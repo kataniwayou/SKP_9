@@ -442,3 +442,6 @@ references/
 
 # Local NuGet package feed (see NuGet.config) — restorable artifacts, not source.
 nugets/
+
+# Subagent-driven-development scratch (ledger, briefs, review packages).
+.superpowers/

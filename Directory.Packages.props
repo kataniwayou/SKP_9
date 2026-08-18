@@ -84,6 +84,9 @@
          pull these in transitively the way BaseApi.Core's ASP.NET Core reference does. -->
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="8.0.2" />
+    <!-- Health checks and hosting for BaseConsole.Core -->
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
 
     <!-- Redis L2 projection client -->
     <PackageVersion Include="StackExchange.Redis" Version="2.13.1" />
