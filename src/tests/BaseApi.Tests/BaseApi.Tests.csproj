@@ -28,6 +28,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\BaseConsole.Core\BaseConsole.Core.csproj" />
     <ProjectReference Include="..\..\Messaging.Transport\Messaging.Transport.csproj" />
+    <ProjectReference Include="..\..\BaseProcessor.Core\BaseProcessor.Core.csproj" />
   </ItemGroup>
 
 </Project>
