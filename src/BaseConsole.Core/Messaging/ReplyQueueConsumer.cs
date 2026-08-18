@@ -56,25 +56,39 @@ public sealed class ReplyQueueConsumer : IAsyncDisposable
         _channel = null;
         if (previous is not null)
         {
-            await previous.DisposeAsync().ConfigureAwait(false);
+            // The channel being replaced belongs to the connection that just proved dead — this is
+            // the rebind path, so disposing it throwing is the expected case, not a fault to surface.
+            await SafeDisposeAsync(previous).ConfigureAwait(false);
         }
 
         var connection = await _connection.GetAsync(ct).ConfigureAwait(false);
         var channel = await connection.CreateChannelAsync(cancellationToken: ct).ConfigureAwait(false);
 
-        await channel.QueueDeclareAsync(
-            queue: QueueName,
-            durable: false,
-            exclusive: true,
-            autoDelete: true,
-            arguments: null,
-            cancellationToken: ct).ConfigureAwait(false);
+        try
+        {
+            await channel.QueueDeclareAsync(
+                queue: QueueName,
+                durable: false,
+                exclusive: true,
+                autoDelete: true,
+                arguments: null,
+                cancellationToken: ct).ConfigureAwait(false);
 
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += OnReceivedAsync;
+            var consumer = new AsyncEventingBasicConsumer(channel);
+            consumer.ReceivedAsync += OnReceivedAsync;
 
-        await channel.BasicConsumeAsync(
-            QueueName, autoAck: false, consumer, ct).ConfigureAwait(false);
+            await channel.BasicConsumeAsync(
+                QueueName, autoAck: false, consumer, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The channel opened but declare or consume failed — most likely the broker is
+            // mid-recovery, exactly the condition this method gets retried against next tick. It was
+            // never adopted into _channel, so nothing else will ever dispose it; without this it leaks
+            // one channel per failed tick for as long as the broker stays unhealthy.
+            await SafeDisposeAsync(channel).ConfigureAwait(false);
+            throw;
+        }
 
         _channel = channel;
         _logger.LogInformation("reply queue {Queue} bound", QueueName);
@@ -137,11 +151,28 @@ public sealed class ReplyQueueConsumer : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Disposes a channel that may already belong to a torn-down connection — the rebind path and the
+    /// failed-rebind cleanup path both hit this by design, so the throw is recorded rather than left
+    /// to propagate. Mirrors <c>RpcQueueConsumer.DiscardChannelAsync</c>.
+    /// </summary>
+    private async ValueTask SafeDisposeAsync(IChannel channel)
+    {
+        try
+        {
+            await channel.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "reply channel dispose failed");
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_channel is not null)
         {
-            await _channel.DisposeAsync().ConfigureAwait(false);
+            await SafeDisposeAsync(_channel).ConfigureAwait(false);
         }
     }
 }
