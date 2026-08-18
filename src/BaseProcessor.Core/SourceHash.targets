@@ -1,0 +1,175 @@
+<Project>
+
+  <!--
+    SourceHash.targets (IDENT-01/02, Phase 28, D-01/D-02/D-03).
+
+    Build-time code-identity: computes a reproducible SHA-256 over the implementation .cs of
+    BaseProcessor.Core + the importing concrete (e.g. Processor.Sample) and embeds it as
+    [assembly: AssemblyMetadata("SourceHash", "<64-hex>")] onto the CONCRETE (entry) assembly.
+    The runtime reader (AssemblyMetadataSourceHashProvider) reads that attribute off
+    Assembly.GetEntryAssembly(), so the attribute MUST land on the concrete .dll, never on
+    BaseProcessor.Core (D-03).
+
+    Authored ONCE here and <Import>ed explicitly by each concrete Processor.*.csproj — a
+    ProjectReference does NOT auto-flow build/*.targets, hence the explicit import (D-01).
+    BaseProcessor.Core itself does NOT import this file, so it is never self-applied.
+
+    Algorithm (IDENT-01, locked): for each impl .cs:
+      text = File.ReadAllText(p); text = text.Replace("\r\n","\n").Replace("\r","\n");  // LF-normalize CONTENT
+      perFileHash = SHA256(UTF8(text));
+    fold the per-file hashes in ORDINAL order of the forward-slash-normalized FullPath; the final
+    SourceHash = SHA256(concatenated per-file hashes), lowercase 64-hex (b.ToString("x2")). Paths
+    are forward-slash-normalized + ordinal-sorted so the hash is identical on Windows dev builds and
+    Linux Docker builds (Pitfall 1).
+  -->
+
+  <!-- (1) Inline RoslynCodeTaskFactory task — netstandard2.0 surface only; recompiled each build. -->
+  <UsingTask TaskName="ComputeSourceHash" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <Hash ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+public class ComputeSourceHash : Microsoft.Build.Utilities.Task
+{
+    [Microsoft.Build.Framework.Required]
+    public Microsoft.Build.Framework.ITaskItem[] Files { get; set; }
+    [Microsoft.Build.Framework.Output]
+    public string Hash { get; set; }
+
+    public override bool Execute()
+    {
+        // Ordinal sort on a normalized (forward-slash) full path for OS-independence (Pitfall 1).
+        var paths = new System.Collections.Generic.List<string>();
+        foreach (var f in Files) paths.Add(f.GetMetadata("FullPath").Replace('\\', '/'));
+        paths.Sort(System.StringComparer.Ordinal);
+
+        using (var outer = System.Security.Cryptography.SHA256.Create())
+        using (var acc = new System.IO.MemoryStream())
+        {
+            foreach (var p in paths)
+            {
+                var text = System.IO.File.ReadAllText(p);              // UTF-8 default
+                text = text.Replace("\r\n", "\n").Replace("\r", "\n"); // LF-normalize CONTENT (IDENT-01)
+                using (var per = System.Security.Cryptography.SHA256.Create())
+                {
+                    var h = per.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text));
+                    acc.Write(h, 0, h.Length);                          // fold per-file hashes, in sorted order
+                }
+            }
+            acc.Position = 0;
+            var final = outer.ComputeHash(acc);
+            var sb = new System.Text.StringBuilder(64);
+            foreach (var b in final) sb.Append(b.ToString("x2"));       // lowercase 64-hex (IDENT-01)
+            Hash = sb.ToString();
+        }
+        return true;
+    }
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <!--
+    (2) Implementation-file set: BaseProcessor.Core ($(MSBuildThisFileDirectory)) + the concrete
+    ($(MSBuildProjectDirectory)). BaseConsole.Core and Messaging.Contracts are SIBLINGS (not under
+    either directory) so they are excluded automatically. Exclude generated + build-output files so
+    the fold is reproducible across clean/incremental and Windows/Linux builds (Pitfall 1).
+  -->
+  <ItemGroup>
+    <ImplFiles Include="$(MSBuildThisFileDirectory)**\*.cs;$(MSBuildProjectDirectory)\**\*.cs"
+               Exclude="$(MSBuildThisFileDirectory)obj\**\*.cs;$(MSBuildProjectDirectory)\obj\**\*.cs;$(MSBuildThisFileDirectory)bin\**\*.cs;$(MSBuildProjectDirectory)\bin\**\*.cs;**\*.g.cs;**\*GlobalUsings*.cs;**\*AssemblyInfo*.cs" />
+  </ItemGroup>
+
+  <!--
+    (3) Two-target compute/emit split (Pitfall 2). The INCREMENTAL compute target re-hashes only when
+    an impl .cs changes (Inputs/Outputs stamp); the ALWAYS-RUN emit target reads the stamp back when
+    compute was skipped and adds the AssemblyAttribute UNCONDITIONALLY, so an incremental no-change
+    build still carries the attribute (never dropped → the reader fail-fast can never trip from a skip).
+  -->
+  <!--
+    Hook BEFORE the SDK's CoreGenerateAssemblyInfo (which materializes @(AssemblyAttribute) via its
+    GetAssemblyAttributes dependency) — NOT merely BeforeTargets="CoreCompile". GenerateAssemblyInfo
+    itself runs BeforeTargets="CoreCompile" and depends on CoreGenerateAssemblyInfo, so a plain
+    CoreCompile hook is NOT guaranteed to add the item before the SDK collects it (the attribute would
+    silently never embed). BeforeTargets="CoreGenerateAssemblyInfo" guarantees the item is present.
+  -->
+  <Target Name="ComputeSourceHash" BeforeTargets="CoreGenerateAssemblyInfo;CoreCompile"
+          Inputs="@(ImplFiles)" Outputs="$(IntermediateOutputPath)sourcehash.stamp">
+    <ComputeSourceHash Files="@(ImplFiles)">
+      <Output PropertyName="SourceHash" TaskParameter="Hash" />
+    </ComputeSourceHash>
+    <WriteLinesToFile File="$(IntermediateOutputPath)sourcehash.stamp" Lines="$(SourceHash)" Overwrite="true" />
+  </Target>
+
+  <!--
+    (3a) STALE-EMBED GUARD (Pitfall 2b). Without this, an INCREMENTAL build can PRINT the new
+    SourceHash while leaving the OLD one embedded in the assembly — the most dangerous possible
+    failure for a value whose whole job is code identity.
+
+    Mechanism: the SDK's CoreGenerateAssemblyInfo is itself incremental on
+    Inputs="$(MSBuildAllProjects)" — the PROJECT files — NOT on @(AssemblyAttribute). So when only
+    BaseProcessor.Core *.cs change (they are in @(ImplFiles), so the hash changes) but this concrete
+    project's own files do not, ComputeSourceHash re-runs and EchoSourceHash prints the NEW hash,
+    yet CoreGenerateAssemblyInfo is skipped as up-to-date and $(GeneratedAssemblyInfoFile) keeps the
+    PREVIOUS AssemblyMetadata("SourceHash", ...). CoreCompile then has no changed input, so the .dll
+    ships the stale value. Docker builds are immune (always clean); host incremental builds are not.
+
+    Observed 2026-07-27: build log said be9c0fe7…, Processor.Sample.dll carried e2f0e743… (three
+    hashes stale). Registering the printed hash then deploying that binary is an identity mismatch —
+    the container never resolves its processor row and Start 422s on the liveness gate.
+
+    Fix: an Inputs/Outputs target that fires ONLY when the stamp is newer than the generated
+    AssemblyInfo, and deletes that file. CoreGenerateAssemblyInfo then sees its output missing and
+    regenerates with the current attribute; CoreCompile sees a changed source and rebuilds. Ordered
+    BeforeTargets="CoreGenerateAssemblyInfo" and DependsOnTargets="ComputeSourceHash" so the stamp is
+    always fresh before the comparison. When the hash has NOT changed the stamp is not rewritten, so
+    this target is skipped and incrementality is fully preserved.
+  -->
+  <Target Name="InvalidateAssemblyInfoOnSourceHashChange"
+          BeforeTargets="CoreGenerateAssemblyInfo"
+          DependsOnTargets="ComputeSourceHash"
+          Inputs="$(IntermediateOutputPath)sourcehash.stamp"
+          Outputs="$(GeneratedAssemblyInfoFile)">
+    <Message Text="SourceHash changed — regenerating $(GeneratedAssemblyInfoFile)" Importance="high" />
+    <Delete Files="$(GeneratedAssemblyInfoFile)" />
+  </Target>
+
+  <Target Name="EmitSourceHashAttribute" BeforeTargets="CoreGenerateAssemblyInfo;CoreCompile" DependsOnTargets="ComputeSourceHash">
+    <!-- If ComputeSourceHash was skipped (no source change), recover the hash from the stamp. -->
+    <ReadLinesFromFile File="$(IntermediateOutputPath)sourcehash.stamp" Condition="'$(SourceHash)' == ''">
+      <Output TaskParameter="Lines" PropertyName="SourceHash" />
+    </ReadLinesFromFile>
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>SourceHash</_Parameter1>
+        <_Parameter2>$(SourceHash)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
+
+  <!--
+    (3b) Echo the computed SourceHash into the build output. AfterTargets="EmitSourceHashAttribute"
+    (NOT ComputeSourceHash): on an incremental no-source-change build ComputeSourceHash is skipped by its
+    Inputs/Outputs stamp and $(SourceHash) is empty until EmitSourceHashAttribute reads it back from the
+    stamp — so anchoring here guarantees the value is populated in BOTH the fresh-compute and
+    incremental-skip paths. Importance="high" prints at the default `dotnet build` (minimal) verbosity;
+    the project name distinguishes concretes in a multi-project build (Processor.Sample, BaseApi.Tests, …).
+  -->
+  <Target Name="EchoSourceHash" AfterTargets="EmitSourceHashAttribute">
+    <Message Text="SourceHash ($(MSBuildProjectName)): $(SourceHash)" Importance="high" />
+  </Target>
+
+  <!--
+    (4) Diagnostic dump target (Task 3 exclusion fact): when $(ImplFilesDump) is set, write the
+    @(ImplFiles) set to that file so a test can assert BaseConsole.Core / Messaging.Contracts /
+    generated files never leak into the fold. No-op in a normal build.
+  -->
+  <Target Name="DumpImplFiles">
+    <WriteLinesToFile File="$(ImplFilesDump)" Lines="@(ImplFiles)" Overwrite="true"
+                      Condition="'$(ImplFilesDump)' != ''" />
+  </Target>
+
+</Project>
