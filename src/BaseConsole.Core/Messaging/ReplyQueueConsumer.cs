@@ -1,9 +1,9 @@
 using BaseConsole.Core.Loop;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 
 namespace BaseConsole.Core.Messaging;
 
@@ -39,15 +39,30 @@ public sealed class ReplyQueueConsumer : IAsyncDisposable
     public string QueueName { get; }
 
     /// <summary>
-    /// Declares the queue and attaches the consumer, returning only once the broker has confirmed
-    /// the subscription. Asking before this completes would let an answer arrive with no listener.
+    /// Declares the queue and attaches the consumer if it is not already up, returning only once the
+    /// broker has confirmed the subscription. Cheap and idempotent on the common path — the queue is
+    /// exclusive and auto-delete, so it dies with its connection, and this is what re-creates it after
+    /// a broker reconnect. Safe to call on every loop tick: when a live channel is already attached it
+    /// returns immediately without talking to the broker.
     /// </summary>
-    public async Task StartAsync(CancellationToken ct)
+    public async Task EnsureStartedAsync(CancellationToken ct)
     {
-        var connection = await _connection.GetAsync(ct).ConfigureAwait(false);
-        _channel = await connection.CreateChannelAsync(cancellationToken: ct).ConfigureAwait(false);
+        if (_channel is { IsOpen: true })
+        {
+            return;
+        }
 
-        await _channel.QueueDeclareAsync(
+        var previous = _channel;
+        _channel = null;
+        if (previous is not null)
+        {
+            await previous.DisposeAsync().ConfigureAwait(false);
+        }
+
+        var connection = await _connection.GetAsync(ct).ConfigureAwait(false);
+        var channel = await connection.CreateChannelAsync(cancellationToken: ct).ConfigureAwait(false);
+
+        await channel.QueueDeclareAsync(
             queue: QueueName,
             durable: false,
             exclusive: true,
@@ -55,17 +70,23 @@ public sealed class ReplyQueueConsumer : IAsyncDisposable
             arguments: null,
             cancellationToken: ct).ConfigureAwait(false);
 
-        var consumer = new AsyncEventingBasicConsumer(_channel);
+        var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += OnReceivedAsync;
 
-        await _channel.BasicConsumeAsync(
+        await channel.BasicConsumeAsync(
             QueueName, autoAck: false, consumer, ct).ConfigureAwait(false);
 
+        _channel = channel;
         _logger.LogInformation("reply queue {Queue} bound", QueueName);
     }
 
     private async Task OnReceivedAsync(object sender, BasicDeliverEventArgs ea)
     {
+        // The channel this specific delivery arrived on, not the field: a rebind (EnsureStartedAsync
+        // replacing a dead channel) can race with an in-flight delivery, and the ack must go back on
+        // the channel that issued the delivery tag, not on whatever channel is current when this
+        // handler finally runs.
+        var channel = ((IAsyncBasicConsumer)sender).Channel;
         var type = ea.BasicProperties.Type ?? string.Empty;
         try
         {
@@ -87,10 +108,32 @@ public sealed class ReplyQueueConsumer : IAsyncDisposable
         }
         finally
         {
-            if (_channel is { IsOpen: true })
+            if (channel is not null)
             {
-                await _channel.BasicAckAsync(ea.DeliveryTag, multiple: false).ConfigureAwait(false);
+                await SafeAckAsync(channel, ea.DeliveryTag).ConfigureAwait(false);
             }
+        }
+    }
+
+    /// <summary>
+    /// Acknowledges the delivery whatever happened to it. A reply holds no state and cannot be
+    /// repaired by redelivery — the next tick asks again regardless — so leaving it unacknowledged
+    /// would only have it redelivered to a listener that no longer needs it. The ack call itself is
+    /// wrapped, not just gated on <c>IsOpen</c> beforehand: the channel can close between that check
+    /// and the awaited call, and a closed channel here is an expected outcome to record, not an
+    /// exception to leak out of an async event handler with nothing above it to catch it.
+    /// </summary>
+    private async Task SafeAckAsync(IChannel channel, ulong deliveryTag)
+    {
+        try
+        {
+            await channel.BasicAckAsync(deliveryTag, multiple: false).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is AlreadyClosedException
+                                      or OperationInterruptedException
+                                      or ObjectDisposedException)
+        {
+            _logger.LogDebug(ex, "reply acknowledgement dropped — channel gone");
         }
     }
 
