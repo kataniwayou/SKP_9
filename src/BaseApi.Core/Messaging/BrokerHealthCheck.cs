@@ -1,3 +1,4 @@
+using Messaging.Transport;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace BaseApi.Core.Messaging;

@@ -3,6 +3,7 @@ using BaseApi.Core.Gating;
 using BaseApi.Core.Health;
 using BaseApi.Core.Messaging;
 using HealthChecks.NpgSql;
+using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;

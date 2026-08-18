@@ -3,7 +3,7 @@ using Messaging.Contracts;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 
-namespace BaseApi.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// The send primitive: one channel, one message at a time, confirmed by the broker before the call
@@ -42,7 +42,7 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task SendAsync<T>(string queue, string type, T body, CancellationToken ct)
+    public async Task SendAsync<T>(string queue, string type, T body, CancellationToken ct, string? replyTo = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queue);
         ArgumentException.ThrowIfNullOrWhiteSpace(type);
@@ -58,6 +58,11 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
             ContentType  = "application/json",
             Type         = type,
         };
+
+        if (replyTo is not null)
+        {
+            properties.ReplyTo = replyTo;
+        }
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try

@@ -1,6 +1,6 @@
 using RabbitMQ.Client;
 
-namespace BaseApi.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// A unit of broker topology — the exchanges, queues and bindings one feature needs — declared

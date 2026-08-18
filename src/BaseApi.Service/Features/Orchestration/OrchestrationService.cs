@@ -1,5 +1,4 @@
 using BaseApi.Core.Exceptions;
-using BaseApi.Core.Messaging;
 using BaseApi.Core.Persistence;
 using BaseApi.Service.Features.Orchestration.Loading;
 using BaseApi.Service.Features.Orchestration.Validation;
@@ -7,6 +6,7 @@ using BaseApi.Service.Features.Workflow;
 using FluentValidation;
 using FluentValidation.Results;
 using Messaging.Contracts;
+using Messaging.Transport;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;

@@ -1,6 +1,7 @@
 using BaseApi.Core.Configuration;
 using BaseApi.Core.Gating;
 using BaseApi.Core.Messaging;
+using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;

@@ -4,6 +4,7 @@ using BaseApi.Service.Features.Orchestration.Messaging;
 using BaseApi.Service.Features.Processor.Responders;
 using BaseApi.Service.Features.Schema.Responders;
 using Messaging.Contracts;
+using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
