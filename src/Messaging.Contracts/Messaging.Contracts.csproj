@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Pure-POCO leaf contracts library: the shared bus vocabulary and L2 projection shapes.
+    Deliberately has no PackageReferences and no ProjectReferences — every other project may
+    reference this one without creating a cycle, so it must stay dependency-free. In particular it
+    does not reference the broker client: these are shapes, and nothing here should need a transport
+    to be understood.
+    Common build properties come from Directory.Build.props.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>Messaging.Contracts</RootNamespace>
+    <AssemblyName>Messaging.Contracts</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

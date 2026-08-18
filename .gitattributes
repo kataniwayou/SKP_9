@@ -1,0 +1,29 @@
+# Force LF line endings for all text files on checkout — Windows dev host, Linux containers.
+
+* text=auto eol=lf
+
+# Binary file types — never normalize
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.tgz binary
+*.dll binary
+*.exe binary
+*.so binary
+*.dylib binary
+*.pdb binary
+*.snk binary
+*.pfx binary
+
+# Diff settings
+*.cs diff=csharp
+*.csproj diff=xml
+*.props diff=xml
+*.targets diff=xml
+*.sln merge=union
