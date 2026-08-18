@@ -79,6 +79,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Messaging.Contracts\Messaging.Contracts.csproj" />
+    <ProjectReference Include="..\Messaging.Transport\Messaging.Transport.csproj" />
   </ItemGroup>
 
 </Project>

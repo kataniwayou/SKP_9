@@ -1,4 +1,4 @@
-namespace BaseApi.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// Handles one kind of message off a gated queue.

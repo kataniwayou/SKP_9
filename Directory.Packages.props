@@ -80,6 +80,10 @@
 
     <!-- Microsoft.Extensions.* family versions on its own cadence -->
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="8.10.0" />
+    <!-- Logging/options abstractions for Messaging.Transport, which has no FrameworkReference to
+         pull these in transitively the way BaseApi.Core's ASP.NET Core reference does. -->
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="8.0.2" />
 
     <!-- Redis L2 projection client -->
     <PackageVersion Include="StackExchange.Redis" Version="2.13.1" />

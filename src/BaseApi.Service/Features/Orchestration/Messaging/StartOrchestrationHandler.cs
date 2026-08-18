@@ -1,7 +1,7 @@
 using System.Text.Json;
-using BaseApi.Core.Messaging;
 using BaseApi.Service.Features.Orchestration.Projection;
 using Messaging.Contracts;
+using Messaging.Transport;
 using Microsoft.Extensions.Logging;
 
 namespace BaseApi.Service.Features.Orchestration.Messaging;

@@ -1,4 +1,4 @@
-namespace BaseApi.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// Sends one message to one named queue and does not return until the broker has accepted
@@ -26,5 +26,6 @@ public interface IQueueSender
     /// <param name="type">Discriminator written to the type header; see the shared message-type constants.</param>
     /// <param name="body">Payload, serialized with the shared messaging serializer options.</param>
     /// <param name="ct">Cancels the send. A cancelled send may or may not have reached the broker.</param>
-    Task SendAsync<T>(string queue, string type, T body, CancellationToken ct);
+    /// <param name="replyTo">The queue a reply should be addressed to, for request-reply callers.</param>
+    Task SendAsync<T>(string queue, string type, T body, CancellationToken ct, string? replyTo = null);
 }

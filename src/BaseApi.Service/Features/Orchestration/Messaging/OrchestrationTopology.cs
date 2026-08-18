@@ -1,5 +1,5 @@
-using BaseApi.Core.Messaging;
 using Messaging.Contracts;
+using Messaging.Transport;
 using RabbitMQ.Client;
 
 namespace BaseApi.Service.Features.Orchestration.Messaging;

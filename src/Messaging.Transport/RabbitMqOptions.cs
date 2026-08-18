@@ -1,4 +1,4 @@
-namespace BaseApi.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// Broker connection settings, bound from the <c>RabbitMq</c> configuration section.
