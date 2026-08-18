@@ -1,0 +1,24 @@
+<Project>
+
+  <!-- Repo-wide MSBuild defaults, inherited by every csproj below this directory.
+       Projects must not redeclare these. Package versions live in Directory.Packages.props. -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AnalysisMode>latest</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Pins the exact transitive package closure per project so restore is deterministic
+         and the offline `nugets/` feed is provably complete. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
+    <!-- Mapperly analyzer codes. RMG089 defaults to Info severity, which TreatWarningsAsErrors
+         does not catch, so it must be listed explicitly. -->
+    <WarningsAsErrors>$(WarningsAsErrors);RMG007;RMG012;RMG020;RMG089</WarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

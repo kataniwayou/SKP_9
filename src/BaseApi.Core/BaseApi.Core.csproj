@@ -1,0 +1,84 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Reusable API infrastructure: persistence, validation, mapping, error handling, health,
+    observability and HTTP wiring, consumed by the concrete API service.
+
+    Common build properties come from Directory.Build.props and package versions from
+    Directory.Packages.props, so no PackageReference here carries a Version attribute.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>BaseApi.Core</RootNamespace>
+    <AssemblyName>BaseApi.Core</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ASP.NET Core surface: IHttpContextAccessor, health checks, middleware and controllers.
+         A FrameworkReference is the documented pattern for an ASP.NET-coupled class library. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- EF Core, Npgsql and the snake_case naming convention. Npgsql is pinned explicitly
+         because PostgresExceptionMapper consumes PostgresException directly, so the
+         dependency stays visible rather than riding in transitively. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="EFCore.NamingConventions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Validation. The companion package supplies the assembly-scan registration used by
+         AddBaseApiValidation. -->
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Observability: OpenTelemetry core, hosting and OTLP exporter, plus the ASP.NET Core,
+         HttpClient, runtime and Npgsql instrumentation. -->
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
+    <PackageReference Include="Npgsql.OpenTelemetry" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Health checks: the Postgres probe and the JSON response writer. -->
+    <PackageReference Include="AspNetCore.HealthChecks.NpgSql" />
+    <PackageReference Include="AspNetCore.HealthChecks.UI.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- HTTP: API versioning for controllers, the API explorer that Swagger integration needs
+         for group naming and URL substitution, and OpenAPI document generation. -->
+    <PackageReference Include="Asp.Versioning.Mvc" />
+    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" />
+    <PackageReference Include="Swashbuckle.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Redis client for the L2 projection. -->
+    <PackageReference Include="StackExchange.Redis" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Raw AMQP. This project owns the connection, the send primitive and the gated-consumer
+         host; it references Messaging.Contracts for the control records only, and never
+         BaseConsole.Core — that is the dependency firewall. -->
+    <PackageReference Include="RabbitMQ.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Messaging.Contracts\Messaging.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
