@@ -30,10 +30,9 @@ spec:
           image: processor-sample:local
           imagePullPolicy: IfNotPresent
           env:
-            # A processor's service name is a sentinel for the life of the process: it names the
-            # ROLE, not the row. The real identity is the database row and arrives per-record as
-            # ProcessorId once discovery completes, because an OTel resource is fixed when the
-            # provider is built and cannot be rewritten afterwards.
+            # Fallback only. The real service name and version come from the processor's database row,
+            # resolved before the host is built so they can reach the OTel resource. These values are
+            # used only if a host is started without that resolution — which the sample never does.
             - name: Service__Name
               value: processor
             - name: Service__Version

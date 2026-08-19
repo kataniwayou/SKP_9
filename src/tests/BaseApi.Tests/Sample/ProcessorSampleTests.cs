@@ -1,4 +1,6 @@
 using System.Reflection;
+using BaseProcessor.Core.Identity;
+using Messaging.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -9,11 +11,17 @@ namespace BaseApi.Tests.Sample;
 
 public sealed class ProcessorSampleTests
 {
+    private static readonly ProcessorIdentityFound Identity = new(
+        Guid.Parse("9e034ca0-144b-44d5-ab90-7ed53b64a728"),
+        InputSchemaId: null, OutputSchemaId: null, ConfigSchemaId: null,
+        Name: "sample-proc", Version: "1.0.0");
+
     private static IHost Build() => ProcessorHost.Create(
         // Development turns on the container's build-time validation, which is the whole point of
         // this test: every registration is checked for constructibility without anything being
         // instantiated, so no broker or store is contacted.
         ["--environment", "Development"],
+        Identity,
         cfg => cfg.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Service:Name"]            = "processor",
@@ -32,6 +40,19 @@ public sealed class ProcessorSampleTests
         using var host = Build();
 
         Assert.NotNull(host);
+    }
+
+    [Fact]
+    public void TheSeededIdentityIsWhatTheContextReports()
+    {
+        // The host is built from the row, not from configuration. If this ever read "processor" the
+        // resource would be carrying a sentinel and the whole two-stage boot would be pointless.
+        using var host = Build();
+
+        var context = host.Services.GetRequiredService<IProcessorContext>();
+
+        Assert.Equal(Identity.Id, context.Identity?.Id);
+        Assert.Equal("sample-proc", context.Identity?.Name);
     }
 
     [Fact]
