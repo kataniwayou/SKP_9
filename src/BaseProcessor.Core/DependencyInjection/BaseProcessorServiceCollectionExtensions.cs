@@ -50,10 +50,10 @@ public static class BaseProcessorServiceCollectionExtensions
         services.TryAddSingleton<ISourceHashProvider, AssemblyMetadataSourceHashProvider>();
         services.TryAddSingleton<IStartupGate, StartupGate>();
 
-        // In Kubernetes the machine name is the pod name, which is exactly the per-replica identity
-        // the liveness key and the reply queue are named after. TryAdd, so a host that gets it from
-        // the downward API or anywhere else wins.
-        services.TryAddSingleton(new InstanceId(Environment.MachineName));
+        // Resolved once and shared, so the liveness key, the reply queue and the telemetry's
+        // service.instance.id all name this replica identically. TryAdd, so a host that pins a
+        // deterministic id — a test, say — wins.
+        services.TryAddSingleton(InstanceId.Resolve());
         services.TryAddSingleton<ProcessorLivenessWriter>();
 
         // One slot shared by both startup loops: they never ask concurrently, and each drains it
