@@ -21,7 +21,13 @@ public sealed class WorkflowCreateDtoValidator : AbstractValidator<WorkflowCreat
     {
         Include(new BaseDtoValidator<WorkflowCreateDto>());
 
+        // Cascade.Stop is load-bearing, not tidiness. FluentValidation continues the chain by default,
+        // so without it the three predicates below still run after NotNull has already failed — and
+        // each dereferences the null, throwing out of the validator instead of reporting the failure
+        // it exists to report. Over HTTP model binding rejects the null first; an in-process caller
+        // has no such gate.
         RuleFor(x => x.EntryStepIds)
+            .Cascade(CascadeMode.Stop)
             .NotNull()
             .Must(ids => ids.Count > 0)
             .WithMessage("EntryStepIds must contain at least one Step Id.")
@@ -67,7 +73,13 @@ public sealed class WorkflowUpdateDtoValidator : AbstractValidator<WorkflowUpdat
     {
         Include(new BaseDtoValidator<WorkflowUpdateDto>());
 
+        // Cascade.Stop is load-bearing, not tidiness. FluentValidation continues the chain by default,
+        // so without it the three predicates below still run after NotNull has already failed — and
+        // each dereferences the null, throwing out of the validator instead of reporting the failure
+        // it exists to report. Over HTTP model binding rejects the null first; an in-process caller
+        // has no such gate.
         RuleFor(x => x.EntryStepIds)
+            .Cascade(CascadeMode.Stop)
             .NotNull()
             .Must(ids => ids.Count > 0)
             .WithMessage("EntryStepIds must contain at least one Step Id.")
