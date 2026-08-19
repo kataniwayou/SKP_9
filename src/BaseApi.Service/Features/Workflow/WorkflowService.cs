@@ -89,4 +89,46 @@ public sealed class WorkflowService :
             await assignmentsSet.AddRangeAsync(rows, ct);
         }
     }
+
+    /// <summary>
+    /// Populates <see cref="WorkflowReadDto.EntryStepIds"/> and
+    /// <see cref="WorkflowReadDto.AssignmentIds"/> from the two junction tables — the same enrichment
+    /// <c>WorkflowGraphLoader</c> performs for the orchestration path, applied to the read path so a
+    /// client can see the bindings it wrote.
+    /// <para>
+    /// One query per junction for the whole batch, keyed by workflow id, rather than one pair per row.
+    /// A workflow with no assignments gets an empty list rather than null: null used to mean "not
+    /// populated", and leaving it would keep the field ambiguous exactly where it is now meaningful.
+    /// </para>
+    /// </summary>
+    protected override async Task<IReadOnlyList<WorkflowReadDto>> EnrichReadAsync(
+        IReadOnlyList<WorkflowReadDto> dtos, CancellationToken ct)
+    {
+        if (dtos.Count == 0)
+        {
+            return dtos;
+        }
+
+        var ids = dtos.Select(d => d.Id).ToList();
+
+        var entryRows = await DbContext.Set<WorkflowEntrySteps>().AsNoTracking()
+            .Where(j => ids.Contains(j.WorkflowId))
+            .ToListAsync(ct);
+        var entryLookup = entryRows.GroupBy(j => j.WorkflowId)
+            .ToDictionary(g => g.Key, g => g.Select(j => j.StepId).ToList());
+
+        var assignmentRows = await DbContext.Set<WorkflowAssignments>().AsNoTracking()
+            .Where(j => ids.Contains(j.WorkflowId))
+            .ToListAsync(ct);
+        var assignmentLookup = assignmentRows.GroupBy(j => j.WorkflowId)
+            .ToDictionary(g => g.Key, g => g.Select(j => j.AssignmentId).ToList());
+
+        return dtos
+            .Select(d => d with
+            {
+                EntryStepIds = entryLookup.GetValueOrDefault(d.Id) ?? new List<Guid>(),
+                AssignmentIds = assignmentLookup.GetValueOrDefault(d.Id) ?? new List<Guid>(),
+            })
+            .ToList();
+    }
 }

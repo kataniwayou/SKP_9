@@ -38,11 +38,13 @@ public sealed record WorkflowUpdateDto(
 /// <summary>
 /// Read-side DTO returned to clients, carrying the id and the audit fields.
 /// <para>
-/// <b>Neither collection is populated on read.</b> The mapper projects from the entity, which
-/// deliberately has neither property, so both come back null on get and list. The junction rows are
-/// the source of truth and must be queried directly. That is also why <c>EntryStepIds</c> is
-/// nullable here while it is required on create and update: a non-nullable collection would fail
-/// the mapper's strict-mapping analyzer.
+/// <b>Both collections are populated after the mapper has run, not by it.</b> The mapper projects
+/// from the entity, which deliberately has neither property, so it hard-codes null;
+/// <c>WorkflowService.EnrichReadAsync</c> then fills both from the junction rows, which remain the
+/// source of truth. Every read verb goes through that enrichment, so a client sees the bindings it
+/// wrote, and a workflow with no assignments reads as an empty list rather than null. The
+/// properties stay nullable only because the mapper's strict-mapping analyzer rejects a
+/// non-nullable collection it has no source for.
 /// </para>
 /// </summary>
 public sealed record WorkflowReadDto(
