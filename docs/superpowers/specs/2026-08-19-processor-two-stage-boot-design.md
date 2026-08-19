@@ -161,3 +161,45 @@ never overlap. The reply queue is exclusive and auto-delete, so it dies with the
   it belongs, before the latch flips.
 - Changing `BaseApi.Core`'s observability extension.
 - Automating processor row registration in the deploy pipeline.
+
+## 6. Verified
+
+Confirmed against the live `skp` namespace on the kind cluster `desktop`, 2026-08-19.
+
+| | |
+|---|---|
+| Image | `processor-sample:local` — `sha256:38f3bac801d90ce16d2eb520d85c5a957fe5a8b4991c5a6a82301d4b3f26bcd4` |
+| `SourceHash` (computed in the Linux publish) | `d872fa9315de05f492b338ba2db8ac4209d4d09f6dfaede4d8ef56f28d87e2fe` |
+| Row it resolved | `5fed54d3-41ce-4eed-9cea-1363cb4f7509` — `sample-proc` `1.2.0` |
+
+**§2.1 held under the real kubelet, which is the claim no test can make.** The rollout deliberately
+went out before the row was registered. The new pod sat `Running`, `Ready=false`, **0 restarts** for
+roughly four minutes — well past the startup probe's `5s + 30 × 5s ≈ 155s` budget — logging
+`no processor registered for source hash d872fa93…; retrying in 00:00:30` to stdout throughout. It
+resolved on its own the moment the row appeared, and still never restarted:
+
+```
+no processor registered for source hash d872fa93…; retrying in 00:00:30   (×n)
+identity resolved: processor 5fed54d3-41ce-4eed-9cea-1363cb4f7509 (sample-proc 1.2.0)
+processor healthy; startup loops retired
+```
+
+**§3's contract, observed on both replicas.** Metrics at the collector's Prometheus endpoint:
+
+```
+job="sample-proc"                                  service_version="1.2.0"
+processorId="5fed54d3-41ce-4eed-9cea-1363cb4f7509" source="worker"
+service_instance_id="processor-sample-6c8787cdf8-ft6gv" / "…-x6t7x"
+```
+
+Logs in Elasticsearch, under the PascalCase convention:
+
+```
+service.name=sample-proc   service.version=1.2.0
+ProcessorId=5fed54d3-41ce-4eed-9cea-1363cb4f7509   Source=worker
+```
+
+`service.name` is the name alone — the `{name}_{version}` interpolation is gone, and `job` no longer
+reads `unresolved_0.0.0`. `IdentityName` appears on zero records from this build, and on zero records
+from any service in the ten minutes after the rollout; the pre-rollout history still carries it.
+`baseapi_0.0.0` is unchanged, as §3 requires.
