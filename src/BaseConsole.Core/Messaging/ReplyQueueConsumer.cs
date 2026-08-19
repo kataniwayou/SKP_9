@@ -15,7 +15,7 @@ namespace BaseConsole.Core.Messaging;
 /// signals — leaving the loop as the sole writer.
 /// </para>
 /// </summary>
-public sealed class ReplyQueueConsumer : IAsyncDisposable
+public sealed class ReplyQueueConsumer : IReplyEndpoint, IAsyncDisposable
 {
     private readonly RabbitMqConnection _connection;
     private readonly ReplySlot<object> _slot;

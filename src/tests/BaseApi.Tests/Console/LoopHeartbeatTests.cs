@@ -1,7 +1,6 @@
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
@@ -9,12 +8,9 @@ namespace BaseApi.Tests.Console;
 
 public sealed class LoopHeartbeatTests
 {
+    // interval 10 * staleFactor 3 = 30, the window the discovery loop registers with.
     private static LoopLivenessHealthCheck Check(ILoopHeartbeat beat, TimeProvider clock) =>
-        new(beat, Options.Create(new ConsoleLoopOptions
-        {
-            Interval = TimeSpan.FromSeconds(10),
-            StaleFactor = 3,
-        }), clock);
+        new(beat, TimeSpan.FromSeconds(30), "discovery", clock);
 
     [Fact]
     public void LastIsNullBeforeFirstBeat()

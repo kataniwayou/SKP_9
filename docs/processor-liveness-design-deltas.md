@@ -5,7 +5,10 @@ what `/src` needs when the processor host is built. Written after confirming the
 against the code; the confirmed-correct invariants are listed in the last section so they are not
 "fixed" by accident.
 
-**Status of `/src` today:**
+**Status:** Deltas 1–4 are implemented, along with the processor host's discovery and liveness
+loops. Gate A and the dispatch endpoint are still outstanding — see *Not built yet* below.
+
+**Status of `/src` before that work:**
 
 - `src/BaseProcessor.Core` is six files — options, `IProcessorContext` / `ProcessorContext` /
   `ProcessorIdentity`, `ISourceHashProvider` / `AssemblyMetadataSourceHashProvider`, and
@@ -22,7 +25,7 @@ below.
 
 ---
 
-## Delta 1 — Per-loop heartbeat holders with a retirement state
+## Delta 1 — Per-loop heartbeat holders with a retirement state — **DONE**
 
 ### The gap
 
@@ -114,7 +117,7 @@ instant at exactly the window counts as stale. **Done.**
 
 ---
 
-## Delta 2 — The startup-loop window derives from the backoff cap, not the heartbeat interval
+## Delta 2 — The startup-loop window derives from the backoff cap — **DONE**
 
 The two loop families have different cadences, so they cannot share a staleness window.
 
@@ -131,7 +134,7 @@ Worst gap is `cap + RequestTimeout` because the beat is at the top of the iterat
 
 ---
 
-## Delta 3 — Restore two config settings
+## Delta 3 — Restore two config settings — **DONE**
 
 `src/BaseProcessor.Core/Configuration/ProcessorLivenessOptions.cs` has three settings; the reference
 has six. Two of the three dropped are prerequisites for the startup loops.
@@ -172,7 +175,7 @@ interval is enough.
 
 ---
 
-## Delta 4 — Transition logging
+## Delta 4 — Transition logging — **DONE for what exists**
 
 **Rule: log the edge, not the iteration.** Every loop here runs on a 10–30s cadence for process life;
 anything logged per tick is unreadable within an hour and hides the transitions that matter. A value
@@ -351,6 +354,39 @@ own observability wiring (AspNetCore and Http instrumentation packages the conso
 omits). **Do not "fix" it by making `BaseApi.Core` depend on `BaseConsole.Core`** — that would drag
 the console's worker-shaped OTel and hosting model into the API. Delta 1 has to be applied to both
 copies independently, and Delta 4's boundary reconciliation (`>=`) already was.
+
+---
+
+## Not built yet
+
+The host discovers its identity and reports liveness. Two pieces of the reference design are
+deliberately absent, and both have a defined insertion point:
+
+- **Gate A** — the config-schema coverage check (schema ⊨ `TConfig`). Needs `IConfigTypeProvider` and
+  `ConfigSchemaCoverageCheck`, neither of which exists in `/src`. It belongs in
+  `ProcessorStartupOrchestrator.RunStartupAsync` between the end of Loop B and `MarkHealthy()`, and
+  on a clash it must publish `configOutcome: Fail` explicitly, mark the startup gate ready, withhold
+  `MarkHealthy`, and keep re-stamping the unhealthy entry rather than returning.
+- **The dispatch endpoint bind** — needs the processing pipeline. It goes immediately before
+  `MarkHealthy()`, marked with a comment at that line. Binding after the latch would advertise the
+  processor as healthy while its queue does not exist.
+
+Also outstanding: no processor executable. `AddBaseProcessor` wires the library; a `Processor.Sample`
+host with its own appsettings, source-hash embed target and manifests is a separate piece.
+
+### Orphaned by Delta 1
+
+`BaseConsole.Core.Loop.ConsoleLoopOptions` is now referenced by nothing. `LoopLivenessHealthCheck`
+took its `Interval`/`StaleFactor` before the window became a constructor argument, and `GracePeriod`
+was never used — `IReplyEndpoint.EnsureStartedAsync` awaits the broker's own consume confirmation,
+which is the guarantee the cushion was approximating. Delete it unless a future console tier claims
+it.
+
+### The two `ILoopHeartbeat` copies have diverged
+
+`BaseConsole.Core.Loop.ILoopHeartbeat` now carries `IsRetired`/`Retire`; the `BaseApi.Core.Gating`
+copy does not. That is deliberate — the API tier runs one loop that never finishes, so retirement
+there would be an API with no caller. Revisit only if the API grows a second loop.
 
 ---
 
