@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace BaseApi.Core.Gating;
 
 /// <summary>
@@ -28,6 +30,8 @@ namespace BaseApi.Core.Gating;
 /// </summary>
 public sealed class L2Gate
 {
+    private readonly ILogger<L2Gate> _logger;
+
     // Transition and notification happen under one mutex. Without it two racing callers can both pass
     // the equality check and notify twice, and a trip racing a recovery can deliver the two
     // notifications in the opposite order from the final state — leaving subscribers paused while the
@@ -37,8 +41,10 @@ public sealed class L2Gate
     private volatile bool _isOpen;
     private volatile TaskCompletionSource _tripped;
 
-    public L2Gate()
+    public L2Gate(ILogger<L2Gate> logger)
     {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
         // Pre-completed: a probe that awaits Tripped before its first measurement must not block,
         // because at startup the closed state is exactly what it is there to resolve.
         var tripped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -79,6 +85,19 @@ public sealed class L2Gate
             }
 
             _isOpen = open;
+
+            // Logged here rather than at the call sites because this is the only place that knows a
+            // transition happened: the probe calls both entry points on every tick, so a call-site log
+            // would emit a line per tick and bury the edges. Closing is a Warning because it pauses
+            // consumption; opening is the recovery, so Information.
+            if (open)
+            {
+                _logger.LogInformation("L2 gate open — projection store healthy, consumers may run");
+            }
+            else
+            {
+                _logger.LogWarning("L2 gate closed — projection store unusable, consumers paused");
+            }
 
             if (open)
             {

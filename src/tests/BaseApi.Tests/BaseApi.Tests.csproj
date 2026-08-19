@@ -26,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\BaseApi.Core\BaseApi.Core.csproj" />
     <ProjectReference Include="..\..\BaseConsole.Core\BaseConsole.Core.csproj" />
     <ProjectReference Include="..\..\Messaging.Transport\Messaging.Transport.csproj" />
     <ProjectReference Include="..\..\BaseProcessor.Core\BaseProcessor.Core.csproj" />
