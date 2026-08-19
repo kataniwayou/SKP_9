@@ -21,12 +21,6 @@ public sealed class ProcessorLivenessOptions
     [ConfigurationKeyName("StartupInterval")]
     public int StartupIntervalSeconds { get; set; } = 30;
 
-    /// <summary>Sliding liveness-key expiry floor in seconds (default 30). INDEPENDENT of
-    /// <see cref="IntervalSeconds"/> — the TTL floor folded into the per-instance key
-    /// via the writer's derived-TTL formula <c>max(interval×2, TtlSeconds)</c>.</summary>
-    [ConfigurationKeyName("Ttl")]
-    public int TtlSeconds { get; set; } = 30;
-
     /// <summary>Per-<c>IRequestClient</c> request timeout in seconds (default 8).</summary>
     [ConfigurationKeyName("RequestTimeout")]
     public int RequestTimeoutSeconds { get; set; } = 8;

@@ -36,7 +36,7 @@ public sealed class ProcessorLivenessHeartbeatTests
             redis.GetDatabase().Returns(Db);
             var options = Options.Create(new ProcessorLivenessOptions());
             var writer = new ProcessorLivenessWriter(
-                redis, options, new RecordingLogger<ProcessorLivenessWriter>());
+                redis, new RecordingLogger<ProcessorLivenessWriter>());
 
             Heartbeat = new ProcessorLivenessHeartbeat(
                 writer, Context, options, clock, Beat, Gate, new InstanceId("pod-1"), Log);

@@ -71,7 +71,7 @@ public sealed class ProcessorStartupOrchestratorTests
             redis.GetDatabase().Returns(Db);
             var options = Options.Create(new ProcessorLivenessOptions { RequestTimeoutSeconds = 1 });
             var writer = new ProcessorLivenessWriter(
-                redis, options, new RecordingLogger<ProcessorLivenessWriter>());
+                redis, new RecordingLogger<ProcessorLivenessWriter>());
 
             var endpoint = Substitute.For<IReplyEndpoint>();
             endpoint.QueueName.Returns("proc-reply-pod-1");

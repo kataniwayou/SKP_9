@@ -13,7 +13,6 @@ public sealed class ProcessorLivenessOptionsTests
 
         Assert.Equal(10, options.IntervalSeconds);
         Assert.Equal(30, options.StartupIntervalSeconds);
-        Assert.Equal(30, options.TtlSeconds);
         Assert.Equal(8, options.RequestTimeoutSeconds);
         Assert.Equal(30, options.BackoffCapSeconds);
     }
@@ -27,7 +26,6 @@ public sealed class ProcessorLivenessOptionsTests
         {
             ["Processor:Interval"]        = "11",
             ["Processor:StartupInterval"] = "31",
-            ["Processor:Ttl"]             = "41",
             ["Processor:RequestTimeout"]  = "9",
             ["Processor:BackoffCap"]      = "21",
         }).Build();
@@ -36,20 +34,22 @@ public sealed class ProcessorLivenessOptionsTests
 
         Assert.Equal(11, options.IntervalSeconds);
         Assert.Equal(31, options.StartupIntervalSeconds);
-        Assert.Equal(41, options.TtlSeconds);
         Assert.Equal(9, options.RequestTimeoutSeconds);
         Assert.Equal(21, options.BackoffCapSeconds);
     }
 
     [Theory]
     // The startup writes ride the backoff, so their recorded interval must cover the slowest one:
-    // TTL = max(interval*2, floor) has to outlast BackoffCap + RequestTimeout.
-    [InlineData(30, 30, 60)]   // StartupInterval 30 -> max(60, 30) = 60 > 38s worst-case cadence
-    [InlineData(10, 30, 30)]   // IntervalSeconds 10 -> max(20, 30) = 30, which would NOT cover it
-    public void StartupTtlOutlivesTheSlowestBackoffWrite(int interval, int floor, int expectedTtl)
+    // the gap between two of them reaches BackoffCap + RequestTimeout = 38s.
+    [InlineData(30, 120)]   // StartupInterval 30 -> 120s, comfortably past 38
+    [InlineData(10, 40)]    // IntervalSeconds 10 -> 40s, which also covers it, but see below
+    public void StartupTtlOutlivesTheSlowestBackoffWrite(int interval, int expectedTtl)
     {
+        // Recording the steady-state interval on a startup write would still produce a TTL past the
+        // 38s worst case, but it would also tell the reader the replica beats every 10s when it does
+        // not — so it would read as stale at 20s while still being on schedule.
         Assert.Equal(
             expectedTtl,
-            BaseProcessor.Core.Liveness.ProcessorLivenessWriter.DeriveTtlSeconds(interval, floor));
+            BaseProcessor.Core.Liveness.ProcessorLivenessWriter.DeriveTtlSeconds(interval));
     }
 }

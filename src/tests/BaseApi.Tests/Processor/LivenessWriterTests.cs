@@ -28,8 +28,7 @@ public sealed class LivenessWriterTests
         Build(IConnectionMultiplexer redis)
     {
         var log = new RecordingLogger<ProcessorLivenessWriter>();
-        var options = Options.Create(new ProcessorLivenessOptions());
-        return (new ProcessorLivenessWriter(redis, options, log), log);
+        return (new ProcessorLivenessWriter(redis, log), log);
     }
 
     [Fact]
@@ -96,11 +95,11 @@ public sealed class LivenessWriterTests
 
         await writer.WriteAsync(processorId, "instance-1", Entry());
 
-        // TTL is derived from the entry's recorded interval, floored by the option: max(10*2, 30) = 30.
+        // TTL is four times the entry's own recorded interval: 10 * 4 = 40.
         await db.Received(1).StringSetAsync(
             L2ProjectionKeys.PerInstance(processorId, "instance-1"),
             Arg.Any<RedisValue>(),
-            TimeSpan.FromSeconds(30),
+            TimeSpan.FromSeconds(40),
             Arg.Any<ValueCondition>(), Arg.Any<CommandFlags>());
         await db.Received(1).SetAddAsync(
             L2ProjectionKeys.InstanceIndex(processorId), "instance-1", Arg.Any<CommandFlags>());

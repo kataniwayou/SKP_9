@@ -103,7 +103,10 @@ kubectl -n skp exec sts/redis -- redis-cli GET 'skp:proc:<processorId>:<podName>
 The set members should be the two pod names, matching `service.instance.id` on those pods' telemetry
 — that correspondence is the whole reason the instance id is resolved once from `POD_NAME` rather
 than defaulted separately in three places. The entry should read `"status":"Healthy"` with
-`"interval":10`, and its TTL should be 30s, refreshed every 10s by the liveness loop.
+`"interval":10`, and its TTL should be 40s — four times that interval — refreshed every 10s by the
+liveness loop. The reader calls the same entry stale at twice its interval, so between 20s and 40s
+without a beat the key still exists but no longer counts, which is what lets the gate distinguish a
+wedged replica from one that was never there.
 
 The sequence worth watching rather than just the end state: before registration the entries are
 absent, immediately after identity resolves they appear as `Unhealthy`, and they turn `Healthy` once
