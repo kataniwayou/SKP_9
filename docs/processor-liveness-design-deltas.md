@@ -353,6 +353,65 @@ copies independently, and Delta 4's boundary reconciliation (`>=`) already was.
 
 ---
 
+## Deferred — metrics configuration and labels
+
+**Decision: not now.** Recorded so the analysis is not re-derived later.
+
+### The finding
+
+`identityName` is a redundant label on the business counters. All four increment sites
+(`EntryStepDispatchConsumer:42`, `OutputTail:166`, `PostProcessConsumer:50`,
+`ProcessorPipeline:317`) already carry `processorId` immediately above it, and `identityName` is
+`{Name}_{Version}` from the DB row keyed by that same `processorId` — a 1:1 static mapping. The label
+is denormalization, and `ProcessorMetrics.UnresolvedIdentity` (`"unresolved"`) exists only to stop a
+denormalized label from splitting the series before identity resolves.
+
+It reads as a leftover from the MLBL-03 migration: the MeterProvider swap was removed, `{Name}_{Version}`
+moved from the resource onto the datapoint, and its overlap with `processorId` was not revisited.
+
+### The proposed fix, when it is picked up
+
+Defer the *one instrument that needs identity*, not the metrics pipeline. Drop `identityName` from the
+four business counters and emit the mapping once as an info metric — an `ObservableGauge` whose
+callback yields **zero measurements** until identity resolves, so the series does not exist before
+then and no fallback value is ever needed. Dashboards join on
+`* on(processorId) group_left(identityName) processor_identity_info`. This is the standard Prometheus
+info-metric pattern (`kube_pod_info`, `node_uname_info`).
+
+`UnresolvedIdentity` and `IdentityNameOf` are then both deletable. Logs are unaffected — the enricher
+omits rather than falls back, which is already correct for logs.
+
+**Do not** defer the whole MeterProvider to after identity. It also feeds
+`AddRuntimeInstrumentation()` and the MassTransit meter, and startup is unbounded by design (Loop A
+retries forever against boot-before-register), so that would blind the runtime and broker metrics for
+exactly the window where a processor is stuck. Building a second provider later is the swap that was
+already removed for splitting every metric family across two `service_name` values.
+
+The cost of the info metric is that panels wanting the human-readable name need a `group_left` join.
+
+### Not deferred: the WR-03 read in the consume path
+
+Separable from the metrics work and worth treating on its own, because it is a correctness risk
+rather than a labelling one.
+
+`EntryStepDispatchConsumer:35-36` justifies its `context.Id!` with *"Consume runs ONLY
+post-MarkHealthy (the runtime binds queue:{id:D} AFTER Healthy)"*. That is backwards. The orchestrator
+binds the entry endpoint, awaits `handle.Ready`, binds the `-post` endpoint, awaits `postHandle.Ready`,
+and only then calls `MarkHealthy()` (`ProcessorStartupOrchestrator.cs:268-291`). The entry consumer is
+live for the whole second bind — a broker round-trip — and the dispatch queue is durable and a
+competing consumer, so a restarting replica can pick up a backlog inside that window.
+
+In that window a consumer thread reaches `context.Id!.Value` with no barrier having published it. A
+null read there is an `InvalidOperationException` in the consume path, not a bad label.
+
+The fix is structural: replace the nine plain auto-properties on `ProcessorContext` with a single
+immutable snapshot record behind one `volatile` field, so any thread seeing non-null sees every field
+consistently. That closes the null-deref, removes the per-site `Name`/`Version` guards in
+`ProcessorIdLogEnricher` and `IdentityNameOf`, and retires the WR-03 hazard class documented on
+`IProcessorContext` rather than restating it at each call site.
+
+---
+
 ## Confirmed correct — do not change
 
 Verified against the code; these are load-bearing and easy to "fix" wrongly.
