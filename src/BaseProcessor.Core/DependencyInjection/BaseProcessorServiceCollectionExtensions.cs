@@ -1,3 +1,4 @@
+using BaseConsole.Core.DependencyInjection;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
@@ -18,11 +19,16 @@ namespace BaseProcessor.Core.DependencyInjection;
 /// Wires the processor host: the identity holder, the two startup loops' collaborators, the liveness
 /// loop, and the health checks that report on them.
 /// <para>
-/// <b>Prerequisites the caller registers.</b> This does not wire the broker or Redis:
-/// <see cref="Messaging.Transport.IQueueSender"/>, <c>RabbitMqConnection</c> and
-/// <c>IConnectionMultiplexer</c> belong to the console tier, which owns transport and observability
-/// for every worker. Registering them here would invert that and drag a processor-shaped opinion into
-/// the shared layer.
+/// <b>It folds the console base in.</b> A concrete processor is a thin shell, so this one call brings
+/// the broker, Redis and the health surface with it. That is not a layering violation — this assembly
+/// already references the console library, and the prohibition runs the other way — while leaving the
+/// four registrations to every processor author would make each of them a runtime failure waiting to
+/// be forgotten.
+/// </para>
+/// <para>
+/// <b>Observability stays the shell's own call.</b> It needs the host builder rather than the service
+/// collection, and it needs the emitter <c>source</c>, which is the one thing only the concrete
+/// console can answer.
 /// </para>
 /// </summary>
 public static class BaseProcessorServiceCollectionExtensions
@@ -43,13 +49,16 @@ public static class BaseProcessorServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(cfg);
 
+        // The console base: broker, Redis, startup latch and health probes.
+        services.AddBaseConsoleMessaging(cfg);
+        services.AddBaseConsoleRedis(cfg);
+        services.AddBaseConsoleHealth(cfg);
+
         services.Configure<ProcessorLivenessOptions>(cfg.GetSection("Processor"));
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IProcessorContext, ProcessorContext>();
         services.TryAddSingleton<ISourceHashProvider, AssemblyMetadataSourceHashProvider>();
-        services.TryAddSingleton<IStartupGate, StartupGate>();
-
         // Resolved once and shared, so the liveness key, the reply queue and the telemetry's
         // service.instance.id all name this replica identically. TryAdd, so a host that pins a
         // deterministic id — a test, say — wins.
