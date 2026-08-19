@@ -393,6 +393,34 @@ there would be an API with no caller. Revisit only if the API grows a second loo
 
 ---
 
+## Open: the instance index accumulates orphans, and nothing prunes it
+
+Confirmed on the cluster. The per-instance liveness keys carry a TTL and vanish when a replica dies;
+the index set at `skp:proc:{processorId}` carries none, so the dead replica's id stays in it forever.
+After one scale-down and scale-up of a two-replica deployment the index held four members against two
+live keys, and the validator counted the two orphans as `absent`.
+
+That is correct behaviour — `ProcessorLivenessValidator` is documented as strictly read-only, because
+pruning on a request path could only clean the members it happened to read before short-circuiting,
+and a prune racing a replica's re-registration would evict a processor that had just come back. But
+the sweep it defers to does not exist.
+
+Left alone, the index grows by one member per pod restart, indefinitely. Every rolling deploy adds a
+replica's worth. Nothing breaks — orphans read as `absent` and one healthy replica still admits the
+processor — but the set the gate reads gets steadily larger while the useful part of it stays the
+same size.
+
+This also makes Delta-era batching load-bearing rather than merely tidy. Before it, a start request
+walked the index one sequential `GET` at a time, so the cost scaled with total pod churn since the
+processor was first registered rather than with the number of live replicas. It is now two round
+trips regardless.
+
+The sweep wants to be a background job that reads each member, drops the ones whose per-instance key
+is gone, and tolerates losing a race against a re-registering replica — the same posture the writer
+takes, since `SADD` is idempotent and a wrongly evicted member re-adds itself on the next beat.
+
+---
+
 ## Deferred — metrics configuration and labels
 
 **Decision: not now.** Recorded so the analysis is not re-derived later.
