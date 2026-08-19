@@ -1,0 +1,105 @@
+# ============================================================================
+# rabbitmq — message broker (StatefulSet + 1Gi PVC + startupProbe + headless Service).
+# ============================================================================
+# Port of the compose `rabbitmq` block (compose.yaml L161-176). A StatefulSet
+# grants stable identity (`rabbitmq-0`) + stable DNS via the same-named headless
+# Service, which exposes BOTH broker ports (5672 AMQP + 15672 management UI). A
+# `volumeClaimTemplates` provisions a 1Gi per-pod PVC (D-11) mounted at the mnesia
+# dir so durable queues + the broker's node identity survive a pod restart —
+# deliberately diverging from compose's ephemeral posture. Creds come from
+# `skp-dev-secrets` via `secretKeyRef` (D-07), never baked into the image. The
+# compose `5673:5672` + `15673:15672` host publishes are dropped; they re-emerge
+# only at port-forward (D-14).
+#
+# COLD START (Pitfall 3): rabbitmq needs ~40s to boot (compose start_period: 40s).
+# A dedicated `startupProbe` (periodSeconds 10 × failureThreshold 6 = 60s budget)
+# holds off readiness until the broker answers `rabbitmq-diagnostics ping`, so a
+# slow start never trips a liveness CrashLoop and `kubectl rollout status` stays a
+# meaningful readiness gate (plan 80-09).
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: skp
+  labels:
+    app: rabbitmq
+    app.kubernetes.io/part-of: skp
+spec:
+  clusterIP: None            # headless — required for StatefulSet stable DNS
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: 5672
+    - name: mgmt
+      port: 15672
+      targetPort: 15672
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: skp
+  labels:
+    app: rabbitmq
+    app.kubernetes.io/part-of: skp
+spec:
+  serviceName: rabbitmq      # MUST match the headless Service name
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4.1.8-management-alpine   # verbatim (public image)
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: skp-dev-secrets
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: skp-dev-secrets
+                  key: RABBITMQ_DEFAULT_PASS
+          ports:
+            - containerPort: 5672
+            - containerPort: 15672
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+          # compose start_period 40s → startupProbe (10s × 6 = 60s budget covers the cold start)
+          startupProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # compose healthcheck 10s/5s/retries 5 → readiness exec (startupProbe gates the cold start first)
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              memory: "256Mi"
+            limits:
+              memory: "512Mi"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi       # D-11 — durable mnesia (queues + node identity)
+        # storageClassName omitted → Docker Desktop default "hostpath" provisioner binds

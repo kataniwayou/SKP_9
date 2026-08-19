@@ -1,0 +1,87 @@
+# processor-sample — the discovery shell. Two replicas, and deliberately NO Service: it is a pure
+# consumer, so the only inbound traffic is the kubelet hitting the pod IP for probes. Two replicas
+# also make the per-instance liveness scheme observable — each writes its own
+# skp:proc:{processorId}:{instanceId} key and adds itself to the shared index set.
+#
+# EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS. Readiness reports identity resolution, and
+# identity is resolved by asking the API for the row matching this image's embedded SourceHash. Until
+# that row is registered the pod is live, healthy and unready — which is correct, and looks exactly
+# like a fault if you are not expecting it. See k8s/README.md for the registration step.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor-sample
+  namespace: skp
+  labels:
+    app: processor-sample
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: processor-sample
+  template:
+    metadata:
+      labels:
+        app: processor-sample
+    spec:
+      containers:
+        - name: processor-sample
+          image: processor-sample:local
+          imagePullPolicy: IfNotPresent
+          env:
+            # A processor's service name is a sentinel for the life of the process. Its real identity
+            # is the database row and arrives per-record as ProcessorId once discovery completes — so
+            # the Source resource attribute is what actually identifies the emitter class.
+            - name: Service__Name
+              value: unresolved
+            - name: Service__Version
+              value: 0.0.0
+            # The replica identity that names this pod's liveness key, its reply queue, and the
+            # service.instance.id on its telemetry. All three must be the same string, which is why it
+            # is resolved once from the downward API rather than three times from three defaults.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_USER }
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+            - name: ConnectionStrings__Redis
+              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            - name: ConsoleHealth__Port
+              value: "8081"
+          ports:
+            - containerPort: 8081
+          # Startup flips on the liveness loop's first beat, within moments of the host starting, so
+          # this passes long before discovery does. It is deliberately not gated on identity: a
+          # processor waiting on an unregistered row is starting correctly, however long that takes.
+          startupProbe:
+            httpGet: { path: /health/startup, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Readiness is identity resolution. It stays red until the processor row exists, and no
+          # restart will help — which is exactly why this is readiness and not liveness.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8081 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          # Liveness is the loops still turning, and nothing else. A broker that is down must not
+          # restart this pod: the startup loop is designed to retry against it forever, and a restart
+          # only throws away the backoff progress.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8081 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests: { memory: "160Mi" }
+            limits:   { memory: "384Mi" }

@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Numbered by dependency order for a reader; kustomize does not sequence them and does not need to.
+# Every component tolerates its dependencies being absent at start and converges once they appear,
+# which is what makes the ordering advisory rather than load-bearing.
+namespace: skp
+
+resources:
+  - 00-namespace.yaml
+  - 01-secret.yaml
+  - 10-postgres.yaml
+  - 11-redis.yaml
+  - 12-rabbitmq.yaml
+  - 30-baseapi-service.yaml
+  - 33-processor-sample.yaml
