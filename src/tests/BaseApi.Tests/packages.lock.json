@@ -607,6 +607,10 @@
           "Messaging.Transport": "[1.0.0, )",
           "Microsoft.Extensions.Diagnostics.HealthChecks": "[8.0.11, )",
           "Microsoft.Extensions.Hosting": "[8.0.1, )",
+          "OpenTelemetry": "[1.15.3, )",
+          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.15.3, )",
+          "OpenTelemetry.Extensions.Hosting": "[1.15.3, )",
+          "OpenTelemetry.Instrumentation.Runtime": "[1.15.0, )",
           "StackExchange.Redis": "[2.13.1, )"
         }
       },
