@@ -372,8 +372,10 @@ deliberately absent, and both have a defined insertion point:
   processor as healthy while its queue does not exist.
 
 `Processor.Sample` now exists as a discovery shell — it boots, discovers, publishes liveness and
-answers its probes, and does no work. What it still lacks is a container image and manifests; `src/`
-has no Dockerfile, no k8s YAML and no charts, and `references/k8s` is the thing to port from.
+answers its probes, and does no work. `k8s/` carries manifests for Postgres, Redis, RabbitMQ, the API
+and the processor, with Dockerfiles beside each of the two projects and the run procedure in
+`k8s/README.md`. The observability stack (collector, Prometheus, Grafana, Elasticsearch) is not
+ported — OTLP export fails quietly without it and nothing depends on it.
 
 ### Orphaned by Delta 1
 

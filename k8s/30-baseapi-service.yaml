@@ -1,0 +1,101 @@
+# The API: the only thing in this stack with an inbound surface, and the responder both processor
+# discovery queries are addressed to.
+#
+# It migrates its own database on startup — StartupCompletionService applies migrations and only then
+# flips the startup gate — so /health/startup gates on schema readiness and no init container or
+# manual step is needed.
+apiVersion: v1
+kind: Service
+metadata:
+  name: baseapi-service
+  namespace: skp
+  labels:
+    app: baseapi-service
+    app.kubernetes.io/part-of: skp
+spec:
+  selector:
+    app: baseapi-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: baseapi-service
+  namespace: skp
+  labels:
+    app: baseapi-service
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: baseapi-service
+  template:
+    metadata:
+      labels:
+        app: baseapi-service
+    spec:
+      containers:
+        - name: baseapi-service
+          image: baseapi-service:local
+          # Read the local image store. There is no registry, so a rebuild plus a rollout restart is
+          # how new bits reach the cluster.
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: Service__Name
+              value: baseapi
+            - name: Service__Version
+              value: 0.0.0
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: POSTGRES_DB }
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: POSTGRES_USER }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: POSTGRES_PASSWORD }
+            - name: ConnectionStrings__Postgres
+              value: "Host=postgres;Port=5432;Database=$(POSTGRES_DB);Username=$(POSTGRES_USER);Password=$(POSTGRES_PASSWORD)"
+            # abortConnect=false so the client materialises against a Redis that is not up yet and
+            # fails per-operation instead, rather than throwing during container startup.
+            - name: ConnectionStrings__Redis
+              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_USER }
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+          ports:
+            - containerPort: 8080
+          # Startup covers migrations, which is why its budget is the generous one: 30 x 5s.
+          startupProbe:
+            httpGet: { path: /health/startup, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          # Liveness must not consult Postgres, Redis or the broker: a dependency blip would restart
+          # the pod during exactly the outage it should be riding out.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests: { memory: "256Mi" }
+            limits:   { memory: "512Mi" }
