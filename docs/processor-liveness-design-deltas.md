@@ -151,10 +151,14 @@ The `interval` value recorded on the startup `unhealthy` entries, distinct from 
 `IntervalSeconds`. It drives both the derived TTL and the reader's staleness math. The arithmetic is
 why it cannot be dropped:
 
-| Recorded interval | Derived TTL — `max(interval × 2, TtlSeconds)` | vs. 38s worst-case write cadence |
+| Recorded interval | Derived TTL — `interval × 4` | Reader calls it stale at `interval × 2` |
 |---|---|---|
-| `StartupInterval` 30 | `max(60, 30)` = **60s** | 60 > 38 ✅ |
-| `IntervalSeconds` 10 | `max(20, 30)` = **30s** | 30 < 38 ❌ |
+| `StartupInterval` 30 | **120s** — covers the 38s worst-case backoff cadence | 60s |
+| `IntervalSeconds` 10 | 40s | 20s |
+
+Recording the steady-state interval on a startup write would still outlast the 38s cadence, but it
+would also tell the reader the replica beats every 10s when it does not — so a replica writing on
+schedule would read as stale at 20s.
 
 Without it, a replica backing off at the cap lets its own key expire between its own writes. It then
 reads as **absent** rather than **unhealthy** — both block the 422, but the diagnostic counts in
@@ -168,10 +172,23 @@ TTL exactly.
 `ExecutionDataTtl`, the third dropped setting, is unrelated to liveness — leave it out until the
 execution-data path is built.
 
-`ProcessorLivenessWriter.WriteAsync` needs no change: it already derives TTL from `entry.Interval`
-(the *recorded* value) rather than live config
-(`src/BaseProcessor.Core/Liveness/ProcessorLivenessWriter.cs:41`), so parameterising the recorded
-interval is enough.
+`ProcessorLivenessWriter` derives TTL from `entry.Interval` — the *recorded* value, not live config —
+so each processor's key lifetime is proportional to its own configured cadence and parameterising the
+recorded interval is all that is needed.
+
+### The TTL is `interval × 4`, and the factor is load-bearing
+
+The reader calls an entry stale at `entry.Interval × 2`. The key expiring at `× 4` leaves a window,
+exactly one staleness-window wide, in which the key still exists but reads stale — and that window is
+the only reason the gate can ever report `stale` rather than `absent`. The two answers mean different
+things: `stale` is a replica that registered and then stopped writing, which is a wedged or
+partitioned pod; `absent` also covers one deleted hours ago.
+
+An earlier version used `max(interval × 2, TtlSeconds)` with a floor of 30. At the default interval
+of 10 the floor won every time, so the `× 2` term was inert and the gap that makes `stale` reportable
+existed only by accident — a floor of 30 against a window of 20. The `Ttl` option is gone with it;
+the relationship is now proportional and holds at every configured cadence rather than only at the
+default one.
 
 ---
 

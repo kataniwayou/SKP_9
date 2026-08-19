@@ -1,7 +1,5 @@
-using BaseProcessor.Core.Configuration;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 namespace BaseProcessor.Core.Liveness;
@@ -16,21 +14,34 @@ namespace BaseProcessor.Core.Liveness;
 public sealed class ProcessorLivenessWriter
 {
     private readonly IConnectionMultiplexer _redis;
-    private readonly ProcessorLivenessOptions _options;
     private readonly ILogger<ProcessorLivenessWriter> _logger;
 
     public ProcessorLivenessWriter(
         IConnectionMultiplexer redis,
-        IOptions<ProcessorLivenessOptions> options,
         ILogger<ProcessorLivenessWriter> logger)
     {
-        _redis   = redis ?? throw new ArgumentNullException(nameof(redis));
-        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-        _logger  = logger ?? throw new ArgumentNullException(nameof(logger));
+        _redis  = redis ?? throw new ArgumentNullException(nameof(redis));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>TTL is twice the recorded interval, floored — a slow cadence must not expire itself.</summary>
-    public static int DeriveTtlSeconds(int interval, int floor) => Math.Max(interval * 2, floor);
+    /// <summary>
+    /// The key's lifetime: four times the interval the entry itself records.
+    /// <para>
+    /// Derived from the <b>entry's own</b> interval rather than live configuration, so each processor
+    /// gets a TTL proportional to its own cadence and a slow one can never expire between its own
+    /// writes. It also means a startup entry, which records the backoff anchor rather than the
+    /// steady-state cadence, gets the longer lifetime its slower writes need.
+    /// </para>
+    /// <para>
+    /// Four rather than two because the reader calls an entry stale at <c>interval x 2</c>. Expiring
+    /// exactly then would collapse two distinct answers into one: a replica that registered and then
+    /// wedged would vanish just as it became stale, and read as <c>absent</c> — indistinguishable
+    /// from one deleted hours ago. The extra window is what keeps <c>stale</c> reportable, and it is
+    /// deliberately proportional rather than a fixed floor, so the relationship holds at every
+    /// configured cadence instead of only at the default one.
+    /// </para>
+    /// </summary>
+    public static int DeriveTtlSeconds(int interval) => interval * 4;
 
     public async Task WriteAsync(Guid processorId, string instanceId, ProcessorLivenessEntry entry)
     {
@@ -38,7 +49,7 @@ public sealed class ProcessorLivenessWriter
         try
         {
             var db = _redis.GetDatabase();
-            var ttl = TimeSpan.FromSeconds(DeriveTtlSeconds(entry.Interval, _options.TtlSeconds));
+            var ttl = TimeSpan.FromSeconds(DeriveTtlSeconds(entry.Interval));
 
             await db.StringSetAsync(
                 L2ProjectionKeys.PerInstance(processorId, instanceId),
