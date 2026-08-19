@@ -11,9 +11,15 @@ namespace BaseApi.Service.Persistence.Configurations;
 /// column, so a duplicate source hash reports a 409 naming the field. EF's auto-generated names
 /// would not match, and the mapper would then report no field at all.
 /// <para>
-/// The three schema foreign keys null the column on delete rather than restricting, so deleting a
-/// referenced schema succeeds by design instead of raising the restrict violation that the step,
-/// assignment and junction foreign keys produce.
+/// The three schema foreign keys restrict on delete, matching the step, assignment and junction
+/// foreign keys: a schema still referenced by a processor cannot be deleted, and the attempt raises
+/// SQLSTATE 23001 which the mapper turns into a 422 naming the offending column.
+/// </para>
+/// <para>
+/// They previously nulled the column instead. That made a schema delete succeed while silently
+/// stripping the contract off every processor pointing at it — the processor kept running with no
+/// input, output or config schema, and nothing surfaced to the caller who deleted it. Restricting
+/// makes the reference say so.
 /// </para>
 /// <para>
 /// The relationships are declared without lambdas, which creates the foreign keys without generating
@@ -32,19 +38,19 @@ internal sealed class ProcessorEntityConfiguration : IEntityTypeConfiguration<Pr
             .WithMany()
             .HasForeignKey(e => e.InputSchemaId)
             .HasConstraintName("fk_processor_input_schema_id")
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         entity.HasOne<SchemaEntity>()
             .WithMany()
             .HasForeignKey(e => e.OutputSchemaId)
             .HasConstraintName("fk_processor_output_schema_id")
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         entity.HasOne<SchemaEntity>()
             .WithMany()
             .HasForeignKey(e => e.ConfigSchemaId)
             .HasConstraintName("fk_processor_config_schema_id")
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         // A SHA-256 hex string is exactly 64 characters; lock that at the database too.
         entity.Property(e => e.SourceHash)
