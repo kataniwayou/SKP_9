@@ -27,7 +27,10 @@ public sealed class LoopLivenessHealthCheck : IHealthCheck
         }
 
         var window = _options.Interval * _options.StaleFactor;
-        return Task.FromResult(_clock.GetUtcNow() - last > window
+
+        // Non-strict: the boundary instant counts as stale, so the threshold means what it reads as.
+        // Matches BaseApi.Core's copy of this check — the two must not disagree about the edge.
+        return Task.FromResult(_clock.GetUtcNow() - last >= window
             ? HealthCheckResult.Unhealthy("discovery loop stale")
             : HealthCheckResult.Healthy("discovery loop running"));
     }
