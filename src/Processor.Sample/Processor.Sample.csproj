@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The first concrete processor: a thin shell. It carries no identity, liveness, broker or Redis code
+    of its own — AddBaseProcessor folds all of it in — and today it carries no work either. It exists
+    to be deployed and observed: to prove that a processor boots, discovers who it is, publishes
+    liveness and answers its probes.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare either
+    here.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.Sample</RootNamespace>
+    <AssemblyName>Processor.Sample</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BaseProcessor.Core\BaseProcessor.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    Explicit import: a ProjectReference does not flow build targets, and this one must run here rather
+    than in BaseProcessor.Core. It hashes that library's sources together with this project's and
+    stamps the result on THIS assembly, because the runtime reader looks for the attribute on the
+    entry assembly. The hash is the identity the API matches a processor row against.
+  -->
+  <Import Project="..\BaseProcessor.Core\SourceHash.targets" />
+
+</Project>
