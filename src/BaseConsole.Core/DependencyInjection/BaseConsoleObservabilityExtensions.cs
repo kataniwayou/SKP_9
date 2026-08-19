@@ -29,14 +29,21 @@ public static class BaseConsoleObservabilityExtensions
     /// <param name="builder">The host builder, exposing both logging and services.</param>
     /// <param name="cfg">The worker's configuration, supplying the service name and version.</param>
     /// <param name="source">
-    /// The coarse emitter class stamped on every record's resource — <c>processor</c>,
-    /// <c>orchestrator</c>, <c>keeper</c>. Required rather than defaulted, because it is the stable
-    /// answer to "who emitted this" and a new worker must not be able to ship without one.
+    /// The application type stamped on every record's resource — <c>worker</c> for every background
+    /// host, paired with <c>webapi</c> on the API side. Required rather than defaulted, because it is
+    /// the stable answer to "what kind of process emitted this" and a new worker must not be able to
+    /// ship without one.
     /// <para>
-    /// On a processor it is the <i>only</i> answer: that service name is the fixed
-    /// <c>unresolved</c> sentinel for the process's whole life, since a processor's real identity is
-    /// its database row and arrives per-record once discovery completes. Every processor image shares
-    /// the value <c>processor</c> deliberately, so one term selects the whole class.
+    /// Deliberately coarser than <c>service.name</c>, and not a substitute for it: the type says what
+    /// shape of process produced the record, while the service name says which role —
+    /// <c>processor</c>, <c>orchestrator</c>, <c>keeper</c> — it plays. One term selects every
+    /// worker, the other one role within them. It is deliberately not the library name: a host that
+    /// dropped this library but kept the shape would still be a <c>worker</c>.
+    /// </para>
+    /// <para>
+    /// Neither of them names the processor's <i>row</i>. That identity arrives from the database long
+    /// after this method runs, and an OTel resource is materialised once when the provider is built
+    /// and is immutable thereafter, so a row-derived name can only ever ride per-record.
     /// </para>
     /// </param>
     public static IHostApplicationBuilder AddBaseConsoleObservability(
@@ -56,9 +63,10 @@ public static class BaseConsoleObservabilityExtensions
         // independent answers would decouple them.
         var instanceId = InstanceId.Resolve().Value;
 
-        // The emitter class rides on both resources under each signal's own casing convention:
+        // The application type rides on both resources under each signal's own casing convention:
         // PascalCase on logs, camelCase on metrics. It is resource-level, never per record, because
-        // it cannot vary within a process.
+        // it cannot vary within a process — which is exactly why the processor's row identity, which
+        // does change within a process, cannot live here.
         var logAttrs = new[]
         {
             new KeyValuePair<string, object>("service.instance.id", instanceId),

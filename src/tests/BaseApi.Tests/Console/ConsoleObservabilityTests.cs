@@ -33,7 +33,7 @@ public sealed class ConsoleObservabilityTests
         var builder = BuilderWith(("Service:Version", "1.0.0"));
 
         var ex = Assert.Throws<InvalidOperationException>(
-            () => builder.AddBaseConsoleObservability(builder.Configuration, source: "processor"));
+            () => builder.AddBaseConsoleObservability(builder.Configuration, source: "worker"));
 
         Assert.Contains("Service:Name", ex.Message);
     }
@@ -41,10 +41,10 @@ public sealed class ConsoleObservabilityTests
     [Fact]
     public void FailsFastWhenTheServiceVersionIsMissing()
     {
-        var builder = BuilderWith(("Service:Name", "unresolved"));
+        var builder = BuilderWith(("Service:Name", "processor"));
 
         var ex = Assert.Throws<InvalidOperationException>(
-            () => builder.AddBaseConsoleObservability(builder.Configuration, source: "processor"));
+            () => builder.AddBaseConsoleObservability(builder.Configuration, source: "worker"));
 
         Assert.Contains("Service:Version", ex.Message);
     }
@@ -52,9 +52,9 @@ public sealed class ConsoleObservabilityTests
     [Fact]
     public void RequiresAnEmitterSource()
     {
-        // Required rather than defaulted, so a new console cannot ship without saying who emitted a
-        // record — service.name is the sentinel on a processor and cannot answer that.
-        var builder = BuilderWith(("Service:Name", "unresolved"), ("Service:Version", "0.0.0"));
+        // Required rather than defaulted, so a new console cannot ship without naming its tier.
+        // service.name cannot stand in for it: that names the role, one level finer.
+        var builder = BuilderWith(("Service:Name", "processor"), ("Service:Version", "0.0.0"));
 
         Assert.Throws<ArgumentException>(
             () => builder.AddBaseConsoleObservability(builder.Configuration, source: "  "));
@@ -63,9 +63,9 @@ public sealed class ConsoleObservabilityTests
     [Fact]
     public void WiresUpWithTheProcessorSentinel()
     {
-        var builder = BuilderWith(("Service:Name", "unresolved"), ("Service:Version", "0.0.0"));
+        var builder = BuilderWith(("Service:Name", "processor"), ("Service:Version", "0.0.0"));
 
-        var returned = builder.AddBaseConsoleObservability(builder.Configuration, source: "processor");
+        var returned = builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
 
         Assert.Same(builder, returned);
     }

@@ -30,11 +30,12 @@ spec:
           image: processor-sample:local
           imagePullPolicy: IfNotPresent
           env:
-            # A processor's service name is a sentinel for the life of the process. Its real identity
-            # is the database row and arrives per-record as ProcessorId once discovery completes — so
-            # the Source resource attribute is what actually identifies the emitter class.
+            # A processor's service name is a sentinel for the life of the process: it names the
+            # ROLE, not the row. The real identity is the database row and arrives per-record as
+            # ProcessorId once discovery completes, because an OTel resource is fixed when the
+            # provider is built and cannot be rewritten afterwards.
             - name: Service__Name
-              value: unresolved
+              value: processor
             - name: Service__Version
               value: 0.0.0
             # The replica identity that names this pod's liveness key, its reply queue, and the
