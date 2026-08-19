@@ -3,10 +3,8 @@ using Messaging.Contracts;
 namespace BaseProcessor.Core.Identity;
 
 /// <summary>
-/// Backing implementation of <see cref="IProcessorContext"/> (D-06). Only <see cref="IsHealthy"/>
-/// carries synchronization; the identity/definition properties are plain auto-properties safe to
-/// read cross-thread only after Healthy is observed (see the memory-visibility invariant on
-/// <see cref="IProcessorContext"/>, WR-03).
+/// Backing implementation of <see cref="IProcessorContext"/> (D-06). Two synchronized fields and
+/// nothing else: the immutable identity snapshot and the Healthy latch.
 ///
 /// <para>
 /// <c>public sealed</c> so <c>services.AddSingleton&lt;IProcessorContext, ProcessorContext&gt;()</c>
@@ -15,41 +13,26 @@ namespace BaseProcessor.Core.Identity;
 /// </para>
 ///
 /// <para>
-/// <see cref="IsHealthy"/> is backed by the StartupGate int-latch idiom
-/// (<c>Volatile.Read</c>/<c>Interlocked.Exchange</c> — Interlocked has no bool overload in .NET 8).
-/// <see cref="MarkHealthy"/> is idempotent: a second call is a no-op re-assignment of the same value.
+/// <b>Safe publication.</b> Each snapshot is fully constructed before its reference is stored, and
+/// the store is a <see cref="Volatile.Write{T}"/> paired with a <see cref="Volatile.Read{T}"/> on the
+/// read side. The release/acquire pair is what guarantees a thread observing the reference also
+/// observes every field behind it — .NET makes no Java-style final-field promise, so the barrier is
+/// explicit rather than inferred from the record's immutability.
+/// </para>
+/// <para>
+/// The writers (<see cref="SetIdentity"/>, <see cref="SetDefinition"/>) are called only from the
+/// startup orchestrator's own thread, in order, so read-modify-write on the snapshot needs no
+/// interlocked compare-exchange. <see cref="IsHealthy"/> keeps the int-latch idiom because
+/// <see cref="Interlocked"/> has no bool overload in .NET 8.
 /// </para>
 /// </summary>
 public sealed class ProcessorContext : IProcessorContext
 {
+    private ProcessorIdentity? _identity;
     private int _isHealthy; // 0 = false, 1 = true (Interlocked.Exchange has no bool overload in .NET 8)
 
     /// <inheritdoc/>
-    public Guid? Id { get; private set; }
-
-    /// <inheritdoc/>
-    public Guid? InputSchemaId { get; private set; }
-
-    /// <inheritdoc/>
-    public Guid? OutputSchemaId { get; private set; }
-
-    /// <inheritdoc/>
-    public Guid? ConfigSchemaId { get; private set; }
-
-    /// <inheritdoc/>
-    public string? Name { get; private set; }
-
-    /// <inheritdoc/>
-    public string? Version { get; private set; }
-
-    /// <inheritdoc/>
-    public string? InputDefinition { get; private set; }
-
-    /// <inheritdoc/>
-    public string? OutputDefinition { get; private set; }
-
-    /// <inheritdoc/>
-    public string? ConfigDefinition { get; private set; }
+    public ProcessorIdentity? Identity => Volatile.Read(ref _identity);
 
     /// <inheritdoc/>
     public bool IsHealthy => Volatile.Read(ref _isHealthy) == 1;
@@ -57,32 +40,50 @@ public sealed class ProcessorContext : IProcessorContext
     /// <inheritdoc/>
     public void SetIdentity(ProcessorIdentityFound identity)
     {
-        Id = identity.Id;
-        InputSchemaId = identity.InputSchemaId;
-        OutputSchemaId = identity.OutputSchemaId;
-        ConfigSchemaId = identity.ConfigSchemaId;
-        Name = identity.Name;
-        Version = identity.Version;
+        ArgumentNullException.ThrowIfNull(identity);
+
+        Volatile.Write(ref _identity, new ProcessorIdentity(
+            identity.Id,
+            identity.InputSchemaId,
+            identity.OutputSchemaId,
+            identity.ConfigSchemaId,
+            identity.Name,
+            identity.Version,
+            InputDefinition: null,
+            OutputDefinition: null,
+            ConfigDefinition: null));
     }
 
     /// <inheritdoc/>
     public void SetDefinition(Guid schemaId, string definition)
     {
-        if (schemaId == InputSchemaId)
-            InputDefinition = definition;
-        if (schemaId == OutputSchemaId)
-            OutputDefinition = definition;
-        // D-12/D-14: route the config schema id to ConfigDefinition (Gate A's input). Independent `if`
-        // (not else-if) — if two roles share an Id, one fetch populates both slots (idempotent).
-        if (schemaId == ConfigSchemaId)
-            ConfigDefinition = definition;
+        ArgumentNullException.ThrowIfNull(definition);
+
+        var current = Volatile.Read(ref _identity)
+            ?? throw new InvalidOperationException(
+                "SetDefinition was called before SetIdentity — Loop B runs only after Loop A resolves.");
+
+        // Independent tests, not else-if: if two roles share one schema id, a single fetch fills both
+        // slots (idempotent). Copy-on-write, so a reader holding the previous snapshot is unaffected.
+        var updated = current;
+        if (schemaId == current.InputSchemaId)
+        {
+            updated = updated with { InputDefinition = definition };
+        }
+
+        if (schemaId == current.OutputSchemaId)
+        {
+            updated = updated with { OutputDefinition = definition };
+        }
+
+        if (schemaId == current.ConfigSchemaId)
+        {
+            updated = updated with { ConfigDefinition = definition };
+        }
+
+        Volatile.Write(ref _identity, updated);
     }
 
     /// <inheritdoc/>
-    public void MarkHealthy()
-    {
-        // Full-barrier CAS publishes the prior identity/definition writes (WR-03). Idempotent: a
-        // second call re-assigns the same value.
-        Interlocked.Exchange(ref _isHealthy, 1);
-    }
+    public void MarkHealthy() => Interlocked.Exchange(ref _isHealthy, 1);
 }
