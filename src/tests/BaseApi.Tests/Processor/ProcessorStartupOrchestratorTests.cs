@@ -62,10 +62,20 @@ public sealed class ProcessorStartupOrchestratorTests
         public ScriptedSender Sender { get; }
         public ProcessorStartupOrchestrator Orchestrator { get; }
 
-        public Harness(params object?[] script)
+        /// <param name="identity">
+        /// Seeded before the orchestrator exists, the way the two-stage boot seeds the container. Null
+        /// builds the one shape the boot is supposed to make impossible, which is what the guard test
+        /// needs.
+        /// </param>
+        public Harness(ProcessorIdentityFound? identity, params object?[] script)
         {
             Beat = new LoopHeartbeat(Clock);
             Sender = new ScriptedSender(Slot, script);
+
+            if (identity is not null)
+            {
+                Context.SetIdentity(identity);
+            }
 
             var redis = Substitute.For<IConnectionMultiplexer>();
             redis.GetDatabase().Returns(Db);
@@ -76,11 +86,8 @@ public sealed class ProcessorStartupOrchestratorTests
             var endpoint = Substitute.For<IReplyEndpoint>();
             endpoint.QueueName.Returns("proc-reply-pod-1");
 
-            var hash = Substitute.For<ISourceHashProvider>();
-            hash.Get().Returns("abc123");
-
             Orchestrator = new ProcessorStartupOrchestrator(
-                Sender, endpoint, Slot, hash, Context, writer, new InstanceId("pod-1"),
+                Sender, endpoint, Slot, Context, writer, new InstanceId("pod-1"),
                 options, Clock, Beat, new RecordingLogger<ProcessorStartupOrchestrator>());
         }
 
@@ -115,7 +122,7 @@ public sealed class ProcessorStartupOrchestratorTests
         new(Guid.NewGuid(), input, null, config, "sample", "1.0.0");
 
     [Fact]
-    public async Task ResolvesIdentityThenDefinitionsAndReachesHealthy()
+    public async Task ResolvesDefinitionsAndReachesHealthy()
     {
         var input = Guid.NewGuid();
         var h = new Harness(Found(input: input), new SchemaDefinitionFound("{\"type\":\"object\"}"));
@@ -124,15 +131,15 @@ public sealed class ProcessorStartupOrchestratorTests
 
         Assert.True(h.Context.IsHealthy);
         Assert.Equal("{\"type\":\"object\"}", h.Context.Identity!.InputDefinition);
-        Assert.Equal(
-            [ProcessorQueues.IdentityQuery, ProcessorQueues.SchemaQuery],
-            h.Sender.Sent.Select(s => s.Queue));
+        Assert.Equal([ProcessorQueues.SchemaQuery], h.Sender.Sent.Select(s => s.Queue));
     }
 
     [Fact]
     public async Task EveryAskCarriesTheReplyAddress()
     {
-        var h = new Harness(Found());
+        // Given a schema to resolve, so there is an ask at all: with identity pre-seeded a processor
+        // with no schemas sends nothing, and the assertion would pass on an empty list.
+        var h = new Harness(Found(input: Guid.NewGuid()), new SchemaDefinitionFound("{}"));
 
         await h.Orchestrator.RunStartupAsync(TestContext.Current.CancellationToken);
 
@@ -142,48 +149,22 @@ public sealed class ProcessorStartupOrchestratorTests
     [Fact]
     public async Task SkipsNullSchemaIdsWithoutAsking()
     {
-        // A processor with no input, output or config schema asks once and is done — a null id means
-        // the role does not apply, not that a definition is missing.
+        // A processor with no input, output or config schema asks nothing at all — a null id means
+        // the role does not apply, not that a definition is missing, and identity is already in hand.
         var h = new Harness(Found());
 
         await h.Orchestrator.RunStartupAsync(TestContext.Current.CancellationToken);
 
-        Assert.Single(h.Sender.Sent);
-        Assert.Equal(ProcessorQueues.IdentityQuery, h.Sender.Sent[0].Queue);
+        Assert.Empty(h.Sender.Sent);
         Assert.True(h.Context.IsHealthy);
     }
 
     [Fact]
-    public async Task KeepsAskingWhileTheProcessorRowIsNotRegistered()
+    public async Task PublishesUnhealthyBeforeResolvingAnyDefinition()
     {
-        // Boot-before-register is tolerated by design: the row may appear minutes after the pod.
-        var h = new Harness(new ProcessorIdentityNotFound("abc123"), Found());
-
-        await RunPumpedAsync(h, TestContext.Current.CancellationToken);
-
-        Assert.Equal(2, h.Sender.Sent.Count);
-        Assert.True(h.Context.IsHealthy);
-    }
-
-    [Fact]
-    public async Task WritesNothingToL2BeforeIdentityResolves()
-    {
-        // There is no processor id to key on yet, so the replica is absent rather than unhealthy.
-        var h = new Harness(new ProcessorIdentityNotFound("abc123"), Found());
-
-        await RunPumpedAsync(h, TestContext.Current.CancellationToken);
-
-        // Two asks were made but only one write happened — the not-found iteration wrote nothing,
-        // because there was no processor id to key on yet.
-        Assert.Equal(2, h.Sender.Sent.Count);
-        Assert.Single(h.WrittenEntries());
-    }
-
-    [Fact]
-    public async Task PublishesUnhealthyAsSoonAsIdentityResolves()
-    {
-        // Visible in L2 as unhealthy from the first post-identity moment — never absent, so the
-        // orchestration gate fails the replica on its status rather than on a missing key.
+        // Visible in L2 as unhealthy from the first moment — never absent, so the orchestration gate
+        // fails the replica on its status rather than on a missing key. With identity pre-seeded that
+        // moment is host start.
         var input = Guid.NewGuid();
         var h = new Harness(Found(input: input), new SchemaDefinitionFound("{}"));
 
@@ -194,6 +175,31 @@ public sealed class ProcessorStartupOrchestratorTests
         Assert.Equal(LivenessStatus.Unhealthy, entries[0].Status);
         Assert.Equal(SchemaOutcome.Fail, entries[0].Summary.InputSchema);   // not yet resolved
         Assert.Equal(30, entries[0].Interval);                              // the startup anchor
+    }
+
+    [Fact]
+    public async Task StartsFromASeededIdentityWithoutAsking()
+    {
+        // Loop A is gone. If the orchestrator still asked, a processor whose identity was already
+        // resolved would send a pointless query on every boot — and worse, could disagree with it.
+        var h = new Harness(Found());
+
+        await h.Orchestrator.RunStartupAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(h.Sender.Sent, s => s.Queue == ProcessorQueues.IdentityQuery);
+    }
+
+    [Fact]
+    public async Task RefusesToStartWithoutASeededIdentity()
+    {
+        // The one way this can happen is a host built through the identity-free overload, which is a
+        // wiring mistake. Failing here names it; carrying on would publish L2 writes keyed on nothing.
+        var h = new Harness(identity: null);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Orchestrator.RunStartupAsync(TestContext.Current.CancellationToken));
+
+        Assert.Contains("AddBaseProcessor", ex.Message);
     }
 
     [Fact]
@@ -210,7 +216,7 @@ public sealed class ProcessorStartupOrchestratorTests
     [Fact]
     public async Task BeatsWhileResolving()
     {
-        var h = new Harness(Found());
+        var h = new Harness(Found(input: Guid.NewGuid()), new SchemaDefinitionFound("{}"));
 
         await h.Orchestrator.RunStartupAsync(TestContext.Current.CancellationToken);
 
@@ -225,13 +231,12 @@ public sealed class ProcessorStartupOrchestratorTests
         var h = new Harness(Found(input: Guid.NewGuid()));   // identity answered, schema never is
         h.Sender.OnSend = send =>
         {
-            if (send == 2) cts.Cancel();   // the schema ask — identity is already resolved
+            if (send == 1) cts.Cancel();   // the schema ask is now the first — identity is pre-seeded
         };
 
         await RunPumpedAsync(h, cts.Token);
 
-        Assert.NotNull(h.Context.Identity);      // Loop A did complete
-        Assert.False(h.Context.IsHealthy);       // Loop B did not
+        Assert.False(h.Context.IsHealthy);       // Loop B did not complete
         Assert.False(h.Beat.IsRetired);
     }
 }
