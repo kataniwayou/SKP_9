@@ -14,6 +14,12 @@ public sealed class ConsoleObservabilityTests
     private static IHostApplicationBuilder BuilderWith(params (string Key, string Value)[] settings)
     {
         var builder = Host.CreateApplicationBuilder();
+
+        // Drop the default sources first. The host builder reads appsettings.json from the content
+        // root, and this output directory holds one — Processor.Sample's, copied in by the project
+        // reference. A test asserting that a missing key fails fast must not be able to find that key
+        // in a file it never mentioned.
+        builder.Configuration.Sources.Clear();
         builder.Configuration.AddInMemoryCollection(
             settings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value)));
         return builder;

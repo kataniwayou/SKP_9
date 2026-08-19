@@ -31,6 +31,7 @@
     <ProjectReference Include="..\..\BaseConsole.Core\BaseConsole.Core.csproj" />
     <ProjectReference Include="..\..\Messaging.Transport\Messaging.Transport.csproj" />
     <ProjectReference Include="..\..\BaseProcessor.Core\BaseProcessor.Core.csproj" />
+    <ProjectReference Include="..\..\Processor.Sample\Processor.Sample.csproj" />
   </ItemGroup>
 
 </Project>

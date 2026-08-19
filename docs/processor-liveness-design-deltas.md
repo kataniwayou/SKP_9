@@ -371,8 +371,9 @@ deliberately absent, and both have a defined insertion point:
   `MarkHealthy()`, marked with a comment at that line. Binding after the latch would advertise the
   processor as healthy while its queue does not exist.
 
-Also outstanding: no processor executable. `AddBaseProcessor` wires the library; a `Processor.Sample`
-host with its own appsettings, source-hash embed target and manifests is a separate piece.
+`Processor.Sample` now exists as a discovery shell — it boots, discovers, publishes liveness and
+answers its probes, and does no work. What it still lacks is a container image and manifests; `src/`
+has no Dockerfile, no k8s YAML and no charts, and `references/k8s` is the thing to port from.
 
 ### Orphaned by Delta 1
 
