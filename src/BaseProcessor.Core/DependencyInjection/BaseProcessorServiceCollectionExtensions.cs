@@ -7,6 +7,7 @@ using BaseProcessor.Core.Health;
 using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Liveness;
 using BaseProcessor.Core.Startup;
+using Messaging.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -42,6 +43,32 @@ public static class BaseProcessorServiceCollectionExtensions
     /// one slow iteration without reporting a healthy loop as gone.
     /// </summary>
     private const int StaleFactor = 3;
+
+    /// <summary>
+    /// The two-stage boot's registration: the same graph, with <see cref="IProcessorContext"/> already
+    /// carrying the identity Stage 1 resolved.
+    /// <para>
+    /// Seeding rather than resolving is what lets the OTel resource carry the identity at all. By the
+    /// time this runs the answer is known, so the in-host retry that used to find it has nothing left
+    /// to do — see <see cref="Startup.ProcessorStartupOrchestrator"/>, which now begins at Loop B.
+    /// </para>
+    /// </summary>
+    public static IServiceCollection AddBaseProcessor(
+        this IServiceCollection services, IConfiguration cfg, ProcessorIdentityFound identity)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(identity);
+
+        // Registered before AddBaseProcessor's TryAddSingleton, so this pre-seeded instance wins.
+        services.AddSingleton<IProcessorContext>(_ =>
+        {
+            var context = new ProcessorContext();
+            context.SetIdentity(identity);
+            return context;
+        });
+
+        return services.AddBaseProcessor(cfg);
+    }
 
     public static IServiceCollection AddBaseProcessor(
         this IServiceCollection services, IConfiguration cfg)
