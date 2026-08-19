@@ -1,4 +1,5 @@
 using BaseConsole.Core.Messaging;
+using BaseApi.Tests.Support;
 using Xunit;
 
 namespace BaseApi.Tests.Console;
@@ -9,6 +10,7 @@ namespace BaseApi.Tests.Console;
 /// <c>service.instance.id</c> stamped on this pod's logs and metrics. If they diverge, a liveness key
 /// cannot be traced back to the pod that wrote it.
 /// </summary>
+[Collection(EnvironmentCollection.Name)]
 public sealed class InstanceIdTests
 {
     private static void WithEnv(string? podName, string? hostname, Action assert)
@@ -51,11 +53,13 @@ public sealed class InstanceIdTests
     }
 
     [Fact]
-    public void TreatsAnEmptyVariableAsAbsent()
+    public void TreatsABlankVariableAsAbsent()
     {
-        // An unset downward-API field surfaces as empty, not missing. Taking it literally would name
-        // the liveness key after nothing and fail the InstanceId guard.
-        WithEnv("", "some-host", () =>
+        // A downward-API field that resolved to nothing surfaces as blank, not missing. Taking it
+        // literally would name the liveness key after nothing and fail the constructor guard.
+        // Whitespace rather than "": SetEnvironmentVariable deletes a variable set to the empty
+        // string, so "" would exercise deletion instead of blankness.
+        WithEnv("   ", "some-host", () =>
             Assert.Equal("some-host", InstanceId.Resolve().Value));
     }
 
