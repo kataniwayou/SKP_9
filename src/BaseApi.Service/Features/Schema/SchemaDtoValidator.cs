@@ -21,7 +21,12 @@ public sealed class SchemaCreateDtoValidator : AbstractValidator<SchemaCreateDto
     {
         Include(new BaseDtoValidator<SchemaCreateDto>());
 
+        // Cascade.Stop for the same reason as the workflow's entry-step rule: by default the Custom
+        // step below runs even once NotEmpty has failed, and JsonDocument.Parse(null) raises
+        // ArgumentNullException — not the JsonException the catch is written for — so a null escapes
+        // as an unhandled throw rather than a validation failure.
         RuleFor(x => x.Definition)
+            .Cascade(CascadeMode.Stop)
             .NotEmpty()
             .Custom((definition, ctx) =>
             {
@@ -68,7 +73,12 @@ public sealed class SchemaUpdateDtoValidator : AbstractValidator<SchemaUpdateDto
     {
         Include(new BaseDtoValidator<SchemaUpdateDto>());
 
+        // Cascade.Stop for the same reason as the workflow's entry-step rule: by default the Custom
+        // step below runs even once NotEmpty has failed, and JsonDocument.Parse(null) raises
+        // ArgumentNullException — not the JsonException the catch is written for — so a null escapes
+        // as an unhandled throw rather than a validation failure.
         RuleFor(x => x.Definition)
+            .Cascade(CascadeMode.Stop)
             .NotEmpty()
             .Custom((definition, ctx) =>
             {
