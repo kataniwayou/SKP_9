@@ -16,8 +16,9 @@ namespace BaseApi.Service.Features.Workflow;
 ///     has no home for.</item>
 ///   <item><see cref="ToRead"/> maps both collections to null explicitly. The read DTO is a
 ///     positional record, so each is a required constructor parameter and cannot simply be ignored;
-///     mapping a value is what satisfies it. Reads therefore return null for both and the junction
-///     rows stay the source of truth.</item>
+///     mapping a value is what satisfies it. The null is a placeholder, not the response:
+///     <c>WorkflowService.EnrichReadAsync</c> replaces both from the junction rows, which stay the
+///     source of truth, before the DTO reaches a caller.</item>
 /// </list>
 /// </summary>
 [Mapper]

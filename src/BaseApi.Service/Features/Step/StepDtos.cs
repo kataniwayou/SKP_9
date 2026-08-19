@@ -32,10 +32,12 @@ public sealed record StepUpdateDto(
 /// <summary>
 /// Read-side DTO returned to clients, carrying the id and the audit fields.
 /// <para>
-/// <b><c>NextStepIds</c> is not populated on read.</b> The mapper projects from the entity, which
-/// deliberately has no such property, so this comes back null on get and list. The junction rows are
-/// the source of truth and must be queried directly. That is also why the property is nullable:
-/// a non-nullable collection here would fail the mapper's strict-mapping analyzer.
+/// <b><c>NextStepIds</c> is populated after the mapper has run, not by it.</b> The mapper projects
+/// from the entity, which deliberately has no such property, so it hard-codes null;
+/// <c>StepService.EnrichReadAsync</c> then fills it from the junction rows, which remain the source
+/// of truth. Every read verb goes through that enrichment, so a client sees the edges it wrote, and
+/// a sink reads as an empty list rather than null. The property stays nullable only because the
+/// mapper's strict-mapping analyzer rejects a non-nullable collection it has no source for.
 /// </para>
 /// </summary>
 public sealed record StepReadDto(
