@@ -1,3 +1,4 @@
+using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
 using BaseProcessor.Core.DependencyInjection;
@@ -29,14 +30,21 @@ public sealed class ProcessorHostWiringTests
         var services = new ServiceCollection();
         services.AddLogging();
 
-        // The console tier's prerequisites, which AddBaseProcessor deliberately does not own.
+        // Substituted before AddBaseProcessor so TryAdd leaves them alone: resolving the real
+        // multiplexer would open a connection, and the point here is the shape of the graph.
         services.AddSingleton(Substitute.For<IConnectionMultiplexer>());
-        services.AddSingleton(Substitute.For<IQueueSender>());
         services.AddSingleton<IEnumerable<IRabbitMqTopology>>([]);
-        services.Configure<RabbitMqOptions>(_ => { });
-        services.AddSingleton<RabbitMqConnection>();
 
-        services.AddBaseProcessor(new ConfigurationBuilder().AddInMemoryCollection([]).Build());
+        // AddBaseProcessor folds the console base, so the settings it reads eagerly must be present.
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
+            ["RabbitMq:Host"]           = "localhost",
+            ["RabbitMq:Username"]       = "guest",
+            ["RabbitMq:Password"]       = "guest",
+        }).Build();
+
+        services.AddBaseProcessor(cfg);
         return services.BuildServiceProvider(validateScopes: true);
     }
 
@@ -50,6 +58,19 @@ public sealed class ProcessorHostWiringTests
         Assert.NotNull(sp.GetRequiredService<ProcessorLivenessWriter>());
         Assert.NotNull(sp.GetRequiredService<ReplySlot<object>>());
         Assert.NotNull(sp.GetRequiredService<InstanceId>());
+    }
+
+    [Fact]
+    public async Task TheConsoleBaseIsFoldedInSoAShellNeedsOneCall()
+    {
+        // A concrete processor should not have to remember the broker, Redis and the health surface —
+        // each omission would be a runtime failure rather than a compile error.
+        await using var sp = Build();
+
+        Assert.NotNull(sp.GetRequiredService<IQueueSender>());
+        Assert.NotNull(sp.GetRequiredService<RabbitMqConnection>());
+        Assert.NotNull(sp.GetRequiredService<IStartupGate>());
+        Assert.Contains(sp.GetServices<IHostedService>(), h => h is EmbeddedHealthEndpointService);
     }
 
     [Fact]
