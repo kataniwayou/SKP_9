@@ -7,8 +7,9 @@ against the code; the confirmed-correct invariants are listed in the last sectio
 
 **Status of `/src` today:**
 
-- `src/BaseProcessor.Core` is five files — options, `IProcessorContext` / `ProcessorContext`,
-  `ISourceHashProvider` / `AssemblyMetadataSourceHashProvider`, and `ProcessorLivenessWriter`.
+- `src/BaseProcessor.Core` is six files — options, `IProcessorContext` / `ProcessorContext` /
+  `ProcessorIdentity`, `ISourceHashProvider` / `AssemblyMetadataSourceHashProvider`, and
+  `ProcessorLivenessWriter`.
   Nothing in `/src` consumes any of them except tests. There is no processor host, no Loop A, no
   Loop B, no Gate A, no liveness loop, and no `Observability/` folder.
 - `src/BaseConsole.Core` is nine files — `Health/` (2), `Loop/` (3), `Messaging/` (4). There is no
@@ -389,7 +390,7 @@ already removed for splitting every metric family across two `service_name` valu
 
 The cost of the info metric is that panels wanting the human-readable name need a `group_left` join.
 
-### Not deferred: the WR-03 read in the consume path
+### Not deferred: the WR-03 read in the consume path — context half **DONE**
 
 Separable from the metrics work and worth treating on its own, because it is a correctness risk
 rather than a labelling one.
@@ -404,11 +405,23 @@ competing consumer, so a restarting replica can pick up a backlog inside that wi
 In that window a consumer thread reaches `context.Id!.Value` with no barrier having published it. A
 null read there is an `InvalidOperationException` in the consume path, not a bad label.
 
-The fix is structural: replace the nine plain auto-properties on `ProcessorContext` with a single
-immutable snapshot record behind one `volatile` field, so any thread seeing non-null sees every field
-consistently. That closes the null-deref, removes the per-site `Name`/`Version` guards in
-`ProcessorIdLogEnricher` and `IdentityNameOf`, and retires the WR-03 hazard class documented on
-`IProcessorContext` rather than restating it at each call site.
+**Done on the context side.** The nine plain auto-properties are replaced by a single immutable
+`ProcessorIdentity` snapshot behind one field, published with `Volatile.Write` and read with
+`Volatile.Read`. `Id`, `Name` and `Version` are non-nullable inside the snapshot, so there is no
+state in which one is visible and another is not, and no call site can read them independently even
+by mistake. `SetDefinition` before `SetIdentity` now throws rather than silently no-opping, which
+previously would have left the config definition null — read by Gate A as "no config schema, skip",
+letting a processor reach Healthy without validating its config.
+
+Done now because nothing in `/src` consumes `IProcessorContext` yet except its own tests. The
+consumers that would each have needed their own guard — the orchestrator, the heartbeat, the log
+enricher and four increment sites — will be written against an API where the hazard cannot be
+expressed.
+
+**Residual:** the incorrect ordering claim in the reference's `EntryStepDispatchConsumer:35-36`
+comment still needs correcting when that consumer is ported, and `ProcessorIdLogEnricher` /
+`IdentityNameOf` shed their per-site `Name`/`Version` guards at the same time. The API no longer
+permits the null-deref, but the stale comment would mislead the next reader.
 
 ---
 
@@ -422,7 +435,7 @@ Verified against the code; these are load-bearing and easy to "fix" wrongly.
    the gate exists to ride out (`src/BaseApi.Core/Gating/LoopLivenessHealthCheck.cs:8-23`).
 
 2. **The processor starts unhealthy in memory, absent in L2.** `_isHealthy` defaults to 0
-   (`ProcessorContext.cs:25,55`); no L2 key exists before identity resolves, because the write is
+   (`ProcessorContext.cs:31,38`); no L2 key exists before identity resolves, because the write is
    guarded on `context.Id` being non-null (`ProcessorStartupOrchestrator.cs:358`). `absent` and
    `unhealthy` are distinct states to the reader (`ProcessorLivenessValidator.cs:58-73`).
 
