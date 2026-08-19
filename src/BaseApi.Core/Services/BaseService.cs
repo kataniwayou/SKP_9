@@ -68,11 +68,27 @@ public abstract class BaseService<TEntity, TCreate, TUpdate, TRead>
         DbContext  = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    /// <summary>Returns the full list mapped to read DTOs.</summary>
+    /// <summary>
+    /// The read-side counterpart to <see cref="SyncJunctionsAsync"/>. A collection that lives in a
+    /// junction table is invisible to the mapper — the entity has no property for it, and the read
+    /// DTO's constructor requires one, so the mapper assigns null. This is where an entity that owns
+    /// junctions puts it back.
+    /// <para>
+    /// The batch overload exists so a list read costs one extra query rather than one per row. It is
+    /// the default implementation for the single overload too, which keeps the two from drifting.
+    /// </para>
+    /// </summary>
+    protected virtual Task<IReadOnlyList<TRead>> EnrichReadAsync(
+        IReadOnlyList<TRead> dtos, CancellationToken ct) => Task.FromResult(dtos);
+
+    private async Task<TRead> EnrichOneAsync(TRead dto, CancellationToken ct)
+        => (await EnrichReadAsync(new[] { dto }, ct))[0];
+
+    /// <summary>Returns the full list mapped to read DTOs, with junction collections populated.</summary>
     public async Task<IReadOnlyList<TRead>> ListAsync(CancellationToken ct)
     {
         var entities = await _repo.ListAsync(ct);
-        return entities.Select(_mapper.ToRead).ToList();
+        return await EnrichReadAsync(entities.Select(_mapper.ToRead).ToList(), ct);
     }
 
     /// <summary>Returns one entity by id, throwing <see cref="NotFoundException"/> when missing.</summary>
@@ -80,7 +96,7 @@ public abstract class BaseService<TEntity, TCreate, TUpdate, TRead>
     {
         var entity = await _repo.GetAsync(id, ct);
         if (entity is null) throw new NotFoundException(typeof(TEntity).Name, id);
-        return _mapper.ToRead(entity);
+        return await EnrichOneAsync(_mapper.ToRead(entity), ct);
     }
 
     /// <summary>
@@ -95,7 +111,10 @@ public abstract class BaseService<TEntity, TCreate, TUpdate, TRead>
         await _repo.AddAsync(entity, ct);                                // 3
         await SyncJunctionsAsync(entity, dto, default, ct);              // 4
         await DbContext.SaveChangesAsync(ct);                            // 5
-        return _mapper.ToRead(entity);                                   // 6
+        // After the save, deliberately: the junction rows staged in step 4 are only queryable once
+        // they are committed, and the response has to report what was persisted rather than echo
+        // back what was asked for.
+        return await EnrichOneAsync(_mapper.ToRead(entity), ct);          // 6
     }
 
     /// <summary>
@@ -110,7 +129,7 @@ public abstract class BaseService<TEntity, TCreate, TUpdate, TRead>
         _mapper.Update(dto, entity);
         await SyncJunctionsAsync(entity, default, dto, ct);
         await DbContext.SaveChangesAsync(ct);
-        return _mapper.ToRead(entity);
+        return await EnrichOneAsync(_mapper.ToRead(entity), ct);
     }
 
     /// <summary>

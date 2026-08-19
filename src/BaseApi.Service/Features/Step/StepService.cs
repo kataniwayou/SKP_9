@@ -63,4 +63,35 @@ public sealed class StepService :
             await junctionSet.AddRangeAsync(rows, ct);
         }
     }
+
+    /// <summary>
+    /// Populates <see cref="StepReadDto.NextStepIds"/> from the junction table — the same enrichment
+    /// <c>WorkflowGraphLoader</c> performs for the orchestration path, applied to the read path so a
+    /// client can see the edges it wrote.
+    /// <para>
+    /// One query for the whole batch, keyed by step id, rather than one per row. A step with no
+    /// successors gets an empty list rather than null: null used to mean "not populated", and leaving
+    /// it would keep the field ambiguous exactly where it is now meaningful.
+    /// </para>
+    /// </summary>
+    protected override async Task<IReadOnlyList<StepReadDto>> EnrichReadAsync(
+        IReadOnlyList<StepReadDto> dtos, CancellationToken ct)
+    {
+        if (dtos.Count == 0)
+        {
+            return dtos;
+        }
+
+        var ids = dtos.Select(d => d.Id).ToList();
+        var rows = await DbContext.Set<StepNextSteps>().AsNoTracking()
+            .Where(j => ids.Contains(j.StepId))
+            .ToListAsync(ct);
+
+        var lookup = rows.GroupBy(j => j.StepId)
+            .ToDictionary(g => g.Key, g => g.Select(j => j.NextStepId).ToList());
+
+        return dtos
+            .Select(d => d with { NextStepIds = lookup.GetValueOrDefault(d.Id) ?? new List<Guid>() })
+            .ToList();
+    }
 }
