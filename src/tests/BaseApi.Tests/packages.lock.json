@@ -2,6 +2,15 @@
   "version": 2,
   "dependencies": {
     "net8.0": {
+      "Microsoft.EntityFrameworkCore.InMemory": {
+        "type": "Direct",
+        "requested": "[8.0.27, )",
+        "resolved": "8.0.27",
+        "contentHash": "PAlgm3IMMA4Zl88+S2myea91RlNBU/w7hAxfMFjQw+bFHwknzf1JFcSr0peBkler6Mm1knkmuwJCPBJYtcKVKw==",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore": "8.0.27"
+        }
+      },
       "Microsoft.Extensions.TimeProvider.Testing": {
         "type": "Direct",
         "requested": "[8.10.0, )",
