@@ -48,6 +48,22 @@ public sealed class LoopHeartbeatTests
     }
 
     [Fact]
+    public async Task UnhealthyAtExactlyTheStaleWindow()
+    {
+        // The boundary instant counts as stale, so the threshold means what it reads as — matching
+        // BaseApi.Core's copy of this check, which is documented as non-strict.
+        var clock = new FakeTimeProvider();
+        var beat = new LoopHeartbeat(clock);
+        beat.Beat();
+        clock.Advance(TimeSpan.FromSeconds(30));   // interval 10 * staleFactor 3 = 30, exactly
+
+        var result = await Check(beat, clock)
+            .CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+    }
+
+    [Fact]
     public async Task UnhealthyOnceTheStaleWindowElapses()
     {
         var clock = new FakeTimeProvider();
