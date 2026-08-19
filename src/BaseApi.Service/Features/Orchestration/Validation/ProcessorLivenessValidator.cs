@@ -16,6 +16,11 @@ namespace BaseApi.Service.Features.Orchestration.Validation;
 /// a count-only reason.
 /// </para>
 /// <para>
+/// <b>The reads are batched per processor.</b> The index is fetched, then every per-instance read is
+/// issued before any is awaited, so one processor costs two round trips however many replicas it has.
+/// The short-circuit below then applies to deserialization only, not to I/O.
+/// </para>
+/// <para>
 /// <b>This gate is strictly read-only.</b> It reads the index and the per-instance keys and writes
 /// nothing — an index member whose key has expired is counted as absent and left alone. Reclaiming
 /// those members belongs to a background sweep, not to a request path: pruning here could only ever
@@ -40,7 +45,31 @@ internal sealed class ProcessorLivenessValidator
         var now = _clock.GetUtcNow().UtcDateTime;
         foreach (var proc in snapshot.Processors.Values)
         {
+            // Checked per processor rather than per replica: it is the coarsest granularity that
+            // still bounds the work, since everything below is a single pipelined batch. The Redis
+            // client takes no token of its own, so this is the only place cancellation can land.
+            ct.ThrowIfCancellationRequested();
+
             var members = await db.SetMembersAsync(L2ProjectionKeys.InstanceIndex(proc.Id));
+
+            // Every read is issued BEFORE any is awaited, so the client writes them to the connection
+            // as one batch and the cost is a single round trip's latency instead of one per replica.
+            // That matters only when the news is bad — a healthy processor short-circuits below — but
+            // bad news is exactly when a workflow with many processors would otherwise turn a start
+            // request into a long serial walk.
+            //
+            // Deliberately individual GETs rather than one MGET: a multi-key command against a
+            // clustered Redis fails outright when the keys span hash slots, and these keys do, since
+            // the instance id is the part that varies. Pipelined single-key reads cost the same and
+            // carry no such constraint.
+            var reads = new Task<RedisValue>[members.Length];
+            for (var i = 0; i < members.Length; i++)
+            {
+                reads[i] = db.StringGetAsync(L2ProjectionKeys.PerInstance(proc.Id, members[i].ToString()));
+            }
+
+            var values = await Task.WhenAll(reads);
+
             int absent = 0, unhealthy = 0, stale = 0, malformed = 0;
             bool qualified = false;
 
@@ -51,10 +80,8 @@ internal sealed class ProcessorLivenessValidator
             // transport fault propagates untouched to the caller, which tags it and returns a 500.
             // This validator deliberately adds no Redis catch — the 422-versus-500 split lives in the
             // caller.
-            foreach (var member in members)
+            foreach (var raw in values)
             {
-                var instanceId = member.ToString();
-                var raw = await db.StringGetAsync(L2ProjectionKeys.PerInstance(proc.Id, instanceId));
                 if (raw.IsNullOrEmpty)
                 {
                     absent++;
@@ -72,12 +99,14 @@ internal sealed class ProcessorLivenessValidator
                 // producer and always emits the canonical constant.
                 if (!string.Equals(entry.Status, LivenessStatus.Healthy, StringComparison.Ordinal)) { unhealthy++; continue; }
                 if (entry.Timestamp.AddSeconds(entry.Interval * 2) <= now) { stale++; continue; }
-                qualified = true; break;                                  // one healthy and fresh replica is enough
+                qualified = true; break;   // one healthy and fresh replica is enough to admit the processor
             }
 
             if (!qualified)
             {
-                // Counts only — never instance ids, connection strings or stack traces.
+                // Counts only — never instance ids, connection strings or stack traces. Because the
+                // loop above only breaks on success, a failure has classified every replica, so these
+                // sum to the number checked.
                 var reason = $"no healthy replica ({members.Length} checked: " +
                              $"{absent} absent, {unhealthy} unhealthy, {stale} stale, {malformed} malformed)";
                 throw OrchestrationValidationException.ProcessorNotLive(proc.Id, reason);

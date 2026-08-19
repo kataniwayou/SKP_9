@@ -590,6 +590,16 @@
           "Swashbuckle.AspNetCore": "[6.9.0, )"
         }
       },
+      "baseapi.service": {
+        "type": "Project",
+        "dependencies": {
+          "BaseApi.Core": "[1.0.0, )",
+          "Cronos": "[0.13.0, )",
+          "JsonSchema.Net": "[9.2.1, )",
+          "Messaging.Contracts": "[1.0.0, )",
+          "StackExchange.Redis": "[2.13.1, )"
+        }
+      },
       "baseconsole.core": {
         "type": "Project",
         "dependencies": {
@@ -668,6 +678,12 @@
         "dependencies": {
           "AspNetCore.HealthChecks.UI.Core": "9.0.0"
         }
+      },
+      "Cronos": {
+        "type": "CentralTransitive",
+        "requested": "[0.13.0, )",
+        "resolved": "0.13.0",
+        "contentHash": "Nkve+Yi0+ol3ntSBRHeW0ka9cJQ8vndSUvvkXqF9LVqwpoqWueyxu/HS275r98RDOmF7/mzRnZW5XXUBXob+TA=="
       },
       "EFCore.NamingConventions": {
         "type": "CentralTransitive",
