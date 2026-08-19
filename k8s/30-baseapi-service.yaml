@@ -66,6 +66,10 @@ spec:
             # fails per-operation instead, rather than throwing during container startup.
             - name: ConnectionStrings__Redis
               value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            # The collector already running in this namespace. Without it the SDK still works and
+            # export simply fails quietly, so this is an enrichment rather than a dependency.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
             - name: RabbitMq__Host
               value: rabbitmq
             - name: RabbitMq__Username

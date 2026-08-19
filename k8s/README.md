@@ -1,9 +1,20 @@
 # Running the stack on kind
 
 What this deploys: Postgres, Redis, RabbitMQ, the API, and two replicas of the discovery-shell
-processor. There is no observability stack yet — no collector, Prometheus or Grafana — so OTLP export
-fails quietly and console logging is what you read. Adding the collector is a separate step and
-nothing here depends on it.
+processor.
+
+The observability stack — collector, Prometheus, Grafana, Elasticsearch — is **not** included here.
+Both applications export OTLP to `http://otel-collector:4317` if something is listening there and
+fail quietly if nothing is, so a collector is an enrichment rather than a dependency. If the
+namespace already has one running, telemetry lands without any further action.
+
+**If your namespace already has infrastructure running, apply only the two application manifests.**
+Re-applying the StatefulSets would restart working Postgres, Redis and RabbitMQ for no benefit, and
+some of their fields are immutable once created:
+
+```bash
+kubectl apply -f k8s/30-baseapi-service.yaml -f k8s/33-processor-sample.yaml
+```
 
 ## Build and load
 
@@ -51,7 +62,7 @@ nothing to resolve and goes straight through:
 ```bash
 kubectl -n skp port-forward svc/baseapi-service 8080:8080 &
 
-curl -X POST http://localhost:8080/api/v1.0/processor \
+curl -X POST http://localhost:8080/api/v1.0/processors \
   -H 'Content-Type: application/json' \
   -d '{
         "name": "sample",
@@ -69,6 +80,9 @@ Within one backoff interval both pods should go ready:
 ```bash
 kubectl -n skp get pods -l app=processor-sample -w
 ```
+
+The controller is `ProcessorsController`, so the route is `/processors` — plural. A singular URL
+returns a bare 404 with no body, which is easy to mistake for the API not being reachable.
 
 ## What to check, and what each check proves
 
