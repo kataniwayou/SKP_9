@@ -108,4 +108,55 @@ public sealed class ConsoleObservabilityTests
             }
         }
     }
+
+    [Fact]
+    public void AnExplicitServiceNameDoesNotNeedTheConfigKey()
+    {
+        // The two-stage boot knows the name from the database row, so requiring Service:Name as well
+        // would make config the authority over a value config cannot know.
+        var builder = BuilderWith(("Service:Version", "0.0.0"));
+
+        var returned = builder.AddBaseConsoleObservability(
+            builder.Configuration, source: "worker",
+            serviceName: "sample-proc", serviceVersion: "1.0.0");
+
+        Assert.Same(builder, returned);
+    }
+
+    [Fact]
+    public void ExplicitIdentityIsUsedEvenWhenConfigDisagrees()
+    {
+        var builder = BuilderWith(("Service:Name", "processor"), ("Service:Version", "0.0.0"));
+
+        var returned = builder.AddBaseConsoleObservability(
+            builder.Configuration, source: "worker",
+            serviceName: "sample-proc", serviceVersion: "1.0.0");
+
+        Assert.Same(builder, returned);
+    }
+
+    [Fact]
+    public void ResourceAttributesCarryBothCasings()
+    {
+        // One value, two keys: the log and metric conventions differ and a single key would force one
+        // signal to break its own convention.
+        var attr = new ResourceAttribute("ProcessorId", "processorId", "9e034ca0");
+
+        Assert.Equal("ProcessorId", attr.LogKey);
+        Assert.Equal("processorId", attr.MetricKey);
+        Assert.Equal("9e034ca0", attr.Value);
+    }
+
+    [Fact]
+    public void ExtraResourceAttributesAreAccepted()
+    {
+        var builder = BuilderWith(("Service:Name", "processor"), ("Service:Version", "0.0.0"));
+
+        var returned = builder.AddBaseConsoleObservability(
+            builder.Configuration, source: "worker",
+            serviceName: "sample-proc", serviceVersion: "1.0.0",
+            resourceAttributes: [new ResourceAttribute("ProcessorId", "processorId", "9e034ca0")]);
+
+        Assert.Same(builder, returned);
+    }
 }
