@@ -16,7 +16,7 @@ public sealed class ProcessorSampleTests
         ["--environment", "Development"],
         cfg => cfg.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Service:Name"]            = "unresolved",
+            ["Service:Name"]            = "processor",
             ["Service:Version"]         = "0.0.0",
             ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
             ["RabbitMq:Host"]           = "localhost",

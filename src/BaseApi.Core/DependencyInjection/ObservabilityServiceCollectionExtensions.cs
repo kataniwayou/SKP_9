@@ -24,8 +24,10 @@ public static class ObservabilityServiceCollectionExtensions
     /// <param name="builder">The host builder, exposing both logging and services.</param>
     /// <param name="cfg">The application's configuration, supplying the service name and version.</param>
     /// <param name="source">
-    /// The coarse emitter class stamped on every log record's resource. Required, and mirrored by the
-    /// console host's equivalent, so one attribute selects an emitter class across the whole stack.
+    /// The application type stamped on every record's resource — <c>webapi</c> here, paired with
+    /// <c>worker</c> on the console side. Required, and mirrored by the console host's equivalent, so
+    /// one attribute selects a process shape across the whole stack. It names the shape, never the
+    /// role: which role a process plays is <c>service.name</c>, one level finer.
     /// </param>
     public static IHostApplicationBuilder AddBaseApiObservability(
         this IHostApplicationBuilder builder, IConfiguration cfg, string source)
@@ -41,7 +43,7 @@ public static class ObservabilityServiceCollectionExtensions
         // different instance labels.
         var instanceId = ResolveInstanceId();
 
-        // The emitter class rides on both resources under each signal's own casing convention:
+        // The application type rides on both resources under each signal's own casing convention:
         // PascalCase on logs, camelCase on metrics. It is resource-level, never per record, because
         // it cannot vary within a process.
         var logAttrs = new[]

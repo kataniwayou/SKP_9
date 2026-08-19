@@ -24,10 +24,12 @@ public static class ProcessorHost
         configure?.Invoke(builder.Configuration);
 
         // The one call the shell makes for itself. It needs the host builder rather than the service
-        // collection, and it needs the emitter class — the single question only a concrete console
-        // can answer, and the only reliable one on a processor, whose service name stays the
-        // `unresolved` sentinel until its identity arrives per-record from the database row.
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "processor");
+        // collection, and it needs the application type — `worker`, shared by every background
+        // host and paired with `webapi` on the API side. The role is carried separately by
+        // service.name, which stays the `processor` sentinel for the process's whole life: the
+        // database row's identity cannot reach an OTel resource, which is fixed when the provider is
+        // built, so it rides per-record instead.
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
 
         // Everything else: broker, Redis, health probes, identity discovery and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration);
