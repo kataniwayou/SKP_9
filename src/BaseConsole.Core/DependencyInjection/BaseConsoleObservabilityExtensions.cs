@@ -40,43 +40,64 @@ public static class BaseConsoleObservabilityExtensions
     /// worker, the other one role within them. It is deliberately not the library name: a host that
     /// dropped this library but kept the shape would still be a <c>worker</c>.
     /// </para>
+    /// </param>
+    /// <param name="serviceName">
+    /// The resolved role name. Null falls back to <c>Service:Name</c> in configuration.
     /// <para>
-    /// Neither of them names the processor's <i>row</i>. That identity arrives from the database long
-    /// after this method runs, and an OTel resource is materialised once when the provider is built
-    /// and is immutable thereafter, so a row-derived name can only ever ride per-record.
+    /// A processor passes the name from its database row, resolved before the host was built. That is
+    /// the only way it can reach a resource at all: an OTel resource is materialised once when the
+    /// provider is built and is immutable thereafter.
     /// </para>
     /// </param>
+    /// <param name="serviceVersion">
+    /// The resolved version. Null falls back to <c>Service:Version</c> in configuration.
+    /// </param>
+    /// <param name="resourceAttributes">
+    /// Extra attributes stamped on both resources, each under its own signal's casing. This is where
+    /// <c>ProcessorId</c> rides: it is the only value that identifies a processor exactly, because
+    /// name and version are unconstrained columns and two different builds can share them.
+    /// </param>
     public static IHostApplicationBuilder AddBaseConsoleObservability(
-        this IHostApplicationBuilder builder, IConfiguration cfg, string source)
+        this IHostApplicationBuilder builder,
+        IConfiguration cfg,
+        string source,
+        string? serviceName = null,
+        string? serviceVersion = null,
+        IEnumerable<ResourceAttribute>? resourceAttributes = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
 
-        // Fail fast at the boundary rather than letting null reach the resource builder and surface
-        // as an opaque SDK argument exception.
-        var serviceName    = cfg.Require("Service:Name");
-        var serviceVersion = cfg.Require("Service:Version");
+        // Configuration is the fallback, not the authority. A caller that resolved a real identity
+        // knows something configuration cannot, so Require is consulted only when it did not.
+        var name    = serviceName    ?? cfg.Require("Service:Name");
+        var version = serviceVersion ?? cfg.Require("Service:Version");
 
         // The same replica identity that names this process's liveness key and reply queue. Sharing
         // one resolver is what lets an operator pivot from an L2 key to that pod's records; two
         // independent answers would decouple them.
         var instanceId = InstanceId.Resolve().Value;
 
+        var extra = (resourceAttributes ?? []).ToList();
+
         // The application type rides on both resources under each signal's own casing convention:
         // PascalCase on logs, camelCase on metrics. It is resource-level, never per record, because
-        // it cannot vary within a process — which is exactly why the processor's row identity, which
-        // does change within a process, cannot live here.
-        var logAttrs = new[]
+        // it cannot vary within a process — and neither can anything else stamped here, which is why
+        // the caller must already know the identity by the time it calls.
+        var logAttrs = new List<KeyValuePair<string, object>>
         {
-            new KeyValuePair<string, object>("service.instance.id", instanceId),
-            new KeyValuePair<string, object>("Source", source),
+            new("service.instance.id", instanceId),
+            new("Source", source),
         };
-        var metricAttrs = new[]
+        logAttrs.AddRange(extra.Select(a => new KeyValuePair<string, object>(a.LogKey, a.Value)));
+
+        var metricAttrs = new List<KeyValuePair<string, object>>
         {
-            new KeyValuePair<string, object>("service.instance.id", instanceId),
-            new KeyValuePair<string, object>("source", source),
+            new("service.instance.id", instanceId),
+            new("source", source),
         };
+        metricAttrs.AddRange(extra.Select(a => new KeyValuePair<string, object>(a.MetricKey, a.Value)));
 
         // Logs must go through builder.Logging.AddOpenTelemetry, not the services-side logging
         // registration: the latter creates a parallel provider that bypasses the logging filters.
@@ -88,25 +109,23 @@ public static class BaseConsoleObservabilityExtensions
             o.IncludeScopes           = true;
             o.ParseStateValues        = true;
             o.SetResourceBuilder(ResourceBuilder.CreateDefault()
-                .AddService(serviceName: serviceName, serviceVersion: serviceVersion)
+                .AddService(serviceName: name, serviceVersion: version)
                 .AddAttributes(logAttrs));
             o.AddOtlpExporter();
         });
 
-        // The versioned service name is set on the meter provider's own resource via
-        // SetResourceBuilder, never via the shared ConfigureResource. In this OpenTelemetry version
-        // the shared configuration overrides the logs provider's own resource builder, so a versioned
-        // name set there leaks onto logs — which breaks any log query filtering on the bare service
-        // name. A per-provider resource keeps metrics versioned while logs stay bare.
+        // The resource is set on the meter provider's own builder via SetResourceBuilder, never via
+        // the shared ConfigureResource. In this OpenTelemetry version the shared configuration
+        // overrides the logs provider's own resource builder, so anything set there leaks onto logs.
+        // A per-provider resource keeps the two independent.
         builder.Services.AddOpenTelemetry()
             .WithMetrics(m => m
                 .SetResourceBuilder(ResourceBuilder.CreateDefault()
-                    // A combined name-and-version, so every metric series carries one human label.
-                    // serviceVersion is deliberately not passed separately: it is already
-                    // interpolated into the name here, and passing it too would restate the same
-                    // value as a second label on every series. Logs are unaffected — their service
-                    // name has no version suffix, so they still carry service.version.
-                    .AddService(serviceName: $"{serviceName}_{serviceVersion}")
+                    // Name and version as separate attributes, not interpolated into one string. The
+                    // interpolation this replaces existed to give a sentinel a single readable label;
+                    // with a real identity it only buries the version inside the name and leaves logs
+                    // and metrics disagreeing about what service.name means.
+                    .AddService(serviceName: name, serviceVersion: version)
                     .AddAttributes(metricAttrs))
                 // No ASP.NET Core or HttpClient instrumentation: a worker's only inbound surface is
                 // its own health probes, so those would measure nothing but the probing.
