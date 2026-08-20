@@ -231,7 +231,15 @@ public sealed class WorkflowFireJobTests
         // auto-purged, so its reschedule has to be able to recreate it — leaving two live jobs for one
         // workflow, both firing every tick and double-dispatching every entry step.
         var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
-        h.SupersedeJob(W);   // L1 now holds a different jobId
+
+        // The start lands *while the dispatch is running*, which is the only moment this check exists
+        // for and the only arrangement that can tell a re-read from a cached one: L1 still holds this
+        // fire's job when the fire looks it up at the top, and holds a replacement by the time the
+        // fire goes to arm its successor. Superseding before Execute would leave an implementation
+        // that reused its first lookup passing this test identically.
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(),
+                                 Arg.Do<ProcessDispatch>(_ => h.SupersedeJob(W)),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
 
         await h.Build().Execute(h.Context(W, h.JobId));
 
@@ -247,14 +255,25 @@ public sealed class WorkflowFireJobTests
     [Fact]
     public async Task AFireForAWorkflowStoppedMidFireDoesNotReschedule()
     {
-        // The same check on its other outcome: a stop applied while this fire was running left L1 with
-        // no entry at all. Rescheduling would resurrect a job an operator stopped.
+        // The same check on its other outcome — L1 empty rather than holding a different id — and it
+        // is only reachable mid-fire. A stop applied before the fire returns at the very first L1
+        // lookup and never reaches the check at all, which is what AFireForAWorkflowAbsentFromL1
+        // covers; applying it from inside the dispatch is what makes this the second outcome of the
+        // *second* lookup and not a duplicate of that test.
         var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
-        h.StopWorkflow(W);
+
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(),
+                                 Arg.Do<ProcessDispatch>(_ => h.StopWorkflow(W)),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
 
         await h.Build().Execute(h.Context(W, h.JobId));
 
         Assert.Equal(0, h.Scheduler.RescheduleCount);
+
+        // The same vacuity guard as above: the fire must have got as far as the dispatch, or the zero
+        // says nothing about the check this test is named for.
+        await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P1), MessageTypes.ProcessDispatch,
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
     }
 
     [Fact]

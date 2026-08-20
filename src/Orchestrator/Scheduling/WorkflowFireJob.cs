@@ -80,6 +80,13 @@ public sealed class WorkflowFireJob(
                 return;
             }
 
+            // Leadership alone, where the reference gates on `IsLeader && IsHydrated`. Dropping the
+            // hydration term is deliberate, not an omission: the reference's second term fenced a cold
+            // leader firing against an empty L1, and that state cannot be reached here. A Quartz job
+            // exists only because WorkflowActivator put both the L1 entry and the job there, in that
+            // order, so a fire that arrives before L1 holds its workflow returns at the lookup above —
+            // before this gate is consulted at all. A term that can never be false is a term that
+            // reads as a live mechanism while protecting nothing.
             if (leaderState.IsLeader)
             {
                 await DispatchEntryStepsAsync(workflowId, entry.Definition, context).ConfigureAwait(false);
@@ -197,6 +204,13 @@ public sealed class WorkflowFireJob(
                 {
                     // See the type remarks: swallowed on purpose, and only here. The ids are already
                     // in the open scope, so the record carries them without putting one in a template.
+                    //
+                    // The filter is deliberately wider than the reference's, which is
+                    // `!(ex is OperationCanceledException && …IsCancellationRequested)` and so goes on
+                    // swallowing a genuine broker fault that happens to coincide with shutdown. Once
+                    // the token is cancelled there is nothing left worth surviving for — the schedule
+                    // chain this swallow protects is being torn down either way — so the simpler rule
+                    // is the honest one: after cancellation, nothing here is absorbed.
                     logger.LogWarning(ex, "the entry-step dispatch failed to send; continuing");
                 }
             }
