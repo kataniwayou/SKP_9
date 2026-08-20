@@ -161,7 +161,15 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // branch permanently while recording a business outcome that never happened.
             throw;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        // The filter turns on WHOSE cancellation it is, not on the exception type. Our consumer passes
+        // CancellationToken.None deliberately, so ct is never cancelled in production — which means an
+        // OperationCanceledException arriving with an un-cancelled ct came from the author's own code
+        // or a library it called. HttpClient surfaces a request timeout as TaskCanceledException, a
+        // subclass of this one, and that is the commonest transient fault an author will ever hit;
+        // excluding it here would PARK the dispatch with no StepFailed and no retry. When ct IS
+        // cancelled the process is stopping, the step's outcome is genuinely unknown, and the
+        // exception must escape so the delivery is not acknowledged with a fabricated outcome.
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // The message is deliberately a constant. A deserialize JsonException quotes the offending
             // fragment of the payload, and this text reaches the orchestrator's projections.
