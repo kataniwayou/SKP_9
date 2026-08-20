@@ -105,6 +105,7 @@ public static class ConsoleRedisServiceCollectionExtensions
                 HealthStatus.Unhealthy,
                 ["live"]));
 
+        services.TryAddSingleton<IConsumerAdmission, AlwaysOpenAdmission>();
         services.TryAddSingleton<GatedQueueConsumer>();
         services.AddHostedService(sp => sp.GetRequiredService<GatedQueueConsumer>());
 
