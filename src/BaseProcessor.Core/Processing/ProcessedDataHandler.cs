@@ -94,8 +94,6 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
                 + "validated — the work queue must not be bound before the processor reaches Healthy.");
         }
 
-        var db = _redis.GetDatabase();
-
         if (!ProcessorJsonSchemaValidator.TryValidate(identity.OutputDefinition, p.Data, out var errors))
         {
             await SendAsync(new StepFailed(p.WorkflowId, p.StepId, self)
@@ -108,6 +106,8 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
             _logger.LogInformation("output failed its schema — reported failed {MessageId}", p.MessageId);
             return;
         }
+
+        var db = _redis.GetDatabase();
 
         // When/flags passed explicitly: StackExchange.Redis overloads a bare (key, value, expiry) call
         // between a keepTtl-bool overload and an Expiration-struct overload, and the compiler resolves

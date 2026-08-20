@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Superseded in part:** this plan's §7/§7.1-related design (the `out:` namespace, post-handler
+> reclaim) was reversed by `docs/superpowers/plans/2026-08-20-input-reclaim-single-namespace.md`. The
+> numbered task bodies below are frozen historical record and still describe the pre-reversal design —
+> read the later plan for what actually ships.
+
 **Goal:** Make a processor execute work — consume a dispatch, validate its input, run the author's
 transform, persist the output, and report the outcome to the orchestrator — with redelivery as the
 only recovery mechanism.
