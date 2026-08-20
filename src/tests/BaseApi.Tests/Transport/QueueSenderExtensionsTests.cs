@@ -133,6 +133,23 @@ public sealed class QueueSenderExtensionsTests
     }
 
     [Fact]
+    public void ClassifiesADisposedChannelAsTransport()
+    {
+        // A channel disposed underneath a send during shutdown throws this, and it is neither in the
+        // allow-list's original set nor in the broker client's namespace. The send site must not have
+        // to rescue it with a catch-all: parking a message because the process was shutting down is
+        // a park nothing can retry, and the classification decision belongs here.
+        Assert.True(SendFaultClassifier.IsTransport(new ObjectDisposedException("IChannel")));
+    }
+
+    [Fact]
+    public void FindsADisposedChannelTheBrokerClientWrapped()
+    {
+        Assert.True(SendFaultClassifier.IsTransport(
+            new InvalidOperationException("outer", new ObjectDisposedException("IChannel"))));
+    }
+
+    [Fact]
     public void DoesNotSeeATransportFaultWhereThereIsNone()
     {
         Assert.False(SendFaultClassifier.IsTransport(

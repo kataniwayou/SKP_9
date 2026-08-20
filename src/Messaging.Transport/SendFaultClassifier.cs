@@ -15,6 +15,12 @@ namespace Messaging.Transport;
 /// The chain is walked because transport libraries wrap: a socket failure commonly arrives inside a
 /// broker exception, and the outermost type alone would miss it.
 /// </para>
+/// <para>
+/// <see cref="ObjectDisposedException"/> is on the list because a channel disposed underneath an
+/// in-flight send during shutdown raises it, and it is neither one of the other members nor in the
+/// broker client's namespace. That is the environment going away mid-send, not the message being
+/// unsendable — and parking work because the process was stopping is a park no redelivery repairs.
+/// </para>
 /// </summary>
 public static class SendFaultClassifier
 {
@@ -24,7 +30,8 @@ public static class SendFaultClassifier
 
         for (Exception? e = ex; e is not null; e = e.InnerException)
         {
-            if (e is IOException or SocketException or TimeoutException or OperationCanceledException)
+            if (e is IOException or SocketException or TimeoutException or OperationCanceledException
+                     or ObjectDisposedException)
             {
                 return true;
             }

@@ -178,6 +178,28 @@ public sealed class BaseProcessorSeamTests
     }
 
     [Fact]
+    public async Task LetsADeterministicSendFaultPropagateUnwrappedSoTheDispatchParks()
+    {
+        // PostSendException IS a TransientSendException, and the consumer's classifier maps every one
+        // of those to Requeue. Wrapping a fault the send-fault allow-list does not recognise would
+        // therefore override that classification at this one site and requeue, forever, a branch that
+        // fails identically on every redelivery. The fault has to arrive raw so the message parks.
+        var sender = Substitute.For<IQueueSender>();
+        var deterministic = new NotSupportedException("no converter for this type");
+        sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProcessedData>(),
+                         Arg.Any<CancellationToken>(), Arg.Any<string?>())
+              .ThrowsAsync(deterministic);
+        var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
+        processor.BeginDispatch(new DispatchState(sender, W, S, P, C, E));
+
+        var thrown = await Assert.ThrowsAnyAsync<Exception>(
+            () => processor.ExecuteAsync([], "", E, CancellationToken.None));
+
+        Assert.Same(deterministic, thrown);
+        Assert.IsNotAssignableFrom<TransientSendException>(thrown);
+    }
+
+    [Fact]
     public async Task DerivesAnExecutionIdThatIsStableAcrossAReplay()
     {
         Guid RunOnce()
