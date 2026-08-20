@@ -89,6 +89,11 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
+        // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
+        // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
+        // safe only because prefetch is 1.
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, SampleProcessor>();
+
         return builder.Build();
     }
 }
