@@ -80,10 +80,25 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
         // buys nothing and is the only way the two could ever disagree. Stamping from self keeps the
         // mismatch unrepresentable on both handlers, which is what lets this design carry no
         // provenance guard anywhere.
+        //
+        // As on the pre handler, nothing gates consumption on IProcessorContext.IsHealthy today, so
+        // this can genuinely run while the startup loops are still resolving. See the known gap in the
+        // execution-path plan; both guards here park rather than proceed until it is closed.
         var identity = _context.Identity
             ?? throw new InvalidOperationException(
                 "A branch was consumed before identity resolved — the queue must not be bound until then.");
         var self = identity.Id;
+
+        // The same "not applicable" vs "not yet" pair the pre handler reads, on the output role. A
+        // non-null schema id whose definition is still null would hand TryValidate a null definition,
+        // which returns true by contract — so the branch would be persisted and reported complete with
+        // the output schema silently not applied. Parking keeps it recoverable from the DLQ.
+        if (identity.OutputSchemaId is { } outputSchemaId && identity.OutputDefinition is null)
+        {
+            throw new InvalidOperationException(
+                $"Output schema {outputSchemaId:D} has not resolved yet, so the output cannot be "
+                + "validated — the work queue must not be bound before the processor reaches Healthy.");
+        }
 
         var db = _redis.GetDatabase();
 
