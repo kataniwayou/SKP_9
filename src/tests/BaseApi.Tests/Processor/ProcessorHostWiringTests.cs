@@ -49,12 +49,22 @@ public sealed class ProcessorHostWiringTests
     }
 
     [Fact]
+    public async Task TheHostGraphCarriesNoSourceHashProvider()
+    {
+        // The hash answers "which row is mine", and that is settled before this container exists —
+        // Stage 1 owns it and registers its own. A copy here would resolve for nobody while reading
+        // like a live dependency, which is how a graph accumulates wiring nobody dares delete.
+        await using var sp = Build();
+
+        Assert.Null(sp.GetService<ISourceHashProvider>());
+    }
+
+    [Fact]
     public async Task EverySingletonResolves()
     {
         await using var sp = Build();
 
         Assert.NotNull(sp.GetRequiredService<IProcessorContext>());
-        Assert.NotNull(sp.GetRequiredService<ISourceHashProvider>());
         Assert.NotNull(sp.GetRequiredService<ProcessorLivenessWriter>());
         Assert.NotNull(sp.GetRequiredService<ReplySlot<object>>());
         Assert.NotNull(sp.GetRequiredService<InstanceId>());
