@@ -40,16 +40,32 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
     /// with it.
     /// </para>
     /// <para>
-    /// <b>One host, and never disposed, because Quartz's logging is process-global.</b>
+    /// <b>One host, and never disposed, because Quartz's logging is process-global and this file is
+    /// one line away from arming it.</b>
+    /// </para>
+    /// <para>
     /// <c>Quartz.Logging.LogProvider</c> holds a static provider wrapping an <c>ILoggerFactory</c>,
-    /// and Quartz's DI integration sets it from the container that first resolves a scheduler
-    /// factory. Dispose that container and every later Quartz call in the process —
-    /// including <c>WorkflowSchedulerTests</c>' own schedulers, which share nothing else with this
-    /// file — resolves a logger from a disposed factory and throws <c>ObjectDisposedException</c>.
-    /// Building once and leaving it alive is what keeps that static pointing at a factory that is
-    /// still there. A test that builds and disposes a second host would put the hazard back, so do
-    /// not add one; nothing here needs it, since the container is immutable and every assertion below
-    /// is about what is registered in it.
+    /// and what sets it is <b>creating a scheduler</b> — <c>ISchedulerFactory.GetScheduler()</c> —
+    /// from some container. Dispose that container afterwards and the next Quartz call anywhere in
+    /// the process resolves a logger from a disposed factory and throws
+    /// <c>ObjectDisposedException</c>; the blast radius includes <c>WorkflowSchedulerTests</c>, which
+    /// shares nothing else with this file.
+    /// </para>
+    /// <para>
+    /// <b>Nothing here creates a scheduler today, and that was measured rather than assumed.</b> A
+    /// throwaway probe built this host twice in a row, each time resolving <c>ISchedulerFactory</c>
+    /// and enumerating all eight hosted services and disposing: no throw. Adding one
+    /// <c>GetScheduler()</c> to the first iteration made the second throw
+    /// <c>ObjectDisposedException</c> immediately. That is also the history of this file — the
+    /// hazard appeared when the host registered a scheduler by blocking on <c>GetScheduler()</c>,
+    /// and went away when <c>WorkflowScheduler&lt;TJob&gt;</c> took the factory instead.
+    /// </para>
+    /// <para>
+    /// So this fixture is one build ahead of a hazard rather than on top of one: any test that starts
+    /// the host, or schedules anything, creates a scheduler and arms it. Keeping a single host means
+    /// that when that day comes there is no second container to be poisoned. Nothing here needs a
+    /// second one anyway — the container is immutable and every assertion below is about what is
+    /// registered in it. Do not add a test that builds one.
     /// </para>
     /// </summary>
     public sealed class BuiltHost
@@ -218,6 +234,14 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
         // would surface on the first trigger, on a background thread, long after start — so it is
         // resolved here instead, where the gap is a test failure rather than a workflow that quietly
         // never fires.
-        Assert.NotNull(_host.Services.GetRequiredService<WorkflowFireJob>());
+        //
+        // From a scope, because that is what production does: Quartz's Microsoft DI job factory opens
+        // a scope per fire and builds the job inside it. Resolving from the root would be stricter
+        // than the real path rather than more faithful to it — the day this job legitimately takes a
+        // scoped dependency, a root resolution fails under ValidateScopes while every actual fire is
+        // fine.
+        using var scope = _host.Services.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<WorkflowFireJob>());
     }
 }

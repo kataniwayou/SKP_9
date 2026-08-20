@@ -27,10 +27,27 @@ namespace Orchestrator.Scheduling;
 /// would otherwise not need: a purged job took its job-data map with it, so the re-created job has to
 /// re-stamp both ids or the resurrected fire loses track of what it is firing.
 /// </para>
+/// <para>
+/// <b>It takes the <see cref="ISchedulerFactory"/> rather than an <see cref="IScheduler"/>, and that
+/// is what Quartz's DI integration actually offers.</b> <c>AddQuartz</c> registers the factory and the
+/// hosted service and deliberately does not register a scheduler: acquiring one is asynchronous and
+/// its lifecycle belongs to that hosted service. Injecting the scheduler instead would force the
+/// composition root to block a container-resolution thread on <c>GetScheduler().GetAwaiter().GetResult()</c>
+/// — safe only for as long as nothing on Quartz's path captures a synchronization context, which is a
+/// property of a third-party library rather than of this code, and whose failure mode is a hung
+/// process rather than a failing test. Every method here is already <c>async</c> and already takes a
+/// <see cref="CancellationToken"/>, so awaiting the factory costs nothing at the seam: a factory
+/// hands out one scheduler rather than building one per call — which is both why this is cheap and
+/// why this class and <c>QuartzHostedService</c> drive the same scheduler — and it is the property
+/// <c>WorkflowSchedulerTests</c> leans on when it reads the job store back through a scheduler taken
+/// from the same factory it hands the subject.
+/// </para>
 /// </summary>
 /// <typeparam name="TJob">The job type the trigger fires. Never constructed here.</typeparam>
 public sealed class WorkflowScheduler<TJob>(
-    IScheduler scheduler, TimeProvider timeProvider, ILogger<WorkflowScheduler<TJob>> logger)
+    ISchedulerFactory schedulerFactory,
+    TimeProvider timeProvider,
+    ILogger<WorkflowScheduler<TJob>> logger)
     : IWorkflowScheduler
     where TJob : IJob
 {
@@ -46,6 +63,8 @@ public sealed class WorkflowScheduler<TJob>(
             return;
         }
 
+        var scheduler = await schedulerFactory.GetScheduler(ct).ConfigureAwait(false);
+
         var jobKey = JobKeyFor(jobId);
         await scheduler
             .ScheduleJob(BuildJob(jobKey, workflowId, jobId), BuildTrigger(jobKey, jobId, nextUtc), ct)
@@ -59,6 +78,8 @@ public sealed class WorkflowScheduler<TJob>(
         {
             return;
         }
+
+        var scheduler = await schedulerFactory.GetScheduler(ct).ConfigureAwait(false);
 
         var jobKey = JobKeyFor(jobId);
         var trigger = BuildTrigger(jobKey, jobId, nextUtc);
@@ -78,10 +99,14 @@ public sealed class WorkflowScheduler<TJob>(
     }
 
     /// <inheritdoc />
-    public Task UnscheduleAsync(Guid jobId, CancellationToken ct) =>
+    public async Task UnscheduleAsync(Guid jobId, CancellationToken ct)
+    {
+        var scheduler = await schedulerFactory.GetScheduler(ct).ConfigureAwait(false);
+
         // DeleteJob, not UnscheduleJob: it removes the job and every trigger of it in one step, so
         // there is no interval in which a trigger outlives the job it fires.
-        scheduler.DeleteJob(JobKeyFor(jobId), ct);
+        await scheduler.DeleteJob(JobKeyFor(jobId), ct).ConfigureAwait(false);
+    }
 
     private DateTime? NextFireTimeOrLogSkip(Guid workflowId, string cron)
     {

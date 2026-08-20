@@ -35,18 +35,24 @@ public sealed class WorkflowSchedulerTests
         Func<IScheduler, FakeTimeProvider, WorkflowScheduler<NoopJob>, Task> body)
     {
         // A unique instance name per test: StdSchedulerFactory publishes into a process-wide
-        // repository, and a shared name would let one test read another's job store.
-        var scheduler = await new StdSchedulerFactory(new NameValueCollection
+        // repository keyed by that name, and a shared one would let one test read another's job
+        // store — or silently hand two tests the same scheduler.
+        var factory = new StdSchedulerFactory(new NameValueCollection
         {
             ["quartz.scheduler.instanceName"] = "test-" + Guid.NewGuid().ToString("N"),
             ["quartz.jobStore.type"] = "Quartz.Simpl.RAMJobStore, Quartz",
             ["quartz.threadPool.type"] = "Quartz.Simpl.DefaultThreadPool, Quartz",
             ["quartz.threadPool.maxConcurrency"] = "1",
-        }).GetScheduler();
+        });
+
+        // The subject takes the factory, not the scheduler — the body still gets the scheduler to
+        // read the job store back, and it is the same instance, because GetScheduler returns what
+        // this factory's instance name already resolves to in the repository.
+        var scheduler = await factory.GetScheduler();
 
         var clock = new FakeTimeProvider(new DateTimeOffset(Now, TimeSpan.Zero));
         var sut = new WorkflowScheduler<NoopJob>(
-            scheduler, clock, NullLogger<WorkflowScheduler<NoopJob>>.Instance);
+            factory, clock, NullLogger<WorkflowScheduler<NoopJob>>.Instance);
 
         try
         {

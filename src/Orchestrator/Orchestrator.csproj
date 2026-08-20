@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The orchestrator control plane: a thin shell, mirroring Processor.Sample's shape. It carries no
-    scheduling, hydration or leader-election logic of its own yet — those arrive in later tasks, each
-    extending OrchestratorHost — and today it declares its topology and nothing else.
+    The orchestrator control plane, and no longer a shell: it mirrors L2 into an in-memory L1
+    (Hydration, L1), keeps one self-rescheduling Quartz job per scheduled workflow (Scheduling), and
+    has exactly one replica of three fire a workflow's entry steps (Election). OrchestratorHost is the
+    composition root for all of it; Program does nothing but start what that method builds.
 
     Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
     Directory.Build.props, and package versions from Directory.Packages.props — never declare either
