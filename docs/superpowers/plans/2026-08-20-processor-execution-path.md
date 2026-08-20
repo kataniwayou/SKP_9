@@ -2892,6 +2892,14 @@ public sealed class ProcessorIdLogEnricher(IProcessorContext context) : BaseProc
 > whenever `Id` is — unlike the reference, which had to guard them independently against a torn read
 > across unsynchronized auto-properties.
 
+> **This type ends up registered nowhere, and that is accepted.** Step 5 below wires the topology,
+> the handlers and the consumer, but there is no place to add a `LogRecord` processor:
+> `AddBaseConsoleObservability` owns the `builder.Logging.AddOpenTelemetry` callback and exposes no
+> hook into it, and it cannot take the enricher directly because `BaseConsole.Core` must not reference
+> `BaseProcessor.Core`. Give the class doc a banner saying so — a dead registration that reads as a
+> live dependency is exactly what commit `ab03ecf` had to delete once already — and carry it as a
+> known gap rather than wiring it somewhere convenient.
+
 - [ ] **Step 5: Wire everything**
 
 Append to `BaseProcessorServiceCollectionExtensions`:
@@ -3232,8 +3240,25 @@ in `src/` yet. Nothing in this plan produces an end-to-end workflow on its own.
 - Nobody relocates `out:{messageId}` into per-successor `data:{entryId}` keys, so a fan-out cannot
   actually run yet — spec §7.1.
 - No dedup by `MessageId`, so the duplicate results this design permits are not yet absorbed.
-- No stuck-step reaper.
+- No stuck-step reaper. Until there is one, `ProcessDispatchHandler`'s "entry absent means this step
+  already completed" reading has no backstop: under multiple replicas a fan-out whose second branch
+  send fails can be requeued, have `data:{entryId}` deleted by another replica's post handler for the
+  first branch, and then read the absent key as completion — leaving branch 2 unsent and the step
+  stalled forever with no error anywhere. The reaper is what closes it; the handler deliberately does
+  not guess, because guessing the other way forks finished workflows.
 - The startup loops still treat a `MalformedRequest` reply as no answer and retry silently.
+- **`ProcessorIdLogEnricher` is built but registered nowhere**, so records emitted outside a message
+  scope — the startup loops, the liveness heartbeat — carry no `ProcessorId`. Wiring it needs a
+  caller-supplied `LogRecord`-processor seam on `AddBaseConsoleObservability`, which that method does
+  not expose and cannot take directly: it lives in `BaseConsole.Core`, which must not reference
+  `BaseProcessor.Core`. Accepted as-is for now; see the banner on the type.
+- **Nothing gates work-queue consumption on `IProcessorContext.IsHealthy`.** `GatedQueueConsumer`
+  starts as soon as the L2 gate opens, so a dispatch can arrive while Loop B is still resolving the
+  schema definitions. Both handlers now PARK such a message rather than run it unvalidated, which is
+  recoverable from the DLQ but is not the right answer — gating consumption on health is, and it
+  would make the window unreachable instead of survivable.
 - Spec §13's open item stands: whether an OpenTelemetry scope key colliding with a record attribute of
-  the same name — `ProcessorId` arrives from both `ExecutionLogScope` and the enricher — duplicates,
-  overwrites, or drops. Probe it against a real collector before relying on either.
+  the same name duplicates, overwrites, or drops. Today only `ExecutionLogScope` supplies
+  `ProcessorId`, because the enricher that would be the second source is not registered (above) — so
+  the collision is not currently reachable. Probe it against a real collector before wiring the
+  enricher, not after.
