@@ -33,9 +33,11 @@ processor ────ProcessedData─────┘                           
                                                     ┌─────────┴─────────┐
                                               PreHandler          PostHandler
                                                     │                   │
-                                              ProcessAsync        delete L2[data:entryId]
-                                                    │             validate output schema
-                                              SendToPostAsync ──> write L2[data:messageId]
+                                              ProcessAsync              │
+                                                    │                   │
+                                              SendToPostAsync ──> validate output schema
+                                                    │             write L2[data:messageId]
+                                              delete L2[data:entryId]   │
                                                                   StepCompleted ──> orchestrator-result
 ```
 
@@ -127,8 +129,9 @@ Notes on the fields that carry weight:
   RabbitMQ never assigns a message id — `message_id` is producer-set, and `QueueSender` does not set
   it today. A body field is what makes a NACK-requeue redeliver a byte-identical message, so the
   write is idempotent.
-- **`ProcessedData.EntryId`** is the input key the post handler reclaims. Carried because the delete
-  lives in post (§7).
+- **`ProcessedData.EntryId`** is the input key this branch was produced from. Nothing reclaims it
+  on this hop — the pre handler already deleted it once the author's transform returned (§5);
+  it rides along here purely for the log scope.
 - **`StepCompleted.EntryId` is the `MessageId`** — the `data:` key the next step reads directly.
 - `Payload` is the step's processor config as JSON; it was already validated against the config
   schema at workflow-creation time by `PayloadConfigSchemaValidator`, so the processor does not
@@ -175,8 +178,8 @@ public static class ProcessorQueues
 `MessageType => MessageTypes.ProcessDispatch`.
 
 1. **Read `L2[data:entryId]`.** Skipped when `EntryId == Guid.Empty` (source step). An absent key
-   returns with **no result sent** — the entry is gone because this step already completed and post
-   reclaimed it, so this is a duplicate delivery. Emitting a failure would corrupt a finished
+   returns with **no result sent** — the entry is gone because an earlier attempt at this dispatch
+   already reclaimed it, so this is a duplicate delivery. Emitting a failure would corrupt a finished
    workflow.
 2. **Validate against the input schema.** Skipped on the source branch as an *explicit branch
    decision*, not as a consequence of a source processor having no input schema. A null definition
@@ -184,23 +187,37 @@ public static class ProcessorQueues
    would otherwise have empty bytes parsed, throw, and fail a step that was never wrong.
 3. **Deserialize `Payload` into `TConfig`.** Null when the payload is empty or whitespace.
 4. **Invoke `ProcessAsync`.** See §6.
-5. **Return.** The message acks.
+5. **Delete `L2[data:entryId]`, but only if step 4 returned normally**, skipped when `EntryId ==
+   Guid.Empty` (source step).
+6. **Return.** The message acks.
 
-**Pre never mutates L2.** No write, no delete. Every failure before the ack leaves the entry exactly
-as it was found, so a redelivery has everything it needs to replay.
+**Pre owns the reclaim, and only on the normal-return path — nowhere else.** A fan-out sends N
+branches from inside one `ProcessAsync` call; the call returning is the only point at which all N are
+known to have been sent. That property was arrived at by elimination, and the rejected alternatives
+are worth recording:
 
-That property was arrived at by elimination and both rejected alternatives are worth recording:
+- *Delete before `ProcessAsync`* — the send for branch 2 fails transiently, the dispatch is
+  redelivered, pre reads the entry and finds it already gone, and the clean-absent branch returns
+  without processing. Branch 1 shipped; branch 2 never will, and nothing says so.
+- *Delete per branch, from inside the author's send loop* — the same loss one step later: branch 1's
+  delete removes the key branch 2's retry still needs.
+- *Delete in post* — this project's earlier design (an earlier version of §7.1 justified it with a
+  separate `out:` namespace, reversed since — §7.1). Post no longer touches L2 at all (§7): a store
+  fault on the reclaim must propagate rather than be swallowed by `ProcessAsync`'s catch chain, and
+  post only ever sees one branch's message at a time, so it has no equivalent of "the whole author
+  returned" to key the delete on.
+- *Delete unconditionally, including when `ProcessAsync` throws* — `FailedException`,
+  `CancelledException` and a framework fault all leave step 4 short of a normal return, so the delete
+  is skipped and the input survives for the orchestrator to deal with (§7.1). Reclaiming regardless
+  would destroy the only copy of the input while reporting a business outcome that never actually
+  completed.
 
-- *Delete before `ProcessAsync`* — the post send fails transiently, the dispatch is redelivered, pre
-  reads the entry and finds it absent, and the clean-absent branch returns without processing. A
-  silently lost step.
-- *Delete after the send, in pre* — a failed delete NACKs, the redelivery re-runs `ProcessAsync`, and
-  the workflow forks. Redis blips are exactly the fault this design expects, so this makes forking
-  routine.
-
-Moving the delete into post (§6) leaves pre with no post-send operation that can fail, so the only
-remaining fork window is the process dying between the send returning and the ack landing —
-irreducible under at-least-once, and microseconds wide.
+What survives elimination is exactly one delete: after `ProcessAsync` returns normally, outside the
+`try`/`catch` so a store fault on it propagates and trips the gate rather than being swallowed and
+reported as a `StepFailed` that never happened. See the comment on the reclaim at the end of
+`ProcessDispatchHandler.RunAsync`, and the comment above `raw.IsNullOrEmpty` at the top of the same
+method, for the full reasoning — including the case a shared entry key does not survive: more than
+one successor dispatched against it (§7.1).
 
 ## 6. The author seam
 
@@ -333,8 +350,12 @@ The processor does not defend against this. The orchestrator must, and owns two 
 
 **Nothing expires.** Execution blobs carry no TTL: an expiry would delete a live workflow's input
 during a slow hand-off, and silent loss is the one outcome this design refuses. Every key is
-reclaimed explicitly — by the pre handler, by the orchestrator, or by the orphan sweeper as a
-backstop. The cost is that a leaked key leaks until something sweeps it, which is the accepted
+reclaimed explicitly — by the pre handler, by the orchestrator, or by an orphan sweeper as a
+backstop. (Today's `L2OrphanSweeper` reclaims stale liveness-index entries left by dead
+processor replicas, not execution-data keys — a different remit from §11's stuck-step reaper,
+which watches a workflow for a step that never reports a result. Extending sweep-on-a-schedule to
+leaked `data:` keys is the backstop this paragraph describes, not a capability either mechanism has
+today.) The cost is that a leaked key leaks until something sweeps it, which is the accepted
 direction of the trade: tolerate duplication, never tolerate loss.
 
 ### 7.2 Two outcomes, no switch

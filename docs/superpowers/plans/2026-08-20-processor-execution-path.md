@@ -8,8 +8,9 @@ only recovery mechanism.
 
 **Architecture:** One queue per processor carries two message kinds routed by the AMQP type header.
 The pre handler reads and validates the input and calls the author's `ProcessAsync`, which sends
-0..N branches to the post handler; the post handler reclaims the input key, validates the output,
-writes it, and emits the result. Pre never mutates the projection store, so any failure before its
+0..N branches to the post handler; the post handler validates the output, writes it, and emits
+the result. The pre handler reclaims the input key itself, once the author's whole call returns
+normally. Pre never mutates the projection store before that point, so any failure before its
 ack leaves a redelivery everything it needs. Message ids are derived rather than random, which is
 what makes a replayed branch land on the key it landed on the first time.
 
@@ -3227,8 +3228,9 @@ git commit -m "feat: add the worked processor example"
   exit 0.
 - A dispatch with an absent entry key returns without sending anything.
 - Running the same dispatch twice produces the same branch message ids.
-- The pre handler issues no `KeyDelete` and no `StringSet`.
-- The post handler's delete precedes its write, and both are keyed by the body's `MessageId`.
+- The pre handler issues exactly one `KeyDeleteAsync`, and only after `ProcessAsync` returns
+  normally for a non-source step; it issues no `StringSet`.
+- The post handler issues no `KeyDelete` at all — it only writes, keyed by the body's `MessageId`.
 - `grep -rn "Guid.NewGuid" src/BaseProcessor.Core/Processing/` prints nothing.
 
 ## Known Gaps After This Plan
@@ -3244,18 +3246,23 @@ in `src/` yet. Nothing in this plan produces an end-to-end workflow on its own.
   three-successor step. A single-successor step is safe and needs no copy. Spec §7.1.
 - Nothing reclaims the input key of a step that failed. The pre handler deletes it only after a normal
   return, so `FailedException`, `CancelledException` and framework faults all leave it behind, and
-  execution blobs carry no TTL to catch it. The orchestrator owns this cleanup; the orphan sweeper is
-  the backstop.
+  execution blobs carry no TTL to catch it. The orchestrator owns this cleanup; an orphan sweeper
+  is the backstop — but today's `L2OrphanSweeper` reclaims stale liveness-index entries from dead
+  processor replicas, not execution-data keys, so extending that sweep to leaked `data:` keys is
+  future work, not a capability that exists yet. That is a different job from the stuck-step reaper
+  further down, which watches a workflow for a step that never reports a result rather than sweeping
+  storage for keys nobody reclaimed.
 - `StepFailed` carries no input entry id — its `EntryId` is fixed at `Guid.Empty` and means *output
   key* — so an orchestrator reclaiming after a failure must do it from its own dispatch record. Adding
   an input-id field to the contract is the alternative. Deliberately left open until the orchestrator
   exists.
-- No stuck-step reaper. Until there is one, `ProcessDispatchHandler`'s "entry absent means this step
-  already completed" reading has no backstop: under multiple replicas a fan-out whose second branch
-  send fails can be requeued, have `data:{entryId}` deleted by another replica's post handler for the
-  first branch, and then read the absent key as completion — leaving branch 2 unsent and the step
-  stalled forever with no error anywhere. The reaper is what closes it; the handler deliberately does
-  not guess, because guessing the other way forks finished workflows.
+- No stuck-step reaper. Until there is one, a step lost to the multi-successor gap above has no
+  backstop: `ProcessDispatchHandler`'s absent-key branch deliberately reads an absent key as
+  completion rather than guessing loss — see the comment above `raw.IsNullOrEmpty` in
+  `ProcessDispatchHandler.RunAsync` — because guessing the other way reprocesses or forks a
+  workflow that already finished. The reaper is what turns that silence into a surfaced error;
+  spec §11 frames the discriminator (a step with successors reporting nothing is worth
+  surfacing), but nothing implements it yet.
 - The startup loops still treat a `MalformedRequest` reply as no answer and retry silently.
 - **`ProcessorIdLogEnricher` is built but registered nowhere**, so records emitted outside a message
   scope — the startup loops, the liveness heartbeat — carry no `ProcessorId`. Wiring it needs a
