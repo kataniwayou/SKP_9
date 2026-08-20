@@ -313,6 +313,7 @@ public sealed class ProcessDispatchHandlerTests
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
         Assert.Equal("below threshold", sent!.CancellationMessage);
+        await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
@@ -336,6 +337,7 @@ public sealed class ProcessDispatchHandlerTests
         Assert.NotNull(sent);
         Assert.Equal(P, sent!.ProcessorId);
         Assert.NotEmpty(sent.ErrorMessage);
+        await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
@@ -355,6 +357,7 @@ public sealed class ProcessDispatchHandlerTests
 
         await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
                                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
@@ -384,6 +387,8 @@ public sealed class ProcessDispatchHandlerTests
 
         await Assert.ThrowsAsync<PostSendException>(
             () => h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None));
+
+        await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
