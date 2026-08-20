@@ -97,22 +97,14 @@ public static class OrchestratorHost
         // staler source of truth; and the Microsoft DI job factory, because the fire job is built from
         // this container once per fire. WaitForJobsToComplete lets a fire already dispatching finish
         // rather than being torn out mid-send when the pod is asked to stop.
+        //
+        // These two register an ISchedulerFactory and the hosted service that starts the scheduler,
+        // and no IScheduler — deliberately, on Quartz's part: acquiring one is asynchronous and its
+        // lifecycle belongs to that hosted service. WorkflowScheduler<TJob> takes the factory for
+        // exactly that reason, so nothing here has to block a container-resolution thread to hand it
+        // a scheduler.
         builder.Services.AddQuartz();
         builder.Services.AddQuartzHostedService(o => o.WaitForJobsToComplete = true);
-
-        // AddQuartz registers ISchedulerFactory and NOT IScheduler, and WorkflowScheduler<TJob> takes
-        // the scheduler itself. Without this line the whole graph fails to resolve — which is how this
-        // was found: every descriptor reaching IWorkflowScheduler named Quartz.IScheduler under
-        // ValidateOnBuild.
-        //
-        // The blocking GetAwaiter().GetResult() is the concession, and it is bounded: a DI factory
-        // cannot await, the scheduler this creates is backed by the in-memory job store so there is no
-        // I/O to block on, and a console host has no synchronization context to deadlock against.
-        // GetScheduler is also idempotent — it returns the instance already in Quartz's repository for
-        // this scheduler name — so this and QuartzHostedService hand out one scheduler, not two, and
-        // the one this registration returns is the one that hosted service starts.
-        builder.Services.AddSingleton(
-            sp => sp.GetRequiredService<ISchedulerFactory>().GetScheduler().GetAwaiter().GetResult());
 
         // Transient, and registered at all rather than left to the job factory's create-if-absent
         // fallback: an unregistered job type still resolves at fire time, but it does so outside
