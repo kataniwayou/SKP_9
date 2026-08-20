@@ -23,12 +23,15 @@ namespace BaseApi.Service.Features.Orchestration.Messaging;
 internal sealed class StopOrchestrationHandler : IQueueMessageHandler
 {
     private readonly L2Cleanup _cleanup;
+    private readonly IQueueFanoutPublisher _publisher;
     private readonly ILogger<StopOrchestrationHandler> _logger;
 
-    public StopOrchestrationHandler(L2Cleanup cleanup, ILogger<StopOrchestrationHandler> logger)
+    public StopOrchestrationHandler(
+        L2Cleanup cleanup, IQueueFanoutPublisher publisher, ILogger<StopOrchestrationHandler> logger)
     {
-        _cleanup = cleanup ?? throw new ArgumentNullException(nameof(cleanup));
-        _logger  = logger ?? throw new ArgumentNullException(nameof(logger));
+        _cleanup   = cleanup ?? throw new ArgumentNullException(nameof(cleanup));
+        _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        _logger    = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public string MessageType => MessageTypes.StopOrchestration;
@@ -48,5 +51,16 @@ internal sealed class StopOrchestrationHandler : IQueueMessageHandler
         _logger.LogInformation("removing projection for workflow {WorkflowId}", message.WorkflowId);
 
         await _cleanup.RemoveAsync(message.WorkflowId, ct).ConfigureAwait(false);
+
+        // The announcement goes out only now, because only now is the removal committed. A replica
+        // reading L2 on an announcement published any earlier could still find the projection that is
+        // about to be removed, and would have no way to tell that from a stale read.
+        //
+        // A failure here escapes as a transient send fault, so the delivery is requeued and the whole
+        // handler runs again — the clean is unconditional and idempotent by design, so the repeat is
+        // safe, and the replicas learn about the removal on the retry.
+        await _publisher.PublishAsync(
+            OrchestratorFanout.Exchange, MessageTypes.OrchestrationStopped,
+            new OrchestrationStopped(message.WorkflowId), ct).ConfigureAwait(false);
     }
 }
