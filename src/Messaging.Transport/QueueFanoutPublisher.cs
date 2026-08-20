@@ -2,7 +2,7 @@ using System.Text.Json;
 using Messaging.Contracts;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 
 namespace Messaging.Transport;
 
@@ -18,13 +18,14 @@ namespace Messaging.Transport;
 /// accepts and discards in the same breath.
 /// </para>
 /// <para>
-/// <b>Correlating the return to the publish leans on the same serialisation that makes one shared
-/// channel safe.</b> <c>_gate</c> admits one publish at a time, so at most one
-/// <see cref="TaskCompletionSource{TResult}"/> is ever pending, and the broker delivers a
-/// <c>basic.return</c> for an unroutable message before it delivers the confirm that
-/// <c>BasicPublishAsync</c> is awaiting — so by the time the publish call completes, a return for it,
-/// if any, has already been recorded. No per-message identifier is needed because there is never more
-/// than one message in flight to be confused with.
+/// <b>The route is confirmed by the client library, not by hand-correlating a return.</b> The channel
+/// is created with <c>publisherConfirmationTrackingEnabled: true</c>, and with tracking on, a
+/// <c>mandatory</c> publish that comes back as a <c>basic.return</c> makes <c>BasicPublishAsync</c>
+/// itself throw <see cref="PublishException"/> with <see cref="PublishException.IsReturn"/> true,
+/// instead of completing — there is no untracked return frame here for this class to correlate by
+/// hand. <see cref="PublishAsync{T}"/> catches that specific shape and remaps it to
+/// <see cref="UnroutablePublishException"/>, which names the exchange rather than leaving the caller
+/// to interpret a library exception.
 /// </para>
 /// </summary>
 public sealed class QueueFanoutPublisher : IQueueFanoutPublisher, IAsyncDisposable
@@ -37,10 +38,6 @@ public sealed class QueueFanoutPublisher : IQueueFanoutPublisher, IAsyncDisposab
     // inside this one on every publish, and could only ever be uncontended.
     private readonly SemaphoreSlim _gate = new(1, 1);
     private IChannel? _channel;
-
-    // Set for the duration of exactly one publish, under _gate. The return handler is channel-level,
-    // not publish-level, so this field is what ties a basic.return back to the publish that caused it.
-    private TaskCompletionSource<bool>? _pendingReturn;
 
     public QueueFanoutPublisher(RabbitMqConnection connection, ILogger<QueueFanoutPublisher> logger)
     {
@@ -57,37 +54,49 @@ public sealed class QueueFanoutPublisher : IQueueFanoutPublisher, IAsyncDisposab
 
         var properties = QueueSender.BuildProperties(type, replyTo: null, correlationId: null);
 
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var channel = await GetChannelAsync(ct).ConfigureAwait(false);
-
-            var returned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pendingReturn = returned;
-
-            // A named exchange instead of the default one, an empty routing key because a fan-out
-            // exchange ignores it, and mandatory: true so a discarded message comes back as a return
-            // instead of vanishing behind a confirm that only means "accepted".
-            await channel.BasicPublishAsync(
-                exchange: exchange,
-                routingKey: string.Empty,
-                mandatory: true,
-                basicProperties: properties,
-                body: payload,
-                cancellationToken: ct).ConfigureAwait(false);
-
-            if (returned.Task.IsCompletedSuccessfully)
+            // The gate wait is inside this classified region, not before it: a caller that arrives
+            // already cancelled must still see TransientSendException, not a raw
+            // OperationCanceledException, or DeliveryClassifier would park the control message instead
+            // of requeuing it.
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                throw new UnroutablePublishException(exchange);
+                var channel = await GetChannelAsync(ct).ConfigureAwait(false);
+
+                // A named exchange instead of the default one, an empty routing key because a fan-out
+                // exchange ignores it, and mandatory: true so an unroutable message is reported rather
+                // than silently discarded and confirmed anyway.
+                await channel.BasicPublishAsync(
+                    exchange: exchange,
+                    routingKey: string.Empty,
+                    mandatory: true,
+                    basicProperties: properties,
+                    body: payload,
+                    cancellationToken: ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
             }
         }
         catch (Exception ex)
         {
-            // A channel that faulted — or that just reported an unroutable publish — is not trusted
-            // for the next publish, so it is dropped here rather than reused. Recreation happens on
-            // the next publish, under this same lock.
+            // A channel that faulted is not trusted for the next publish, so it is dropped here
+            // rather than reused. Recreation happens on the next publish, under this same lock. Safe
+            // to call even when the fault happened before any channel was touched, e.g. a cancelled
+            // gate wait.
             await DiscardChannelAsync().ConfigureAwait(false);
             _logger.LogWarning(ex, "publish to {Exchange} failed; publish channel discarded", exchange);
+
+            // The client library's own correlation of a return to the publish that caused it.
+            // Recognised by its type, not this task's own type, so it is remapped to the
+            // exchange-naming diagnosis before the generic classification below runs.
+            if (ex is PublishException { IsReturn: true })
+            {
+                ex = new UnroutablePublishException(exchange);
+            }
 
             if (SendFaultClassifier.IsTransport(ex))
             {
@@ -96,22 +105,6 @@ public sealed class QueueFanoutPublisher : IQueueFanoutPublisher, IAsyncDisposab
 
             throw;
         }
-        finally
-        {
-            _pendingReturn = null;
-            _gate.Release();
-        }
-    }
-
-    /// <summary>
-    /// Records that the in-flight publish came back unrouted. Runs on the connection's dispatch
-    /// thread, never concurrently with the publish it belongs to — <see cref="_gate"/> already
-    /// guarantees there is at most one.
-    /// </summary>
-    private Task OnBasicReturnAsync(object sender, BasicReturnEventArgs args)
-    {
-        _pendingReturn?.TrySetResult(true);
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -132,14 +125,13 @@ public sealed class QueueFanoutPublisher : IQueueFanoutPublisher, IAsyncDisposab
 
         var connection = await _connection.GetAsync(ct).ConfigureAwait(false);
 
+        // Tracking is what makes a return arrive as a thrown PublishException on this same call
+        // rather than as an untracked event with nothing to correlate it to.
         var options = new CreateChannelOptions(
             publisherConfirmationsEnabled: true,
             publisherConfirmationTrackingEnabled: true);
 
-        var channel = await connection.CreateChannelAsync(options, ct).ConfigureAwait(false);
-        channel.BasicReturnAsync += OnBasicReturnAsync;
-
-        _channel = channel;
+        _channel = await connection.CreateChannelAsync(options, ct).ConfigureAwait(false);
         return _channel;
     }
 
@@ -159,7 +151,6 @@ public sealed class QueueFanoutPublisher : IQueueFanoutPublisher, IAsyncDisposab
 
         try
         {
-            channel.BasicReturnAsync -= OnBasicReturnAsync;
             await channel.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception ex)

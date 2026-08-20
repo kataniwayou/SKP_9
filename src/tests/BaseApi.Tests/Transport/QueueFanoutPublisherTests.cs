@@ -1,10 +1,34 @@
 using Messaging.Transport;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace BaseApi.Tests.Transport;
 
 public sealed class QueueFanoutPublisherTests
 {
+    [Fact]
+    public async Task ClassifiesAnAlreadyCancelledPublishAsTransport()
+    {
+        // The gate wait sits before any channel work, so a caller that arrives already cancelled must
+        // still see TransientSendException — DeliveryClassifier requires the OUTERMOST type to be
+        // TransientSendException to requeue, and a raw OperationCanceledException would park the
+        // control message instead. RabbitMqConnection only opens a real connection lazily on its first
+        // GetAsync call, which an already-cancelled gate wait never reaches, so no broker is needed.
+        var publisher = new QueueFanoutPublisher(
+            new RabbitMqConnection(
+                Options.Create(new RabbitMqOptions()),
+                Array.Empty<IRabbitMqTopology>(),
+                NullLogger<RabbitMqConnection>.Instance),
+            NullLogger<QueueFanoutPublisher>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<TransientSendException>(
+            () => publisher.PublishAsync("orchestrator-fanout", "workflow-created", new object(), cts.Token));
+    }
+
     [Fact]
     public void ClassifiesAnUnroutablePublishAsTransport()
     {
