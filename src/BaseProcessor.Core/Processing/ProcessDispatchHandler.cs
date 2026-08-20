@@ -10,19 +10,14 @@ using StackExchange.Redis;
 namespace BaseProcessor.Core.Processing;
 
 /// <summary>
-/// Runs one step: read the input, validate it, hand it to the author.
+/// Runs one step: read the input, validate it, hand it to the author, then reclaim the input once the
+/// author has returned.
 /// <para>
-/// <b>This handler never mutates the projection store.</b> No write, no delete. That is what makes
-/// every failure below safe to retry: whatever goes wrong, the input key is exactly as it was found,
-/// so the redelivery replays from the same starting state. Reclaiming the input belongs to the post
-/// handler, which owns it along with everything else keyed by the branch's message id.
-/// </para>
-/// <para>
-/// Two rejected alternatives are worth recording. Deleting the input <i>before</i> the transform
-/// leaves a redelivery reading an absent key, which returns without processing — a silently lost
-/// step. Deleting it <i>after</i> a successful branch send means a failed delete requeues the
-/// dispatch, the transform runs again, and the workflow forks; a store blip is precisely the fault
-/// this design expects, so that would make forking routine.
+/// <b>This handler writes nothing to the projection store — the only mutation is the final delete,
+/// and it runs at most once.</b> Every failure before the author returns is safe to retry: whatever
+/// goes wrong, the input key is exactly as it was found, so the redelivery replays from the same
+/// starting state. The reclaim itself sits outside the failure paths, gated on the author having
+/// actually run to completion; see the comment beside it for why.
 /// </para>
 /// </summary>
 internal sealed class ProcessDispatchHandler : IQueueMessageHandler
@@ -124,22 +119,21 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
 
             if (raw.IsNullOrEmpty)
             {
-                // Read as "a post handler already reclaimed this key", and returning is right for that
-                // reading: reporting a failure would overwrite a finished workflow's outcome.
+                // Read as "an earlier attempt at this dispatch already reclaimed this key", and
+                // returning is right for that reading: reporting a failure would overwrite a finished
+                // workflow's outcome. The reclaim runs only once the WHOLE author has returned — see the
+                // reclaim at the end of RunAsync — so an absent key never means a fan-out was caught
+                // mid-flight with some branches sent and others lost; that state cannot arise.
                 //
                 // THIS DEPENDS ON AN ASSUMPTION THE WIRING DOES NOT ENFORCE: that at most one dispatch
                 // per entry key is in flight across the whole deployment. Under multiple replicas —
-                // which ProcessorLivenessWriter's per-instance keys imply is intended — the absent key
-                // has a second reading. Replica A fans out, branch 1 sends, branch 2's send fails and
-                // the dispatch is requeued; replica B consumes branch 1's ProcessedData and deletes
-                // data:{entryId}; the redelivered dispatch then finds the key absent, reads it as
-                // completion, and returns. Branch 2 is never sent and the step stalls forever with no
-                // error anywhere.
-                //
-                // Not fixed here on purpose. Distinguishing the two readings needs state this handler
-                // does not have, and guessing the other way — running on an absent key — would fork
-                // finished workflows, which is worse. The stuck-step reaper is what closes it; see the
-                // known gaps in the execution-path plan.
+                // which ProcessorLivenessWriter's per-instance keys imply is intended — a second
+                // concurrent attempt could read this key before the first one's reclaim runs and then
+                // re-run the author. That re-run is not silent data loss: SendToPostAsync derives its
+                // message ids from data the two attempts share, so the duplicate branches rewrite the
+                // same post-handler keys rather than create new ones. The residual cost is a duplicate
+                // run of the author's own code, which this design already treats as an acceptable replay
+                // cost everywhere else.
                 _logger.LogInformation("entry absent — treating as a duplicate delivery");
                 return;
             }
@@ -167,9 +161,14 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
 
         _processor.BeginDispatch(new DispatchState(
             _sender, d.WorkflowId, d.StepId, self, d.CorrelationId, d.EntryId));
+
+        // Set only on the normal path. Every catch below leaves it false, which is what keeps a failed
+        // or cancelled step's input intact for the orchestrator to deal with.
+        var ran = false;
         try
         {
             await _processor.ExecuteAsync(data, d.Payload, d.ExecutionId, ct).ConfigureAwait(false);
+            ran = true;
         }
         catch (FailedException ex)
         {
@@ -220,6 +219,28 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         finally
         {
             _processor.EndDispatch();
+        }
+
+        // The input is reclaimed HERE rather than in the post handler, and only after the author's
+        // transform returned normally. A fan-out sends N branches from inside one ProcessAsync; the
+        // return is the only signal that all N went out. Reclaiming per branch instead would delete
+        // the input after branch 1, so a failed branch-2 send would requeue a dispatch whose input is
+        // already gone — the redelivery would read an absent key, take the duplicate-delivery branch,
+        // and lose branch 2 silently.
+        //
+        // Outside the catch chain on purpose: a store fault on this delete must propagate so the L2
+        // classifier trips the gate and requeues. Inside the try it would be caught by the general
+        // catch and reported as a StepFailed that never happened. The replay is safe — the author
+        // re-runs and its branches carry the same derived message ids, so the post handler rewrites
+        // identical bytes.
+        //
+        // Skipped for a source step, which produced its own input and has no key. The author still
+        // ran; only the delete is skipped.
+        if (ran && d.EntryId != Guid.Empty)
+        {
+            await _redis.GetDatabase()
+                .KeyDeleteAsync(L2ProjectionKeys.ExecutionData(d.EntryId))
+                .ConfigureAwait(false);
         }
     }
 

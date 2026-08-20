@@ -92,8 +92,9 @@ public sealed class ProcessDispatchHandlerTests
     [Fact]
     public async Task ReturnsWithoutAResultWhenTheEntryIsAlreadyGone()
     {
-        // The input was reclaimed by a post handler, so this step already completed and this is a
-        // duplicate delivery. Emitting a failure here would corrupt a finished workflow.
+        // An earlier attempt at this dispatch already ran its author to completion and reclaimed the
+        // input, so this step already completed and this is a duplicate delivery. Emitting a failure
+        // here would corrupt a finished workflow.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns(RedisValue.Null);
         var probe = new Probe((_, _) => Task.CompletedTask);
@@ -119,18 +120,79 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
-    public async Task NeverDeletesOrWritesAnything()
+    public async Task ReclaimsTheInputOnceTheAuthorReturns()
     {
-        // Pre owns no store mutation at all. Anything here would leave a redelivery without its input.
+        // The input is finished with only when the author's transform has returned normally, which
+        // means every branch it wanted to send was sent.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
         var probe = new Probe((_, _) => Task.CompletedTask);
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
+        await h.Db.Received(1).KeyDeleteAsync(L2ProjectionKeys.ExecutionData(E), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task LeavesTheInputAloneWhenTheAuthorThrows()
+    {
+        // A failed step's input must survive: the orchestrator decides whether to reclaim it, and a
+        // reclaim here would destroy the only copy while reporting a business outcome.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) => throw new FailedException("author said no"));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
         await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
-        await h.Db.DidNotReceive().StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
-                                                  Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task LeavesTheInputAloneWhenTheInputFailsItsSchema()
+    {
+        // The author never ran, so the dispatch may yet be re-run against this input.
+        var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"""{"number":"seven"}""");
+        var probe = new Probe((_, _) => Task.CompletedTask);
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.False(probe.Ran);
+        await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task ReclaimsNothingForASourceStepButStillRunsTheAuthor()
+    {
+        // A source step produces its own input, so there is no key — but it is a normal run in every
+        // other respect.
+        var h = new Harness();
+        var probe = new Probe((_, _) => Task.CompletedTask);
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(Guid.Empty)), CancellationToken.None);
+
+        Assert.True(probe.Ran);
+        await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task LetsAFailedReclaimEscapeRatherThanReportingAFailedStep()
+    {
+        // The reclaim sits OUTSIDE the catch chain on purpose. Inside it, a Redis fault would be
+        // caught by the general catch and reported as StepFailed — a business outcome that never
+        // happened, with the delivery acknowledged. Escaping lets the L2 classifier trip the gate and
+        // requeue, and the replay is harmless: the same author runs again and sends the same derived
+        // message ids, so the post handler rewrites identical bytes.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        h.Db.KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
+        var probe = new Probe((_, _) => Task.CompletedTask);
+
+        await Assert.ThrowsAsync<RedisConnectionException>(
+            () => h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None));
+
+        Assert.Empty(h.Sender.ReceivedCalls());
     }
 
     [Fact]
