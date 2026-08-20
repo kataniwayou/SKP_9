@@ -52,14 +52,31 @@ public sealed class DeterministicIdTests
     }
 
     [Fact]
-    public void ASourceStepStillGetsADistinctIdPerStep()
+    public void TwoSourceStepsInOneWorkflowGetDistinctIds()
     {
-        // A source step's EntryId is Guid.Empty, so the correlation and step ids carry the uniqueness.
+        // A source step's EntryId is Guid.Empty, so the step id has to carry the uniqueness between
+        // two different source steps firing under one correlation.
         var stepA = DeterministicId.From(DeterministicId.MessagePurpose, C, S, Guid.Empty, 0);
         var stepB = DeterministicId.From(DeterministicId.MessagePurpose, C,
                                          Guid.Parse("77777777-7777-7777-7777-777777777777"), Guid.Empty, 0);
 
         Assert.NotEqual(stepA, stepB);
+    }
+
+    [Fact]
+    public void OneSourceStepGetsANewIdOnEveryFiring()
+    {
+        // The property the type's own doc comment rests on, and the one that actually matters in
+        // production: a source step's StepId is fixed by the workflow definition and its EntryId is
+        // always Guid.Empty, so the per-fire CorrelationId is the ONLY field distinguishing today's
+        // firing from tomorrow's. If it ever stopped feeding the hash, every firing of a source step
+        // would write the same key — and each run would silently overwrite the last.
+        var firstFiring  = DeterministicId.From(DeterministicId.MessagePurpose, C, S, Guid.Empty, 0);
+        var secondFiring = DeterministicId.From(
+            DeterministicId.MessagePurpose,
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), S, Guid.Empty, 0);
+
+        Assert.NotEqual(firstFiring, secondFiring);
     }
 
     [Fact]
