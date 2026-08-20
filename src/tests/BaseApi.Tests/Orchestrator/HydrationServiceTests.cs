@@ -15,10 +15,16 @@ using Xunit;
 namespace BaseApi.Tests.Orchestrator;
 
 /// <summary>
-/// Loop 2. Three claims, and they are the three things that go wrong silently if this loop is written
-/// carelessly: that every workflow L2 lists actually reaches L1, that an unreachable L2 leaves the pod
-/// alive and still beating rather than restarting into the same outage, and that the admission latch
-/// and the heartbeat's retirement happen together with success and never before it.
+/// Loop 2, and the things that go wrong silently if it is written carelessly: that every workflow L2
+/// lists actually reaches L1, that an unreachable L2 leaves the pod alive and still beating rather
+/// than restarting into the same outage, and that the admission latch and the heartbeat's retirement
+/// happen together with success and never before it.
+/// <para>
+/// <b>That last claim is made twice, and the two halves are not the same claim.</b> A pass that fails
+/// before it activates anything is the easy case — nothing has happened, so nothing has been decided.
+/// A pass that mirrors one workflow and then fails on the next is the case where a latch opened
+/// optimistically would admit the consumer against a half-built L1, and it is tested separately.
+/// </para>
 /// </summary>
 public sealed class HydrationServiceTests
 {
@@ -67,9 +73,7 @@ public sealed class HydrationServiceTests
         /// </summary>
         public Harness WithWorkflow(Guid workflowId, string? cron)
         {
-            _index.Add(workflowId.ToString("D"));
-            Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
-                .Returns(_index.ToArray());
+            Index(workflowId);
 
             Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
                 .Returns((RedisValue)JsonSerializer.Serialize(
@@ -89,11 +93,57 @@ public sealed class HydrationServiceTests
             return this;
         }
 
+        /// <summary>
+        /// Adds one id to the parent index. The stub is replaced rather than appended to, so the last
+        /// call carries every id added so far and index order is the order they were added in — which
+        /// is what makes "mirrored W1, then failed on W2" a thing a test can arrange.
+        /// </summary>
+        private void Index(Guid workflowId)
+        {
+            _index.Add(workflowId.ToString("D"));
+            Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
+                .Returns(_index.ToArray());
+        }
+
         /// <summary>An L2 that cannot be reached at all — the index read itself faults.</summary>
         public Harness WithStoreFault()
         {
             Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
                 .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
+
+            return this;
+        }
+
+        /// <summary>
+        /// A workflow the index lists but whose root read faults — the store going away partway
+        /// through a pass, rather than before it started.
+        /// </summary>
+        public Harness WithWorkflowFault(Guid workflowId)
+        {
+            Index(workflowId);
+            Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
+                .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
+
+            return this;
+        }
+
+        /// <summary>
+        /// An L2 that faults the first <paramref name="failures"/> index reads and answers normally
+        /// after that — a store that was down and came back.
+        /// <para>
+        /// Must be the last <c>With…</c> call in a chain: it replaces the index stub, and reads the
+        /// ids lazily so whatever <see cref="WithWorkflow"/> added still arrives on the attempt that
+        /// succeeds.
+        /// </para>
+        /// </summary>
+        public Harness WithStoreFaultsThenRecovery(int failures)
+        {
+            var attempts = 0;
+
+            Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
+                .Returns(_ => Interlocked.Increment(ref attempts) <= failures
+                    ? throw new RedisConnectionException(ConnectionFailureType.SocketFailure, "down")
+                    : _index.ToArray());
 
             return this;
         }
@@ -171,5 +221,50 @@ public sealed class HydrationServiceTests
         Assert.True(h.Admission.IsOpen);
         Assert.True(h.Heartbeat.IsRetired);
         Assert.True(h.StartupGate.IsReady);
+    }
+
+    [Fact]
+    public async Task LeavesEverythingShutWhenThePassFailsPartWayThrough()
+    {
+        // The half of "only once hydration succeeds" that a fault on the index read cannot reach. Here
+        // the pass gets a workflow into L1 and then loses the store, which is exactly the state an
+        // optimistically-opened latch would admit the consumer against: a half-built L1, in which a
+        // stop announcement for a workflow this replica has not mirrored yet would find nothing to
+        // stop and a fire would run against steps that were never read.
+        var h = new Harness()
+            .WithWorkflow(W1, "0 * * * *")
+            .WithWorkflowFault(W2);
+
+        await Assert.ThrowsAsync<RedisConnectionException>(
+            () => h.Build().RunOnceAsync(CancellationToken.None));
+
+        Assert.True(h.Store.TryGet(W1, out _));    // the half that got through is still mirrored
+        Assert.False(h.Store.TryGet(W2, out _));
+        Assert.False(h.Admission.IsOpen);
+        Assert.False(h.Heartbeat.IsRetired);
+        Assert.False(h.StartupGate.IsReady);
+    }
+
+    [Fact]
+    public async Task StopsRetryingOnTheFirstAttemptThatSucceeds()
+    {
+        // The way out of the retry loop. Every other success assertion drives RunOnceAsync directly,
+        // so none of them can tell a loop that notices a good pass from one that retries forever —
+        // and a loop that never left would hold the admission shut with L2 answering perfectly well.
+        var h = new Harness()
+            .WithWorkflow(W1, "0 * * * *")
+            .WithStoreFaultsThenRecovery(failures: 2);
+
+        var run = h.Build().RunUntilHydratedAsync(h.Cts.Token);
+        h.PumpTime(TimeSpan.FromSeconds(30));
+
+        // Three seconds of backoff separate the third attempt from the first, against thirty pumped,
+        // so the wait is only ever the pool catching up. The real-time bound is here so that a loop
+        // which never returns fails this test instead of stalling the whole run.
+        await run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        Assert.True(h.Admission.IsOpen);
+        Assert.True(h.Heartbeat.IsRetired);
+        Assert.True(h.Store.TryGet(W1, out _));
     }
 }
