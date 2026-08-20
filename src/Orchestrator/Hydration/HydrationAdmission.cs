@@ -19,10 +19,13 @@ namespace Orchestrator.Hydration;
 /// <c>L2Gate</c> — dynamic, and already registered here — is for.
 /// </para>
 /// <para>
-/// <b>It must be registered ahead of <c>AddBaseConsoleGating</c>.</b> That call resolves
-/// <see cref="IConsumerAdmission"/> with <c>TryAddSingleton</c>, so a registration made after it loses
-/// to <see cref="AlwaysOpenAdmission"/> silently: nothing fails, nothing is logged, and the replica
-/// simply consumes before it has hydrated.
+/// <b>It must be registered ahead of <c>AddBaseConsoleGating</c>.</b> That call <c>TryAdd</c>s
+/// <see cref="AlwaysOpenAdmission"/> as the default <see cref="IConsumerAdmission"/>, and registering
+/// above it is what makes that <c>TryAdd</c> a no-op. A plain <c>AddSingleton</c> made below it does
+/// still win the lookup — the container returns the last registration — but it leaves the always-open
+/// default in the collection for any enumeration to construct, and the same line written as a
+/// <c>TryAddSingleton</c> loses to that default outright and in silence: nothing fails, nothing is
+/// logged, and the replica simply consumes before it has hydrated.
 /// </para>
 /// </summary>
 public sealed class HydrationAdmission : IConsumerAdmission

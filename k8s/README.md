@@ -1,45 +1,55 @@
 # Running the stack on kind
 
-What this deploys: Postgres, Redis, RabbitMQ, the API, and two replicas of the discovery-shell
-processor.
+What this deploys: Postgres, Redis, RabbitMQ, the API, two replicas of the discovery-shell
+processor, and three replicas of the orchestrator control plane.
 
 The observability stack — collector, Prometheus, Grafana, Elasticsearch — is **not** included here.
-Both applications export OTLP to `http://otel-collector:4317` if something is listening there and
-fail quietly if nothing is, so a collector is an enrichment rather than a dependency. If the
+Every application exports OTLP to `http://otel-collector:4317` if something is listening there and
+fails quietly if nothing is, so a collector is an enrichment rather than a dependency. If the
 namespace already has one running, telemetry lands without any further action.
 
-**If your namespace already has infrastructure running, apply only the two application manifests.**
+**If your namespace already has infrastructure running, apply only the application manifests.**
 Re-applying the StatefulSets would restart working Postgres, Redis and RabbitMQ for no benefit, and
 some of their fields are immutable once created:
 
 ```bash
-kubectl apply -f k8s/30-baseapi-service.yaml -f k8s/33-processor-sample.yaml
+kubectl apply -f k8s/30-baseapi-service.yaml -f k8s/33-processor-sample.yaml \
+  -f k8s/36-orchestrator.yaml
 ```
 
 ## Build and load
 
-Both Dockerfiles take the **repository root** as their build context, because restore needs
+All three Dockerfiles take the **repository root** as their build context, because restore needs
 `NuGet.config`, the props files and the local `nugets/` feed:
 
 ```bash
 docker build -f src/BaseApi.Service/Dockerfile   -t baseapi-service:local   .
 docker build -f src/Processor.Sample/Dockerfile  -t processor-sample:local  .
+docker build -f src/Orchestrator/Dockerfile      -t orchestrator:local      .
 
 kind load docker-image baseapi-service:local
 kind load docker-image processor-sample:local
+kind load docker-image orchestrator:local
 ```
 
-Both manifests use `imagePullPolicy: IfNotPresent` against a `:local` tag, so there is no registry
-and nothing is ever pulled. The corollary is that rebuilding an image does **not** update a running
-pod — `kubectl rollout restart` is what picks up new bits.
+Every application manifest uses `imagePullPolicy: IfNotPresent` against a `:local` tag, so there is
+no registry and nothing is ever pulled. The corollary is that rebuilding an image does **not**
+update a running pod — `kubectl rollout restart` is what picks up new bits.
 
 ```bash
 kubectl apply -k k8s/
 kubectl -n skp rollout status deploy/baseapi-service
+kubectl -n skp rollout status sts/orchestrator
 ```
 
 The API applies its own migrations during startup and only then flips its startup gate, so
 `/health/startup` going green means the schema is in place. No init container, no manual step.
+
+**Never scale `sts/orchestrator` down.** Each replica owns a durable fan-out queue named after its
+pod, and a queue whose replica is gone for good stays bound to `orchestrator-fanout`, accumulating a
+copy of every announcement with nothing draining it. Scaling up is safe. Removing a replica for good
+means deleting its `orchestrator-control.orchestrator-N` queue on the broker in the same change. The
+manifest says the same thing at the top of `k8s/36-orchestrator.yaml`.
 
 ## Register the processor, which is the part that is easy to misread
 

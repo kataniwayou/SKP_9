@@ -1,8 +1,12 @@
+using BaseConsole.Core.DependencyInjection;
+using BaseConsole.Core.Gating;
 using BaseConsole.Core.Health;
+using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
 using Orchestrator;
 using Orchestrator.Hydration;
 using Orchestrator.Messaging;
+using Orchestrator.Scheduling;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,114 +22,95 @@ namespace BaseApi.Tests.Orchestrator;
 /// the one thing worth asserting about a shell — the same idiom as <c>ProcessorSampleTests</c> on the
 /// processor side.
 /// </summary>
-public sealed class OrchestratorHostWiringTests
+public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHostWiringTests.BuiltHost>
 {
-    private static readonly Dictionary<string, string?> Config = new()
-    {
-        ["Service:Name"]            = "orchestrator",
-        ["Service:Version"]         = "0.0.0",
-        ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
-        ["RabbitMq:Host"]           = "localhost",
-        ["RabbitMq:Username"]       = "guest",
-        ["RabbitMq:Password"]       = "guest",
-    };
-
     /// <summary>
-    /// Builds leniently — <c>--environment Production</c> — and is what every test below but
-    /// <see cref="TheHostGraphResolvesExceptTheSchedulerTask10Registers"/> uses.
+    /// The one orchestrator host this test process ever builds. Every test below reads it, and it is
+    /// deliberately never disposed.
     /// <para>
-    /// <b>Both flags, not one.</b> .NET 8's <c>HostApplicationBuilder</c> derives both
-    /// <c>ServiceProviderOptions.ValidateOnBuild</c> <i>and</i> <c>ValidateScopes</c> from
-    /// <c>IsDevelopment()</c>, and nothing in <c>src/</c> overrides that. So Production turns off scope
-    /// validation too — the check that catches a singleton capturing a scoped service — not only the
-    /// constructor-graph walk. That loss is not incidental here: this task added this host's first
-    /// scoped registrations (<c>ApplyStartHandler</c>/<c>ApplyStopHandler</c>), and Tasks 9-10 add a
-    /// Quartz <c>IScheduler</c> and <c>WorkflowScheduler&lt;TJob&gt;</c> alongside them — captive
-    /// dependency is exactly the class of mistake now undetected by this file, in the same area of the
-    /// graph that just grew.
+    /// <b>Development, so that both validations run.</b> .NET 8's <c>HostApplicationBuilder</c> derives
+    /// both <c>ServiceProviderOptions.ValidateOnBuild</c> <i>and</i> <c>ValidateScopes</c> from
+    /// <c>IsDevelopment()</c>, and nothing in <c>src/</c> overrides that. So this one word buys the
+    /// constructor-graph walk over every registered service <i>and</i> the check that no singleton
+    /// captures a scoped service — which matters because this host has scoped registrations
+    /// (<c>ApplyStartHandler</c>/<c>ApplyStopHandler</c>) sitting beside singletons that could
+    /// plausibly reach them. If either check fails, constructing this fixture throws and every test in
+    /// the class reports it. This file built leniently, under Production, for exactly as long as
+    /// <c>IWorkflowScheduler</c> had no registration; that hole is closed and the narrowing is gone
+    /// with it.
     /// </para>
     /// <para>
-    /// <b>Why not Development, which this file used until Task 8.</b> Development's
-    /// <c>ValidateOnBuild</c> walks every registered service's constructor graph, including
-    /// <c>ApplyStartHandler</c>/<c>ApplyStopHandler</c> → <c>WorkflowActivator</c> →
-    /// <c>IWorkflowScheduler</c> — and <c>IWorkflowScheduler</c> has no registration until Task 10 (see
-    /// <see cref="TheHostGraphResolvesExceptTheSchedulerTask10Registers"/> for exactly why). None of
-    /// the other six tests in this file touch that chain — they resolve <c>InstanceId</c>,
-    /// <c>IRabbitMqTopology</c>, <c>IConsumerAdmission</c>, <c>HydrationAdmission</c>, the keyed
-    /// heartbeat, or health-check registrations, none of which sit anywhere near
-    /// <c>IWorkflowScheduler</c> — so building leniently here costs those six tests nothing: every
-    /// assertion they make is exactly the one they made before, and still genuinely proves it. What it
-    /// gives up, on top of the constructor-graph walk, is <c>ValidateScopes</c> — a second, currently
-    /// undetected class of mistake, tracked above. Task 10 registers <c>IWorkflowScheduler</c>, at
-    /// which point this should go back to Development and lenient building should be deleted, per that
-    /// test's own comment.
+    /// <b>One host, and never disposed, because Quartz's logging is process-global.</b>
+    /// <c>Quartz.Logging.LogProvider</c> holds a static provider wrapping an <c>ILoggerFactory</c>,
+    /// and Quartz's DI integration sets it from the container that first resolves a scheduler
+    /// factory. Dispose that container and every later Quartz call in the process —
+    /// including <c>WorkflowSchedulerTests</c>' own schedulers, which share nothing else with this
+    /// file — resolves a logger from a disposed factory and throws <c>ObjectDisposedException</c>.
+    /// Building once and leaving it alive is what keeps that static pointing at a factory that is
+    /// still there. A test that builds and disposes a second host would put the hazard back, so do
+    /// not add one; nothing here needs it, since the container is immutable and every assertion below
+    /// is about what is registered in it.
     /// </para>
     /// </summary>
-    private static IHost Build() => OrchestratorHost.Create(
-        ["--environment", "Production"],
-        cfg => cfg.AddInMemoryCollection(Config));
+    public sealed class BuiltHost
+    {
+        public IHost Host { get; } = OrchestratorHost.Create(
+            ["--environment", "Development"],
+            cfg => cfg.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Service:Name"]            = "orchestrator",
+                ["Service:Version"]         = "0.0.0",
+                ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
+                ["RabbitMq:Host"]           = "localhost",
+                ["RabbitMq:Username"]       = "guest",
+                ["RabbitMq:Password"]       = "guest",
+            }));
+    }
+
+    private readonly IHost _host;
+
+    public OrchestratorHostWiringTests(BuiltHost fixture)
+    {
+        ArgumentNullException.ThrowIfNull(fixture);
+        _host = fixture.Host;
+    }
 
     [Fact]
-    public void TheHostGraphResolvesExceptTheSchedulerTask10Registers()
+    public void TheHostGraphResolves()
     {
-        // Development turns on ServiceProviderOptions.ValidateOnBuild, which checks every registered
-        // service's constructor graph without instantiating anything. Task 8 registered
-        // ApplyStartHandler/ApplyStopHandler as scoped IQueueMessageHandlers — the first type-based
-        // registrations reaching WorkflowActivator, which needs IWorkflowScheduler. Task 8 also
-        // registered WorkflowL1Store, L2WorkflowReader and WorkflowActivator itself, which is why the
-        // chain gets this far before failing rather than failing one step earlier on WorkflowActivator
-        // being unregistered, as it did immediately after Task 8's handler registrations landed.
-        //
-        // IWorkflowScheduler still has no registration: its only implementation, WorkflowScheduler<TJob>,
-        // is closed over a fire job Task 9 has not written, and nothing registers a Quartz IScheduler.
-        // So a whole-graph ValidateOnBuild genuinely cannot pass until Task 10 supplies both — this is
-        // not a defect to fix here.
-        //
-        // This test used to be TheHostGraphResolves, asserting `Assert.NotNull(host)` after a lenient
-        // `Build()`. It cannot assert that any more, so it is renamed to say what it currently means —
-        // a green TheHostGraphResolves next to a provably unresolvable graph would be a trap for
-        // anyone reading a CI summary rather than this file — and it asserts the narrower thing that is
-        // true now: building strictly throws, and it throws for exactly this one, already-understood
-        // reason — every InvalidOperationException in the AggregateException names IWorkflowScheduler,
-        // not some other, unrelated registration gap.
-        // TASK 10 MUST restore this to method name TheHostGraphResolves, body
-        // `using var host = Build(); Assert.NotNull(host);` (with `Build()` switched back to
-        // Development — see its doc comment) once IWorkflowScheduler is registered.
-        var ex = Assert.Throws<AggregateException>(() => OrchestratorHost.Create(
-            ["--environment", "Development"],
-            cfg => cfg.AddInMemoryCollection(Config)));
-
-        Assert.NotEmpty(ex.InnerExceptions);
-        Assert.All(ex.InnerExceptions, inner => Assert.Contains(
-            "Orchestrator.Scheduling.IWorkflowScheduler", inner.ToString()));
+        // Everything this test claims happened inside Create, in the fixture above: ValidateOnBuild
+        // walked every registered service's constructor graph and threw an AggregateException naming
+        // each one it could not satisfy, and ValidateScopes rejected any singleton taking a scoped
+        // dependency. Having a host to assert on at all is the result.
+        Assert.NotNull(_host);
     }
 
     [Fact]
     public void TheReplicaIdentityResolves()
     {
-        using var host = Build();
-
-        Assert.NotNull(host.Services.GetRequiredService<InstanceId>());
+        Assert.NotNull(_host.Services.GetRequiredService<InstanceId>());
     }
 
     [Fact]
     public void TheTopologyIsRegistered()
     {
-        using var host = Build();
-
-        Assert.Contains(host.Services.GetServices<IRabbitMqTopology>(), t => t is OrchestratorTopology);
+        Assert.Contains(_host.Services.GetServices<IRabbitMqTopology>(), t => t is OrchestratorTopology);
     }
 
     [Fact]
     public void AdmissionIsTheHydrationLatchAndNotTheAlwaysOpenDefault()
     {
         // The one wiring mistake in this host that fails in complete silence. AddBaseConsoleGating
-        // resolves IConsumerAdmission with TryAddSingleton, so a HydrationAdmission registered after
-        // it would simply lose to AlwaysOpenAdmission — no error, no log, and a replica that consumes
-        // announcements before it has mirrored L2. Nothing else in the suite can see that happen.
-        using var host = Build();
-
-        Assert.IsType<HydrationAdmission>(host.Services.GetRequiredService<IConsumerAdmission>());
+        // TryAdds AlwaysOpenAdmission as the default IConsumerAdmission, so any registration that
+        // fails to beat it — dropped, or written as a TryAdd below that call — leaves the default in
+        // place with no error and no log, and the replica consumes announcements before it has
+        // mirrored L2. Nothing else in the suite can see that happen.
+        //
+        // Both of those were checked by mutation rather than assumed, and the second corrected a
+        // claim this file and two others used to make: moving the plain AddSingleton below gating
+        // does NOT break the latch, because a single-service lookup returns the LAST registration.
+        // It is a TryAdd below gating that loses, and that is the case this test catches.
+        Assert.IsType<HydrationAdmission>(_host.Services.GetRequiredService<IConsumerAdmission>());
     }
 
     [Fact]
@@ -134,11 +119,9 @@ public sealed class OrchestratorHostWiringTests
         // Two registrations, one instance. Registering the concrete type and the interface separately
         // would give the hydration loop a latch of its own to open while the gated consumer went on
         // reading a second one that never opens — a deadlock in which the queue fills forever.
-        using var host = Build();
-
         Assert.Same(
-            host.Services.GetRequiredService<HydrationAdmission>(),
-            host.Services.GetRequiredService<IConsumerAdmission>());
+            _host.Services.GetRequiredService<HydrationAdmission>(),
+            _host.Services.GetRequiredService<IConsumerAdmission>());
     }
 
     [Fact]
@@ -147,10 +130,8 @@ public sealed class OrchestratorHostWiringTests
         // A heartbeat nobody reads proves nothing. A wedged hydration loop never opens the admission,
         // so the queue fills forever while every probe stays green — and nothing inside the process
         // can restart a loop that is gone, which is why `live` is the tag and the only one.
-        using var host = Build();
-
         var registration = Assert.Single(
-            host.Services.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations,
+            _host.Services.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations,
             r => r.Name == OrchestratorHost.HydrationLoop);
 
         Assert.Equal(["live"], registration.Tags);
@@ -158,26 +139,85 @@ public sealed class OrchestratorHostWiringTests
 
         // Constructing it is what proves the keyed heartbeat resolves. An unkeyed lookup here would
         // fail to resolve at startup, and this is the only place that would say so.
-        Assert.IsType<LoopLivenessHealthCheck>(registration.Factory(host.Services));
+        Assert.IsType<LoopLivenessHealthCheck>(registration.Factory(_host.Services));
+    }
+
+    [Fact]
+    public void EachLoopHasItsOwnHeartbeatHolder()
+    {
+        // Both heartbeats are keyed, and they must be two holders rather than one. A holder shared
+        // between two loops lets the live loop's beat refresh the stamp the dead loop's liveness check
+        // reads, so a stopped loop stays invisible for as long as any other loop is turning. Both keys
+        // are read from the code that owns them, never restated as literals here.
+        var gate = _host.Services.GetRequiredKeyedService<ILoopHeartbeat>(
+            ConsoleRedisServiceCollectionExtensions.GateLoop);
+        var hydration = _host.Services.GetRequiredKeyedService<ILoopHeartbeat>(
+            OrchestratorHost.HydrationLoop);
+
+        Assert.NotSame(gate, hydration);
+    }
+
+    [Fact]
+    public void EveryLoopIsHosted()
+    {
+        // Enumerating IHostedService constructs every one of them, which is why this could not be
+        // asserted while the scheduling stack was incomplete: the hydration loop reaches
+        // WorkflowActivator, and WorkflowActivator reaches IWorkflowScheduler. It is back because the
+        // graph is startable now, and it is the only test that proves the loops are actually started
+        // rather than merely resolvable — a HydrationService that resolved but was never hosted would
+        // leave the admission shut for the life of the process, with every probe green.
+        var hosted = _host.Services.GetServices<IHostedService>().ToList();
+
+        Assert.Contains(hosted, s => s is HydrationService);
+        Assert.Contains(hosted, s => s is L2GateProbe);
+        Assert.Contains(hosted, s => s is EmbeddedHealthEndpointService);
     }
 
     [Fact]
     public void TheHealthSurfaceIsRegistered()
     {
-        // This asserted `EmbeddedHealthEndpointService` is among IHostedService until Loop 2 arrived.
-        // It cannot any more: the hydration loop is a hosted service too, and enumerating that service
-        // constructs every one of them — including a WorkflowActivator whose IWorkflowScheduler is a
-        // WorkflowScheduler<TJob> closed over a fire job that does not exist yet. So the health
-        // surface is asserted through the registrations AddBaseConsoleHealth makes instead, which is
-        // the same claim by a route the still-incomplete scheduling stack cannot break. The
-        // enumeration belongs back here, as an EveryLoopIsHosted, the moment the graph can be started.
-        using var host = Build();
-
-        var registrations = host.Services
+        var registrations = _host.Services
             .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations;
 
-        Assert.NotNull(host.Services.GetRequiredService<IStartupGate>());
+        Assert.NotNull(_host.Services.GetRequiredService<IStartupGate>());
         Assert.Contains(registrations, r => r.Name == "self");
         Assert.Contains(registrations, r => r.Name == "startup");
+    }
+
+    [Fact]
+    public void BothApplyHandlersAreRegisteredPerDelivery()
+    {
+        // Resolved from a scope, not the root: the handlers are scoped so each delivery gets its own,
+        // and under ValidateScopes a root resolution of a scoped service throws. Both must be present
+        // — the consumer dispatches by message type across whatever this enumeration yields, so a
+        // handler missing from it means announcements of that type are refused rather than applied,
+        // and the replica silently stops tracking one half of the workflow lifecycle.
+        using var scope = _host.Services.CreateScope();
+
+        var handlers = scope.ServiceProvider.GetServices<IQueueMessageHandler>().ToList();
+
+        Assert.Contains(handlers, h => h is ApplyStartHandler);
+        Assert.Contains(handlers, h => h is ApplyStopHandler);
+    }
+
+    [Fact]
+    public void TheSchedulerIsClosedOverTheFireJob()
+    {
+        // WorkflowScheduler<TJob> leaves the job type open so the scheduling mechanics can be tested
+        // against an inert job. The host is the one place that closes it, and closing it over anything
+        // other than WorkflowFireJob would leave every trigger firing a job that dispatches nothing —
+        // schedules intact, workflows silently dead.
+        Assert.IsType<WorkflowScheduler<WorkflowFireJob>>(
+            _host.Services.GetRequiredService<IWorkflowScheduler>());
+    }
+
+    [Fact]
+    public void TheFireJobResolvesWithEveryDependency()
+    {
+        // Quartz builds the job from this container on every fire. An unregistered dependency of it
+        // would surface on the first trigger, on a background thread, long after start — so it is
+        // resolved here instead, where the gap is a test failure rather than a workflow that quietly
+        // never fires.
+        Assert.NotNull(_host.Services.GetRequiredService<WorkflowFireJob>());
     }
 }
