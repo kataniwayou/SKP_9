@@ -108,6 +108,13 @@ public static class OrchestratorHost
         builder.Services.AddHostedService(sp => ActivatorUtilities.CreateInstance<HydrationService>(
             sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(HydrationLoop)));
 
+        // The two consumers that keep a running replica in step with L2 once hydration has admitted
+        // it: the start and stop announcements the API publishes after each projection write. Scoped,
+        // exactly as the processor registers ProcessDispatchHandler and ProcessedDataHandler — each
+        // delivery resolves its own handler instance from its own scope.
+        builder.Services.AddScoped<IQueueMessageHandler, ApplyStartHandler>();
+        builder.Services.AddScoped<IQueueMessageHandler, ApplyStopHandler>();
+
         builder.Services.AddBaseConsoleGating(
             builder.Configuration, OrchestratorFanout.PerReplica(instanceId.Value));
 

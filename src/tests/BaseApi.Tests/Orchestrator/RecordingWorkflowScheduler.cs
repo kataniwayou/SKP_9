@@ -20,6 +20,15 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
     public List<Guid> Unscheduled { get; } = [];
 
     /// <summary>
+    /// How many jobs this scheduler currently believes are live: every <see cref="ScheduleAsync"/>
+    /// call minus every <see cref="UnscheduleAsync"/> call. Deliberately a count, not a set kept in
+    /// step by <see cref="Scheduled"/> and <see cref="Unscheduled"/> — those two lists already are
+    /// the record of what happened, and a count derived from their lengths cannot fail to subtract a
+    /// teardown the way a count that only ever increments could.
+    /// </summary>
+    public int LiveJobCount => Scheduled.Count - Unscheduled.Count;
+
+    /// <summary>
     /// Every call in the order it arrived, as method names. The three typed lists above answer "what
     /// was it asked to do", which is what most assertions want; they cannot answer "in what order",
     /// because a per-method list has no way to interleave with another one. Teardown-before-apply is
