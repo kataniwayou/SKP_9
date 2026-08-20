@@ -2,6 +2,7 @@ using System.Text.Json;
 using BaseApi.Service.Features.Orchestration.Messaging;
 using BaseApi.Service.Features.Orchestration.Projection;
 using Messaging.Contracts;
+using Messaging.Contracts.Projections;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -40,10 +41,13 @@ public sealed class FanoutPublishTests
             Redis.GetDatabase().Returns(Db);
             Db.CreateBatch().Returns(Batch);
 
-            // No prior projection: the clean every handler runs first finds nothing to remove and
-            // returns without ever touching a batch, so only the writer's own batch (start path)
-            // exercises Batch below.
-            Db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(RedisValue.Null);
+            // No explicit "no prior projection" stub here: NSubstitute already returns a completed
+            // Task whose RedisValue is default, and default(RedisValue).IsNullOrEmpty is true — the
+            // same thing RedisValue.Null would assert, so a stub saying so was dead weight rather than
+            // a precondition. The start-path tests below rely on exactly that default: an absent root
+            // makes L2Cleanup.RemoveAsync return before it ever touches a batch, so only the writer's
+            // own batch exercises Batch for those. The stop-path test needs the opposite — a root that
+            // IS present, so its own clean reaches a batch too — and stubs that itself.
         }
 
         public StartOrchestrationHandler BuildStart() => new(
@@ -64,6 +68,15 @@ public sealed class FanoutPublishTests
 
     private static byte[] Body(StopOrchestration m)
         => JsonSerializer.SerializeToUtf8Bytes(m, MessagingJson.Options);
+
+    /// <summary>A stored root for <see cref="W"/>, serialized the way L2Cleanup expects to read it.</summary>
+    private static string ExistingRoot() => JsonSerializer.Serialize(
+        new WorkflowRootProjection(
+            EntryStepIds: new List<Guid>(),
+            StepIds: new List<Guid>(),
+            Cron: null,
+            Liveness: new LivenessProjection(DateTime.UtcNow, 0, "Pending")),
+        MessagingJson.Options);
 
     [Fact]
     public async Task AnnouncesOnlyAfterTheProjectionHasBeenWritten()
@@ -114,11 +127,21 @@ public sealed class FanoutPublishTests
     public async Task TheStopPathAnnouncesAfterItsCleanToo()
     {
         // A stop that cleans L2 without telling the replicas leaves three schedulers firing a workflow
-        // that no longer exists.
+        // that no longer exists. A stop only reaches a batch when there is something stored to remove
+        // — an absent root returns early inside L2Cleanup and never calls Execute() — so this stubs a
+        // real stored root rather than the harness's "nothing stored" default, which would let the
+        // announce-after-clean ordering pass unchecked.
         var h = new Harness();
+        var order = new List<string>();
+        h.Db.StringGetAsync(L2ProjectionKeys.Root(W), Arg.Any<CommandFlags>()).Returns((RedisValue)ExistingRoot());
+        h.Batch.When(b => b.Execute()).Do(_ => order.Add("write"));
+        h.Publisher.When(p => p.PublishAsync(
+                    Arg.Any<string>(), Arg.Any<string>(), Arg.Any<OrchestrationStopped>(), Arg.Any<CancellationToken>()))
+                .Do(_ => order.Add("announce"));
 
         await h.BuildStop().HandleAsync(Body(Stop(W)), CancellationToken.None);
 
+        Assert.Equal(["write", "announce"], order);
         await h.Publisher.Received(1).PublishAsync(
             OrchestratorFanout.Exchange, MessageTypes.OrchestrationStopped,
             Arg.Is<OrchestrationStopped>(a => a.WorkflowId == W), Arg.Any<CancellationToken>());
