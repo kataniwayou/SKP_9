@@ -46,8 +46,9 @@ public sealed record ProcessedData(Guid WorkflowId, Guid StepId, Guid ProcessorI
 
 /// <summary>
 /// A step produced output. <see cref="EntryId"/> is the output key — the
-/// <see cref="ProcessedData.MessageId"/> the post handler just wrote — which the orchestrator
-/// relocates into one input key per successor.
+/// <see cref="ProcessedData.MessageId"/> the post handler just wrote — which the orchestrator hands
+/// straight through to a single successor's input, or copies into one key per successor when a step
+/// fans out to more than one.
 /// </summary>
 public sealed record StepCompleted(Guid WorkflowId, Guid StepId, Guid ProcessorId)
 {

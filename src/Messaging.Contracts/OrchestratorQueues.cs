@@ -50,7 +50,7 @@ public static class OrchestratorQueues
 
     /// <summary>
     /// Pre-to-post fan-out queue. The pre stage sends one <c>NextStepHandoff</c> per fan-out target
-    /// here and the post consumer relocates the data and dispatches.
+    /// here and the post consumer copies the data into that successor's own key and dispatches.
     /// </summary>
     public const string ResultPost = "orchestrator-result-post";
 }
