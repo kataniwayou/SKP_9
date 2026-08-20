@@ -3,6 +3,7 @@ using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Orchestrator.L1;
 using StackExchange.Redis;
 using Xunit;
@@ -11,9 +12,11 @@ namespace BaseApi.Tests.Orchestrator;
 
 /// <summary>
 /// The reader is the one place that knows L2's key layout, and the only place the orchestrator touches
-/// L2 at all. The activation tests drive its happy path; these cover the two damaged-store paths they
-/// cannot reach — a root listing a step key that is not there, and an index member that is not a
-/// workflow id — because both are survivable by design and neither may take a hydration pass down.
+/// L2 at all. The activation tests drive its happy path; these cover the damaged-store paths they
+/// cannot reach — a root listing a step key that is not there, a step value that will not deserialize,
+/// and an index member that is not a workflow id — because all three are survivable by design and none
+/// of them may take a hydration pass down. The last test is the fence on the other side: what is
+/// survivable stops exactly where the store's own faults begin.
 /// </summary>
 public sealed class L2WorkflowReaderTests
 {
@@ -91,6 +94,38 @@ public sealed class L2WorkflowReaderTests
     }
 
     [Fact]
+    public async Task SkipsAStepWhoseStoredValueWillNotDeserialize()
+    {
+        // Corrupt in place is torn in the same way missing is: the root names a step this workflow can
+        // no longer run. Letting the JsonException escape would end a hydration pass over every other
+        // workflow in the store, and would reach the consumer looking exactly like the Redis fault that
+        // is supposed to trip the gate.
+        WriteRoot("0 * * * *", S1, S2);
+        WriteStep(S1);
+        _db.StringGetAsync(L2ProjectionKeys.Step(W, S2), Arg.Any<CommandFlags>())
+            .Returns((RedisValue)"{\"entryCondition\": not-json");
+
+        var definition = await _reader.ReadAsync(W, CancellationToken.None);
+
+        Assert.NotNull(definition);
+        Assert.Equal(S1, Assert.Single(definition.Steps).StepId);
+    }
+
+    [Fact]
+    public async Task LetsARedisFaultOnAStepReadEscape()
+    {
+        // The other half of the same decision. The skip above must not be wide enough to swallow this:
+        // spec §7.4 classifies an L2 read fault as RequeueAndTrip, which only the consumer can do, and
+        // only if the fault reaches it.
+        WriteRoot("0 * * * *", S1);
+        _db.StringGetAsync(L2ProjectionKeys.Step(W, S1), Arg.Any<CommandFlags>())
+            .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
+
+        await Assert.ThrowsAsync<RedisConnectionException>(
+            () => _reader.ReadAsync(W, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ReadsEveryWorkflowIdFromTheParentIndexAndSkipsWhatIsNotOne()
     {
         _db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
@@ -102,9 +137,13 @@ public sealed class L2WorkflowReaderTests
     }
 
     [Fact]
-    public async Task ExistenceIsAskedOfTheRootKey()
+    public async Task ExistenceIsAskedOfTheRootKeyOfTheWorkflowAskedAbout()
     {
+        // Both answers are stubbed, and they differ. Leaving the negative to the substitute's default
+        // would have let an implementation that ignores its argument pass — which is precisely the
+        // implementation the stop path cannot survive, since it verifies one workflow's removal.
         _db.KeyExistsAsync(L2ProjectionKeys.Root(W), Arg.Any<CommandFlags>()).Returns(true);
+        _db.KeyExistsAsync(L2ProjectionKeys.Root(S1), Arg.Any<CommandFlags>()).Returns(false);
 
         Assert.True(await _reader.ExistsAsync(W, CancellationToken.None));
         Assert.False(await _reader.ExistsAsync(S1, CancellationToken.None));
