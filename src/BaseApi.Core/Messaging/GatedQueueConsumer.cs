@@ -256,25 +256,39 @@ public sealed class GatedQueueConsumer : BackgroundService
 
             await SafeAckAsync(ea, epoch).ConfigureAwait(false);
         }
-        catch (Exception ex) when (L2FaultClassifier.IsTransient(ex))
-        {
-            _logger.LogWarning(
-                ex, "projection store unreachable — returning message to {Queue}", _options.Queue);
-
-            // Awaited rather than fired and forgotten: closing the gate before the message goes back
-            // means the redelivery finds it already closed instead of racing it. That is only safe
-            // because gate subscribers signal rather than perform I/O — a subscriber that did broker
-            // work inside the notification would deadlock here.
-            await _gate.TripAsync().ConfigureAwait(false);
-            await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
-        }
         catch (Exception ex)
         {
-            // Everything else is taken as a property of the message rather than of the environment. A
-            // parked message can be recovered by hand; a message requeued forever is an outage that
-            // never resolves, so the ambiguous case is deliberately resolved toward parking.
-            _logger.LogError(ex, "refusing message of type {Type} — parking", type);
-            await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
+            switch (DeliveryClassifier.Classify(ex))
+            {
+                case DeliveryDisposition.RequeueAndTrip:
+                    _logger.LogWarning(
+                        ex, "projection store unreachable — returning message to {Queue}", _options.Queue);
+
+                    // Awaited rather than fired and forgotten: closing the gate before the message goes
+                    // back means the redelivery finds it already closed instead of racing it. That is
+                    // only safe because gate subscribers signal rather than perform I/O — a subscriber
+                    // that did broker work inside the notification would deadlock here.
+                    await _gate.TripAsync().ConfigureAwait(false);
+                    await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                    break;
+
+                case DeliveryDisposition.Requeue:
+                    // The projection store said nothing about itself, so the gate stays open and this
+                    // consumer keeps working. Only this delivery goes back.
+                    _logger.LogWarning(
+                        ex, "send failed while handling {Type} — returning message to {Queue}",
+                        type, _options.Queue);
+                    await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                    break;
+
+                default:
+                    // Taken as a property of the message rather than of the environment. A parked
+                    // message can be recovered by hand; a message requeued forever is an outage that
+                    // never resolves, so the ambiguous case is deliberately resolved toward parking.
+                    _logger.LogError(ex, "refusing message of type {Type} — parking", type);
+                    await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
+                    break;
+            }
         }
     }
 
