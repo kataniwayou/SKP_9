@@ -128,6 +128,13 @@ public sealed class ApplyHandlerTests
 
         Assert.True(h.Store.TryGet(W, out _));
         Assert.Equal(1, h.Scheduler.LiveJobCount);
+
+        // LiveJobCount alone is a net count: it cannot tell teardown-then-apply from a broken order
+        // that happens to net the same. The call sequence pins the order the test's name promises —
+        // the second activation's UnscheduleAsync (of the first job) must land between the two
+        // ScheduleAsync calls, not after both.
+        Assert.Equal(
+            new[] { "ScheduleAsync", "UnscheduleAsync", "ScheduleAsync" }, h.Scheduler.Calls);
     }
 
     [Fact]
@@ -176,6 +183,11 @@ public sealed class ApplyHandlerTests
 
         Assert.False(h.Store.TryGet(W, out _));
         Assert.Equal(0, h.Scheduler.LiveJobCount);
+
+        // The net count above is satisfied by exactly one schedule and one unschedule regardless of
+        // their order; the sequence pins that the stop's teardown is the one and only scheduler call
+        // to follow the start's.
+        Assert.Equal(new[] { "ScheduleAsync", "UnscheduleAsync" }, h.Scheduler.Calls);
     }
 
     [Fact]
@@ -198,5 +210,17 @@ public sealed class ApplyHandlerTests
 
         await Assert.ThrowsAsync<RedisConnectionException>(
             () => h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnL2FaultOnTheStopPathPropagatesSoTheDeliveryRequeuesAndTripsTheGate()
+    {
+        // The verify-first read is the whole point of Spec section 7.3 — it has to be able to fail the
+        // same way the start path's read does, or the ordering guarantee it exists to provide would
+        // rest on a read that silently swallowed the one fault that matters.
+        var h = new Harness().WithStoreFault();
+
+        await Assert.ThrowsAsync<RedisConnectionException>(
+            () => h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None));
     }
 }
