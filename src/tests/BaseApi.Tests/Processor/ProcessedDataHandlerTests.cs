@@ -193,14 +193,70 @@ public sealed class ProcessedDataHandlerTests
     public async Task IsIdempotentAcrossAReplay()
     {
         // The delete no-ops on an already-absent key and the write rewrites the same key with the same
-        // bytes, so running the handler twice leaves the state one run leaves.
+        // bytes, so running the handler twice leaves the state one run leaves. Counting two writes
+        // would not show that — two writes of DIFFERENT bytes to the same key, or a second run that
+        // skipped the reclaim, both satisfy a count. So capture what each run actually issued.
         var h = new Harness();
+        var written = new List<byte[]>();
+        var deleted = new List<RedisKey>();
+        await h.Db.StringSetAsync(Arg.Any<RedisKey>(), Arg.Do<RedisValue>(v => written.Add((byte[])v!)),
+                                  Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
+        await h.Db.KeyDeleteAsync(Arg.Do<RedisKey>(k => deleted.Add(k)), Arg.Any<CommandFlags>());
+        var completed = new List<StepCompleted>();
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCompleted>(completed.Add),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        await h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None);
-        await h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None);
+        await h.Build().HandleAsync(Body(Branch(E, """{"number":7}""")), CancellationToken.None);
+        await h.Build().HandleAsync(Body(Branch(E, """{"number":7}""")), CancellationToken.None);
 
+        // Same key, twice.
         await h.Db.Received(2).StringSetAsync(L2ProjectionKeys.OutputData(M), Arg.Any<RedisValue>(),
                                               Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
+        // Same bytes, twice: the second write is a REwrite, so it cannot leave a different value behind.
+        Assert.Equal(2, written.Count);
+        Assert.Equal("""{"number":7}""", Encoding.UTF8.GetString(written[0]));
+        Assert.Equal(written[0], written[1]);
+        // The reclaim is part of the repeated sequence, not something the first run consumed.
+        Assert.Equal([L2ProjectionKeys.ExecutionData(E), L2ProjectionKeys.ExecutionData(E)], deleted);
+        // And the outcome reported is the same one, naming the same output key.
+        Assert.Equal(2, completed.Count);
+        Assert.Equal(completed[0].EntryId, completed[1].EntryId);
+        Assert.Equal(M, completed[0].EntryId);
+    }
+
+    [Fact]
+    public async Task StampsOurOwnProcessorIdOnResultsEvenWhenTheBranchClaimsAnother()
+    {
+        // The inbound ProcessedData was produced by this processor, so its field is already ours by
+        // construction — which is exactly why echoing it buys nothing and is the only way the two
+        // could ever disagree. A StepCompleted attributed to another processor's id lands in their
+        // lineage, and nothing downstream would notice.
+        var h = new Harness();
+        StepCompleted? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCompleted>(s => sent = s),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var foreign = Branch(E) with { ProcessorId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") };
+        await h.Build().HandleAsync(Body(foreign), CancellationToken.None);
+
+        Assert.Equal(P, sent!.ProcessorId);
+    }
+
+    [Fact]
+    public async Task StampsOurOwnProcessorIdOnAFailureEvenWhenTheBranchClaimsAnother()
+    {
+        // The other outbound site in this handler. A StepFailed carries no key anyone later reads, so
+        // a misattributed one is invisible until someone asks why a processor has failures it never ran.
+        var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");
+        StepFailed? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var foreign = Branch(E, """{"number":"seven"}""")
+            with { ProcessorId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") };
+        await h.Build().HandleAsync(Body(foreign), CancellationToken.None);
+
+        Assert.Equal(P, sent!.ProcessorId);
     }
 
     [Fact]
