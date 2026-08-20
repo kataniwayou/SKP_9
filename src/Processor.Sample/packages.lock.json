@@ -330,6 +330,7 @@
           "Messaging.Contracts": "[1.0.0, )",
           "Messaging.Transport": "[1.0.0, )",
           "Microsoft.Extensions.Hosting": "[8.0.1, )",
+          "OpenTelemetry": "[1.15.3, )",
           "StackExchange.Redis": "[2.13.1, )"
         }
       },
