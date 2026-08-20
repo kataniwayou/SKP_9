@@ -212,6 +212,48 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
+    public async Task ReportsAStepFailedWhenTheAuthorsOwnCodeCancels()
+    {
+        // The consumer passes CancellationToken.None, so ct is never cancelled in production — which
+        // means a TaskCanceledException reaching here can only have come from the author's code. The
+        // ordinary source is HttpClient, which surfaces a request timeout as exactly this type. A
+        // filter that excluded every OperationCanceledException would PARK the dispatch: no StepFailed
+        // to the orchestrator, no retry, a message out of circulation until someone recovers it by
+        // hand — for the single commonest transient fault an author will hit.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        StepFailed? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        var probe = new Probe((_, _) => throw new TaskCanceledException("the request timed out"));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.NotNull(sent);
+        Assert.Equal(P, sent!.ProcessorId);
+        Assert.NotEmpty(sent.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task LetsAShutdownCancellationEscapeRatherThanReportingTheStepFailed()
+    {
+        // The other half of the same filter. When ct IS cancelled the process is stopping, the step's
+        // outcome is genuinely unknown, and reporting a business failure would record an outcome that
+        // never happened. Letting it escape leaves the delivery unacknowledged.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var probe = new Probe((_, _) => throw new OperationCanceledException(cts.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => h.Build(probe).HandleAsync(Body(Dispatch(E)), cts.Token));
+
+        await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
+                                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+    }
+
+    [Fact]
     public async Task SendsNothingWhenTheAuthorEndsTheBranchSilently()
     {
         // A sink or a filter legitimately ends here with nothing to report.
