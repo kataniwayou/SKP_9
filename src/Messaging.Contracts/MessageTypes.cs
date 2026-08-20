@@ -58,4 +58,10 @@ public static class MessageTypes
 
     /// <summary>Body is a <see cref="Messaging.Contracts.StepCancelled"/>.</summary>
     public const string StepCancelled = "step-cancelled";
+
+    /// <summary>Announcement: the API has projected a workflow into L2.</summary>
+    public const string OrchestrationStarted = "orchestration-started";
+
+    /// <summary>Announcement: the API has removed a workflow from L2.</summary>
+    public const string OrchestrationStopped = "orchestration-stopped";
 }
