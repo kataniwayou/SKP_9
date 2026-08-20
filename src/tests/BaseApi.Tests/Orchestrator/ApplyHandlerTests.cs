@@ -179,8 +179,17 @@ public sealed class ApplyHandlerTests
         await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
         h.RemoveWorkflowFromL2(W);
 
+        // Spec section 7.3 states the sequence as "unschedule the stored jobId, then remove from L1".
+        // Neither Calls nor LiveJobCount can see that order — store.Remove is not a scheduler call, so
+        // it is invisible to both. Sampling the store's own state from inside UnscheduleAsync is what
+        // makes the order observable: if unschedule genuinely ran first, the workflow is still in L1 at
+        // that instant.
+        var workflowStillHeldAtUnschedule = false;
+        h.Scheduler.OnUnscheduleAsync = () => workflowStillHeldAtUnschedule = h.Store.TryGet(W, out _);
+
         await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
 
+        Assert.True(workflowStillHeldAtUnschedule, "unschedule must run before the workflow leaves L1");
         Assert.False(h.Store.TryGet(W, out _));
         Assert.Equal(0, h.Scheduler.LiveJobCount);
 
