@@ -191,18 +191,32 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
     {
         _heartbeat.Beat();
 
+        // One fresh id per REQUEST, not per loop: a retry is a new question, and reusing an id would
+        // make two records that an operator has to tell apart look like one. The serving side echoes
+        // it onto the reply and names it at every drop and failure site, so this record is the other
+        // half of that pair — without it those RPC diagnostics point at nothing. "N" is the fixed
+        // rendering for a correlation id everywhere in this stack.
+        //
+        // Guid.NewGuid is banned under Processing/, where a redelivery must replay the same ids. This
+        // is a startup query with no replay semantics at all, so a fresh guid is exactly right.
+        var correlationId = Guid.NewGuid().ToString("N");
+
         try
         {
             await _replies.EnsureStartedAsync(ct).ConfigureAwait(false);
             _slot.Take();
-            await _sender.SendAsync(queue, type, body, ct, _replies.QueueName).ConfigureAwait(false);
+            await _sender
+                .SendAsync(queue, type, body, ct, _replies.QueueName, correlationId)
+                .ConfigureAwait(false);
+            _logger.LogInformation("asked {Type} {CorrelationId}", type, correlationId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A broker that is down or mid-reconnect is the same situation as an unanswered ask: wait
             // and try again. Letting it escape would fault the host over a condition the loop exists
             // to ride out.
-            _logger.LogWarning(ex, "could not send the {Type} request; will retry", type);
+            _logger.LogWarning(
+                ex, "could not send the {Type} request; will retry {CorrelationId}", type, correlationId);
             return null;
         }
 

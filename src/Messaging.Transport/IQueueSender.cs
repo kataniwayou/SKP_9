@@ -27,5 +27,15 @@ public interface IQueueSender
     /// <param name="body">Payload, serialized with the shared messaging serializer options.</param>
     /// <param name="ct">Cancels the send. A cancelled send may or may not have reached the broker.</param>
     /// <param name="replyTo">The queue a reply should be addressed to, for request-reply callers.</param>
-    Task SendAsync<T>(string queue, string type, T body, CancellationToken ct, string? replyTo = null);
+    /// <param name="correlationId">
+    /// An id the responder echoes back, so a request-reply caller can pair an answer — or a logged
+    /// failure on the serving side — with the question it asked. Those query queues have no
+    /// dead-letter exchange, so a dropped request leaves nothing but a log record, and this is the
+    /// only field linking that record to the loop still retrying on the other side. Left unset when
+    /// null, because a fire-and-forget send has nothing to pair with and an always-present id would
+    /// put a value on the correlation attribute that nobody ever matches.
+    /// </param>
+    Task SendAsync<T>(
+        string queue, string type, T body, CancellationToken ct,
+        string? replyTo = null, string? correlationId = null);
 }
