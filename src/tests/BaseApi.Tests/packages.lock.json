@@ -674,7 +674,8 @@
           "Cronos": "[0.13.0, )",
           "KubernetesClient": "[18.0.13, )",
           "Messaging.Contracts": "[1.0.0, )",
-          "Quartz.Extensions.Hosting": "[3.18.1, )"
+          "Quartz.Extensions.Hosting": "[3.18.1, )",
+          "StackExchange.Redis": "[2.13.1, )"
         }
       },
       "processor.sample": {

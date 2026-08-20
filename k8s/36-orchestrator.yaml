@@ -1,0 +1,189 @@
+# orchestrator — the control plane. Three replicas, and a StatefulSet rather than a Deployment for
+# one reason: identity. Each replica mirrors Redis into its own in-memory L1 over its own durable
+# fan-out queue, `orchestrator-control.{POD_NAME}`, and a StatefulSet ordinal is the only pod name
+# that survives a restart. Under a Deployment every restart would mint a new random pod name, bind a
+# new queue to the fan-out exchange, and abandon the old one with its backlog still in it.
+#
+# ---------------------------------------------------------------------------------------------
+# THIS STATEFULSET MUST NEVER BE SCALED DOWN. Scaling UP is safe; scaling down is not, and nothing
+# in Kubernetes will stop you. Each replica's queue is durable and never auto-deletes — it has to
+# be, so that a replica which is briefly down accumulates its announcements and drains them on
+# return. The cost of that is exact: a queue belonging to a replica that is gone for good stays
+# bound to `orchestrator-fanout`, receives a copy of every announcement forever, and has nothing
+# reading it. It grows without bound and no probe, log or alert here reports it. If a replica must
+# be removed permanently, its queue has to be deleted on the broker by hand, in the same change.
+# ---------------------------------------------------------------------------------------------
+#
+# There is no readiness probe, deliberately, and that is the difference from processor-sample. That
+# processor is unready until its identity resolves against a database row; this replica knows who it
+# is the moment the kubelet hands it POD_NAME, and there is nothing for readiness to gate — no
+# Service routes traffic here, so removing a pod from endpoints changes nothing about what it does.
+# Hydration, the one thing worth waiting for, is reported through the startup probe instead: see
+# its note below for what that costs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orchestrator
+  namespace: skp
+  labels:
+    app: orchestrator
+    app.kubernetes.io/part-of: skp
+---
+# Exactly the three verbs the leader election performs on exactly the one Lease it contends for, and
+# nothing else. `get` reads the current holder, `update` renews or takes the lease, and `create` is
+# needed once — the very first replica to run finds no Lease object and makes it. No `list`, `watch`
+# or `delete`: LeaderElector polls the single named object, and a Role that could enumerate or
+# destroy leases would let a compromised replica interfere with any other election in this namespace.
+#
+# Getting this wrong is not a quiet failure. LeaderElectionService handles only
+# OperationCanceledException, so a 403 from the API server propagates out of a BackgroundService, and
+# .NET 8's default BackgroundServiceExceptionBehavior.StopHost takes the whole replica down with it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: orchestrator-leader-election
+  namespace: skp
+  labels:
+    app: orchestrator
+    app.kubernetes.io/part-of: skp
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["orchestrator-leader"]
+    verbs: ["get", "update"]
+  # `create` cannot carry a resourceNames restriction: the name of an object that does not exist yet
+  # is not known to the authorizer, so a create rule naming resources matches nothing and every
+  # create is denied. Scoping it to the leases resource in this one namespace is as tight as the
+  # authorization model allows.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: orchestrator-leader-election
+  namespace: skp
+  labels:
+    app: orchestrator
+    app.kubernetes.io/part-of: skp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: orchestrator-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: orchestrator
+    namespace: skp
+---
+# The governing headless Service a StatefulSet requires. Nothing dials in — the orchestrator has no
+# inbound surface at all — so this exists to satisfy `spec.serviceName` and to give the pods their
+# stable per-ordinal DNS names. clusterIP: None means no virtual IP and no load balancing, which is
+# what makes those per-pod names the only thing it publishes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator
+  namespace: skp
+  labels:
+    app: orchestrator
+    app.kubernetes.io/part-of: skp
+spec:
+  clusterIP: None
+  selector:
+    app: orchestrator
+  ports:
+    - name: health
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: orchestrator
+  namespace: skp
+  labels:
+    app: orchestrator
+    app.kubernetes.io/part-of: skp
+spec:
+  # Three. See the scale-down warning at the top of this file before changing it in either
+  # direction — up is safe, down leaks a queue that fills forever.
+  replicas: 3
+  serviceName: orchestrator
+  selector:
+    matchLabels:
+      app: orchestrator
+  template:
+    metadata:
+      labels:
+        app: orchestrator
+    spec:
+      # Without this the pods run as `default`, which has no lease permissions, and every replica
+      # dies on its first election attempt. See the Role above.
+      serviceAccountName: orchestrator
+      containers:
+        - name: orchestrator
+          image: orchestrator:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: Service__Name
+              value: orchestrator
+            - name: Service__Version
+              value: 0.0.0
+            # The identity this replica is built on, and it feeds four things that must agree: the
+            # name of its fan-out queue and dead queue, the holder identity it writes into the
+            # leader Lease, and the service.instance.id on its telemetry. Resolved once from the
+            # downward API rather than defaulted separately in four places — under a StatefulSet
+            # this is the ordinal name, so a restarted pod reclaims its own queue.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            # The collector already running in this namespace. Without it the SDK still works and
+            # export simply fails quietly, so this is an enrichment rather than a dependency.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_USER }
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+            - name: ConnectionStrings__Redis
+              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            - name: ConsoleHealth__Port
+              value: "8081"
+          ports:
+            - name: health
+              containerPort: 8081
+          # Startup here means hydrated: HydrationService flips the startup gate only after a
+          # complete pass has mirrored every workflow L2 lists into L1. That is a stronger claim
+          # than processor-sample's startup probe makes, and it is why this one gets a wider budget
+          # than that file's 30 — 60 x 5s is five minutes, and hydration backs off to a 30s cap, so
+          # this covers several full-cap retries against a Redis that is slow to come back. It is
+          # still finite on purpose, but the number is chosen knowing that a restart repairs
+          # nothing: a fresh process meets the same unreachable store, and the only thing the
+          # kubelet buys by killing this container is that the outage starts reading as a crash
+          # loop. Announcements are not lost while it waits — the replica's queue is durable and
+          # accumulates them until the consumer is admitted.
+          startupProbe:
+            httpGet: { path: /health/startup, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          # Liveness answers from the checks tagged `live` — `self`, plus one per loop: the gate
+          # probe's and hydration's. Not one of them touches a dependency, and that is the rule
+          # rather than an accident: a Redis or broker outage must not restart these pods, because
+          # both loops are built to retry through it and a restart only discards their backoff
+          # progress. What this does catch is a loop that has stopped beating, which nothing inside
+          # the process can repair.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8081 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests: { memory: "160Mi" }
+            limits:   { memory: "384Mi" }

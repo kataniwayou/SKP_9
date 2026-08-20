@@ -38,6 +38,12 @@
     <PackageReference Include="Quartz.Extensions.Hosting" />
     <PackageReference Include="Cronos" />
     <PackageReference Include="KubernetesClient" />
+    <!-- L1/L2WorkflowReader talks to IDatabase and RedisValue directly. It arrives transitively via
+         BaseConsole.Core, so the build works without this line — but only until BaseConsole.Core's
+         own dependencies change, at which point this project stops compiling for a reason that has
+         nothing to do with anything in it. BaseApi.Core, BaseApi.Service and BaseProcessor.Core all
+         declare it for the same reason. Version comes from Directory.Packages.props. -->
+    <PackageReference Include="StackExchange.Redis" />
   </ItemGroup>
 
 </Project>

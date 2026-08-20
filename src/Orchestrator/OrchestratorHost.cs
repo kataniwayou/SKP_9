@@ -6,12 +6,15 @@ using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Orchestrator.Election;
 using Orchestrator.Hydration;
 using Orchestrator.L1;
 using Orchestrator.Messaging;
+using Orchestrator.Scheduling;
+using Quartz;
 
 namespace Orchestrator;
 
@@ -28,9 +31,13 @@ namespace Orchestrator;
 /// <b>Registrations run in a flat, ordered block rather than a fluent chain</b> so that a line can be
 /// inserted ahead of <see cref="ConsoleRedisServiceCollectionExtensions.AddBaseConsoleGating"/> without
 /// restructuring anything around it. <see cref="Hydration.HydrationAdmission"/> is why that matters and
-/// is already there: gating resolves <see cref="IConsumerAdmission"/> with <c>TryAddSingleton</c>, so
-/// the first registration wins and one made below that call would be discarded in silence. Anything
-/// added later that gating also <c>TryAdd</c>s belongs above it too.
+/// is already there: gating <c>TryAdd</c>s <c>AlwaysOpenAdmission</c> as the default
+/// <see cref="IConsumerAdmission"/>, and registering above that call is what makes gating's <c>TryAdd</c>
+/// a no-op, leaving exactly one descriptor. Below it there would be two — the plain <c>AddSingleton</c>
+/// used here would still win, because a single-service resolution returns the last registration, but
+/// the default would sit in the collection to be constructed by any enumeration, and the same line
+/// written as a <c>TryAddSingleton</c> would lose to it outright and in silence. Anything added later
+/// that gating also <c>TryAdd</c>s belongs above it for the same reason.
 /// </para>
 /// </summary>
 public static class OrchestratorHost
@@ -84,16 +91,53 @@ public static class OrchestratorHost
 
         builder.Services.AddSingleton<IRabbitMqTopology>(_ => new OrchestratorTopology(instanceId));
 
+        // Scheduling. Quartz's defaults are what this needs and all of it: the in-memory job store,
+        // because every job here is re-derivable from L2 by the hydration pass that runs before this
+        // replica consumes anything, so a job store that outlived the process would only be a second,
+        // staler source of truth; and the Microsoft DI job factory, because the fire job is built from
+        // this container once per fire. WaitForJobsToComplete lets a fire already dispatching finish
+        // rather than being torn out mid-send when the pod is asked to stop.
+        builder.Services.AddQuartz();
+        builder.Services.AddQuartzHostedService(o => o.WaitForJobsToComplete = true);
+
+        // AddQuartz registers ISchedulerFactory and NOT IScheduler, and WorkflowScheduler<TJob> takes
+        // the scheduler itself. Without this line the whole graph fails to resolve — which is how this
+        // was found: every descriptor reaching IWorkflowScheduler named Quartz.IScheduler under
+        // ValidateOnBuild.
+        //
+        // The blocking GetAwaiter().GetResult() is the concession, and it is bounded: a DI factory
+        // cannot await, the scheduler this creates is backed by the in-memory job store so there is no
+        // I/O to block on, and a console host has no synchronization context to deadlock against.
+        // GetScheduler is also idempotent — it returns the instance already in Quartz's repository for
+        // this scheduler name — so this and QuartzHostedService hand out one scheduler, not two, and
+        // the one this registration returns is the one that hosted service starts.
+        builder.Services.AddSingleton(
+            sp => sp.GetRequiredService<ISchedulerFactory>().GetScheduler().GetAwaiter().GetResult());
+
+        // Transient, and registered at all rather than left to the job factory's create-if-absent
+        // fallback: an unregistered job type still resolves at fire time, but it does so outside
+        // ValidateOnBuild's reach, so a fire-job dependency nobody registered would surface on the
+        // first trigger, on a background thread, instead of when the host is built. Transient because
+        // Quartz builds one instance per fire.
+        builder.Services.AddTransient<WorkflowFireJob>();
+
+        // The clock the scheduler does its cron arithmetic on. AddBaseConsoleGating below TryAdds the
+        // same instance; this is deliberately the same TryAdd rather than a second, different
+        // registration, so the scheduling block does not depend on a call thirty lines below it for
+        // something as basic as its clock, and whichever call runs first gives the same answer.
+        builder.Services.TryAddSingleton(TimeProvider.System);
+
+        // The one place WorkflowScheduler<TJob>'s open job type is closed, and the registration that
+        // makes the whole graph resolvable — WorkflowActivator, both apply handlers and the fire job
+        // itself all reach IWorkflowScheduler. Closing it over anything but WorkflowFireJob would
+        // leave every trigger armed and firing something that dispatches nothing: schedules intact,
+        // workflows silently dead.
+        builder.Services.AddSingleton<IWorkflowScheduler, WorkflowScheduler<WorkflowFireJob>>();
+
         // L1: the in-memory mirror of L2, and the single activation path that fills it. Registered
         // here rather than left for each caller to new one up, because both hydration (below) and the
         // apply handlers (below that) are constructor-injected consumers of the same three instances —
         // one store, one reader, one activator per replica, not one per caller.
-        //
-        // WorkflowActivator itself still cannot be fully validated: its IWorkflowScheduler parameter
-        // has no registration yet. WorkflowFireJob now exists, so the type WorkflowScheduler<TJob>
-        // would be closed over does too — but nothing here registers either it or a Quartz IScheduler
-        // for it to drive. That is the one gap left for Task 10 to close — see
-        // OrchestratorHostWiringTests.TheHostGraphResolvesExceptTheSchedulerTask10Registers.
         builder.Services.AddSingleton<WorkflowL1Store>();
         builder.Services.AddSingleton<L2WorkflowReader>();
         builder.Services.AddSingleton<WorkflowActivator>();
@@ -116,11 +160,14 @@ public static class OrchestratorHost
         }
 
         // Loop 2 and its admission latch. The position of the next two lines is the point of them
-        // being here at all: AddBaseConsoleGating below resolves IConsumerAdmission with
-        // TryAddSingleton, so a registration made after it loses to AlwaysOpenAdmission without
-        // failing and without logging, and the replica then consumes announcements before it has
-        // mirrored L2. One instance under two registrations, not two instances: the loop has to open
-        // the latch the consumer reads.
+        // being here at all: AddBaseConsoleGating below TryAdds AlwaysOpenAdmission as the default
+        // IConsumerAdmission, and being above it is what turns that TryAdd into a no-op. Written
+        // below instead, this plain AddSingleton would still be the one resolved — the container
+        // returns the last registration for a single-service lookup — but the default would remain in
+        // the collection, and the day either line becomes a TryAdd the latch loses to it without
+        // failing and without logging, and the replica consumes announcements before it has mirrored
+        // L2. One instance under two registrations, not two instances: the loop has to open the latch
+        // the consumer reads.
         builder.Services.AddSingleton<HydrationAdmission>();
         builder.Services.AddSingleton<IConsumerAdmission>(
             sp => sp.GetRequiredService<HydrationAdmission>());
