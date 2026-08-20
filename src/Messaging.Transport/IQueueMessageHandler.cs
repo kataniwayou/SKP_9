@@ -10,6 +10,19 @@ namespace Messaging.Transport;
 /// delivery, with no retry.
 /// </para>
 /// <para>
+/// <b>Deserialization is the line.</b> Above it — a body that will not parse, a missing or unknown
+/// type header — throwing is correct: the message is unroutable, no redelivery can fix it, and the
+/// consumer parks it where the bytes survive for inspection. Below it, once there is a readable
+/// message with real ids in hand, a handler must not throw for a business reason. A business failure
+/// is an outcome to report on whatever channel the message came with, followed by a normal return;
+/// throwing instead parks work that was understood perfectly well.
+/// </para>
+/// <para>
+/// A send that fails while handling is neither. Wrap it — <see cref="Messaging.Transport.QueueSenderExtensions.SendTransientAsync{T}"/>
+/// does — so the delivery is returned to the queue without the projection-store gate being closed
+/// over a broker fault.
+/// </para>
+/// <para>
 /// A handler is resolved per delivery from its own scope, so scoped dependencies are safe to inject
 /// and nothing is shared between deliveries.
 /// </para>
