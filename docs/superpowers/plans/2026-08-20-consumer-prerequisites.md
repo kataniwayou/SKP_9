@@ -1248,6 +1248,27 @@ Append to the class in `src/BaseConsole.Core/DependencyInjection/ConsoleRedisSer
         services.AddHostedService(sp => ActivatorUtilities.CreateInstance<L2GateProbe>(
             sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(GateLoop)));
 
+        // One liveness check over that same keyed holder, because a heartbeat nobody reads proves
+        // nothing. If the probe loop stops iterating the gate never reopens, the consumer stays paused
+        // forever, the work queue fills — and without this every probe stays green while it happens.
+        // Nothing inside the process can restart a loop that is gone, so `live` (an external restart)
+        // is the only repair available. The window is Interval x StaleFactor, which is also the only
+        // reader L2GateOptions.StaleFactor has.
+        services.AddHealthChecks()
+            .Add(new HealthCheckRegistration(
+                GateLoop,
+                sp =>
+                {
+                    var options = sp.GetRequiredService<IOptions<L2GateOptions>>().Value;
+                    return new LoopLivenessHealthCheck(
+                        sp.GetRequiredKeyedService<ILoopHeartbeat>(GateLoop),
+                        options.Interval * options.StaleFactor,
+                        GateLoop,
+                        sp.GetRequiredService<TimeProvider>());
+                },
+                HealthStatus.Unhealthy,
+                ["live"]));
+
         services.TryAddSingleton<GatedQueueConsumer>();
         services.AddHostedService(sp => sp.GetRequiredService<GatedQueueConsumer>());
 
@@ -1255,13 +1276,20 @@ Append to the class in `src/BaseConsole.Core/DependencyInjection/ConsoleRedisSer
     }
 ```
 
-The gate loop deliberately gets no `LoopLivenessHealthCheck` of its own here. The two loops that have
-one — startup and liveness — are watched because a wedged one strands the processor silently. A
-wedged gate probe leaves the gate in whatever state it last held, which the consumer's own logging
-already makes visible. Add one when something needs it, not before.
+The gate loop gets a `LoopLivenessHealthCheck` of its own, exactly as the startup and liveness loops
+do on the processor side — see `AddProcessorHealthChecks`, whose 4-arg console constructor call this
+copies. An earlier revision of this plan omitted it on the reasoning that a wedged gate probe leaves
+the gate in whatever state it last held and the consumer's own logging makes that visible. That
+reasoning is wrong twice over: the state it last held is *closed*, so consumption never resumes and
+the work queue fills behind a process that reports itself healthy; and `L2GateProbe`'s own type doc
+calls its heartbeat the only evidence this process is still capable of recovering from an outage.
+Omitting the check also leaves `L2GateOptions.StaleFactor` with no reader at all, despite a doc
+comment that derives a staleness budget from it.
 
-Add whatever `using` directives this needs — `BaseConsole.Core.Gating`, `BaseConsole.Core.Messaging`,
-`Microsoft.Extensions.DependencyInjection.Extensions` — if not already present.
+Add whatever `using` directives this needs — `BaseConsole.Core.Gating`, `BaseConsole.Core.Health`,
+`BaseConsole.Core.Messaging`, `Microsoft.Extensions.DependencyInjection.Extensions`,
+`Microsoft.Extensions.Diagnostics.HealthChecks`, `Microsoft.Extensions.Options` — if not already
+present.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
