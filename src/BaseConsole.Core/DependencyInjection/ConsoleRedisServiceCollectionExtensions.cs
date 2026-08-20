@@ -45,6 +45,9 @@ public static class ConsoleRedisServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>Heartbeat key for the gate probe's loop. One holder per loop, never shared.</summary>
+    public const string GateLoop = "l2-gate";
+
     /// <summary>
     /// Registers the projection-store gate, its probe, and one gated consumer bound to
     /// <paramref name="queue"/>.
@@ -55,9 +58,6 @@ public static class ConsoleRedisServiceCollectionExtensions
     /// discards while still confirming, so the sender is told the message was accepted.
     /// </para>
     /// </summary>
-    /// <summary>Heartbeat key for the gate probe's loop. One holder per loop, never shared.</summary>
-    public const string GateLoop = "l2-gate";
-
     public static IServiceCollection AddBaseConsoleGating(
         this IServiceCollection services, IConfiguration cfg, string queue)
     {

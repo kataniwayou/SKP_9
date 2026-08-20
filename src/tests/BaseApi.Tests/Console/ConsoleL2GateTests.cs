@@ -69,9 +69,47 @@ public sealed class ConsoleL2GateTests
             DeliveryClassifier.Classify(new InvalidOperationException("message carries no type header")));
 
         Assert.Equal(DeliveryDisposition.RequeueAndTrip,
-            DeliveryClassifier.Classify(new RedisTimeoutException("timed out", CommandStatus.Unknown)));
+            DeliveryClassifier.Classify(new RedisTimeoutException("timed out", CommandStatus.WaitingInBacklog)));
 
         Assert.Equal(DeliveryDisposition.Requeue,
             DeliveryClassifier.Classify(new TransientSendException("send failed", new IOException("closed"))));
+    }
+
+    [Fact]
+    public void PrefersTheSendClassificationWhenAStoreFaultIsNestedBeneathIt()
+    {
+        // The highest-risk drift this file exists to catch. L2FaultClassifier walks the whole inner
+        // chain, so if the two branches of Classify were ever reordered in the console copy, a send
+        // failure that happens to wrap a Redis type would close the gate over a store that never
+        // failed — and every flat-exception assertion above would still pass.
+        var ex = new TransientSendException("send to orchestrator-result failed",
+            new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
+
+        Assert.Equal(DeliveryDisposition.Requeue, DeliveryClassifier.Classify(ex));
+    }
+
+    [Fact]
+    public async Task DoesNotLogWhenTheStateIsUnchanged()
+    {
+        // The probe reports healthy on every healthy tick, so a per-call log would bury the transitions
+        // this gate exists to surface. Pins the dedup guard inside SetAsync, which the transition tests
+        // above cannot see.
+        var (gate, log) = Build();
+        await gate.ReportHealthyAsync();
+        log.Records.Clear();
+
+        await gate.ReportHealthyAsync();
+
+        Assert.Empty(log.Records);
+    }
+
+    [Fact]
+    public async Task DoesNotLogTrippingAGateThatStartedClosed()
+    {
+        var (gate, log) = Build();
+
+        await gate.TripAsync();
+
+        Assert.Empty(log.Records);
     }
 }
