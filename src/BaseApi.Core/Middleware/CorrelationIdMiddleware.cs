@@ -1,3 +1,4 @@
+using Messaging.Contracts;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
@@ -41,7 +42,7 @@ namespace BaseApi.Core.Middleware;
 public sealed class CorrelationIdMiddleware
 {
     private const string HeaderName = "X-Correlation-Id";
-    private const string ItemKey = "CorrelationId";
+    private const string ItemKey = CorrelationKeys.LogScope;
     private const int MaxLength = 128;
 
     private readonly RequestDelegate _next;

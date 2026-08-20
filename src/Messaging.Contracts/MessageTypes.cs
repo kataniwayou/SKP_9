@@ -43,4 +43,19 @@ public static class MessageTypes
 
     /// <summary>Reply body is a <see cref="Messaging.Contracts.MalformedRequest"/>.</summary>
     public const string MalformedRequest = "malformed-request";
+
+    /// <summary>Body is a <see cref="Messaging.Contracts.ProcessDispatch"/>.</summary>
+    public const string ProcessDispatch = "process-dispatch";
+
+    /// <summary>Body is a <see cref="Messaging.Contracts.ProcessedData"/>.</summary>
+    public const string ProcessedData = "processed-data";
+
+    /// <summary>Body is a <see cref="Messaging.Contracts.StepCompleted"/>.</summary>
+    public const string StepCompleted = "step-completed";
+
+    /// <summary>Body is a <see cref="Messaging.Contracts.StepFailed"/>.</summary>
+    public const string StepFailed = "step-failed";
+
+    /// <summary>Body is a <see cref="Messaging.Contracts.StepCancelled"/>.</summary>
+    public const string StepCancelled = "step-cancelled";
 }
