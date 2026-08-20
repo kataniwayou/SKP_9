@@ -28,23 +28,51 @@ public static class SendFaultClassifier
     {
         ArgumentNullException.ThrowIfNull(ex);
 
-        for (Exception? e = ex; e is not null; e = e.InnerException)
-        {
-            if (e is IOException or SocketException or TimeoutException or OperationCanceledException
-                     or ObjectDisposedException)
-            {
-                return true;
-            }
+        return Unwrap(ex).Any(IsTransportType);
+    }
 
-            // Matched by namespace rather than by a list of type names: the broker client's exception
-            // set changes between major versions, and a name list silently stops matching the type it
-            // was written for while still compiling.
-            if (e.GetType().Namespace?.StartsWith("RabbitMQ.Client", StringComparison.Ordinal) == true)
-            {
-                return true;
-            }
+    private static bool IsTransportType(Exception e)
+    {
+        if (e is IOException or SocketException or TimeoutException or OperationCanceledException
+                 or ObjectDisposedException)
+        {
+            return true;
         }
 
-        return false;
+        // Matched by namespace rather than by a list of type names: the broker client's exception
+        // set changes between major versions, and a name list silently stops matching the type it
+        // was written for while still compiling.
+        return e.GetType().Namespace?.StartsWith("RabbitMQ.Client", StringComparison.Ordinal) == true;
+    }
+
+    /// <summary>
+    /// Flattens aggregates and walks inner exceptions, yielding every exception in the chain.
+    /// <para>
+    /// <b>Aggregates need flattening, not just walking.</b> <see cref="Exception.InnerException"/> on
+    /// an aggregate is only its FIRST inner one, so a chain walk reaches a single branch and a socket
+    /// failure sitting in position two is classified deterministic and parked — the expensive mistake
+    /// this allow-list is shaped to avoid. The sibling classifier on the projection side,
+    /// <c>L2FaultClassifier.Unwrap</c>, flattens for exactly this reason; this is the same shape.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<Exception> Unwrap(Exception ex)
+    {
+        if (ex is AggregateException aggregate)
+        {
+            foreach (var inner in aggregate.Flatten().InnerExceptions)
+            {
+                foreach (var e in Unwrap(inner))
+                {
+                    yield return e;
+                }
+            }
+
+            yield break;
+        }
+
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            yield return e;
+        }
     }
 }
