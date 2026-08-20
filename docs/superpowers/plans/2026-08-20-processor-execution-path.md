@@ -3256,6 +3256,11 @@ in `src/` yet. Nothing in this plan produces an end-to-end workflow on its own.
   key* — so an orchestrator reclaiming after a failure must do it from its own dispatch record. Adding
   an input-id field to the contract is the alternative. Deliberately left open until the orchestrator
   exists.
+- Nobody reclaims a terminal step's output key. The only reclaimer this design defines for a `data:`
+  key is the successor's pre hop; a workflow's last step has no successor, so its output blob —
+  written with no expiry — is deleted by nobody on the success path, on every run. The orchestrator
+  owns this today, the same as the failed-step gap above. A TTL on `data:` keys, or a sweeper extended
+  to cover them, would also close it; which of the three the repository owner adopts is still open.
 - No stuck-step reaper. Until there is one, a step lost to the multi-successor gap above has no
   backstop: `ProcessDispatchHandler`'s absent-key branch deliberately reads an absent key as
   completion rather than guessing loss — see the comment above `raw.IsNullOrEmpty` in
