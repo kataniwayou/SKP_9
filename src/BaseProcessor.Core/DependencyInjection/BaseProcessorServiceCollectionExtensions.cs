@@ -6,8 +6,11 @@ using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Health;
 using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Liveness;
+using BaseProcessor.Core.Messaging;
+using BaseProcessor.Core.Processing;
 using BaseProcessor.Core.Startup;
 using Messaging.Contracts;
+using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -67,7 +70,14 @@ public static class BaseProcessorServiceCollectionExtensions
             return context;
         });
 
-        return services.AddBaseProcessor(cfg);
+        services.AddBaseProcessor(cfg);
+
+        // The only place the processor id is known before the container is built — everywhere else
+        // it would have to be resolved from IProcessorContext, which is exactly the singleton this
+        // topology and this queue name are handed to below instead.
+        services.AddProcessorExecution(cfg, identity.Id);
+
+        return services;
     }
 
     public static IServiceCollection AddBaseProcessor(
@@ -156,5 +166,35 @@ public static class BaseProcessorServiceCollectionExtensions
                 sp => new ProcessorIdentityReadyHealthCheck(sp.GetRequiredService<IProcessorContext>()),
                 HealthStatus.Unhealthy,
                 ["ready"]));
+    }
+
+    /// <summary>
+    /// Registers the execution path: the queue topology, the two handlers, and the gated consumer
+    /// that feeds them.
+    /// <para>
+    /// The consumer's prefetch stays at its default of one. That is structural, not a tuning knob —
+    /// the per-dispatch state on the singleton processor is a plain field, and a second concurrent
+    /// dispatch would overwrite it.
+    /// </para>
+    /// <para>
+    /// The author registers their own <c>BaseProcessor</c> implementation; this method does not, so a
+    /// host that forgets fails to resolve the handler at startup rather than consuming and failing
+    /// every message.
+    /// </para>
+    /// </summary>
+    public static IServiceCollection AddProcessorExecution(
+        this IServiceCollection services, IConfiguration cfg, Guid processorId)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(cfg);
+
+        services.AddSingleton<IRabbitMqTopology>(_ => new ProcessorTopology(processorId));
+
+        services.AddScoped<IQueueMessageHandler, ProcessDispatchHandler>();
+        services.AddScoped<IQueueMessageHandler, ProcessedDataHandler>();
+
+        services.AddBaseConsoleGating(cfg, ProcessorQueues.Work(processorId));
+
+        return services;
     }
 }
