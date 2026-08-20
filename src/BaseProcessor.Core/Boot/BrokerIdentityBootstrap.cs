@@ -136,6 +136,14 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
         IQueueSender sender, IReplyEndpoint replies, ReplySlot<object> slot, string hash,
         CancellationToken ct)
     {
+        // One fresh id per request, the same as the startup orchestrator's ask. The serving side
+        // echoes it onto the reply and names it at every drop and failure site, and those query
+        // queues have no dead-letter exchange — a log record at each end carrying this id is the only
+        // way an unanswered identity query can be traced to the loop still asking for it. Guid.NewGuid
+        // is banned only under Processing/, where a redelivery must replay the same ids; a boot-time
+        // query has no replay semantics.
+        var correlationId = Guid.NewGuid().ToString("N");
+
         try
         {
             await replies.EnsureStartedAsync(ct).ConfigureAwait(false);
@@ -145,13 +153,16 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
                 MessageTypes.GetProcessorBySourceHash,
                 new GetProcessorBySourceHash(hash),
                 ct,
-                replies.QueueName).ConfigureAwait(false);
+                replies.QueueName,
+                correlationId).ConfigureAwait(false);
+            _logger.LogInformation("asked for the processor identity {CorrelationId}", correlationId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A broker that is down or mid-reconnect is the same situation as an unanswered ask: wait
             // and try again. This is the window the design exists to let a processor ride out.
-            _logger.LogWarning(ex, "could not send the identity request; will retry");
+            _logger.LogWarning(
+                ex, "could not send the identity request; will retry {CorrelationId}", correlationId);
             return null;
         }
 

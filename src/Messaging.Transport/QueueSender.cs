@@ -42,27 +42,16 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task SendAsync<T>(string queue, string type, T body, CancellationToken ct, string? replyTo = null)
+    public async Task SendAsync<T>(
+        string queue, string type, T body, CancellationToken ct,
+        string? replyTo = null, string? correlationId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queue);
         ArgumentException.ThrowIfNullOrWhiteSpace(type);
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(body, MessagingJson.Options);
 
-        var properties = new BasicProperties
-        {
-            // Persistent alone does not survive a broker restart — the queue must be durable too.
-            // Both halves are required, and each is declared where it belongs: the flag here, the
-            // queue's durability in its topology declaration.
-            DeliveryMode = DeliveryModes.Persistent,
-            ContentType  = "application/json",
-            Type         = type,
-        };
-
-        if (replyTo is not null)
-        {
-            properties.ReplyTo = replyTo;
-        }
+        var properties = BuildProperties(type, replyTo, correlationId);
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -92,6 +81,42 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>
+    /// The outgoing message's properties. A separate method because it is the one part of a send with
+    /// no broker in it, and so the only part a unit test can reach — <see cref="SendAsync{T}"/> needs
+    /// a live connection.
+    /// <para>
+    /// <paramref name="replyTo"/> and <paramref name="correlationId"/> are set only when supplied.
+    /// Writing them unconditionally would put empty strings on every fire-and-forget message, and an
+    /// empty correlation id reads on the receiving side as an id that failed to match rather than as
+    /// one that was never asked for.
+    /// </para>
+    /// </summary>
+    internal static BasicProperties BuildProperties(string type, string? replyTo, string? correlationId)
+    {
+        var properties = new BasicProperties
+        {
+            // Persistent alone does not survive a broker restart — the queue must be durable too.
+            // Both halves are required, and each is declared where it belongs: the flag here, the
+            // queue's durability in its topology declaration.
+            DeliveryMode = DeliveryModes.Persistent,
+            ContentType  = "application/json",
+            Type         = type,
+        };
+
+        if (replyTo is not null)
+        {
+            properties.ReplyTo = replyTo;
+        }
+
+        if (correlationId is not null)
+        {
+            properties.CorrelationId = correlationId;
+        }
+
+        return properties;
     }
 
     /// <summary>

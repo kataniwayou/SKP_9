@@ -1,6 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <!-- QueueSender.BuildProperties: SendAsync needs a live broker connection, so the property
+         construction is the only part of a send a unit test can assert on. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="RabbitMQ.Client" />
     <!-- ILogger<T> and IOptions<T>: RabbitMQ.Client does not carry these transitively, and this
          project deliberately has no FrameworkReference to Microsoft.AspNetCore.App. -->

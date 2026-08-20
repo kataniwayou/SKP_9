@@ -37,11 +37,13 @@ public sealed class ProcessorStartupOrchestratorTests
         /// <summary>Runs on every send, so a test can act at a known point in the sequence.</summary>
         public Action<int>? OnSend { get; set; }
 
-        public List<(string Queue, string Type, string? ReplyTo)> Sent { get; } = [];
+        public List<(string Queue, string Type, string? ReplyTo, string? CorrelationId)> Sent { get; } = [];
 
-        public Task SendAsync<T>(string queue, string type, T body, CancellationToken ct, string? replyTo = null)
+        public Task SendAsync<T>(
+            string queue, string type, T body, CancellationToken ct,
+            string? replyTo = null, string? correlationId = null)
         {
-            Sent.Add((queue, type, replyTo));
+            Sent.Add((queue, type, replyTo, correlationId));
             OnSend?.Invoke(Sent.Count);
             if (_script.Count > 0 && _script.Dequeue() is { } reply)
             {
@@ -144,6 +146,26 @@ public sealed class ProcessorStartupOrchestratorTests
         await h.Orchestrator.RunStartupAsync(TestContext.Current.CancellationToken);
 
         Assert.All(h.Sender.Sent, s => Assert.Equal("proc-reply-pod-1", s.ReplyTo));
+    }
+
+    [Fact]
+    public async Task EveryAskCarriesItsOwnCorrelationId()
+    {
+        // The RPC consumer logs {CorrelationId} at four drop/failure sites and echoes it onto every
+        // reply, and that id is the only thing linking an API-side failure to the startup loop still
+        // spinning on this side. If nothing sets the property those four records render (null) and
+        // the link does not exist. One id PER REQUEST, so two asks are distinguishable.
+        var h = new Harness(
+            Found(input: Guid.NewGuid(), config: Guid.NewGuid()),
+            new SchemaDefinitionFound("{}"), new SchemaDefinitionFound("{}"));
+
+        await h.Orchestrator.RunStartupAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, h.Sender.Sent.Count);
+        Assert.All(h.Sender.Sent, s => Assert.False(string.IsNullOrWhiteSpace(s.CorrelationId)));
+        Assert.Equal(2, h.Sender.Sent.Select(s => s.CorrelationId).Distinct().Count());
+        // Rendered "N", the fixed rendering for correlation ids everywhere in this stack.
+        Assert.All(h.Sender.Sent, s => Assert.Equal(32, s.CorrelationId!.Length));
     }
 
     [Fact]

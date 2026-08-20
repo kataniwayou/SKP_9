@@ -912,12 +912,34 @@ even though it is read at the top of the method and echoed onto every successful
 the only thing linking an API-side failure to a processor-side startup loop that is still spinning,
 and those query queues have no dead-letter exchange by design — the log is the only artifact.
 
-This change has no unit test: `RpcQueueConsumer` is a `BackgroundService` holding a real
-`RabbitMqConnection`, and extracting a seam for four log lines would cost more than it proves. It is
-verified by inspection and by the `Live/` suite continuing to pass.
+**Correction — this task as originally written did not work.** Reading
+`ea.BasicProperties.CorrelationId` and echoing it is not enough, because *nothing in `src/` ever set
+that property*: `QueueSender.SendAsync` wrote only `DeliveryMode`, `ContentType`, `Type` and
+optionally `ReplyTo`, and reply pairing is done by `ReplyQueueConsumer` + `ReplySlot` keyed on the
+**type header**. So all four sites rendered `CorrelationId=(null)`, the echo echoed null, and a null
+value landed on `attributes.CorrelationId` — the field `CorrelationKeys` exists to keep clean. The
+sending half must be plumbed in the same task or the log sites are decoration:
+
+- `IQueueSender.SendAsync` takes an optional `string? correlationId = null` after `replyTo`, and
+  `QueueSender` stamps `props.CorrelationId` when it is non-null (unset otherwise, so a
+  fire-and-forget send does not carry an id nobody matches).
+- Both RPC request senders — `BaseProcessor.Core/Startup/ProcessorStartupOrchestrator.AskAsync` and
+  `BaseProcessor.Core/Boot/BrokerIdentityBootstrap.AskAsync` — mint one id per request with
+  `Guid.NewGuid().ToString("N")`, pass it, and log it as a structured `{CorrelationId}` argument so
+  the two sides can actually be paired. (`Guid.NewGuid` is banned only under
+  `BaseProcessor.Core/Processing/`, where a redelivery must replay the same ids. A startup query has
+  no replay semantics.)
+
+The four consumer-side log lines themselves have no unit test: `RpcQueueConsumer` is a
+`BackgroundService` holding a real `RabbitMqConnection`, and extracting a seam for four log lines
+would cost more than it proves. The sending half does — assert that `QueueSender` stamps the property
+when supplied and leaves it unset when not, and that a startup-loop request carries a non-null id.
 
 **Files:**
 - Modify: `src/BaseApi.Core/Messaging/RpcQueueConsumer.cs:118-172`
+- Modify: `src/Messaging.Transport/IQueueSender.cs`, `src/Messaging.Transport/QueueSender.cs`
+- Modify: `src/BaseProcessor.Core/Startup/ProcessorStartupOrchestrator.cs`,
+  `src/BaseProcessor.Core/Boot/BrokerIdentityBootstrap.cs`
 
 **Interfaces:**
 - Consumes: nothing new.
