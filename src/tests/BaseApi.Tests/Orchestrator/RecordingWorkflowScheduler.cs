@@ -38,6 +38,20 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
     /// </summary>
     public List<string> Calls { get; } = [];
 
+    /// <summary>
+    /// Invoked at the top of <see cref="UnscheduleAsync"/>, before it records anything. Opt-in and
+    /// null by default, so every caller that does not set it is unaffected.
+    /// <para>
+    /// <b>Why this exists.</b> Ordering against a call this recorder makes is visible in
+    /// <see cref="Calls"/>. Ordering against a call on a <i>different</i> real object —
+    /// <c>WorkflowL1Store.Remove</c>, for the stop path — is not: the store is a real object, not a
+    /// fake, so it keeps no list a test can inspect afterwards. The only way to tell "the store still
+    /// held the workflow when unschedule ran" from "the store had already dropped it" is to sample the
+    /// store's state at the instant this method runs, from inside it — which is what this hook is for.
+    /// </para>
+    /// </summary>
+    public Action? OnUnscheduleAsync { get; set; }
+
     public Task ScheduleAsync(Guid workflowId, Guid jobId, string cron, CancellationToken ct)
     {
         Scheduled.Add((workflowId, jobId, cron));
@@ -54,6 +68,7 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
 
     public Task UnscheduleAsync(Guid jobId, CancellationToken ct)
     {
+        OnUnscheduleAsync?.Invoke();
         Unscheduled.Add(jobId);
         Calls.Add(nameof(UnscheduleAsync));
         return Task.CompletedTask;
