@@ -354,7 +354,15 @@ The processor does not defend against this. The orchestrator must, and owns two 
   hop, so a workflow's last step has none coming behind it. Its output — written with no expiry — is
   deleted by nobody on the success path, on every run. The orchestrator must delete it when the
   workflow completes. Restoring a TTL on `data:` keys, or extending an orphan sweeper to cover them,
-  would also close this hole; which of the three the repository owner adopts is not yet decided.
+  would also close this hole.
+
+**Decided: neither. Both leaks are accepted until the orchestrator service exists.** Execution blobs
+carry no TTL and no sweep, so the orchestrator is the *sole* reclaimer of both a failed step's input
+key and a terminal step's output key — an obligation with nothing behind it, not a backstopped one.
+Until that service is built, `data:` keys accumulate in Redis for every failed step and every
+completed workflow, and only manual reclamation removes them. Anyone building the orchestrator owns
+both duties on day one; anyone operating this before then should expect unbounded `skp:data:` growth
+and size the store for it.
 
 **Nothing expires.** Execution blobs carry no TTL: an expiry would delete a live workflow's input
 during a slow hand-off, and silent loss is the one outcome this design refuses. Every key is
