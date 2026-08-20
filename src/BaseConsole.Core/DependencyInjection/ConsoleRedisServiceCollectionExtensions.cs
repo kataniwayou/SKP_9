@@ -1,4 +1,7 @@
 using BaseConsole.Core.Configuration;
+using BaseConsole.Core.Gating;
+using BaseConsole.Core.Loop;
+using BaseConsole.Core.Messaging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -38,6 +41,48 @@ public static class ConsoleRedisServiceCollectionExtensions
 
         services.TryAddSingleton<IConnectionMultiplexer>(
             _ => ConnectionMultiplexer.Connect(connectionString));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the projection-store gate, its probe, and one gated consumer bound to
+    /// <paramref name="queue"/>.
+    /// <para>
+    /// The queue must already be declared by an <see cref="Messaging.Transport.IRabbitMqTopology"/>
+    /// unit. The consumer deliberately does not declare it: a paused consumer declares nothing, and a
+    /// send arriving in that window would address a queue that does not exist — which the broker
+    /// discards while still confirming, so the sender is told the message was accepted.
+    /// </para>
+    /// </summary>
+    /// <summary>Heartbeat key for the gate probe's loop. One holder per loop, never shared.</summary>
+    public const string GateLoop = "l2-gate";
+
+    public static IServiceCollection AddBaseConsoleGating(
+        this IServiceCollection services, IConfiguration cfg, string queue)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(cfg);
+        ArgumentException.ThrowIfNullOrWhiteSpace(queue);
+
+        services.Configure<L2GateOptions>(cfg.GetSection("L2Gate"));
+        services.Configure<GatedConsumerOptions>(o => o.Queue = queue);
+
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<L2Gate>();
+
+        // The probe takes an ILoopHeartbeat, and on the console side every heartbeat is registered
+        // KEYED — one holder per loop, because a holder shared between two loops lets the faster
+        // loop's beat refresh the stamp for both and a dead loop stays invisible. There is no unkeyed
+        // registration anywhere in this stack, so a plain AddHostedService<L2GateProbe>() would build
+        // a service graph that fails to resolve at startup.
+        services.AddKeyedSingleton<ILoopHeartbeat>(
+            GateLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
+        services.AddHostedService(sp => ActivatorUtilities.CreateInstance<L2GateProbe>(
+            sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(GateLoop)));
+
+        services.TryAddSingleton<GatedQueueConsumer>();
+        services.AddHostedService(sp => sp.GetRequiredService<GatedQueueConsumer>());
 
         return services;
     }
