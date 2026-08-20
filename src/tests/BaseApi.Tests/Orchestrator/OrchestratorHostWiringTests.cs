@@ -1,4 +1,3 @@
-using BaseConsole.Core.Gating;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Messaging;
 using Orchestrator;
