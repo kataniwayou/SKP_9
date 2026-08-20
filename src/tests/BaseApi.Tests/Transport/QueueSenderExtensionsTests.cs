@@ -150,6 +150,31 @@ public sealed class QueueSenderExtensionsTests
     }
 
     [Fact]
+    public void FindsATransportFaultHidingPastTheFirstBranchOfAnAggregate()
+    {
+        // AggregateException.InnerException is only the FIRST inner one, so walking the chain reaches
+        // exactly one branch and a socket failure in position 2 is classified deterministic and
+        // parked. The sibling classifier on the projection side (L2FaultClassifier.Unwrap) flattens
+        // for this reason; this one must too.
+        var aggregate = new AggregateException(
+            new NotSupportedException("no converter for this type"),
+            new System.Net.Sockets.SocketException());
+
+        Assert.True(SendFaultClassifier.IsTransport(aggregate));
+    }
+
+    [Fact]
+    public void StillSeesNoTransportFaultInAnAggregateOfDeterministicOnes()
+    {
+        // The flattening must not turn "walked more exceptions" into "found one".
+        var aggregate = new AggregateException(
+            new NotSupportedException("no converter"),
+            new ArgumentException("queue must not be blank"));
+
+        Assert.False(SendFaultClassifier.IsTransport(aggregate));
+    }
+
+    [Fact]
     public void DoesNotSeeATransportFaultWhereThereIsNone()
     {
         Assert.False(SendFaultClassifier.IsTransport(

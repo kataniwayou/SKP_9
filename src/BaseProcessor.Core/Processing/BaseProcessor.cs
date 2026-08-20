@@ -17,20 +17,27 @@ namespace BaseProcessor.Core.Processing;
 /// </summary>
 public abstract class BaseProcessor
 {
+    // Published with a Volatile.Write / Volatile.Read pair, matching ProcessorContext's identity
+    // snapshot: DispatchState is fully constructed and then published, and .NET makes no Java-style
+    // final-field promise, so the release/acquire barrier is explicit rather than inferred from the
+    // record's immutability. Consecutive deliveries can land on different threadpool threads.
+    // Consistency rather than a live bug — the RabbitMQ dispatcher's own synchronisation supplies the
+    // barrier in practice at ConsumerDispatchConcurrency 1 — but that is a property of a setting one
+    // file away, not of this class.
     private DispatchState? _dispatch;
 
     private DispatchState Current =>
-        _dispatch ?? throw new InvalidOperationException(
+        Volatile.Read(ref _dispatch) ?? throw new InvalidOperationException(
             "No dispatch is open. BeginDispatch must run before the seam helpers — this is a framework wiring fault.");
 
     /// <summary>Framework entry point, supplied by <see cref="BaseProcessor{TConfig}"/>.</summary>
     internal abstract Task ExecuteAsync(byte[] data, string payload, Guid executionId, CancellationToken ct);
 
     /// <summary>Opens a dispatch. Called by the pre handler before it invokes the seam.</summary>
-    internal void BeginDispatch(DispatchState state) => _dispatch = state;
+    internal void BeginDispatch(DispatchState state) => Volatile.Write(ref _dispatch, state);
 
     /// <summary>Closes it, in a finally, so stale ids cannot outlive the dispatch on a pooled thread.</summary>
-    internal void EndDispatch() => _dispatch = null;
+    internal void EndDispatch() => Volatile.Write(ref _dispatch, null);
 
     /// <summary>
     /// Hands one branch of output to the post queue.
