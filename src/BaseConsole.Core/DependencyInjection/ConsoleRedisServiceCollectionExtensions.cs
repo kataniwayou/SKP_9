@@ -1,10 +1,13 @@
 using BaseConsole.Core.Configuration;
 using BaseConsole.Core.Gating;
+using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 namespace BaseConsole.Core.DependencyInjection;
@@ -80,6 +83,27 @@ public static class ConsoleRedisServiceCollectionExtensions
             GateLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
         services.AddHostedService(sp => ActivatorUtilities.CreateInstance<L2GateProbe>(
             sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(GateLoop)));
+
+        // One liveness check over that same keyed holder, because a heartbeat nobody reads proves
+        // nothing. If the probe loop stops iterating the gate never reopens, the consumer stays paused
+        // forever, the work queue fills — and without this every probe stays green while it happens.
+        // Nothing inside the process can restart a loop that is gone, so `live` (an external restart)
+        // is the only repair available. The window is Interval x StaleFactor, which is also the only
+        // reader L2GateOptions.StaleFactor has.
+        services.AddHealthChecks()
+            .Add(new HealthCheckRegistration(
+                GateLoop,
+                sp =>
+                {
+                    var options = sp.GetRequiredService<IOptions<L2GateOptions>>().Value;
+                    return new LoopLivenessHealthCheck(
+                        sp.GetRequiredKeyedService<ILoopHeartbeat>(GateLoop),
+                        options.Interval * options.StaleFactor,
+                        GateLoop,
+                        sp.GetRequiredService<TimeProvider>());
+                },
+                HealthStatus.Unhealthy,
+                ["live"]));
 
         services.TryAddSingleton<GatedQueueConsumer>();
         services.AddHostedService(sp => sp.GetRequiredService<GatedQueueConsumer>());
