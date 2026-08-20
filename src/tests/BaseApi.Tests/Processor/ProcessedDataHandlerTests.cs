@@ -49,9 +49,9 @@ public sealed class ProcessedDataHandlerTests
             }
         }
 
-        public ProcessedDataHandler Build() => new(
+        public ProcessedDataHandler Build(ProcessorLivenessOptions? options = null) => new(
             Redis, Sender, Context,
-            Options.Create(new ProcessorLivenessOptions()), Log);
+            Options.Create(options ?? new ProcessorLivenessOptions()), Log);
     }
 
     private static byte[] Body(ProcessedData p)
@@ -257,6 +257,31 @@ public sealed class ProcessedDataHandlerTests
         await h.Build().HandleAsync(Body(foreign), CancellationToken.None);
 
         Assert.Equal(P, sent!.ProcessorId);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void RefusesATtlThatWouldMakeEveryWriteFail(int ttlSeconds)
+    {
+        // L2ProjectionKeys.OutputDataTtl derives Random.Shared.Next(ttl, 2 * ttl + 1), so zero gives
+        // TimeSpan.Zero — which Redis rejects on EVERY write, turning every branch into a parked
+        // message with no clue pointing at the config value that caused it. A negative one throws out
+        // of Random.Next instead. Neither is recoverable at run time, so it has to be refused up front.
+        var h = new Harness();
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => h.Build(new ProcessorLivenessOptions { ExecutionDataTtlSeconds = ttlSeconds }));
+    }
+
+    [Fact]
+    public void AcceptsTheSmallestTtlThatActuallyWorks()
+    {
+        // One second is degenerate but valid: OutputDataTtl(1) yields 1s or 2s, both of which Redis
+        // accepts. The guard must refuse the broken values, not police the sensible ones.
+        var h = new Harness();
+
+        Assert.NotNull(h.Build(new ProcessorLivenessOptions { ExecutionDataTtlSeconds = 1 }));
     }
 
     [Fact]
