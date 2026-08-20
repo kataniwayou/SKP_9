@@ -40,6 +40,9 @@ public sealed class SampleProcessor : BaseProcessor<SampleConfig>
         // Drop, silent: just return. The branch ends and the orchestrator hears nothing at all, which
         // is what a sink or a filter wants.
         //     if (incoming == 0) return;
+        //
+        // Sending and returning silently both reclaim this step's input key; CancelledException does
+        // not, and with no TTL it stays leaked until the orchestrator reclaims it.
 
         var processed = JsonSerializer.SerializeToUtf8Bytes(
             new { number = incoming + baseNumber, label }, ProcessorConfig.SerializerOptions);
