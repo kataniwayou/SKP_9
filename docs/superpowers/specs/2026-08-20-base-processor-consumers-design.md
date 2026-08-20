@@ -35,7 +35,7 @@ processor ────ProcessedData─────┘                           
                                                     │                   │
                                               ProcessAsync        delete L2[data:entryId]
                                                     │             validate output schema
-                                              SendToPostAsync ──> write L2[out:messageId]
+                                              SendToPostAsync ──> write L2[data:messageId]
                                                                   StepCompleted ──> orchestrator-result
 ```
 
@@ -129,7 +129,7 @@ Notes on the fields that carry weight:
   write is idempotent.
 - **`ProcessedData.EntryId`** is the input key the post handler reclaims. Carried because the delete
   lives in post (§7).
-- **`StepCompleted.EntryId` is the `MessageId`** — the `out:` key the next step will read.
+- **`StepCompleted.EntryId` is the `MessageId`** — the `data:` key the next step reads directly.
 - `Payload` is the step's processor config as JSON; it was already validated against the config
   schema at workflow-creation time by `PayloadConfigSchemaValidator`, so the processor does not
   re-check it.
@@ -294,34 +294,48 @@ ordered.
 
 `MessageType => MessageTypes.ProcessedData`.
 
-1. **Delete `L2[data:entryId]`**, skipped when `EntryId == Guid.Empty` (source step).
-2. **Validate `Data` against the output schema.** Failure → `StepFailed("output failed schema
+1. **Validate `Data` against the output schema.** Failure → `StepFailed("output failed schema
    validation")` and ack. No blob is written: no successor will read a failed step's output.
-3. **Write `L2[out:messageId] = Data`** with `L2ProjectionKeys.OutputDataTtl`'s jittered TTL.
-4. **Send `StepCompleted`** to `OrchestratorQueues.Result`, carrying `EntryId = MessageId`.
-5. Ack.
+2. **Write `L2[data:messageId] = Data`** with no expiry.
+3. **Send `StepCompleted`** to `OrchestratorQueues.Result`, carrying `EntryId = MessageId`.
+4. Ack.
 
-Deleting first is not merely "the entry is finished with". It puts the most failure-prone operation
-*before* the ones whose repetition costs something: delete last and a failed delete replays a write
-and a result send, so the orchestrator sees a duplicate result; delete first and a failed delete
-replays only itself.
+The post handler reclaims nothing. The input key is deleted by the **pre** handler, once the author's
+transform has returned normally — the only point at which every branch of a fan-out is known to have
+been sent. Reclaiming per branch would delete the input after the first one, so a later branch's
+failed send would requeue a dispatch whose input no longer exists.
 
-Every NACK path replays the whole handler under the same `MessageId` — the delete no-ops, the write
-rewrites the same key with the same bytes, the result send repeats. All idempotent.
+Every NACK path replays the whole handler under the same `MessageId` — the write rewrites the same
+key with the same bytes and the result send repeats. All idempotent.
 
-### 7.1 The output goes to `out:`, not `data:`
+### 7.1 One namespace: output is the successor's input
 
-Collapsing the two namespaces — post writing straight into `data:{messageId}` so the next dispatch
-reads it directly — was considered and rejected. Fan-out breaks it.
+An earlier revision of this spec wrote output to `out:{messageId}` and had the orchestrator relocate
+it into one `data:{entryId}` key per successor. That was reversed: post writes `data:{messageId}`,
+and the successor reads it as `data:{entryId}` with the same id. The hand-off is a no-op rather than
+a copy, and `L2ProjectionKeys.ExecutionData` is the only execution-blob key builder.
 
-A step with three successors would produce three dispatches carrying the same `EntryId`, all reading
-one key. The first successor's post deletes it at step 1, and the other two find it absent, hit pre's
-clean-absent branch, and return with no result. Two branches lost silently.
+**The fan-out objection that motivated `out:` is not refuted — it is reassigned.** A step with three
+successors still produces three dispatches carrying one `EntryId`, and the first one's pre hop
+reclaims the shared key when its author returns, leaving the other two to read absent and return with
+no result. Two branches lost silently.
 
-So the processor writes `out:{messageId}`, which is its own output and nobody's input, and the
-orchestrator relocates it into one `data:{entryId}` key per successor before dispatching. Each
-successor then owns a key nobody else deletes, and post's step-1 delete is safe by construction.
-`L2ProjectionKeys.OutputData` and `OutputDataTtl` already exist in `src` for this, jitter included.
+The processor does not defend against this. The orchestrator must, and owns two duties because of it:
+
+- **More than one successor:** copy the blob into one key per successor before dispatching, under
+  ids **derived** the way `DeterministicId` derives everything else. A minted id would fork on
+  replay. A step with exactly one successor needs no copy — pass `MessageId` through as `EntryId`.
+- **A step that failed:** the pre handler reclaims only after a normal return, so a step ending in
+  `FailedException`, `CancelledException` or a framework fault leaves its input key in place. The
+  orchestrator reclaims it. Note that `StepFailed` carries no input entry id — `EntryId` is fixed at
+  `Guid.Empty` and means *output key* — so the orchestrator must reclaim from its own dispatch
+  record, or the contract must gain a field. That choice is open.
+
+**Nothing expires.** Execution blobs carry no TTL: an expiry would delete a live workflow's input
+during a slow hand-off, and silent loss is the one outcome this design refuses. Every key is
+reclaimed explicitly — by the pre handler, by the orchestrator, or by the orphan sweeper as a
+backstop. The cost is that a leaked key leaks until something sweeps it, which is the accepted
+direction of the trade: tolerate duplication, never tolerate loss.
 
 ### 7.2 Two outcomes, no switch
 
@@ -529,7 +543,8 @@ These are prerequisites, not processor features. Each is shared by every consume
 Orchestrator-side work, none of which exists in `src/` yet:
 
 - The result consumer on `OrchestratorQueues.Result`.
-- Relocating `out:{messageId}` into per-successor `data:{entryId}` keys (§7.1).
+- Copying the output blob into one `data:{entryId}` key per successor, and reclaiming a failed step's
+  input key (§7.1).
 - Dedup by `MessageId`.
 - The stuck-step reaper (§11).
 - Dispatching `ProcessDispatch` at all.
