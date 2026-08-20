@@ -255,16 +255,19 @@ parameter exists so tests can drive it.
 
 ### 6.1 The three author terminals
 
-| Author does | Orchestrator hears |
-|---|---|
-| sends 1..N branches via `SendToPostAsync` | success, via post, one result per branch |
-| returns without sending | nothing — the branch ends here |
-| throws `FailedException` / `CancelledException` | that outcome directly from pre, no post hop |
+| Author does | Orchestrator hears | Input key |
+|---|---|---|
+| sends 1..N branches via `SendToPostAsync` | success, via post, one result per branch | reclaimed once every branch is sent |
+| returns without sending | nothing — the branch ends here | reclaimed the same way |
+| throws `FailedException` / `CancelledException` | that outcome directly from pre, no post hop | left in place, unreclaimed by pre/post |
 
 A silent zero-send is **legitimate**: a sink processor writing to an external system, or a filter
 deciding the data goes no further, ends its branch with nothing to report. `CancelledException` is
 therefore not the mechanism for dropping — it is the mechanism for dropping *visibly*, when
-downstream steps gated on a cancelled predecessor need to know.
+downstream steps gated on a cancelled predecessor need to know. That visibility is not free: with the
+TTL gone, choosing `CancelledException` over a silent return also leaves the input key behind for the
+orchestrator to reclaim rather than reclaiming it on the spot, in the one case where nothing
+downstream is even told to look for it.
 
 Author-thrown messages go on the wire verbatim. Framework-caught exception messages never do (§8).
 

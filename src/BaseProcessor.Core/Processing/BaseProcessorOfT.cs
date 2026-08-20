@@ -35,7 +35,9 @@ public abstract class BaseProcessor<TConfig> : BaseProcessor where TConfig : Pro
     /// <para>
     /// <b>Three ways to end.</b> Send one or more branches with <c>SendToPostAsync</c>; return without
     /// sending, which ends the branch silently and legitimately; or throw <see cref="FailedException"/>
-    /// or <see cref="CancelledException"/> to report an outcome directly.
+    /// or <see cref="CancelledException"/> to report an outcome directly. The first two both reclaim
+    /// the input key once this method returns; a thrown exception does not — the input key is left in
+    /// place, and with no TTL it stays there until something else reclaims it.
     /// </para>
     /// <para>
     /// <b>Branches must be produced in the same order every invocation.</b> A redelivered dispatch
