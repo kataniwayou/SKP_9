@@ -32,6 +32,13 @@ namespace BaseConsole.Core.Messaging;
 /// closes the channel for good — converting a transient blip into a consumer that is silently dead.
 /// Every acknowledgement is therefore checked against the epoch its delivery arrived in.
 /// </para>
+/// <para>
+/// <b>Consuming also requires admission, a second and separate condition from the L2 gate.</b>
+/// <see cref="IConsumerAdmission"/> is one-shot readiness — a host opens it once its own startup work
+/// is done and never closes it again — where the L2 gate is dynamic and reopens as the projection
+/// store comes and goes. The two are independent axes of the same decision, not two names for one
+/// thing.
+/// </para>
 /// </summary>
 public sealed class GatedQueueConsumer : BackgroundService
 {
@@ -39,6 +46,7 @@ public sealed class GatedQueueConsumer : BackgroundService
     private readonly L2Gate _gate;
     private readonly IServiceScopeFactory _scopes;
     private readonly GatedConsumerOptions _options;
+    private readonly IConsumerAdmission _admission;
     private readonly ILogger<GatedQueueConsumer> _logger;
 
     // Initial count 0, maximum 1: a signal arriving while one is already pending is absorbed, because
@@ -57,12 +65,14 @@ public sealed class GatedQueueConsumer : BackgroundService
         L2Gate gate,
         IServiceScopeFactory scopes,
         IOptions<GatedConsumerOptions> options,
+        IConsumerAdmission admission,
         ILogger<GatedQueueConsumer> logger)
     {
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _gate       = gate ?? throw new ArgumentNullException(nameof(gate));
         _scopes     = scopes ?? throw new ArgumentNullException(nameof(scopes));
         _options    = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _admission  = admission ?? throw new ArgumentNullException(nameof(admission));
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -71,6 +81,13 @@ public sealed class GatedQueueConsumer : BackgroundService
 
     /// <summary>Whether the channel is in a state where consuming is possible at all.</summary>
     public bool IsChannelUsable => _channelUsable;
+
+    /// <summary>
+    /// Whether the consumer should currently hold a subscription: admission is granted and the L2 gate
+    /// is open. A single named member rather than an inline local so there is exactly one place this
+    /// conjunction lives, and one place a test can reach it.
+    /// </summary>
+    internal bool ShouldConsume => _admission.IsOpen && _gate.IsOpen;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -150,7 +167,7 @@ public sealed class GatedQueueConsumer : BackgroundService
             return;   // the broker is unreachable; the next pass tries again
         }
 
-        var shouldConsume = _gate.IsOpen;
+        var shouldConsume = ShouldConsume;
 
         if (shouldConsume && _consumerTag is null)
         {
