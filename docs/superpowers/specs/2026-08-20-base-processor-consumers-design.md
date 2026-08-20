@@ -347,6 +347,11 @@ The processor does not defend against this. The orchestrator must, and owns two 
   orchestrator reclaims it. Note that `StepFailed` carries no input entry id — `EntryId` is fixed at
   `Guid.Empty` and means *output key* — so the orchestrator must reclaim from its own dispatch
   record, or the contract must gain a field. That choice is open.
+- **A step with no successor:** the pre handler that reclaims a `data:` key is the *successor's* pre
+  hop, so a workflow's last step has none coming behind it. Its output — written with no expiry — is
+  deleted by nobody on the success path, on every run. The orchestrator must delete it when the
+  workflow completes. Restoring a TTL on `data:` keys, or extending an orphan sweeper to cover them,
+  would also close this hole; which of the three the repository owner adopts is not yet decided.
 
 **Nothing expires.** Execution blobs carry no TTL: an expiry would delete a live workflow's input
 during a slow hand-off, and silent loss is the one outcome this design refuses. Every key is
