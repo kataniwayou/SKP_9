@@ -69,10 +69,17 @@ public abstract class BaseProcessor
                 .SendTransientAsync(ProcessorQueues.Work(state.ProcessorId), MessageTypes.ProcessedData, branch, ct)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (TransientSendException ex)
         {
-            // Named so an author fanning out can see which branch was lost. It stays a
-            // TransientSendException, so the consumer still returns the dispatch to the queue.
+            // ONLY the already-classified fault is renamed. Naming it lets an author fanning out see
+            // which branch was lost, and it stays a TransientSendException, so the consumer still
+            // returns the dispatch to the queue.
+            //
+            // Catching Exception here instead would defeat the classification entirely: every
+            // TransientSendException maps to Requeue, so wrapping a deterministic fault — one
+            // SendFaultClassifier's allow-list deliberately declined to recognise — would requeue a
+            // branch that fails identically on every redelivery, forever. An unrecognised fault has
+            // to leave here raw so the dispatch parks where someone can look at it.
             throw new PostSendException(messageId, executionId, ex);
         }
     }
