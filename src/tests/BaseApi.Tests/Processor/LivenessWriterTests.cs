@@ -50,9 +50,13 @@ public sealed class LivenessWriterTests
     public async Task SetFaultIsLoggedAndSwallowed()
     {
         var db = Substitute.For<IDatabase>();
+        // Matched against the five-parameter (expiry, When, CommandFlags) overload the writer now
+        // names explicitly. The Expiration/ValueCondition matchers this replaces bound a DIFFERENT
+        // overload — the one the compiler used to pick for a bare three-argument call — so they would
+        // silently stop matching the moment the call site was disambiguated.
         db.StringSetAsync(
-                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<Expiration>(),
-                Arg.Any<ValueCondition>(), Arg.Any<CommandFlags>())
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
+                Arg.Any<When>(), Arg.Any<CommandFlags>())
             .Throws(new RedisTimeoutException("timed out", CommandStatus.WaitingInBacklog));
 
         var redis = Substitute.For<IConnectionMultiplexer>();
@@ -100,7 +104,7 @@ public sealed class LivenessWriterTests
             L2ProjectionKeys.PerInstance(processorId, "instance-1"),
             Arg.Any<RedisValue>(),
             TimeSpan.FromSeconds(40),
-            Arg.Any<ValueCondition>(), Arg.Any<CommandFlags>());
+            Arg.Any<When>(), Arg.Any<CommandFlags>());
         await db.Received(1).SetAddAsync(
             L2ProjectionKeys.InstanceIndex(processorId), "instance-1", Arg.Any<CommandFlags>());
         Assert.Empty(log.Records);

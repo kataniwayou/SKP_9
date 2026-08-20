@@ -15,6 +15,17 @@ namespace BaseApi.Service.Features.Schema;
 /// evaluation. If nothing ever touches it, the constructor never runs and the lockdown silently
 /// regresses.
 /// </para>
+///
+/// <para>
+/// <b>This type is deliberately duplicated by
+/// <c>BaseProcessor.Core/Validation/ProcessorJsonSchemaValidator.cs</c></b> — same
+/// <c>Dialect.Default</c>, same <c>SchemaRegistry.Global.Fetch</c> lockdown, same options. Both mutate
+/// process-global library state, and neither can call the other: they live in assemblies that must not
+/// reference each other, since a worker host must not load the web stack. <b>The two must stay in
+/// sync.</b> A dialect or fetch setting changed here and not there means the same schema row evaluates
+/// differently on the API side and the processor side — a divergence no test on either side would
+/// catch alone.
+/// </para>
 /// </summary>
 public static class JsonSchemaConfig
 {

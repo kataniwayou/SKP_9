@@ -51,10 +51,17 @@ public sealed class ProcessorLivenessWriter
             var db = _redis.GetDatabase();
             var ttl = TimeSpan.FromSeconds(DeriveTtlSeconds(entry.Interval));
 
+            // When/flags passed explicitly, matching ProcessedDataHandler. Behaviourally identical to
+            // the bare three-argument call, but StackExchange.Redis overloads that shape between a
+            // keepTtl-bool overload and an Expiration-struct one — the compiler picks silently, and
+            // during Task 7 that trap produced a test that matched a method the code never called.
+            // Naming all five parameters pins the overload for the reader and for the matcher.
             await db.StringSetAsync(
                 L2ProjectionKeys.PerInstance(processorId, instanceId),
                 System.Text.Json.JsonSerializer.Serialize(entry),
-                ttl).ConfigureAwait(false);
+                ttl,
+                When.Always,
+                CommandFlags.None).ConfigureAwait(false);
 
             await db.SetAddAsync(
                 L2ProjectionKeys.InstanceIndex(processorId), instanceId).ConfigureAwait(false);

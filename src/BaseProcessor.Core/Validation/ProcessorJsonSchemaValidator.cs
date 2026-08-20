@@ -17,6 +17,16 @@ namespace BaseProcessor.Core.Validation;
 /// requests to a host of their choosing from inside a message handler. With the global fetcher
 /// returning null the library raises instead, and that surfaces as a business failure.
 /// </para>
+/// <para>
+/// <b>The static constructor and <see cref="DefaultOptions"/> here are a deliberate duplicate of
+/// <c>BaseApi.Service/Features/Schema/JsonSchemaConfig.cs</c></b> — same <c>Dialect.Default</c>, same
+/// <c>SchemaRegistry.Global.Fetch</c> lockdown, same options. Both mutate process-global library
+/// state, and they are duplicated rather than shared because they live in assemblies that must not
+/// reference each other: a processor host does not load <c>BaseApi.Service</c>, and a validator that
+/// did would drag the web stack into a worker. <b>The two must stay in sync.</b> A dialect or fetch
+/// setting changed in one and not the other means the same schema row evaluates differently on the
+/// API side and the processor side — a divergence no test on either side would catch alone.
+/// </para>
 /// </summary>
 public static class ProcessorJsonSchemaValidator
 {
