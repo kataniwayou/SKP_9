@@ -1,13 +1,11 @@
 using System.Text;
 using System.Text.Json;
-using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Processing;
 using BaseApi.Tests.Support;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
-using Microsoft.Extensions.Options;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using StackExchange.Redis;
@@ -49,9 +47,7 @@ public sealed class ProcessedDataHandlerTests
             }
         }
 
-        public ProcessedDataHandler Build(ProcessorLivenessOptions? options = null) => new(
-            Redis, Sender, Context,
-            Options.Create(options ?? new ProcessorLivenessOptions()), Log);
+        public ProcessedDataHandler Build() => new(Redis, Sender, Context, Log);
     }
 
     private static byte[] Body(ProcessedData p)
@@ -87,27 +83,32 @@ public sealed class ProcessedDataHandlerTests
     [Fact]
     public async Task WritesTheOutputUnderTheMessageIdSoAReplayRewritesIt()
     {
+        // The message id is derived, so a redelivered branch lands on this same key and rewrites the
+        // same bytes rather than creating a second blob.
         var h = new Harness();
 
         await h.Build().HandleAsync(Body(Branch(E, """{"number":7}""")), CancellationToken.None);
 
         await h.Db.Received(1).StringSetAsync(
-            L2ProjectionKeys.OutputData(M), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
+            L2ProjectionKeys.ExecutionData(M), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
             Arg.Any<When>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
-    public async Task WritesWithATtlSoAnOrphanedOutputExpires()
+    public async Task WritesWithNoExpirySoNothingVanishesBeforeItsSuccessorRuns()
     {
+        // This blob IS the successor's input — data:{messageId} is read back as data:{entryId}. An
+        // expiry here would delete a workflow's input out from under it if the next step were slow to
+        // be dispatched. Reclaim is explicit: the successor's pre hop deletes it, or the orchestrator
+        // does after a failed step.
         var h = new Harness();
-        TimeSpan? ttl = null;
-
+        TimeSpan? ttl = TimeSpan.MaxValue;
         await h.Db.StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Do<TimeSpan?>(t => ttl = t),
                                   Arg.Any<When>(), Arg.Any<CommandFlags>());
+
         await h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None);
 
-        Assert.NotNull(ttl);
-        Assert.True(ttl!.Value > TimeSpan.Zero);
+        Assert.Null(ttl);
     }
 
     [Fact]
@@ -174,7 +175,7 @@ public sealed class ProcessedDataHandlerTests
         await h.Build().HandleAsync(Body(Branch(E, "not json at all")), CancellationToken.None);
 
         Assert.NotNull(sent);
-        await h.Db.Received(1).StringSetAsync(L2ProjectionKeys.OutputData(M), Arg.Any<RedisValue>(),
+        await h.Db.Received(1).StringSetAsync(L2ProjectionKeys.ExecutionData(M), Arg.Any<RedisValue>(),
                                               Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
     }
 
@@ -210,7 +211,7 @@ public sealed class ProcessedDataHandlerTests
         await h.Build().HandleAsync(Body(Branch(E, """{"number":7}""")), CancellationToken.None);
 
         // Same key, twice.
-        await h.Db.Received(2).StringSetAsync(L2ProjectionKeys.OutputData(M), Arg.Any<RedisValue>(),
+        await h.Db.Received(2).StringSetAsync(L2ProjectionKeys.ExecutionData(M), Arg.Any<RedisValue>(),
                                               Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
         // Same bytes, twice: the second write is a REwrite, so it cannot leave a different value behind.
         Assert.Equal(2, written.Count);
@@ -257,31 +258,6 @@ public sealed class ProcessedDataHandlerTests
         await h.Build().HandleAsync(Body(foreign), CancellationToken.None);
 
         Assert.Equal(P, sent!.ProcessorId);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void RefusesATtlThatWouldMakeEveryWriteFail(int ttlSeconds)
-    {
-        // L2ProjectionKeys.OutputDataTtl derives Random.Shared.Next(ttl, 2 * ttl + 1), so zero gives
-        // TimeSpan.Zero — which Redis rejects on EVERY write, turning every branch into a parked
-        // message with no clue pointing at the config value that caused it. A negative one throws out
-        // of Random.Next instead. Neither is recoverable at run time, so it has to be refused up front.
-        var h = new Harness();
-
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => h.Build(new ProcessorLivenessOptions { ExecutionDataTtlSeconds = ttlSeconds }));
-    }
-
-    [Fact]
-    public void AcceptsTheSmallestTtlThatActuallyWorks()
-    {
-        // One second is degenerate but valid: OutputDataTtl(1) yields 1s or 2s, both of which Redis
-        // accepts. The guard must refuse the broken values, not police the sensible ones.
-        var h = new Harness();
-
-        Assert.NotNull(h.Build(new ProcessorLivenessOptions { ExecutionDataTtlSeconds = 1 }));
     }
 
     [Fact]
