@@ -9,4 +9,8 @@
     <ProjectReference Include="..\Messaging.Transport\Messaging.Transport.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
 </Project>
