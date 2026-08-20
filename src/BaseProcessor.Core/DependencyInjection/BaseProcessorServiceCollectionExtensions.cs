@@ -85,7 +85,9 @@ public static class BaseProcessorServiceCollectionExtensions
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IProcessorContext, ProcessorContext>();
-        services.TryAddSingleton<ISourceHashProvider, AssemblyMetadataSourceHashProvider>();
+        // No ISourceHashProvider here. The hash answers one question — "which row is mine" — and that
+        // is settled before this container exists; Stage 1 registers its own inside the boot. A copy
+        // here would resolve for nobody while reading like a live dependency.
         // Resolved once and shared, so the liveness key, the reply queue and the telemetry's
         // service.instance.id all name this replica identically. TryAdd, so a host that pins a
         // deterministic id — a test, say — wins.
