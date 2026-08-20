@@ -241,6 +241,26 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
+    public async Task StampsOurOwnProcessorIdOnResultsEvenWhenTheDispatchClaimsAnother()
+    {
+        // The branch path is covered below; this covers the OTHER four outbound sites. A result that
+        // echoed the inbound id would misattribute a failure to whichever processor a corrupt or
+        // misrouted dispatch happened to name — and unlike the branch path, nothing downstream would
+        // notice, because a StepFailed carries no key anyone later reads.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        StepFailed? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        var probe = new Probe((_, _) => throw new FailedException("nope"));
+
+        var foreign = Dispatch(E) with { ProcessorId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") };
+        await h.Build(probe).HandleAsync(Body(foreign), CancellationToken.None);
+
+        Assert.Equal(P, sent!.ProcessorId);
+    }
+
+    [Fact]
     public async Task StampsOurOwnProcessorIdOnBranchesEvenWhenTheDispatchClaimsAnother()
     {
         // The dispatch was addressed to OUR queue, so we are the processor it names. Echoing its

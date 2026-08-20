@@ -69,7 +69,22 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
 
     private async Task RunAsync(ProcessDispatch d, CancellationToken ct)
     {
-        var identity = _context.Identity;
+        // ProcessorId on EVERY outbound message comes from OUR OWN identity, never from the inbound
+        // one. The dispatch was addressed to this processor's queue, so we ARE the processor it
+        // names — echoing its field back is the only way the two could ever disagree, and a result
+        // attributed to another processor's id lands in their lineage. Stamping from self makes that
+        // unrepresentable, which is why this design carries no provenance guard anywhere: a check
+        // against a condition that cannot arise reads as a live defence, cannot be tested, and drifts.
+        //
+        // Resolved ONCE, above every early return, so the schema-failure path is covered too. A null
+        // identity here is a framework wiring fault, never a producer or author one: the work queue is
+        // bound only after the processor reaches Healthy, so nothing can be consumed before identity
+        // resolves. Loud is right — it parks the message, preserving it for inspection.
+        var identity = _context.Identity
+            ?? throw new InvalidOperationException(
+                "A dispatch was consumed before identity resolved — the queue must not be bound until then.");
+        var self = identity.Id;
+
         var isSource = d.EntryId == Guid.Empty;
 
         byte[] data;
@@ -102,9 +117,9 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // today — but a source step that did carry one would have empty bytes parsed, throw, and fail a
         // step that was never wrong.
         if (!isSource
-            && !ProcessorJsonSchemaValidator.TryValidate(identity?.InputDefinition, data, out var errors))
+            && !ProcessorJsonSchemaValidator.TryValidate(identity.InputDefinition, data, out var errors))
         {
-            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, d.ProcessorId)
+            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, self)
             {
                 CorrelationId = d.CorrelationId,
                 ExecutionId   = d.ExecutionId,
@@ -115,21 +130,6 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             return;
         }
 
-        // ProcessorId comes from OUR OWN identity, never from the inbound message. The dispatch was
-        // addressed to this processor's queue, so we ARE the processor it names — echoing its field
-        // back is the only way the two could ever disagree, and a branch stamped with someone else's
-        // id would write into their lineage. Stamping from self makes that unrepresentable, which is
-        // why there is no provenance guard anywhere in this design: a check against a condition that
-        // cannot arise reads as a live defence, cannot be tested, and drifts.
-        //
-        // A null identity here is a framework wiring fault, never a producer or author one: the work
-        // queue is bound only after the processor reaches Healthy, so nothing can be consumed before
-        // identity resolves. Loud is right — it parks the message, preserving it for inspection.
-        var self = (_context.Identity
-                    ?? throw new InvalidOperationException(
-                        "A dispatch was consumed before identity resolved — the queue must not be bound until then."))
-                   .Id;
-
         _processor.BeginDispatch(new DispatchState(
             _sender, d.WorkflowId, d.StepId, self, d.CorrelationId, d.EntryId));
         try
@@ -138,7 +138,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         }
         catch (FailedException ex)
         {
-            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, d.ProcessorId)
+            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, self)
             {
                 CorrelationId = d.CorrelationId,
                 ExecutionId   = d.ExecutionId,
@@ -147,7 +147,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         }
         catch (CancelledException ex)
         {
-            await SendAsync(new StepCancelled(d.WorkflowId, d.StepId, d.ProcessorId)
+            await SendAsync(new StepCancelled(d.WorkflowId, d.StepId, self)
             {
                 CorrelationId       = d.CorrelationId,
                 ExecutionId         = d.ExecutionId,
@@ -167,7 +167,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // fragment of the payload, and this text reaches the orchestrator's projections.
             _logger.LogWarning(ex, "the transform faulted — reporting the step failed");
 
-            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, d.ProcessorId)
+            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, self)
             {
                 CorrelationId = d.CorrelationId,
                 ExecutionId   = d.ExecutionId,
