@@ -1,5 +1,6 @@
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestrator.L1;
@@ -38,6 +39,16 @@ namespace Orchestrator.Hydration;
 /// </summary>
 public sealed class HydrationService : BackgroundService
 {
+    /// <summary>
+    /// This loop's own identity: the key its heartbeat is registered under in <c>OrchestratorHost</c>,
+    /// and the name its liveness health check is registered under there too. It lives here rather than
+    /// on <c>OrchestratorHost</c> because it names this loop, not the composition root — a service
+    /// reaching into the host to find its own key would be backwards. The <see cref="FromKeyedServicesAttribute"/>
+    /// below and <c>OrchestratorHost.HydrationLoop</c> both point at this constant so the two cannot
+    /// drift apart.
+    /// </summary>
+    internal const string LoopName = "orchestrator-hydration";
+
     /// <summary>
     /// Ceiling on the retry delay, which doubles from one second up to it. Thirty seconds is the same
     /// cap the processor's startup loops use, and for the same reason: it is short enough that a store
@@ -78,7 +89,7 @@ public sealed class HydrationService : BackgroundService
         HydrationAdmission admission,
         IStartupGate startupGate,
         TimeProvider clock,
-        ILoopHeartbeat heartbeat,
+        [FromKeyedServices(LoopName)] ILoopHeartbeat heartbeat,
         ILogger<HydrationService> logger)
     {
         _reader      = reader ?? throw new ArgumentNullException(nameof(reader));

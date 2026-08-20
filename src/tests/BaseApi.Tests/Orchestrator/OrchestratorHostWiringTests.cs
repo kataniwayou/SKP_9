@@ -31,23 +31,34 @@ public sealed class OrchestratorHostWiringTests
     };
 
     /// <summary>
-    /// Builds leniently — <c>--environment Production</c>, so <c>ServiceProviderOptions.ValidateOnBuild</c>
-    /// stays off — and is what every test below but <see cref="TheHostGraphResolves"/> uses.
+    /// Builds leniently — <c>--environment Production</c> — and is what every test below but
+    /// <see cref="TheHostGraphResolvesExceptTheSchedulerTask10Registers"/> uses.
     /// <para>
-    /// <b>Why not Development, which this file used until Task 8.</b> Development turns
-    /// <c>ValidateOnBuild</c> on, which walks every registered service's constructor graph, including
+    /// <b>Both flags, not one.</b> .NET 8's <c>HostApplicationBuilder</c> derives both
+    /// <c>ServiceProviderOptions.ValidateOnBuild</c> <i>and</i> <c>ValidateScopes</c> from
+    /// <c>IsDevelopment()</c>, and nothing in <c>src/</c> overrides that. So Production turns off scope
+    /// validation too — the check that catches a singleton capturing a scoped service — not only the
+    /// constructor-graph walk. That loss is not incidental here: this task added this host's first
+    /// scoped registrations (<c>ApplyStartHandler</c>/<c>ApplyStopHandler</c>), and Tasks 9-10 add a
+    /// Quartz <c>IScheduler</c> and <c>WorkflowScheduler&lt;TJob&gt;</c> alongside them — captive
+    /// dependency is exactly the class of mistake now undetected by this file, in the same area of the
+    /// graph that just grew.
+    /// </para>
+    /// <para>
+    /// <b>Why not Development, which this file used until Task 8.</b> Development's
+    /// <c>ValidateOnBuild</c> walks every registered service's constructor graph, including
     /// <c>ApplyStartHandler</c>/<c>ApplyStopHandler</c> → <c>WorkflowActivator</c> →
     /// <c>IWorkflowScheduler</c> — and <c>IWorkflowScheduler</c> has no registration until Task 10 (see
-    /// <see cref="TheHostGraphResolves"/> for exactly why). None of the other six tests in this file
-    /// touch that chain — they resolve <c>InstanceId</c>, <c>IRabbitMqTopology</c>,
-    /// <c>IConsumerAdmission</c>, <c>HydrationAdmission</c>, the keyed heartbeat, or health-check
-    /// registrations, none of which sit anywhere near <c>IWorkflowScheduler</c> — so building leniently
-    /// here costs those six tests nothing: every assertion they make is exactly the one they made
-    /// before, and still genuinely proves it. What it gives up is the generic safety net of
-    /// <c>ValidateOnBuild</c> catching some unrelated, hypothetical future wiring mistake for free;
-    /// <see cref="TheHostGraphResolves"/> is where that net is restored, narrowed to the one thing it
-    /// can currently prove. Task 10 registers <c>IWorkflowScheduler</c>, at which point this should go
-    /// back to Development and lenient building should be deleted, per that test's own comment.
+    /// <see cref="TheHostGraphResolvesExceptTheSchedulerTask10Registers"/> for exactly why). None of
+    /// the other six tests in this file touch that chain — they resolve <c>InstanceId</c>,
+    /// <c>IRabbitMqTopology</c>, <c>IConsumerAdmission</c>, <c>HydrationAdmission</c>, the keyed
+    /// heartbeat, or health-check registrations, none of which sit anywhere near
+    /// <c>IWorkflowScheduler</c> — so building leniently here costs those six tests nothing: every
+    /// assertion they make is exactly the one they made before, and still genuinely proves it. What it
+    /// gives up, on top of the constructor-graph walk, is <c>ValidateScopes</c> — a second, currently
+    /// undetected class of mistake, tracked above. Task 10 registers <c>IWorkflowScheduler</c>, at
+    /// which point this should go back to Development and lenient building should be deleted, per that
+    /// test's own comment.
     /// </para>
     /// </summary>
     private static IHost Build() => OrchestratorHost.Create(
@@ -55,7 +66,7 @@ public sealed class OrchestratorHostWiringTests
         cfg => cfg.AddInMemoryCollection(Config));
 
     [Fact]
-    public void TheHostGraphResolves()
+    public void TheHostGraphResolvesExceptTheSchedulerTask10Registers()
     {
         // Development turns on ServiceProviderOptions.ValidateOnBuild, which checks every registered
         // service's constructor graph without instantiating anything. Task 8 registered
@@ -70,12 +81,16 @@ public sealed class OrchestratorHostWiringTests
         // So a whole-graph ValidateOnBuild genuinely cannot pass until Task 10 supplies both — this is
         // not a defect to fix here.
         //
-        // This test used to be `Assert.NotNull(host)` after a lenient `Build()`. It cannot assert that
-        // any more, so it asserts the narrower thing that is true now: building strictly throws, and it
-        // throws for exactly this one, already-understood reason — every InvalidOperationException in
-        // the AggregateException names IWorkflowScheduler, not some other, unrelated registration gap.
-        // TASK 10 MUST restore this to `using var host = Build(); Assert.NotNull(host);` (with `Build()`
-        // switched back to Development — see its doc comment) once IWorkflowScheduler is registered.
+        // This test used to be TheHostGraphResolves, asserting `Assert.NotNull(host)` after a lenient
+        // `Build()`. It cannot assert that any more, so it is renamed to say what it currently means —
+        // a green TheHostGraphResolves next to a provably unresolvable graph would be a trap for
+        // anyone reading a CI summary rather than this file — and it asserts the narrower thing that is
+        // true now: building strictly throws, and it throws for exactly this one, already-understood
+        // reason — every InvalidOperationException in the AggregateException names IWorkflowScheduler,
+        // not some other, unrelated registration gap.
+        // TASK 10 MUST restore this to method name TheHostGraphResolves, body
+        // `using var host = Build(); Assert.NotNull(host);` (with `Build()` switched back to
+        // Development — see its doc comment) once IWorkflowScheduler is registered.
         var ex = Assert.Throws<AggregateException>(() => OrchestratorHost.Create(
             ["--environment", "Development"],
             cfg => cfg.AddInMemoryCollection(Config)));

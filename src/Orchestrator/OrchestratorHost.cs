@@ -38,8 +38,13 @@ public static class OrchestratorHost
     /// Heartbeat key for the hydration loop, and the name its liveness check is registered under. One
     /// holder per loop — see <see cref="ILoopHeartbeat"/> — because a holder shared between two loops
     /// lets the live one's beat cover for the dead one.
+    /// <para>
+    /// Points at <see cref="HydrationService.LoopName"/> rather than restating the literal — the loop
+    /// names itself, and a composition root reading that name from the loop (not the other way round)
+    /// is what keeps the two from drifting apart.
+    /// </para>
     /// </summary>
-    public const string HydrationLoop = "orchestrator-hydration";
+    public const string HydrationLoop = HydrationService.LoopName;
 
     /// <summary>
     /// The production entry point: builds the host, starts it, and returns it running.
@@ -119,8 +124,12 @@ public static class OrchestratorHost
                 HealthStatus.Unhealthy,
                 ["live"]));
 
-        builder.Services.AddHostedService(sp => ActivatorUtilities.CreateInstance<HydrationService>(
-            sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(HydrationLoop)));
+        // A plain type-based registration, not a factory: HydrationService's keyed ILoopHeartbeat
+        // parameter carries [FromKeyedServices(HydrationService.LoopName)], which the built-in
+        // container resolves on its own. The factory this replaced was shielding this loop's own
+        // dependency graph from ValidateOnBuild — collapsing it puts HydrationService under the same
+        // validation as everything else once Task 10 registers IWorkflowScheduler.
+        builder.Services.AddHostedService<HydrationService>();
 
         // The two consumers that keep a running replica in step with L2 once hydration has admitted
         // it: the start and stop announcements the API publishes after each projection write. Scoped,
