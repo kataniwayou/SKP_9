@@ -53,6 +53,16 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger  = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        // The one configured value here that has no safe wrong setting. L2ProjectionKeys.OutputDataTtl
+        // derives Random.Shared.Next(ttl, 2 * ttl + 1), so zero yields TimeSpan.Zero — which Redis
+        // rejects on EVERY write, so every branch parks with nothing pointing at the config value that
+        // did it — and a negative one throws out of Random.Next. Neither is recoverable at run time.
+        // ProcessorLivenessOptions carries no validation of its own and this is the value's only
+        // reader, so the guard lives here.
+        ArgumentOutOfRangeException.ThrowIfLessThan(
+            _options.ExecutionDataTtlSeconds, 1,
+            $"{nameof(options)}.{nameof(ProcessorLivenessOptions.ExecutionDataTtlSeconds)}");
     }
 
     public string MessageType => MessageTypes.ProcessedData;
