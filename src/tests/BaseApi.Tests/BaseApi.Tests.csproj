@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\Messaging.Transport\Messaging.Transport.csproj" />
     <ProjectReference Include="..\..\BaseProcessor.Core\BaseProcessor.Core.csproj" />
     <ProjectReference Include="..\..\Processor.Sample\Processor.Sample.csproj" />
+    <ProjectReference Include="..\..\Orchestrator\Orchestrator.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The orchestrator control plane: a thin shell, mirroring Processor.Sample's shape. It carries no
+    scheduling, hydration or leader-election logic of its own yet — those arrive in later tasks, each
+    extending OrchestratorHost — and today it declares its topology and nothing else.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare either
+    here.
+
+    ProjectReference is BaseConsole.Core and Messaging.Contracts ONLY. No reference to the web API's
+    own projects is permitted from this project: the orchestrator is a broker/Redis consumer of the
+    API's projections, never a caller into API-side code, and a ProjectReference the other way would
+    let that boundary erode silently.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Orchestrator</RootNamespace>
+    <AssemblyName>Orchestrator</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- BaseProcessor.Core.csproj:14 and Messaging.Transport.csproj:6 carry the same idiom: it lets a
+         test drive an internal loop body directly rather than only through its public surface. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BaseConsole.Core\BaseConsole.Core.csproj" />
+    <ProjectReference Include="..\Messaging.Contracts\Messaging.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Quartz.Extensions.Hosting" />
+    <PackageReference Include="Cronos" />
+    <PackageReference Include="KubernetesClient" />
+  </ItemGroup>
+
+</Project>
