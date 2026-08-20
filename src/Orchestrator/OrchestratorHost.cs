@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Orchestrator.Hydration;
+using Orchestrator.L1;
 using Orchestrator.Messaging;
 
 namespace Orchestrator;
@@ -76,6 +77,19 @@ public static class OrchestratorHost
         builder.Services.AddBaseConsoleHealth(builder.Configuration);
 
         builder.Services.AddSingleton<IRabbitMqTopology>(_ => new OrchestratorTopology(instanceId));
+
+        // L1: the in-memory mirror of L2, and the single activation path that fills it. Registered
+        // here rather than left for each caller to new one up, because both hydration (below) and the
+        // apply handlers (below that) are constructor-injected consumers of the same three instances —
+        // one store, one reader, one activator per replica, not one per caller.
+        //
+        // WorkflowActivator itself still cannot be fully validated: its IWorkflowScheduler parameter
+        // has no registration yet. Its only implementation, WorkflowScheduler<TJob>, is closed over a
+        // fire job Task 9 has not written, and nothing here registers a Quartz IScheduler. That is the
+        // one gap left for Task 10 to close — see OrchestratorHostWiringTests.TheHostGraphResolves.
+        builder.Services.AddSingleton<WorkflowL1Store>();
+        builder.Services.AddSingleton<L2WorkflowReader>();
+        builder.Services.AddSingleton<WorkflowActivator>();
 
         // Loop 2 and its admission latch. The position of the next two lines is the point of them
         // being here at all: AddBaseConsoleGating below resolves IConsumerAdmission with
