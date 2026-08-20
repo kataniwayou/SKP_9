@@ -1,10 +1,14 @@
 using BaseConsole.Core.DependencyInjection;
+using BaseConsole.Core.Health;
+using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using Orchestrator.Hydration;
 using Orchestrator.Messaging;
 
 namespace Orchestrator;
@@ -19,15 +23,23 @@ namespace Orchestrator;
 /// there is no window in which the host does not yet know who it is.
 /// </para>
 /// <para>
-/// <b>Registrations run in a flat, ordered block rather than a fluent chain</b> so that a later task
-/// can insert a line ahead of <see cref="ConsoleRedisServiceCollectionExtensions.AddBaseConsoleGating"/>
-/// without restructuring anything around it — that is exactly where the hydration-backed
-/// <c>IConsumerAdmission</c> a later task adds must land, since gating resolves it with
-/// <c>TryAddSingleton</c> and the first registration wins.
+/// <b>Registrations run in a flat, ordered block rather than a fluent chain</b> so that a line can be
+/// inserted ahead of <see cref="ConsoleRedisServiceCollectionExtensions.AddBaseConsoleGating"/> without
+/// restructuring anything around it. <see cref="Hydration.HydrationAdmission"/> is why that matters and
+/// is already there: gating resolves <see cref="IConsumerAdmission"/> with <c>TryAddSingleton</c>, so
+/// the first registration wins and one made below that call would be discarded in silence. Anything
+/// added later that gating also <c>TryAdd</c>s belongs above it too.
 /// </para>
 /// </summary>
 public static class OrchestratorHost
 {
+    /// <summary>
+    /// Heartbeat key for the hydration loop, and the name its liveness check is registered under. One
+    /// holder per loop — see <see cref="ILoopHeartbeat"/> — because a holder shared between two loops
+    /// lets the live one's beat cover for the dead one.
+    /// </summary>
+    public const string HydrationLoop = "orchestrator-hydration";
+
     /// <summary>
     /// The production entry point: builds the host, starts it, and returns it running.
     /// </summary>
@@ -65,9 +77,37 @@ public static class OrchestratorHost
 
         builder.Services.AddSingleton<IRabbitMqTopology>(_ => new OrchestratorTopology(instanceId));
 
-        // A later task's hydration-backed IConsumerAdmission registers directly above this call — see
-        // the type remarks — so that AddBaseConsoleGating's TryAddSingleton<IConsumerAdmission> leaves
-        // it alone instead of falling back to AlwaysOpenAdmission.
+        // Loop 2 and its admission latch. The position of the next two lines is the point of them
+        // being here at all: AddBaseConsoleGating below resolves IConsumerAdmission with
+        // TryAddSingleton, so a registration made after it loses to AlwaysOpenAdmission without
+        // failing and without logging, and the replica then consumes announcements before it has
+        // mirrored L2. One instance under two registrations, not two instances: the loop has to open
+        // the latch the consumer reads.
+        builder.Services.AddSingleton<HydrationAdmission>();
+        builder.Services.AddSingleton<IConsumerAdmission>(
+            sp => sp.GetRequiredService<HydrationAdmission>());
+
+        builder.Services.AddKeyedSingleton<ILoopHeartbeat>(
+            HydrationLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
+
+        // A heartbeat nobody reads proves nothing. The window is HydrationService's own backoff cap
+        // times its stale factor, derived there so it cannot fall below the delay it has to cover.
+        // Tagged `live` and nothing else: a hydration loop still retrying an unreachable L2 is this
+        // design working, and only a loop that has stopped iterating is worth a restart.
+        builder.Services.AddHealthChecks()
+            .Add(new HealthCheckRegistration(
+                HydrationLoop,
+                sp => new LoopLivenessHealthCheck(
+                    sp.GetRequiredKeyedService<ILoopHeartbeat>(HydrationLoop),
+                    HydrationService.LivenessWindow,
+                    "hydration",
+                    sp.GetRequiredService<TimeProvider>()),
+                HealthStatus.Unhealthy,
+                ["live"]));
+
+        builder.Services.AddHostedService(sp => ActivatorUtilities.CreateInstance<HydrationService>(
+            sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(HydrationLoop)));
+
         builder.Services.AddBaseConsoleGating(
             builder.Configuration, OrchestratorFanout.PerReplica(instanceId.Value));
 
