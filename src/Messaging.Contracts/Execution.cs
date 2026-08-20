@@ -3,9 +3,10 @@ namespace Messaging.Contracts;
 /// <summary>
 /// Orchestrator to processor: run one step. Sent to <see cref="ProcessorQueues.Work"/>.
 /// <para>
-/// <b>There is no message id, deliberately.</b> The pre hop needs no delivery identity of its own —
-/// it writes nothing and reclaims nothing, so there is no key to be stable about. The identity that
-/// matters is minted when the author sends to post, where it becomes an L2 key.
+/// <b>There is no message id, deliberately.</b> The pre hop's one store mutation is deleting
+/// <see cref="EntryId"/> once the author returns, and that key already rides the body — nothing here
+/// needs a minted identity of its own to be stable about. The identity that matters is minted when the
+/// author sends to post, where it becomes an L2 key.
 /// </para>
 /// <para>
 /// <see cref="EntryId"/> is the L2 key holding this step's input, or <see cref="Guid.Empty"/> for a
@@ -31,8 +32,10 @@ public sealed record ProcessDispatch(Guid WorkflowId, Guid StepId, Guid Processo
 /// names, which turns a replayed delivery into a rewrite of the same bytes rather than a second blob.
 /// </para>
 /// <para>
-/// <see cref="EntryId"/> is the input key the post handler reclaims. It is carried here rather than
-/// deleted by the pre handler because pre must leave the input intact for any redelivery of itself.
+/// <see cref="EntryId"/> is the input key this branch was produced from. Nothing reclaims it on this
+/// hop — the pre handler deletes it once the author's transform returns — so it rides along purely
+/// for the log scope, which is what lets a branch's records be traced back to the input that
+/// produced them.
 /// </para>
 /// </summary>
 public sealed record ProcessedData(Guid WorkflowId, Guid StepId, Guid ProcessorId)

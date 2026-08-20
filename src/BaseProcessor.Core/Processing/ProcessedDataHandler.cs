@@ -10,18 +10,12 @@ using StackExchange.Redis;
 namespace BaseProcessor.Core.Processing;
 
 /// <summary>
-/// Finishes one branch: reclaim the input, validate the output, persist it, report the outcome.
+/// Finishes one branch: validate the output, persist it, report the outcome.
 /// <para>
 /// <b>Every step is keyed by a message id that rides the message body</b>, so a redelivery repeats
-/// the sequence exactly — the delete no-ops on an absent key, the write rewrites the same key with
-/// the same bytes, the result send repeats. That idempotence is what lets this handler use a plain
-/// NACK as its whole recovery mechanism.
-/// </para>
-/// <para>
-/// <b>The delete goes first, and not merely because the input is finished with.</b> It is the most
-/// failure-prone operation here, so it belongs before the ones whose repetition costs something:
-/// delete last and a failed delete replays a write and a result send, so the orchestrator sees a
-/// duplicate result; delete first and a failed delete replays only itself.
+/// the sequence exactly — the write rewrites the same key with the same bytes, the result send
+/// repeats. That idempotence is what lets this handler use a plain NACK as its whole recovery
+/// mechanism.
 /// </para>
 /// <para>
 /// <b>The output is written to <c>data:{messageId}</c>, which is the successor's input key
@@ -101,12 +95,6 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
         }
 
         var db = _redis.GetDatabase();
-
-        // A source step had no input key to begin with.
-        if (p.EntryId != Guid.Empty)
-        {
-            await db.KeyDeleteAsync(L2ProjectionKeys.ExecutionData(p.EntryId)).ConfigureAwait(false);
-        }
 
         if (!ProcessorJsonSchemaValidator.TryValidate(identity.OutputDefinition, p.Data, out var errors))
         {

@@ -36,7 +36,6 @@ public sealed class ProcessedDataHandlerTests
             Redis.GetDatabase().Returns(Db);
             Db.StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
                               Arg.Any<When>(), Arg.Any<CommandFlags>()).Returns(true);
-            Db.KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(true);
 
             var outId = Guid.Parse("88888888-8888-8888-8888-888888888888");
             Context.SetIdentity(new ProcessorIdentityFound(
@@ -61,21 +60,14 @@ public sealed class ProcessedDataHandlerTests
         };
 
     [Fact]
-    public async Task ReclaimsTheInputKeyFirst()
+    public async Task ReclaimsNothingAtAll()
     {
+        // The pre handler owns the reclaim now: it deletes the input once its author's transform
+        // returns, which is the only point at which every branch is known to have been sent. A delete
+        // here would race the pre hop of a sibling branch's successor.
         var h = new Harness();
 
         await h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None);
-
-        await h.Db.Received(1).KeyDeleteAsync(L2ProjectionKeys.ExecutionData(E), Arg.Any<CommandFlags>());
-    }
-
-    [Fact]
-    public async Task LeavesNothingToReclaimForASourceStep()
-    {
-        var h = new Harness();
-
-        await h.Build().HandleAsync(Body(Branch(Guid.Empty)), CancellationToken.None);
 
         await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
@@ -182,8 +174,11 @@ public sealed class ProcessedDataHandlerTests
     [Fact]
     public async Task LetsAStoreFaultEscapeSoTheBranchIsRequeued()
     {
+        // The reclaim moved to the pre handler, so the write is this handler's only remaining store
+        // call — and a fault on it must still propagate rather than being swallowed.
         var h = new Harness();
-        h.Db.KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+        h.Db.StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
+                            Arg.Any<When>(), Arg.Any<CommandFlags>())
             .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
 
         await Assert.ThrowsAsync<RedisConnectionException>(
@@ -193,16 +188,13 @@ public sealed class ProcessedDataHandlerTests
     [Fact]
     public async Task IsIdempotentAcrossAReplay()
     {
-        // The delete no-ops on an already-absent key and the write rewrites the same key with the same
-        // bytes, so running the handler twice leaves the state one run leaves. Counting two writes
-        // would not show that — two writes of DIFFERENT bytes to the same key, or a second run that
-        // skipped the reclaim, both satisfy a count. So capture what each run actually issued.
+        // The write rewrites the same key with the same bytes, so running the handler twice leaves the
+        // state one run leaves. Counting two writes would not show that — two writes of DIFFERENT bytes
+        // to the same key would also satisfy a count. So capture what each run actually issued.
         var h = new Harness();
         var written = new List<byte[]>();
-        var deleted = new List<RedisKey>();
         await h.Db.StringSetAsync(Arg.Any<RedisKey>(), Arg.Do<RedisValue>(v => written.Add((byte[])v!)),
                                   Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
-        await h.Db.KeyDeleteAsync(Arg.Do<RedisKey>(k => deleted.Add(k)), Arg.Any<CommandFlags>());
         var completed = new List<StepCompleted>();
         await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCompleted>(completed.Add),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
@@ -217,8 +209,6 @@ public sealed class ProcessedDataHandlerTests
         Assert.Equal(2, written.Count);
         Assert.Equal("""{"number":7}""", Encoding.UTF8.GetString(written[0]));
         Assert.Equal(written[0], written[1]);
-        // The reclaim is part of the repeated sequence, not something the first run consumed.
-        Assert.Equal([L2ProjectionKeys.ExecutionData(E), L2ProjectionKeys.ExecutionData(E)], deleted);
         // And the outcome reported is the same one, naming the same output key.
         Assert.Equal(2, completed.Count);
         Assert.Equal(completed[0].EntryId, completed[1].EntryId);
