@@ -26,14 +26,21 @@ public static class ProcessorJsonSchemaValidator
         SchemaRegistry.Global.Fetch = (_, _) => null;   // no outbound $ref fetch
     }
 
-    /// <summary>Referencing this fires the lockdown constructor before any evaluation runs.</summary>
+    /// <summary>
+    /// Shared evaluation options.
+    /// <para>
+    /// The lockdown is guaranteed by this type having an <i>explicit</i> static constructor, which
+    /// disables <c>beforefieldinit</c> and so runs before any static member access — including
+    /// <see cref="TryValidate"/> itself. Touching this property is not what arms it.
+    /// </para>
+    /// </summary>
     public static EvaluationOptions DefaultOptions { get; } = new() { OutputFormat = OutputFormat.List };
 
     /// <summary>
     /// True when <paramref name="data"/> satisfies <paramref name="definition"/>. A null or
     /// whitespace definition skips validation and returns true — bytes are never decoded without a
     /// schema asking for it. Every failure path fills <paramref name="errors"/> and returns false;
-    /// none of them throw.
+    /// <b>none of them throw, for any input.</b>
     /// </summary>
     public static bool TryValidate(string? definition, byte[] data, out IReadOnlyList<string> errors)
     {
@@ -44,61 +51,93 @@ public static class ProcessorJsonSchemaValidator
             return true;
         }
 
-        JsonSchema schema;
+        // The outer net. The specific catches below produce better diagnostics for the cases worth
+        // naming, but the JSON Schema keyword surface is large and each keyword may throw its own
+        // type from deep inside the library: a bad `pattern` regex raises RegexParseException from
+        // FromText, and a definition that is valid JSON but not an object or boolean at the root
+        // raises ArgumentException. Enumerating them is a losing game, and losing it means an
+        // exception escapes into a message handler that will then PARK the message instead of
+        // reporting a failed step — the one outcome this method exists to prevent. A malformed row in
+        // the schema table must always be a business failure, never a crash.
         try
         {
-            schema = JsonSchema.FromText(definition);
-        }
-        catch (Exception ex) when (ex is JsonException or JsonSchemaException)
-        {
-            errors = ["Schema definition is not valid JSON Schema."];
-            return false;
-        }
-
-        JsonDocument doc;
-        try
-        {
-            doc = JsonDocument.Parse(data);
-        }
-        catch (JsonException)
-        {
-            errors = ["Data is not valid JSON/UTF-8."];
-            return false;
-        }
-
-        using (doc)
-        {
-            EvaluationResults results;
+            JsonSchema schema;
             try
             {
-                results = schema.Evaluate(doc.RootElement, DefaultOptions);
+                schema = JsonSchema.FromText(definition);
             }
-            catch (JsonSchemaException)
+            catch (Exception ex) when (ex is JsonException or JsonSchemaException)
             {
-                // An unresolvable $ref — the lockdown holding, not a fault to crash on.
-                errors = ["Schema definition could not be evaluated (unresolved $ref)."];
+                errors = ["Schema definition is not valid JSON Schema."];
                 return false;
             }
 
-            if (results.IsValid)
+            JsonDocument doc;
+            try
             {
-                return true;
+                doc = JsonDocument.Parse(data);
+            }
+            catch (JsonException)
+            {
+                errors = ["Data is not valid JSON/UTF-8."];
+                return false;
             }
 
-            // Instance locations and rule names only. These strings reach StepFailed and the
-            // orchestrator's projections, so a value must never appear among them.
-            var flat = (results.Details ?? [])
-                .Where(d => d.Errors is { Count: > 0 })
-                .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Value}"))
-                .ToList();
-
-            if (flat.Count == 0 && results.Errors is { Count: > 0 })
+            using (doc)
             {
-                flat = results.Errors.Select(kv => $"{results.InstanceLocation}: {kv.Value}").ToList();
-            }
+                EvaluationResults results;
+                try
+                {
+                    results = schema.Evaluate(doc.RootElement, DefaultOptions);
+                }
+                catch (JsonSchemaException)
+                {
+                    // An unresolvable $ref — the lockdown holding, not a fault to crash on.
+                    errors = ["Schema definition could not be evaluated (unresolved $ref)."];
+                    return false;
+                }
 
-            errors = flat;
+                if (results.IsValid)
+                {
+                    return true;
+                }
+
+                errors = Flatten(results);
+                return false;
+            }
+        }
+        catch
+        {
+            errors = ["Schema definition could not be evaluated."];
             return false;
         }
+    }
+
+    /// <summary>
+    /// Turns a failed evaluation into instance locations and keyword names — and nothing else.
+    /// <para>
+    /// <b>The library's own error text is deliberately discarded.</b> These strings reach
+    /// <c>StepFailed</c> and the orchestrator's projections, and several keywords embed the offending
+    /// instance value in their message: <c>minimum</c> renders "-999888 should be at least 18",
+    /// <c>maximum</c> and <c>multipleOf</c> likewise. A payload's account balance, age or numeric
+    /// token would land in a projection an operator can read. Which keywords do this is a property of
+    /// the library version, not of anything we control, so an allow-list of "safe" messages would
+    /// need re-auditing on every upgrade. Location plus keyword says where and which rule, is
+    /// sufficient to diagnose, and cannot leak by construction.
+    /// </para>
+    /// </summary>
+    private static List<string> Flatten(EvaluationResults results)
+    {
+        var flat = (results.Details ?? [])
+            .Where(d => d.Errors is { Count: > 0 })
+            .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Key}"))
+            .ToList();
+
+        if (flat.Count == 0 && results.Errors is { Count: > 0 })
+        {
+            flat = results.Errors.Select(kv => $"{results.InstanceLocation}: {kv.Key}").ToList();
+        }
+
+        return flat;
     }
 }

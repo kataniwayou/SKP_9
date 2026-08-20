@@ -72,4 +72,50 @@ public sealed class ProcessorJsonSchemaValidatorTests
 
         Assert.DoesNotContain(errors, e => e.Contains("topsecret", StringComparison.Ordinal));
     }
+
+    public static TheoryData<string, string> LeakyKeywords() => new()
+    {
+        // Every one of these keywords embeds the offending instance value in the library's own error
+        // message — "-999888 should be at least 18", and so on. The `type` case above happens not to,
+        // which is exactly why testing only `type` gave false confidence.
+        { """{"type":"object","properties":{"n":{"minimum":18}}}""",    """{"n":-999888}""" },
+        { """{"type":"object","properties":{"n":{"maximum":18}}}""",    """{"n":777666}"""  },
+        { """{"type":"object","properties":{"n":{"multipleOf":5}}}""",  """{"n":123457}"""  },
+    };
+
+    [Theory]
+    [MemberData(nameof(LeakyKeywords))]
+    public void NoErrorMessageQuotesANumericValueEither(string schema, string json)
+    {
+        // The digits are distinctive so a substring match cannot pass by accident.
+        var value = System.Text.RegularExpressions.Regex.Match(json, @"-?\d+").Value;
+
+        Assert.False(ProcessorJsonSchemaValidator.TryValidate(schema, Utf8(json), out var errors));
+        Assert.NotEmpty(errors);
+        Assert.DoesNotContain(errors, e => e.Contains(value, StringComparison.Ordinal));
+    }
+
+    public static TheoryData<string> MalformedSchemasThatAreValidJson() =>
+    [
+        // Valid JSON, but not a schema. Both of these throw from inside JsonSchema.FromText with
+        // exception types the specific catches do not name — a RegexParseException and an
+        // ArgumentException respectively. Either escaping would park a message instead of reporting a
+        // failed step.
+        """{"type":"object","properties":{"a":{"type":"string","pattern":"("}}}""",
+        """"just a string"""",
+    ];
+
+    [Theory]
+    [MemberData(nameof(MalformedSchemasThatAreValidJson))]
+    public void ReturnsAVerdictForASchemaThatIsValidJsonButNotAValidSchema(string definition)
+    {
+        // A malformed row in the schema table is a business failure, never a crash. The row can be
+        // fixed while the processor keeps running.
+        var thrown = Record.Exception(
+            () => ProcessorJsonSchemaValidator.TryValidate(definition, Utf8("""{"a":"x"}"""), out _));
+
+        Assert.Null(thrown);
+        Assert.False(ProcessorJsonSchemaValidator.TryValidate(definition, Utf8("""{"a":"x"}"""), out var errors));
+        Assert.NotEmpty(errors);
+    }
 }
