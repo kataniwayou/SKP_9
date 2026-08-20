@@ -120,13 +120,17 @@ public sealed class RpcQueueConsumer : BackgroundService
         {
             if (string.IsNullOrWhiteSpace(replyTo))
             {
-                _logger.LogWarning("query on {Queue} carried no reply address — dropping", _queue);
+                _logger.LogWarning(
+                    "query on {Queue} carried no reply address — dropping {CorrelationId}",
+                    _queue, correlationId);
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(requestType))
             {
-                _logger.LogWarning("query on {Queue} carried no type header — dropping", _queue);
+                _logger.LogWarning(
+                    "query on {Queue} carried no type header — dropping {CorrelationId}",
+                    _queue, correlationId);
                 return;
             }
 
@@ -138,7 +142,8 @@ public sealed class RpcQueueConsumer : BackgroundService
             if (handler is null)
             {
                 _logger.LogWarning(
-                    "no handler for query type {Type} on {Queue} — dropping", requestType, _queue);
+                    "no handler for query type {Type} on {Queue} — dropping {CorrelationId}",
+                    requestType, _queue, correlationId);
                 return;
             }
 
@@ -165,8 +170,12 @@ public sealed class RpcQueueConsumer : BackgroundService
         catch (Exception ex)
         {
             // The caller is waiting and will time out; there is nothing useful to send them, and no
-            // reason to keep the request. Log it here, where the detail is available.
-            _logger.LogError(ex, "query of type {Type} on {Queue} failed", requestType, _queue);
+            // reason to keep the request. The correlation id is what lets an operator match this line
+            // to the startup loop still retrying on the other side — these queues have no dead-letter
+            // exchange, so this record is the only artifact the failure leaves.
+            _logger.LogError(
+                ex, "query of type {Type} on {Queue} failed {CorrelationId}",
+                requestType, _queue, correlationId);
         }
         finally
         {
