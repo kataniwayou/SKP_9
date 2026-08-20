@@ -114,7 +114,7 @@ public sealed class ProcessedDataHandlerTests
     [Fact]
     public async Task ReportsCompletionCarryingTheOutputKey()
     {
-        // The orchestrator relocates this key into one input key per successor, so it has to be the
+        // The successor reads this key straight through as its input, so it has to be the
         // key just written rather than the input that was reclaimed.
         var h = new Harness();
         StepCompleted? sent = null;
