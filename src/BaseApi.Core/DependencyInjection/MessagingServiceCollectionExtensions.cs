@@ -54,6 +54,7 @@ public static class MessagingServiceCollectionExtensions
         // there is no second implementation to swap in.
         services.TryAddSingleton<RabbitMqConnection>();
         services.TryAddSingleton<IQueueSender, QueueSender>();
+        services.TryAddSingleton<IQueueFanoutPublisher, QueueFanoutPublisher>();
 
         return services;
     }
