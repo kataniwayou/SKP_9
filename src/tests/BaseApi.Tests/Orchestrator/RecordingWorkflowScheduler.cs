@@ -29,6 +29,13 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
     public int LiveJobCount => Scheduled.Count - Unscheduled.Count;
 
     /// <summary>
+    /// How many times a fire armed its own successor. Derived from <see cref="Rescheduled"/> rather
+    /// than counted separately, for the same reason <see cref="LiveJobCount"/> is derived: a counter
+    /// kept alongside the list is a second record of one fact, and the two can disagree.
+    /// </summary>
+    public int RescheduleCount => Rescheduled.Count;
+
+    /// <summary>
     /// Every call in the order it arrived, as method names. The three typed lists above answer "what
     /// was it asked to do", which is what most assertions want; they cannot answer "in what order",
     /// because a per-method list has no way to interleave with another one. Teardown-before-apply is
