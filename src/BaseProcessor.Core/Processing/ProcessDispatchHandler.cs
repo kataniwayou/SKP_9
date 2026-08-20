@@ -124,8 +124,22 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
 
             if (raw.IsNullOrEmpty)
             {
-                // The post handler already reclaimed this key, so the step completed and this is a
-                // duplicate delivery. Reporting a failure would overwrite a finished workflow's outcome.
+                // Read as "a post handler already reclaimed this key", and returning is right for that
+                // reading: reporting a failure would overwrite a finished workflow's outcome.
+                //
+                // THIS DEPENDS ON AN ASSUMPTION THE WIRING DOES NOT ENFORCE: that at most one dispatch
+                // per entry key is in flight across the whole deployment. Under multiple replicas —
+                // which ProcessorLivenessWriter's per-instance keys imply is intended — the absent key
+                // has a second reading. Replica A fans out, branch 1 sends, branch 2's send fails and
+                // the dispatch is requeued; replica B consumes branch 1's ProcessedData and deletes
+                // data:{entryId}; the redelivered dispatch then finds the key absent, reads it as
+                // completion, and returns. Branch 2 is never sent and the step stalls forever with no
+                // error anywhere.
+                //
+                // Not fixed here on purpose. Distinguishing the two readings needs state this handler
+                // does not have, and guessing the other way — running on an absent key — would fork
+                // finished workflows, which is worse. The stuck-step reaper is what closes it; see the
+                // known gaps in the execution-path plan.
                 _logger.LogInformation("entry absent — treating as a duplicate delivery");
                 return;
             }
