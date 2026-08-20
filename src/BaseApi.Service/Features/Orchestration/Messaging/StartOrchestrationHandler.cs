@@ -31,14 +31,17 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
 {
     private readonly L2Cleanup _cleanup;
     private readonly L2ProjectionWriter _writer;
+    private readonly IQueueFanoutPublisher _publisher;
     private readonly ILogger<StartOrchestrationHandler> _logger;
 
     public StartOrchestrationHandler(
-        L2Cleanup cleanup, L2ProjectionWriter writer, ILogger<StartOrchestrationHandler> logger)
+        L2Cleanup cleanup, L2ProjectionWriter writer, IQueueFanoutPublisher publisher,
+        ILogger<StartOrchestrationHandler> logger)
     {
-        _cleanup = cleanup ?? throw new ArgumentNullException(nameof(cleanup));
-        _writer  = writer ?? throw new ArgumentNullException(nameof(writer));
-        _logger  = logger ?? throw new ArgumentNullException(nameof(logger));
+        _cleanup   = cleanup ?? throw new ArgumentNullException(nameof(cleanup));
+        _writer    = writer ?? throw new ArgumentNullException(nameof(writer));
+        _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        _logger    = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public string MessageType => MessageTypes.StartOrchestration;
@@ -65,5 +68,17 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
 
         await _cleanup.RemoveAsync(workflow.WorkflowId, ct).ConfigureAwait(false);
         await _writer.WriteAsync(workflow, ct).ConfigureAwait(false);
+
+        // The announcement goes out only now, because only now is "validated AND written" true. The
+        // service validated before it sent this message; the write happened two lines up. A replica
+        // reading L2 on an announcement published any earlier could see the previous definition, or
+        // none, and could not distinguish that from a workflow that was never started.
+        //
+        // A failure here escapes as a transient send fault, so the delivery is requeued and the whole
+        // handler runs again — the clean and write are unconditional and idempotent by design, so the
+        // repeat is safe, and the replicas learn about the projection on the retry.
+        await _publisher.PublishAsync(
+            OrchestratorFanout.Exchange, MessageTypes.OrchestrationStarted,
+            new OrchestrationStarted(workflow.WorkflowId), ct).ConfigureAwait(false);
     }
 }

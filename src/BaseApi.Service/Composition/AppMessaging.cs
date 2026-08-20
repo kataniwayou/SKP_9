@@ -41,6 +41,7 @@ internal static class AppMessaging
         // Topology is declared as part of opening the connection, before anything sends or consumes,
         // so a queue exists even while its consumer is paused.
         services.AddSingleton<IRabbitMqTopology, OrchestrationTopology>();
+        services.AddSingleton<IRabbitMqTopology, FanoutTopology>();
         services.AddSingleton<IRabbitMqTopology, QueryTopology>();
 
         // The gated control consumer, and the two handlers it dispatches to by message type.
