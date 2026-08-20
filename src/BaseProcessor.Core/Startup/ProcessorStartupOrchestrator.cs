@@ -43,9 +43,16 @@ namespace BaseProcessor.Core.Startup;
 /// shorter than that gap and let a replica expire its own key between its own writes.
 /// </para>
 /// <para>
-/// <b>When the dispatch endpoint is added, it must be bound before <c>MarkHealthy</c>.</b> The
-/// heartbeat publishes <c>Healthy</c> to L2 only once that latch flips, and the orchestrator admits
-/// only healthy processors — so binding afterwards would advertise a queue that does not exist yet.
+/// <b>The dispatch endpoint's binding is NOT sequenced against <c>MarkHealthy</c> today, in either
+/// direction.</b> This paragraph used to require binding before the latch flips, on the reasoning
+/// that the heartbeat publishes <c>Healthy</c> to L2 only once it does and the orchestrator admits
+/// only healthy processors, so binding afterwards would advertise a queue nobody is serving. That
+/// requirement is real but unmet: <c>GatedQueueConsumer</c> is a <c>BackgroundService</c> that begins
+/// consuming as soon as the L2 gate opens, and nothing consults <see cref="IProcessorContext.IsHealthy"/>
+/// before it does — so the queue is in fact bound <i>before</i> this loop finishes, and a dispatch can
+/// arrive while the definitions are still unresolved. Both message handlers park such a dispatch
+/// rather than run it unvalidated. Gating consumption on health is the proper fix; it is recorded as
+/// a known gap in the execution-path plan.
 /// </para>
 /// </summary>
 public sealed class ProcessorStartupOrchestrator : BackgroundService

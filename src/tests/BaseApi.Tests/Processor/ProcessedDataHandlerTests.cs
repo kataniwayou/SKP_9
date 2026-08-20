@@ -143,6 +143,42 @@ public sealed class ProcessedDataHandlerTests
     }
 
     [Fact]
+    public async Task ParksABranchWhoseOutputSchemaHasNotResolvedRatherThanPersistingUnvalidated()
+    {
+        // Same "not yet" as the pre handler's: a non-null schema id whose definition Loop B has not
+        // fetched. TryValidate(null, ...) returns true, so without the guard this branch would be
+        // written to the output key and reported complete with the output schema silently not applied.
+        var h = new Harness();
+        h.Context.SetIdentity(new ProcessorIdentityFound(
+            P, null, Guid.Parse("88888888-8888-8888-8888-888888888888"), null, "sample", "1.0.0"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None));
+
+        await h.Db.DidNotReceive().StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
+                                                  Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
+        await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
+                                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task CompletesABranchThatSimplyHasNoOutputSchema()
+    {
+        // The "not applicable" half: a null schema id means the role does not apply, so the branch
+        // persists and reports complete with validation skipped, exactly as designed.
+        var h = new Harness();
+        StepCompleted? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCompleted>(s => sent = s),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        await h.Build().HandleAsync(Body(Branch(E, "not json at all")), CancellationToken.None);
+
+        Assert.NotNull(sent);
+        await h.Db.Received(1).StringSetAsync(L2ProjectionKeys.OutputData(M), Arg.Any<RedisValue>(),
+                                              Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
     public async Task LetsAStoreFaultEscapeSoTheBranchIsRequeued()
     {
         var h = new Harness();

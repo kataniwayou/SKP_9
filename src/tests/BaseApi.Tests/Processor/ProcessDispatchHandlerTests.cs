@@ -164,6 +164,47 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
+    public async Task ParksADispatchWhoseInputSchemaHasNotResolvedRatherThanRunningUnvalidated()
+    {
+        // A non-null schema id with a null definition is ProcessorIdentity's "not yet" — Loop B is
+        // still fetching. TryValidate(null, ...) returns true by contract, so without this guard the
+        // step would run with the input schema silently not applied and nothing logged to say so.
+        // A silently skipped security control is worse than a loud failure, and parking is
+        // recoverable by hand from the DLQ.
+        var h = new Harness();
+        h.Context.SetIdentity(new ProcessorIdentityFound(
+            P, Guid.Parse("88888888-8888-8888-8888-888888888888"), null, null, "sample", "1.0.0"));
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) => Task.CompletedTask);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None));
+
+        // The point of the guard: the author's code must not have run.
+        Assert.False(probe.Ran);
+        await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
+                                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task RunsAStepThatSimplyHasNoInputSchema()
+    {
+        // The other half of the pair ProcessorIdentity's doc names: a NULL schema id means the role
+        // does not apply — a source processor, or any step whose input is unconstrained. That must
+        // still run and skip validation, or the guard above would refuse work that was never wrong.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"not json at all");
+        var probe = new Probe((_, _) => Task.CompletedTask);
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        // Bytes that no schema would accept still reach the author, which is what "skips validation"
+        // means here.
+        Assert.True(probe.Ran);
+        Assert.Equal("not json at all", Encoding.UTF8.GetString(probe.SawData!));
+    }
+
+    [Fact]
     public async Task PutsAnAuthorsFailureMessageOnTheWireVerbatim()
     {
         var h = new Harness();

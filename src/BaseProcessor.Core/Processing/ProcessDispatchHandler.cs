@@ -76,14 +76,35 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // unrepresentable, which is why this design carries no provenance guard anywhere: a check
         // against a condition that cannot arise reads as a live defence, cannot be tested, and drifts.
         //
-        // Resolved ONCE, above every early return, so the schema-failure path is covered too. A null
-        // identity here is a framework wiring fault, never a producer or author one: the work queue is
-        // bound only after the processor reaches Healthy, so nothing can be consumed before identity
-        // resolves. Loud is right — it parks the message, preserving it for inspection.
+        // Resolved ONCE, above every early return, so the schema-failure path is covered too.
+        //
+        // NOTHING GATES CONSUMPTION ON HEALTH TODAY — this used to claim the work queue is bound only
+        // after the processor reaches Healthy, and that is not true of the wiring. GatedQueueConsumer
+        // is a BackgroundService that starts consuming as soon as the L2 gate opens, and
+        // IProcessorContext.IsHealthy is read by nothing but the liveness heartbeat and a readiness
+        // check. So a dispatch CAN arrive while the startup loops are still running. Gating
+        // consumption on health is the proper fix and is recorded as a known gap in the execution-path
+        // plan; until it lands, both guards below park the message rather than proceed. Loud is right:
+        // parking preserves the message for inspection and it is recoverable by hand from the DLQ.
         var identity = _context.Identity
             ?? throw new InvalidOperationException(
                 "A dispatch was consumed before identity resolved — the queue must not be bound until then.");
         var self = identity.Id;
+
+        // The pair ProcessorIdentity documents: a NULL schema id means the role does not apply, while
+        // a non-null id whose definition is still null means Loop B has not resolved it yet. Only the
+        // second is a fault. Proceeding would hand TryValidate a null definition, which returns true
+        // by contract, and the step would run with the input schema silently not applied — a security
+        // control skipped with nothing logged to say so. Parking is the same disposition the identity
+        // guard above chooses, and the direction spec 8.1 gives every ambiguous case; reporting a
+        // StepFailed instead would mark a workflow failed over a condition that resolves itself
+        // seconds later.
+        if (identity.InputSchemaId is { } inputSchemaId && identity.InputDefinition is null)
+        {
+            throw new InvalidOperationException(
+                $"Input schema {inputSchemaId:D} has not resolved yet, so the input cannot be "
+                + "validated — the work queue must not be bound before the processor reaches Healthy.");
+        }
 
         var isSource = d.EntryId == Guid.Empty;
 
