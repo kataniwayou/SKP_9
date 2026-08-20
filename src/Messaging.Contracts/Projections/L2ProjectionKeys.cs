@@ -16,8 +16,7 @@ namespace Messaging.Contracts.Projections;
 ///   <item><description>Step: <c>{Prefix}{workflowId}:{stepId}</c></description></item>
 ///   <item><description>PerInstance: <c>{Prefix}proc:{processorId}:{instanceId}</c> — the per-replica liveness key</description></item>
 ///   <item><description>InstanceIndex: <c>{Prefix}proc:{processorId}</c> — the per-processor instance-index SET key</description></item>
-///   <item><description>ExecutionData: <c>{Prefix}data:{entryId}</c> — the input data blob</description></item>
-///   <item><description>OutputData: <c>{Prefix}out:{messageId}</c> — the per-message output blob</description></item>
+///   <item><description>ExecutionData: <c>{Prefix}data:{guid}</c> — the blob for both roles</description></item>
 /// </list>
 /// </summary>
 public static class L2ProjectionKeys
@@ -40,23 +39,20 @@ public static class L2ProjectionKeys
     public static string InstanceIndex(Guid processorId)
         => $"{Prefix}proc:{processorId:D}";
 
-    /// <summary>The input data blob key. No TTL is implied here — that is a caller concern.</summary>
-    public static string ExecutionData(Guid entryId) => $"{Prefix}data:{entryId:D}";
-
-    /// <summary>The per-message output blob key. The separate <c>out:</c> namespace keeps output
-    /// blobs, keyed by message id, distinct from input blobs keyed by entry id. The TTL is a caller
-    /// concern — see <see cref="OutputDataTtl"/>.</summary>
-    public static string OutputData(Guid messageId) => $"{Prefix}out:{messageId:D}";
-
     /// <summary>
-    /// The single source of truth for the output-blob TTL policy: a jittered value in
-    /// [ttlSeconds, 2 × ttlSeconds]. Both the processor's output tail and the keeper's inject
-    /// consumer call this, so a keeper-completed result and a directly-completed one cannot end up
-    /// with desynchronized lifetimes. Only the policy is shared; the floor comes from each writer's
-    /// own configured option.
+    /// The execution blob key, and the only one. A step's output is written here under its
+    /// <c>MessageId</c> and read back by its successor under that same id as the successor's
+    /// <c>EntryId</c> — output and input are one blob under one key, so the hand-off is a no-op
+    /// rather than a copy.
+    /// <para>
+    /// <b>No TTL, ever.</b> Reclaim is explicit: the pre handler deletes the key once its author's
+    /// transform returns normally, and the orchestrator reclaims after a step that failed. An expiry
+    /// here would delete a live workflow's input during a slow hand-off, which is a silent loss —
+    /// and loss is the one outcome this design refuses. An unreclaimed key is the orphan sweeper's
+    /// problem, not this key builder's.
+    /// </para>
     /// </summary>
-    public static TimeSpan OutputDataTtl(int ttlSeconds)
-        => TimeSpan.FromSeconds(Random.Shared.Next(ttlSeconds, 2 * ttlSeconds + 1));
+    public static string ExecutionData(Guid entryId) => $"{Prefix}data:{entryId:D}";
 
     /// <summary>Probe scratch key — written then deleted, with a short TTL as the net for a crash
     /// between the two.</summary>

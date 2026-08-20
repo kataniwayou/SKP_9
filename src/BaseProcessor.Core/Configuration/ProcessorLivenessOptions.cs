@@ -31,10 +31,4 @@ public sealed class ProcessorLivenessOptions
     /// (<c>BackoffCap × StaleFactor</c>), since a loop at the cap must not read as wedged.</summary>
     [ConfigurationKeyName("BackoffCap")]
     public int BackoffCapSeconds { get; set; } = 30;
-
-    /// <summary>Floor in seconds (default 3600) of the jittered output-blob TTL — see
-    /// <see cref="Messaging.Contracts.Projections.L2ProjectionKeys.OutputDataTtl"/>, which derives the
-    /// actual TTL as a jittered value in [floor, 2 × floor].</summary>
-    [ConfigurationKeyName("ExecutionDataTtl")]
-    public int ExecutionDataTtlSeconds { get; set; } = 3600;
 }

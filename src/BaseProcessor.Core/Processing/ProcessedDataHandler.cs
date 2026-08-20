@@ -1,12 +1,10 @@
 using System.Text.Json;
-using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Validation;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 namespace BaseProcessor.Core.Processing;
@@ -26,11 +24,16 @@ namespace BaseProcessor.Core.Processing;
 /// duplicate result; delete first and a failed delete replays only itself.
 /// </para>
 /// <para>
-/// <b>The output goes to the <c>out:</c> namespace, never straight to <c>data:</c>.</b> A step with
-/// three successors would otherwise produce three dispatches reading one key — the first successor's
-/// post handler would reclaim it and the other two would find it absent, return without processing,
-/// and vanish. The orchestrator relocates this blob into one input key per successor, so each
-/// successor owns a key nobody else deletes.
+/// <b>The output is written to <c>data:{messageId}</c>, which is the successor's input key
+/// unchanged.</b> One blob, one namespace, no relocation — the orchestrator hands the id straight
+/// through when a step has exactly one successor.
+/// </para>
+/// <para>
+/// <b>That makes multi-successor fan-out the orchestrator's problem, not this handler's.</b> Three
+/// successors dispatched against one key means the first one's PRE hop reclaims it and the other two
+/// find it absent and return with no result — two branches lost silently. The orchestrator must copy
+/// the blob into one key per successor under derived ids, or refcount it. Nothing in this assembly
+/// defends against it, by decision rather than by oversight.
 /// </para>
 /// </summary>
 internal sealed class ProcessedDataHandler : IQueueMessageHandler
@@ -38,31 +41,18 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
     private readonly IConnectionMultiplexer _redis;
     private readonly IQueueSender _sender;
     private readonly IProcessorContext _context;
-    private readonly ProcessorLivenessOptions _options;
     private readonly ILogger<ProcessedDataHandler> _logger;
 
     public ProcessedDataHandler(
         IConnectionMultiplexer redis,
         IQueueSender sender,
         IProcessorContext context,
-        IOptions<ProcessorLivenessOptions> options,
         ILogger<ProcessedDataHandler> logger)
     {
         _redis   = redis ?? throw new ArgumentNullException(nameof(redis));
         _sender  = sender ?? throw new ArgumentNullException(nameof(sender));
         _context = context ?? throw new ArgumentNullException(nameof(context));
-        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger  = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        // The one configured value here that has no safe wrong setting. L2ProjectionKeys.OutputDataTtl
-        // derives Random.Shared.Next(ttl, 2 * ttl + 1), so zero yields TimeSpan.Zero — which Redis
-        // rejects on EVERY write, so every branch parks with nothing pointing at the config value that
-        // did it — and a negative one throws out of Random.Next. Neither is recoverable at run time.
-        // ProcessorLivenessOptions carries no validation of its own and this is the value's only
-        // reader, so the guard lives here.
-        ArgumentOutOfRangeException.ThrowIfLessThan(
-            _options.ExecutionDataTtlSeconds, 1,
-            $"{nameof(options)}.{nameof(ProcessorLivenessOptions.ExecutionDataTtlSeconds)}");
     }
 
     public string MessageType => MessageTypes.ProcessedData;
@@ -135,10 +125,13 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
         // between a keepTtl-bool overload and an Expiration-struct overload, and the compiler resolves
         // it to the former — silently a different method than the (expiry, When, CommandFlags) one
         // most call sites (and tests) expect. Naming all five parameters pins the overload.
+        //
+        // The expiry is null on purpose. This blob is the successor's input, and an expiry would
+        // delete a live workflow's input mid-hand-off.
         await db.StringSetAsync(
-                L2ProjectionKeys.OutputData(p.MessageId),
+                L2ProjectionKeys.ExecutionData(p.MessageId),
                 p.Data,
-                L2ProjectionKeys.OutputDataTtl(_options.ExecutionDataTtlSeconds),
+                null,
                 When.Always,
                 CommandFlags.None)
             .ConfigureAwait(false);
@@ -147,7 +140,7 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
         {
             CorrelationId = p.CorrelationId,
             ExecutionId   = p.ExecutionId,
-            EntryId       = p.MessageId,   // the output key the orchestrator relocates
+            EntryId       = p.MessageId,   // the key the successor reads as its input
         }, MessageTypes.StepCompleted, ct).ConfigureAwait(false);
 
         // The message id is the one id the scope does not carry, so it goes in as a structured
