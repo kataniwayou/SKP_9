@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using Orchestrator.Election;
 using Orchestrator.Hydration;
 using Orchestrator.L1;
 using Orchestrator.Messaging;
@@ -89,12 +90,30 @@ public static class OrchestratorHost
         // one store, one reader, one activator per replica, not one per caller.
         //
         // WorkflowActivator itself still cannot be fully validated: its IWorkflowScheduler parameter
-        // has no registration yet. Its only implementation, WorkflowScheduler<TJob>, is closed over a
-        // fire job Task 9 has not written, and nothing here registers a Quartz IScheduler. That is the
-        // one gap left for Task 10 to close — see OrchestratorHostWiringTests.TheHostGraphResolves.
+        // has no registration yet. WorkflowFireJob now exists, so the type WorkflowScheduler<TJob>
+        // would be closed over does too — but nothing here registers either it or a Quartz IScheduler
+        // for it to drive. That is the one gap left for Task 10 to close — see
+        // OrchestratorHostWiringTests.TheHostGraphResolvesExceptTheSchedulerTask10Registers.
         builder.Services.AddSingleton<WorkflowL1Store>();
         builder.Services.AddSingleton<L2WorkflowReader>();
         builder.Services.AddSingleton<WorkflowActivator>();
+
+        // The leadership gate, and the election that writes it. The gate is registered
+        // unconditionally because every fire on every replica reads it; the election is registered
+        // only in-cluster, because it is the only thing here that needs a Kubernetes API server and a
+        // mounted ServiceAccount token. KUBERNETES_SERVICE_HOST is injected by the kubelet into every
+        // container and by nothing else, which makes it the one signal that cannot be true off a
+        // cluster — so no hermetic test ever stands an election up, and none has to stub one out.
+        //
+        // Off-cluster the state therefore stays follower and this process dispatches nothing. That is
+        // deliberate: this workload only ever runs in Kubernetes, and a local run that silently
+        // elected itself would be a local run that sends real work to real processor queues.
+        builder.Services.AddSingleton<LeaderState>();
+
+        if (Environment.GetEnvironmentVariable("KUBERNETES_SERVICE_HOST") is not null)
+        {
+            builder.Services.AddHostedService<LeaderElectionService>();
+        }
 
         // Loop 2 and its admission latch. The position of the next two lines is the point of them
         // being here at all: AddBaseConsoleGating below resolves IConsumerAdmission with
