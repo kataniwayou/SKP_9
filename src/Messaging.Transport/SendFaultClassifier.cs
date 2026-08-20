@@ -34,7 +34,7 @@ public static class SendFaultClassifier
     private static bool IsTransportType(Exception e)
     {
         if (e is IOException or SocketException or TimeoutException or OperationCanceledException
-                 or ObjectDisposedException)
+                 or ObjectDisposedException or UnroutablePublishException)
         {
             return true;
         }
