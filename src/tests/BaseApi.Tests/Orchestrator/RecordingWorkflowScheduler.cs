@@ -19,21 +19,34 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
 
     public List<Guid> Unscheduled { get; } = [];
 
+    /// <summary>
+    /// Every call in the order it arrived, as method names. The three typed lists above answer "what
+    /// was it asked to do", which is what most assertions want; they cannot answer "in what order",
+    /// because a per-method list has no way to interleave with another one. Teardown-before-apply is
+    /// exactly such a claim — <see cref="global::Orchestrator.L1.WorkflowActivator"/> converges on a
+    /// redelivery only because the unschedule precedes the schedule — so the ordering needs somewhere
+    /// to be visible.
+    /// </summary>
+    public List<string> Calls { get; } = [];
+
     public Task ScheduleAsync(Guid workflowId, Guid jobId, string cron, CancellationToken ct)
     {
         Scheduled.Add((workflowId, jobId, cron));
+        Calls.Add(nameof(ScheduleAsync));
         return Task.CompletedTask;
     }
 
     public Task RescheduleAsync(Guid workflowId, Guid jobId, string cron, CancellationToken ct)
     {
         Rescheduled.Add((workflowId, jobId, cron));
+        Calls.Add(nameof(RescheduleAsync));
         return Task.CompletedTask;
     }
 
     public Task UnscheduleAsync(Guid jobId, CancellationToken ct)
     {
         Unscheduled.Add(jobId);
+        Calls.Add(nameof(UnscheduleAsync));
         return Task.CompletedTask;
     }
 }

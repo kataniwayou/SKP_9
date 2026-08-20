@@ -81,7 +81,13 @@ public sealed class WorkflowActivatorTests
 
         Assert.True(h.Store.TryGet(W, out var entry));
         Assert.Equal(W, entry.Definition.WorkflowId);
-        Assert.Single(h.Scheduler.Scheduled);
+
+        // The job id handed to the scheduler must be the job id L1 recorded, and this is the only
+        // place that is true by construction rather than by coincidence. Task 9's fire reads its own
+        // job id out of the job-data map and stands down unless L1 still holds that same id for the
+        // workflow; if the two ever diverged here, every fire would decline to reschedule and the
+        // replica would silently stop firing anything, with nothing failing and nothing logged.
+        Assert.Equal((W, entry.JobId, "0 * * * *"), Assert.Single(h.Scheduler.Scheduled));
     }
 
     [Fact]
@@ -124,5 +130,14 @@ public sealed class WorkflowActivatorTests
         Assert.Contains(first, h.Scheduler.Unscheduled);
         Assert.True(h.Store.TryGet(W, out var e2));
         Assert.NotEqual(first, e2.JobId);
+
+        // Teardown strictly before apply. Harmless to get wrong today — the two job keys differ, so a
+        // late DeleteJob could not hit the new job — but the convergence argument in WorkflowActivator's
+        // own doc is an ordering claim, and an ordering claim needs an ordered record to rest on.
+        Assert.Equal(["ScheduleAsync", "UnscheduleAsync", "ScheduleAsync"], h.Scheduler.Calls);
+
+        // The replacement went out under the NEW job id, not the torn-down one. Assert.NotEqual above
+        // says L1 moved on; this says the scheduler was told the same thing.
+        Assert.Equal((W, e2.JobId, "0 * * * *"), h.Scheduler.Scheduled[1]);
     }
 }

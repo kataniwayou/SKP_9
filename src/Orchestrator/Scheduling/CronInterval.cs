@@ -28,15 +28,22 @@ public static class CronInterval
 {
     /// <summary>
     /// The next strictly-future occurrence of <paramref name="cron"/> after <paramref name="utcNow"/>,
-    /// or null when the expression will not parse or has no future occurrence.
+    /// or null when <paramref name="cron"/> is null or blank, will not parse, or has no future
+    /// occurrence.
     /// </summary>
-    /// <param name="cron">A 5-field standard or 6-field seconds cron expression.</param>
+    /// <param name="cron">
+    /// A 5-field standard or 6-field seconds cron expression. Nullable on purpose: the thing callers
+    /// hold is <c>WorkflowRootProjection.Cron</c>, which is <c>string?</c> because a null cron is a
+    /// valid projection meaning unscheduled. Taking a non-nullable string here would push every caller
+    /// into a null check whose only possible answer is the one this method already gives, and under
+    /// TreatWarningsAsErrors a caller that skipped it would not compile.
+    /// </param>
     /// <param name="utcNow">
     /// The reference instant, which must be <see cref="DateTimeKind.Utc"/> — Cronos rejects anything
     /// else, and a caller feeding wall-clock local time would compute fire times silently offset by
     /// its own timezone. Callers pass <c>TimeProvider.GetUtcNow().UtcDateTime</c>.
     /// </param>
-    public static DateTime? NextOccurrence(string cron, DateTime utcNow)
+    public static DateTime? NextOccurrence(string? cron, DateTime utcNow)
     {
         if (string.IsNullOrWhiteSpace(cron) || !CronFieldForm.IsValidFieldCount(cron))
         {

@@ -18,11 +18,13 @@ namespace Orchestrator.L1;
 /// inversion the two invariants exist to prevent.
 /// </para>
 /// <para>
-/// <b>A torn projection is survivable; a broken store is not this type's problem.</b> A step key
-/// missing while its root still lists it is skipped with a warning: the workflow is worth running with
-/// the steps that are there, and the next start rewrites the whole key set anyway. A Redis fault, by
-/// contrast, propagates untouched — spec §7.4 classifies an L2 read fault as RequeueAndTrip, and that
-/// decision belongs to the consumer that can act on it, not to the reader.
+/// <b>A torn projection is survivable; a broken store is not this type's problem.</b> A step the root
+/// still lists but L2 has no usable value for — the key is gone, or what is under it will not
+/// deserialize — is skipped with a warning: the workflow is worth running with the steps that are
+/// there, and the next start rewrites the whole key set anyway. A Redis fault, by contrast, propagates
+/// untouched — spec §7.4 classifies an L2 read fault as RequeueAndTrip, and that decision belongs to
+/// the consumer that can act on it, not to the reader. That split is why the only <c>catch</c> in this
+/// file sits around a single <c>Deserialize</c> call and cannot reach a read.
 /// </para>
 /// </summary>
 public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2WorkflowReader> logger)
@@ -87,17 +89,16 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
         {
             ct.ThrowIfCancellationRequested();
 
+            // The read is deliberately outside ReadStep: a Redis fault must propagate, and the only way
+            // to be sure it cannot be swallowed is for no catch to be anywhere near it.
             var stepJson = await db.StringGetAsync(L2ProjectionKeys.Step(workflowId, stepId))
                 .ConfigureAwait(false);
 
-            var step = stepJson.IsNullOrEmpty
-                ? null
-                : JsonSerializer.Deserialize<StepProjection>(stepJson!, MessagingJson.Options);
-
+            var step = ReadStep(stepJson);
             if (step is null)
             {
                 logger.LogWarning(
-                    "workflow {WorkflowId} lists step {StepId} but L2 does not hold it; skipping the step",
+                    "workflow {WorkflowId} lists step {StepId} but L2 holds no usable value for it; skipping the step",
                     workflowId, stepId);
                 continue;
             }
@@ -107,6 +108,41 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
         }
 
         return new WorkflowL1(workflowId, root.EntryStepIds ?? new List<Guid>(), root.Cron, steps);
+    }
+
+    /// <summary>
+    /// One stored step value, or null when there is nothing usable there — the key is gone, or what is
+    /// under it will not deserialize.
+    /// <para>
+    /// <b>The two are one outcome, and the catch is deliberately this narrow.</b> A torn projection is
+    /// survivable by design, and a value corrupt in place is torn in exactly the way a missing key is:
+    /// the root names a step this workflow can no longer run, the rest of the workflow is still worth
+    /// running, and the next start rewrites the whole key set. Without this the workflow's own damage
+    /// would surface as a <see cref="JsonException"/> escaping <see cref="ReadAsync"/> — indistinguishable
+    /// to a caller from the Redis fault that must escape, and enough to end a hydration pass over every
+    /// other workflow in the store.
+    /// </para>
+    /// <para>
+    /// It takes an already-read value rather than a key precisely so the catch cannot reach the read.
+    /// A <c>try</c> one line wider would put a Redis outage inside a swallow, and spec §7.4's
+    /// RequeueAndTrip depends on that fault escaping.
+    /// </para>
+    /// </summary>
+    private static StepProjection? ReadStep(RedisValue stepJson)
+    {
+        if (stepJson.IsNullOrEmpty)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<StepProjection>(stepJson!, MessagingJson.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
