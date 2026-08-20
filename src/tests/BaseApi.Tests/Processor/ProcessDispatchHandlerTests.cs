@@ -126,11 +126,12 @@ public sealed class ProcessDispatchHandlerTests
         // means every branch it wanted to send was sent.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        var probe = new Probe((_, _) => Task.CompletedTask);
+        var probe = new Probe((_, self) => self.Send(Encoding.UTF8.GetBytes("{}")));
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
         await h.Db.Received(1).KeyDeleteAsync(L2ProjectionKeys.ExecutionData(E), Arg.Any<CommandFlags>());
+        Assert.Single(h.Sender.ReceivedCalls());
     }
 
     [Fact]
