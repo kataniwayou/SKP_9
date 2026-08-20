@@ -48,8 +48,9 @@ public static class L2ProjectionKeys
     /// <b>No TTL, ever.</b> Reclaim is explicit: the pre handler deletes the key once its author's
     /// transform returns normally, and the orchestrator reclaims after a step that failed. An expiry
     /// here would delete a live workflow's input during a slow hand-off, which is a silent loss —
-    /// and loss is the one outcome this design refuses. An unreclaimed key is the orphan sweeper's
-    /// problem, not this key builder's.
+    /// and loss is the one outcome this design refuses. An unreclaimed key has no automatic reclaimer
+    /// today: <c>L2OrphanSweeper</c> covers stale liveness-index entries left by dead processor
+    /// replicas, not <c>data:</c> keys, so it cannot be pointed to as a backstop for this one.
     /// </para>
     /// </summary>
     public static string ExecutionData(Guid entryId) => $"{Prefix}data:{entryId:D}";
