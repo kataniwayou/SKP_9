@@ -134,6 +134,25 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
                 // same post-handler keys rather than create new ones. The residual cost is a duplicate
                 // run of the author's own code, which this design already treats as an acceptable replay
                 // cost everywhere else.
+                //
+                // A DIFFERENT CASE THIS DOES NOT COVER: several successor steps dispatched against the
+                // one shared entry key, each carrying its own ProcessDispatch message rather than a
+                // branch raised from inside a single author invocation. A step with more than one
+                // successor still hands every successor the same EntryId, and the first successor's own
+                // RunAsync reclaims that key once ITS author returns. Every other successor then reads
+                // absent here — not a redelivery of anything, but a step that has not run yet, finding a
+                // key a different step already consumed. Returning in that case means the successor's
+                // author never runs at all: a silent loss, not a safe duplicate, because nothing
+                // downstream reports it and nothing retries it. Preventing this is the orchestrator's
+                // job — copying the blob into one key per successor under derived ids before dispatch,
+                // or refcounting the shared key so only the last reader deletes it — and nothing in this
+                // assembly defends against it. That is a decision, not an oversight: this handler trusts
+                // EntryId to name a key it alone is entitled to delete, and multi-successor fan-out is
+                // the one case where that trust does not hold until the orchestrator exists to make it
+                // hold.
+                //
+                // With execution blobs carrying no TTL, this branch now has exactly two readings, not
+                // three: reclaimed, or never written. It can no longer mean expired.
                 _logger.LogInformation("entry absent — treating as a duplicate delivery");
                 return;
             }

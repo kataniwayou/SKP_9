@@ -3237,9 +3237,19 @@ These are spec §12 items, deliberately not implemented here because the orchest
 in `src/` yet. Nothing in this plan produces an end-to-end workflow on its own.
 
 - Nobody sends `ProcessDispatch`, and nobody consumes `OrchestratorQueues.Result`.
-- Nobody relocates `out:{messageId}` into per-successor `data:{entryId}` keys, so a fan-out cannot
-  actually run yet — spec §7.1.
 - No dedup by `MessageId`, so the duplicate results this design permits are not yet absorbed.
+- A step with more than one successor is unsafe until the orchestrator copies its output blob into one
+  key per successor under derived ids. All successors currently share one key and the first to run
+  reclaims it, so the others read absent and return with no result — two branches lost silently for a
+  three-successor step. A single-successor step is safe and needs no copy. Spec §7.1.
+- Nothing reclaims the input key of a step that failed. The pre handler deletes it only after a normal
+  return, so `FailedException`, `CancelledException` and framework faults all leave it behind, and
+  execution blobs carry no TTL to catch it. The orchestrator owns this cleanup; the orphan sweeper is
+  the backstop.
+- `StepFailed` carries no input entry id — its `EntryId` is fixed at `Guid.Empty` and means *output
+  key* — so an orchestrator reclaiming after a failure must do it from its own dispatch record. Adding
+  an input-id field to the contract is the alternative. Deliberately left open until the orchestrator
+  exists.
 - No stuck-step reaper. Until there is one, `ProcessDispatchHandler`'s "entry absent means this step
   already completed" reading has no backstop: under multiple replicas a fan-out whose second branch
   send fails can be requeued, have `data:{entryId}` deleted by another replica's post handler for the
