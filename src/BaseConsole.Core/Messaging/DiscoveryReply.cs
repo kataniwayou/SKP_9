@@ -20,6 +20,8 @@ public static class DiscoveryReplyRouter
             JsonSerializer.Deserialize<SchemaDefinitionFound>(body.Span, MessagingJson.Options),
         MessageTypes.SchemaDefinitionNotFound =>
             JsonSerializer.Deserialize<SchemaDefinitionNotFound>(body.Span, MessagingJson.Options),
+        MessageTypes.MalformedRequest =>
+            JsonSerializer.Deserialize<MalformedRequest>(body.Span, MessagingJson.Options),
         _ => null,
     };
 }

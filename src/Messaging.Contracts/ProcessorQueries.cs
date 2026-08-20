@@ -13,3 +13,8 @@ public sealed record ProcessorIdentityNotFound(string SourceHash);
 public sealed record GetSchemaDefinition(Guid SchemaId);
 public sealed record SchemaDefinitionFound(string Definition);
 public sealed record SchemaDefinitionNotFound(Guid SchemaId);
+
+// A request whose required field arrived as its type default. Distinct from not-found: not-found is
+// an answer about the data, this is an answer about the request. The caller can log and stop
+// retrying something that will never succeed.
+public sealed record MalformedRequest(string Field);

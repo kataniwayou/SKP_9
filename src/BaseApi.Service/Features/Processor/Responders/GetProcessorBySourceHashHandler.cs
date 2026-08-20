@@ -23,10 +23,29 @@ internal sealed class GetProcessorBySourceHashHandler : IRpcHandler
 
     public string RequestType => MessageTypes.GetProcessorBySourceHash;
 
+    /// <summary>
+    /// The refusal reply for a request whose source hash did not bind, or null when it is usable. See
+    /// <c>GetSchemaDefinitionHandler.Reject</c>: an unbound field defaults rather than throwing, and a
+    /// not-found reply for one is indistinguishable from a processor that is simply not registered
+    /// yet — which the caller retries forever.
+    /// </summary>
+    internal static RpcReply? Reject(GetProcessorBySourceHash request)
+        => string.IsNullOrWhiteSpace(request.SourceHash)
+            ? new RpcReply(
+                MessageTypes.MalformedRequest,
+                JsonSerializer.SerializeToUtf8Bytes(
+                    new MalformedRequest(nameof(GetProcessorBySourceHash.SourceHash)), MessagingJson.Options))
+            : null;
+
     public async Task<RpcReply> HandleAsync(ReadOnlyMemory<byte> body, CancellationToken ct)
     {
         var request = JsonSerializer.Deserialize<GetProcessorBySourceHash>(body.Span, MessagingJson.Options)
                       ?? throw new JsonException("processor identity request deserialized to null");
+
+        if (Reject(request) is { } malformed)
+        {
+            return malformed;
+        }
 
         try
         {

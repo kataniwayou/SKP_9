@@ -40,4 +40,7 @@ public static class MessageTypes
 
     /// <summary>Reply body is a <see cref="Messaging.Contracts.SchemaDefinitionNotFound"/>.</summary>
     public const string SchemaDefinitionNotFound = "schema-definition-not-found";
+
+    /// <summary>Reply body is a <see cref="Messaging.Contracts.MalformedRequest"/>.</summary>
+    public const string MalformedRequest = "malformed-request";
 }
