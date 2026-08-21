@@ -30,16 +30,10 @@ namespace BaseApi.Core.DependencyInjection;
 /// This function feeds a real connection, not a log: unlike a redaction helper, it must not touch the
 /// password, and nothing here logs or otherwise prints the parsed options or the connection string.
 /// </para>
-/// <para>
-/// <b>Public rather than internal.</b> <c>BaseApi.Core.csproj</c> grants no <c>InternalsVisibleTo</c>
-/// to <c>BaseApi.Tests</c> (unlike <c>BaseConsole.Core.csproj</c>, whose equivalent helper is
-/// internal), so an internal type here would not be directly testable. Same reasoning as
-/// <c>StartupGate</c> in this assembly: public over silently adding a test-only grant.
-/// </para>
 /// </summary>
-public static class ApiRedisConnectionOptions
+internal static class ApiRedisConnectionOptions
 {
-    public static ConfigurationOptions ParseForcingNonAborting(string connectionString)
+    internal static ConfigurationOptions ParseForcingNonAborting(string connectionString)
     {
         var options = ConfigurationOptions.Parse(connectionString);
         options.AbortOnConnectFail = false;
