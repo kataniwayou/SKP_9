@@ -171,7 +171,7 @@ control flow. The exception continues to propagate exactly as it does now.
 
 | Instrument | Type | Unit | Attributes |
 | --- | --- | --- | --- |
-| `pipeline.messages.consumed` | `Counter<long>` | `{message}` | `queue`, `type`, `disposition`, `reason` |
+| `pipeline.messages.consumed` | `Counter<long>` | `{message}` | `queue`, `type`, `disposition`, `reason`, `landed` |
 | `pipeline.process.duration` | `Histogram<double>` | `s` | `queue`, `type`, `disposition` |
 | `pipeline.consumer.inflight` | `UpDownCounter<long>` | `{message}` | `queue` |
 | `pipeline.consumer.consuming` | `ObservableGauge<int>` | `1` | `queue` |
@@ -183,14 +183,17 @@ control flow. The exception continues to propagate exactly as it does now.
 every exit path** of `OnReceivedAsync`. The values map one-to-one onto branches
 that already exist — no new control flow, one line per branch:
 
+**`disposition` and `reason` record what the consumer decided. `landed` records
+whether the broker was told.** They are separate facts and must not be collapsed
+into one attribute — see §5.2.
+
 | Branch in `GatedQueueConsumer` | `disposition` | `reason` |
 | --- | --- | --- |
 | `!_gate.IsOpen` early check, before the handler | `requeued` | `gate_closed` |
-| handler returned, `SafeAckAsync` issued the ack | `acked` | `handled` |
+| handler returned, ack issued | `acked` | `handled` |
 | `DeliveryDisposition.RequeueAndTrip` | `requeued` | `store_unreachable` |
 | `DeliveryDisposition.Requeue` | `requeued` | `send_failed` |
 | `DeliveryDisposition.Park` (the `default` arm) | `parked` | `refused` |
-| `TagStillValid(epoch)` false, or `AlreadyClosed`/`OperationInterrupted`/`ObjectDisposed` inside `SafeAckAsync`/`SafeNackAsync` | `dropped` | `channel_lost` |
 
 Two attributes rather than one compound value, so that "how many deliveries were
 not acked" is a filter on `disposition` and "why" is a drill-down on `reason`,
@@ -199,21 +202,38 @@ without either query needing to know the other's vocabulary.
 Missing type header and no registered handler both throw and land on
 `parked` / `refused`, which is correct: both are properties of the message.
 
-### 5.2 `dropped` is the new signal
+### 5.2 `landed` is the new signal, and it is a third fact
 
-`dropped` does not exist today in any form. It means the ack or nack never
-reached the broker — the delivery tag belonged to a previous epoch, or the
-channel went away between the validity check and the call — so **the broker will
-redeliver a message whose handler already ran to completion.** Today that is a
-single `LogDebug("acknowledgement dropped — channel gone")`.
+`landed` is `false` when the acknowledgement never reached the broker — the
+delivery tag belonged to a previous epoch, or the channel went away between
+`TagStillValid` and the call. It means **the broker will redeliver a message
+whose handler already ran to completion.** Today that is one
+`LogDebug("acknowledgement dropped — channel gone")` and nothing else.
 
-This is silent retry amplification, and it is the one thing that can make every
-other number on the board look healthy while the same work is done repeatedly.
-`pipeline.consumer.channel.resets` is its cause: `reason` is `shutdown`
-(`OnChannelShutdownAsync`), `recovered` (`OnRecoveredAsync`, automatic recovery
-renumbering deliveries), or `reopened` (`OpenChannelAsync` incrementing the
-epoch). The class's own remarks already name this failure mode — "the service
-would sit consuming nothing while every other signal stayed green."
+**It is an attribute rather than a sixth `disposition` value, and that is a
+correction to an earlier draft of this spec.** A `dropped` disposition would
+make two independent facts compete for one slot: a delivery that arrived while
+the gate was shut *and* whose nack was lost is both `gate_closed` and dropped,
+and whichever value won would erase the other. In practice the losing fact would
+be the intent — so a routine gate pause that coincided with a broker blip would
+report as a channel problem and send an operator after the wrong thing. Keeping
+intent in `disposition`/`reason` and landing in `landed` makes both
+representable, costs two attribute values, and — because the two are decided by
+independent code paths — is what lets §11 test the intent matrix without a
+broker.
+
+Mechanically this means `SafeAckAsync` and `SafeNackAsync` return `bool` rather
+than `void`, and `OnReceivedAsync` records one measurement per exit path using
+that return. Recording inside the two Safe methods instead would put the
+increment in two places and make "exactly once per delivery" a rule to remember
+rather than a property of the code.
+
+`pipeline.consumer.channel.resets` is the cause of `landed=false`: `reason` is
+`shutdown` (`OnChannelShutdownAsync`), `recovered` (`OnRecoveredAsync`,
+automatic recovery renumbering deliveries), or `reopened` (`OpenChannelAsync`
+incrementing the epoch). The class's own remarks already name this failure
+mode — "the service would sit consuming nothing while every other signal stayed
+green."
 
 ### 5.3 The other three
 
@@ -242,8 +262,14 @@ because these are singletons.
 
 So: each `GatedQueueConsumer` registers its own `pipeline.consumer.consuming`
 gauge in its constructor, with its own `queue` attribute baked into the
-measurement. `L2Gate` is a single singleton per process, so it registers
-`pipeline.gate.open` in its own constructor the same way.
+measurement. `L2GateMetrics` (§6) does the same for the single `L2Gate`.
+
+An observable's callback only runs while something holds the registration alive,
+and a DI singleton is never constructed until it is resolved. Every observable
+owner is therefore either already an `IHostedService` — which
+`GatedQueueConsumer` is — or registered as one with no-op `StartAsync`/
+`StopAsync`, purely so the container constructs it. That is the case for
+`L2GateMetrics` and for the two role observers in §6.
 
 Neither type may create an observable outside its constructor. An observable
 registered per call, or per converge pass, leaks a callback per registration and
@@ -256,10 +282,26 @@ the exported value becomes whichever stale instance answers last.
 | Instrument | Type | Source |
 | --- | --- | --- |
 | `pipeline.gate.open` | `ObservableGauge<int>` 0/1 | `L2Gate.IsOpen` |
-| `pipeline.gate.trips` | `Counter<long>` | `L2Gate.TripAsync` |
+| `pipeline.gate.trips` | `Counter<long>` | the falling edge of `L2Gate.StateChanged` |
 
 The gate is the best single answer to "why did the pipeline stop", and it is the
 same instrument on both roles.
+
+**`L2Gate` itself is not modified**, and this is a constraint rather than a
+preference. Its own type remarks state that
+`BaseConsole.Core.Gating.L2Gate` is "a deliberate copy of
+`BaseApi.Core.Gating.L2Gate`, not a shared type … Behaviour must not diverge:
+the two are covered by parallel test classes so a change to one that is not made
+to the other fails a build." Instrumenting one copy while §10 holds the API side
+out of scope would be exactly that divergence.
+
+So the instruments are owned by a new `L2GateMetrics` in
+`BaseConsole.Core.Gating`, which takes the `L2Gate` singleton, registers the
+observable over its `IsOpen`, and subscribes to `StateChanged` for the trip
+counter. Both copies of `L2Gate` stay byte-identical. This also respects the
+gate's other standing rule — handlers run under its mutex and must not perform
+I/O — because incrementing a counter is a flag flip, and the gauge does not use
+the event at all.
 
 **Meter `Orchestrator`:**
 
@@ -300,8 +342,12 @@ sum(rate(pipeline_messages_produced_total{type="process-dispatch",outcome="accep
   - sum(rate(pipeline_messages_consumed_total{type="process-dispatch",disposition="acked"}[5m]))
 
 # retry amplification: how much work is being redone
-sum(rate(pipeline_messages_consumed_total{disposition=~"requeued|dropped"}[5m]))
+sum(rate(pipeline_messages_consumed_total{disposition=~"requeued|parked"}[5m])
+  or rate(pipeline_messages_consumed_total{landed="false"}[5m]))
   / sum(rate(pipeline_messages_consumed_total[5m]))
+
+# work that completed but will be redelivered anyway -- the silent case
+sum(rate(pipeline_messages_consumed_total{disposition="acked",landed="false"}[5m]))
 
 # is anything listening
 min(pipeline_consumer_consuming) by (service_name, queue)
@@ -318,6 +364,7 @@ pipeline_gate_open / pipeline_leader / pipeline_hydration_admitted / pipeline_id
 | `destination` | includes `processor-{guid}` | **One series per processor in the deployment**, times `type` times `outcome`. Fine at tens, worth revisiting at hundreds. Opt-out is collapsing it to the literal `processor-work`, which loses per-processor send visibility. |
 | `type` | the `MessageTypes` constants | Fixed set. |
 | `outcome`, `disposition`, `reason`, `route` | fixed enums above | Fixed sets. |
+| `landed` | `true` / `false` | Two values. In steady state everything is `true`, so the series count barely moves. |
 
 ## 9. Wiring
 
@@ -355,29 +402,68 @@ onto metrics) must not be disturbed.
 - **Unit, egress:** the `outcome` classification table in §4.2 is a pure
   function of an exception and is tested as one, including the ordering of
   `unroutable` before `transient`.
-- **Unit, ingress — the four handler-reachable rows.** `acked`, and the three
-  classifier-driven rows (`store_unreachable`, `send_failed`, `refused`) are
-  decided by `DeliveryClassifier.Classify`, which is a pure function and is
-  tested as one against the `(disposition, reason)` pair.
-- **`gate_closed` and `dropped` need a seam that does not exist yet, and this
-  is the one piece of real work in the plan.** No test in the suite touches the
-  consumer's epoch — `ConsumerAdmissionTests` builds a `GatedQueueConsumer` but
-  exercises only `ShouldConsume`, with no channel behind it. Reaching the
-  `dropped` rows means driving `SafeAckAsync`/`SafeNackAsync` with an
-  invalidated epoch, which needs either an internal seam over the epoch and the
-  channel or a fake `IChannel`. Deciding which is the first task of the
-  implementation plan, not something to settle here. Until that seam exists,
-  `dropped` is asserted at the classification level only, and the plan must say
-  so rather than claim coverage it does not have.
+Observation is by `System.Diagnostics.Metrics.MeterListener`, which subscribes
+by meter name and needs no OpenTelemetry pipeline.
+
+- **Unit, ingress — the whole §5.1 matrix, hermetically.** Splitting `landed`
+  out of `disposition` is what makes this possible. `ConsumerAdmissionTests`
+  already proves a real `GatedQueueConsumer` can be constructed with no broker —
+  `RabbitMqConnection` opens no socket in its constructor — and the
+  `(disposition, reason)` decision is taken before any channel is touched. With
+  `OnReceivedAsync` made `internal` (the precedent is the existing
+  `internal bool ShouldConsume`), all five rows are reachable: `gate_closed`
+  from a closed `L2Gate`, and the other four from a fake `IQueueMessageHandler`
+  registered in the scope factory that returns or throws the relevant exception.
+  Every one of these records `landed=false`, because there is no channel — which
+  is correct, and is asserted.
+- **`landed=true` is not covered hermetically**, and the plan must not claim it
+  is. It requires a real channel and a valid delivery tag, so it is exercised
+  only by a RealStack run.
+- **Unit, egress:** the `outcome` classification table in §4.2 is a pure
+  function of an exception and is tested as one, including the ordering of
+  `unroutable` before `transient`.
 - **Invariant:** exactly one `pipeline.messages.consumed` increment per
   delivery, on every path — asserted with a `MeterListener` over a run that
-  exercises every reachable disposition. This is the property that makes the §7
-  conservation queries meaningful, so it is tested directly rather than inferred
-  from the per-branch tests. Its coverage is bounded by the seam above.
+  exercises all five rows. This is the property that makes the §7 conservation
+  queries meaningful, so it is tested directly rather than inferred from the
+  per-branch tests. Returning `bool` from the two Safe methods (§5.2) is what
+  reduces it to "one `Record` call per exit path of one method".
 - **Wiring:** extend `ConsoleObservabilityTests` to assert the three shared
   meters are registered, so a future worker cannot ship without them. Extend
   `OrchestratorHostWiringTests` — which already asserts three consumers exist —
-  to assert three distinct `queue` values are observed, which is what catches an
-  observable gauge registered in the wrong place per §5.4.
-- No Live/RealStack test is required. Every instrument except the two rows above
-  is exercised through existing hermetic seams.
+  to assert three distinct `queue` values are observed on
+  `pipeline.consumer.consuming`, which is what catches an observable gauge
+  registered in the wrong place per §5.4.
+- The hermetic baseline before this work is **451 tests: 444 passed, 7 skipped,
+  0 failed**, in about 15s. Every task must leave it at 0 failed with the skip
+  count unchanged.
+
+## 12. Changes made while writing the implementation plan
+
+The plan is `docs/superpowers/plans/2026-08-22-pipeline-metrics.md`. Three
+defects in the approved draft were found by planning against the real code and
+are corrected above rather than left to contradict the plan.
+
+1. **`dropped` was a disposition; it is now the `landed` attribute** (§5.1,
+   §5.2). As a disposition it made two independent facts compete for one slot,
+   and the fact that lost was the consumer's intent. As a side effect the whole
+   intent matrix became testable without a broker.
+2. **`L2Gate` is no longer modified** (§6). Its type remarks bind it to stay
+   identical to `BaseApi.Core.Gating.L2Gate`, which §10 holds out of scope, so
+   the instruments moved to a separate `L2GateMetrics` owner.
+3. **Observable ownership is now explicit** (§5.4). A DI singleton is not
+   constructed until resolved, so an observable's owner must be an
+   `IHostedService` or nothing ever registers the callback.
+
+Two facts were verified against the repository rather than assumed, because the
+plan depends on both:
+
+- `System.Diagnostics.Metrics.Meter` compiles in `Messaging.Transport` with **no
+  new package reference** — RabbitMQ.Client 7.1.2 brings
+  `System.Diagnostics.DiagnosticSource` transitively. Confirmed by building a
+  throwaway probe file against that project.
+- All five projects already grant `InternalsVisibleTo("BaseApi.Tests")`, so the
+  `internal OnReceivedAsync` seam needs no project-file change. Note that
+  `DynamicProxyGenAssembly2` is deliberately *not* granted, so internal types
+  cannot be substituted with NSubstitute — the ingress tests use hand-written
+  fakes, which is what the existing `ConsumerAdmissionTests` already does.
