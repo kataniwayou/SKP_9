@@ -176,6 +176,23 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
     }
 
     [Fact]
+    public void HydrationIsReportedThroughReadiness()
+    {
+        // Where "this replica has mirrored L2" lives now that the startup gate reports only that the
+        // loop is running. `ready` and nothing else: an un-hydrated replica is starting correctly, so
+        // `live` would restart it for waiting and `startup` would spend a finite budget on an outage
+        // no restart repairs. Nothing routes traffic here, so all this gates is the READY column —
+        // which is the point, because 0/1 is then a truthful "not hydrated".
+        var registration = Assert.Single(
+            _host.Services.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations,
+            r => r.Name == OrchestratorHost.HydrationReady);
+
+        Assert.Equal(["ready"], registration.Tags);
+        Assert.Equal(HealthStatus.Unhealthy, registration.FailureStatus);
+        Assert.IsType<HydrationReadyHealthCheck>(registration.Factory(_host.Services));
+    }
+
+    [Fact]
     public void EachLoopHasItsOwnHeartbeatHolder()
     {
         // Both heartbeats are keyed, and they must be two holders rather than one. A holder shared
