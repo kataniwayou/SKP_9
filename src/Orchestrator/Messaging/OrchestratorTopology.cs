@@ -88,5 +88,65 @@ internal sealed class OrchestratorTopology(InstanceId instanceId) : IRabbitMqTop
             routingKey: string.Empty,
             arguments: null,
             cancellationToken: ct).ConfigureAwait(false);
+
+        // The execution path. Unlike the announcement queue above, these two are SHARED: one name for
+        // the whole deployment, every replica a competing consumer on it. Each replica declares them
+        // identically, which is idempotent at the broker and is what lets a replica that starts first
+        // serve them alone until the others arrive.
+        await channel.ExchangeDeclareAsync(
+            exchange: OrchestratorQueues.DeadLetterExchange,
+            type: ExchangeType.Direct,
+            durable: true,
+            autoDelete: false,
+            arguments: null,
+            cancellationToken: ct).ConfigureAwait(false);
+
+        await DeclareSharedAsync(channel, OrchestratorQueues.Result, OrchestratorQueues.ResultDead, ct)
+            .ConfigureAwait(false);
+        await DeclareSharedAsync(channel, OrchestratorQueues.ResultPost, OrchestratorQueues.ResultPostDead, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// One shared execution queue and the queue it parks into, in the only order that works: the
+    /// dead-letter queue and its binding first, then the queue naming it.
+    /// <para>
+    /// <b>Deliberately no <c>x-delivery-limit</c>,</b> matching the control queue's reasoning. A
+    /// delivery limit counts every redelivery, including the requeues the L2 gate issues while the
+    /// projection store is unreachable — so a long outage would dead-letter results that were never
+    /// malformed. A message the consumer genuinely refuses is parked on its first delivery, which is
+    /// what a limit would otherwise be protecting against.
+    /// </para>
+    /// </summary>
+    private static async Task DeclareSharedAsync(
+        IChannel channel, string queue, string dead, CancellationToken ct)
+    {
+        await channel.QueueDeclareAsync(
+            queue: dead,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: new Dictionary<string, object?> { ["x-queue-type"] = "quorum" },
+            cancellationToken: ct).ConfigureAwait(false);
+
+        await channel.QueueBindAsync(
+            queue: dead,
+            exchange: OrchestratorQueues.DeadLetterExchange,
+            routingKey: dead,
+            arguments: null,
+            cancellationToken: ct).ConfigureAwait(false);
+
+        await channel.QueueDeclareAsync(
+            queue: queue,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: new Dictionary<string, object?>
+            {
+                ["x-queue-type"] = "quorum",
+                ["x-dead-letter-exchange"] = OrchestratorQueues.DeadLetterExchange,
+                ["x-dead-letter-routing-key"] = dead,
+            },
+            cancellationToken: ct).ConfigureAwait(false);
     }
 }

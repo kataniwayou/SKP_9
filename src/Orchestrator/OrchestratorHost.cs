@@ -232,8 +232,25 @@ public static class OrchestratorHost
         builder.Services.AddScoped<IQueueMessageHandler, ApplyStartHandler>();
         builder.Services.AddScoped<IQueueMessageHandler, ApplyStopHandler>();
 
+        // The execution path's two handlers, registered the same way. Handlers are resolved by their
+        // MessageType across the WHOLE container rather than per queue, so these four must stay
+        // type-disjoint — two claiming one type makes the consumer's SingleOrDefault throw, which
+        // classifies as deterministic and parks every message of that type.
+        builder.Services.AddScoped<IQueueMessageHandler, StepOutcomeHandler>();
+        builder.Services.AddScoped<IQueueMessageHandler, NextStepHandoffHandler>();
+
+        // The announcement queue, which also registers the gate, its probe, the liveness check over
+        // that probe, and the first consumer. It has to come before the AddGatedQueue calls below,
+        // which reuse all of that and register only a consumer.
         builder.Services.AddBaseConsoleGating(
             builder.Configuration, OrchestratorFanout.PerReplica(instanceId.Value));
+
+        // The execution path. Both are SHARED queues — one name for the deployment, every replica a
+        // competing consumer — where the announcement queue above is per-replica. They inherit the
+        // hydration latch along with the gate, which is what stops this replica taking a result for a
+        // workflow it has not mirrored out of L2 yet.
+        builder.Services.AddGatedQueue(OrchestratorQueues.Result);
+        builder.Services.AddGatedQueue(OrchestratorQueues.ResultPost);
 
         return builder.Build();
     }

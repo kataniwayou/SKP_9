@@ -16,7 +16,26 @@ namespace Orchestrator.L1;
 /// </summary>
 /// <param name="Definition">The workflow as L2 described it at the moment of activation.</param>
 /// <param name="JobId">The Quartz job standing for this workflow on this replica.</param>
-public sealed record L1Entry(WorkflowL1 Definition, Guid JobId);
+public sealed record L1Entry(WorkflowL1 Definition, Guid JobId)
+{
+    /// <summary>
+    /// The definition's steps keyed by id, built once here rather than scanned per lookup.
+    /// <para>
+    /// <b>This is the hot path, which the entry-step scan in the fire job is not.</b> Every step
+    /// outcome from every processor resolves one step and then every one of its successors through
+    /// this map, on a queue shared by the whole deployment — where a fire touches one workflow on one
+    /// schedule tick. A linear scan of the step list is fine at the second rate and not at the first.
+    /// </para>
+    /// <para>
+    /// <b>Last one wins on a duplicate id, silently.</b> The step ids come from the workflow's own L2
+    /// key set, which cannot hold a duplicate — a repeated id would have been one key written twice.
+    /// Throwing on a condition the projection cannot produce would put an exception on the activation
+    /// path to guard nothing.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<Guid, StepL1> Steps { get; } =
+        Definition.Steps.GroupBy(s => s.StepId).ToDictionary(g => g.Key, g => g.Last());
+}
 
 /// <summary>
 /// L1: the in-memory mirror of the workflows this replica has activated.

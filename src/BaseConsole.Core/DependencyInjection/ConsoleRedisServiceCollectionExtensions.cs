@@ -3,10 +3,13 @@ using BaseConsole.Core.Gating;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
+using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
@@ -128,6 +131,44 @@ public static class ConsoleRedisServiceCollectionExtensions
         services.TryAddSingleton<IConsumerAdmission, AlwaysOpenAdmission>();
         services.TryAddSingleton<GatedQueueConsumer>();
         services.AddHostedService(sp => sp.GetRequiredService<GatedQueueConsumer>());
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers an ADDITIONAL gated consumer on <paramref name="queue"/>, sharing the gate, probe and
+    /// admission latch that <see cref="AddBaseConsoleGating"/> already registered. Call that first.
+    /// <para>
+    /// <b>Sharing the gate is the point.</b> One projection-store outage should pause every queue this
+    /// process reads, not each one separately on its own first failure — and one probe loop, with one
+    /// liveness check over it, is what makes "the store is reachable" a single answer rather than one
+    /// per consumer that can disagree.
+    /// </para>
+    /// <para>
+    /// <b>Options are constructed here rather than resolved.</b> <see cref="GatedConsumerOptions"/> is
+    /// a single configured instance naming one queue, so a second consumer cannot read it and mean
+    /// something different; each extra consumer is handed its own.
+    /// </para>
+    /// <para>
+    /// <b>A plain <c>AddSingleton&lt;IHostedService&gt;</c>, NOT <c>AddHostedService</c>, and that is
+    /// load-bearing.</b> <c>AddHostedService</c> registers through <c>TryAddEnumerable</c>, which
+    /// de-duplicates on implementation type — so a second call naming the same <c>GatedQueueConsumer</c>
+    /// type is silently dropped and the second queue is never consumed, with nothing anywhere to say
+    /// so. The plain overload stacks.
+    /// </para>
+    /// </summary>
+    public static IServiceCollection AddGatedQueue(this IServiceCollection services, string queue)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(queue);
+
+        services.AddSingleton<IHostedService>(sp => new GatedQueueConsumer(
+            sp.GetRequiredService<RabbitMqConnection>(),
+            sp.GetRequiredService<L2Gate>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(new GatedConsumerOptions { Queue = queue }),
+            sp.GetRequiredService<IConsumerAdmission>(),
+            sp.GetRequiredService<ILogger<GatedQueueConsumer>>()));
 
         return services;
     }

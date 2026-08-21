@@ -7,6 +7,7 @@ using Orchestrator;
 using Orchestrator.Hydration;
 using Orchestrator.Messaging;
 using Orchestrator.Scheduling;
+using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -122,6 +123,38 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
     public void TheReplicaIdentityResolves()
     {
         Assert.NotNull(_host.Services.GetRequiredService<InstanceId>());
+    }
+
+    [Fact]
+    public void EveryQueueThisReplicaReadsHasAConsumerOfItsOwn()
+    {
+        // Three queues, three consumers: the per-replica announcement queue, and the two shared
+        // execution queues. This is the check the wiring most needs, because the failure mode is
+        // silent — AddHostedService registers through TryAddEnumerable, which de-duplicates on
+        // implementation type, so a second GatedQueueConsumer added that way is simply dropped and its
+        // queue is never read, with nothing logged and every probe still green. AddGatedQueue uses a
+        // plain AddSingleton for exactly that reason, and this asserts it worked.
+        var consumers = _host.Services.GetServices<IHostedService>().OfType<GatedQueueConsumer>().ToList();
+
+        Assert.Equal(3, consumers.Count);
+    }
+
+    [Fact]
+    public void TheExecutionPathHandlersAreRegisteredAndTypeDisjoint()
+    {
+        // Handlers are resolved by MessageType across the whole container rather than per queue, and
+        // the consumer picks one with SingleOrDefault — so two handlers claiming one type throw, which
+        // classifies as deterministic and parks every message of that type. Disjointness is the
+        // invariant that makes one shared registry safe.
+        using var scope = _host.Services.CreateScope();
+        var handlers = scope.ServiceProvider.GetServices<IQueueMessageHandler>().ToList();
+
+        Assert.Equal(
+            handlers.Select(h => h.MessageType).Order(StringComparer.Ordinal),
+            handlers.Select(h => h.MessageType).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+
+        Assert.Contains(MessageTypes.StepOutcome, handlers.Select(h => h.MessageType));
+        Assert.Contains(MessageTypes.NextStepHandoff, handlers.Select(h => h.MessageType));
     }
 
     [Fact]

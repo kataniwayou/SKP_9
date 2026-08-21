@@ -43,6 +43,80 @@ public sealed class OrchestratorTopologyTests
         Assert.True(dlx >= 0 && q > dlx, "the dead-letter exchange must be declared before the queue naming it");
     }
 
+    [Theory]
+    [InlineData(OrchestratorQueues.Result, OrchestratorQueues.ResultDead)]
+    [InlineData(OrchestratorQueues.ResultPost, OrchestratorQueues.ResultPostDead)]
+    public async Task DeclaresEachSharedExecutionQueueAfterTheExchangeItParksInto(string queue, string dead)
+    {
+        // The execution queues are shared across the deployment, unlike the announcement queue above,
+        // but the ordering rule is the same and the consequence of breaking it is worse here: a result
+        // this consumer refuses is the orchestrator's only record that a step could not be advanced,
+        // and a queue naming an exchange that does not exist yet discards every one of them silently.
+        var channel = Substitute.For<IChannel>();
+        var order = new List<string>();
+
+        channel.ExchangeDeclareAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask)
+            .AndDoes(c => order.Add($"exchange:{c.ArgAt<string>(0)}"));
+
+        channel.QueueDeclareAsync(
+                Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new QueueDeclareOk("q", 0, 0)))
+            .AndDoes(c => order.Add($"queue:{c.ArgAt<string>(0)}"));
+
+        await new OrchestratorTopology(new InstanceId("orchestrator-0"))
+            .DeclareAsync(channel, CancellationToken.None);
+
+        var dlx = order.IndexOf($"exchange:{OrchestratorQueues.DeadLetterExchange}");
+        var deadQueue = order.IndexOf($"queue:{dead}");
+        var work = order.IndexOf($"queue:{queue}");
+
+        Assert.True(dlx >= 0, "the execution dead-letter exchange is never declared");
+        Assert.True(deadQueue > dlx, "the dead queue must be declared after the exchange it binds to");
+        Assert.True(work > deadQueue, "the work queue must be declared after the queue it parks into");
+    }
+
+    [Theory]
+    [InlineData(OrchestratorQueues.Result, OrchestratorQueues.ResultDead)]
+    [InlineData(OrchestratorQueues.ResultPost, OrchestratorQueues.ResultPostDead)]
+    public async Task GivesEachSharedExecutionQueueItsDeadLetterArgumentsAndNoDeliveryLimit(
+        string queue, string dead)
+    {
+        // No x-delivery-limit, matching the control queue: the limit counts every redelivery including
+        // the ones the L2 gate issues through an outage, so a long one would dead-letter results that
+        // were never malformed. A message the consumer genuinely refuses is parked on its first
+        // delivery, which is what a limit would otherwise protect against.
+        var channel = Substitute.For<IChannel>();
+        var args = new Dictionary<string, IDictionary<string, object?>?>(StringComparer.Ordinal);
+
+        channel.ExchangeDeclareAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        channel.QueueDeclareAsync(
+                Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new QueueDeclareOk("q", 0, 0)))
+            .AndDoes(c => args[c.ArgAt<string>(0)] = c.ArgAt<IDictionary<string, object?>>(4));
+
+        await new OrchestratorTopology(new InstanceId("orchestrator-0"))
+            .DeclareAsync(channel, CancellationToken.None);
+
+        var work = args[queue]!;
+        Assert.Equal(OrchestratorQueues.DeadLetterExchange, work["x-dead-letter-exchange"]);
+        Assert.Equal(dead, work["x-dead-letter-routing-key"]);
+        Assert.Equal("quorum", work["x-queue-type"]);
+        Assert.False(work.ContainsKey("x-delivery-limit"));
+    }
+
     [Fact]
     public async Task BindsThisReplicasQueueToTheFanoutExchangeAndItsDeadQueueToTheDeadLetterExchange()
     {
