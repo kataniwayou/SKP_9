@@ -126,6 +126,41 @@ public sealed class StartupPreflightServiceTests
             && r.Message.Contains("PASSED", StringComparison.Ordinal));
         Assert.Contains("RabbitMQ", allClear.Message, StringComparison.Ordinal);
         Assert.Contains("Redis", allClear.Message, StringComparison.Ordinal);
+
+        // The line an operator screenshots must carry what it passed against, not just that it passed.
+        Assert.Contains("rmq-host", allClear.Message, StringComparison.Ordinal);
+        Assert.Contains("redis-host", allClear.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RendersTheRabbitMqEndpointUnambiguouslyForANonDefaultVirtualHost()
+    {
+        // The old "{Host}:{Port}{VirtualHost}" concatenation rendered a non-default vhost as
+        // "5672prod" — indistinguishable from a typo'd port. VirtualHost is free-form config, not
+        // guaranteed to carry its own leading slash, so this covers both shapes.
+        var h = new Harness();
+        h.RabbitOptions.VirtualHost = "prod";
+
+        await h.Build().RunAsync(CancellationToken.None);
+
+        var rabbitLine = Assert.Single(h.Log.Records, r =>
+            r.Message.Contains("RabbitMQ reachable at", StringComparison.Ordinal));
+        Assert.Contains("rmq-host:5672/prod", rabbitLine.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("5672prod", rabbitLine.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RendersTheRabbitMqEndpointUnambiguouslyWhenVirtualHostAlreadyCarriesItsSlash()
+    {
+        var h = new Harness();
+        h.RabbitOptions.VirtualHost = "/prod";
+
+        await h.Build().RunAsync(CancellationToken.None);
+
+        var rabbitLine = Assert.Single(h.Log.Records, r =>
+            r.Message.Contains("RabbitMQ reachable at", StringComparison.Ordinal));
+        Assert.Contains("rmq-host:5672/prod", rabbitLine.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("5672//prod", rabbitLine.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -206,6 +241,29 @@ public sealed class StartupPreflightServiceTests
 
         Assert.DoesNotContain(h.Log.Records, r => r.Exception is OperationCanceledException);
         Assert.DoesNotContain(h.Log.Records, r => r.Message.Contains("PASSED", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DoesNotLogAnErrorWhenCancelledWhileARedisPingIsOutstanding()
+    {
+        // PingRedisAsync races the ping against a deadline LINKED to the caller's token, so cancelling
+        // that token also cancels the deadline. The only thing distinguishing "Redis is slow" from
+        // "the host is stopping" is whether ct itself was cancelled -- never the exception's type,
+        // and never merely which side of Task.WhenAny won. RabbitMQ is left to succeed by default so
+        // the run is definitely sitting inside the Redis ping, not still on RabbitMQ, when we cancel.
+        var h = new Harness();
+        var pingNeverCompletes = new TaskCompletionSource<TimeSpan>();
+        h.Db.PingAsync(Arg.Any<CommandFlags>()).Returns(pingNeverCompletes.Task);
+
+        var run = h.Build().RunAsync(h.Cts.Token);
+        h.PumpTime(TimeSpan.FromSeconds(1));   // real time for the pool to reach the outstanding ping
+        h.Cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.DoesNotContain(h.Log.Records, r => r.Level == LogLevel.Error);
+        Assert.DoesNotContain(
+            h.Log.Records, r => r.Message.Contains("unreachable", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

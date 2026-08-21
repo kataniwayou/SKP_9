@@ -1,4 +1,3 @@
-using BaseConsole.Core.Health;
 using Messaging.Transport;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,7 +11,7 @@ namespace BaseConsole.Core.Startup;
 /// this process's own RabbitMQ connection and Redis connection actually work — reachability and
 /// credentials, nothing about what either dependency holds.
 /// <para>
-/// <b>This is not a gate and not a watchdog.</b> It reads no <see cref="IStartupGate"/>, marks
+/// <b>This is not a gate and not a watchdog.</b> It reads no <c>IStartupGate</c>, marks
 /// nothing ready, and registers no liveness check. The startup loops that already exist —
 /// <c>HydrationService</c>, <c>ProcessorStartupOrchestrator</c> — keep sole ownership of retrying and
 /// recovering; this component only ever calls into the connections they already share, observes what
@@ -41,9 +40,14 @@ namespace BaseConsole.Core.Startup;
 internal sealed class StartupPreflightService : BackgroundService
 {
     /// <summary>
-    /// How often the still-failing dependencies are re-checked and re-logged, and the deadline the
-    /// Redis ping is raced against (see <see cref="PingRedisAsync"/>) — one number for both, since a
-    /// ping that ran longer than the loop's own cadence would already have missed this pass.
+    /// How often the still-failing dependencies are re-checked and re-logged, governed by
+    /// <see cref="TimeProvider"/> so a test can fast-forward it. The same duration is reused, as a
+    /// plain wall-clock value, for the deadline the Redis ping is raced against (see
+    /// <see cref="PingRedisAsync"/>) — deliberately <b>not</b> governed by the same clock: that ping
+    /// bounds one real network round-trip, the same way <c>L2GateProbe.IsHealthyAsync</c>'s does, and
+    /// a round-trip is not a delay a test — or an operator — should be able to freeze. A ping that ran
+    /// longer than the loop's own cadence would already have missed this pass either way, which is why
+    /// one literal number is reused for both rather than two configured separately.
     /// </summary>
     internal static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(5);
 
@@ -76,7 +80,13 @@ internal sealed class StartupPreflightService : BackgroundService
 
         // Host, port, vhost and username are configuration facts, not secrets — Password never rides
         // along. See RabbitMqOptions for which fields are which.
-        _rabbitEndpoint = $"amqp://{options.Username}@{options.Host}:{options.Port}{options.VirtualHost}";
+        //
+        // VirtualHost is free-form config and not guaranteed to carry its own leading slash — "/" (the
+        // default), "prod", and "/prod" are all legal values of it. TrimStart('/') before rebuilding
+        // the separator ourselves is what keeps "prod" from concatenating onto the port with nothing
+        // between them (amqp://host:5672prod) and keeps "/prod" from doubling up (amqp://host:5672//prod).
+        _rabbitEndpoint =
+            $"amqp://{options.Username}@{options.Host}:{options.Port}/{options.VirtualHost.TrimStart('/')}";
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken) => RunAsync(stoppingToken);
@@ -87,7 +97,13 @@ internal sealed class StartupPreflightService : BackgroundService
     /// directly, the same seam <c>HydrationService.RunUntilHydratedAsync</c> exposes.
     /// <para>
     /// Throws <see cref="OperationCanceledException"/> on shutdown and logs nothing more when it does:
-    /// a cancellation is the host stopping, not a verdict on either dependency.
+    /// a cancellation is the host stopping, not a verdict on either dependency. <see cref="CheckAsync"/>
+    /// tells the two apart by asking <paramref name="ct"/> directly — <c>ct.IsCancellationRequested</c>
+    /// — rather than by an exception's type, because a dependency's own client can raise an
+    /// <see cref="OperationCanceledException"/> that has nothing to do with this token, and this
+    /// token's own cancellation can surface as an exception type that is not
+    /// <see cref="OperationCanceledException"/> (see <see cref="PingRedisAsync"/>, whose ping-vs-deadline
+    /// race throws <see cref="TimeoutException"/> even when the real cause is shutdown).
     /// </para>
     /// </summary>
     internal async Task RunAsync(CancellationToken ct)
@@ -125,8 +141,15 @@ internal sealed class StartupPreflightService : BackgroundService
             await Task.Delay(RetryInterval, _clock, ct).ConfigureAwait(false);
         }
 
+        // Restates both endpoints rather than just naming the dependencies: this is the line an
+        // operator screenshots, and "PASSED" with no record of what it passed against is not
+        // actionable if it turns out to be the wrong endpoint. Worded to avoid the literal phrase
+        // "reachable at" that the per-dependency success line below uses, so a test matching on that
+        // phrase can't accidentally pick this line up too.
         _logger.LogInformation(
-            "Startup preflight PASSED: RabbitMQ and Redis are both reachable.");
+            "Startup preflight PASSED: RabbitMQ ({RabbitEndpoint}) and Redis ({RedisEndpoint}) are " +
+            "both reachable.",
+            _rabbitEndpoint, _redisEndpoint);
     }
 
     /// <summary>
@@ -145,7 +168,7 @@ internal sealed class StartupPreflightService : BackgroundService
                 "Startup preflight: {Dependency} reachable at {Endpoint}.", dependency, endpoint);
             return true;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogError(
                 ex,
@@ -172,6 +195,13 @@ internal sealed class StartupPreflightService : BackgroundService
 
         if (!ReferenceEquals(winner, ping))
         {
+            // deadline is linked to ct, so losing this race has two different causes that must not be
+            // told apart by exception type: a slow-but-reachable Redis (deadline's own CancelAfter
+            // fired), or the caller's own token being cancelled (host shutdown, which cancels deadline
+            // too). ct is the only authority on which one happened — checked before either exception
+            // is even constructed, so a shutdown never gets dressed up as a timed-out ping.
+            ct.ThrowIfCancellationRequested();
+
             // Abandoned, not cancelled: the ping is still running and will eventually complete or
             // fault. Observe that fault so it is not raised as unobserved later, far from here.
             _ = ping.ContinueWith(
