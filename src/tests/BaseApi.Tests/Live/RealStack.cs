@@ -1,4 +1,4 @@
-using Xunit;
+﻿using Xunit;
 
 namespace BaseApi.Tests.Live;
 
@@ -32,6 +32,12 @@ public static class RealStack
     public static string BaseApiUrl => Get("SKP_BASEAPI_URL", "http://localhost:18080");
     public static string OtlpEndpoint => Get("SKP_OTLP_ENDPOINT", "http://localhost:14317");
     public static string CollectorMetricsUrl => Get("SKP_COLLECTOR_METRICS_URL", "http://localhost:18889/metrics");
+
+    // Read by RedisReconnectLiveTests as the far side of its own forwarder, never connected to
+    // directly: the point of that test is a client whose endpoint is absent and then present, which
+    // an always-open forward cannot express.
+    public static string RedisHost => Get("SKP_REDIS_HOST", "localhost");
+    public static int RedisPort => int.Parse(Get("SKP_REDIS_PORT", "6380"));
 
     private static string Get(string key, string fallback) =>
         Environment.GetEnvironmentVariable(key) is { Length: > 0 } v ? v : fallback;
