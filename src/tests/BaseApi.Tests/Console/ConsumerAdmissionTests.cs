@@ -81,10 +81,10 @@ public sealed class ConsumerAdmissionTests
     [Fact]
     public void ARegisteredAdmissionStandsDownTheDefault()
     {
-        // This is the assertion that makes Task 7's registration possible at all: a host that
-        // registers its own IConsumerAdmission before calling AddBaseConsoleGating must get that
-        // implementation resolved, not AlwaysOpenAdmission — TryAddSingleton only takes effect when
-        // nothing has claimed the slot yet.
+        // What lets a host bring its own admission at all, and what the orchestrator's hydration
+        // latch depends on: a host that registers its own IConsumerAdmission before calling
+        // AddBaseConsoleGating must get that implementation resolved, not AlwaysOpenAdmission —
+        // TryAddSingleton only takes effect when nothing has claimed the slot yet.
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<TimeProvider>(new FakeTimeProvider());
