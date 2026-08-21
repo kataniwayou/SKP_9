@@ -35,6 +35,15 @@ namespace Orchestrator.Hydration;
 /// only thing that would change is that the outage now reads as a crash loop.
 /// </para>
 /// <para>
+/// <b>Which is why the startup gate is opened on the first beat and not on success.</b> The pod's
+/// startup budget is finite, so a gate that waited for a complete pass would turn exactly that
+/// survivable outage into the crash loop the paragraph above rules out — and under
+/// <c>podManagementPolicy: Parallel</c> it would take all three replicas at once. Readiness here
+/// claims what <c>ProcessorLivenessHeartbeat</c> claims on its own first beat: the loop is running.
+/// Whether it has finished is <see cref="HydrationAdmission.IsOpen"/>, reported on
+/// <c>/health/ready</c>, where a condition no restart can repair belongs.
+/// </para>
+/// <para>
 /// <b>And a loop that simply stopped beating would be just as fatal.</b> A finished startup loop looks
 /// exactly like a wedged one to a staleness window, so success ends with
 /// <see cref="ILoopHeartbeat.Retire"/> — without it the pod would fail liveness one window after
@@ -150,9 +159,14 @@ public sealed class HydrationService : BackgroundService
     }
 
     /// <summary>
-    /// One pass: beat, declare this replica's topology, read every workflow id L2 lists, activate
-    /// each in turn, and — only if all of that finished — mark the host ready, admit the consumer and
+    /// One pass: beat, report the loop running, declare this replica's topology, read every workflow
+    /// id L2 lists, activate each in turn, and — only if all of that finished — admit the consumer and
     /// retire the heartbeat.
+    /// <para>
+    /// <b>The startup gate is marked on the beat, not at the end.</b> It says this replica is starting
+    /// correctly, which is true on every attempt including the ones that throw; the claim that L1 now
+    /// mirrors L2 is <see cref="HydrationAdmission"/>'s, and the readiness probe reads that.
+    /// </para>
     /// <para>
     /// Internal so a test can drive a single attempt without a host, the same seam
     /// <c>ProcessorStartupOrchestrator.RunStartupAsync</c> exposes.
@@ -166,6 +180,14 @@ public sealed class HydrationService : BackgroundService
     internal async Task RunOnceAsync(CancellationToken ct)
     {
         _heartbeat.Beat();
+
+        // Beside the beat, and for the same reason the processor's liveness loop marks itself ready on
+        // its first beat: the loop is genuinely running, which is all readiness claims. Deliberately
+        // not gated on the pass succeeding — a replica retrying an unreachable L2 or broker is
+        // starting correctly, and a gate that waited for success would hold /health/startup red for
+        // the whole outage until the kubelet spent the startup budget and killed the pod. Idempotent,
+        // so calling it on every attempt costs a no-op rather than a first-attempt flag.
+        _startupGate.MarkReady();
 
         // Before the first read of L2, and after the beat: a broker that is down must leave this loop
         // retrying and visibly alive, exactly as an L2 that is down does. A declare placed ahead of
@@ -186,11 +208,10 @@ public sealed class HydrationService : BackgroundService
         _logger.LogInformation(
             "hydrated {WorkflowCount} workflows from L2; admitting the consumer", workflowIds.Count);
 
-        // Order matters only in that all three follow a complete pass. Readiness first because it is
-        // what an operator watching /health/startup sees, admission second because it is what changes
-        // this process's behaviour, and retirement last because it is the statement that there is
-        // nothing left of this loop to watch.
-        _startupGate.MarkReady();
+        // Both of these follow a complete pass, and only these two. Admission first because it is what
+        // changes this process's behaviour, retirement second because it is the statement that there
+        // is nothing left of this loop to watch. Readiness is not here: it was claimed on the first
+        // beat, above.
         _admission.Open();
         _heartbeat.Retire();
     }
