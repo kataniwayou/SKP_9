@@ -21,6 +21,14 @@ namespace Orchestrator.Scheduling;
 /// is the only move that is safe from inside a fire.
 /// </para>
 /// <para>
+/// <b>That is a claim about a third-party library, so it is checked rather than asserted.</b>
+/// <c>SelfReschedulingChainTests</c> runs a real started scheduler through two fires a second apart;
+/// re-adding the job from inside a fire instead of replacing the trigger fails it with Quartz's own
+/// <c>ObjectAlreadyExistsException</c>, which is the store saying the job of a fire in progress is
+/// still there. If the claim were false every workflow would fire exactly once and stop, on all three
+/// replicas, with nothing logged.
+/// </para>
+/// <para>
 /// <b>And it must nonetheless be able to re-create job and trigger from nothing.</b> A non-durable job
 /// with no triggers is auto-purged, which is the ordinary state of affairs by the time a fire gets
 /// around to arming its successor. That is why <see cref="RescheduleAsync"/> takes the workflow id it
