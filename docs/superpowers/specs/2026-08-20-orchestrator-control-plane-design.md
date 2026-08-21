@@ -90,15 +90,15 @@ OrchestrationService.StartAsync
 Startup on each replica, before any of the above is consumed:
 
 ```
-connection up, topology declared      (queue exists; fanout messages buffer here)
-        ▼
-L2 gate opens (two healthy Redis pings)
+hydration loop opens the connection   (topology declared: queue exists, fanout messages buffer here)
         ▼
 hydration loop: SMEMBERS skp: → read each root → L1 → schedule
         ▼
 IStartupGate.MarkReady()  →  /health/startup healthy
         ▼
 IConsumerAdmission opens  →  fanout consumption begins, draining the backlog
+                             (and only while loop 1's L2 gate is open: the two are
+                              independent conditions on the same decision, not a sequence)
 ```
 
 ---
@@ -174,8 +174,11 @@ consuming, per that interface's contract.
   **before** the queue naming it, since that argument is not validated at declare time and a queue
   pointing at a missing exchange discards every parked message silently.
 
-The queue is declared before hydration runs, so fanout messages published while a replica is still
-hydrating accumulate in a durable queue and are drained when consumption is admitted.
+Declaring is the first thing each hydration pass does, before it reads a byte of L2 — opening the
+shared connection is what runs the declarations, and hydration is what opens it. So the queue exists
+before the read, and fanout messages published while a replica is still hydrating accumulate in a
+durable queue and are drained when consumption is admitted. A pass that cannot reach the broker backs
+off and retries exactly as one that cannot reach L2 does.
 
 ### 4.5 The unroutable-publish window
 
@@ -240,12 +243,12 @@ budgeted at `Interval × StaleFactor`.
 
 ### 6.3 Loop 2 — hydration
 
-Reads `SMEMBERS skp:` (the parent-index SET every workflow root is added to by
-`L2ProjectionWriter.cs:71`), then each `Root(workflowId)` and its steps, mirrors into L1, and calls
-the shared activation path (§7.1) per workflow.
+Declares this replica's topology first — see §4.4 — then reads `SMEMBERS skp:` (the parent-index SET
+every workflow root is added to by `L2ProjectionWriter.cs:71`), then each `Root(workflowId)` and its
+steps, mirrors into L1, and calls the shared activation path (§7.1) per workflow.
 
-Retries forever on an L2 fault with the same backoff-to-cap shape as `ProcessorStartupOrchestrator`,
-beating its heartbeat each iteration. On success it calls `IStartupGate.MarkReady()` and **retires**
+Retries forever on a broker or L2 fault with the same backoff-to-cap shape as
+`ProcessorStartupOrchestrator`, beating its heartbeat each iteration. On success it calls `IStartupGate.MarkReady()` and **retires**
 its heartbeat, so its liveness check stops expecting ticks — the console `ILoopHeartbeat` already
 carries `IsRetired`/`Retire` for this.
 

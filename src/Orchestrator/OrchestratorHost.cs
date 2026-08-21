@@ -182,11 +182,18 @@ public static class OrchestratorHost
                 HealthStatus.Unhealthy,
                 ["live"]));
 
+        // What makes "the queue exists before hydration reads L2" true. Opening the shared connection
+        // is what declares topology, and the only other thing here that opens it is the gated
+        // consumer, registered below and therefore started after this loop — so without this the
+        // first pass read L2 through a queue that did not exist yet, and any announcement published
+        // in that window was lost to this replica for good.
+        builder.Services.AddSingleton<ITopologyDeclarer, ConnectionTopologyDeclarer>();
+
         // A plain type-based registration, not a factory: HydrationService's keyed ILoopHeartbeat
         // parameter carries [FromKeyedServices(HydrationService.LoopName)], which the built-in
         // container resolves on its own. The factory this replaced was shielding this loop's own
         // dependency graph from ValidateOnBuild — collapsing it puts HydrationService under the same
-        // validation as everything else once Task 10 registers IWorkflowScheduler.
+        // validation as everything else, including the IWorkflowScheduler registered above.
         builder.Services.AddHostedService<HydrationService>();
 
         // The two consumers that keep a running replica in step with L2 once hydration has admitted

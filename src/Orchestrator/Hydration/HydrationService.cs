@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestrator.L1;
+using Orchestrator.Messaging;
 
 namespace Orchestrator.Hydration;
 
@@ -16,6 +17,15 @@ namespace Orchestrator.Hydration;
 /// what makes a start announcement arriving mid-boot harmless: it waits, and by the time it is handled
 /// the workflow it names is already in L1, so the handler converges on it instead of racing the pass
 /// that was about to mirror it.
+/// </para>
+/// <para>
+/// <b>Each pass declares this replica's topology before it reads a byte of L2, and the order is the
+/// point.</b> Declaring is what creates the fan-out queue this replica listens on, and an
+/// announcement published between the read and the declare would route to the replicas whose queues
+/// already existed and be lost to this one for good — the pass would not see it in L2 either, having
+/// already read. Doing it here rather than in a service ordered ahead of this one is what puts a
+/// broker outage under the same backoff as an L2 outage, which is the contract this loop already
+/// has; the alternative blocks host startup on a dependency that is allowed to be down.
 /// </para>
 /// <para>
 /// <b>An unreachable L2 is not a reason to die.</b> Spec §6.4: the liveness check over this loop asks
@@ -75,6 +85,7 @@ public sealed class HydrationService : BackgroundService
     /// </summary>
     internal static readonly TimeSpan LivenessWindow = BackoffCap * StaleFactor;
 
+    private readonly ITopologyDeclarer _topology;
     private readonly L2WorkflowReader _reader;
     private readonly WorkflowActivator _activator;
     private readonly HydrationAdmission _admission;
@@ -84,6 +95,7 @@ public sealed class HydrationService : BackgroundService
     private readonly ILogger<HydrationService> _logger;
 
     public HydrationService(
+        ITopologyDeclarer topology,
         L2WorkflowReader reader,
         WorkflowActivator activator,
         HydrationAdmission admission,
@@ -92,6 +104,7 @@ public sealed class HydrationService : BackgroundService
         [FromKeyedServices(LoopName)] ILoopHeartbeat heartbeat,
         ILogger<HydrationService> logger)
     {
+        _topology    = topology ?? throw new ArgumentNullException(nameof(topology));
         _reader      = reader ?? throw new ArgumentNullException(nameof(reader));
         _activator   = activator ?? throw new ArgumentNullException(nameof(activator));
         _admission   = admission ?? throw new ArgumentNullException(nameof(admission));
@@ -124,10 +137,11 @@ public sealed class HydrationService : BackgroundService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // The delay is named because it is the operator's only clue to how long the replica
-                // will sit un-admitted while its queue fills. The exception carries the rest.
+                // Named for the condition that actually holds: either dependency this pass touches
+                // can fail it. The delay is the operator's only clue to how long the replica will sit
+                // un-admitted; the exception carries which of the two it was.
                 _logger.LogWarning(
-                    ex, "hydration could not read L2; retrying in {Delay}", delay);
+                    ex, "hydration could not reach the broker or L2; retrying in {Delay}", delay);
             }
 
             await Task.Delay(delay, _clock, ct).ConfigureAwait(false);
@@ -136,8 +150,9 @@ public sealed class HydrationService : BackgroundService
     }
 
     /// <summary>
-    /// One pass: beat, read every workflow id L2 lists, activate each in turn, and — only if all of
-    /// that finished — mark the host ready, admit the consumer and retire the heartbeat.
+    /// One pass: beat, declare this replica's topology, read every workflow id L2 lists, activate
+    /// each in turn, and — only if all of that finished — mark the host ready, admit the consumer and
+    /// retire the heartbeat.
     /// <para>
     /// Internal so a test can drive a single attempt without a host, the same seam
     /// <c>ProcessorStartupOrchestrator.RunStartupAsync</c> exposes.
@@ -151,6 +166,12 @@ public sealed class HydrationService : BackgroundService
     internal async Task RunOnceAsync(CancellationToken ct)
     {
         _heartbeat.Beat();
+
+        // Before the first read of L2, and after the beat: a broker that is down must leave this loop
+        // retrying and visibly alive, exactly as an L2 that is down does. A declare placed ahead of
+        // the beat would leave the heartbeat unstamped for the whole outage and have the pod
+        // restarted for waiting as designed.
+        await _topology.EnsureDeclaredAsync(ct).ConfigureAwait(false);
 
         var workflowIds = await _reader.ReadAllIdsAsync(ct).ConfigureAwait(false);
 
