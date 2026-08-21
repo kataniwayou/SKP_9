@@ -174,7 +174,14 @@ public sealed class GatedQueueConsumer : BackgroundService
             _consumerTag = await _channel
                 .BasicConsumeAsync(_options.Queue, autoAck: false, _consumer, ct)
                 .ConfigureAwait(false);
-            _logger.LogInformation("projection store healthy — consuming {Queue}", _options.Queue);
+
+            // Both conditions are named because both are read: this transition fires on the
+            // ShouldConsume conjunction, and on a host that gates admission the first one of these a
+            // process ever logs is admission opening, not the store coming back. A message naming
+            // only the store would send an operator to Redis for a change Redis had no part in.
+            _logger.LogInformation(
+                "consumption admitted and the projection store healthy — consuming {Queue}",
+                _options.Queue);
         }
         else if (!shouldConsume && _consumerTag is not null)
         {
@@ -185,7 +192,12 @@ public sealed class GatedQueueConsumer : BackgroundService
             // currently occupy, and waiting for it there is a deadlock at a dispatch concurrency of
             // one. Nothing depends on the confirmation — the next pass re-checks.
             await _channel.BasicCancelAsync(tag, noWait: true, ct).ConfigureAwait(false);
-            _logger.LogWarning("projection store unavailable — paused consuming {Queue}", _options.Queue);
+
+            // The disjunction, for the same reason, and no narrower: this pass knows the conjunction
+            // no longer holds, not which half of it gave way.
+            _logger.LogWarning(
+                "consumption no longer admitted or the projection store unhealthy — paused consuming {Queue}",
+                _options.Queue);
         }
     }
 
