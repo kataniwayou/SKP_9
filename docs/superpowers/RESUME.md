@@ -3,7 +3,7 @@
 Written 2026-08-21. Paste the fenced block below into a fresh session.
 
 This is session scaffolding, not project documentation: it describes where the
-work stood at `47ef56b` so a fresh session can pick it up without re-deriving
+work stood at `bd82249` so a fresh session can pick it up without re-deriving
 anything. It is committed so it survives `git clean`. Delete it once the branch
 lands — a stale resume note is worse than none.
 
@@ -13,7 +13,7 @@ lands — a stale resume note is worse than none.
 Continue work on the SK_P9 orchestrator branch.
 
 REPO: C:\Users\UserL\source\repos\SK_P9
-BRANCH: processor-sample-discovery (head 47ef56b, unpushed, ~119 commits ahead of main)
+BRANCH: processor-sample-discovery (head bd82249, unpushed, ~125 commits ahead of main)
 
 WHAT'S BUILT: src/Orchestrator — a .NET 8 console service, 3 replicas under a
 StatefulSet, that mirrors workflow definitions from Redis ("L2") into an in-memory
@@ -26,11 +26,13 @@ enforced AbortOnConnectFail=false in both the API and console Redis registration
 
 TEST GATE: dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
 Must be 0 failures, exactly 6 skips, exit 0, 0 build warnings.
-Currently: Failed 0, Passed 399, Skipped 6, Total 405.
+Currently: Failed 0, Passed 400, Skipped 6, Total 406.
 
 REPO GOTCHAS THAT WILL BITE YOU:
 - --filter is SILENTLY IGNORED by this test runner. Run the whole project.
-  --filter-method works for a single test.
+  --filter-method works for a single test, but only after a bare `--`:
+  `dotnet test <csproj> -- --filter-method "*Name*"`. Without it MSBuild rejects
+  the switch outright (MSB1001), which is at least loud.
 - FakeTimeProvider needs an external pump here: time advances only when something
   reads it, so a loop test that waits on a delay HANGS rather than failing, and
   stalls the whole run. HydrationServiceTests.PumpTime is the worked example.
@@ -51,22 +53,12 @@ or reverted:
   untracked src/tests/BaseApi.Tests/Orchestration/L2OrphanSweeperTests.cs
 Always `git add` explicit paths. NEVER `git add -A` or `git add .`.
 
-OPEN ITEMS (all small, none blocking):
-1. Nothing pins ITopologyDeclarer to ConnectionTopologyDeclarer — a no-op
-   registered over it would leave the suite green while restoring a real bug.
-   One line, idiom already at OrchestratorHostWiringTests.cs:243.
-2. Spec §11 (Testing) doesn't list the tests added by the final fix wave,
-   notably the self-rescheduling chain test — the only one proving a workflow
-   fires more than once.
-3. WorkflowScheduler.cs's "checked rather than asserted" paragraph overstates its
-   evidence: ObjectAlreadyExistsException on the JOB proves the job's presence;
-   the trigger's presence follows only by also observing the green run never took
-   the re-create fallback.
-4. StartupPreflightService: on the shutdown path the abandoned Redis ping's fault
-   is no longer observed by a ContinueWith. Low; process is exiting anyway.
-5. k8s/README.md's "Probes, and why they differ" table is written for the
-   processor but reads as generic; its /health/ready row now describes only one
-   of the two workloads.
+OPEN ITEMS: none. The five that stood at 4725424 were closed at bd82249 — the
+ITopologyDeclarer pin, the spec §11 test list, the WorkflowScheduler evidence
+claim, the preflight ping's unobserved shutdown fault, and the k8s probe table.
+What is left is the work the spec itself names as out of scope (§12): nothing
+consumes `orchestrator-result`, the three reclaim duties are unowned, and
+scale-down is undefended.
 
 HOW I'VE BEEN WORKING: subagent-driven development — a fresh implementer per
 piece of work, then an independent reviewer against the diff, then a scoped
@@ -84,6 +76,12 @@ so the next session does not re-derive it.
 
 | Commit | What |
 |---|---|
+| `bd82249` | k8s docs: split the probe table across the three workloads |
+| `9642f92` | docs: list the fix wave's tests in spec §11 |
+| `7a4f515` | docs: state what the chain test proves about the trigger, and how |
+| `4c593e0` | fix: observe the abandoned Redis ping on the shutdown path too |
+| `71d7a44` | test: pin ITopologyDeclarer to ConnectionTopologyDeclarer |
+| `4725424` | docs: add a resume prompt for the orchestrator branch |
 | `47ef56b` | docs: record what each orchestrator probe now means |
 | `eed1ebb` | k8s: orchestrator readiness probe, startup budget 60 → 30 |
 | `f461971` | feat: report orchestrator hydration through readiness |
@@ -96,6 +94,9 @@ so the next session does not re-derive it.
 | `726cb8d..b9d3f14` | the orchestrator control plane plan — 10 tasks + a final fix wave |
 
 ### Three probe meanings, after the last change
+
+(`k8s/README.md` now carries these per workload rather than only for the
+orchestrator; this section is the orchestrator column of that table.)
 
 - `/health/startup` — the process booted and its hydration loop is running. It is
   claimed on the loop's **first beat**, ahead of the topology declare and the L2
