@@ -69,8 +69,8 @@ public sealed class WorkflowFireJob(
             return;
         }
 
-        using (logger.BeginScope(ExecutionLogScope.BuildState(
-                   workflowId, Guid.Empty, Guid.Empty, Guid.Empty, Guid.Empty)))
+        using (logger.BeginScope(ExecutionLogScope.BuildScope(
+                   Guid.Empty, workflowId, Guid.Empty, Guid.Empty, Guid.Empty)))
         {
             if (!store.TryGet(workflowId, out var entry))
             {
@@ -164,25 +164,22 @@ public sealed class WorkflowFireJob(
                 continue;
             }
 
-            var state = ExecutionLogScope.BuildState(
-                Guid.Empty, step.StepId, step.ProcessorId, Guid.Empty, Guid.Empty);
+            var state = ExecutionLogScope.BuildScope(
+                Guid.Empty, Guid.Empty, step.StepId, step.ProcessorId, Guid.Empty);
             state[CorrelationKeys.LogScope] = CorrelationKeys.Render(correlationId);
 
             using (logger.BeginScope(state))
             {
-                var dispatch = new ProcessDispatch(workflowId, step.StepId, step.ProcessorId)
-                {
-                    CorrelationId = correlationId,
-
-                    // An entry step is a source step: no upstream input, so the author produces its
-                    // own. That is the branch the processor's pre handler already implements.
-                    EntryId = Guid.Empty,
-
-                    // An entry dispatch opens no lineage; the author mints the execution id.
-                    ExecutionId = Guid.Empty,
-
-                    Payload = step.Payload,
-                };
+                // Positional, in the canonical id order ProcessDispatch documents. The two
+                // Guid.Empty arguments are load-bearing sentinels rather than unset fields: the
+                // execution id because an entry dispatch opens no lineage and the author mints one,
+                // and the entry id because an entry step is a source step — no upstream input, so the
+                // author produces its own. That second one is the branch the processor's pre handler
+                // already implements, and it is also why a source step has no key to reclaim and so no
+                // idempotence token against a redelivery.
+                var dispatch = new ProcessDispatch(
+                    correlationId, Guid.Empty, workflowId, step.StepId, step.ProcessorId,
+                    step.Payload, Guid.Empty);
 
                 try
                 {

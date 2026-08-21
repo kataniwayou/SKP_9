@@ -19,15 +19,15 @@ namespace BaseProcessor.Core.Processing;
 /// </summary>
 public sealed class PostSendException : TransientSendException
 {
-    public PostSendException(Guid messageId, Guid executionId, Exception inner)
-        : base($"send of branch {messageId:D} to the post queue failed", inner)
+    public PostSendException(Guid entryId, Guid executionId, Exception inner)
+        : base($"send of branch {entryId:D} to the post queue failed", inner)
     {
-        MessageId = messageId;
+        EntryId = entryId;
         ExecutionId = executionId;
     }
 
-    /// <summary>The branch's derived message id — the L2 key it would have written.</summary>
-    public Guid MessageId { get; }
+    /// <summary>The branch's entry id — the L2 key it would have written.</summary>
+    public Guid EntryId { get; }
 
     /// <summary>The branch's execution id, naming the lineage that did not start.</summary>
     public Guid ExecutionId { get; }

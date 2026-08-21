@@ -126,14 +126,19 @@ public static class ProcessorJsonSchemaValidator
     /// <summary>
     /// Turns a failed evaluation into instance locations and keyword names — and nothing else.
     /// <para>
-    /// <b>The library's own error text is deliberately discarded.</b> These strings reach
-    /// <c>StepFailed</c> and the orchestrator's projections, and several keywords embed the offending
-    /// instance value in their message: <c>minimum</c> renders "-999888 should be at least 18",
-    /// <c>maximum</c> and <c>multipleOf</c> likewise. A payload's account balance, age or numeric
-    /// token would land in a projection an operator can read. Which keywords do this is a property of
-    /// the library version, not of anything we control, so an allow-list of "safe" messages would
-    /// need re-auditing on every upgrade. Location plus keyword says where and which rule, is
-    /// sufficient to diagnose, and cannot leak by construction.
+    /// <b>The library's own error text is deliberately discarded.</b> Several keywords embed the
+    /// offending instance value in their message: <c>minimum</c> renders "-999888 should be at least
+    /// 18", <c>maximum</c> and <c>multipleOf</c> likewise. A payload's account balance, age or numeric
+    /// token would land wherever these strings land. Which keywords do this is a property of the
+    /// library version, not of anything we control, so an allow-list of "safe" messages would need
+    /// re-auditing on every upgrade. Location plus keyword says where and which rule, is sufficient to
+    /// diagnose, and cannot leak by construction.
+    /// </para>
+    /// <para>
+    /// These strings no longer reach the orchestrator — a <c>StepOutcome</c> has no text field — but
+    /// they are logged by both handlers, which is the only record of why a step failed. So the
+    /// discipline still holds, against a log rather than a projection: an operator's log store is not
+    /// a place to put a payload either.
     /// </para>
     /// </summary>
     private static List<string> Flatten(EvaluationResults results)

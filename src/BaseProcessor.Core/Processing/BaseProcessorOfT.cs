@@ -36,14 +36,19 @@ public abstract class BaseProcessor<TConfig> : BaseProcessor where TConfig : Pro
     /// <b>Three ways to end.</b> Send one or more branches with <c>SendToPostAsync</c>; return without
     /// sending, which ends the branch silently and legitimately; or throw <see cref="FailedException"/>
     /// or <see cref="CancelledException"/> to report an outcome directly. The first two both reclaim
-    /// the input key once this method returns; a thrown exception does not — the input key is left in
-    /// place, and with no TTL it stays there until something else reclaims it.
+    /// the input key once this method returns. A thrown exception does not: the key stays where it is
+    /// and the outcome sent to the orchestrator names it, because nothing else ever would — execution
+    /// blobs carry no TTL and no sweeper covers them.
     /// </para>
     /// <para>
-    /// <b>Branches must be produced in the same order every invocation.</b> A redelivered dispatch
-    /// replays this method, and each branch's ids are derived from its position in the call sequence —
-    /// so a fan-out over a <c>HashSet</c>, or a parallel loop, changes the ids on replay and forks the
-    /// workflow. Iterate something ordered.
+    /// <b>Write this method so that running it twice on one input is acceptable.</b> A redelivered
+    /// dispatch replays it, and the branches of the replay carry freshly minted ids rather than the
+    /// ones the first run used — so the replay is a second set of branches, not a rewrite of the first.
+    /// Redelivery is narrow (the framework reclaims the input key on the way out, and a redelivery that
+    /// finds it gone returns without calling this method at all), but it is reachable, and it is not
+    /// reachable at all for a source step, which has no key to reclaim. A transform pays nothing for
+    /// this. A step that writes a row or calls an API does the work twice, and nothing in the framework
+    /// records that it did — so make those idempotent, or key them off something the input carries.
     /// </para>
     /// <para>
     /// <paramref name="ct"/> is never cancelled in production: abandoning a handler mid-flight would

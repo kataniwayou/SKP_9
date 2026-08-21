@@ -40,10 +40,10 @@ public static class L2ProjectionKeys
         => $"{Prefix}proc:{processorId:D}";
 
     /// <summary>
-    /// The execution blob key, and the only one. A step's output is written here under its
-    /// <c>MessageId</c> and read back by its successor under that same id as the successor's
-    /// <c>EntryId</c> — output and input are one blob under one key, so the hand-off is a no-op
-    /// rather than a copy.
+    /// The execution blob key, and the only one. A step's output is written here under the
+    /// <c>EntryId</c> its branch minted, and read back by its successor under that same id as the
+    /// successor's own <c>EntryId</c> — output and input are one blob under one key and one name, so
+    /// the hand-off is a no-op rather than a copy.
     /// <para>
     /// <b>No TTL, ever.</b> Reclaim is explicit: the pre handler deletes the key once its author's
     /// transform returns normally, and the orchestrator reclaims the two keys no pre hop ever comes

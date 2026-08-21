@@ -20,7 +20,6 @@ public sealed class ProcessedDataHandlerTests
     private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
-    private static readonly Guid M = Guid.Parse("99999999-9999-9999-9999-999999999999");
 
     private sealed class Harness
     {
@@ -52,12 +51,11 @@ public sealed class ProcessedDataHandlerTests
     private static byte[] Body(ProcessedData p)
         => JsonSerializer.SerializeToUtf8Bytes(p, MessagingJson.Options);
 
+    // The parameter is now the key this branch WRITES — it used to be the source key alongside a
+    // separate MessageId, and the two collapsed into one field. Callers that passed the source entry
+    // here are passing the written key now, which is the same value the outcome reports.
     private static ProcessedData Branch(Guid entryId, string json = "{}") =>
-        new(W, S, P)
-        {
-            CorrelationId = C, ExecutionId = E, MessageId = M, EntryId = entryId,
-            Data = Encoding.UTF8.GetBytes(json),
-        };
+        new(C, E, W, S, P, entryId, Encoding.UTF8.GetBytes(json));
 
     [Fact]
     public async Task ReclaimsNothingAtAll()
@@ -73,7 +71,7 @@ public sealed class ProcessedDataHandlerTests
     }
 
     [Fact]
-    public async Task WritesTheOutputUnderTheMessageIdSoAReplayRewritesIt()
+    public async Task WritesTheOutputUnderTheBranchsEntryIdSoAReplayRewritesIt()
     {
         // The message id is derived, so a redelivered branch lands on this same key and rewrites the
         // same bytes rather than creating a second blob.
@@ -82,7 +80,7 @@ public sealed class ProcessedDataHandlerTests
         await h.Build().HandleAsync(Body(Branch(E, """{"number":7}""")), CancellationToken.None);
 
         await h.Db.Received(1).StringSetAsync(
-            L2ProjectionKeys.ExecutionData(M), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
+            L2ProjectionKeys.ExecutionData(E), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
             Arg.Any<When>(), Arg.Any<CommandFlags>());
     }
 
@@ -109,14 +107,16 @@ public sealed class ProcessedDataHandlerTests
         // The successor reads this key straight through as its input, so it has to be the
         // key just written rather than the input that was reclaimed.
         var h = new Harness();
-        StepCompleted? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCompleted>(s => sent = s),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
         await h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None);
 
-        Assert.Equal(M, sent!.EntryId);
-        Assert.Equal(E, sent.ExecutionId);
+        // The branch's own EntryId, handed straight through: one blob under one key, so the id the
+        // handler wrote is the id the successor reads. There is no second minted id any more.
+        Assert.Equal(E, sent!.EntryId);
+        Assert.Equal(StepResult.Completed, sent.Result);
     }
 
     [Fact]
@@ -124,13 +124,20 @@ public sealed class ProcessedDataHandlerTests
     {
         // No successor will read a failed step's output, so persisting it would be garbage with a TTL.
         var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");
-        StepFailed? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
         await h.Build().HandleAsync(Body(Branch(E, """{"number":"seven"}""")), CancellationToken.None);
 
-        Assert.NotNull(sent);
+        Assert.Equal(StepResult.Failed, sent!.Result);
+
+        // Guid.Empty, not the branch's key: the write never ran, so that key does not exist, and the
+        // step's own input was already reclaimed by the pre handler when the author returned. There is
+        // genuinely nothing here for the orchestrator to reclaim, and naming a key that was never
+        // written would send it after one.
+        Assert.Equal(Guid.Empty, sent.EntryId);
+
         await h.Db.DidNotReceive().StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
                                                   Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
     }
@@ -160,14 +167,14 @@ public sealed class ProcessedDataHandlerTests
         // The "not applicable" half: a null schema id means the role does not apply, so the branch
         // persists and reports complete with validation skipped, exactly as designed.
         var h = new Harness();
-        StepCompleted? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCompleted>(s => sent = s),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
         await h.Build().HandleAsync(Body(Branch(E, "not json at all")), CancellationToken.None);
 
         Assert.NotNull(sent);
-        await h.Db.Received(1).StringSetAsync(L2ProjectionKeys.ExecutionData(M), Arg.Any<RedisValue>(),
+        await h.Db.Received(1).StringSetAsync(L2ProjectionKeys.ExecutionData(E), Arg.Any<RedisValue>(),
                                               Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
     }
 
@@ -195,15 +202,15 @@ public sealed class ProcessedDataHandlerTests
         var written = new List<byte[]>();
         await h.Db.StringSetAsync(Arg.Any<RedisKey>(), Arg.Do<RedisValue>(v => written.Add((byte[])v!)),
                                   Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
-        var completed = new List<StepCompleted>();
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCompleted>(completed.Add),
+        var completed = new List<StepOutcome>();
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(completed.Add),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
         await h.Build().HandleAsync(Body(Branch(E, """{"number":7}""")), CancellationToken.None);
         await h.Build().HandleAsync(Body(Branch(E, """{"number":7}""")), CancellationToken.None);
 
         // Same key, twice.
-        await h.Db.Received(2).StringSetAsync(L2ProjectionKeys.ExecutionData(M), Arg.Any<RedisValue>(),
+        await h.Db.Received(2).StringSetAsync(L2ProjectionKeys.ExecutionData(E), Arg.Any<RedisValue>(),
                                               Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>());
         // Same bytes, twice: the second write is a REwrite, so it cannot leave a different value behind.
         Assert.Equal(2, written.Count);
@@ -212,49 +219,49 @@ public sealed class ProcessedDataHandlerTests
         // And the outcome reported is the same one, naming the same output key.
         Assert.Equal(2, completed.Count);
         Assert.Equal(completed[0].EntryId, completed[1].EntryId);
-        Assert.Equal(M, completed[0].EntryId);
+        Assert.Equal(E, completed[0].EntryId);
     }
 
     [Fact]
-    public async Task StampsOurOwnProcessorIdOnResultsEvenWhenTheBranchClaimsAnother()
+    public async Task CarriesTheBranchsProcessorIdOntoTheOutcome()
     {
-        // The inbound ProcessedData was produced by this processor, so its field is already ours by
-        // construction — which is exactly why echoing it buys nothing and is the only way the two
-        // could ever disagree. A StepCompleted attributed to another processor's id lands in their
-        // lineage, and nothing downstream would notice.
+        // ProcessorId passes through here as it does on the pre hop — a routing and tracing id, not a
+        // claim to verify. The inbound branch was stamped by this processor one hop ago off the
+        // dispatch that named it, so re-resolving it from identity would read the same fact twice and
+        // leave the field written and never read.
         var h = new Harness();
-        StepCompleted? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCompleted>(s => sent = s),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        var foreign = Branch(E) with { ProcessorId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") };
-        await h.Build().HandleAsync(Body(foreign), CancellationToken.None);
+        var foreign = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+        await h.Build().HandleAsync(Body(Branch(E) with { ProcessorId = foreign }), CancellationToken.None);
 
-        Assert.Equal(P, sent!.ProcessorId);
+        Assert.Equal(foreign, sent!.ProcessorId);
     }
 
     [Fact]
-    public async Task StampsOurOwnProcessorIdOnAFailureEvenWhenTheBranchClaimsAnother()
+    public async Task CarriesTheBranchsProcessorIdOntoAFailedOutcome()
     {
-        // The other outbound site in this handler. A StepFailed carries no key anyone later reads, so
-        // a misattributed one is invisible until someone asks why a processor has failures it never ran.
+        // The other outbound site in this handler, pinned separately because it is the path that skips
+        // the write — so nothing else on it would notice which id was used.
         var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");
-        StepFailed? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        var foreign = Branch(E, """{"number":"seven"}""")
-            with { ProcessorId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") };
-        await h.Build().HandleAsync(Body(foreign), CancellationToken.None);
+        var foreign = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+        await h.Build().HandleAsync(
+            Body(Branch(E, """{"number":"seven"}""") with { ProcessorId = foreign }), CancellationToken.None);
 
-        Assert.Equal(P, sent!.ProcessorId);
+        Assert.Equal(foreign, sent!.ProcessorId);
     }
 
     [Fact]
     public async Task LetsAFailedResultSendEscapeRatherThanAcknowledging()
     {
         var h = new Harness();
-        h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<StepCompleted>(),
+        h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<StepOutcome>(),
                            Arg.Any<CancellationToken>(), Arg.Any<string?>())
                 .ThrowsAsync(new IOException("socket closed"));
 
