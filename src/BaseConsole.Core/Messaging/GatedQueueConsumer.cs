@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BaseConsole.Core.Gating;
 using Messaging.Transport;
 using Microsoft.Extensions.DependencyInjection;
@@ -242,22 +243,37 @@ public sealed class GatedQueueConsumer : BackgroundService
         _channelUsable = true;
     }
 
-    private async Task OnReceivedAsync(object sender, BasicDeliverEventArgs ea)
+    /// <summary>
+    /// One delivery, start to finish. <c>internal</c> rather than <c>private</c> so the disposition
+    /// matrix can be driven without a broker — the same reason <see cref="ShouldConsume"/> is.
+    /// <para>
+    /// <b>Exactly one <c>RecordConsumed</c> per exit path, and they all live here.</b> Recording
+    /// inside <see cref="SafeAckAsync"/> and <see cref="SafeNackAsync"/> instead would put the
+    /// increment in two places, and "exactly once per delivery" would become a rule to remember
+    /// rather than something you can see by reading one method.
+    /// </para>
+    /// </summary>
+    internal async Task OnReceivedAsync(object sender, BasicDeliverEventArgs ea)
     {
         var epoch = Interlocked.Read(ref _epoch);
+        var type = ea.BasicProperties.Type ?? "";
 
         // The gate can close between the broker handing this message over and it arriving here, and
         // messages already in flight when the subscription was cancelled still arrive. Re-checking
         // here is what makes a pause clean rather than a burst of failures.
         if (!_gate.IsOpen)
         {
-            await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+            var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+
+            // No handler ran, so no duration: a near-zero sample here would make a paused consumer
+            // look fast.
+            IngressMetrics.RecordConsumed(
+                _options.Queue, type, "requeued", "gate_closed", landed, startedTimestamp: null);
             return;
         }
 
         // Copy out of the transport buffer, which is pooled and valid only for this callback.
         var body = ea.Body.ToArray();
-        var type = ea.BasicProperties.Type;
 
         // Debug, and it stays Debug however useful it looks. This runs ABOVE the deserialization
         // boundary, so the ids that make a record joinable — correlation, workflow, step — are still
@@ -266,6 +282,8 @@ public sealed class GatedQueueConsumer : BackgroundService
         // the ids answer. The handlers log their own entry one layer down, inside the scope where
         // those ids exist, and that is the record worth shipping.
         _logger.LogDebug("received a {Type} delivery on {Queue}", type, _options.Queue);
+
+        var started = Stopwatch.GetTimestamp();
 
         try
         {
@@ -291,13 +309,16 @@ public sealed class GatedQueueConsumer : BackgroundService
             // finish and leaves unacknowledged deliveries to be redelivered.
             await handler.HandleAsync(body, CancellationToken.None).ConfigureAwait(false);
 
-            await SafeAckAsync(ea, epoch).ConfigureAwait(false);
+            var landed = await SafeAckAsync(ea, epoch).ConfigureAwait(false);
+            IngressMetrics.RecordConsumed(
+                _options.Queue, type, "acked", "handled", landed, started);
         }
         catch (Exception ex)
         {
             switch (DeliveryClassifier.Classify(ex))
             {
                 case DeliveryDisposition.RequeueAndTrip:
+                {
                     _logger.LogWarning(
                         ex, "projection store unreachable — returning message to {Queue}", _options.Queue);
 
@@ -306,25 +327,36 @@ public sealed class GatedQueueConsumer : BackgroundService
                     // only safe because gate subscribers signal rather than perform I/O — a subscriber
                     // that did broker work inside the notification would deadlock here.
                     await _gate.TripAsync().ConfigureAwait(false);
-                    await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                    var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                    IngressMetrics.RecordConsumed(
+                        _options.Queue, type, "requeued", "store_unreachable", landed, started);
                     break;
+                }
 
                 case DeliveryDisposition.Requeue:
+                {
                     // The projection store said nothing about itself, so the gate stays open and this
                     // consumer keeps working. Only this delivery goes back.
                     _logger.LogWarning(
                         ex, "send failed while handling {Type} — returning message to {Queue}",
                         type, _options.Queue);
-                    await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                    var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                    IngressMetrics.RecordConsumed(
+                        _options.Queue, type, "requeued", "send_failed", landed, started);
                     break;
+                }
 
                 default:
+                {
                     // Taken as a property of the message rather than of the environment. A parked
                     // message can be recovered by hand; a message requeued forever is an outage that
                     // never resolves, so the ambiguous case is deliberately resolved toward parking.
                     _logger.LogError(ex, "refusing message of type {Type} — parking", type);
-                    await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
+                    var landed = await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
+                    IngressMetrics.RecordConsumed(
+                        _options.Queue, type, "parked", "refused", landed, started);
                     break;
+                }
             }
         }
     }
@@ -336,16 +368,22 @@ public sealed class GatedQueueConsumer : BackgroundService
     private bool TagStillValid(long epoch) =>
         _channelUsable && _channel is { IsOpen: true } && Interlocked.Read(ref _epoch) == epoch;
 
-    private async Task SafeAckAsync(BasicDeliverEventArgs ea, long epoch)
+    /// <summary>
+    /// Acknowledges a delivery. Returns whether the broker was actually told — false means the
+    /// delivery tag was void or the channel had gone, so the broker will redeliver a message whose
+    /// handler already ran.
+    /// </summary>
+    private async Task<bool> SafeAckAsync(BasicDeliverEventArgs ea, long epoch)
     {
         if (!TagStillValid(epoch) || _channel is null)
         {
-            return;
+            return false;
         }
 
         try
         {
             await _channel.BasicAckAsync(ea.DeliveryTag, multiple: false).ConfigureAwait(false);
+            return true;
         }
         catch (Exception ex) when (ex is AlreadyClosedException
                                       or OperationInterruptedException
@@ -354,29 +392,36 @@ public sealed class GatedQueueConsumer : BackgroundService
             // The channel went away between the check and the call. The delivery is unacknowledged,
             // so the broker requeues it — which against an idempotent handler is a repeat, not a loss.
             _logger.LogDebug(ex, "acknowledgement dropped — channel gone");
+            return false;
         }
     }
 
-    private async Task SafeNackAsync(BasicDeliverEventArgs ea, bool requeue, long epoch)
+    /// <summary>
+    /// Rejects a delivery. Returns whether the broker was actually told; see
+    /// <see cref="SafeAckAsync"/>.
+    /// </summary>
+    private async Task<bool> SafeNackAsync(BasicDeliverEventArgs ea, bool requeue, long epoch)
     {
         if (!TagStillValid(epoch) || _channel is null)
         {
             // A tag from a previous epoch is meaningless now, and rejecting it would be a
             // channel-level error that closes the channel permanently. Everything unacknowledged has
             // already been requeued by the broker.
-            return;
+            return false;
         }
 
         try
         {
             await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: requeue)
                 .ConfigureAwait(false);
+            return true;
         }
         catch (Exception ex) when (ex is AlreadyClosedException
                                       or OperationInterruptedException
                                       or ObjectDisposedException)
         {
             _logger.LogDebug(ex, "rejection dropped — channel gone");
+            return false;
         }
     }
 
