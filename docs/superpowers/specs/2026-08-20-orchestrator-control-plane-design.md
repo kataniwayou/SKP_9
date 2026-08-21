@@ -527,6 +527,17 @@ Hermetic, no broker, no Redis, no Kubernetes — matching how the processor is t
   bound to `ConnectionTopologyDeclarer` — because every other test in this list deliberately
   substitutes them, so a wrong binding here is invisible everywhere else.
 
+**One test is deliberately not hermetic, because the property it checks cannot be.** Everything above
+substitutes Redis, so the suite proves the hydration loop recovers when the store starts answering —
+never that the store *starts answering*. That second half is a property of StackExchange.Redis: a
+multiplexer built with `AbortOnConnectFail=false` against a dead endpoint must reconnect in the
+background, or the retry loop spins forever and the pod restart the whole design avoids becomes the
+only repair. `RedisReconnectLiveTests` stages exactly that against a real Redis — a loopback
+forwarder that refuses connections, a real multiplexer built through the production
+`ParseForcingNonAborting` path, hydration left retrying, then the forwarder opened — and asserts
+admission opens and `IsConnected` goes true on the same multiplexer instance. It is gated on
+`SKP_REALSTACK` like the rest of `Live/`, so a hermetic run skips it.
+
 `FakeTimeProvider` requires an external pump in this repo — time advances only on a read, so a loop
 test that waits for a delay hangs unless the test advances it. Pump it from the test. The chain test
 is the one deliberate exception: Quartz's own timer fires against real time, so cron arithmetic on
