@@ -16,6 +16,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- BaseConsole.Core.csproj, BaseProcessor.Core.csproj, Messaging.Transport.csproj and
+         Orchestrator.csproj carry the same idiom: it lets a test drive an internal type or loop
+         body directly rather than only through its public surface. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- ASP.NET Core surface: IHttpContextAccessor, health checks, middleware and controllers.
          A FrameworkReference is the documented pattern for an ASP.NET-coupled class library. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
