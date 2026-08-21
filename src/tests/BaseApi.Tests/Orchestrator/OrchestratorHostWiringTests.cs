@@ -1,4 +1,4 @@
-using BaseConsole.Core.DependencyInjection;
+﻿using BaseConsole.Core.DependencyInjection;
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
@@ -248,6 +248,20 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
 
         Assert.Contains(handlers, h => h is ApplyStartHandler);
         Assert.Contains(handlers, h => h is ApplyStopHandler);
+    }
+
+    [Fact]
+    public void TopologyIsDeclaredByHoldingTheConnection()
+    {
+        // The whole point of ConnectionTopologyDeclarer is that "the topology exists" stays a
+        // consequence of opening the shared connection. Any other ITopologyDeclarer — a no-op, or a
+        // second declaration path — satisfies hydration's await without the queue existing, which is
+        // precisely the bug the seam was cut to prevent: hydration reads L2 through a queue that is
+        // not there yet, and announcements published in that window are lost to this replica for
+        // good. That failure is invisible to every other test here, because a substitute declarer is
+        // what the hydration tests deliberately use.
+        Assert.IsType<ConnectionTopologyDeclarer>(
+            _host.Services.GetRequiredService<ITopologyDeclarer>());
     }
 
     [Fact]
