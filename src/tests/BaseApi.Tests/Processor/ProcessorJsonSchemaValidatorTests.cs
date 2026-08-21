@@ -66,8 +66,9 @@ public sealed class ProcessorJsonSchemaValidatorTests
     [Fact]
     public void NoErrorMessageQuotesTheData()
     {
-        // Validator messages reach StepFailed and the orchestrator's projections. They may name an
-        // instance location, never a value.
+        // Validator messages are logged by both handlers as the only record of why a step failed.
+        // They may name an instance location, never a value — a log store is no better a place for a
+        // payload than the projection these used to reach.
         ProcessorJsonSchemaValidator.TryValidate(NumberSchema, Utf8("""{"number":"topsecret"}"""), out var errors);
 
         Assert.DoesNotContain(errors, e => e.Contains("topsecret", StringComparison.Ordinal));

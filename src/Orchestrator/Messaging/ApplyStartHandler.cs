@@ -48,8 +48,8 @@ internal sealed class ApplyStartHandler : IQueueMessageHandler
             throw new JsonException("start announcement carries an empty workflow id");
         }
 
-        using (_logger.BeginScope(ExecutionLogScope.BuildState(
-                   m.WorkflowId, Guid.Empty, Guid.Empty, Guid.Empty, Guid.Empty)))
+        using (_logger.BeginScope(ExecutionLogScope.BuildScope(
+                   Guid.Empty, m.WorkflowId, Guid.Empty, Guid.Empty, Guid.Empty)))
         {
             await _activator.ActivateAsync(m.WorkflowId, ct).ConfigureAwait(false);
         }

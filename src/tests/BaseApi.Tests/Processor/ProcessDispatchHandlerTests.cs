@@ -74,7 +74,7 @@ public sealed class ProcessDispatchHandlerTests
         => JsonSerializer.SerializeToUtf8Bytes(d, MessagingJson.Options);
 
     private static ProcessDispatch Dispatch(Guid entryId) =>
-        new(W, S, P) { CorrelationId = C, ExecutionId = Guid.Empty, EntryId = entryId, Payload = "" };
+        new(C, Guid.Empty, W, S, P, "", entryId);
 
     [Fact]
     public async Task RunsTheTransformOnTheDataItReadFromTheStore()
@@ -214,8 +214,8 @@ public sealed class ProcessDispatchHandlerTests
     {
         var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"""{"number":"seven"}""");
-        StepFailed? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, _) => Task.CompletedTask);
 
@@ -223,7 +223,17 @@ public sealed class ProcessDispatchHandlerTests
 
         Assert.False(probe.Ran);
         Assert.NotNull(sent);
-        Assert.Equal(Guid.Empty, sent!.EntryId);
+        Assert.Equal(StepResult.Failed, sent!.Result);
+
+        // The input key, not Guid.Empty. This path never sets `ran`, so the reclaim at the end of the
+        // handler is skipped and the blob is still in the store — and execution blobs have no TTL and
+        // no sweeper, so if the outcome did not name it nothing ever would.
+        Assert.Equal(E, sent.EntryId);
+
+        // The validator's errors used to ride the wire. They are logged instead, because that output
+        // quotes the fragment of the document that failed — and this line is now the only record of
+        // why the step failed at all.
+        Assert.Contains(h.Log.Records, r => r.Message.Contains("failed its schema", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -268,18 +278,24 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
-    public async Task PutsAnAuthorsFailureMessageOnTheWireVerbatim()
+    public async Task LogsAnAuthorsFailureMessageRatherThanSendingIt()
     {
+        // StepOutcome has no text field, so an author's reason reaches nobody unless it is logged
+        // here. That is the whole trade: the orchestrator branches on Result and never read the text,
+        // and keeping text off the wire is also what stops a framework exception's payload fragments
+        // reaching the orchestrator's projections.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        StepFailed? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, _) => throw new FailedException("order total below minimum"));
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
-        Assert.Equal("order total below minimum", sent!.ErrorMessage);
+        Assert.Equal(StepResult.Failed, sent!.Result);
+        Assert.Contains(h.Log.Records,
+                        r => r.Message.Contains("order total below minimum", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -289,15 +305,20 @@ public sealed class ProcessDispatchHandlerTests
         // would leak payload content into the orchestrator's projections.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        StepFailed? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, _) => throw new InvalidOperationException("secret-token-abc123"));
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
-        Assert.DoesNotContain("secret-token-abc123", sent!.ErrorMessage, StringComparison.Ordinal);
-        Assert.NotEmpty(sent.ErrorMessage);
+        // Asserted against the bytes that would actually go on the wire rather than against one
+        // field, because there is no longer a field it could hide in — which is the point. The detail
+        // still has to exist somewhere, so the exception goes to the log with the message attached.
+        var wire = Encoding.UTF8.GetString(JsonSerializer.SerializeToUtf8Bytes(sent!, MessagingJson.Options));
+        Assert.DoesNotContain("secret-token-abc123", wire, StringComparison.Ordinal);
+        Assert.Equal(StepResult.Failed, sent!.Result);
+        Assert.Contains(h.Log.Records, r => r.Exception?.Message == "secret-token-abc123");
     }
 
     [Fact]
@@ -305,14 +326,18 @@ public sealed class ProcessDispatchHandlerTests
     {
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        StepCancelled? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepCancelled>(c => sent = c),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, _) => throw new CancelledException("below threshold"));
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
-        Assert.Equal("below threshold", sent!.CancellationMessage);
+        Assert.Equal(StepResult.Cancelled, sent!.Result);
+        Assert.Contains(h.Log.Records, r => r.Message.Contains("below threshold", StringComparison.Ordinal));
+
+        // Nothing was reclaimed, so the outcome carries the input key for the orchestrator to reclaim.
+        Assert.Equal(E, sent.EntryId);
         await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
@@ -327,8 +352,8 @@ public sealed class ProcessDispatchHandlerTests
         // hand — for the single commonest transient fault an author will hit.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        StepFailed? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, _) => throw new TaskCanceledException("the request timed out"));
 
@@ -336,7 +361,8 @@ public sealed class ProcessDispatchHandlerTests
 
         Assert.NotNull(sent);
         Assert.Equal(P, sent!.ProcessorId);
-        Assert.NotEmpty(sent.ErrorMessage);
+        Assert.Equal(StepResult.Failed, sent.Result);
+        Assert.Equal(E, sent.EntryId);
         await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
@@ -392,32 +418,33 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
-    public async Task StampsOurOwnProcessorIdOnResultsEvenWhenTheDispatchClaimsAnother()
+    public async Task CarriesTheDispatchsProcessorIdOntoTheOutcome()
     {
-        // The branch path is covered below; this covers the OTHER four outbound sites. A result that
-        // echoed the inbound id would misattribute a failure to whichever processor a corrupt or
-        // misrouted dispatch happened to name — and unlike the branch path, nothing downstream would
-        // notice, because a StepFailed carries no key anyone later reads.
+        // ProcessorId travels like WorkflowId and StepId: read off the dispatch and passed through.
+        // The orchestrator sets it from L1 and addresses this queue with the same value, so a dispatch
+        // that reached us names us — there is nothing here to verify, and the handler no longer
+        // overwrites it with the resolved identity's own id. The foreign value below is therefore what
+        // the outcome reports, and this test exists to pin that as the contract rather than to bless a
+        // reachable state: nothing in the wiring can produce one.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        StepFailed? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepFailed>(f => sent = f),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, _) => throw new FailedException("nope"));
 
-        var foreign = Dispatch(E) with { ProcessorId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") };
-        await h.Build(probe).HandleAsync(Body(foreign), CancellationToken.None);
+        var foreign = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+        await h.Build(probe).HandleAsync(Body(Dispatch(E) with { ProcessorId = foreign }), CancellationToken.None);
 
-        Assert.Equal(P, sent!.ProcessorId);
+        Assert.Equal(foreign, sent!.ProcessorId);
     }
 
     [Fact]
-    public async Task StampsOurOwnProcessorIdOnBranchesEvenWhenTheDispatchClaimsAnother()
+    public async Task CarriesTheDispatchsProcessorIdOntoEveryBranch()
     {
-        // The dispatch was addressed to OUR queue, so we are the processor it names. Echoing its
-        // ProcessorId field back would be the only way the two could ever disagree — and a branch
-        // stamped with someone else's id writes into their lineage. This is what makes a provenance
-        // guard unnecessary: the mismatch is unrepresentable rather than checked for.
+        // The same pass-through on the branch path, which also decides where the branch is SENT:
+        // SendToPostAsync addresses ProcessorQueues.Work(state.ProcessorId). That is the one place the
+        // substitution is observable rather than cosmetic, so it is pinned separately.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
         ProcessedData? sent = null;
@@ -425,10 +452,13 @@ public sealed class ProcessDispatchHandlerTests
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, self) => self.Send(Encoding.UTF8.GetBytes("{}")));
 
-        var foreign = Dispatch(E) with { ProcessorId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd") };
-        await h.Build(probe).HandleAsync(Body(foreign), CancellationToken.None);
+        var foreign = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+        await h.Build(probe).HandleAsync(Body(Dispatch(E) with { ProcessorId = foreign }), CancellationToken.None);
 
-        Assert.Equal(P, sent!.ProcessorId);
+        Assert.Equal(foreign, sent!.ProcessorId);
+        await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(foreign), MessageTypes.ProcessedData,
+                                             Arg.Any<ProcessedData>(), Arg.Any<CancellationToken>(),
+                                             Arg.Any<string?>());
     }
 
     [Fact]

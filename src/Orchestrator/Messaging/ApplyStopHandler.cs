@@ -57,8 +57,8 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
             throw new JsonException("stop announcement carries an empty workflow id");
         }
 
-        using (_logger.BeginScope(ExecutionLogScope.BuildState(
-                   m.WorkflowId, Guid.Empty, Guid.Empty, Guid.Empty, Guid.Empty)))
+        using (_logger.BeginScope(ExecutionLogScope.BuildScope(
+                   Guid.Empty, m.WorkflowId, Guid.Empty, Guid.Empty, Guid.Empty)))
         {
             // Verify before acting. The API can process a stop and then a start, so by the time this stop
             // is handled L2 may already hold the re-written workflow — and unscheduling first would halt a

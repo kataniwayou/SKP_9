@@ -29,8 +29,9 @@ public sealed class SampleProcessor : BaseProcessor<SampleConfig>
 
         // ---- The three deliberate terminals, none of which reach the post queue ----
         //
-        // Fail, reported: StepFailed carrying this exact text, then ack. Author-authored messages go
-        // on the wire verbatim; a framework-caught exception's message never does.
+        // Fail, reported: a StepOutcome of Failed, then ack. The text does not travel — the outcome
+        // carries no message field — so this string is logged by the framework and found by joining on
+        // the ids, which is also what keeps a framework exception's payload fragments off the wire.
         //     if (incoming < 0) throw new FailedException("input number must not be negative");
         //
         // Drop, announced: ends the branch and tells the orchestrator why, so a successor gated on a
@@ -41,15 +42,17 @@ public sealed class SampleProcessor : BaseProcessor<SampleConfig>
         // is what a sink or a filter wants.
         //     if (incoming == 0) return;
         //
-        // Sending and returning silently both reclaim this step's input key; CancelledException does
-        // not, and with no TTL it stays leaked until the orchestrator reclaims it.
+        // Sending and returning silently both reclaim this step's input key. Either exception leaves
+        // it in place — which is why the outcome those two send names that key, so the orchestrator
+        // reclaims what this step could not.
 
         var processed = JsonSerializer.SerializeToUtf8Bytes(
             new { number = incoming + baseNumber, label }, ProcessorConfig.SerializerOptions);
 
         // An entry step opens a lineage; a downstream step reuses the inbound one so the lineage
-        // holds. NewExecutionId is derived rather than random, so a redelivered dispatch reopens the
-        // same lineage instead of a second one.
+        // holds. The new id is random, so a redelivered dispatch opens a second lineage rather than
+        // reopening this one — the same replay cost the branch ids carry, and the reason this method
+        // is written to tolerate running twice on one input.
         var branchExecutionId = executionId == Guid.Empty ? NewExecutionId() : executionId;
 
         try
@@ -62,10 +65,11 @@ public sealed class SampleProcessor : BaseProcessor<SampleConfig>
             // branch was lost. Then it MUST propagate.
             //
             // Bare `throw;` is load-bearing. It preserves the type, so the framework returns the whole
-            // dispatch to the queue and replays every branch under the same derived ids. Wrapping it,
-            // or throwing something new, falls through to the general catch — which reports the step
-            // failed and acknowledges the message, recording a business outcome that never happened
-            // while the work is silently lost.
+            // dispatch to the queue and replays every branch. Wrapping it, or throwing something new,
+            // falls through to the general catch — which reports the step failed and acknowledges the
+            // message, recording a business outcome that never happened while the work is silently
+            // lost. The replay re-sends the branches that did land, under fresh ids; that is the
+            // accepted cost of a transient here, and it is why this transform stays side-effect free.
             throw;
         }
     }

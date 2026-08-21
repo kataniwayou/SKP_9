@@ -52,7 +52,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         var d = JsonSerializer.Deserialize<ProcessDispatch>(body.Span, MessagingJson.Options)
                 ?? throw new JsonException("dispatch deserialized to null");
 
-        using (_logger.BeginScope(ExecutionLogScope.BuildState(d)))
+        using (_logger.BeginScope(ExecutionLogScope.BuildScope(d)))
         using (_logger.BeginScope(new Dictionary<string, object>
                {
                    [CorrelationKeys.LogScope] = CorrelationKeys.Render(d.CorrelationId),
@@ -64,16 +64,19 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
 
     private async Task RunAsync(ProcessDispatch d, CancellationToken ct)
     {
-        // ProcessorId on EVERY outbound message comes from OUR OWN identity, never from the inbound
-        // one. The dispatch was addressed to this processor's queue, so we ARE the processor it
-        // names — echoing its field back is the only way the two could ever disagree, and a result
-        // attributed to another processor's id lands in their lineage. Stamping from self makes that
-        // unrepresentable, which is why this design carries no provenance guard anywhere: a check
-        // against a condition that cannot arise reads as a live defence, cannot be tested, and drifts.
+        // ProcessorId is passed through, exactly like WorkflowId and StepId. It is a routing and
+        // tracing id, not a claim this handler has to verify: the orchestrator reads it off L1, uses it
+        // to address this queue, and stamps the same value on the body — one expression, both uses — so
+        // a dispatch that reached us names us by construction.
         //
-        // Resolved ONCE, above every early return, so the schema-failure path is covered too.
+        // This used to be overwritten with the resolved identity's own id. That defended a state that
+        // cannot arise, which is the thing this design refuses everywhere else: a check against a
+        // condition that cannot occur reads as a live defence, cannot be tested, and drifts. It was
+        // also only ever partial — anything able to forge this field can forge WorkflowId and StepId
+        // too, and nothing overwrites those.
         //
-        // NOTHING GATES CONSUMPTION ON HEALTH TODAY — this used to claim the work queue is bound only
+        // IDENTITY IS STILL RESOLVED HERE, for the input schema below, and NOTHING GATES CONSUMPTION
+        // ON HEALTH TODAY — this used to claim the work queue is bound only
         // after the processor reaches Healthy, and that is not true of the wiring. GatedQueueConsumer
         // is a BackgroundService that starts consuming as soon as the L2 gate opens, and
         // IProcessorContext.IsHealthy is read by nothing but the liveness heartbeat and a readiness
@@ -84,7 +87,6 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         var identity = _context.Identity
             ?? throw new InvalidOperationException(
                 "A dispatch was consumed before identity resolved — the queue must not be bound until then.");
-        var self = identity.Id;
 
         // The pair ProcessorIdentity documents: a NULL schema id means the role does not apply, while
         // a non-null id whose definition is still null means Loop B has not resolved it yet. Only the
@@ -92,7 +94,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // by contract, and the step would run with the input schema silently not applied — a security
         // control skipped with nothing logged to say so. Parking is the same disposition the identity
         // guard above chooses, and the direction spec 8.1 gives every ambiguous case; reporting a
-        // StepFailed instead would mark a workflow failed over a condition that resolves itself
+        // a failed outcome instead would mark a workflow failed over a condition that resolves itself
         // seconds later.
         if (identity.InputSchemaId is { } inputSchemaId && identity.InputDefinition is null)
         {
@@ -125,18 +127,27 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
                 // reclaim at the end of RunAsync — so an absent key never means a fan-out was caught
                 // mid-flight with some branches sent and others lost; that state cannot arise.
                 //
-                // THIS DEPENDS ON AN ASSUMPTION THE WIRING DOES NOT ENFORCE: that at most one dispatch
-                // per entry key is in flight across the whole deployment. Under multiple replicas —
-                // which ProcessorLivenessWriter's per-instance keys imply is intended — a second
-                // concurrent attempt could read this key before the first one's reclaim runs and then
-                // re-run the author. That re-run is not silent data loss: SendToPostAsync derives its
-                // message ids from data the two attempts share, so the duplicate branches rewrite the
-                // same post-handler keys rather than create new ones. The residual cost is a duplicate
-                // run of the author's own code, which this design already treats as an acceptable replay
-                // cost everywhere else.
+                // THIS BRANCH IS NOW THE PRIMARY IDEMPOTENCE MECHANISM, not a safety net. While branch
+                // ids were derived from the dispatch, a re-run of the author converged — the same seeds
+                // produced the same keys and the writes were rewrites. Ids are minted with NewGuid now
+                // (see SendToPostAsync), so a re-run produces DIFFERENT keys and a second outcome, and
+                // the successor subtree runs twice. Returning here is what stops that, which makes the
+                // ordering above load-bearing: the reclaim runs only once the WHOLE author has returned,
+                // so an absent key can be read as "already done" and never as "caught mid-fan-out".
                 //
-                // A DIFFERENT CASE THIS DOES NOT COVER: several successor steps dispatched against the
-                // one shared entry key, each carrying its own ProcessDispatch message rather than a
+                // Two reachable cases sit outside its reach, and they are the accepted cost of the
+                // NewGuid decision rather than gaps to be closed here. The reclaim below can itself fail
+                // — Redis reachable for the read and not for the delete — leaving the key present for a
+                // redelivery that then re-runs the author. And a source step has no key at all, so this
+                // branch never executes for one, and a lost acknowledgement alone is enough to re-run it.
+                // Neither loses data and neither leaks: the orchestrator reclaims every output blob it
+                // relocates. What they cost is a second run of the author's own code, which is free for a
+                // pure transform and is not for a step with side effects.
+                //
+                // A SEPARATE CASE THIS DOES NOT COVER: several successor steps dispatched against the
+                // one shared entry key.
+                //
+                // Each would carry its own ProcessDispatch message rather than a
                 // branch raised from inside a single author invocation. A step with more than one
                 // successor still hands every successor the same EntryId, and the first successor's own
                 // RunAsync reclaims that key once ITS author returns. Every other successor then reads
@@ -167,19 +178,19 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         if (!isSource
             && !ProcessorJsonSchemaValidator.TryValidate(identity.InputDefinition, data, out var errors))
         {
-            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, self)
-            {
-                CorrelationId = d.CorrelationId,
-                ExecutionId   = d.ExecutionId,
-                ErrorMessage  = string.Join("; ", errors),
-            }, MessageTypes.StepFailed, ct).ConfigureAwait(false);
+            // Logged here because it is no longer carried anywhere else. StepOutcome has no text
+            // field, so this line is the only record of WHY the step failed — and the validator's
+            // output can quote payload fragments, which is precisely why it belongs in this
+            // processor's own logs rather than on the wire and in the orchestrator's projections.
+            _logger.LogInformation(
+                "input failed its schema — reported failed: {SchemaErrors}", string.Join("; ", errors));
 
-            _logger.LogInformation("input failed its schema — reported failed");
+            await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
             return;
         }
 
         _processor.BeginDispatch(new DispatchState(
-            _sender, d.WorkflowId, d.StepId, self, d.CorrelationId, d.EntryId));
+            _sender, d.CorrelationId, d.WorkflowId, d.StepId, d.ProcessorId));
 
         // Set only on the normal path. Every catch below leaves it false, which is what keeps a failed
         // or cancelled step's input intact for the orchestrator to deal with.
@@ -191,21 +202,18 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         }
         catch (FailedException ex)
         {
-            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, self)
-            {
-                CorrelationId = d.CorrelationId,
-                ExecutionId   = d.ExecutionId,
-                ErrorMessage  = ex.Message,   // author-authored, so verbatim is safe
-            }, MessageTypes.StepFailed, ct).ConfigureAwait(false);
+            // The author's own text, and this line is now the only place it survives — StepOutcome
+            // carries no message. Author-authored, so verbatim is safe here exactly as it once was on
+            // the wire.
+            _logger.LogInformation("the author reported the step failed: {Reason}", ex.Message);
+
+            await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
         }
         catch (CancelledException ex)
         {
-            await SendAsync(new StepCancelled(d.WorkflowId, d.StepId, self)
-            {
-                CorrelationId       = d.CorrelationId,
-                ExecutionId         = d.ExecutionId,
-                CancellationMessage = ex.Message,
-            }, MessageTypes.StepCancelled, ct).ConfigureAwait(false);
+            _logger.LogInformation("the author cancelled the branch: {Reason}", ex.Message);
+
+            await SendAsync(Failure(d, StepResult.Cancelled), ct).ConfigureAwait(false);
         }
         catch (TransientSendException)
         {
@@ -224,16 +232,14 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // exception must escape so the delivery is not acknowledged with a fabricated outcome.
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // The message is deliberately a constant. A deserialize JsonException quotes the offending
-            // fragment of the payload, and this text reaches the orchestrator's projections.
+            // The exception goes to the log and nowhere else. It always had to: a deserialize
+            // JsonException quotes the offending fragment of the payload, and this used to be paired
+            // with a fixed constant on the wire to keep that out of the orchestrator's projections.
+            // With no text field on StepOutcome at all, the constant is gone and the pairing is
+            // structural rather than a rule anyone has to remember.
             _logger.LogWarning(ex, "the transform faulted — reporting the step failed");
 
-            await SendAsync(new StepFailed(d.WorkflowId, d.StepId, self)
-            {
-                CorrelationId = d.CorrelationId,
-                ExecutionId   = d.ExecutionId,
-                ErrorMessage  = "the processor faulted",
-            }, MessageTypes.StepFailed, ct).ConfigureAwait(false);
+            await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
         }
         finally
         {
@@ -249,9 +255,15 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         //
         // Outside the catch chain on purpose: a store fault on this delete must propagate so the L2
         // classifier trips the gate and requeues. Inside the try it would be caught by the general
-        // catch and reported as a StepFailed that never happened. The replay is safe — the author
-        // re-runs and its branches carry the same derived message ids, so the post handler rewrites
-        // identical bytes.
+        // catch and reported as a failed step that never happened.
+        //
+        // A DELETE THAT FAILS IS THE ONE PATH THAT COSTS SOMETHING, and it is the price of minting
+        // branch ids with NewGuid. The redelivery finds this key still present, re-runs the author,
+        // and its branches carry FRESH ids — so the post handler writes new blobs rather than
+        // rewriting the ones the first attempt wrote, and the successor subtree runs twice. Nothing is
+        // lost and nothing leaks (the orchestrator reclaims every blob it relocates), but the author's
+        // own code does run again. See SendToPostAsync for why that trade was taken and how to reverse
+        // it.
         //
         // Skipped for a source step, which produced its own input and has no key. The author still
         // ran; only the delete is skipped.
@@ -264,9 +276,23 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
     }
 
     /// <summary>
-    /// Sends a result, classifying a broker failure as transient so the delivery is returned to the
+    /// Builds the outcome for a step that produced no output.
+    /// <para>
+    /// <b>EntryId is the dispatch's own — the step's INPUT — and that is the whole point of it.</b>
+    /// None of these paths sets <c>ran</c>, so the reclaim at the end of <see cref="RunAsync"/> is
+    /// skipped and that key is still in the store. Execution blobs have no TTL and no sweeper covers
+    /// them, so if this outcome did not name the key, nothing anywhere ever would and every failed step
+    /// would leak its input permanently. A source step reports <see cref="Guid.Empty"/> here, which is
+    /// correct: it read no key, so there is none to reclaim.
+    /// </para>
+    /// </summary>
+    private static StepOutcome Failure(ProcessDispatch d, StepResult result) =>
+        new(d.CorrelationId, d.ExecutionId, d.WorkflowId, d.StepId, d.ProcessorId, d.EntryId, result);
+
+    /// <summary>
+    /// Sends an outcome, classifying a broker failure as transient so the delivery is returned to the
     /// queue rather than parked — the step's outcome is known and must not be lost to a blip.
     /// </summary>
-    private Task SendAsync<T>(T result, string type, CancellationToken ct)
-        => _sender.SendTransientAsync(OrchestratorQueues.Result, type, result, ct);
+    private Task SendAsync(StepOutcome outcome, CancellationToken ct)
+        => _sender.SendTransientAsync(OrchestratorQueues.Result, MessageTypes.StepOutcome, outcome, ct);
 }

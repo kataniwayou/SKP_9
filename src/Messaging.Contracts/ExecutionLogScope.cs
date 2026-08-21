@@ -9,6 +9,14 @@ namespace Messaging.Contracts;
 /// <c>X-Correlation-Id</c>, and must render the way the HTTP middleware renders it — so it keeps its
 /// own key and its own renderer in <see cref="CorrelationKeys"/>.
 /// </para>
+/// <para>
+/// <b>The parameters run in the canonical order the message records use</b> — execution, workflow,
+/// step, processor, entry — minus the correlation id for the reason above. The method was called
+/// <c>BuildState</c> while that order was different; it was renamed rather than re-ordered in place
+/// because every parameter is a <see cref="Guid"/> and every call site passed the same count, so a
+/// silent transposition would have compiled and been wrong only at runtime. The rename forced each
+/// one to be visited.
+/// </para>
 /// </summary>
 public static class ExecutionLogScope
 {
@@ -31,8 +39,8 @@ public static class ExecutionLogScope
     /// lookup unchanged.
     /// </para>
     /// </summary>
-    public static Dictionary<string, object> BuildState(
-        Guid workflowId, Guid stepId, Guid processorId, Guid executionId, Guid entryId)
+    public static Dictionary<string, object> BuildScope(
+        Guid executionId, Guid workflowId, Guid stepId, Guid processorId, Guid entryId)
     {
         var state = new Dictionary<string, object>(5);
         if (workflowId  != Guid.Empty) state[WorkflowId]  = workflowId.ToString("D");
@@ -43,11 +51,16 @@ public static class ExecutionLogScope
         return state;
     }
 
-    /// <summary>Convenience overload for a dispatch.</summary>
-    public static Dictionary<string, object> BuildState(ProcessDispatch d)
-        => BuildState(d.WorkflowId, d.StepId, d.ProcessorId, d.ExecutionId, d.EntryId);
+    /// <summary>Convenience overload for a dispatch, whose entry id is the key it reads.</summary>
+    public static Dictionary<string, object> BuildScope(ProcessDispatch d)
+        => BuildScope(d.ExecutionId, d.WorkflowId, d.StepId, d.ProcessorId, d.EntryId);
 
-    /// <summary>Convenience overload for a processed-data branch.</summary>
-    public static Dictionary<string, object> BuildState(ProcessedData p)
-        => BuildState(p.WorkflowId, p.StepId, p.ProcessorId, p.ExecutionId, p.EntryId);
+    /// <summary>
+    /// Convenience overload for a processed-data branch. Note the <c>EntryId</c> attribute means the
+    /// key this branch will <i>write</i> — the successor's input — where on the dispatch above it
+    /// means the key that step <i>read</i>. Anything querying across both hops is looking at two
+    /// different keys under one field name; see <see cref="ProcessedData.EntryId"/>.
+    /// </summary>
+    public static Dictionary<string, object> BuildScope(ProcessedData p)
+        => BuildScope(p.ExecutionId, p.WorkflowId, p.StepId, p.ProcessorId, p.EntryId);
 }

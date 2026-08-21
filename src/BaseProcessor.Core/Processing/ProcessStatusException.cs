@@ -10,18 +10,23 @@ namespace BaseProcessor.Core.Processing;
 /// success for one step. Throwing makes the abort structural instead of a discipline to remember.
 /// </para>
 /// <para>
-/// The message reaches the orchestrator verbatim. That is safe precisely because an author wrote it;
-/// a framework-caught exception's message never does.
+/// <b>The message is logged, not sent.</b> A <c>StepOutcome</c> carries no text at all, so this
+/// string reaches an operator through this processor's own records, found by joining on the ids the
+/// log scope carries. Author-authored text is safe to render verbatim there; a framework-caught
+/// exception's message is not, and no longer has any route to the wire to be kept off.
 /// </para>
 /// </summary>
 public abstract class ProcessStatusException(string message) : Exception(message);
 
-/// <summary>The step failed for a business reason. Maps to <c>StepFailed.ErrorMessage</c>.</summary>
+/// <summary>
+/// The step failed for a business reason. Reported as a <c>StepOutcome</c> of
+/// <c>StepResult.Failed</c>, whose entry id names the input this step did not consume.
+/// </summary>
 public sealed class FailedException(string message) : ProcessStatusException(message);
 
 /// <summary>
-/// The step ended its branch and wants the orchestrator told. Maps to
-/// <c>StepCancelled.CancellationMessage</c>.
+/// The step ended its branch and wants the orchestrator told. Reported as a <c>StepOutcome</c> of
+/// <c>StepResult.Cancelled</c>.
 /// <para>
 /// Distinct from returning without sending, which is also a legitimate way to end a branch — a sink
 /// with no successor, or a filter dropping data. Use this one when a successor gated on a cancelled

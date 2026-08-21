@@ -42,14 +42,33 @@ public abstract class BaseProcessor
     /// <summary>
     /// Hands one branch of output to the post queue.
     /// <para>
-    /// The framework stamps every id: the dispatch's workflow, step, correlation and entry ids, this
-    /// processor's own id, and a derived message id. <b>The message id is derived rather than random
-    /// on purpose</b> — a redelivered dispatch replays this call and must produce the id it produced
-    /// before, so the post handler's write becomes a rewrite instead of a second branch.
+    /// The framework stamps every id: the dispatch's correlation, workflow, step and processor ids,
+    /// plus a fresh entry id naming the L2 key this branch's output will be written to. The author
+    /// supplies the bytes and the execution id and nothing else — an author cannot influence the ids
+    /// on its own output, and the four it does not supply are the dispatch's own, passed through
+    /// unchanged.
+    /// </para>
+    /// <para>
+    /// <b>The entry id is random, and that is a decision with a cost.</b> A redelivered dispatch
+    /// replays this call and mints a <i>different</i> id, so the replay writes a second blob and
+    /// reports a second outcome — the successor subtree runs twice. Two things keep that narrow. The
+    /// input-key delete in <see cref="ProcessDispatchHandler"/> is an idempotence token: once it lands,
+    /// a redelivery reads the key absent and returns without re-running the author at all. And the
+    /// orchestrator reclaims each output blob it relocates, so the duplicate leaks nothing. What is
+    /// left is two reachable cases — the delete itself failing, and a source step, which has no key to
+    /// read or delete and therefore no token — where the author genuinely runs twice.
+    /// </para>
+    /// <para>
+    /// <b>That is safe exactly as far as authors are pure transforms.</b> A duplicate run of a
+    /// transform computes the same answer twice and wastes cycles; a duplicate run of a step that
+    /// writes a row or calls an API does it twice, and nothing here records that it did. Deriving the
+    /// id from the dispatch instead would make the replay rewrite the same key and converge — that is
+    /// what this used to do — and it is the change to make if an author with side effects ever lands.
+    /// It is four lines in this method and no author code.
     /// </para>
     /// <para>
     /// The author supplies <paramref name="executionId"/>, because how many lineages a fan-out opens
-    /// is a decision only they can make. <see cref="NewExecutionId"/> mints one that survives a replay.
+    /// is a decision only they can make. <see cref="NewExecutionId"/> mints one.
     /// </para>
     /// </summary>
     protected async Task SendToPostAsync(byte[] processedData, Guid executionId, CancellationToken ct)
@@ -57,18 +76,11 @@ public abstract class BaseProcessor
         ArgumentNullException.ThrowIfNull(processedData);
 
         var state = Current;
-        var messageId = DeterministicId.From(
-            DeterministicId.MessagePurpose,
-            state.CorrelationId, state.StepId, state.EntryId, state.NextMessageSequence());
+        var entryId = Guid.NewGuid();
 
-        var branch = new ProcessedData(state.WorkflowId, state.StepId, state.ProcessorId)
-        {
-            CorrelationId = state.CorrelationId,
-            ExecutionId   = executionId,
-            MessageId     = messageId,
-            EntryId       = state.EntryId,
-            Data          = processedData,
-        };
+        var branch = new ProcessedData(
+            state.CorrelationId, executionId, state.WorkflowId, state.StepId, state.ProcessorId,
+            entryId, processedData);
 
         try
         {
@@ -87,19 +99,25 @@ public abstract class BaseProcessor
             // SendFaultClassifier's allow-list deliberately declined to recognise — would requeue a
             // branch that fails identically on every redelivery, forever. An unrecognised fault has
             // to leave here raw so the dispatch parks where someone can look at it.
-            throw new PostSendException(messageId, executionId, ex);
+            throw new PostSendException(entryId, executionId, ex);
         }
     }
 
     /// <summary>
-    /// A fresh execution id for a branch, derived so that a replayed dispatch opens the same lineage
-    /// rather than a new one. Use it wherever <c>Guid.NewGuid()</c> would otherwise go.
+    /// A fresh execution id for a branch. Use it wherever <c>Guid.NewGuid()</c> would otherwise go —
+    /// it is that call today, and keeping the seam means changing how a lineage is opened stays a
+    /// change to this one method rather than to every author.
+    /// <para>
+    /// It does not survive a replay, for the same reason and with the same consequences as the entry
+    /// id above: a redelivered dispatch opens a second lineage rather than reopening the first.
+    /// </para>
     /// </summary>
     protected Guid NewExecutionId()
     {
-        var state = Current;
-        return DeterministicId.From(
-            DeterministicId.ExecutionPurpose,
-            state.CorrelationId, state.StepId, state.EntryId, state.NextExecutionSequence());
+        // Reads Current for its side effect: opening a lineage outside a dispatch is a framework
+        // wiring fault, and it must be as loud here as it is on the send path rather than quietly
+        // handing back an id that belongs to no dispatch.
+        _ = Current;
+        return Guid.NewGuid();
     }
 }

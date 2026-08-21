@@ -36,7 +36,7 @@ public sealed class BaseProcessorSeamTests
     {
         var sender = Substitute.For<IQueueSender>();
         var processor = new Probe(body);
-        processor.BeginDispatch(new DispatchState(sender, W, S, P, C, E));
+        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
         return (processor, sender);
     }
 
@@ -77,23 +77,25 @@ public sealed class BaseProcessorSeamTests
         Assert.Equal(W, sent!.WorkflowId);
         Assert.Equal(S, sent.StepId);
         Assert.Equal(C, sent.CorrelationId);
-        Assert.Equal(E, sent.EntryId);
+        Assert.Equal(E, sent.ExecutionId);
+
+        // The entry id is the one field NOT carried over from the dispatch — it is minted here and
+        // names the key this branch's output will be written to, which is the successor's input.
+        Assert.NotEqual(Guid.Empty, sent.EntryId);
     }
 
     [Fact]
     public async Task StampsTheProcessorIdTheDispatchWasOpenedWith()
     {
-        // Note what this does NOT prove: DispatchState holds one processor id, so from in here the
-        // seam cannot tell "our own identity" from "whatever the inbound message claimed". Which of
-        // those the id came from is decided by the caller that opens the dispatch — see the handler
-        // task, where a test pins that a dispatch carrying a foreign processor id still produces a
-        // branch stamped with ours.
+        // DispatchState holds one processor id and the seam stamps it verbatim. Where that id came
+        // from is the caller's decision, and the handler tests pin it: the pre handler reads it off the
+        // dispatch and passes it through, like WorkflowId and StepId.
         ProcessedData? sent = null;
         var sender = Substitute.For<IQueueSender>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => sent = p),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
-        processor.BeginDispatch(new DispatchState(sender, W, S, P, C, E));
+        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
 
         await processor.ExecuteAsync([], "", E, CancellationToken.None);
 
@@ -101,11 +103,11 @@ public sealed class BaseProcessorSeamTests
     }
 
     [Fact]
-    public async Task GivesEachBranchOfAFanOutItsOwnMessageId()
+    public async Task GivesEachBranchOfAFanOutItsOwnEntryId()
     {
         var ids = new List<Guid>();
         var sender = Substitute.For<IQueueSender>();
-        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => ids.Add(p.MessageId)),
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => ids.Add(p.EntryId)),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var processor = new Probe(async (_, _, _, self) =>
         {
@@ -113,7 +115,7 @@ public sealed class BaseProcessorSeamTests
             await self.Send(Encoding.UTF8.GetBytes("{}"), E);
             await self.Send(Encoding.UTF8.GetBytes("{}"), E);
         });
-        processor.BeginDispatch(new DispatchState(sender, W, S, P, C, E));
+        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
 
         await processor.ExecuteAsync([], "", E, CancellationToken.None);
 
@@ -121,28 +123,35 @@ public sealed class BaseProcessorSeamTests
     }
 
     [Fact]
-    public async Task ReplayingADispatchProducesTheSameBranchIds()
+    public async Task ReplayingADispatchProducesFreshBranchIds()
     {
-        // The property the whole redelivery model rests on: a second run of the same dispatch writes
-        // the keys the first run wrote.
+        // The cost of minting with NewGuid, pinned so that it stays a decision on the record rather
+        // than a surprise: a second run of the same dispatch writes DIFFERENT keys than the first, so
+        // the replay is a second set of branches and the successor subtree runs twice.
+        //
+        // It is not often reached. The pre handler reclaims the input key once the author returns, and
+        // a redelivery that finds the key gone returns without calling the author at all — so this
+        // matters only where that token is missing: a failed reclaim, and a source step, which has no
+        // key to reclaim. Deriving the ids from the dispatch is what made a replay converge instead,
+        // and it is a four-line change in SendToPostAsync if an author with side effects ever lands.
         async Task<List<Guid>> RunOnce()
         {
             var ids = new List<Guid>();
             var sender = Substitute.For<IQueueSender>();
             await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(),
-                                   Arg.Do<ProcessedData>(p => ids.Add(p.MessageId)),
+                                   Arg.Do<ProcessedData>(p => ids.Add(p.EntryId)),
                                    Arg.Any<CancellationToken>(), Arg.Any<string?>());
             var processor = new Probe(async (_, _, _, self) =>
             {
                 await self.Send(Encoding.UTF8.GetBytes("{}"), E);
                 await self.Send(Encoding.UTF8.GetBytes("{}"), E);
             });
-            processor.BeginDispatch(new DispatchState(sender, W, S, P, C, E));
+            processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
             await processor.ExecuteAsync([], "", E, CancellationToken.None);
             return ids;
         }
 
-        Assert.Equal(await RunOnce(), await RunOnce());
+        Assert.NotEqual(await RunOnce(), await RunOnce());
     }
 
     [Fact]
@@ -165,13 +174,13 @@ public sealed class BaseProcessorSeamTests
                          Arg.Any<CancellationToken>(), Arg.Any<string?>())
               .ThrowsAsync(new IOException("socket closed"));
         var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
-        processor.BeginDispatch(new DispatchState(sender, W, S, P, C, E));
+        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
 
         var thrown = await Assert.ThrowsAsync<PostSendException>(
             () => processor.ExecuteAsync([], "", E, CancellationToken.None));
 
         Assert.Equal(E, thrown.ExecutionId);
-        Assert.NotEqual(Guid.Empty, thrown.MessageId);
+        Assert.NotEqual(Guid.Empty, thrown.EntryId);
         // It must stay classifiable as transient, or the consumer parks the dispatch instead of
         // returning it and the branch is lost for good.
         Assert.IsAssignableFrom<TransientSendException>(thrown);
@@ -190,7 +199,7 @@ public sealed class BaseProcessorSeamTests
                          Arg.Any<CancellationToken>(), Arg.Any<string?>())
               .ThrowsAsync(deterministic);
         var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
-        processor.BeginDispatch(new DispatchState(sender, W, S, P, C, E));
+        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
 
         var thrown = await Assert.ThrowsAnyAsync<Exception>(
             () => processor.ExecuteAsync([], "", E, CancellationToken.None));
@@ -200,17 +209,30 @@ public sealed class BaseProcessorSeamTests
     }
 
     [Fact]
-    public async Task DerivesAnExecutionIdThatIsStableAcrossAReplay()
+    public void OpeningALineageTwiceProducesDifferentIds()
     {
+        // Same replay cost as the branch ids above, on the other id an author can mint: a redelivered
+        // dispatch opens a SECOND lineage rather than reopening the first. Pinned rather than left
+        // implicit, because the method it tests used to promise the opposite.
         Guid RunOnce()
         {
             var processor = new Probe((_, _, _, _) => Task.CompletedTask);
-            processor.BeginDispatch(new DispatchState(Substitute.For<IQueueSender>(), W, S, P, C, Guid.Empty));
+            processor.BeginDispatch(new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
             return processor.NextExecution();
         }
 
-        Assert.Equal(RunOnce(), RunOnce());
-        await Task.CompletedTask;
+        Assert.NotEqual(RunOnce(), RunOnce());
+    }
+
+    [Fact]
+    public void RefusesToOpenALineageOutsideADispatch()
+    {
+        // The same framework-wiring guard the send path carries. Without it this helper would be a
+        // bare Guid.NewGuid() that quietly succeeds outside a dispatch and hands back a lineage id
+        // belonging to nothing — which is exactly the kind of id that is impossible to trace back.
+        var processor = new Probe((_, _, _, _) => Task.CompletedTask);
+
+        Assert.Throws<InvalidOperationException>(() => processor.NextExecution());
     }
 
     [Fact]
