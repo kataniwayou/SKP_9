@@ -33,6 +33,13 @@ namespace BaseApi.Tests.Orchestrator;
 /// green, and the only symptom is an announcement published in the window between the read and the
 /// declare vanishing — reachable on the first start of a replica ordinal, which is a scale-up.
 /// </para>
+/// <para>
+/// <b>The startup gate is the one thing here that is deliberately not tied to success.</b> It reports
+/// that this loop is running, not that it has finished, so it opens on the first beat of the first
+/// attempt and stays open through every retry. Tied to success instead, a dependency outage would
+/// exhaust the pod's startup budget and have the kubelet kill all three replicas for a fault a
+/// restart cannot repair — so "ready even when the pass fails" is asserted directly.
+/// </para>
 /// </summary>
 public sealed class HydrationServiceTests
 {
@@ -252,7 +259,11 @@ public sealed class HydrationServiceTests
         await h.Db.DidNotReceive().SetMembersAsync(
             L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>());
         Assert.False(h.Admission.IsOpen);
-        Assert.False(h.StartupGate.IsReady);
+
+        // Ready all the same: the gate reports that the loop is turning, and the beat that opens it
+        // is ahead of the declare precisely so a broker this replica cannot reach leaves it retrying
+        // and startable rather than burning the pod's startup budget.
+        Assert.True(h.StartupGate.IsReady);
     }
 
     [Fact]
@@ -294,6 +305,11 @@ public sealed class HydrationServiceTests
         Assert.True(
             h.Heartbeat.Last > start, "the loop stopped beating while L2 was unreachable");
         Assert.False(h.Admission.IsOpen);
+
+        // And startable throughout. This is the assertion that stands between a Redis outage and the
+        // kubelet killing every replica at once: /health/startup reads this latch, and a latch that
+        // waited for a complete pass would stay red for the whole outage.
+        Assert.True(h.StartupGate.IsReady);
         h.Cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
     }
@@ -303,17 +319,41 @@ public sealed class HydrationServiceTests
     {
         // Retiring matters: a startup loop that stops beating is indistinguishable from one that
         // wedged, and would fail its liveness check one window later and restart a healthy pod.
+        //
+        // The startup gate is deliberately absent from this test. It is not part of the "only once"
+        // claim any more — it opens on the first beat, before any of this — and asserting it here
+        // would read as evidence for a rule it no longer follows. MarksTheStartupGateReadyEvenWhen…
+        // owns it instead.
         var h = new Harness().WithWorkflow(W1, "0 * * * *");
 
         await h.Build().RunOnceAsync(CancellationToken.None);
 
         Assert.True(h.Admission.IsOpen);
         Assert.True(h.Heartbeat.IsRetired);
-        Assert.True(h.StartupGate.IsReady);
     }
 
     [Fact]
-    public async Task LeavesEverythingShutWhenThePassFailsPartWayThrough()
+    public async Task MarksTheStartupGateReadyEvenWhenThePassFails()
+    {
+        // The whole point of the gate moving off success. /health/startup reads this latch, and the
+        // orchestrator's startup budget is finite: a latch that waited for a complete pass would stay
+        // red for the length of any L2 or broker outage and have the kubelet kill all three replicas
+        // together — podManagementPolicy: Parallel starts them together, so they fail together too.
+        // The gate opens on the first beat and the failure changes nothing about it.
+        var h = new Harness().WithStoreFault();
+
+        await Assert.ThrowsAsync<RedisConnectionException>(
+            () => h.Build().RunOnceAsync(CancellationToken.None));
+
+        Assert.True(h.StartupGate.IsReady);
+
+        // And the gate opening is emphatically not admission opening. Readiness reports the loop is
+        // running; admission is the permission to consume, and it still waits for a complete pass.
+        Assert.False(h.Admission.IsOpen);
+    }
+
+    [Fact]
+    public async Task LeavesAdmissionShutWhenThePassFailsPartWayThrough()
     {
         // The half of "only once hydration succeeds" that a fault on the index read cannot reach. Here
         // the pass gets a workflow into L1 and then loses the store, which is exactly the state an
@@ -331,7 +371,11 @@ public sealed class HydrationServiceTests
         Assert.False(h.Store.TryGet(W2, out _));
         Assert.False(h.Admission.IsOpen);
         Assert.False(h.Heartbeat.IsRetired);
-        Assert.False(h.StartupGate.IsReady);
+
+        // Ready, though — and the pairing is the point of the rename. "Everything shut" stopped being
+        // true when readiness moved to the first beat, and the two latches now answer different
+        // questions: this pod is starting correctly, and it may not consume yet.
+        Assert.True(h.StartupGate.IsReady);
     }
 
     [Fact]
