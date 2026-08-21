@@ -54,7 +54,7 @@ public sealed class ProcessorLivenessWriter
             // When/flags passed explicitly, matching ProcessedDataHandler. Behaviourally identical to
             // the bare three-argument call, but StackExchange.Redis overloads that shape between a
             // keepTtl-bool overload and an Expiration-struct one — the compiler picks silently, and
-            // during Task 7 that trap produced a test that matched a method the code never called.
+            // that trap has already produced a test here that matched a method the code never called.
             // Naming all five parameters pins the overload for the reader and for the matcher.
             await db.StringSetAsync(
                 L2ProjectionKeys.PerInstance(processorId, instanceId),
