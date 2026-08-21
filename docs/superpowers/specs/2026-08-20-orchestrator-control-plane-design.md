@@ -493,9 +493,14 @@ Hermetic, no broker, no Redis, no Kubernetes — matching how the processor is t
 - **Fanout naming:** three distinct instanceIds → three distinct queue names. This is the silent-
   degradation guard from §4.3 and the broker cannot provide it.
 - **Topology:** the dead-letter exchange is declared before the queue naming it, asserted by call
-  ordering against a substituted `IChannel`.
+  ordering against a substituted `IChannel`; both binds are asserted too, because a declared-but-
+  unbound queue is a broker in perfect health delivering nothing.
 - **Hydration:** builds L1 from a substituted `IDatabase`; retries and keeps beating on an L2 fault;
-  retires its heartbeat and marks ready on success.
+  retires its heartbeat and marks ready on success. Separately: it declares this replica's topology
+  *before* it reads L2 (§4.5) — an ordering assertion, not a failure assertion, which is why
+  `ITopologyDeclarer` exists as a seam at all.
+- **Readiness:** the hydration readiness check is unhealthy until admission opens and healthy after,
+  which is what makes `0/1 READY` mean "still hydrating" rather than "broken".
 - **Consumer admission:** the consumer does not consume while admission is closed, and does once open.
 - **Start consumer:** applies; is idempotent across a replay; no-ops when the workflow is absent from
   L2; parks an unreadable body; requeues-and-trips on an L2 fault.
@@ -506,9 +511,27 @@ Hermetic, no broker, no Redis, no Kubernetes — matching how the processor is t
   fresh correlationId; a follower dispatches nothing but still reschedules; a send fault is swallowed
   and the reschedule still happens.
 - **Leader timings:** renew deadline < lease duration, asserted against the constants.
+- **The self-rescheduling chain:** a real started Quartz scheduler, a RAM job store and a real clock
+  are driven through two fires a second apart. **This is the only test in the branch that proves a
+  workflow fires more than once.** Every other scheduling test proves one half that never meets the
+  other — `WorkflowSchedulerTests` reads the job store back through a scheduler it deliberately
+  never starts, and `WorkflowFireJobTests` calls `Execute` directly against a recording scheduler —
+  so the mechanism in §8.3 step 4, a fire arming its own successor, lives only in the seam between
+  them. It is also what checks the Quartz claim `WorkflowScheduler`'s remarks rest on: that a
+  completed no-repeat trigger is still in the store while `Execute` is on the stack. If that were
+  wrong, every workflow on every replica would fire exactly once and stop, with no exception, no log
+  and no probe.
+- **Host wiring:** the composition root actually builds, under `Development` so that both
+  `ValidateOnBuild` and `ValidateScopes` run. Beyond resolution it pins the substitutable seams to
+  their production implementations — the scheduler closed over `WorkflowFireJob`, `ITopologyDeclarer`
+  bound to `ConnectionTopologyDeclarer` — because every other test in this list deliberately
+  substitutes them, so a wrong binding here is invisible everywhere else.
 
 `FakeTimeProvider` requires an external pump in this repo — time advances only on a read, so a loop
-test that waits for a delay hangs unless the test advances it. Pump it from the test.
+test that waits for a delay hangs unless the test advances it. Pump it from the test. The chain test
+is the one deliberate exception: Quartz's own timer fires against real time, so cron arithmetic on
+any other clock would arm fire times that scheduler never reaches. It stays bounded by waiting on a
+signal rather than a sleep, so a broken chain fails in milliseconds with the reason attached.
 
 ---
 
