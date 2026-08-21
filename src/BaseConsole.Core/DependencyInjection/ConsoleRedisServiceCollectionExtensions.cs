@@ -15,15 +15,33 @@ namespace BaseConsole.Core.DependencyInjection;
 /// <summary>
 /// The console-side Redis client: one <see cref="IConnectionMultiplexer"/> for the process.
 /// <para>
-/// <b>A soft dependency, deliberately.</b> There is no startup probe and no readiness gate here. The
-/// connection string carries <c>abortConnect=false</c>, so the multiplexer materialises even against
-/// a dead Redis and individual operations fail at their call sites instead — which is what lets a
-/// worker boot, serve <c>/health/live</c>, and report the store as degraded rather than crash-loop on
-/// a dependency that may be seconds from returning.
+/// <b>A soft dependency, deliberately.</b> There is no startup probe and no readiness gate here. This
+/// registration parses the connection string at wiring time and forces
+/// <see cref="ConfigurationOptions.AbortOnConnectFail"/> to <c>false</c> on it — see
+/// <see cref="ConsoleRedisConnectionOptions"/> — so the multiplexer materialises even against a dead
+/// Redis and individual operations fail at their call sites instead. That is what lets a worker boot,
+/// serve <c>/health/live</c>, and report the store as degraded rather than crash-loop on a dependency
+/// that may be seconds from returning. The flag is enforced in code rather than left to the connection
+/// string: three separate deployment files would otherwise each have to remember it independently, and
+/// a fourth deployment, or one careless edit to any of them, would silently reintroduce the crash-loop.
 /// </para>
 /// <para>
-/// The connection opens lazily on first resolution: a DI factory cannot await, so connecting eagerly
-/// would block a container-resolution thread on a network round-trip.
+/// <b>An operator's explicit <c>abortConnect=true</c> is silently overridden.</b> This is deliberate,
+/// not an oversight: the console stack's gate-and-probe design (<c>L2Gate</c>, <c>L2GateProbe</c>,
+/// <c>StartupPreflightService</c>) assumes the multiplexer always exists and may simply be
+/// disconnected, and a hard failure inside this DI factory would kill the host during
+/// <c>Host.StartAsync</c>'s hosted-service enumeration before any of those diagnostics — including the
+/// one built specifically to announce that Redis is unreachable — ever ran. Silently ignoring an
+/// operator's setting without documenting it would be worse than the original bug, so this paragraph is
+/// that documentation.
+/// </para>
+/// <para>
+/// <b>The connection is eager and synchronous, not lazy.</b> <see cref="ConnectionMultiplexer.Connect"/>
+/// runs at resolution time on the resolving thread and blocks on the network round-trip — it does not
+/// defer to first use. Even with <c>AbortOnConnectFail = false</c>, <c>Connect</c> still blocks for up
+/// to <c>ConnectTimeout</c> (the manifests set 5000ms) before returning against a dead Redis, so startup
+/// is delayed by roughly that much; that delay is the accepted cost of resolving the multiplexer
+/// eagerly instead of deferring the connection to a background task a DI factory cannot await.
 /// </para>
 /// <para>
 /// Unlike the API-side equivalent this binds no projection options type — that one is coupled to the
@@ -38,12 +56,14 @@ public static class ConsoleRedisServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(cfg);
 
-        // Read eagerly so a missing connection string fails at wiring time with an actionable
-        // message, rather than on whichever operation happens to resolve the multiplexer first.
+        // Read and parse eagerly so a missing or malformed connection string fails at wiring time
+        // with an actionable message, rather than on whichever operation happens to resolve the
+        // multiplexer first.
         var connectionString = cfg.RequireConnectionString("Redis");
+        var options = ConsoleRedisConnectionOptions.ParseForcingNonAborting(connectionString);
 
         services.TryAddSingleton<IConnectionMultiplexer>(
-            _ => ConnectionMultiplexer.Connect(connectionString));
+            _ => ConnectionMultiplexer.Connect(options));
 
         return services;
     }
