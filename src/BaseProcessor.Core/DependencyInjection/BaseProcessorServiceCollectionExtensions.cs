@@ -91,6 +91,12 @@ public static class BaseProcessorServiceCollectionExtensions
         services.AddBaseConsoleRedis(cfg);
         services.AddBaseConsoleHealth(cfg);
 
+        // The startup preflight: an operator-facing log of whether the connections just registered
+        // above actually work. Registered ahead of every other hosted service below —
+        // ProcessorStartupOrchestrator among them — so its output leads the console. It gates nothing
+        // and recovers nothing; see ConsolePreflightServiceCollectionExtensions.
+        services.AddBaseConsolePreflight(cfg);
+
         services.Configure<ProcessorLivenessOptions>(cfg.GetSection("Processor"));
 
         services.TryAddSingleton(TimeProvider.System);
