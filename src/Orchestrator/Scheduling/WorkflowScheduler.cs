@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Quartz;
 
 namespace Orchestrator.Scheduling;
@@ -22,11 +22,15 @@ namespace Orchestrator.Scheduling;
 /// </para>
 /// <para>
 /// <b>That is a claim about a third-party library, so it is checked rather than asserted.</b>
-/// <c>SelfReschedulingChainTests</c> runs a real started scheduler through two fires a second apart;
-/// re-adding the job from inside a fire instead of replacing the trigger fails it with Quartz's own
-/// <c>ObjectAlreadyExistsException</c>, which is the store saying the job of a fire in progress is
-/// still there. If the claim were false every workflow would fire exactly once and stop, on all three
-/// replicas, with nothing logged.
+/// <c>SelfReschedulingChainTests</c> runs a real started scheduler through two fires a second apart,
+/// and reaching the trigger half of the claim from that run takes two steps rather than one. Quartz
+/// raises <c>ObjectAlreadyExistsException</c> on the <i>job</i> key, so on its own it says only that
+/// the job of a fire in progress is still in the store. The trigger's presence is what follows from
+/// the run being green at all: had the completed trigger already been evicted,
+/// <see cref="RescheduleAsync"/> would have found nothing to replace, taken its re-create fallback,
+/// and hit that exception on the still-present job key — so a fire that threw nothing is a fire whose
+/// trigger was there to replace. If the claim were false every workflow would fire exactly once and
+/// stop, on all three replicas, with nothing logged.
 /// </para>
 /// <para>
 /// <b>And it must nonetheless be able to re-create job and trigger from nothing.</b> A non-durable job
