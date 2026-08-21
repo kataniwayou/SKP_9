@@ -93,22 +93,31 @@ public sealed class HydrationServiceTests
             Index(workflowId);
 
             Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
-                .Returns((RedisValue)JsonSerializer.Serialize(
-                    new WorkflowRootProjection(
-                        EntryStepIds: [S],
-                        StepIds: [S],
-                        Cron: cron,
-                        Liveness: new LivenessProjection(DateTime.UtcNow, 3600, "Pending")),
-                    MessagingJson.Options));
+                .Returns(RootJson(cron));
 
             Db.StringGetAsync(L2ProjectionKeys.Step(workflowId, S), Arg.Any<CommandFlags>())
-                .Returns((RedisValue)JsonSerializer.Serialize(
-                    new StepProjection(
-                        EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []),
-                    MessagingJson.Options));
+                .Returns(StepJson());
 
             return this;
         }
+
+        /// <summary>
+        /// The stored root, as <c>L2ProjectionWriter</c> writes it. Shared by every stub that has to
+        /// produce one, so a stub that answers on the second attempt cannot describe a different
+        /// workflow from the one that answers on the first.
+        /// </summary>
+        private static RedisValue RootJson(string? cron) => JsonSerializer.Serialize(
+            new WorkflowRootProjection(
+                EntryStepIds: [S],
+                StepIds: [S],
+                Cron: cron,
+                Liveness: new LivenessProjection(DateTime.UtcNow, 3600, "Pending")),
+            MessagingJson.Options);
+
+        /// <summary>The one stored step, as <c>L2ProjectionWriter</c> writes it.</summary>
+        private static RedisValue StepJson() => JsonSerializer.Serialize(
+            new StepProjection(EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []),
+            MessagingJson.Options);
 
         /// <summary>
         /// Adds one id to the parent index. The stub is replaced rather than appended to, so the last
@@ -165,6 +174,28 @@ public sealed class HydrationServiceTests
             Index(workflowId);
             Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
                 .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
+
+            return this;
+        }
+
+        /// <summary>
+        /// A workflow the index lists whose root read faults the first <paramref name="failures"/>
+        /// times and answers normally after that: the store going away partway through a pass and
+        /// coming back before the retry. <see cref="WithWorkflowFault"/> never recovers, which ends
+        /// the run at one failed pass; this one lets a second, complete pass follow the first.
+        /// </summary>
+        public Harness WithWorkflowFaultsThenRecovery(Guid workflowId, string? cron, int failures)
+        {
+            Index(workflowId);
+            var attempts = 0;
+
+            Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
+                .Returns(_ => Interlocked.Increment(ref attempts) <= failures
+                    ? throw new RedisConnectionException(ConnectionFailureType.SocketFailure, "down")
+                    : RootJson(cron));
+
+            Db.StringGetAsync(L2ProjectionKeys.Step(workflowId, S), Arg.Any<CommandFlags>())
+                .Returns(StepJson());
 
             return this;
         }
@@ -399,5 +430,36 @@ public sealed class HydrationServiceTests
         Assert.True(h.Admission.IsOpen);
         Assert.True(h.Heartbeat.IsRetired);
         Assert.True(h.Store.TryGet(W1, out _));
+    }
+
+    [Fact]
+    public async Task ARetriedPassLeavesOneLiveJobPerWorkflowRatherThanTwo()
+    {
+        // The half of the partial-pass case that latch assertions cannot reach. A pass that mirrors
+        // W1 and then loses the store has already put W1 on the scheduler; the retry activates W1
+        // again, and WorkflowActivator's teardown-before-apply is the only thing between that and two
+        // live Quartz jobs for one workflow — both firing its entry steps on every tick, for as long
+        // as the process lives. Nothing else here would notice: L1 holds one entry either way,
+        // admission opens either way, and every probe stays green.
+        var h = new Harness()
+            .WithWorkflow(W1, "0 * * * *")
+            .WithWorkflowFaultsThenRecovery(W2, "0 * * * *", failures: 1);
+
+        var run = h.Build().RunUntilHydratedAsync(h.Cts.Token);
+        h.PumpTime(TimeSpan.FromSeconds(30));
+        await run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Three schedules across two passes — W1 on both, W2 only on the one that got that far — and
+        // the second activation of W1 tore down the job the first one left. Two live jobs, one per
+        // workflow, is the whole claim.
+        Assert.True(h.Admission.IsOpen);
+        Assert.Equal([W1, W1, W2], h.Scheduler.Scheduled.Select(s => s.WorkflowId));
+        Assert.Single(h.Scheduler.Unscheduled);
+        Assert.Equal(2, h.Scheduler.LiveJobCount);
+
+        // And the surviving job is the one L1 points at: what was torn down is the first pass's job,
+        // not the current one. A teardown that ran in the other order would leave these equal.
+        Assert.True(h.Store.TryGet(W1, out var w1));
+        Assert.DoesNotContain(w1.JobId, h.Scheduler.Unscheduled);
     }
 }
