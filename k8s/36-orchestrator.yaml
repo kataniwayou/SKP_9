@@ -14,12 +14,23 @@
 # be removed permanently, its queue has to be deleted on the broker by hand, in the same change.
 # ---------------------------------------------------------------------------------------------
 #
-# There is no readiness probe, deliberately, and that is the difference from processor-sample. That
-# processor is unready until its identity resolves against a database row; this replica knows who it
-# is the moment the kubelet hands it POD_NAME, and there is nothing for readiness to gate — no
-# Service routes traffic here, so removing a pod from endpoints changes nothing about what it does.
-# Hydration, the one thing worth waiting for, is reported through the startup probe instead: see
-# its note below for what that costs.
+# The three probes here answer three different questions, and keeping them apart is what lets a
+# dependency outage be survivable rather than fatal:
+#
+#   /health/startup  — is the hydration loop running? It flips on the loop's first beat, before the
+#                      broker or Redis is touched, so it passes within seconds of process start even
+#                      while both are down. Its budget therefore covers process start only.
+#   /health/ready    — has this replica mirrored L2 into L1 and admitted its consumer? Red for the
+#                      whole of any outage, and that is fine: readiness is the one probe that may
+#                      fail indefinitely and recover without anything being restarted.
+#   /health/live     — are the loops still turning? Nothing it reads touches a dependency.
+#
+# The readiness probe is new and it is the difference from the earlier shape of this file, where
+# hydration was reported through the startup probe. That cost a five-minute budget on a condition no
+# restart repairs: past it the kubelet killed the pod, and under podManagementPolicy: Parallel it
+# killed all three at once — turning the outage the design prices as survivable into a whole-service
+# crash loop. Nothing routes traffic here, so readiness gates only the pod's READY column; 0/1 now
+# means "still hydrating", which is exactly what was lost when the claim came off /health/startup.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -110,13 +121,14 @@ spec:
   # direction — up is safe, down leaks a queue that fills forever.
   replicas: 3
   serviceName: orchestrator
-  # Parallel, not the OrderedReady default, and this one is load-bearing. There is no readiness
-  # probe here, so a pod becomes Ready only once its STARTUP probe passes — that is, once it has
-  # hydrated. Under OrderedReady the kubelet would not create orchestrator-1 until orchestrator-0
-  # was Ready, so a Redis that is slow or down at deploy time would not leave three replicas
-  # patiently retrying, which is what the five-minute startup budget below is written for; it would
-  # leave one replica retrying and two that do not exist. The dependency outage the design prices as
-  # "not a crash" would become a whole-service non-deploy.
+  # Parallel, not the OrderedReady default, and this one is load-bearing — it and the readiness
+  # probe below are load-bearing *together*, and neither is safe to remove while the other stands.
+  # A pod is Ready only once it has hydrated, so under OrderedReady the kubelet would not create
+  # orchestrator-1 until orchestrator-0 was Ready: a Redis that is slow or down at deploy time would
+  # not leave three replicas patiently retrying, it would leave one retrying and two that do not
+  # exist. The dependency outage the design prices as "not a crash" would become a whole-service
+  # non-deploy. Adding the readiness probe under the old OrderedReady default would have caused
+  # exactly that, which is why it could not be added until this field was set.
   #
   # Nothing here needs the ordering OrderedReady buys. These replicas share no state, each owns its
   # own durable fan-out queue named after its own ordinal, and which one dispatches is decided by a
@@ -178,22 +190,39 @@ spec:
           ports:
             - name: health
               containerPort: 8081
-          # Startup here means hydrated: HydrationService flips the startup gate only after a
-          # complete pass has mirrored every workflow L2 lists into L1. That is a stronger claim
-          # than processor-sample's startup probe makes, and it is why this one gets a wider budget
-          # than that file's 30 — 60 x 5s is five minutes, and hydration backs off to a 30s cap, so
-          # this covers several full-cap retries against a Redis that is slow to come back. It is
-          # still finite on purpose, but the number is chosen knowing that a restart repairs
-          # nothing: a fresh process meets the same unreachable store, and the only thing the
-          # kubelet buys by killing this container is that the outage starts reading as a crash
-          # loop. Announcements are not lost while it waits — the replica's queue is durable and
-          # accumulates them until the consumer is admitted.
+          # Startup here means the hydration loop is running, and nothing more. HydrationService
+          # flips the startup gate on the loop's first beat — ahead of the topology declare and
+          # ahead of the first read of L2 — so this passes whether or not either dependency is
+          # reachable. What it still catches is a process that cannot get as far as starting its
+          # loop at all: a container that fails to build its host, or one wedged before the first
+          # beat. Nothing a restart could not fix, which is what a startup probe should be scoped to.
+          #
+          # 30 x 5s is 150s, the same budget as processor-sample's startup probe, because it now
+          # covers the same thing: process start and one loop iteration reaching its first beat. The
+          # old 60 bought five minutes to cover retries against a slow Redis, and buying that here
+          # was the defect — hydration against a store that is down can take longer than any finite
+          # budget, and past it the kubelet killed the pod for a fault a fresh process meets
+          # identically. That condition is /health/ready's now, where it may stay red for as long as
+          # the outage lasts. Announcements are not lost meanwhile: the replica's queue is durable
+          # and accumulates them until the consumer is admitted.
           startupProbe:
             httpGet: { path: /health/startup, port: 8081 }
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
-            failureThreshold: 60
+            failureThreshold: 30
+          # Readiness is hydration: red until this replica has mirrored every workflow L2 lists into
+          # L1 and admitted its consumer. No restart makes an unreachable store answer, which is
+          # exactly why this is readiness and not startup or liveness — it may sit red for the whole
+          # outage and go green again on its own. Safe to have at all only because
+          # podManagementPolicy above is Parallel; under OrderedReady it would gate the creation of
+          # the next replica. Read the two together.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8081 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
           # Liveness answers from the checks tagged `live` — `self`, plus one per loop: the gate
           # probe's and hydration's. Not one of them touches a dependency, and that is the rule
           # rather than an accident: a Redis or broker outage must not restart these pods, because
