@@ -5,11 +5,12 @@ namespace Orchestrator.Hydration;
 /// <summary>
 /// Admission to consume, held shut until this replica has hydrated L1 from L2.
 /// <para>
-/// <b>What it buys is that the queue does the waiting.</b> This replica's fan-out queue is durable and
-/// bound before anything consumes it, so announcements published during hydration accumulate there
-/// rather than being missed. Consuming them earlier would not make them arrive sooner — it would mean
-/// acting on a start announcement against an L1 that does not yet hold the workflows the pass is about
-/// to mirror, and the pass would then overwrite whatever the announcement did.
+/// <b>What it buys is that the queue does the waiting.</b> This replica's fan-out queue is durable, and
+/// <see cref="HydrationService"/> declares it at the top of every pass — before that pass reads L2 —
+/// so an announcement published from then on accumulates there rather than being missed. Consuming
+/// them earlier would not make them arrive sooner — it would mean acting on a start announcement
+/// against an L1 that does not yet hold the workflows the pass is about to mirror, and the pass would
+/// then overwrite whatever the announcement did.
 /// </para>
 /// <para>
 /// <b>One-shot, in the shape of <c>StartupGate</c>.</b> Reads use <c>Volatile.Read</c> for cross-thread

@@ -9,6 +9,8 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Orchestrator.Hydration;
 using Orchestrator.L1;
+using Orchestrator.Messaging;
+using RabbitMQ.Client.Exceptions;
 using StackExchange.Redis;
 using Xunit;
 
@@ -25,6 +27,12 @@ namespace BaseApi.Tests.Orchestrator;
 /// A pass that mirrors one workflow and then fails on the next is the case where a latch opened
 /// optimistically would admit the consumer against a half-built L1, and it is tested separately.
 /// </para>
+/// <para>
+/// <b>And that this replica's queue is declared before the pass reads L2 at all.</b> That ordering is
+/// not observable from anywhere else: get it wrong and every test here still passes, every probe is
+/// green, and the only symptom is an announcement published in the window between the read and the
+/// declare vanishing — reachable on the first start of a replica ordinal, which is a scale-up.
+/// </para>
 /// </summary>
 public sealed class HydrationServiceTests
 {
@@ -39,6 +47,8 @@ public sealed class HydrationServiceTests
         private readonly L2WorkflowReader _reader;
 
         public IDatabase Db { get; } = Substitute.For<IDatabase>();
+
+        public ITopologyDeclarer Topology { get; } = Substitute.For<ITopologyDeclarer>();
 
         public WorkflowL1Store Store { get; } = new();
 
@@ -105,6 +115,31 @@ public sealed class HydrationServiceTests
                 .Returns(_index.ToArray());
         }
 
+        /// <summary>A broker this replica cannot reach, so its topology cannot be declared.</summary>
+        public Harness WithBrokerFault()
+        {
+            Topology.EnsureDeclaredAsync(Arg.Any<CancellationToken>())
+                .Throws(new BrokerUnreachableException(new IOException("no broker")));
+
+            return this;
+        }
+
+        /// <summary>
+        /// A broker that refuses the first <paramref name="failures"/> declarations and accepts after
+        /// that — the outage this loop is supposed to back off through rather than die on.
+        /// </summary>
+        public Harness WithBrokerFaultsThenRecovery(int failures)
+        {
+            var attempts = 0;
+
+            Topology.EnsureDeclaredAsync(Arg.Any<CancellationToken>())
+                .Returns(_ => Interlocked.Increment(ref attempts) <= failures
+                    ? throw new BrokerUnreachableException(new IOException("no broker"))
+                    : ValueTask.CompletedTask);
+
+            return this;
+        }
+
         /// <summary>An L2 that cannot be reached at all — the index read itself faults.</summary>
         public Harness WithStoreFault()
         {
@@ -149,6 +184,7 @@ public sealed class HydrationServiceTests
         }
 
         public HydrationService Build() => new(
+            Topology,
             _reader,
             new WorkflowActivator(
                 _reader, Store, Scheduler, NullLogger<WorkflowActivator>.Instance),
@@ -183,6 +219,59 @@ public sealed class HydrationServiceTests
 
         Assert.True(h.Store.TryGet(W1, out _));
         Assert.True(h.Store.TryGet(W2, out _));
+    }
+
+    [Fact]
+    public async Task DeclaresThisReplicasTopologyBeforeItReadsL2()
+    {
+        // The whole of the finding. Both calls happen either way, so nothing but their order says
+        // whether an announcement published mid-pass reaches this replica's queue or is discarded by
+        // an exchange that has nothing of ours bound to it yet.
+        var h = new Harness().WithWorkflow(W1, "0 * * * *");
+
+        await h.Build().RunOnceAsync(CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            h.Topology.EnsureDeclaredAsync(Arg.Any<CancellationToken>());
+            h.Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>());
+        });
+    }
+
+    [Fact]
+    public async Task ReadsNothingFromL2WhileTheBrokerIsUnreachable()
+    {
+        // The ordering above, stated as the thing it protects: a pass that cannot declare must not
+        // proceed to read. A read that went ahead anyway would mirror an L2 whose announcements this
+        // replica is not yet listening for, and then admit the consumer against it.
+        var h = new Harness().WithWorkflow(W1, "0 * * * *").WithBrokerFault();
+
+        await Assert.ThrowsAsync<BrokerUnreachableException>(
+            () => h.Build().RunOnceAsync(CancellationToken.None));
+
+        await h.Db.DidNotReceive().SetMembersAsync(
+            L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>());
+        Assert.False(h.Admission.IsOpen);
+        Assert.False(h.StartupGate.IsReady);
+    }
+
+    [Fact]
+    public async Task BacksOffAndRetriesThroughABrokerOutageJustAsItDoesForL2()
+    {
+        // A broker outage now fails the pass, so it has to land in the same contract as an L2 outage:
+        // back off, keep beating, hydrate when it returns. A declaration ordered ahead of this loop
+        // instead would have blocked host startup on a dependency this design allows to be down.
+        var h = new Harness()
+            .WithWorkflow(W1, "0 * * * *")
+            .WithBrokerFaultsThenRecovery(failures: 2);
+
+        var run = h.Build().RunUntilHydratedAsync(h.Cts.Token);
+        h.PumpTime(TimeSpan.FromSeconds(30));
+
+        await run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        Assert.True(h.Admission.IsOpen);
+        Assert.True(h.Store.TryGet(W1, out _));
     }
 
     [Fact]
