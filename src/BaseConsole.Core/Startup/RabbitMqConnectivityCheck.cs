@@ -13,6 +13,14 @@ namespace BaseConsole.Core.Startup;
 /// reason; this is that same seam, one layer down, for the component that only ever needs to know
 /// whether opening the connection succeeded.
 /// </para>
+/// <para>
+/// <b>Public deliberately, not for outside consumers.</b> <c>BaseConsole.Core.csproj</c> grants
+/// <c>InternalsVisibleTo</c> only to <c>BaseApi.Tests</c>, not to NSubstitute's dynamic proxy assembly
+/// — the same reason <c>ITopologyDeclarer</c> is public rather than internal. Making this
+/// <c>internal</c> instead would need a second <c>InternalsVisibleTo</c> grant naming
+/// <c>DynamicProxyGenAssembly2</c>, widening exactly the same kind of surface a step further for no
+/// gain: nothing outside this assembly constructs or calls it today, and nothing is meant to.
+/// </para>
 /// </summary>
 public interface IRabbitMqConnectivityCheck
 {
