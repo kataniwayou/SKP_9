@@ -1,4 +1,4 @@
-using Messaging.Transport;
+﻿using Messaging.Transport;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -195,20 +195,26 @@ internal sealed class StartupPreflightService : BackgroundService
 
         if (!ReferenceEquals(winner, ping))
         {
+            // Abandoned, not cancelled: the ping is still running and will eventually complete or
+            // fault. Observe that fault so it is not raised as unobserved later, far from here.
+            //
+            // Attached ahead of the shutdown check below rather than after it, because that check
+            // throws: both ways out of this branch abandon the same running ping, and a ping left
+            // behind by a stopping host faults exactly as readily as one left behind by a timeout.
+            // The process is usually exiting moments later, which is why this was easy to miss — but
+            // "usually exiting" is not a reason to leave one of the two exits unobserved.
+            _ = ping.ContinueWith(
+                static t => _ = t.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
+
             // deadline is linked to ct, so losing this race has two different causes that must not be
             // told apart by exception type: a slow-but-reachable Redis (deadline's own CancelAfter
             // fired), or the caller's own token being cancelled (host shutdown, which cancels deadline
             // too). ct is the only authority on which one happened — checked before either exception
             // is even constructed, so a shutdown never gets dressed up as a timed-out ping.
             ct.ThrowIfCancellationRequested();
-
-            // Abandoned, not cancelled: the ping is still running and will eventually complete or
-            // fault. Observe that fault so it is not raised as unobserved later, far from here.
-            _ = ping.ContinueWith(
-                static t => _ = t.Exception,
-                CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted,
-                TaskScheduler.Default);
 
             throw new TimeoutException($"Redis PING did not complete within {RetryInterval}.");
         }
