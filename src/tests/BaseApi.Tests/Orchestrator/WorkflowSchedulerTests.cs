@@ -25,7 +25,11 @@ public sealed class WorkflowSchedulerTests
     private static readonly DateTime Now = new(2026, 8, 20, 12, 30, 0, DateTimeKind.Utc);
     private const string EveryHour = "0 * * * *";
 
-    /// <summary>Stands in for the fire job, which arrives with a later task. It is never executed.</summary>
+    /// <summary>
+    /// Stands in for <c>WorkflowFireJob</c>, and is never executed — the scheduler under test is never
+    /// started, so nothing here fires. What the job type is only matters to the job detail this class
+    /// writes, which is what these tests read back.
+    /// </summary>
     private sealed class NoopJob : IJob
     {
         public Task Execute(IJobExecutionContext context) => Task.CompletedTask;

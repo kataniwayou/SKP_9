@@ -83,7 +83,7 @@ public sealed class WorkflowActivatorTests
         Assert.Equal(W, entry.Definition.WorkflowId);
 
         // The job id handed to the scheduler must be the job id L1 recorded, and this is the only
-        // place that is true by construction rather than by coincidence. Task 9's fire reads its own
+        // place that is true by construction rather than by coincidence. WorkflowFireJob reads its own
         // job id out of the job-data map and stands down unless L1 still holds that same id for the
         // workflow; if the two ever diverged here, every fire would decline to reschedule and the
         // replica would silently stop firing anything, with nothing failing and nothing logged.

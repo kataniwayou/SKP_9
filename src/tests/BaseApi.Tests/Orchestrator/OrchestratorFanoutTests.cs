@@ -26,13 +26,15 @@ public sealed class OrchestratorFanoutTests
     }
 
     [Fact]
-    public void ThePerReplicaNameIsStableForAGivenReplica()
+    public void ThePerReplicaNameIsTheOrdinalUnderTheControlPrefix()
     {
         // A restarted pod at the same StatefulSet ordinal must reclaim its own queue and drain what
-        // buffered while it was away, rather than minting a new one and abandoning the backlog.
-        Assert.Equal(
-            OrchestratorFanout.PerReplica("orchestrator-1"),
-            OrchestratorFanout.PerReplica("orchestrator-1"));
+        // buffered while it was away, rather than minting a new one and abandoning the backlog. What
+        // makes that true is that the name is a pure function of the ordinal AND that the function
+        // does not change: the queues are durable, so a renamed prefix abandons every existing queue
+        // with its backlog still in it and binds new empty ones. The literal is the assertion for the
+        // same reason the durable queue is the hazard — nothing else in the system would notice.
+        Assert.Equal("orchestrator-control.orchestrator-1", OrchestratorFanout.PerReplica("orchestrator-1"));
     }
 
     [Fact]
