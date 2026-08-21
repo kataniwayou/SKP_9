@@ -53,34 +53,41 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
 
         var properties = BuildProperties(type, replyTo, correlationId);
 
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
+        // The gate wait is inside the measured window: sends serialise behind one channel, so
+        // queueing behind another send is latency this caller genuinely waited out.
+        await EgressMetrics.MeasureAsync(EgressMetrics.RouteQueue, queue, type, async () =>
         {
-            var channel = await GetChannelAsync(ct).ConfigureAwait(false);
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var channel = await GetChannelAsync(ct).ConfigureAwait(false);
 
-            // Empty exchange = the default exchange, which routes to the queue named by the routing
-            // key. mandatory: true turns "no such queue" into a fault instead of a silent discard.
-            await channel.BasicPublishAsync(
-                exchange: string.Empty,
-                routingKey: queue,
-                mandatory: true,
-                basicProperties: properties,
-                body: payload,
-                cancellationToken: ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // A channel that faulted is unusable for every later send, so drop it here rather than
-            // letting the next caller discover it. Recreation happens on the next send, under this
-            // same lock. The original exception is what the caller needs, so it propagates untouched.
-            await DiscardChannelAsync().ConfigureAwait(false);
-            _logger.LogWarning(ex, "send to {Queue} failed; send channel discarded", queue);
-            throw;
-        }
-        finally
-        {
-            _gate.Release();
-        }
+                // Empty exchange = the default exchange, which routes to the queue named by the
+                // routing key. mandatory: true turns "no such queue" into a fault instead of a
+                // silent discard.
+                await channel.BasicPublishAsync(
+                    exchange: string.Empty,
+                    routingKey: queue,
+                    mandatory: true,
+                    basicProperties: properties,
+                    body: payload,
+                    cancellationToken: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // A channel that faulted is unusable for every later send, so drop it here rather
+                // than letting the next caller discover it. Recreation happens on the next send,
+                // under this same lock. The original exception is what the caller needs, so it
+                // propagates untouched.
+                await DiscardChannelAsync().ConfigureAwait(false);
+                _logger.LogWarning(ex, "send to {Queue} failed; send channel discarded", queue);
+                throw;
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }).ConfigureAwait(false);
     }
 
     /// <summary>

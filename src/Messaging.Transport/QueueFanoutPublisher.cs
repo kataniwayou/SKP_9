@@ -56,30 +56,36 @@ public sealed class QueueFanoutPublisher : IQueueFanoutPublisher, IAsyncDisposab
 
         try
         {
-            // The gate wait is inside this classified region, not before it: a caller that arrives
-            // already cancelled must still see TransientSendException, not a raw
-            // OperationCanceledException, or DeliveryClassifier would park the control message instead
-            // of requeuing it.
-            await _gate.WaitAsync(ct).ConfigureAwait(false);
-            try
+            // Measured inside the outer try so the metric sees the RAW fault, before the remap to
+            // UnroutablePublishException and the wrap into TransientSendException below.
+            // EgressMetrics.Classify is written against those raw shapes.
+            await EgressMetrics.MeasureAsync(EgressMetrics.RouteFanout, exchange, type, async () =>
             {
-                var channel = await GetChannelAsync(ct).ConfigureAwait(false);
+                // The gate wait is inside this classified region, not before it: a caller that
+                // arrives already cancelled must still see TransientSendException, not a raw
+                // OperationCanceledException, or DeliveryClassifier would park the control message
+                // instead of requeuing it.
+                await _gate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var channel = await GetChannelAsync(ct).ConfigureAwait(false);
 
-                // A named exchange instead of the default one, an empty routing key because a fan-out
-                // exchange ignores it, and mandatory: true so an unroutable message is reported rather
-                // than silently discarded and confirmed anyway.
-                await channel.BasicPublishAsync(
-                    exchange: exchange,
-                    routingKey: string.Empty,
-                    mandatory: true,
-                    basicProperties: properties,
-                    body: payload,
-                    cancellationToken: ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                _gate.Release();
-            }
+                    // A named exchange instead of the default one, an empty routing key because a
+                    // fan-out exchange ignores it, and mandatory: true so an unroutable message is
+                    // reported rather than silently discarded and confirmed anyway.
+                    await channel.BasicPublishAsync(
+                        exchange: exchange,
+                        routingKey: string.Empty,
+                        mandatory: true,
+                        basicProperties: properties,
+                        body: payload,
+                        cancellationToken: ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
