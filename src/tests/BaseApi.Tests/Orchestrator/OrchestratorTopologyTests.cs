@@ -44,6 +44,50 @@ public sealed class OrchestratorTopologyTests
     }
 
     [Fact]
+    public async Task BindsThisReplicasQueueToTheFanoutExchangeAndItsDeadQueueToTheDeadLetterExchange()
+    {
+        // The single most load-bearing line in this file, and the one nothing asserted. A bind that is
+        // missing, or that names the wrong exchange, produces the failure OrchestratorFanout's own
+        // remarks are written about: the queue exists, the consumer consumes it happily, every probe
+        // stays green, and the replica receives nothing, forever. Neither the broker nor any other
+        // test in this suite can report that, because nothing about the code's structure fails on its
+        // own when a bind is absent.
+        var channel = Substitute.For<IChannel>();
+        var queue = OrchestratorFanout.PerReplica("orchestrator-0");
+        var dead = OrchestratorFanout.Dead("orchestrator-0");
+
+        channel.ExchangeDeclareAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        channel.QueueDeclareAsync(
+                Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new QueueDeclareOk("q", 0, 0)));
+
+        await new OrchestratorTopology(new InstanceId("orchestrator-0"))
+            .DeclareAsync(channel, CancellationToken.None);
+
+        // The real arity (RabbitMQ.Client 7.1.2): queue, exchange, routingKey, arguments, noWait, ct.
+        // An empty routing key because a fanout exchange ignores routing keys entirely — asserted
+        // rather than left to Arg.Any, since a non-empty one here would read as though it meant
+        // something.
+        await channel.Received(1).QueueBindAsync(
+            queue, OrchestratorFanout.Exchange, string.Empty,
+            Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+
+        // The dead queue binds to the DIRECT dead-letter exchange under its own name, which is the
+        // routing key the queue above parks with. The two have to agree or a parked announcement is
+        // discarded with nothing logged.
+        await channel.Received(1).QueueBindAsync(
+            dead, OrchestratorFanout.DeadLetterExchange, dead,
+            Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task TheQueueArgumentsCarryTheQuorumTypeAndDeadLetterRouting()
     {
         // The ordering test above only proves the DLX exists before the queue is declared. It says
