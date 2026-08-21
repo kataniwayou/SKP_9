@@ -1,6 +1,7 @@
 using System.Text.Json;
 using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Processing;
+using Microsoft.Extensions.Logging;
 
 namespace Processor.Sample;
 
@@ -8,7 +9,7 @@ namespace Processor.Sample;
 /// The worked example: read the config, read the data, send one branch. Everything else — envelope
 /// ids, retries, the projection store, the result to the orchestrator — belongs to the framework.
 /// </summary>
-public sealed class SampleProcessor : BaseProcessor<SampleConfig>
+public sealed class SampleProcessor(ILogger<SampleProcessor> logger) : BaseProcessor<SampleConfig>
 {
     protected override async Task ProcessAsync(
         byte[] data, SampleConfig? config, Guid executionId, CancellationToken ct)
@@ -16,6 +17,19 @@ public sealed class SampleProcessor : BaseProcessor<SampleConfig>
         // Null when the step's payload was empty or whitespace — the author picks the default.
         var baseNumber = config?.Number ?? 0;
         var label      = config?.Label;
+
+        // An author's own record, and it needs nothing from the framework to be useful: MEL scope
+        // providers are shared across the logger factory, so the scope ProcessDispatchHandler opened
+        // around this call rides this line too. Correlation, workflow, step, processor, entry and
+        // execution ids all land on it without being named in the template — which is what makes an
+        // author's diagnostics part of the run's trace rather than a stream beside it. Injecting a
+        // plain ILogger<T> is the whole of the wiring; the base class deliberately hands out no
+        // logger of its own.
+        //
+        // CONFIG, not data. A step's payload is authored alongside the workflow and is safe to
+        // render; the `data` parameter is runtime content and stays out of every template in this
+        // system, here as much as in the framework.
+        logger.LogInformation("config gives label {Label} and number {Number}", label, baseNumber);
 
         // A source step arrives with no input, because its EntryId was the Guid.Empty sentinel and the
         // framework skipped the read. Anything missing or malformed here throws into the framework's
