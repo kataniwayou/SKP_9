@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 using Xunit;
 
 namespace BaseApi.Tests.Orchestrator;
@@ -25,8 +26,8 @@ namespace BaseApi.Tests.Orchestrator;
 public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHostWiringTests.BuiltHost>
 {
     /// <summary>
-    /// The one orchestrator host this test process ever builds. Every test below reads it, and it is
-    /// deliberately never disposed.
+    /// The one orchestrator host this test process ever builds. Every test below reads it, and neither
+    /// it nor its container is ever disposed.
     /// <para>
     /// <b>Development, so that both validations run.</b> .NET 8's <c>HostApplicationBuilder</c> derives
     /// both <c>ServiceProviderOptions.ValidateOnBuild</c> <i>and</i> <c>ValidateScopes</c> from
@@ -67,8 +68,17 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
     /// second one anyway — the container is immutable and every assertion below is about what is
     /// registered in it. Do not add a test that builds one.
     /// </para>
+    /// <para>
+    /// <b>The Redis multiplexer is the one thing that is disposed, and it is not a softening of that
+    /// rule.</b> <c>EveryLoopIsHosted</c> enumerates <c>IHostedService</c>, which constructs
+    /// <c>L2GateProbe</c>, which resolves an <see cref="IConnectionMultiplexer"/> — and that
+    /// constructor connects, so an undisposed one spends the rest of the run reconnecting to a Redis
+    /// this suite never intends to reach. Disposing that one object releases the socket without
+    /// touching the container, which is what the paragraphs above forbid: the container is what holds
+    /// the <c>ILoggerFactory</c> that Quartz's process-global <c>LogProvider</c> would capture.
+    /// </para>
     /// </summary>
-    public sealed class BuiltHost
+    public sealed class BuiltHost : IDisposable
     {
         public IHost Host { get; } = OrchestratorHost.Create(
             ["--environment", "Development"],
@@ -81,6 +91,13 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
                 ["RabbitMq:Username"]       = "guest",
                 ["RabbitMq:Password"]       = "guest",
             }));
+
+        /// <summary>
+        /// xUnit v3 disposes a class fixture once the last test in the class has run. Only the
+        /// multiplexer, and never <c>Host</c> or its container — see the remarks above for what
+        /// disposing either would do to an unrelated test file.
+        /// </summary>
+        public void Dispose() => Host.Services.GetRequiredService<IConnectionMultiplexer>().Dispose();
     }
 
     private readonly IHost _host;
