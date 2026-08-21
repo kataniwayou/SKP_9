@@ -13,6 +13,14 @@ namespace Orchestrator.Hydration;
 /// then overwrite whatever the announcement did.
 /// </para>
 /// <para>
+/// <b>It is also the replica's readiness answer.</b> <see cref="HydrationReadyHealthCheck"/> reads
+/// <see cref="IsOpen"/> and nothing else, so <c>/health/ready</c> is where "this replica has mirrored
+/// L2" is reported. <c>/health/startup</c> used to carry that claim and no longer does — it reports
+/// only that the hydration loop is running, because a startup budget is finite and the outages this
+/// latch waits through are not. A latch that is both the permission to consume and the thing an
+/// operator reads is deliberate: there is no second flag to fall out of step with it.
+/// </para>
+/// <para>
 /// <b>One-shot, in the shape of <c>StartupGate</c>.</b> Reads use <c>Volatile.Read</c> for cross-thread
 /// visibility and <see cref="Open"/> uses <c>Interlocked.Exchange</c> for atomicity; opening twice is a
 /// no-op. There is deliberately no way to close it: hydration happens once per process, and a latch

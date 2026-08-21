@@ -55,6 +55,14 @@ public static class OrchestratorHost
     public const string HydrationLoop = HydrationService.LoopName;
 
     /// <summary>
+    /// The name the readiness check over <see cref="Hydration.HydrationAdmission"/> is registered
+    /// under. Distinct from <see cref="HydrationLoop"/> because the two answer different questions
+    /// about the same loop — that one is whether it is still turning, this one whether it has
+    /// finished — and a probe body naming both is how an operator tells those apart.
+    /// </summary>
+    public const string HydrationReady = "orchestrator-hydrated";
+
+    /// <summary>
     /// The production entry point: builds the host, starts it, and returns it running.
     /// </summary>
     public static async Task<IHost> StartAsync(
@@ -186,7 +194,22 @@ public static class OrchestratorHost
                     "hydration",
                     sp.GetRequiredService<TimeProvider>()),
                 HealthStatus.Unhealthy,
-                ["live"]));
+                ["live"]))
+            // And whether that loop has *finished*, which is a different question and belongs on a
+            // different probe. The startup gate reports only that the loop is running — it has to, or
+            // an outage this design rides out would exhaust the pod's finite startup budget — so
+            // without this line "has this replica mirrored L2?" would have no probe at all.
+            //
+            // Tagged `ready` and nothing else. `live` would restart a replica for retrying exactly as
+            // designed; `startup` would put it back under the budget that made this change necessary.
+            // Readiness is the only probe that may sit red for the length of an outage and recover
+            // without a restart. Nothing routes traffic here, so all it gates is the pod's READY
+            // column, which is the intent: 0/1 means "still hydrating".
+            .Add(new HealthCheckRegistration(
+                HydrationReady,
+                sp => new HydrationReadyHealthCheck(sp.GetRequiredService<HydrationAdmission>()),
+                HealthStatus.Unhealthy,
+                ["ready"]));
 
         // What makes "the queue exists before hydration reads L2" true. Opening the shared connection
         // is what declares topology, and the only other thing here that opens it is the gated
