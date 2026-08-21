@@ -25,8 +25,11 @@ Also added since: a startup infrastructure preflight in BaseConsole.Core, and
 enforced AbortOnConnectFail=false in both the API and console Redis registrations.
 
 TEST GATE: dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
-Must be 0 failures, exactly 6 skips, exit 0, 0 build warnings.
-Currently: Failed 0, Passed 400, Skipped 6, Total 406.
+Must be 0 failures, exactly 7 skips, exit 0, 0 build warnings.
+Currently: Failed 0, Passed 400, Skipped 7, Total 407.
+The 7 skips are Live/, gated on SKP_REALSTACK. Run them with the Redis forward up:
+  kubectl -n skp port-forward svc/redis 6380:6379
+  SKP_REALSTACK=1 ./src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe     --filter-method "*TheMultiplexerReconnectsAndHydration*"
 
 REPO GOTCHAS THAT WILL BITE YOU:
 - --filter is SILENTLY IGNORED by this test runner. Run the whole project.
