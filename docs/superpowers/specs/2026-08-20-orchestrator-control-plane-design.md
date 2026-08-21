@@ -230,8 +230,11 @@ hold each other up.
 ### 6.1 `WorkflowL1Store`
 
 In-memory `ConcurrentDictionary<Guid, L1Entry>` where `L1Entry` is the `WorkflowL1` definition plus
-the `Guid JobId` of its currently-scheduled Quartz job. Try-get, set, remove, enumerate. Never
-persisted.
+the `Guid JobId` of its currently-scheduled Quartz job. Try-get, set, remove. Never persisted.
+
+Enumerate is **not** there: nothing in this build reads every entry, and a method with no caller
+reads as a live mechanism — the same argument §8.3 makes for not carrying the reference's last-fired
+timestamp. The result path can add one when it has a reader.
 
 The jobId coupling is not bookkeeping — it is what makes job supersession detectable. See §8.2.
 

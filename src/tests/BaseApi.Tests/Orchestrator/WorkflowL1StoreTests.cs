@@ -6,8 +6,8 @@ namespace BaseApi.Tests.Orchestrator;
 
 /// <summary>
 /// L1 is a dictionary, and the activation tests already drive <c>Set</c> and <c>TryGet</c> through the
-/// real path. These cover only the two operations that path does not reach — the stop handler's
-/// <c>Remove</c> and the fire path's <c>Snapshot</c> — so neither ships unexercised.
+/// real path. This covers the one operation that path does not reach — the stop handler's
+/// <c>Remove</c> — so nothing on this type ships unexercised.
 /// </summary>
 public sealed class WorkflowL1StoreTests
 {
@@ -25,19 +25,5 @@ public sealed class WorkflowL1StoreTests
         Assert.True(store.Remove(W));
         Assert.False(store.Remove(W));
         Assert.False(store.TryGet(W, out _));
-    }
-
-    [Fact]
-    public void SnapshotIsUnaffectedByLaterWrites()
-    {
-        // Callers iterate the snapshot while activations continue on other threads; it must not be a
-        // live view that can throw or change underfoot.
-        var store = new WorkflowL1Store();
-        store.Set(W, Definition(W), Guid.NewGuid());
-
-        var snapshot = store.Snapshot();
-        store.Set(Guid.NewGuid(), Definition(Guid.NewGuid()), Guid.NewGuid());
-
-        Assert.Equal(W, Assert.Single(snapshot).Definition.WorkflowId);
     }
 }
