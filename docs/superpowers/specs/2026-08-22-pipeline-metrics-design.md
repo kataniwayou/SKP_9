@@ -260,9 +260,19 @@ processor holds one. A single static `ObservableGauge` with one callback cannot
 see them all, and creating one per instance on the shared meter is correct only
 because these are singletons.
 
-So: each `GatedQueueConsumer` registers its own `pipeline.consumer.consuming`
-gauge in its constructor, with its own `queue` attribute baked into the
-measurement. `L2GateMetrics` (§6) does the same for the single `L2Gate`.
+**One instrument, N measurements — not N instruments.** Creating
+`pipeline.consumer.consuming` once per consumer would put three instruments with
+one name on one meter, and the OpenTelemetry SDK resolves those to a single
+metric stream and warns about (or drops) the duplicates. An observable callback
+is allowed to return many measurements, so the correct shape is a single gauge
+registered once, whose callback yields one `Measurement<int>` per consumer,
+tagged with that consumer's `queue`. Each `GatedQueueConsumer` registers a
+`Func<bool>` for its own queue with `IngressMetrics` on construction and removes
+it in `StopAsync`.
+
+Owners that are genuinely single per process — `L2GateMetrics` (§6) and the two
+role observers — have no such hazard and create their observables directly in
+their own constructors.
 
 An observable's callback only runs while something holds the registration alive,
 and a DI singleton is never constructed until it is resolved. Every observable
