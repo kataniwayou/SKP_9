@@ -61,6 +61,13 @@ internal static class OrchestrationServiceCollectionExtensions
         services.AddScoped<L2Cleanup>();
         services.AddScoped<L2ProjectionWriter>();
 
+        // The instance-index sweep. Singleton rather than scoped, because its only consumer is a
+        // hosted service that outlives any request scope; both it and the store are stateless over
+        // the multiplexer, which is itself a singleton, so nothing is captured that should not be.
+        services.AddSingleton<IL2InstanceIndexStore, RedisL2InstanceIndexStore>();
+        services.AddSingleton<L2OrphanSweeper>();
+        services.AddHostedService<L2OrphanSweepService>();
+
         // Registered here so it lands after the core not-found, validation and database handlers
         // and before the split-out catch-all, which the composition root registers last — after
         // this method has run. Reachable, and emits a 422.
