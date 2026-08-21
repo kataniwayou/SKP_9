@@ -89,6 +89,12 @@ public static class OrchestratorHost
         builder.Services.AddBaseConsoleRedis(builder.Configuration);
         builder.Services.AddBaseConsoleHealth(builder.Configuration);
 
+        // The startup preflight: an operator-facing log of whether the connections just registered
+        // above actually work. Registered ahead of every other hosted service below — HydrationService
+        // among them — so its output leads the console. It gates nothing and recovers nothing; see
+        // ConsolePreflightServiceCollectionExtensions.
+        builder.Services.AddBaseConsolePreflight(builder.Configuration);
+
         builder.Services.AddSingleton<IRabbitMqTopology>(_ => new OrchestratorTopology(instanceId));
 
         // Scheduling. Quartz's defaults are what this needs and all of it: the in-memory job store,
