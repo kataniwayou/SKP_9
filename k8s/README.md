@@ -125,15 +125,44 @@ unhealthy are different answers, and the orchestration gate counts them separate
 
 ## Probes, and why they differ
 
-| Probe | Answers | Fails when |
-|---|---|---|
-| `/health/startup` | the loops are running | never, in practice — it flips on the liveness loop's first beat |
-| `/health/ready` | identity and schemas resolved | no matching processor row, or the API is unreachable |
-| `/health/live` | the loops are still turning | a loop has wedged or died |
+All three workloads expose the same three paths — on 8080 for the API, 8081 for the two console
+services — and the paths do not mean the same thing in each. Readiness in particular answers a
+different question in all three, so the column that matters is the one for the workload in front of
+you.
 
-Liveness deliberately consults nothing external. A broker or Redis outage must not restart these
-pods: the startup loop is built to retry against it indefinitely, and a restart only discards the
-backoff progress and starts the wait again.
+| Probe | API | Processor | Orchestrator |
+|---|---|---|---|
+| `/health/startup` | migrations applied | the loops are running | the loops are running |
+| `/health/ready` | startup latched and Postgres reachable | identity resolved | this replica has hydrated |
+| `/health/live` | the probe loop is turning | both loops are turning | both loops are turning |
+
+**Startup is a one-way latch everywhere**: once green it never goes back. The API's covers schema
+migration, which is why its budget is the generous one. On both console services it flips on a
+loop's first beat — the liveness loop on the processor, the hydration loop on the orchestrator —
+deliberately ahead of any dependency work, so a dependency outage can never fail it and can never
+turn a slow broker into a `CrashLoopBackOff`.
+
+**Readiness is the only probe allowed to sit red for the length of an outage and recover without a
+restart**, which is why each workload puts its "no restart will help" condition here — and why the
+three conditions have nothing in common:
+
+- The API fails readiness on its startup check and on Postgres. Redis and the broker appear on the
+  readiness body but are capped at `Degraded`: they are hard dependencies for the control paths and
+  no dependency at all for CRUD, so they are reported without being able to pull the pod out of the
+  Service.
+- The processor reports identity resolution, and stays red until a processor row matching the
+  image's `SourceHash` exists — the registration section above is the whole story. `0/1 READY`
+  there is the system working, not a fault.
+- The orchestrator reports that this replica has finished rebuilding its L1 mirror from L2. No
+  Service routes traffic to these pods, so a readiness failure pulls nothing; all it gates is the
+  `READY` column, where `0/1` means "still hydrating". It is load-bearing together with
+  `podManagementPolicy: Parallel`: under the default `OrderedReady` a readiness-gated pod would
+  block the next replica's creation, and a slow Redis would become a whole-service non-deploy.
+
+**Liveness deliberately consults nothing external, on any of the three.** That is a rule rather than
+an accident — every `live`-tagged check is either `self` or a loop heartbeat. A broker or Redis
+outage must not restart these pods: the startup loops are built to retry against it indefinitely,
+and a restart only discards the backoff progress and starts the wait again.
 
 ## Teardown
 
