@@ -90,16 +90,34 @@ OrchestrationService.StartAsync
 Startup on each replica, before any of the above is consumed:
 
 ```
+hydration loop beats
+        ▼
+IStartupGate.MarkReady()  →  /health/startup healthy
+                             (the loop is running; says nothing about L2 being reachable,
+                              and is re-asserted on every retry because it is idempotent)
+        ▼
 hydration loop opens the connection   (topology declared: queue exists, fanout messages buffer here)
         ▼
 hydration loop: SMEMBERS skp: → read each root → L1 → schedule
         ▼
-IStartupGate.MarkReady()  →  /health/startup healthy
+        │  a fault at either of the two steps above: log, back off, beat, retry from the top.
+        │  /health/startup stays green throughout; /health/ready stays red.
         ▼
 IConsumerAdmission opens  →  fanout consumption begins, draining the backlog
                              (and only while loop 1's L2 gate is open: the two are
                               independent conditions on the same decision, not a sequence)
+        ▼
+/health/ready healthy     →  this replica has mirrored L2 and is consuming
 ```
+
+**The startup gate is ahead of both dependencies, and that placement is the design.** A gate marked
+after a complete pass reports "hydrated", which is a stronger and more useful claim — but the startup
+probe has a finite budget (`failureThreshold × periodSeconds`) and the outage this loop is built to
+retry through does not. Past that budget the kubelet kills the pod, and under `podManagementPolicy:
+Parallel` it kills all three replicas together, turning the survivable outage of §6.4 into a
+whole-service crash loop. So readiness claims what `ProcessorLivenessHeartbeat.cs:95` claims on its
+first beat — the loop is running — and the "hydrated" claim moves to `/health/ready`, the one probe
+that may fail for the length of an outage and recover without a restart.
 
 ---
 
@@ -251,12 +269,25 @@ every workflow root is added to by `L2ProjectionWriter.cs:71`), then each `Root(
 steps, mirrors into L1, and calls the shared activation path (§7.1) per workflow.
 
 Retries forever on a broker or L2 fault with the same backoff-to-cap shape as
-`ProcessorStartupOrchestrator`, beating its heartbeat each iteration. On success it calls `IStartupGate.MarkReady()` and **retires**
-its heartbeat, so its liveness check stops expecting ticks — the console `ILoopHeartbeat` already
-carries `IsRetired`/`Retire` for this.
+`ProcessorStartupOrchestrator`, beating its heartbeat each iteration.
 
-Its own `LoopLivenessHealthCheck`, named `hydration`, tagged `live`, budgeted `BackoffCap ×
-StaleFactor`.
+`IStartupGate.MarkReady()` is called **beside that beat, at the top of every attempt** — not on
+success. It reports that the loop is running, exactly as `ProcessorLivenessHeartbeat.cs:95` does on
+its own first beat; see §3 for why tying it to success made a dependency outage fatal. It is
+idempotent, so re-asserting it per attempt costs a no-op rather than a first-attempt flag.
+
+On success — and only then — it opens `IConsumerAdmission` and **retires** its heartbeat, so its
+liveness check stops expecting ticks; the console `ILoopHeartbeat` already carries
+`IsRetired`/`Retire` for this.
+
+Two health checks over this loop, answering the two different questions about it:
+
+- `hydration`, a `LoopLivenessHealthCheck`, tagged `live`, budgeted `BackoffCap × StaleFactor` — is
+  the loop still ticking?
+- `orchestrator-hydrated`, a `HydrationReadyHealthCheck` over `HydrationAdmission.IsOpen`, tagged
+  `ready` — has it finished? Red for the whole of any outage, which is the correct answer and costs
+  nothing: no `Service` routes traffic to these pods, so this gates only the pod's `READY` column,
+  where `0/1` now means "still hydrating".
 
 ### 6.4 The watchdog, and what it is not for
 
@@ -285,6 +316,11 @@ The three gates stay distinct on purpose: `L2Gate` is dynamic and reopens; `ISta
 health; `IConsumerAdmission` is one-shot admission to consume. Reusing `IStartupGate` for admission
 would change processor timing immediately, because `ProcessorLivenessHeartbeat.cs:95` already marks it
 ready.
+
+That distinction is what lets the orchestrator's startup gate move onto the loop's first beat (§6.3)
+without the admission latch following it. The replica reports itself startable within seconds and
+still refuses to consume its fanout queue until L1 mirrors L2 — one condition would not have been
+able to carry both.
 
 ---
 
@@ -436,8 +472,17 @@ applicable `StepId` and `ProcessorId`, rendered `"D"`. A fire's records carry `C
 `"N"` under `CorrelationKeys.LogScope`, matching `ExecutionLogScope`'s split — `CorrelationId` keeps
 its own key and renderer because it crosses the HTTP boundary.
 
-Health endpoints come from `BaseConsole.Core`: `/health/startup` (hydration complete), plus `live`-tagged
-checks `l2-gate` and `hydration`.
+Health endpoints come from `BaseConsole.Core`, and the three answer three different questions:
+
+| Probe | Answers | Backed by | Red when |
+|---|---|---|---|
+| `/health/startup` | is the hydration loop running? | `startup` check over `IStartupGate` | the process cannot get as far as its first beat |
+| `/health/ready` | has this replica mirrored L2 and begun consuming? | `orchestrator-hydrated` over `HydrationAdmission.IsOpen` | any broker or L2 outage, for as long as it lasts |
+| `/health/live` | are the loops still turning? | `self`, `l2-gate`, `hydration` | a loop has wedged or died |
+
+Startup deliberately no longer means "hydration complete" — that budget was finite and the outage it
+was covering is not; see §3. No `live`-tagged check touches a dependency, so an outage restarts
+nothing.
 
 ---
 
