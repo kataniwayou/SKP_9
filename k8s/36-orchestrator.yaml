@@ -110,6 +110,27 @@ spec:
   # direction — up is safe, down leaks a queue that fills forever.
   replicas: 3
   serviceName: orchestrator
+  # Parallel, not the OrderedReady default, and this one is load-bearing. There is no readiness
+  # probe here, so a pod becomes Ready only once its STARTUP probe passes — that is, once it has
+  # hydrated. Under OrderedReady the kubelet would not create orchestrator-1 until orchestrator-0
+  # was Ready, so a Redis that is slow or down at deploy time would not leave three replicas
+  # patiently retrying, which is what the five-minute startup budget below is written for; it would
+  # leave one replica retrying and two that do not exist. The dependency outage the design prices as
+  # "not a crash" would become a whole-service non-deploy.
+  #
+  # Nothing here needs the ordering OrderedReady buys. These replicas share no state, each owns its
+  # own durable fan-out queue named after its own ordinal, and which one dispatches is decided by a
+  # Lease rather than by who started first.
+  #
+  # This field cannot be changed in place: Kubernetes rejects an update to it on an existing
+  # StatefulSet. Applying this over a deployment created without it means deleting the StatefulSet
+  # with --cascade=orphan and re-applying, which leaves the running pods alone.
+  #
+  # updateStrategy is deliberately left unset. Its default, RollingUpdate, is what this wants, and
+  # its behaviour under the same outage is the safe one: a rollout that cannot bring a new pod to
+  # Ready stalls with the previous pods still running, rather than emptying the set. podManagementPolicy
+  # is stated because its default is the harmful one; there is nothing to correct here.
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: orchestrator
