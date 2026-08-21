@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Validation;
@@ -103,6 +104,11 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
                 + "validated — the work queue must not be bound before the processor reaches Healthy.");
         }
 
+        // Debug: the read below is implied by everything downstream succeeding, and a failure
+        // propagates and is logged by the consumer's classifier. What this buys is the shape of a
+        // hop when someone is already looking — which key, and whether it was there.
+        _logger.LogDebug("reading the input from L2");
+
         var isSource = d.EntryId == Guid.Empty;
 
         byte[] data;
@@ -192,6 +198,15 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         _processor.BeginDispatch(new DispatchState(
             _sender, d.CorrelationId, d.WorkflowId, d.StepId, d.ProcessorId));
 
+        // INFORMATION, unlike the enter lines on every other handler, and the asymmetry is the point:
+        // what runs next is the author's own code, which this framework knows nothing about and cannot
+        // bound. Every other hop here is framework-only and finishes in milliseconds or throws. Without
+        // this line a step wedged inside a transform is invisible — the dispatch is sent, nothing comes
+        // back, and there is no record anywhere distinguishing that from a dispatch nobody consumed.
+        // It is the one place where the ABSENCE of the matching completion below is the whole signal.
+        _logger.LogInformation("running the step");
+        var started = Stopwatch.GetTimestamp();
+
         // Set only on the normal path. Every catch below leaves it false, which is what keeps a failed
         // or cancelled step's input intact for the orchestrator to deal with.
         var ran = false;
@@ -269,10 +284,19 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // ran; only the delete is skipped.
         if (ran && d.EntryId != Guid.Empty)
         {
+            _logger.LogDebug("reclaiming the input from L2");
+
             await _redis.GetDatabase()
                 .KeyDeleteAsync(L2ProjectionKeys.ExecutionData(d.EntryId))
                 .ConfigureAwait(false);
         }
+
+        // The pre hop had no completion record at all: on the happy path it deleted a key and returned
+        // in silence, so the only evidence a step finished was the branch its author sent from the OTHER
+        // hop. This closes the pair opened by "running the step" — and the duration is the author's own,
+        // measured across their transform and nothing else, which is the number worth having.
+        _logger.LogInformation(
+            "the step returned after {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
     }
 
     /// <summary>

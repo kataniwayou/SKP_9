@@ -259,6 +259,14 @@ public sealed class GatedQueueConsumer : BackgroundService
         var body = ea.Body.ToArray();
         var type = ea.BasicProperties.Type;
 
+        // Debug, and it stays Debug however useful it looks. This runs ABOVE the deserialization
+        // boundary, so the ids that make a record joinable — correlation, workflow, step — are still
+        // bytes here and cannot be put on it. A per-delivery Information record that carries only a
+        // queue name would double the log volume of every run while answering none of the questions
+        // the ids answer. The handlers log their own entry one layer down, inside the scope where
+        // those ids exist, and that is the record worth shipping.
+        _logger.LogDebug("received a {Type} delivery on {Queue}", type, _options.Queue);
+
         try
         {
             if (string.IsNullOrWhiteSpace(type))

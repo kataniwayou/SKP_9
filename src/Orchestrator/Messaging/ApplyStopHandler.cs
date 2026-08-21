@@ -74,6 +74,19 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
             {
                 await _scheduler.UnscheduleAsync(entry.JobId, ct).ConfigureAwait(false);
                 _store.Remove(m.WorkflowId);
+
+                // The counterpart to the activator's own line, and the only record that this replica
+                // stopped dispatching a workflow. Without it a stop is visible on the API side and
+                // nowhere else: the fires simply cease, which is indistinguishable from a replica
+                // that never got the announcement at all.
+                _logger.LogInformation("removed the workflow from L1 and unscheduled its job");
+            }
+            else
+            {
+                // Not a fault, and worth a record precisely because it is not. A redelivered stop, or
+                // one for a workflow this replica never activated, lands here — and reading that as a
+                // missing announcement is the mistake this line exists to prevent.
+                _logger.LogInformation("stop applied; this replica was not holding the workflow");
             }
         }
     }
