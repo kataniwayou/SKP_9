@@ -48,11 +48,4 @@ public sealed class WorkflowL1Store
     /// the stop path idempotent — a second delivery finds nothing and can say so without guessing.
     /// </summary>
     public bool Remove(Guid workflowId) => _entries.TryRemove(workflowId, out _);
-
-    /// <summary>
-    /// Every entry, as a copy. A copy rather than a live view because callers iterate it while
-    /// activations continue on other threads, and an iteration that can change underfoot is a
-    /// different contract than the one callers want here.
-    /// </summary>
-    public IReadOnlyCollection<L1Entry> Snapshot() => _entries.Values.ToArray();
 }
