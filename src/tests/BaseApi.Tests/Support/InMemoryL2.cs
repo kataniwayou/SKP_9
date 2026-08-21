@@ -96,12 +96,24 @@ internal sealed class InMemoryL2
     /// </summary>
     private void Wire(IDatabaseAsync target)
     {
-        target.StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>())
-            .Returns(ci =>
-            {
-                _strings[ci.ArgAt<RedisKey>(0).ToString()] = ci.ArgAt<RedisValue>(1).ToString();
-                return true;
-            });
+        // BOTH string-set overloads, because they are two different methods rather than one with
+        // defaults. StackExchange.Redis declares a (key, value, expiry, keepTtl, when, flags) overload
+        // and a (key, value, expiry, when, flags) one; a bare two-argument call binds to the first and
+        // an explicit five-argument call to the second. Wiring only one leaves the other answered with
+        // default(Task<bool>) — which stores nothing, throws nothing, and shows up much later as a key
+        // that is simply absent. Every handler that writes an execution blob names all five parameters
+        // precisely to pin its overload against the keepTtl one, so this side has to cover both.
+        Task<bool> Store(NSubstitute.Core.CallInfo ci)
+        {
+            _strings[ci.ArgAt<RedisKey>(0).ToString()] = ci.ArgAt<RedisValue>(1).ToString();
+            return Task.FromResult(true);
+        }
+
+        target.StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>()).Returns(Store);
+
+        target.StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
+                              Arg.Any<When>(), Arg.Any<CommandFlags>())
+            .Returns(Store);
 
         target.StringGetAsync(Arg.Any<RedisKey>())
             .Returns(ci => _strings.TryGetValue(ci.ArgAt<RedisKey>(0).ToString(), out var value)
