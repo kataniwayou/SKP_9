@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
@@ -77,6 +78,9 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
     private async Task RunAsync(StepOutcome m, CancellationToken ct)
     {
+        _logger.LogDebug("advancing the graph on a {Result} outcome", m.Result);
+        var started = Stopwatch.GetTimestamp();
+
         // L1 is a per-replica mirror of L2 and this queue is shared, so a miss here has two readings:
         // the workflow was stopped while this step was still running, or this replica has not yet
         // drained the start announcement for it. Parking treats both as faults to look at rather than
@@ -142,12 +146,20 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             _logger.LogInformation(
                 "no successor accepts {Result} — the branch ends here", m.Result);
         }
+        else
+        {
+            _logger.LogInformation(
+                "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+                selection.Matches.Count, (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        }
 
         // Unconditional, and last. See the type remarks: every path reaching here has acked the
         // outcome as final, and a store fault must propagate so the classifier trips the gate and
         // requeues rather than acknowledging a hand-off whose source was never reclaimed.
         if (m.EntryId != Guid.Empty)
         {
+            _logger.LogDebug("reclaiming the source blob from L2");
+
             await _redis.GetDatabase()
                 .KeyDeleteAsync(L2ProjectionKeys.ExecutionData(m.EntryId))
                 .ConfigureAwait(false);
@@ -174,6 +186,8 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     /// </summary>
     private async Task<byte[]> ReadAsync(Guid entryId)
     {
+        _logger.LogDebug("reading the finished step's blob from L2");
+
         // A store fault propagates: the consumer classifies it, closes the gate and returns the
         // delivery. Catching it here would acknowledge an outcome that was never acted on.
         var raw = await _redis.GetDatabase()

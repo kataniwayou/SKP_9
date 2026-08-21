@@ -62,7 +62,12 @@ public sealed class WorkflowActivator(
             await scheduler.ScheduleAsync(workflowId, jobId, cron, ct).ConfigureAwait(false);
         }
 
-        logger.LogDebug(
+        // Information, not Debug. This is the only record that a replica took a start announcement
+        // and acted on it, and it fires once per start rather than once per anything hot. At Debug it
+        // sat below the level shipped to the log store, which made "the announcement never arrived"
+        // and "it arrived and applied" look identical from outside the process — the two cases a
+        // control-plane record exists to separate.
+        logger.LogInformation(
             "activated workflow {WorkflowId} with {StepCount} steps, scheduled={Scheduled}",
             workflowId, definition.Steps.Count, definition.Cron is not null);
     }

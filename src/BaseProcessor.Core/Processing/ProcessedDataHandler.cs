@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Validation;
@@ -70,6 +71,9 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
 
     private async Task RunAsync(ProcessedData p, CancellationToken ct)
     {
+        _logger.LogDebug("validating and persisting a branch");
+        var started = Stopwatch.GetTimestamp();
+
         // Same as the pre handler: ProcessorId is passed through with WorkflowId and StepId, a
         // routing and tracing id rather than a claim to verify. The value arriving here was stamped by
         // this processor one hop ago off the dispatch that named it, and the branch was sent to this
@@ -123,6 +127,8 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
         //
         // The expiry is null on purpose. This blob is the successor's input, and an expiry would
         // delete a live workflow's input mid-hand-off.
+        _logger.LogDebug("writing the branch output to L2");
+
         await db.StringSetAsync(
                 L2ProjectionKeys.ExecutionData(p.EntryId),
                 p.Data,
@@ -140,7 +146,8 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
 
         // Every id rides the open scope, so the template carries none of them — and never the data,
         // since this line is about the delivery rather than its content.
-        _logger.LogInformation("branch completed");
+        _logger.LogInformation(
+            "branch completed in {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
     }
 
     private Task SendAsync(StepOutcome outcome, CancellationToken ct)

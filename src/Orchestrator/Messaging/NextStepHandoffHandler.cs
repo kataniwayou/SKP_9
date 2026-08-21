@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using BaseConsole.Core.Gating;
 using Messaging.Contracts;
@@ -69,6 +70,9 @@ internal sealed class NextStepHandoffHandler : IQueueMessageHandler
 
     private async Task RunAsync(NextStepHandoff h, CancellationToken ct)
     {
+        _logger.LogDebug("starting the next step");
+        var started = Stopwatch.GetTimestamp();
+
         // Tracks whether the key exists yet, so the fallback can tell the pre hop which blob to
         // reclaim. Set immediately after the write rather than derived from h.EntryId, because a
         // failure between the two would otherwise send the orchestrator after a key nobody wrote.
@@ -78,6 +82,8 @@ internal sealed class NextStepHandoffHandler : IQueueMessageHandler
         {
             if (h.EntryId != Guid.Empty)
             {
+                _logger.LogDebug("writing the successor's input to L2");
+
                 // When/flags named explicitly: StackExchange.Redis overloads a bare
                 // (key, value, expiry) call between a keepTtl-bool overload and an Expiration-struct
                 // one, and the compiler picks the former — a different method than the call site
@@ -102,7 +108,8 @@ internal sealed class NextStepHandoffHandler : IQueueMessageHandler
                     ProcessorQueues.Work(h.ProcessorId), MessageTypes.ProcessDispatch, dispatch, ct)
                 .ConfigureAwait(false);
 
-            _logger.LogInformation("dispatched");
+            _logger.LogInformation(
+            "dispatched in {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
         catch (Exception ex) when (!IsRecoverable(ex))
         {
