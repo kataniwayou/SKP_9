@@ -97,6 +97,10 @@ public static class ConsoleRedisServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<L2Gate>();
 
+        // Hosted purely so the container constructs it: it owns an observable gauge, and an
+        // observable nothing resolved is an instrument that never publishes, silently.
+        services.AddHostedService<L2GateMetrics>();
+
         // The probe takes an ILoopHeartbeat, and on the console side every heartbeat is registered
         // KEYED — one holder per loop, because a holder shared between two loops lets the faster
         // loop's beat refresh the stamp for both and a dead loop stays invisible. There is no unkeyed
