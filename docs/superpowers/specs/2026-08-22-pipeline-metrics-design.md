@@ -27,9 +27,11 @@ about *delivery semantics* — a message arrived that had already been handled.
 
 ## 2. The consistency mechanism
 
-Orchestrator and processor cannot drift apart, because every pipeline event on
-both sides already flows through code they share. Instrumentation goes in the
-shared classes; neither role gets bespoke counters.
+Orchestrator and processor cannot drift apart, because every event on the four
+in-scope message types, on both sides, already flows through code they share.
+Instrumentation goes in the shared classes; neither role gets bespoke counters.
+`GatedQueueConsumer` covers every event on those four types — it is not the
+only consumer in its assembly; see §10 for the one that is not covered.
 
 | Event | Class | Assembly | Used by |
 | --- | --- | --- | --- |
@@ -422,6 +424,13 @@ onto metrics) must not be disturbed.
   because it lives in the shared assembly, but its only callers are the two API
   handlers, whose host does not register the `Messaging.Transport` meter. The
   instrument will exist and emit nothing until the API side is wired.
+- **`BaseConsole.Core/Messaging/ReplyQueueConsumer.cs`** — a second consumer in
+  the shared assembly, reading each processor's own `proc-reply-{instanceId}`
+  queue. It carries only that processor's startup-query replies, none of the
+  four in-scope message types, so no §7 conservation query is affected by
+  leaving it dark. Instrumenting a second consumer class is real scope this
+  design never budgeted. The cost: a processor wedged on malformed replies is
+  diagnosed from its logs rather than from `min(pipeline_consumer_consuming)`.
 - Traces. There is no traces pipeline in either worker — the collector receives
   none and the SDK emits none — and this design does not add one.
 

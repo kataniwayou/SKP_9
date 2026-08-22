@@ -43,7 +43,7 @@ internal static class IngressMetrics
     private static readonly Counter<long> ChannelResets = Meter.CreateCounter<long>(
         "pipeline.consumer.channel.resets",
         unit: "1",
-        description: "Times the delivery numbering was invalidated, by cause. The reason landed=false happens.");
+        description: "Times the delivery numbering was invalidated, by cause. This is why landed=false happens.");
 
     /// <summary>
     /// Every live consumer's subscription state, keyed by the queue it reads.

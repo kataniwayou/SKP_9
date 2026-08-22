@@ -2371,7 +2371,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Known gaps, stated rather than hidden:**
 
-- **`landed=true` is never asserted.** It needs a real channel and a valid delivery tag. Spec §11 says so; no task claims otherwise. It is exercised by any RealStack run and by production.
+- **The ack-landed path is never exercised hermetically.** It needs a real channel and a valid delivery tag. Spec §11 says so; no task claims otherwise. It is exercised by any RealStack run and by production.
 - **Task 2 has no test of its own.** Both send primitives need a live broker — `Messaging.Transport.csproj`'s own comment says only `BuildProperties` is unit-testable. Task 1 tests the measurement; Task 2 is the wrap, and the full suite proves nothing else moved.
 - **Task 6, Step 1 does not pin the assertion.** How OpenTelemetry 1.15.3 exposes configured meter names from a built host is not established, so the step gives the preferred assertion, a command to find the real type, and a strictly stronger behavioural fallback. This is the one place the plan defers a decision, and it defers it with both branches spelled out rather than leaving it open.
 - **The consumer registry is process-wide static state**, so tests that assert on the set of tracked queues can see consumers another test class constructed. Tasks 4 and 7 both name this and say to find the leak rather than loosen the assertion.

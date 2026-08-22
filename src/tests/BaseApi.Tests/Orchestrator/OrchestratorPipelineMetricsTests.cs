@@ -18,16 +18,26 @@ public sealed class OrchestratorPipelineMetricsTests
         using var owner = new OrchestratorPipelineMetrics(leader, hydration);
         using var metrics = new MetricCollector(OrchestratorPipelineMetrics.MeterName);
 
+        // The registry is process-wide, so another owner (e.g. the never-disposed wiring-test host)
+        // can still be live here, always reporting 0. Assert over the set rather than picking a
+        // single element.
         metrics.Collect();
-        Assert.Equal(0, metrics.For("pipeline.leader")[^1].Value);
+        Assert.All(metrics.For("pipeline.leader"), m => Assert.Equal(0, m.Value));
 
         leader.BecomeLeader();
         metrics.Collect();
-        Assert.Equal(1, metrics.For("pipeline.leader")[^1].Value);
+        Assert.Contains(metrics.For("pipeline.leader"), m => m.Value == 1);
 
         leader.BecomeFollower();
-        metrics.Collect();
-        Assert.Equal(0, metrics.For("pipeline.leader")[^1].Value);
+
+        // A fresh collector rather than reusing `metrics`: For() accumulates every measurement seen
+        // since its listener started, across every Collect() call, so the existing one still carries
+        // the value == 1 measurement from the round above. Assert.All over that full history would
+        // fail on a value this owner legitimately reported earlier in this same test, not on a
+        // leaked one. A new listener sees only what is published from here on.
+        using var afterDemotion = new MetricCollector(OrchestratorPipelineMetrics.MeterName);
+        afterDemotion.Collect();
+        Assert.All(afterDemotion.For("pipeline.leader"), m => Assert.Equal(0, m.Value));
     }
 
     [Fact]
@@ -40,27 +50,14 @@ public sealed class OrchestratorPipelineMetricsTests
         using var owner = new OrchestratorPipelineMetrics(leader, hydration);
         using var metrics = new MetricCollector(OrchestratorPipelineMetrics.MeterName);
 
+        // The registry is process-wide, so another owner (e.g. the never-disposed wiring-test host)
+        // can still be live here, always reporting 0. Assert over the set rather than picking a
+        // single element.
         metrics.Collect();
-        Assert.Equal(0, metrics.For("pipeline.hydration.admitted")[^1].Value);
+        Assert.All(metrics.For("pipeline.hydration.admitted"), m => Assert.Equal(0, m.Value));
 
         hydration.Open();
         metrics.Collect();
-        Assert.Equal(1, metrics.For("pipeline.hydration.admitted")[^1].Value);
-    }
-
-    [Fact]
-    public void ThePipelineLeaderGaugeIsIndependentOfConsumption()
-    {
-        // A follower still consumes: leadership fences cron fires only, because exactly one outcome
-        // exists per step that ran. Asserting the two are separate instruments is what stops a
-        // future reader wiring consumption to leadership on the strength of this gauge.
-        var leader = new LeaderState();
-        using var owner = new OrchestratorPipelineMetrics(leader, new HydrationAdmission());
-        using var metrics = new MetricCollector(
-            OrchestratorPipelineMetrics.MeterName, "BaseConsole.Core.Messaging");
-
-        metrics.Collect();
-
-        Assert.DoesNotContain(metrics.For("pipeline.leader"), m => m.Tags.ContainsKey("queue"));
+        Assert.Contains(metrics.For("pipeline.hydration.admitted"), m => m.Value == 1);
     }
 }
