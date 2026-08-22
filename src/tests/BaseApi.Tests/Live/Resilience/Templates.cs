@@ -97,4 +97,23 @@ internal static class Templates
     [
         StoreUnreachable, RefusingAndParking, SendFailedReturning,
     ];
+
+    // ---- worker lifecycle edges, for S6 and S7 ----
+
+    /// <summary>
+    /// Emitted by Microsoft.Hosting.Lifetime, so EVERY service in the deployment writes it. Matching
+    /// it without also filtering on the service name witnesses the wrong process, which is why
+    /// ReadTemplateRecordsAsync takes a service filter.
+    /// </summary>
+    public const string HostShuttingDown = "Application is shutting down...";
+
+    /// <summary>Processor-unique: its startup loops stand down once it is serving.</summary>
+    public const string ProcessorLoopsRetired = "processor healthy; startup loops retired";
+
+    /// <summary>Orchestrator-unique: Quartz runs nowhere else in this deployment.</summary>
+    public const string SchedulerShuttingDown = "Scheduler {0} shutting down.";
+
+    /// <summary>Orchestrator-unique: the hydration record no other role writes.</summary>
+    public const string OrchestratorHydrated =
+        "hydrated {WorkflowCount} workflows from L2; admitting the consumer";
 }

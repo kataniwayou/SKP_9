@@ -35,4 +35,14 @@ internal static class Chaos
 
     public static Guid WorkflowId =>
         Guid.Parse(RealStack.Get("SKP_WORKFLOW_ID", "4cd8af45-1295-43db-ab2e-e955dd82b5c5"));
+
+    /// <summary>
+    /// The processor's OpenTelemetry <c>service.name</c>, which the witness filters on for S6.
+    /// <para>
+    /// Configuration rather than a constant: this value comes from the processor's own database row,
+    /// so a rebuilt processor changes it. A hardcoded name would match nothing, and the scenario
+    /// would fail as inconclusive rather than telling anyone why.
+    /// </para>
+    /// </summary>
+    public static string ProcessorService => RealStack.Get("SKP_PROCESSOR_SERVICE", "sample-proc-v9");
 }

@@ -54,20 +54,51 @@ internal sealed class ElasticLogReader
             ct);
 
     /// <summary>
-    /// Records matching any of a set of templates, unfiltered by workflow.
+    /// Records matching any of a set of templates, unfiltered by workflow, and optionally scoped to
+    /// one service.
     /// <para>
     /// The gate and channel records carry no WorkflowId — they are statements about a process, not
-    /// about a run — so the fault witness cannot reuse the query above.
+    /// about a run — so the fault witness cannot reuse the run query.
+    /// </para>
+    /// <para>
+    /// <b>The service filter exists for one specific hazard.</b> A worker's shutdown edge is
+    /// <c>Application is shutting down...</c>, a Microsoft.Hosting.Lifetime template every service in
+    /// the deployment emits. Witnessing a processor outage on that template alone would match the
+    /// API or the orchestrator restarting for unrelated reasons and report a fault that never
+    /// happened to the process under test.
     /// </para>
     /// </summary>
     public Task<IReadOnlyList<LogRecord>> ReadTemplateRecordsAsync(
         IReadOnlyCollection<string> templates, DateTimeOffset from, DateTimeOffset to, CancellationToken ct) =>
-        SearchAsync(
-            [
-                Range(from, to),
-                Terms(templates),
-            ],
-            ct);
+        ReadTemplateRecordsAsync(templates, from, to, service: null, ct);
+
+    /// <summary>
+    /// Records matching any of a set of templates, unfiltered by workflow, and scoped to the given
+    /// service. See the four-argument overload for why the service filter exists.
+    /// </summary>
+    /// <param name="service">
+    /// The <c>service.name</c> to scope to, or null for every service.
+    /// </param>
+    public Task<IReadOnlyList<LogRecord>> ReadTemplateRecordsAsync(
+        IReadOnlyCollection<string> templates,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        string? service,
+        CancellationToken ct)
+    {
+        var filters = new List<Dictionary<string, object>>
+        {
+            Range(from, to),
+            Terms(templates),
+        };
+
+        if (service is { Length: > 0 })
+        {
+            filters.Add(Term("resource.attributes.service.name", service));
+        }
+
+        return SearchAsync(filters, ct);
+    }
 
     /// <summary>How many records one workflow wrote in a window. The settle poll's stability signal.</summary>
     public async Task<long> CountAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)

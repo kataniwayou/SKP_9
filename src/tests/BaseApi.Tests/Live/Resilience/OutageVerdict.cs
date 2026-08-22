@@ -8,14 +8,23 @@ namespace BaseApi.Tests.Live.Resilience;
 /// </summary>
 internal static class OutageVerdict
 {
-    public static void AssertNoUnaccountedLoss(SoakResult result)
+    /// <param name="result">The soak's runs and its witnessed fault window.</param>
+    /// <param name="minimumRuns">
+    /// The fewest fires this scenario can legitimately produce. Nine for a fault that leaves the
+    /// orchestrator scheduling — the soak's ten fires all still happen, and one fire of slop is
+    /// allowed for where t0 lands against the cron boundary. Lower only where the fault stops fires
+    /// happening at all: a fire that never happened is not a lost step, and the ledger has no run to
+    /// judge. See spec section 5.8.
+    /// </param>
+    public static void AssertNoUnaccountedLoss(SoakResult result, int minimumRuns = 9)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         var report = SoakReport.Describe(result);
 
-        Assert.True(result.Runs.Count >= 9,
-            $"expected at least 9 fires in five minutes at a 30s cron, saw {result.Runs.Count}.\n{report}");
+        Assert.True(result.Runs.Count >= minimumRuns,
+            $"expected at least {minimumRuns} fires in five minutes at a 30s cron, "
+            + $"saw {result.Runs.Count}.\n{report}");
 
         // Obligation 1. A run that never met the fault has no excuse, and RunClassifier already
         // refuses to spend one on it — so anything short and clear of the window lands here.
