@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using Messaging.Transport;
 
 namespace BaseConsole.Core.Messaging;
 
@@ -117,6 +118,11 @@ internal static class IngressMetrics
             // as "True", and a dashboard written against "true" would then match nothing.
             { "landed", landed ? "true" : "false" },
         };
+
+        // The host's process-wide tag, if it installed one: role=leader|follower on the
+        // orchestrator, absent on every other host. Read live, so a delivery handled after a
+        // demotion is attributed to the follower that actually handled it.
+        PipelineAmbientTag.AppendTo(ref tags);
 
         Consumed.Add(1, tags);
     }
