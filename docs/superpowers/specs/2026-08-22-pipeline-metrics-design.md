@@ -174,7 +174,6 @@ control flow. The exception continues to propagate exactly as it does now.
 | Instrument | Type | Unit | Attributes |
 | --- | --- | --- | --- |
 | `pipeline.messages.consumed` | `Counter<long>` | `{message}` | `queue`, `type`, `disposition`, `reason`, `landed` |
-| `pipeline.process.duration` | `Histogram<double>` | `s` | `queue`, `type`, `disposition` |
 | `pipeline.consumer.inflight` | `UpDownCounter<long>` | `{message}` | `queue` |
 | `pipeline.consumer.consuming` | `ObservableGauge<int>` | `1` | `queue` |
 | `pipeline.consumer.channel.resets` | `Counter<long>` | `1` | `queue`, `reason` |
@@ -257,9 +256,13 @@ green."
 
 ### 5.3 The other three
 
-- `pipeline.process.duration` is recorded **only when a handler actually ran**,
-  so `gate_closed` rejects — which never enter a handler — do not flatten the
-  histogram toward zero.
+- `pipeline.process.duration` **has moved off this meter entirely** — see §6.
+  It measured the framework handler, and every hop that covers is a fixed
+  sequence of store reads and sends. A histogram of a span that cannot vary
+  answers no question, and keeping it here also forced the consumer to thread a
+  nullable timestamp through every exit path so that rejects which never entered
+  a handler would not flatten it toward zero. Both the instrument and that
+  plumbing are gone.
 - `pipeline.consumer.inflight` increments on entry to the handler call and
   decrements in a `finally`. Against `GatedConsumerOptions.PrefetchCount` it
   gives prefetch saturation.
@@ -346,6 +349,7 @@ the event at all.
 | --- | --- | --- |
 | `pipeline.identity.ready` 0/1 | `IProcessorContext.Identity is not null` | An unregistered processor waits rather than restarting — Running/NotReady with 0 restarts is by design. This is the metric that makes that legible instead of alarming. |
 | `pipeline.duplicate.suppressed` `Counter<long>` | the `"entry absent — treating as a duplicate delivery"` return in `ProcessDispatchHandler` | That path acks having done no work, so it is invisible under `disposition=acked`. It is the primary idempotence mechanism, and its rate is how you would ever notice the mechanism firing more than rarely. |
+| `pipeline.process.duration` `Histogram<double>`, unit `s`, attribute `outcome` ∈ `returned` · `faulted` | around `_processor.ExecuteAsync` in `ProcessDispatchHandler` | The author's own transform — the ONLY span of a hop whose length is somebody's implementation rather than this framework's constant cost. `outcome` separates a slow success from a slow failure, which otherwise average into a number describing neither; it says whether the author returned normally, **not** what the step decided. `StepResult` stays absent from every instrument here. |
 
 `pipeline.duplicate.suppressed` has no orchestrator counterpart, and the
 asymmetry is intended. `StepOutcomeHandler` makes the *opposite* choice on the
@@ -504,3 +508,41 @@ plan depends on both:
   `DynamicProxyGenAssembly2` is deliberately *not* granted, so internal types
   cannot be substituted with NSubstitute — the ingress tests use hand-written
   fakes, which is what the existing `ConsumerAdmissionTests` already does.
+
+## 13. Changes made after the first implementation landed
+
+Three requests, each moving a signal to where the thing it describes happens.
+
+1. **`pipeline.process.duration` measures the author, not the framework** (§5.3,
+   §6). Everything either side of `ExecuteAsync` is a fixed sequence of store
+   reads and sends; the transform is the only part that can be slow. One
+   instrument, not two — the framework-handler timing is not replaced, it is
+   deleted, because a histogram of a constant answers nothing. Its removal also
+   deletes the nullable-timestamp plumbing §5.1 needed to keep no-handler
+   rejects out of it.
+
+2. **The orchestrator names both ends of a run** (`StepOutcomeHandler`). An
+   entry step's completion was previously visible only as a hand-off naming its
+   successor, and an entry step that was also terminal produced no line at all.
+   Both now log under the correlation id the fire minted, using
+   `L1Entry.Definition.EntryStepIds` and the successor selection already in
+   hand.
+
+3. **The blob is reclaimed on park, not only on ack.** A park is a nack with
+   `requeue:false`: the message leaves for the dead-letter exchange and never
+   returns, so a blob left behind is orphaned exactly as an acked one would be —
+   and `data:` keys have no TTL and no sweeper. The commonest route there is a
+   workflow stopped while its steps are in flight, since `ApplyStopHandler`
+   removes it from L1 and every outcome still on the wire then misses. That
+   leaked one blob per in-flight step, permanently.
+
+   The rule is now: **reclaim on every disposition that ends this replica's
+   responsibility for the message.** Only a requeue-nack skips it, because that
+   delivery is coming back and will need the blob. Two paths changed — the
+   L1-miss park in `StepOutcomeHandler`, and the arm in `NextStepHandoffHandler`
+   where the failure outcome itself cannot be sent deterministically.
+
+   **The accepted cost:** a dead-lettered message now names a key that no longer
+   exists, so it can no longer be replayed by hand. The execution is over either
+   way and the next scheduled fire will meet the same condition, so the only
+   difference is whether the store grows each time it does.
