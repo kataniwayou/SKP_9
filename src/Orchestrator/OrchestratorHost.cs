@@ -9,6 +9,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry;
+using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using Orchestrator.Election;
 using Orchestrator.Hydration;
@@ -96,6 +98,17 @@ public static class OrchestratorHost
         // inside AddBaseConsoleObservability so that method's contract stays role-agnostic.
         builder.Services.AddOpenTelemetry()
             .WithMetrics(m => m.AddMeter(OrchestratorPipelineMetrics.MeterName));
+
+        // The logger-provider twin of the meter registration above: every record this replica emits
+        // gets role=leader|follower. ConfigureOpenTelemetryLoggerProvider is a services-side hook
+        // that configures the provider AddBaseConsoleObservability already built, so the shared
+        // extension needs no seam and stays role-agnostic — the same reason the meter goes on here.
+        //
+        // Registered unconditionally. A replica is a follower until it wins the lease, so there is
+        // no window in which the tag would be absent or wrong.
+        builder.Services.AddSingleton<OrchestratorRoleLogEnricher>();
+        builder.Services.ConfigureOpenTelemetryLoggerProvider(
+            (sp, lp) => lp.AddProcessor(sp.GetRequiredService<OrchestratorRoleLogEnricher>()));
 
         // The broker and Redis clients, and the health surface every console carries regardless of
         // what it does. Redis is required here — not merely by convention — because

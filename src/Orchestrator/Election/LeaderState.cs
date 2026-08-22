@@ -34,6 +34,22 @@ public sealed class LeaderState
     /// </summary>
     public bool IsLeader => Volatile.Read(ref _isLeader) == 1;
 
+    /// <summary>
+    /// The same fact as <see cref="IsLeader"/>, as the literal a log record carries: exactly
+    /// <c>leader</c> or <c>follower</c>.
+    /// <para>
+    /// <b>Never empty, and that is what lets the enricher skip a null-guard.</b> A replica is a
+    /// follower until it wins something, so there is no third state and no "not yet known" — which
+    /// means every record can carry the tag and a query for <c>role=follower</c> means a follower
+    /// rather than an unresolved one.
+    /// </para>
+    /// <para>
+    /// Read through the same volatile load as <see cref="IsLeader"/>, so a demotion is visible to
+    /// the next log record for the same reason it is visible to the next fire.
+    /// </para>
+    /// </summary>
+    public string Role => IsLeader ? "leader" : "follower";
+
     /// <summary>Open the gate. Called from the election's started-leading callback and nowhere else.</summary>
     public void BecomeLeader() => Interlocked.Exchange(ref _isLeader, 1);
 
