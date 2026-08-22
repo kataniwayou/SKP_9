@@ -10,7 +10,9 @@ $forwards = @(
     @{ svc = "baseapi-service";local = 18080; remote = 8080 },
     @{ svc = "otel-collector"; local = 14317; remote = 4317 },
     @{ svc = "otel-collector"; local = 18889; remote = 8889 },
-    @{ svc = "redis";          local = 6380;  remote = 6379 }
+    @{ svc = "redis";          local = 6380;  remote = 6379 },
+    @{ svc = "elasticsearch";  local = 19200; remote = 9200 },
+    @{ svc = "prometheus";     local = 19090; remote = 9090 }
 )
 
 foreach ($f in $forwards) {
