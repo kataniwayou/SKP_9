@@ -1,6 +1,3 @@
-using BaseProcessor.Core.Identity;
-using BaseProcessor.Core.Observability;
-using Messaging.Contracts;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using OpenTelemetry.Logs;
@@ -11,12 +8,17 @@ using Xunit;
 namespace BaseApi.Tests.Observability;
 
 /// <summary>
-/// The two log-record enrichers, which put on every record what a scope can only put on records
-/// emitted inside one.
+/// The orchestrator's role enricher, which puts on every record what a scope can only put on
+/// records emitted inside one.
 /// <para>
-/// Both are driven through a real OpenTelemetry logger provider rather than by calling
-/// <c>OnEnd</c> directly: the enricher runs as a pipeline stage, and a downstream capturing
-/// processor observes what the stage actually produced. Calling <c>OnEnd</c> by hand would prove
+/// There is no processor-side counterpart, deliberately: <c>ProcessorIdLogEnricher</c> stays
+/// unregistered because <c>ProcessorId</c> is already a resource attribute and <c>IdentityName</c>
+/// is already <c>service.name</c> plus <c>service.version</c>. See that type's own remarks.
+/// </para>
+/// <para>
+/// Driven through a real OpenTelemetry logger provider rather than by calling <c>OnEnd</c>
+/// directly: the enricher runs as a pipeline stage, and a downstream capturing processor observes
+/// what the stage actually produced. Calling <c>OnEnd</c> by hand would prove
 /// the method mutates a record, not that the record reaching an exporter carries the attribute.
 /// </para>
 /// </summary>
@@ -95,54 +97,6 @@ public sealed class LogEnricherTests
             state.BecomeFollower();
             log.LogInformation("after losing it");
             Assert.Equal("follower", Value(capture, OrchestratorRoleLogEnricher.Role));
-        }
-    }
-
-    private sealed class Context : IProcessorContext
-    {
-        public ProcessorIdentity? Identity { get; set; }
-        public bool IsHealthy => throw new NotSupportedException();
-        public void SetIdentity(ProcessorIdentityFound identity) => throw new NotSupportedException();
-        public void SetDefinition(Guid schemaId, string definition) => throw new NotSupportedException();
-        public void MarkHealthy() => throw new NotSupportedException();
-    }
-
-    [Fact]
-    public void TheProcessorEnricherAddsNothingBeforeIdentityResolves()
-    {
-        // Deliberately not Guid.Empty: a zero id reads as a real processor that does not exist, and
-        // these are exactly the records -- the startup loops -- emitted while identity is still
-        // unresolved. Absent is honest; zero is a lie that queries would match.
-        var (log, capture, factory) = Pipeline(new ProcessorIdLogEnricher(new Context { Identity = null }));
-        using (factory)
-        {
-            log.LogInformation("still resolving");
-
-            Assert.Null(Value(capture, ExecutionLogScope.ProcessorId));
-            Assert.Null(Value(capture, ProcessorIdLogEnricher.IdentityName));
-        }
-    }
-
-    [Fact]
-    public void TheProcessorEnricherStampsIdentityOnRecordsWithNoMessageScope()
-    {
-        // The gap this closes: inside a dispatch ExecutionLogScope already supplies ProcessorId, so
-        // the enricher would add nothing there. Outside one -- the startup loops and the liveness
-        // heartbeat, which are what an operator reads when a processor will not become ready --
-        // nothing supplied it at all. This test logs with no scope open, which is that case.
-        var id = Guid.NewGuid();
-        var context = new Context
-        {
-            Identity = new ProcessorIdentity(id, null, null, null, "sample-proc", "1.5.0", null, null, null),
-        };
-
-        var (log, capture, factory) = Pipeline(new ProcessorIdLogEnricher(context));
-        using (factory)
-        {
-            log.LogInformation("no scope around this one");
-
-            Assert.Equal(id.ToString("D"), Value(capture, ExecutionLogScope.ProcessorId));
-            Assert.Equal("sample-proc_1.5.0", Value(capture, ProcessorIdLogEnricher.IdentityName));
         }
     }
 }

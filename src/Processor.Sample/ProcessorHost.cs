@@ -7,8 +7,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using OpenTelemetry;
-using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 
 namespace Processor.Sample;
@@ -94,19 +92,6 @@ public static class ProcessorHost
         // call configured rather than replacing it.
         builder.Services.AddOpenTelemetry()
             .WithMetrics(m => m.AddMeter(ProcessorPipelineMeter.Name));
-
-        // ProcessorId and IdentityName on every record, including the ones emitted outside a message
-        // scope — the startup loops and the liveness heartbeat, which are precisely what an operator
-        // reads when a processor will not become ready. Inside a dispatch ExecutionLogScope already
-        // supplies the id; outside one, nothing did until now.
-        //
-        // Wired here rather than inside AddBaseConsoleObservability: that method lives in
-        // BaseConsole.Core, which must not reference BaseProcessor.Core, and this host references
-        // both. ConfigureOpenTelemetryLoggerProvider configures the provider that method already
-        // built, so no seam is needed in it.
-        builder.Services.AddSingleton<ProcessorIdLogEnricher>();
-        builder.Services.ConfigureOpenTelemetryLoggerProvider(
-            (sp, lp) => lp.AddProcessor(sp.GetRequiredService<ProcessorIdLogEnricher>()));
 
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
