@@ -15,12 +15,48 @@ namespace BaseApi.Tests.Live.Resilience;
 /// wedged. That is why it is re-issued on a keepalive rather than set once for the whole window: a
 /// single long pause would lapse early if the scenario overran, silently shortening the outage.
 /// </para>
+/// <para>
+/// <b>CLIENT UNPAUSE does not cancel an outstanding pause — it blocks until that pause expires.</b>
+/// Measured directly against this cluster: issuing <c>CLIENT PAUSE 45000 ALL</c> and then, over a
+/// brand-new connection, <c>CLIENT UNPAUSE</c>, the unpause itself took ~45 seconds to return — the
+/// full remaining duration of the pause it was supposedly cancelling, not the near-instant reply a
+/// name like "unpause" implies. That single fact sets every budget below. S2 never noticed because
+/// nothing else was queued ahead of its release call. S4 did, reproducibly: RabbitMQ's own restore
+/// (bounded only by how long its pod takes to become ready, which is unbounded by design) runs to
+/// completion first, and the keepalive keeps renewing the Redis pause the entire time it does — so
+/// by the time Redis's release finally runs, the most recent keepalive pause can still have nearly
+/// its full duration left to expire, and the release has to wait that out before CLIENT UNPAUSE
+/// returns at all. A 45-second pause against a 60-second release budget left no margin once real
+/// cluster latency (a StatefulSet pod that just became ready is not yet fully settled) was added on
+/// top, and the release timed out. The numbers below were chosen to fix that: the keepalive interval
+/// and pause were shortened together, keeping the 3x renewal margin that stops the pause lapsing
+/// mid-window, while cutting the worst-case wait a release can be stuck behind from ~45s to ~24s —
+/// and the release's own budget was widened to two minutes, five times that worst case rather than a
+/// number the old 45-second pause left almost no room inside. This also improves the property that
+/// made CLIENT PAUSE the chosen lever to begin with: a killed or crashed run now leaves at most 24
+/// seconds of pause behind instead of 45.
+/// </para>
 /// </summary>
 internal static class ClusterControl
 {
-    /// <summary>Re-issued well inside the pause it renews, so a slow kubectl cannot leave a gap.</summary>
-    private static readonly TimeSpan KeepaliveInterval = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan KeepalivePause = TimeSpan.FromSeconds(45);
+    /// <summary>
+    /// Re-issued well inside the pause it renews (a 3x margin: 24s pause, 8s interval), so a slow
+    /// kubectl cannot leave a gap. Shortened from 15s/45s alongside <see cref="KeepalivePause"/> —
+    /// see the class remarks for why: a release that follows a RabbitMQ restore can still be stuck
+    /// waiting out most of whatever pause the last keepalive renewed, since CLIENT UNPAUSE does not
+    /// cancel it outright.
+    /// </summary>
+    private static readonly TimeSpan KeepaliveInterval = TimeSpan.FromSeconds(8);
+
+    /// <summary>
+    /// Shortened from 45s to 24s. The renewal margin is preserved (3x <see cref="KeepaliveInterval"/>),
+    /// but the number that actually matters here is the worst case a release can be stuck behind:
+    /// since CLIENT UNPAUSE blocks until the outstanding pause expires rather than cancelling it (see
+    /// the class remarks), a shorter pause directly bounds how long
+    /// <see cref="RedisPause.DisposeAsync"/> can be made to wait — from ~45s down to ~24s — against a
+    /// release budget five times that size.
+    /// </summary>
+    private static readonly TimeSpan KeepalivePause = TimeSpan.FromSeconds(24);
 
     public static async Task PauseRedisAsync(TimeSpan duration, CancellationToken ct) =>
         await Kubectl.RunOrThrowAsync(
@@ -107,8 +143,12 @@ internal static class ClusterControl
                 _stop.Dispose();
 
                 // Its own token: the scenario's may already be cancelled, and a release that skipped
-                // because the run was aborted is exactly the case the release exists for.
-                using var release = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+                // because the run was aborted is exactly the case the release exists for. Two
+                // minutes, not one: CLIENT UNPAUSE blocks until the outstanding pause expires rather
+                // than cancelling it (see the class remarks), so this budget has to clear the worst
+                // case a KeepalivePause-length wait plus real cluster latency can impose, not just
+                // the exec call's own round trip.
+                using var release = new CancellationTokenSource(TimeSpan.FromMinutes(2));
                 await UnpauseRedisAsync(release.Token);
             }
         }
