@@ -33,9 +33,28 @@ public sealed class ProcessorPipelineMetricsTests
         using var owner = new ProcessorPipelineMetricsHost(context);
         using var metrics = new MetricCollector(ProcessorPipelineMeter.Name);
 
+        // The registry is process-wide, so another owner (e.g. the never-disposed wiring-test host)
+        // can still be live here. Assert over the set rather than picking a single element -- the
+        // identical latent shape that made the orchestrator and gate gauges order-dependent.
         metrics.Collect();
 
-        Assert.Equal(0, metrics.For("pipeline.identity.ready")[^1].Value);
+        Assert.All(metrics.For("pipeline.identity.ready"), m => Assert.Equal(0, m.Value));
+    }
+
+    [Fact]
+    public void IdentityReadyIsOneOnceTheProcessorHasBeenRegistered()
+    {
+        // The transition to 1 is the whole reason the gauge exists -- a gauge that only ever proved
+        // it could report 0 would pass even if the positive branch were deleted.
+        var identity = new ProcessorIdentity(
+            Guid.NewGuid(), null, null, null, "sample-proc", "1.0.0", null, null, null);
+        var context = new Context { Identity = identity };
+        using var owner = new ProcessorPipelineMetricsHost(context);
+        using var metrics = new MetricCollector(ProcessorPipelineMeter.Name);
+
+        metrics.Collect();
+
+        Assert.Contains(metrics.For("pipeline.identity.ready"), m => m.Value == 1);
     }
 
     [Fact]
