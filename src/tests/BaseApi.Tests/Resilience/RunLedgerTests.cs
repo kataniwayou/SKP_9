@@ -53,6 +53,8 @@ public sealed class RunLedgerTests
     [InlineData(Templates.BranchCompleted, "I3")]
     [InlineData(Templates.HandedOff, "I4")]
     [InlineData(Templates.AuthorConfig, "I6")]
+    [InlineData(Templates.AdvancedSuccessors, "I7")]
+    [InlineData(Templates.EntryStepCompleted, "I8")]
     public void DroppingOneRecordBreachesTheInvariantThatNamesItsHop(string template, string invariant)
     {
         var maimed = DropOne(CompleteRun, template);
@@ -76,8 +78,14 @@ public sealed class RunLedgerTests
         Assert.Contains(ledger.Breaches, b => b.Invariant == "I5");
     }
 
+    /// <summary>
+    /// A missing terminal record is invisible to the per-step hops (nothing about it changes how many
+    /// steps started or returned), but it breaks the graph walk (I5, fewer terminals than the shape
+    /// promises) and the branch-decision balance (I7, a persisted branch whose decision is unaccounted
+    /// for) at once. It is not, and must not read as, a broken I1.
+    /// </summary>
     [Fact]
-    public void DroppingATerminalBreachesTheGraphWalkOnly()
+    public void DroppingATerminalBreachesTheGraphWalkAndTheBranchDecisionBalance()
     {
         var maimed = DropOne(CompleteRun, Templates.TerminalCompleted);
 
@@ -85,6 +93,7 @@ public sealed class RunLedgerTests
             CompleteRun[0].CorrelationId!, maimed, WorkflowShape.V8FanoutProof);
 
         Assert.Contains(ledger.Breaches, b => b.Invariant == "I5");
+        Assert.Contains(ledger.Breaches, b => b.Invariant == "I7");
         Assert.DoesNotContain(ledger.Breaches, b => b.Invariant == "I1");
     }
 

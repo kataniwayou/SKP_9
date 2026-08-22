@@ -101,10 +101,10 @@ A complete run is exactly 77 records, and the histogram does not vary:
 Nine advance events produce ten handoffs, because one of them advances two
 successors — the `C → {D1, D2}` fan-out.
 
-### 3.3 Six invariants
+### 3.3 Eight invariants
 
 Asserting "the run reached 77 records" would pass a run that lost a dispatch and
-gained a redelivery. The verdict is therefore six relations, each naming one hop:
+gained a redelivery. The verdict is therefore eight relations, each naming one hop:
 
 | # | Invariant | What a breach means |
 | --- | --- | --- |
@@ -114,6 +114,8 @@ gained a redelivery. The verdict is therefore six relations, each naming one hop
 | I4 | `dispatched in` == `handed off to` | the orchestrator decided a handoff and never sent it |
 | I5 | total dispatches == 11 **and** terminals == 2 | the graph was not walked whole |
 | I6 | `config gives label` == `running the step` | **log delivery**, not step loss — see below |
+| I7 | `advanced … successor(s)` + `the terminal step completed …` == `branch completed in` | a persisted branch's decision — advance or terminate — was never recorded |
+| I8 | `the entry step completed with` == `dispatched an entry step` | an entry dispatch's outcome was never recorded |
 
 **I6 is the discriminator that makes the whole design honest.** The framework's
 `running the step` and the author's `config gives label …` are written
@@ -122,7 +124,7 @@ present and the other absent, no step was lost — a log record was. Without I6,
 every OTLP drop reads as a lost step and the suite produces false failures under
 exactly the conditions it exists to test.
 
-A run satisfying I1–I6 is **complete**. A run breaching one is not merely failed:
+A run satisfying I1–I8 is **complete**. A run breaching one is not merely failed:
 the breached invariant names the hop that dropped it, which is the diagnostic
 payoff over a boolean.
 
