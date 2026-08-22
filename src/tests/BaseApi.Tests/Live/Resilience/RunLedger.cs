@@ -1,14 +1,14 @@
 namespace BaseApi.Tests.Live.Resilience;
 
 /// <summary>One invariant that did not hold, and the counts that show it.</summary>
-/// <param name="Invariant">"I1" through "I6".</param>
+/// <param name="Invariant">"I1" through "I8".</param>
 /// <param name="Detail">The relation as it actually stood.</param>
 internal sealed record LedgerBreach(string Invariant, string Detail);
 
 /// <summary>
-/// One run's template histogram, and the six relations that decide whether it lost a step.
+/// One run's template histogram, and the eight relations that decide whether it lost a step.
 /// <para>
-/// <b>Six relations rather than a total.</b> Asserting "the run reached 77 records" would pass a run
+/// <b>Eight relations rather than a total.</b> Asserting "the run reached 77 records" would pass a run
 /// that lost a dispatch and gained a redelivery. Each relation names one hop, so a breach is a
 /// diagnosis -- which hop dropped it -- instead of a boolean.
 /// </para>
@@ -86,6 +86,16 @@ internal sealed class RunLedger
         Require(breaches, "I6", counts[Templates.AuthorConfig] == counts[Templates.RunningTheStep],
             $"author records {counts[Templates.AuthorConfig]}, "
             + $"framework records {counts[Templates.RunningTheStep]} -- a mismatch is log loss, not step loss");
+
+        Require(breaches, "I7",
+            counts[Templates.AdvancedSuccessors] + counts[Templates.TerminalCompleted]
+                == counts[Templates.BranchCompleted],
+            $"advances {counts[Templates.AdvancedSuccessors]} plus terminals "
+            + $"{counts[Templates.TerminalCompleted]}, branches persisted {counts[Templates.BranchCompleted]}");
+
+        Require(breaches, "I8", counts[Templates.EntryStepCompleted] == counts[Templates.EntryDispatched],
+            $"entry outcomes {counts[Templates.EntryStepCompleted]}, "
+            + $"entry dispatches {counts[Templates.EntryDispatched]}");
 
         return new RunLedger(
             correlationId,
