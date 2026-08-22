@@ -32,7 +32,8 @@ internal static class Templates
     public const string TerminalCompleted =
         "the terminal step completed with {Result} \u2014 no successor accepts it, the run ends here";
 
-    // ---- the accounting vocabulary: the closed set of legitimate excuses for a short ledger ----
+    // ---- the accounting vocabulary: the legitimate excuses for a short ledger, in two tiers ----
+    // (see the two lists below the ledger for why they are not one list)
 
     public const string StoreUnreachable =
         "projection store unreachable \u2014 returning message to {Queue}";
@@ -63,13 +64,37 @@ internal static class Templates
     ];
 
     /// <summary>
-    /// The closed set of records that excuse a short ledger. Closed deliberately: anything outside
-    /// it is unaccounted loss, and widening this list is a decision about what the system is allowed
-    /// to do, not a detail of the verifier.
+    /// The templates a run's own records can be. The run query filters on these as well as on
+    /// WorkflowId, because the API's control-plane endpoints (start, stop) carry WorkflowId on some
+    /// of their own log lines too, and each such request is stamped with its own request-scoped
+    /// CorrelationId by CorrelationIdMiddleware — indistinguishable from a run's CorrelationId to a
+    /// query that only checks WorkflowId. Without this second filter, each start and each stop groups
+    /// into its own phantom "run" with an empty ledger, which breaches I5 and reads as a lost step
+    /// that never happened.
     /// </summary>
-    public static readonly IReadOnlyList<string> Accounting =
+    public static readonly IReadOnlyList<string> RunScoped =
+    [
+        .. Ledger, EntryAbsentDuplicate, EntryDispatchSendFailed,
+    ];
+
+    /// <summary>
+    /// Excuses that ride a run's own CorrelationId, because they are logged inside a handler scope,
+    /// after the message has been deserialized and the ids it carries are readable.
+    /// </summary>
+    public static readonly IReadOnlyList<string> RunScopedExcuses =
+    [
+        EntryAbsentDuplicate, EntryDispatchSendFailed,
+    ];
+
+    /// <summary>
+    /// Excuses that cannot be attributed to a run. GatedQueueConsumer logs these from its catch
+    /// block, above the deserialization boundary, where the correlation, workflow, and step ids are
+    /// still undecoded bytes and cannot be put on the record. They account for a run only by being
+    /// present somewhere in the observed fault window — weaker than a per-run attribution, and the
+    /// strongest claim these records can support.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ProcessScopedExcuses =
     [
         StoreUnreachable, RefusingAndParking, SendFailedReturning,
-        EntryDispatchSendFailed, EntryAbsentDuplicate,
     ];
 }

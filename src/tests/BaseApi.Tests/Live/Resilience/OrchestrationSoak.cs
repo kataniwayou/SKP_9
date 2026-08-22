@@ -118,6 +118,24 @@ internal static class OrchestrationSoak
 
         var records = await reader.ReadRunRecordsAsync(Chaos.WorkflowId, startedAt, windowEnd, ct);
 
+        // Process-scoped excuses carry no CorrelationId (GatedQueueConsumer logs them above the
+        // deserialization boundary), so they cannot be read off any one run's own records. Read once
+        // for the whole fault window instead, and offer the same set to every straddling run's
+        // classification. On the happy path the window is FaultWitness's None, so there is nothing
+        // to fetch and this stays empty -- an extra Elasticsearch round trip S1 has no use for.
+        IReadOnlyList<string> windowExcuses = [];
+
+        if (!window.IsNone)
+        {
+            var windowExcuseRecords = await reader.ReadTemplateRecordsAsync(
+                Templates.ProcessScopedExcuses, window.FaultAt, window.HealedAt, ct);
+
+            windowExcuses = windowExcuseRecords
+                .Select(r => r.Template)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+
         var runs = records
             .Where(r => r.CorrelationId is not null)
             .GroupBy(r => r.CorrelationId!, StringComparer.Ordinal)
@@ -125,7 +143,7 @@ internal static class OrchestrationSoak
             {
                 var run = g.ToList();
                 return RunClassifier.Classify(
-                    RunLedger.From(g.Key, run, WorkflowShape.V8FanoutProof), run, window);
+                    RunLedger.From(g.Key, run, WorkflowShape.V8FanoutProof), run, window, windowExcuses);
             })
             .OrderBy(c => c.Ledger.StartedAt)
             .ToList();

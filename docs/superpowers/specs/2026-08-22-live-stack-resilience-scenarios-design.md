@@ -263,19 +263,36 @@ that the schedule must not pretend to know.
   1. **Outside the window**: every run beginning and ending clear of
      `[t_fault, t_heal]` is complete. Zero tolerance. A run that never met the
      fault has no excuse.
-  2. **Straddling the window**: each run is complete, or **accounted** — every
-     step short of the ledger has a record on the same `CorrelationId` naming
-     why. The accounting vocabulary is closed: `projection store unreachable —
-     returning message to {Queue}`, `refusing message of type {Type} —
-     parking`, `send failed while handling {Type} — returning message to
-     {Queue}`, `the entry-step dispatch failed to send; continuing`, `entry
-     absent — treating as a duplicate delivery`, or a `{Result}` of `Failed` or
-     `Cancelled` on an outcome record. **Unaccounted loss must be zero.**
+  2. **Straddling the window**: each run is complete, or **accounted**. The
+     accounting vocabulary is closed, and splits into two tiers, because of
+     where each record sits relative to the point a delivery's ids become
+     readable:
+     - **Run-scoped** — logged inside a handler, after the message is
+       deserialized, where the run's own `CorrelationId` exists and lands on
+       the record: `the entry-step dispatch failed to send; continuing`,
+       `entry absent — treating as a duplicate delivery`, or a `{Result}` of
+       `Failed` or `Cancelled` on an outcome record. Each of these names the
+       specific run it excuses.
+     - **Process-scoped** — logged by `GatedQueueConsumer`'s catch block,
+       *above* the deserialization boundary, where the correlation, workflow,
+       and step ids are still undecoded bytes and cannot be attached to the
+       record: `projection store unreachable — returning message to
+       {Queue}`, `refusing message of type {Type} — parking`, `send failed
+       while handling {Type} — returning message to {Queue}`. None of these
+       can name the run they interrupted, so instead of being read off a
+       run's own records, they are read once for the whole
+       `[t_fault, t_heal]` window: a straddling short run is accounted if any
+       process-scoped excuse appears anywhere in that window, whether or not
+       it names this run. That is weaker than a run-scoped attribution — it
+       is the strongest claim these records can support, not a compromise
+       chosen for convenience.
+
+     **Unaccounted loss must be zero.**
   3. **Recovery**: the first fire beginning after `t_heal` is complete. The
      pipeline heals within one cron period.
 
-`entry absent — treating as a duplicate delivery` is admitted to the accounting
-vocabulary for S2–S4 but is expected to be **unused** there, because the pause
+`entry absent — treating as a duplicate delivery` is admitted to the run-scoped
+tier for S2–S4 but is expected to be **unused** there, because the pause
 preserves L2. Its appearance in S2 would mean a blob was lost without Redis
 being restarted, which is worth knowing. In S5 it is the expected record.
 
