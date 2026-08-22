@@ -22,9 +22,16 @@ forced out into the open:
 | S3 | RabbitMQ unavailable | `scale sts/rabbitmq --replicas=0` | zero unaccounted loss |
 | S4 | Both unavailable | S2 + S3 over one window | zero unaccounted loss |
 | S5 | Redis scale-to-0 (**L2 wipe**) | `scale sts/redis --replicas=0` | loss bounded and attributable |
+| S6 | Processor unavailable | `scale deploy/processor-sample --replicas=0` | zero unaccounted loss |
+| S7 | Orchestrator unavailable | `scale sts/orchestrator --replicas=0` | zero unaccounted loss, on the runs that started |
 
 S5 exists because Redis here is ephemeral by design; §4.2 explains why that
 makes it a different scenario rather than a variant of S2.
+
+S6 and S7 remove a *worker* rather than a dependency, and they are not
+symmetric with each other: a dead processor leaves the orchestrator firing into
+a durable queue, while a dead orchestrator stops the fires happening at all.
+§5.7 and §5.8 give each its own verdict for that reason.
 
 Out of scope, deliberately: processor or orchestrator pod failure, Postgres
 outage, collector or Elasticsearch outage, network partition between replicas,
@@ -322,6 +329,72 @@ heal records interleave in an order the verifier would have to special-case.
 
 `CLIENT PAUSE` is re-issued on its 30-second keepalive throughout, so the Redis
 fault spans RabbitMQ's whole outage including its pod-start time.
+
+### 5.7 Verdict, S6 — processor unavailable
+
+`kubectl scale deploy/processor-sample --replicas=0`, restored to 2.
+
+**Nothing suppresses the dispatch.** `ProcessorLivenessValidator` lives in
+`BaseApi.Service` and runs at `POST /start`, not in the orchestrator's dispatch
+path, so the orchestrator keeps firing and keeps sending `process-dispatch` to
+`ProcessorQueues.Work(processorId)` throughout the outage. Those messages sit in
+a durable queue on a broker with a PVC and are drained when the processor
+returns. The processor's liveness key expires from L2 meanwhile and is rewritten
+on its first beat back.
+
+So S6 is held to the same three obligations as S2-S4 (§5.4), unchanged, with the
+same `runs >= 9` floor: the orchestrator never stopped firing, so every fire of
+the soak still happened.
+
+**Witnessing S6 needs a service filter, and that is the one new mechanism here.**
+The processor's arrival edge is `Application is shutting down...`, which is a
+`Microsoft.Hosting.Lifetime` template every service in the deployment emits — so
+matching it alone would witness the wrong process. The window query is therefore
+additionally filtered on `resource.attributes.service.name`. The heal edge,
+`processor healthy; startup loops retired`, is processor-unique and needs no
+filter, but takes the same one for symmetry.
+
+The processor's `service.name` comes from its own database row and is currently
+`sample-proc-v9`. It is configuration (`SKP_PROCESSOR_SERVICE`), never a
+constant: a rebuilt processor changes it, and a hardcoded name would witness
+nothing and fail the scenario as inconclusive.
+
+### 5.8 Verdict, S7 — orchestrator unavailable
+
+`kubectl scale sts/orchestrator --replicas=0`, restored to 3.
+
+**This does not violate the "never scale down" invariant, and the reason is
+worth stating.** The orchestrator's design forbids reducing its replica count
+because each replica owns a durable per-replica queue that would accumulate
+forever once its owner was gone. Scaling 3 → 0 → 3 restores the same ordinals —
+`orchestrator-0`, `-1`, `-2` — and therefore the same queue names, so no queue is
+orphaned. A scenario that restored to a *smaller* count would breach the
+invariant; this one does not.
+
+**A fire that never happened is not a lost step.** With no scheduler running, the
+cron does not fire for the duration of the outage, so a 60-second window costs
+roughly two fires outright. Those runs do not exist to be judged — the ledger
+only reasons about runs that started. S7 therefore keeps obligations 1-3 of §5.4
+unchanged but **lowers the run-count floor to 7**, because asserting `>= 9`
+would fail on the scenario working exactly as intended.
+
+In-flight `step-outcome` messages accumulate in the durable per-replica queues
+while the orchestrator is gone. On return, all three replicas rebuild L1 from L2,
+re-arm the cron, re-settle the Kubernetes Lease that fences the leader, and drain
+their queues.
+
+Both edges are orchestrator-unique, so S7 needs no service filter:
+`Scheduler {0} shutting down.` is emitted by Quartz, which only the orchestrator
+hosts, and `hydrated {WorkflowCount} workflows from L2; admitting the consumer`
+is the hydration record no other role writes.
+
+### 5.9 What S6 and S7 deliberately do not cover
+
+Neither scenario kills a *single* replica to test partial capacity — both take
+the whole role away. Rolling-restart behaviour, leader failover with the other
+replicas still up, and partial-capacity degradation are all separate questions,
+and answering them with a scenario shaped for total outage would answer them
+badly.
 
 ## 6. Metrics, as corroboration only
 
