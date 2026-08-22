@@ -30,6 +30,19 @@ internal static class SoakReport
             report.AppendLine(CultureInfo.InvariantCulture, $"  {group.Key}: {group.Count()}");
         }
 
+        // Excluded, not silently dropped: a run this close to the soak's own stop was truncated by
+        // ApplyStopHandler removing the workflow from L1, not by the fault under test, so it never
+        // entered judgment above -- see OrchestrationSoak.StopGuard. Named here so the count is
+        // visible instead of making the run total look smaller than what Elasticsearch actually held.
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"cut short by our own stop (excluded from judgment): {result.CutShortByStop.Count}");
+
+        foreach (var run in result.CutShortByStop)
+        {
+            report.AppendLine(CultureInfo.InvariantCulture,
+                $"  {run.Ledger.CorrelationId} started {run.Ledger.StartedAt:HH:mm:ss}");
+        }
+
         foreach (var run in result.Runs.Where(r => r.Verdict != RunVerdict.Complete))
         {
             report.AppendLine(CultureInfo.InvariantCulture,
