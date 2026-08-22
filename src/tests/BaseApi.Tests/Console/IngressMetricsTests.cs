@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using BaseApi.Tests.Support;
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Messaging;
@@ -296,5 +297,79 @@ public sealed class IngressMetricsTests
         var duration = Assert.Single(ran.For("pipeline.process.duration"));
         Assert.Equal("acked", duration.Tags["disposition"]);
         Assert.True(duration.Value >= 0);
+    }
+
+    [Fact]
+    public void TheConsumingGaugeReportsOneSeriesPerQueueFromASingleInstrument()
+    {
+        // ONE instrument, N measurements -- not N instruments. Creating this gauge once per
+        // consumer would put three instruments with one name on one meter, which the OpenTelemetry
+        // SDK resolves to a single stream and warns about or drops. An observable callback may
+        // return many measurements, so a registry keyed by queue is the shape that works.
+        IngressMetrics.TrackConsumer("queue-a", () => true);
+        IngressMetrics.TrackConsumer("queue-b", () => false);
+
+        try
+        {
+            using var metrics = new MetricCollector(IngressMetrics.MeterName);
+            metrics.Collect();
+
+            var byQueue = metrics.For("pipeline.consumer.consuming")
+                .ToDictionary(m => m.Tags["queue"], m => m.Value);
+
+            Assert.Equal(1, byQueue["queue-a"]);
+            Assert.Equal(0, byQueue["queue-b"]);
+        }
+        finally
+        {
+            IngressMetrics.UntrackConsumer("queue-a");
+            IngressMetrics.UntrackConsumer("queue-b");
+        }
+    }
+
+    [Fact]
+    public void AnUntrackedConsumerStopsBeingReported()
+    {
+        // A consumer that stopped must not keep reporting the last value it held -- a stale 1 here
+        // reads as "something is listening" for a queue nothing is reading.
+        IngressMetrics.TrackConsumer("queue-gone", () => true);
+        IngressMetrics.UntrackConsumer("queue-gone");
+
+        using var metrics = new MetricCollector(IngressMetrics.MeterName);
+        metrics.Collect();
+
+        Assert.DoesNotContain(
+            metrics.For("pipeline.consumer.consuming"), m => m.Tags["queue"] == "queue-gone");
+    }
+
+    [Fact]
+    public async Task InflightRisesForTheHandlerAndFallsBackToZero()
+    {
+        // Read against PrefetchCount this is saturation. The decrement is in a finally, so the
+        // assertion that matters is the one after a handler that THREW.
+        using var metrics = new MetricCollector(IngressMetrics.MeterName);
+
+        var consumer = BuildConsumer(
+            await GateAsync(open: true),
+            new Handler(() => throw new InvalidOperationException("boom")));
+
+        await consumer.OnReceivedAsync(this, Delivery());
+
+        var deltas = metrics.For("pipeline.consumer.inflight").Select(m => m.Value).ToArray();
+        Assert.Equal(new double[] { 1, -1 }, deltas);
+        Assert.Equal(0, deltas.Sum());
+    }
+
+    [Fact]
+    public void AChannelResetIsCountedWithItsCause()
+    {
+        using var metrics = new MetricCollector(IngressMetrics.MeterName);
+
+        IngressMetrics.RecordChannelReset(Queue, "shutdown");
+
+        var m = Assert.Single(metrics.For("pipeline.consumer.channel.resets"));
+        Assert.Equal(1, m.Value);
+        Assert.Equal("shutdown", m.Tags["reason"]);
+        Assert.Equal(Queue, m.Tags["queue"]);
     }
 }
