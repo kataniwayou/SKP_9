@@ -1,4 +1,5 @@
 using BaseApi.Tests.Live.Resilience;
+using BaseApi.Tests.Support;
 using Xunit;
 
 namespace BaseApi.Tests.Resilience;
@@ -7,6 +8,16 @@ namespace BaseApi.Tests.Resilience;
 /// The gate is the whole safety story for a suite that pauses Redis and scales StatefulSets to zero.
 /// These run hermetically and assert it is shut unless BOTH switches are thrown.
 /// </summary>
+/// <remarks>
+/// Joins <see cref="EnvironmentCollection"/> because these tests set <c>SKP_REALSTACK</c> and
+/// <c>SKP_CHAOS</c> process-wide. Other collections (the RealStack live suites, and
+/// RedisReconnectLiveTests, which is deliberately kept out of RealStackCollection) read
+/// <c>SKP_REALSTACK</c> via <c>RealStack.Enabled</c>/<c>SkipUnlessEnabled()</c> while running in
+/// parallel with this one. Without serialising against them, a window where this suite has set
+/// <c>SKP_REALSTACK=1</c> could make one of those tests see the switch thrown in a hermetic run and
+/// proceed to reach infrastructure that is not there, turning a skip into a spurious failure.
+/// </remarks>
+[Collection(EnvironmentCollection.Name)]
 public sealed class ChaosGateTests
 {
     [Fact]
