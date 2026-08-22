@@ -19,12 +19,19 @@ internal sealed record FaultSchedule(
 }
 
 /// <summary>Everything one soak observed.</summary>
+/// <param name="CutShortByStop">
+/// Runs that began too close to the soak's own <c>StopWorkflowAsync</c> call to be judged fairly --
+/// see <see cref="OrchestrationSoak.StopGuard"/> for why they are pulled out of <paramref name="Runs"/>
+/// rather than left in it. Not an obligation failure on their own; surfaced so a reader can see what
+/// was excluded and why, rather than have the run count quietly shrink.
+/// </param>
 internal sealed record SoakResult(
     IReadOnlyList<RunClassification> Runs,
     FaultWindow Window,
     IReadOnlyDictionary<string, double?> Metrics,
     DateTimeOffset StartedAt,
-    DateTimeOffset StoppedAt);
+    DateTimeOffset StoppedAt,
+    IReadOnlyList<RunClassification> CutShortByStop);
 
 /// <summary>
 /// The five-minute skeleton every scenario shares: drain, start, inject at 150s, release at 210s,
@@ -42,6 +49,35 @@ internal static class OrchestrationSoak
     private static readonly TimeSpan ReleaseAt = TimeSpan.FromSeconds(210);
     private static readonly TimeSpan StopAt = TimeSpan.FromSeconds(300);
     private static readonly TimeSpan Settle = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// How close to the soak's own <c>StopWorkflowAsync</c> call a run's start can land before that
+    /// run is excluded from judgment rather than scored.
+    /// <para>
+    /// <b>Why a run this close cannot be judged.</b> <c>ApplyStopHandler</c> removes the workflow from
+    /// the orchestrator's L1 the instant the stop is applied, so any step-outcome from a run still in
+    /// flight lands in <c>StepOutcomeHandler</c>'s documented branch for an outcome naming a workflow
+    /// this replica no longer holds, and is parked. A run whose cron fire happens to land on the stop
+    /// instant is truncated by that removal -- by the harness stopping the workflow underneath it --
+    /// not by anything the fault under test did. Judging it fails the scenario for a reason that has
+    /// nothing to do with the fault, and because it depends only on whether a thirty-second cron fire
+    /// happens to coincide with the stop, it would make every scenario nondeterministic.
+    /// </para>
+    /// <para>
+    /// <b>Why this cannot mask a real fault-induced loss.</b> The fault window ends at
+    /// <see cref="ReleaseAt"/> (t0+210s); the stop happens at <see cref="StopAt"/> (t0+300s), ninety
+    /// seconds later. Nothing this guard excludes -- a run starting within ten seconds of the stop --
+    /// can also straddle a window that closed ninety seconds earlier, so no run this guard removes
+    /// could have carried evidence of the fault.
+    /// </para>
+    /// <para>
+    /// <b>Why ten seconds.</b> A run completes in about a second, and the stop itself propagates
+    /// asynchronously through the fanout rather than landing atomically, so the window during which a
+    /// fire can be caught mid-flight by the stop is short. Ten seconds is deliberately generous
+    /// against that, not a tight fit to the observed failure.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan StopGuard = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Waited after the initial stop and before the drain check, so the check queries Elasticsearch
@@ -143,7 +179,7 @@ internal static class OrchestrationSoak
                 .ToList();
         }
 
-        var runs = records
+        var classified = records
             .Where(r => r.CorrelationId is not null)
             .GroupBy(r => r.CorrelationId!, StringComparer.Ordinal)
             .Select(g =>
@@ -155,8 +191,15 @@ internal static class OrchestrationSoak
             .OrderBy(c => c.Ledger.StartedAt)
             .ToList();
 
+        // A run whose cron fire lands on the stop instant is truncated by our own StopWorkflowAsync
+        // removing the workflow from L1, not by the fault under test -- see StopGuard. Pull those
+        // runs out of the judged set rather than let them fail a scenario on nondeterministic timing.
+        var stopGuardCutoff = stoppedAt - StopGuard;
+        var runs = classified.Where(c => c.Ledger.StartedAt <= stopGuardCutoff).ToList();
+        var cutShortByStop = classified.Where(c => c.Ledger.StartedAt > stopGuardCutoff).ToList();
+
         return new SoakResult(
-            runs, window, await prometheus.CorroborationAsync(ct), startedAt, stoppedAt);
+            runs, window, await prometheus.CorroborationAsync(ct), startedAt, stoppedAt, cutShortByStop);
     }
 
     /// <summary>
