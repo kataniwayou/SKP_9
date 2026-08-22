@@ -39,6 +39,11 @@ public static class RealStack
     public static string RedisHost => Get("SKP_REDIS_HOST", "localhost");
     public static int RedisPort => int.Parse(Get("SKP_REDIS_PORT", "6380"));
 
-    private static string Get(string key, string fallback) =>
+    /// <summary>
+    /// Reads an override or falls back. Internal rather than private so the chaos suite's own
+    /// address block reads its environment the same way, instead of growing a second copy that
+    /// could drift on the empty-string case.
+    /// </summary>
+    internal static string Get(string key, string fallback) =>
         Environment.GetEnvironmentVariable(key) is { Length: > 0 } v ? v : fallback;
 }
