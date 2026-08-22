@@ -558,3 +558,33 @@ Three requests, each moving a signal to where the thing it describes happens.
    exists, so it can no longer be replayed by hand. The execution is over either
    way and the next scheduled fire will meet the same condition, so the only
    difference is whether the store grows each time it does.
+
+## 14. `role` on the orchestrator's message instruments
+
+`pipeline_leader_ratio` says which replica leads. It does not say how much work each role did — and
+because leadership fences only cron fires, followers handle most outcomes, which is a property worth
+being able to see rather than infer.
+
+So the orchestrator adds `role` ∈ `leader` · `follower` to `pipeline.messages.produced`,
+`pipeline.produce.duration` and `pipeline.messages.consumed`. **Orchestrator-only, and absent rather
+than blank everywhere else.**
+
+**How, given those instruments are shared.** They live in `Messaging.Transport` and
+`BaseConsole.Core`, which every role uses and which must not learn an orchestrator concept —
+`LeaderState` is not even reachable from them. `PipelineAmbientTag` inverts the dependency: shared
+code offers one process-wide slot, `OrchestratorHost` fills it with a live read of `LeaderState.Role`,
+and no other host calls `Provide`, so no other host's series carry the attribute at all.
+
+- **One tag, not a collection** — a list would allocate per message on a path that runs once per
+  delivery, and there is exactly one fact that needs this. A second should force a rethink.
+- **Installed during host construction**, not at service start: the identity bootstrap and the
+  topology declaration both send before the election runs.
+- **Read live per measurement**, so a demoted replica credits its next send to the follower it now
+  is. A value captured at install time would credit a demoted replica's work to the leader forever.
+- **Cost:** the series count for those instruments doubles, since a flip ends one series and begins
+  another. Bounded, and it is what makes the leader/follower split a single query.
+
+Verified live: `step-outcome` consumed split `follower=33, leader=11` across three replicas, with
+processor series carrying no `role` key. Note that after a rollout each instance briefly shows both a
+tagged and an untagged series — StatefulSet pod names are stable, so the previous process's series
+share the instance id until they age out.
