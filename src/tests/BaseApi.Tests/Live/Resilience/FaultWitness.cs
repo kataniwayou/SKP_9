@@ -1,12 +1,18 @@
 namespace BaseApi.Tests.Live.Resilience;
 
-/// <summary>Which dependency a scenario takes away.</summary>
+/// <summary>Which dependency, or which worker, a scenario takes away.</summary>
 internal enum FaultKind
 {
     None,
     Redis,
     Rabbit,
     Both,
+
+    /// <summary>The processor deployment scaled to zero. Its arrival edge needs a service filter.</summary>
+    Processor,
+
+    /// <summary>The orchestrator statefulset scaled to zero. Both its edges are role-unique.</summary>
+    Orchestrator,
 }
 
 /// <summary>
@@ -44,7 +50,7 @@ internal static class FaultWitness
         var heal = HealTemplates(kind);
 
         var records = await reader.ReadTemplateRecordsAsync(
-            [.. arrival, .. heal], injectedAt, searchTo, ct);
+            [.. arrival, .. heal], injectedAt, searchTo, ServiceFor(kind), ct);
 
         var arrived = records
             .Where(r => arrival.Contains(r.Template, StringComparer.Ordinal))
@@ -82,6 +88,8 @@ internal static class FaultWitness
         FaultKind.Both =>
             [Templates.GateClosed, Templates.StoreUnreachable,
              Templates.ChannelShutDown, Templates.ConsumptionPaused],
+        FaultKind.Processor => [Templates.HostShuttingDown],
+        FaultKind.Orchestrator => [Templates.SchedulerShuttingDown, Templates.HostShuttingDown],
         _ => [],
     };
 
@@ -91,6 +99,20 @@ internal static class FaultWitness
         FaultKind.Rabbit => [Templates.ConnectionRecovered, Templates.ConsumptionAdmitted],
         FaultKind.Both =>
             [Templates.GateOpen, Templates.ConnectionRecovered, Templates.ConsumptionAdmitted],
+        FaultKind.Processor => [Templates.ProcessorLoopsRetired, Templates.ConsumptionAdmitted],
+        FaultKind.Orchestrator => [Templates.OrchestratorHydrated],
         _ => [],
     };
+
+    /// <summary>
+    /// The service whose records witness this fault, or null to search every service.
+    /// <para>
+    /// Only the processor needs one. Its arrival edge is a framework template every service emits,
+    /// so an unscoped match would witness whichever process happened to restart. The orchestrator's
+    /// own edges are role-unique — Quartz and the hydration record run nowhere else — so it is
+    /// searched unscoped, and a filter there would only add a way to be wrong.
+    /// </para>
+    /// </summary>
+    private static string? ServiceFor(FaultKind kind) =>
+        kind == FaultKind.Processor ? Chaos.ProcessorService : null;
 }
