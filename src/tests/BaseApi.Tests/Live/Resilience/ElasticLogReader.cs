@@ -32,9 +32,16 @@ internal sealed class ElasticLogReader
     public ElasticLogReader(HttpClient http) => _http = http ?? throw new ArgumentNullException(nameof(http));
 
     /// <summary>
-    /// Every record of every run of one workflow in a window. Filtering on WorkflowId is safe:
-    /// all 77 records of a complete run carry it, including the entry dispatch, whose own scope
-    /// leaves it empty but which is nested inside a fire scope that sets it.
+    /// Every record of every run of one workflow in a window.
+    /// <para>
+    /// Filtering on WorkflowId alone is not safe: the orchestration control-plane endpoints (start,
+    /// stop) log a line carrying WorkflowId too, and each HTTP request is stamped with its own
+    /// request-scoped CorrelationId by CorrelationIdMiddleware — a WorkflowId-only query cannot tell
+    /// that apart from a run's CorrelationId, and each such request groups into a phantom "run" with
+    /// an empty ledger. The second filter, on <see cref="Templates.RunScoped"/>, restricts the query
+    /// to the templates an actual run's records can be, which excludes the control plane's own
+    /// request-scoped logging without excluding anything a real run emits.
+    /// </para>
     /// </summary>
     public Task<IReadOnlyList<LogRecord>> ReadRunRecordsAsync(
         Guid workflowId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct) =>
@@ -42,6 +49,7 @@ internal sealed class ElasticLogReader
             [
                 Range(from, to),
                 Term("attributes.WorkflowId", workflowId.ToString("D")),
+                Terms(Templates.RunScoped),
             ],
             ct);
 
@@ -57,10 +65,7 @@ internal sealed class ElasticLogReader
         SearchAsync(
             [
                 Range(from, to),
-                new Dictionary<string, object>
-                {
-                    ["terms"] = new Dictionary<string, object> { ["attributes.{OriginalFormat}"] = templates },
-                },
+                Terms(templates),
             ],
             ct);
 
@@ -156,6 +161,12 @@ internal sealed class ElasticLogReader
 
     private static Dictionary<string, object> Term(string field, string value) =>
         new() { ["term"] = new Dictionary<string, object> { [field] = value } };
+
+    private static Dictionary<string, object> Terms(IReadOnlyCollection<string> templates) =>
+        new()
+        {
+            ["terms"] = new Dictionary<string, object> { ["attributes.{OriginalFormat}"] = templates },
+        };
 
     private static Dictionary<string, object> Range(DateTimeOffset from, DateTimeOffset to) =>
         new()

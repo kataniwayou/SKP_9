@@ -23,43 +23,84 @@ public sealed class RunClassifierTests
     /// </summary>
     private static readonly DateTimeOffset StraddlingStart = T0 + TimeSpan.FromSeconds(155);
 
+    /// <summary>No process-scoped excuses observed anywhere in the window -- the common case.</summary>
+    private static readonly IReadOnlyList<string> NoWindowExcuses = [];
+
     [Fact]
     public void ACompleteRunIsComplete()
     {
         var records = Run(T0, complete: true);
 
-        var classification = RunClassifier.Classify(Ledger(records), records, Window);
+        var classification = RunClassifier.Classify(Ledger(records), records, Window, NoWindowExcuses);
 
         Assert.Equal(RunVerdict.Complete, classification.Verdict);
     }
 
     /// <summary>
-    /// Obligation 1 of the spec: a run that never met the fault has no excuse, and an excuse record
-    /// on it does not buy one. Zero tolerance outside the window is what stops a scenario passing
-    /// because the pipeline was quietly broken the whole time.
+    /// Obligation 1 of the spec: a run that never met the fault has no excuse, and a run-scoped
+    /// excuse record on it does not buy one. Zero tolerance outside the window is what stops a
+    /// scenario passing because the pipeline was quietly broken the whole time.
     /// </summary>
     [Fact]
     public void AShortRunClearOfTheWindowIsUnaccountedEvenWithAnExcuse()
     {
-        var records = Run(T0, complete: false, excuse: Templates.StoreUnreachable);
+        var records = Run(T0, complete: false, excuse: Templates.EntryDispatchSendFailed);
 
-        var classification = RunClassifier.Classify(Ledger(records), records, Window);
+        var classification = RunClassifier.Classify(Ledger(records), records, Window, NoWindowExcuses);
 
         Assert.False(classification.Straddles);
         Assert.Equal(RunVerdict.Unaccounted, classification.Verdict);
     }
 
+    /// <summary>
+    /// Obligation 1 applies to both excuse tiers: a process-scoped excuse present somewhere in the
+    /// window is no more use to a run clear of that window than a run-scoped one is.
+    /// </summary>
     [Fact]
-    public void AShortRunStraddlingTheWindowWithAnExcuseIsAccounted()
+    public void AShortRunClearOfTheWindowIsUnaccountedEvenWithAWindowExcuse()
+    {
+        var records = Run(T0, complete: false);
+
+        var classification = RunClassifier.Classify(
+            Ledger(records), records, Window, [Templates.StoreUnreachable]);
+
+        Assert.False(classification.Straddles);
+        Assert.Equal(RunVerdict.Unaccounted, classification.Verdict);
+    }
+
+    /// <summary>
+    /// A run-scoped excuse: logged inside a handler, so it rides the run's own CorrelationId and
+    /// names that run specifically.
+    /// </summary>
+    [Fact]
+    public void AShortRunStraddlingTheWindowWithARunScopedExcuseIsAccounted()
     {
         var records = Run(StraddlingStart, complete: false,
-            excuse: Templates.StoreUnreachable);
+            excuse: Templates.EntryDispatchSendFailed);
 
-        var classification = RunClassifier.Classify(Ledger(records), records, Window);
+        var classification = RunClassifier.Classify(Ledger(records), records, Window, NoWindowExcuses);
 
         Assert.True(classification.Straddles);
         Assert.Equal(RunVerdict.Accounted, classification.Verdict);
-        Assert.Contains(Templates.StoreUnreachable, classification.Excuses);
+        Assert.Contains(Templates.EntryDispatchSendFailed, classification.Excuses);
+    }
+
+    /// <summary>
+    /// A process-scoped excuse: never on the run's own records, because GatedQueueConsumer logs it
+    /// above the deserialization boundary. It still accounts for the run, by corroborating the
+    /// window the run straddles rather than naming the run itself.
+    /// </summary>
+    [Fact]
+    public void AShortRunStraddlingTheWindowWithOnlyAWindowExcuseIsAccounted()
+    {
+        var records = Run(StraddlingStart, complete: false);
+
+        var classification = RunClassifier.Classify(
+            Ledger(records), records, Window, [Templates.StoreUnreachable]);
+
+        Assert.True(classification.Straddles);
+        Assert.Equal(RunVerdict.Accounted, classification.Verdict);
+        Assert.Contains($"window: {Templates.StoreUnreachable}", classification.Excuses);
     }
 
     [Fact]
@@ -67,7 +108,7 @@ public sealed class RunClassifierTests
     {
         var records = Run(StraddlingStart, complete: false);
 
-        var classification = RunClassifier.Classify(Ledger(records), records, Window);
+        var classification = RunClassifier.Classify(Ledger(records), records, Window, NoWindowExcuses);
 
         Assert.True(classification.Straddles);
         Assert.Equal(RunVerdict.Unaccounted, classification.Verdict);
@@ -84,7 +125,7 @@ public sealed class RunClassifierTests
             .Append(Record(StraddlingStart + TimeSpan.FromSeconds(5), Templates.EntryStepCompleted, result))
             .ToList();
 
-        var classification = RunClassifier.Classify(Ledger(records), records, Window);
+        var classification = RunClassifier.Classify(Ledger(records), records, Window, NoWindowExcuses);
 
         Assert.Equal(RunVerdict.Accounted, classification.Verdict);
     }
@@ -96,7 +137,7 @@ public sealed class RunClassifierTests
             .Append(Record(StraddlingStart + TimeSpan.FromSeconds(5), Templates.EntryStepCompleted, "Completed"))
             .ToList();
 
-        var classification = RunClassifier.Classify(Ledger(records), records, Window);
+        var classification = RunClassifier.Classify(Ledger(records), records, Window, NoWindowExcuses);
 
         Assert.Equal(RunVerdict.Unaccounted, classification.Verdict);
     }
@@ -105,9 +146,10 @@ public sealed class RunClassifierTests
     [Fact]
     public void UnderNoFaultAShortRunIsAlwaysUnaccounted()
     {
-        var records = Run(T0, complete: false, excuse: Templates.StoreUnreachable);
+        var records = Run(T0, complete: false, excuse: Templates.EntryDispatchSendFailed);
 
-        var classification = RunClassifier.Classify(Ledger(records), records, FaultWindow.None);
+        var classification = RunClassifier.Classify(
+            Ledger(records), records, FaultWindow.None, NoWindowExcuses);
 
         Assert.False(classification.Straddles);
         Assert.Equal(RunVerdict.Unaccounted, classification.Verdict);
