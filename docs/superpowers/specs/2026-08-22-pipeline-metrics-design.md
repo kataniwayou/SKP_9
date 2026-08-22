@@ -194,10 +194,28 @@ into one attribute — see §5.2.
 | `DeliveryDisposition.RequeueAndTrip` | `requeued` | `store_unreachable` |
 | `DeliveryDisposition.Requeue` | `requeued` | `send_failed` |
 | `DeliveryDisposition.Park` (the `default` arm) | `parked` | `refused` |
+| an exception escapes `OnReceivedAsync` entirely | `requeued` | `escaped` |
 
 Two attributes rather than one compound value, so that "how many deliveries were
 not acked" is a filter on `disposition` and "why" is a drill-down on `reason`,
 without either query needing to know the other's vocabulary.
+
+**`escaped` was added during implementation, and it closes a hole this section
+originally had.** Five paths can throw out of `OnReceivedAsync` without reaching
+any arm above — `_gate.TripAsync()` failing, `SafeNackAsync` throwing outside
+its own catch filter, a null `BasicProperties`, `ea.Body.ToArray()`, and the
+entry `LogDebug`. The first is concretely reachable: `L2Gate.SetAsync` invokes
+`StateChanged` synchronously, `GatedQueueConsumer.OnGateChanged` catches only
+`SemaphoreFullException`, and `_wake` is disposed in `StopAsync` — so an
+`ObjectDisposedException` escapes the trip. Because this method is a RabbitMQ
+event callback, the client library swallows the escape, so those deliveries were
+silently unmeasured in exactly the shutdown-and-outage window the conservation
+query in §7 exists for.
+
+`requeued` is the honest disposition: the broker was never told, so it will
+redeliver. The measurement is taken behind a `recorded` flag and the original
+exception is rethrown with a bare `throw;` — the escape still escapes, so
+control flow is unchanged and only the observation is new.
 
 Missing type header and no registered handler both throw and land on
 `parked` / `refused`, which is correct: both are properties of the message.
