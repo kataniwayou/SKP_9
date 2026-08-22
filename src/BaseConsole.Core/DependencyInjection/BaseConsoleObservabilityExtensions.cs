@@ -1,5 +1,7 @@
 using BaseConsole.Core.Configuration;
+using BaseConsole.Core.Gating;
 using BaseConsole.Core.Messaging;
+using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -127,6 +129,14 @@ public static class BaseConsoleObservabilityExtensions
                     // and metrics disagreeing about what service.name means.
                     .AddService(serviceName: name, serviceVersion: version)
                     .AddAttributes(metricAttrs))
+                // The whole consistency mechanism in three lines: both the orchestrator host and
+                // every processor host already call this method, so both roles emit the same
+                // instruments and a new worker cannot ship without them. The names come from
+                // constants rather than literals because a typo here produces no error and no
+                // metrics.
+                .AddMeter(EgressMeter.Name)
+                .AddMeter(IngressMetrics.MeterName)
+                .AddMeter(L2GateMetrics.MeterName)
                 // No ASP.NET Core or HttpClient instrumentation: a worker's only inbound surface is
                 // its own health probes, so those would measure nothing but the probing.
                 .AddRuntimeInstrumentation()

@@ -4,6 +4,12 @@ using RabbitMQ.Client.Exceptions;
 
 namespace Messaging.Transport;
 
+/// <summary>The egress meter's name, public so the console host can register it. See <see cref="EgressMetrics"/>.</summary>
+public static class EgressMeter
+{
+    public const string Name = "Messaging.Transport";
+}
+
 /// <summary>
 /// Pipeline metrics for the egress half: one measurement per message handed to the broker, on both
 /// send primitives, with the broker's confirmation inside the measured window.
@@ -27,7 +33,7 @@ internal static class EgressMetrics
     /// constant rather than a literal in two places, because a typo produces no error and no
     /// metrics.
     /// </summary>
-    internal const string MeterName = "Messaging.Transport";
+    internal const string MeterName = EgressMeter.Name;
 
     /// <summary>Addressed to a queue through the default exchange — <see cref="QueueSender"/>.</summary>
     internal const string RouteQueue = "queue";
