@@ -1,11 +1,13 @@
 using BaseConsole.Core.DependencyInjection;
 using BaseProcessor.Core.Boot;
 using BaseProcessor.Core.DependencyInjection;
+using BaseProcessor.Core.Observability;
 using Messaging.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry.Metrics;
 
 namespace Processor.Sample;
 
@@ -85,6 +87,11 @@ public static class ProcessorHost
             serviceName: identity.Name,
             serviceVersion: identity.Version,
             resourceAttributes: [new ResourceAttribute("ProcessorId", "processorId", identity.Id.ToString())]);
+
+        // A second WithMetrics on the same OpenTelemetryBuilder adds to the provider the shared
+        // call configured rather than replacing it.
+        builder.Services.AddOpenTelemetry()
+            .WithMetrics(m => m.AddMeter(ProcessorPipelineMeter.Name));
 
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);

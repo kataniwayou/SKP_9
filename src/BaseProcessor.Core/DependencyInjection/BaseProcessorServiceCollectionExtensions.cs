@@ -7,6 +7,7 @@ using BaseProcessor.Core.Health;
 using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Liveness;
 using BaseProcessor.Core.Messaging;
+using BaseProcessor.Core.Observability;
 using BaseProcessor.Core.Processing;
 using BaseProcessor.Core.Startup;
 using Messaging.Contracts;
@@ -101,6 +102,9 @@ public static class BaseProcessorServiceCollectionExtensions
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IProcessorContext, ProcessorContext>();
+
+        // Hosted purely so the container constructs it; see the type's own remarks.
+        services.AddHostedService<ProcessorPipelineMetricsHost>();
         // No ISourceHashProvider here. The hash answers one question — "which row is mine" — and that
         // is settled before this container exists; Stage 1 registers its own inside the boot. A copy
         // here would resolve for nobody while reading like a live dependency.

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using BaseProcessor.Core.Identity;
+using BaseProcessor.Core.Observability;
 using BaseProcessor.Core.Validation;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
@@ -171,6 +172,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
                 // With execution blobs carrying no TTL, this branch now has exactly two readings, not
                 // three: reclaimed, or never written. It can no longer mean expired.
                 _logger.LogInformation("entry absent — treating as a duplicate delivery");
+                ProcessorPipelineMetrics.RecordDuplicateSuppressed();
                 return;
             }
 
