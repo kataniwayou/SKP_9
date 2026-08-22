@@ -384,11 +384,23 @@ sum(rate(pipeline_messages_consumed_total{disposition=~"requeued|parked"}[5m])
 sum(rate(pipeline_messages_consumed_total{disposition="acked",landed="false"}[5m]))
 
 # is anything listening
-min(pipeline_consumer_consuming) by (service_name, queue)
+min(pipeline_consumer_consuming_ratio) by (service_name, queue)
 
 # why the pipeline stopped, in one panel
-pipeline_gate_open / pipeline_leader / pipeline_hydration_admitted / pipeline_identity_ready
+pipeline_gate_open_ratio / pipeline_leader_ratio
+  / pipeline_hydration_admitted_ratio / pipeline_identity_ready_ratio
 ```
+
+### 7.1 Gauge names carry a `_ratio` suffix in Prometheus
+
+Every gauge here declares unit `1`, and the OpenTelemetry Prometheus exporter
+appends `_ratio` to the exported name for that unit. So the series are
+`pipeline_gate_open_ratio`, `pipeline_leader_ratio`,
+`pipeline_hydration_admitted_ratio`, `pipeline_identity_ready_ratio` and
+`pipeline_consumer_consuming_ratio` — the instrument names above are what the
+code creates, not what a dashboard queries. Verified against the live stack;
+an earlier draft of §7 queried the unsuffixed names and would have matched
+nothing. Counters and histograms are unaffected (`_total`, `_seconds_*`).
 
 ## 8. Cardinality
 
