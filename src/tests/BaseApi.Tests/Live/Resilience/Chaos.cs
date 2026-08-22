@@ -46,3 +46,19 @@ internal static class Chaos
     /// </summary>
     public static string ProcessorService => RealStack.Get("SKP_PROCESSOR_SERVICE", "sample-proc-v9");
 }
+
+/// <summary>
+/// Serialises every chaos scenario against every other one.
+/// <para>
+/// <b>This is a safety mechanism, not a tidiness one.</b> These scenarios pause Redis and scale
+/// Redis, RabbitMQ, the processor deployment and the orchestrator StatefulSet to zero. Run
+/// concurrently they would race five independent restore paths across the same objects, and every
+/// soak drives the same workflow through the same start/stop endpoints, so each one's opening stop
+/// and drain check would fight the others. The trait alone cannot prevent that: this runner accepts
+/// a --filter and silently ignores it, so the collection is what actually enforces the ordering.
+/// </para>
+/// </summary>
+[CollectionDefinition(Chaos.Category, DisableParallelization = true)]
+public sealed class ChaosCollection
+{
+}

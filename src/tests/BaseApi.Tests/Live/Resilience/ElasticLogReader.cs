@@ -123,15 +123,26 @@ internal sealed class ElasticLogReader
     {
         var records = new List<LogRecord>();
         object[]? searchAfter = null;
+        long reportedTotal;
 
         while (true)
         {
             var body = new Dictionary<string, object>
             {
                 ["size"] = PageSize,
+                // Without this, hits.total is capped and reported as a lower-bound ("gte") rather
+                // than an exact count above 10,000 -- which would make the completeness check below
+                // compare the collected count against a number that was never exact to begin with.
+                ["track_total_hits"] = true,
                 ["sort"] = new object[]
                 {
                     new Dictionary<string, object> { ["@timestamp"] = "asc" },
+                    // Tie-breaks on _doc, which is stable only within a shard -- fine today, on a
+                    // single shard, but Chaos.LogIndex is a data stream, and after a rollover the
+                    // search spans multiple backing indices, each with its own _doc ordering. The
+                    // completeness check below (collected count vs. hits.total.value) is exactly what
+                    // would catch that breaking: a rollover-induced gap would show up as a page that
+                    // silently dropped or duplicated records, and the count would no longer match.
                     new Dictionary<string, object> { ["_doc"] = "asc" },
                 },
                 ["_source"] = SourceFields,
@@ -146,10 +157,13 @@ internal sealed class ElasticLogReader
             using var response = await PostAsync($"/{Chaos.LogIndex}/_search", body, ct);
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
 
-            var hits = document.RootElement.GetProperty("hits").GetProperty("hits");
+            var hitsElement = document.RootElement.GetProperty("hits");
+            reportedTotal = hitsElement.GetProperty("total").GetProperty("value").GetInt64();
+
+            var hits = hitsElement.GetProperty("hits");
             if (hits.GetArrayLength() == 0)
             {
-                return records;
+                break;
             }
 
             JsonElement last = default;
@@ -165,6 +179,20 @@ internal sealed class ElasticLogReader
             searchAfter = last.GetProperty("sort").EnumerateArray()
                 .Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())!).ToArray();
         }
+
+        // A dropped page reads as lost steps, or -- at a page boundary -- as a run that quietly loses
+        // records, either of which would masquerade as a real finding rather than a plumbing bug. No
+        // verdict built from an incomplete read can be trusted, so this throws rather than returning a
+        // partial list.
+        if (records.Count != reportedTotal)
+        {
+            throw new InvalidOperationException(
+                $"paged search collected {records.Count} record(s) but elasticsearch reported "
+                + $"{reportedTotal} matching the query. The window was read incompletely, and no "
+                + "verdict built from it can be trusted.");
+        }
+
+        return records;
     }
 
     private async Task<HttpResponseMessage> PostAsync(

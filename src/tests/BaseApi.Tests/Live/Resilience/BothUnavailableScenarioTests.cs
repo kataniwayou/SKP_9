@@ -17,6 +17,7 @@ namespace BaseApi.Tests.Live.Resilience;
 /// </para>
 /// </summary>
 [Trait("Category", Chaos.Category)]
+[Collection(Chaos.Category)]
 public sealed class BothUnavailableScenarioTests
 {
     [Fact]

@@ -104,7 +104,14 @@ internal static class OrchestrationSoak
             // Safe even when the start above never ran or never landed: stopping a workflow that
             // isn't running is idempotent -- 202 Accepted, with the orchestrator logging that it
             // wasn't holding it.
-            await StopWorkflowAsync(http, ct);
+            //
+            // A fresh, short-budget token here rather than the scenario's own ct: if the scenario was
+            // cancelled or timed out, ct is already cancelled and passing it through would make this
+            // call throw immediately -- skipping the one stop this finally exists to guarantee, and
+            // leaving the workflow firing every thirty seconds. ClusterControl's release path takes
+            // the same precaution for the same reason.
+            using var stop = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+            await StopWorkflowAsync(http, stop.Token);
         }
 
         var stoppedAt = DateTimeOffset.UtcNow;
