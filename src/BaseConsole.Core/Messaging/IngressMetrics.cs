@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
@@ -33,6 +34,70 @@ internal static class IngressMetrics
         "pipeline.process.duration",
         unit: "s",
         description: "Time spent inside the message handler. Recorded only when a handler ran.");
+
+    private static readonly UpDownCounter<long> Inflight = Meter.CreateUpDownCounter<long>(
+        "pipeline.consumer.inflight",
+        unit: "{message}",
+        description: "Deliveries currently inside a handler. Read against PrefetchCount for saturation.");
+
+    private static readonly Counter<long> ChannelResets = Meter.CreateCounter<long>(
+        "pipeline.consumer.channel.resets",
+        unit: "1",
+        description: "Times the delivery numbering was invalidated, by cause. The reason landed=false happens.");
+
+    /// <summary>
+    /// Every live consumer's subscription state, keyed by the queue it reads.
+    /// <para>
+    /// <b>This registry exists so there is ONE observable instrument rather than one per
+    /// consumer.</b> An orchestrator holds three <see cref="GatedQueueConsumer"/> singletons, and
+    /// three instruments sharing a name on one meter resolve to a single metric stream in the
+    /// OpenTelemetry SDK — which warns about the duplicates and may drop them. An observable
+    /// callback is allowed to return many measurements, so one gauge over a registry is the shape
+    /// that reports all three.
+    /// </para>
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, Func<bool>> Consumers = new(StringComparer.Ordinal);
+
+    static IngressMetrics()
+    {
+        // Registered once, in the static constructor, because an observable created more than once
+        // is the duplicate-stream hazard the registry above exists to avoid. The returned instrument
+        // is intentionally not stored: the Meter owns it and the callback keeps it alive.
+        Meter.CreateObservableGauge(
+            "pipeline.consumer.consuming",
+            ObserveConsuming,
+            unit: "1",
+            description: "1 while a consumer holds its subscription, 0 while it is paused.");
+    }
+
+    /// <summary>
+    /// Report this queue's subscription state until <see cref="UntrackConsumer"/> is called.
+    /// Re-registering the same queue replaces the previous delegate rather than adding a second.
+    /// </summary>
+    internal static void TrackConsumer(string queue, Func<bool> isConsuming) =>
+        Consumers[queue] = isConsuming;
+
+    /// <summary>
+    /// Stop reporting a queue. Without this a stopped consumer's last value would persist, and a
+    /// stale 1 reads as "something is listening" for a queue nothing is reading.
+    /// </summary>
+    internal static void UntrackConsumer(string queue) => Consumers.TryRemove(queue, out _);
+
+    private static IEnumerable<Measurement<int>> ObserveConsuming() =>
+        Consumers.Select(entry => new Measurement<int>(
+            entry.Value() ? 1 : 0,
+            new KeyValuePair<string, object?>("queue", entry.Key)));
+
+    /// <summary>Move the in-flight count for one queue. Always paired: +1 on entry, -1 in a finally.</summary>
+    internal static void AddInflight(string queue, int delta) =>
+        Inflight.Add(delta, new KeyValuePair<string, object?>("queue", queue));
+
+    /// <summary>
+    /// Count one invalidation of the delivery numbering. <paramref name="reason"/> is
+    /// <c>shutdown</c>, <c>recovered</c> or <c>reopened</c>.
+    /// </summary>
+    internal static void RecordChannelReset(string queue, string reason) =>
+        ChannelResets.Add(1, new TagList { { "queue", queue }, { "reason", reason } });
 
     /// <summary>
     /// One delivery, one measurement.
