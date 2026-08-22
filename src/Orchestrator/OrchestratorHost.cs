@@ -9,10 +9,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Metrics;
 using Orchestrator.Election;
 using Orchestrator.Hydration;
 using Orchestrator.L1;
 using Orchestrator.Messaging;
+using Orchestrator.Observability;
 using Orchestrator.Scheduling;
 using Quartz;
 
@@ -88,6 +90,12 @@ public static class OrchestratorHost
         builder.Services.AddSingleton(instanceId);
 
         builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+
+        // A second WithMetrics on the same OpenTelemetryBuilder adds to the provider the shared
+        // call configured rather than replacing it. The role meter is added here rather than
+        // inside AddBaseConsoleObservability so that method's contract stays role-agnostic.
+        builder.Services.AddOpenTelemetry()
+            .WithMetrics(m => m.AddMeter(OrchestratorPipelineMetrics.MeterName));
 
         // The broker and Redis clients, and the health surface every console carries regardless of
         // what it does. Redis is required here — not merely by convention — because
@@ -177,6 +185,9 @@ public static class OrchestratorHost
         builder.Services.AddSingleton<HydrationAdmission>();
         builder.Services.AddSingleton<IConsumerAdmission>(
             sp => sp.GetRequiredService<HydrationAdmission>());
+
+        // Hosted purely so the container constructs it; see the type's own remarks.
+        builder.Services.AddHostedService<OrchestratorPipelineMetrics>();
 
         builder.Services.AddKeyedSingleton<ILoopHeartbeat>(
             HydrationLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));

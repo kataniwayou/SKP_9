@@ -1,4 +1,5 @@
-﻿using BaseConsole.Core.DependencyInjection;
+﻿using BaseApi.Tests.Support;
+using BaseConsole.Core.DependencyInjection;
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
@@ -324,5 +325,36 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
         using var scope = _host.Services.CreateScope();
 
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<WorkflowFireJob>());
+    }
+
+    [Fact]
+    public void EachOfTheThreeConsumersReportsItsOwnQueueOnTheConsumingGauge()
+    {
+        // The counterpart to EveryQueueThisReplicaReadsHasAConsumerOfItsOwn, and it catches the
+        // failure that test cannot: three consumers each creating their own gauge with one shared
+        // name would collapse to a single metric stream in the SDK, and two of the three queues
+        // would silently stop being reported. One instrument over a registry is what stops that.
+        //
+        // Not an exact count: IngressMetrics' consumer registry is process-wide static state, and
+        // xUnit runs test classes in one process, so consumers this test process built for
+        // "some-queue" elsewhere (IngressMetricsTests) are still tracked when this test runs. An
+        // exact Assert.Equal(3, ...) would fail on ordering rather than on a defect. The failure
+        // this test actually guards against -- three instruments collapsing into one metric stream
+        // -- manifests as FEWER of these three specific queues being reported, so asserting their
+        // presence still catches it.
+        _ = _host.Services.GetServices<IHostedService>().OfType<GatedQueueConsumer>().ToList();
+
+        using var metrics = new MetricCollector("BaseConsole.Core.Messaging");
+        metrics.Collect();
+
+        var queues = metrics.For("pipeline.consumer.consuming")
+            .Select(m => m.Tags["queue"])
+            .Distinct()
+            .ToList();
+
+        Assert.Contains(OrchestratorFanout.PerReplica(
+            _host.Services.GetRequiredService<InstanceId>().Value), queues);
+        Assert.Contains(OrchestratorQueues.Result, queues);
+        Assert.Contains(OrchestratorQueues.ResultPost, queues);
     }
 }
