@@ -6,25 +6,42 @@ using OpenTelemetry.Logs;
 namespace BaseProcessor.Core.Observability;
 
 /// <summary>
-/// Puts <c>ProcessorId</c> and <c>IdentityName</c> on every record this process emits, including the
-/// ones with no message scope around them — the startup loops and the liveness heartbeat, which are
-/// exactly the records an operator reads when a processor will not become ready.
+/// <b>NOT REGISTERED, and it should stay that way — because both values it adds are already there,
+/// not because wiring it is hard.</b>
 /// <para>
-/// <b>Wired from the host, not from the shared observability extension.</b> An earlier version of
-/// this comment said registering it required adding a caller-supplied log-processor seam to
-/// <c>AddBaseConsoleObservability</c>, because a <see cref="LogRecord"/> processor is added through
-/// <c>OpenTelemetryLoggerOptions.AddProcessor</c> inside the callback that method owns. That was
-/// wrong. <c>ConfigureOpenTelemetryLoggerProvider</c> is a services-side registration that
-/// configures the same provider after the fact, so the host adds this in two lines and the shared
-/// extension is untouched. The objection that <c>BaseConsole.Core</c> must not reference
-/// <c>BaseProcessor.Core</c> does not bite either: the call is made from the processor host, which
-/// already references both.
+/// <c>ProcessorId</c> is a RESOURCE attribute on every record this process emits, set by
+/// <c>ProcessorHost</c> from the resolved identity. That is the correct home for it: the two-stage
+/// boot builds the host only after discovery succeeds, so the id is known when the resource is
+/// materialised and cannot change afterwards — which is precisely the condition a resource
+/// attribute requires. Adding it per record produces a second copy of a value that is already on
+/// all of them. Measured against the live stack: 164 of 164 records carried the resource attribute.
 /// </para>
 /// <para>
-/// <b>Null-safe by design: before identity resolves it adds nothing</b> rather than adding
+/// <c>IdentityName</c> is <c>{Name}_{Version}</c>, which the resource already carries as
+/// <c>service.name</c> and <c>service.version</c>. One string instead of two is not worth a
+/// per-record attribute.
+/// </para>
+/// <para>
+/// <b>Contrast with <c>OrchestratorRoleLogEnricher</c>, which is registered.</b> That one exists
+/// because leadership CHANGES while the process runs, so it cannot live on a frozen resource and a
+/// log-record processor is the only place to stamp it. The test for "does this value move" is what
+/// decides between the two homes, and <c>ProcessorId</c> does not move.
+/// </para>
+/// <para>
+/// An earlier version of this comment claimed registering it required a new caller-supplied seam in
+/// <c>AddBaseConsoleObservability</c>. That was wrong — <c>ConfigureOpenTelemetryLoggerProvider</c>
+/// configures that provider from the host in two lines — but the correction does not matter, since
+/// the reason not to register it was never difficulty.
+/// </para>
+/// <para>
+/// It also cannot serve the case it was written for. The startup loops that log
+/// "no processor registered for source hash …" run in stage 1, BEFORE the telemetry host exists, so
+/// those records never reach the exporter at all — console only. Closing that means moving stage 1
+/// under the host, which no enricher can do.
+/// </para>
+/// <para>
+/// Null-safe by design: before identity resolves it adds nothing rather than adding
 /// <see cref="Guid.Empty"/>, because a zero id would read as a real processor that does not exist.
-/// This is the difference from <c>OrchestratorRoleLogEnricher</c>, whose value is never absent and
-/// which therefore carries no guard.
 /// </para>
 /// </summary>
 public sealed class ProcessorIdLogEnricher(IProcessorContext context) : BaseProcessor<LogRecord>
