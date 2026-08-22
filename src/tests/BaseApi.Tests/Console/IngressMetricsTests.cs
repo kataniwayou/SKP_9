@@ -139,8 +139,9 @@ public sealed class IngressMetricsTests
         // that also closes the gate -- the pause is at the broker rather than a redelivery burned
         // per message for the length of the outage.
         using var metrics = new MetricCollector(IngressMetrics.MeterName);
+        var gate = await GateAsync(open: true);
         var consumer = BuildConsumer(
-            await GateAsync(open: true),
+            gate,
             new Handler(() => throw new RedisConnectionException(
                 ConnectionFailureType.UnableToConnect, "down")));
 
@@ -149,6 +150,34 @@ public sealed class IngressMetricsTests
         var m = TheOnlyConsumedMeasurement(metrics);
         Assert.Equal("requeued", m.Tags["disposition"]);
         Assert.Equal("store_unreachable", m.Tags["reason"]);
+        Assert.False(gate.IsOpen);
+    }
+
+    [Fact]
+    public async Task AnExceptionThatEscapesTheHandlerPathIsRecordedAsEscapedAndStillPropagates()
+    {
+        // TripAsync invokes L2Gate.StateChanged synchronously, under its own mutex. A subscriber
+        // that throws -- concretely reachable in production via the wake semaphore this class
+        // disposes during shutdown, which races the RequeueAndTrip arm's own TripAsync call -- must
+        // not be swallowed: it has to keep escaping this ReceivedAsync callback exactly as it does
+        // today, and it must still be measured, because the RabbitMQ client library swallows
+        // whatever escapes silently.
+        using var metrics = new MetricCollector(IngressMetrics.MeterName);
+        var gate = await GateAsync(open: true);
+        gate.StateChanged += _ => throw new InvalidOperationException("subscriber blew up");
+
+        var consumer = BuildConsumer(
+            gate,
+            new Handler(() => throw new RedisConnectionException(
+                ConnectionFailureType.UnableToConnect, "down")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => consumer.OnReceivedAsync(this, Delivery()));
+
+        var m = TheOnlyConsumedMeasurement(metrics);
+        Assert.Equal("requeued", m.Tags["disposition"]);
+        Assert.Equal("escaped", m.Tags["reason"]);
+        Assert.Equal("false", m.Tags["landed"]);
     }
 
     [Fact]
@@ -211,10 +240,11 @@ public sealed class IngressMetricsTests
         Assert.Equal("parked", m.Tags["disposition"]);
         Assert.Equal("refused", m.Tags["reason"]);
         Assert.Equal(Queue, m.Tags["queue"]);
+        Assert.Equal("", m.Tags["type"]);
     }
 
     [Fact]
-    public async Task EveryRowReportsLandedFalseWhenThereIsNoChannel()
+    public async Task AnAckedRowReportsLandedFalseWhenThereIsNoChannel()
     {
         // The other half of the split. With no channel the acknowledgement cannot be issued, so
         // the broker will redeliver -- which is exactly the silent retry amplification `landed`
@@ -229,6 +259,21 @@ public sealed class IngressMetricsTests
     }
 
     [Fact]
+    public void LandedRendersAsTheLowerCaseStringTrueNotABooleanTrue()
+    {
+        // The half of `landed` that a hermetic test CAN reach: a live broker is needed to make
+        // SafeAckAsync/SafeNackAsync actually return true, but the string-rendering rule -- lower
+        // case literals, never a bool an exporter could print as "True" -- needs no broker at all.
+        using var metrics = new MetricCollector(IngressMetrics.MeterName);
+
+        IngressMetrics.RecordConsumed(
+            Queue, Type, "acked", "handled", landed: true, startedTimestamp: null);
+
+        var m = TheOnlyConsumedMeasurement(metrics);
+        Assert.Equal("true", m.Tags["landed"]);
+    }
+
+    [Fact]
     public async Task TheHandlerDurationIsRecordedOnlyWhenAHandlerRan()
     {
         // A gate_closed reject never enters a handler, so recording a duration for it would drag
@@ -236,6 +281,13 @@ public sealed class IngressMetricsTests
         using var closed = new MetricCollector(IngressMetrics.MeterName);
         await BuildConsumer(await GateAsync(open: false)).OnReceivedAsync(this, Delivery());
         Assert.Empty(closed.For("pipeline.process.duration"));
+
+        // Same reasoning for a parked-for-lacking-a-handler reject: the type is recognised as
+        // present, but nothing ever runs, so a duration sample here would be equally misleading.
+        using var unhandled = new MetricCollector(IngressMetrics.MeterName);
+        await BuildConsumer(await GateAsync(open: true))
+            .OnReceivedAsync(this, Delivery(type: "no-such-type"));
+        Assert.Empty(unhandled.For("pipeline.process.duration"));
 
         using var ran = new MetricCollector(IngressMetrics.MeterName);
         await BuildConsumer(await GateAsync(open: true), new Handler(() => Task.CompletedTask))
