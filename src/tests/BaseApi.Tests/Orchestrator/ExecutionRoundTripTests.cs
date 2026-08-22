@@ -248,6 +248,9 @@ public sealed class ExecutionRoundTripTests
     [Fact]
     public async Task AnOutcomeForAWorkflowThisReplicaDoesNotHoldIsRefused()
     {
+        // The "never held it" reading of an L1 miss -- an outcome naming a workflow this replica has
+        // no record of at all. The "held it and lost it" reading, which is the common one, is
+        // covered separately by the stopped-mid-flight test below.
         var h = new Harness(Step(A, PA, 1, "{}"));
         Seed(h, Entry, Output);
 
@@ -258,8 +261,16 @@ public sealed class ExecutionRoundTripTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => h.Deliver(MessageTypes.StepOutcome, foreign));
 
-        // Nothing was reclaimed on the way out: the message parks intact and the blob survives with it.
-        Assert.True(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+        // THE BLOB IS RECLAIMED ON THE WAY OUT, and this assertion is the reverse of what it used to
+        // be. A park is a nack with requeue:false: the message leaves for the dead-letter exchange
+        // and never comes back, so a blob left behind here is orphaned exactly as an acked one would
+        // be -- data: keys carry no TTL and no sweeper covers them.
+        //
+        // The cost of the reversal is that this dead-lettered message now names a key that no longer
+        // exists, so it can no longer be replayed by hand. That is deliberate: the execution is over
+        // either way, the next scheduled fire will meet the same condition and park again, and the
+        // difference is only whether the store grows every time it does.
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
     }
 
     [Fact]
@@ -391,5 +402,75 @@ public sealed class ExecutionRoundTripTests
 
         Assert.Equal(first, h.L2.Snapshot());
         Assert.Equal(2, h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Count());
+    }
+
+    // ------------------------------------------------- reclaim on every disposition that ends here
+
+    [Fact]
+    public async Task AnOutcomeForAWorkflowThisReplicaNoLongerHoldsIsParkedWithItsBlobReclaimed()
+    {
+        // The commonest way to reach this: the workflow was stopped while its steps were in flight,
+        // so ApplyStopHandler removed it from L1 and every outcome still on the wire lands here. A
+        // park is a nack with requeue:false -- the message leaves for the dead-letter exchange and
+        // never returns -- so without the reclaim this leaks one blob per in-flight step, forever.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        h.Store.Remove(W);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
+
+        // Parked AND reclaimed. The execution is abandoned either way; the next scheduled fire will
+        // most likely meet the same condition, but nothing accumulates while it does.
+        Assert.False(await h.L2.Db.KeyExistsAsync(L2ProjectionKeys.ExecutionData(Entry)));
+    }
+
+    [Fact]
+    public async Task ARequeuedOutcomeKeepsItsBlobBecauseTheRedeliveryStillNeedsIt()
+    {
+        // The other half of the rule, and the half that makes it safe: only a requeue-nack skips the
+        // reclaim. A transient send fault returns the delivery, and the replay re-reads this key --
+        // deleting it here would turn a recoverable blip into a step that silently never advances.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        h.Bus.FaultOn = type => type == MessageTypes.NextStepHandoff
+            ? new TransientSendException("broker blip", new IOException("reset"))
+            : null;
+
+        await Assert.ThrowsAsync<TransientSendException>(
+            () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
+
+        Assert.True(await h.L2.Db.KeyExistsAsync(L2ProjectionKeys.ExecutionData(Entry)));
+    }
+
+    [Fact]
+    public async Task ATerminalOutcomeReclaimsItsBlobAndSaysTheRunEndedThere()
+    {
+        // A step with no successor that accepts the result is the end of the run, and its blob has
+        // no reader left. It is also the one completion the orchestrator would otherwise record only
+        // as an absence -- no hand-off line is emitted, so the log has to say so itself.
+        var h = new Harness(Step(A, PA, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.False(await h.L2.Db.KeyExistsAsync(L2ProjectionKeys.ExecutionData(Entry)));
+        Assert.Contains(h.PreLog.Records, e => e.Message.Contains("the run ends here"));
+    }
+
+    [Fact]
+    public async Task AnEntryStepCompletionIsNamedAsOneInTheLog()
+    {
+        // The fire logs that it dispatched an entry step and then goes quiet. Without this the only
+        // evidence an entry step finished was a hand-off naming its successor -- and an entry step
+        // that is also terminal produced no such line at all.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Contains(h.PreLog.Records, e => e.Message.Contains("the entry step completed"));
     }
 }

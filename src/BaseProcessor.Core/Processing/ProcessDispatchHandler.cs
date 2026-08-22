@@ -261,6 +261,11 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         finally
         {
             _processor.EndDispatch();
+
+            // The same span the completion log below reports, and the same `ran` flag that decides
+            // whether the input is reclaimed — one timing, two readers, so the metric and the log can
+            // never disagree about how long the author took.
+            ProcessorPipelineMetrics.RecordProcessDuration(started, ran);
         }
 
         // The input is reclaimed HERE rather than in the post handler, and only after the author's

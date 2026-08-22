@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using BaseConsole.Core.Gating;
 using Messaging.Transport;
 using Microsoft.Extensions.DependencyInjection;
@@ -277,10 +276,10 @@ public sealed class GatedQueueConsumer : BackgroundService
 
         // Every branch below calls this instead of IngressMetrics.RecordConsumed directly, so the
         // outer catch can tell whether one of them already recorded before it adds its own.
-        void Record(string disposition, string reason, bool landed, long? startedTimestamp)
+        void Record(string disposition, string reason, bool landed)
         {
             recorded = true;
-            IngressMetrics.RecordConsumed(_options.Queue, type, disposition, reason, landed, startedTimestamp);
+            IngressMetrics.RecordConsumed(_options.Queue, type, disposition, reason, landed);
         }
 
         try
@@ -293,10 +292,7 @@ public sealed class GatedQueueConsumer : BackgroundService
             if (!_gate.IsOpen)
             {
                 var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
-
-                // No handler ran, so no duration: a near-zero sample here would make a paused consumer
-                // look fast.
-                Record("requeued", "gate_closed", landed, startedTimestamp: null);
+                Record("requeued", "gate_closed", landed);
                 return;
             }
 
@@ -314,7 +310,6 @@ public sealed class GatedQueueConsumer : BackgroundService
             // Null until a handler actually starts: a delivery parked for lacking a type or a handler
             // never entered one, and the duration histogram's own contract is "recorded only when a
             // handler ran."
-            long? started = null;
             IngressMetrics.AddInflight(_options.Queue, 1);
 
             // This delivery is now inside a handler (or about to be), so the inflight count must
@@ -341,8 +336,6 @@ public sealed class GatedQueueConsumer : BackgroundService
                         throw new InvalidOperationException("no handler is registered for this message type");
                     }
 
-                    started = Stopwatch.GetTimestamp();
-
                     // Deliberately not the delivery's own token: cancelling mid-handler would abandon a
                     // partially applied write with the message already claimed. Shutdown lets in-flight work
                     // finish and leaves unacknowledged deliveries to be redelivered.
@@ -363,7 +356,7 @@ public sealed class GatedQueueConsumer : BackgroundService
                             // that did broker work inside the notification would deadlock here.
                             await _gate.TripAsync().ConfigureAwait(false);
                             var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
-                            Record("requeued", "store_unreachable", landed, started);
+                            Record("requeued", "store_unreachable", landed);
                             break;
                         }
 
@@ -375,7 +368,7 @@ public sealed class GatedQueueConsumer : BackgroundService
                                 ex, "send failed while handling {Type} — returning message to {Queue}",
                                 type, _options.Queue);
                             var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
-                            Record("requeued", "send_failed", landed, started);
+                            Record("requeued", "send_failed", landed);
                             break;
                         }
 
@@ -386,7 +379,7 @@ public sealed class GatedQueueConsumer : BackgroundService
                             // never resolves, so the ambiguous case is deliberately resolved toward parking.
                             _logger.LogError(ex, "refusing message of type {Type} — parking", type);
                             var landed = await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
-                            Record("parked", "refused", landed, started);
+                            Record("parked", "refused", landed);
                             break;
                         }
                     }
@@ -399,7 +392,7 @@ public sealed class GatedQueueConsumer : BackgroundService
                 // rather than be reclassified by DeliveryClassifier as a handler failure — the message was
                 // already handled, and re-nacking an already-acked delivery would be its own bug.
                 var ackedLanded = await SafeAckAsync(ea, epoch).ConfigureAwait(false);
-                Record("acked", "handled", ackedLanded, started);
+                Record("acked", "handled", ackedLanded);
             }
             finally
             {
@@ -411,7 +404,7 @@ public sealed class GatedQueueConsumer : BackgroundService
             if (!recorded)
             {
                 IngressMetrics.RecordConsumed(
-                    _options.Queue, type, "requeued", "escaped", landed: false, startedTimestamp: null);
+                    _options.Queue, type, "requeued", "escaped", landed: false);
             }
 
             throw;

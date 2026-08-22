@@ -30,11 +30,6 @@ internal static class IngressMetrics
         unit: "{message}",
         description: "Deliveries handled, by queue, type, what was decided, and whether the broker was told.");
 
-    private static readonly Histogram<double> ProcessDuration = Meter.CreateHistogram<double>(
-        "pipeline.process.duration",
-        unit: "s",
-        description: "Time spent inside the message handler. Recorded only when a handler ran.");
-
     private static readonly UpDownCounter<long> Inflight = Meter.CreateUpDownCounter<long>(
         "pipeline.consumer.inflight",
         unit: "{message}",
@@ -102,14 +97,15 @@ internal static class IngressMetrics
     /// <summary>
     /// One delivery, one measurement.
     /// <para>
-    /// <paramref name="startedTimestamp"/> is null when no handler ran — a delivery rejected
-    /// because the gate was shut never entered one, and recording a near-zero duration for it would
-    /// make a paused consumer look fast.
+    /// <b>No duration here.</b> <c>pipeline.process.duration</c> used to be recorded alongside this
+    /// and measured the framework handler, which is the part that cannot vary — every hop it covers
+    /// is a fixed sequence of store reads and sends. It now lives on the processor and measures the
+    /// author's transform, the only span whose length is a property of someone's implementation
+    /// rather than of this framework. One instrument, on the side that can actually be slow.
     /// </para>
     /// </summary>
     internal static void RecordConsumed(
-        string queue, string type, string disposition, string reason, bool landed,
-        long? startedTimestamp)
+        string queue, string type, string disposition, string reason, bool landed)
     {
         var tags = new TagList
         {
@@ -123,17 +119,5 @@ internal static class IngressMetrics
         };
 
         Consumed.Add(1, tags);
-
-        if (startedTimestamp is { } started)
-        {
-            ProcessDuration.Record(
-                Stopwatch.GetElapsedTime(started).TotalSeconds,
-                new TagList
-                {
-                    { "queue", queue },
-                    { "type", type },
-                    { "disposition", disposition },
-                });
-        }
     }
 }
