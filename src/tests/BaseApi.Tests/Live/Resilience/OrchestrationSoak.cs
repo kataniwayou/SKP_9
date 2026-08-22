@@ -69,12 +69,18 @@ internal static class OrchestrationSoak
         await AssertDrainedAsync(reader, ct);
 
         var startedAt = DateTimeOffset.UtcNow;
-        await StartWorkflowAsync(http, ct);
 
         DateTimeOffset injectedAt;
 
         try
         {
+            // Start lives inside this try, not before it: if the start's POST lands server-side but
+            // the response is lost to a dropped port-forward or a client-side timeout, the exception
+            // still routes through this finally and stops the workflow. Without that, a lost response
+            // leaves the workflow firing every thirty seconds into whatever scenario runs next, and
+            // that scenario's AssertDrainedAsync fails for a reason invisible in its own run.
+            await StartWorkflowAsync(http, ct);
+
             await Task.Delay(InjectAt, ct);
 
             injectedAt = DateTimeOffset.UtcNow;
@@ -95,6 +101,9 @@ internal static class OrchestrationSoak
         }
         finally
         {
+            // Safe even when the start above never ran or never landed: stopping a workflow that
+            // isn't running is idempotent -- 202 Accepted, with the orchestrator logging that it
+            // wasn't holding it.
             await StopWorkflowAsync(http, ct);
         }
 
