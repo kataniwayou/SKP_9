@@ -1,0 +1,1903 @@
+[
+  {
+    "@timestamp": "1787388570019.994100",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Scheduling.WorkflowFireJob"
+    },
+    "attributes": {
+      "role": "leader",
+      "StepId": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched an entry step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5"
+    },
+    "body": {
+      "text": "dispatched an entry step"
+    }
+  },
+  {
+    "@timestamp": "1787388570020.205500",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570020.257700",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "Label": "Step_A",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5"
+    },
+    "body": {
+      "text": "config gives label Step_A and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570033.374500",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 13,
+      "StepId": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5"
+    },
+    "body": {
+      "text": "the step returned after 13ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570044.425700",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "cb62f76c-a553-4408-9d67-beecfc18c27b",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the entry step completed with {Result}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "Result": "Completed",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the entry step completed with Completed"
+    }
+  },
+  {
+    "@timestamp": "1787388570044.260800",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "StepId": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "cb62f76c-a553-4408-9d67-beecfc18c27b",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570054.336200",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+      "NextEntryId": "1e1d6e3f-14e3-4227-a5f6-877c5508a650",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "cb62f76c-a553-4408-9d67-beecfc18c27b",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "c04aa144-4abb-4856-9391-f13880b9b25c",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to c04aa144-4abb-4856-9391-f13880b9b25c on d033b408-8471-4c3d-8acf-3bee6164f01e with 1e1d6e3f-14e3-4227-a5f6-877c5508a650"
+    }
+  },
+  {
+    "@timestamp": "1787388570054.360400",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "role": "follower",
+      "StepId": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+      "SuccessorCount": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "cb62f76c-a553-4408-9d67-beecfc18c27b",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 1 successor(s) in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570067.932200",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "c04aa144-4abb-4856-9391-f13880b9b25c",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1e1d6e3f-14e3-4227-a5f6-877c5508a650",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570067.967400",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "c04aa144-4abb-4856-9391-f13880b9b25c",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1e1d6e3f-14e3-4227-a5f6-877c5508a650",
+      "Label": "Step_B",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_B and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570067.282400",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 12,
+      "role": "follower",
+      "StepId": "c04aa144-4abb-4856-9391-f13880b9b25c",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1e1d6e3f-14e3-4227-a5f6-877c5508a650",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 12ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570085.109000",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 17,
+      "StepId": "c04aa144-4abb-4856-9391-f13880b9b25c",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1e1d6e3f-14e3-4227-a5f6-877c5508a650",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 17ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570089.634200",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 5,
+      "StepId": "c04aa144-4abb-4856-9391-f13880b9b25c",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "5c98dfa4-e25f-456c-ad09-6d1f6ad68d5a",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 5ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570100.285200",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "leader",
+      "StepId": "c04aa144-4abb-4856-9391-f13880b9b25c",
+      "NextEntryId": "a4d509ee-8c26-4882-8eef-25f4b42ff769",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "5c98dfa4-e25f-456c-ad09-6d1f6ad68d5a",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to 5114e779-4843-4f1b-852e-538adbcf81f2 on d033b408-8471-4c3d-8acf-3bee6164f01e with a4d509ee-8c26-4882-8eef-25f4b42ff769"
+    }
+  },
+  {
+    "@timestamp": "1787388570100.312600",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "role": "leader",
+      "StepId": "c04aa144-4abb-4856-9391-f13880b9b25c",
+      "SuccessorCount": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "5c98dfa4-e25f-456c-ad09-6d1f6ad68d5a",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 1 successor(s) in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570116.544800",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 16,
+      "role": "follower",
+      "StepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "a4d509ee-8c26-4882-8eef-25f4b42ff769",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 16ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570117.354100",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "a4d509ee-8c26-4882-8eef-25f4b42ff769",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570117.391200",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "a4d509ee-8c26-4882-8eef-25f4b42ff769",
+      "Label": "Step_C",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_C and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570129.637000",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 12,
+      "StepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "a4d509ee-8c26-4882-8eef-25f4b42ff769",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 12ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570145.222600",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 16,
+      "StepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "afb267ab-871b-4612-bd75-e52d3c43ebb9",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 16ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570158.140600",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "NextEntryId": "2ece6663-2b12-428b-a447-e27bb7137c83",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "afb267ab-871b-4612-bd75-e52d3c43ebb9",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "c4231653-6b5f-4063-aaa1-05f871430b51",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to c4231653-6b5f-4063-aaa1-05f871430b51 on d033b408-8471-4c3d-8acf-3bee6164f01e with 2ece6663-2b12-428b-a447-e27bb7137c83"
+    }
+  },
+  {
+    "@timestamp": "1787388570165.301100",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "NextEntryId": "cf225ac9-2006-476a-b9eb-f724ebb89de3",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "afb267ab-871b-4612-bd75-e52d3c43ebb9",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to f79e81d5-2c35-4e6d-b2f7-32753a480c3c on d033b408-8471-4c3d-8acf-3bee6164f01e with cf225ac9-2006-476a-b9eb-f724ebb89de3"
+    }
+  },
+  {
+    "@timestamp": "1787388570165.336900",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 19,
+      "role": "follower",
+      "StepId": "5114e779-4843-4f1b-852e-538adbcf81f2",
+      "SuccessorCount": 2,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "afb267ab-871b-4612-bd75-e52d3c43ebb9",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 2 successor(s) in 19ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570171.462700",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "c4231653-6b5f-4063-aaa1-05f871430b51",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "2ece6663-2b12-428b-a447-e27bb7137c83",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570171.494400",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "c4231653-6b5f-4063-aaa1-05f871430b51",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "2ece6663-2b12-428b-a447-e27bb7137c83",
+      "Label": "Step_D2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_D2 and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570171.14200",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 12,
+      "role": "leader",
+      "StepId": "c4231653-6b5f-4063-aaa1-05f871430b51",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "2ece6663-2b12-428b-a447-e27bb7137c83",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 12ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570175.804500",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "role": "follower",
+      "StepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "cf225ac9-2006-476a-b9eb-f724ebb89de3",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570176.664800",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "cf225ac9-2006-476a-b9eb-f724ebb89de3",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570176.708400",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "cf225ac9-2006-476a-b9eb-f724ebb89de3",
+      "Label": "Step_D1",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_D1 and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570182.572200",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 11,
+      "StepId": "c4231653-6b5f-4063-aaa1-05f871430b51",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "2ece6663-2b12-428b-a447-e27bb7137c83",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 11ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570187.807600",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 11,
+      "StepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "cf225ac9-2006-476a-b9eb-f724ebb89de3",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 11ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570202.440800",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "StepId": "c4231653-6b5f-4063-aaa1-05f871430b51",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "536df982-cb6b-4d36-a68c-c75b1a4d7bf2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570206.557800",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 8,
+      "StepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1a25ee59-5c19-4a45-ae6b-0b6eea6918c2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 8ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570211.955600",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "c4231653-6b5f-4063-aaa1-05f871430b51",
+      "NextEntryId": "1b4ba9d4-0e34-4e1f-808a-65ada049be28",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "536df982-cb6b-4d36-a68c-c75b1a4d7bf2",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "be9f795a-48d3-425c-86a6-35265253d6af",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to be9f795a-48d3-425c-86a6-35265253d6af on d033b408-8471-4c3d-8acf-3bee6164f01e with 1b4ba9d4-0e34-4e1f-808a-65ada049be28"
+    }
+  },
+  {
+    "@timestamp": "1787388570211.981400",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 9,
+      "role": "follower",
+      "StepId": "c4231653-6b5f-4063-aaa1-05f871430b51",
+      "SuccessorCount": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "536df982-cb6b-4d36-a68c-c75b1a4d7bf2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 1 successor(s) in 9ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570220.888700",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "leader",
+      "StepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+      "NextEntryId": "0d1372e7-99b6-4f49-93cd-ec44162192a9",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1a25ee59-5c19-4a45-ae6b-0b6eea6918c2",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "0d2a759d-b2b8-4307-9945-659c048b039d",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to 0d2a759d-b2b8-4307-9945-659c048b039d on d033b408-8471-4c3d-8acf-3bee6164f01e with 0d1372e7-99b6-4f49-93cd-ec44162192a9"
+    }
+  },
+  {
+    "@timestamp": "1787388570220.910100",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 14,
+      "role": "leader",
+      "StepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+      "SuccessorCount": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1a25ee59-5c19-4a45-ae6b-0b6eea6918c2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 1 successor(s) in 14ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570226.410100",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 14,
+      "role": "follower",
+      "StepId": "be9f795a-48d3-425c-86a6-35265253d6af",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1b4ba9d4-0e34-4e1f-808a-65ada049be28",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 14ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570227.348000",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "be9f795a-48d3-425c-86a6-35265253d6af",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1b4ba9d4-0e34-4e1f-808a-65ada049be28",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570227.414600",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "be9f795a-48d3-425c-86a6-35265253d6af",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1b4ba9d4-0e34-4e1f-808a-65ada049be28",
+      "Label": "Step_E2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_E2 and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570231.214100",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "role": "leader",
+      "StepId": "0d2a759d-b2b8-4307-9945-659c048b039d",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "0d1372e7-99b6-4f49-93cd-ec44162192a9",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570232.74000",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "0d2a759d-b2b8-4307-9945-659c048b039d",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "0d1372e7-99b6-4f49-93cd-ec44162192a9",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570232.104500",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "0d2a759d-b2b8-4307-9945-659c048b039d",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "0d1372e7-99b6-4f49-93cd-ec44162192a9",
+      "Label": "Step_E1",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_E1 and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570236.412400",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 9,
+      "StepId": "be9f795a-48d3-425c-86a6-35265253d6af",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "1b4ba9d4-0e34-4e1f-808a-65ada049be28",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 9ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570241.402200",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 9,
+      "StepId": "0d2a759d-b2b8-4307-9945-659c048b039d",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "0d1372e7-99b6-4f49-93cd-ec44162192a9",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 9ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570256.799900",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "StepId": "be9f795a-48d3-425c-86a6-35265253d6af",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "f74d3da6-cf85-4600-b6f6-55e712574d20",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570262.202500",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "StepId": "0d2a759d-b2b8-4307-9945-659c048b039d",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "86b0eb8c-ba0d-482b-95da-15572bd58f1c",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570268.713500",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "be9f795a-48d3-425c-86a6-35265253d6af",
+      "NextEntryId": "45975c12-30f8-48b5-8653-23e1d4dd1acd",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "f74d3da6-cf85-4600-b6f6-55e712574d20",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to 63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf on d033b408-8471-4c3d-8acf-3bee6164f01e with 45975c12-30f8-48b5-8653-23e1d4dd1acd"
+    }
+  },
+  {
+    "@timestamp": "1787388570268.740800",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 11,
+      "role": "follower",
+      "StepId": "be9f795a-48d3-425c-86a6-35265253d6af",
+      "SuccessorCount": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "f74d3da6-cf85-4600-b6f6-55e712574d20",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 1 successor(s) in 11ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570276.595000",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "0d2a759d-b2b8-4307-9945-659c048b039d",
+      "NextEntryId": "5a01f5a7-2e63-4748-b7d6-16df36c0a81a",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "86b0eb8c-ba0d-482b-95da-15572bd58f1c",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to 2da2bb32-22a6-46a6-8c34-04316b4c9693 on d033b408-8471-4c3d-8acf-3bee6164f01e with 5a01f5a7-2e63-4748-b7d6-16df36c0a81a"
+    }
+  },
+  {
+    "@timestamp": "1787388570276.620400",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 14,
+      "role": "follower",
+      "StepId": "0d2a759d-b2b8-4307-9945-659c048b039d",
+      "SuccessorCount": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "86b0eb8c-ba0d-482b-95da-15572bd58f1c",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 1 successor(s) in 14ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570282.410000",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 13,
+      "role": "follower",
+      "StepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "45975c12-30f8-48b5-8653-23e1d4dd1acd",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 13ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570283.360000",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "45975c12-30f8-48b5-8653-23e1d4dd1acd",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570283.416000",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "45975c12-30f8-48b5-8653-23e1d4dd1acd",
+      "Label": "Step_F2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_F2 and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570287.524700",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "role": "follower",
+      "StepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "5a01f5a7-2e63-4748-b7d6-16df36c0a81a",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570288.284700",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "5a01f5a7-2e63-4748-b7d6-16df36c0a81a",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570288.329300",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "5a01f5a7-2e63-4748-b7d6-16df36c0a81a",
+      "Label": "Step_F1",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_F1 and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570294.54700",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "StepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "45975c12-30f8-48b5-8653-23e1d4dd1acd",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570298.372900",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 10,
+      "StepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "5a01f5a7-2e63-4748-b7d6-16df36c0a81a",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 10ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570314.423300",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 11,
+      "StepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "37db8ef8-7674-4e6d-87fb-7c6e6ae4ee87",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 11ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570319.714800",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 11,
+      "StepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "a9995297-b40d-474f-aa9f-ad2b4820e260",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 11ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570326.683100",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "leader",
+      "StepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+      "NextEntryId": "f51f029e-72b6-423e-86d6-ed541f686c42",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "37db8ef8-7674-4e6d-87fb-7c6e6ae4ee87",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to eb42edf2-062d-48be-896e-7860a7370b12 on d033b408-8471-4c3d-8acf-3bee6164f01e with f51f029e-72b6-423e-86d6-ed541f686c42"
+    }
+  },
+  {
+    "@timestamp": "1787388570326.704800",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 12,
+      "role": "leader",
+      "StepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+      "SuccessorCount": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "37db8ef8-7674-4e6d-87fb-7c6e6ae4ee87",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 1 successor(s) in 12ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570336.297000",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+      "NextEntryId": "eb7cf619-2601-4b09-a1e0-915050d9fa93",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "a9995297-b40d-474f-aa9f-ad2b4820e260",
+      "NextProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "NextStepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "handed off to eb42edf2-062d-48be-896e-7860a7370b12 on d033b408-8471-4c3d-8acf-3bee6164f01e with eb7cf619-2601-4b09-a1e0-915050d9fa93"
+    }
+  },
+  {
+    "@timestamp": "1787388570336.320000",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 16,
+      "role": "follower",
+      "StepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+      "SuccessorCount": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "a9995297-b40d-474f-aa9f-ad2b4820e260",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "advanced 1 successor(s) in 16ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570342.140100",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 15,
+      "role": "leader",
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "f51f029e-72b6-423e-86d6-ed541f686c42",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 15ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570342.912200",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "f51f029e-72b6-423e-86d6-ed541f686c42",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570342.943100",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "f51f029e-72b6-423e-86d6-ed541f686c42",
+      "Label": "Step_G",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_G and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570347.730000",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.NextStepHandoffHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 11,
+      "role": "follower",
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "eb7cf619-2601-4b09-a1e0-915050d9fa93",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "dispatched in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "dispatched in 11ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570348.360700",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "eb7cf619-2601-4b09-a1e0-915050d9fa93",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "running the step",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "running the step"
+    }
+  },
+  {
+    "@timestamp": "1787388570348.427900",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "Processor.Sample.SampleProcessor"
+    },
+    "attributes": {
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "Number": 1,
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "eb7cf619-2601-4b09-a1e0-915050d9fa93",
+      "Label": "Step_G",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "config gives label {Label} and number {Number}",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "config gives label Step_G and number 1"
+    }
+  },
+  {
+    "@timestamp": "1787388570354.459900",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 11,
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "f51f029e-72b6-423e-86d6-ed541f686c42",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 11ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570360.230500",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 11,
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "eb7cf619-2601-4b09-a1e0-915050d9fa93",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the step returned after {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the step returned after 11ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570380.224100",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 13,
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "bc942006-5b95-4494-9651-ca73aa5321e2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 13ms"
+    }
+  },
+  {
+    "@timestamp": "1787388570381.196100",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "follower",
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "bc942006-5b95-4494-9651-ca73aa5321e2",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the terminal step completed with {Result} — no successor accepts it, the run ends here",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "Result": "Completed",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the terminal step completed with Completed — no successor accepts it, the run ends here"
+    }
+  },
+  {
+    "@timestamp": "1787388570386.798400",
+    "resource": {
+      "attributes": {
+        "service.name": "orchestrator"
+      }
+    },
+    "scope": {
+      "name": "Orchestrator.Messaging.StepOutcomeHandler"
+    },
+    "attributes": {
+      "role": "leader",
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "e2db801e-480e-4597-95ff-37365009c1ca",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "the terminal step completed with {Result} — no successor accepts it, the run ends here",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "Result": "Completed",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "the terminal step completed with Completed — no successor accepts it, the run ends here"
+    }
+  },
+  {
+    "@timestamp": "1787388570386.154400",
+    "resource": {
+      "attributes": {
+        "service.name": "sample-proc-v9"
+      }
+    },
+    "scope": {
+      "name": "BaseProcessor.Core.Processing.ProcessedDataHandler"
+    },
+    "attributes": {
+      "ElapsedMs": 12,
+      "StepId": "eb42edf2-062d-48be-896e-7860a7370b12",
+      "ProcessorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+      "EntryId": "e2db801e-480e-4597-95ff-37365009c1ca",
+      "CorrelationId": "564c2fb4f0ea48c894b97490b171c595",
+      "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+      "WorkflowId": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+      "ExecutionId": "33e16dc5-61ff-4b02-9afc-bbb28f89234d"
+    },
+    "body": {
+      "text": "branch completed in 12ms"
+    }
+  }
+]
