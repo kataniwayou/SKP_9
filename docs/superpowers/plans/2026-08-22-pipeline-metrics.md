@@ -22,7 +22,11 @@
   - `route`: `queue` · `fanout`
   - `outcome`: `accepted` · `unroutable` · `transient` · `refused`
   - `disposition`: `acked` · `requeued` · `parked`
-  - `reason`: `handled` · `gate_closed` · `store_unreachable` · `send_failed` · `refused`
+  - `reason`: `handled` · `gate_closed` · `store_unreachable` · `send_failed` · `refused` · `escaped`
+    (`escaped` was added during Task 3: an exception can leave `OnReceivedAsync` without reaching
+    any decision arm, and because the method is a RabbitMQ event callback the library swallows it,
+    so those deliveries were silently unmeasured. It pairs with `disposition = requeued`, because
+    the broker was never told and will redeliver.)
   - `landed`: `true` · `false`
   - `pipeline.consumer.channel.resets` `reason`: `shutdown` · `recovered` · `reopened`
 - **Do not modify `BaseConsole.Core/Gating/L2Gate.cs` or `BaseApi.Core/Gating/L2Gate.cs`.** Spec §6: the two are deliberate copies bound to stay identical, and the API-side one is out of scope.
