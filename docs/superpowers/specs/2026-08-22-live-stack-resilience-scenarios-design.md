@@ -1,7 +1,7 @@
 # Live-stack resilience scenarios
 
 Date: 2026-08-22
-Status: approved, not yet implemented
+Status: implemented
 Scope: `src/tests/BaseApi.Tests/Live/Resilience`, `k8s/port-forward-realstack.ps1`
 
 ## 1. What this covers
@@ -220,7 +220,7 @@ t0+300s POST /api/v1/orchestration/stop    expect 202
 +60s    settle
         poll ES until the window's doc count is stable across two reads 10 s apart
         query [t0, t_stop+settle] filtered on WorkflowId; group by CorrelationId
-        apply I1–I6 per run
+        apply I1–I8 per run
 ```
 
 At a 30-second cron a 300-second soak yields ten fires. The assertion is
@@ -258,7 +258,7 @@ that the schedule must not pretend to know.
 
 ### 5.4 Verdicts, S1–S4
 
-- **S1** — every run complete under I1–I6. `runs >= 9`. Zero tolerance.
+- **S1** — every run complete under I1–I8. `runs >= 9`. Zero tolerance.
 - **S2, S3, S4** — three obligations:
   1. **Outside the window**: every run beginning and ending clear of
      `[t_fault, t_heal]` is complete. Zero tolerance. A run that never met the
@@ -305,7 +305,7 @@ S5 asserts a bounded and attributable blast radius, not zero loss:
 2. The wipe is **visible**: `entry absent — treating as a duplicate delivery`
    appears, and the count of runs it truncates is reported.
 3. **Recovery is total**: the first fire after `t_heal` is complete under
-   I1–I6 — which additionally proves the processor re-established its liveness
+   I1–I8 — which additionally proves the processor re-established its liveness
    key and the orchestrator resumed dispatching to it.
 
 A run may also be lost because the workflow's own L2 projection was destroyed.
@@ -362,7 +362,7 @@ That is precisely why the verdict is log-only and this table is evidence.
 
 | Unit | Responsibility |
 | --- | --- |
-| `RunLedger` | I1–I6 over a run's template histogram. Pure; no I/O. |
+| `RunLedger` | I1–I8 over a run's template histogram. Pure; no I/O. |
 | `RunClassifier` | complete / accounted / unaccounted, given a ledger and the window |
 | `ElasticLogReader` | one windowed, `WorkflowId`-filtered, paged search → records grouped by `CorrelationId` |
 | `StabilityWaiter` | the settle poll of §5.1 |
@@ -444,6 +444,6 @@ runner.
 
 It shows that steps are not lost across a dependency outage. It does not show
 that they were executed *once* — a redelivery that re-ran a step and produced a
-second, identical branch satisfies I1–I6 as long as the counts move together.
+second, identical branch satisfies I1–I8 as long as the counts move together.
 Exactly-once is a separate property needing `ExecutionId` lineage rather than
 the run histogram, and it is not in scope here.

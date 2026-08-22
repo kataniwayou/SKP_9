@@ -181,3 +181,32 @@ kubectl -n skp delete pvc --all
 Worth knowing before you interpret a re-deploy: without that, a fresh Postgres comes back with the
 old schema and rows, so a processor row registered in a previous run is still there and the pods go
 ready immediately.
+
+## Resilience scenarios
+
+`src/tests/BaseApi.Tests/Live/Resilience` drives five timed orchestrations against this namespace
+and verifies them from Elasticsearch records. They are gated on **two** environment variables —
+`SKP_REALSTACK=1` and `SKP_CHAOS=1` — because they pause Redis and scale StatefulSets to zero.
+`SKP_REALSTACK=1` alone runs the read-only live tests and never touches infrastructure.
+
+```
+./k8s/port-forward-realstack.ps1
+$env:SKP_REALSTACK = "1"; $env:SKP_CHAOS = "1"
+dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
+```
+
+Each scenario takes 7-8 minutes and assumes exclusive use of the cluster: a workflow started by
+someone else mid-soak is attributed to the scenario.
+
+Three notes an operator will otherwise learn the hard way:
+
+- **NetworkPolicy does nothing here.** kindnetd runs without `--network-policy`, so a policy is
+  accepted by the API server and enforced by nothing. Redis is made unavailable with
+  `redis-cli CLIENT PAUSE ... ALL`, which also expires on its own so a killed run cannot wedge the
+  cluster.
+- **Never scale Redis down to simulate an outage.** It runs `--save "" --appendonly no` with no PVC,
+  so scaling to zero wipes L2 rather than interrupting it. That is scenario S5, which asserts a
+  bounded blast radius rather than zero loss.
+- **RabbitMQ scale-down is safe**, because its StatefulSet has a 1Gi PVC on the mnesia directory.
+
+Design: `docs/superpowers/specs/2026-08-22-live-stack-resilience-scenarios-design.md`
