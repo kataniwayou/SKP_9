@@ -7,6 +7,21 @@ namespace BaseApi.Tests.Console;
 
 public sealed class L2GateMetricsTests
 {
+    /// <summary>
+    /// How many owners currently report an open gate.
+    /// <para>
+    /// <b>A fresh collector per call, so each reading is exactly one poll.</b>
+    /// <see cref="MetricCollector.For"/> replays every measurement its listener has ever seen, so a
+    /// reused collector folds earlier polls into the count and the delta stops meaning anything.
+    /// </para>
+    /// </summary>
+    private static int OpenCount()
+    {
+        using var metrics = new MetricCollector(L2GateMetrics.MeterName);
+        metrics.Collect();
+        return metrics.For("pipeline.gate.open").Count(m => m.Value == 1);
+    }
+
     [Fact]
     public async Task TheGaugeFollowsTheGate()
     {
@@ -14,18 +29,23 @@ public sealed class L2GateMetricsTests
         // gate that started open would never produce an opening edge.
         var gate = new L2Gate(NullLogger<L2Gate>.Instance);
         using var owner = new L2GateMetrics(gate);
-        using var metrics = new MetricCollector(L2GateMetrics.MeterName);
 
-        // The registry is process-wide, so another owner constructed earlier in the process (e.g.
-        // the never-disposed wiring-test host) can still be live here, always reporting 0. Assert
-        // over the set rather than picking a single element.
-        metrics.Collect();
-        Assert.All(metrics.For("pipeline.gate.open"), m => Assert.Equal(0, m.Value));
+        // ASSERT THE DELTA, NOT THE SET. The registry is process-wide and the gauge is deliberately
+        // untagged -- there is one L2Gate per process, so a disambiguating tag would be a
+        // permanently-constant dimension on a production series. That means no assertion over the
+        // raw measurement set can isolate this owner: another live owner may report 0 (the
+        // never-disposed wiring-test host) or 1 (under SKP_REALSTACK, a live processor whose
+        // projection store is reachable). This gate is the only thing that changes between the
+        // readings, so the change is attributable to it and to nothing else.
+        var before = OpenCount();
 
         await gate.ReportHealthyAsync();
+        Assert.Equal(before + 1, OpenCount());
 
-        metrics.Collect();
-        Assert.Contains(metrics.For("pipeline.gate.open"), m => m.Value == 1);
+        // The falling direction too. A gauge that only ever went up would report a store outage as
+        // healthy for as long as the process lived.
+        await gate.TripAsync();
+        Assert.Equal(before, OpenCount());
     }
 
     [Fact]
@@ -50,6 +70,8 @@ public sealed class L2GateMetricsTests
         var owner = new L2GateMetrics(gate);
         await gate.ReportHealthyAsync();
 
+        var whileLive = OpenCount();
+
         owner.Dispose();
 
         using var metrics = new MetricCollector(L2GateMetrics.MeterName);
@@ -57,13 +79,9 @@ public sealed class L2GateMetricsTests
 
         Assert.Empty(metrics.For("pipeline.gate.trips"));
 
-        // The registry backs the gauge too, and Dispose removes this owner from it -- so a
-        // disposed owner's gate is not merely stale, it is entirely absent from the next poll. The
-        // registry is process-wide, though, so another owner (e.g. the never-disposed wiring-test
-        // host) can still be live here -- it always reports 0, so the only thing this disposed
-        // owner's absence proves is that no measurement is 1: this owner's gate was driven open
-        // before disposal, and a stale entry would still show it as 1.
-        metrics.Collect();
-        Assert.DoesNotContain(metrics.For("pipeline.gate.open"), m => m.Value == 1);
+        // Dispose removes this owner from the registry that backs the gauge, so its open gate stops
+        // being reported at all rather than being left behind as a stale 1 -- exactly one fewer
+        // measurement reading 1 than while it was live.
+        Assert.Equal(whileLive - 1, OpenCount());
     }
 }
