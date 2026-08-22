@@ -268,36 +268,12 @@ public sealed class IngressMetricsTests
         using var metrics = new MetricCollector(IngressMetrics.MeterName);
 
         IngressMetrics.RecordConsumed(
-            Queue, Type, "acked", "handled", landed: true, startedTimestamp: null);
+            Queue, Type, "acked", "handled", landed: true);
 
         var m = TheOnlyConsumedMeasurement(metrics);
         Assert.Equal("true", m.Tags["landed"]);
     }
 
-    [Fact]
-    public async Task TheHandlerDurationIsRecordedOnlyWhenAHandlerRan()
-    {
-        // A gate_closed reject never enters a handler, so recording a duration for it would drag
-        // the histogram toward zero and make a paused consumer look fast.
-        using var closed = new MetricCollector(IngressMetrics.MeterName);
-        await BuildConsumer(await GateAsync(open: false)).OnReceivedAsync(this, Delivery());
-        Assert.Empty(closed.For("pipeline.process.duration"));
-
-        // Same reasoning for a parked-for-lacking-a-handler reject: the type is recognised as
-        // present, but nothing ever runs, so a duration sample here would be equally misleading.
-        using var unhandled = new MetricCollector(IngressMetrics.MeterName);
-        await BuildConsumer(await GateAsync(open: true))
-            .OnReceivedAsync(this, Delivery(type: "no-such-type"));
-        Assert.Empty(unhandled.For("pipeline.process.duration"));
-
-        using var ran = new MetricCollector(IngressMetrics.MeterName);
-        await BuildConsumer(await GateAsync(open: true), new Handler(() => Task.CompletedTask))
-            .OnReceivedAsync(this, Delivery());
-
-        var duration = Assert.Single(ran.For("pipeline.process.duration"));
-        Assert.Equal("acked", duration.Tags["disposition"]);
-        Assert.True(duration.Value >= 0);
-    }
 
     [Fact]
     public void TheConsumingGaugeReportsOneSeriesPerQueueFromASingleInstrument()

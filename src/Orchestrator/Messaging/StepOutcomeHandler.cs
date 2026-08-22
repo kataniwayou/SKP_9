@@ -90,8 +90,33 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         if (!_store.TryGet(m.WorkflowId, out var entry) ||
             !entry.Steps.TryGetValue(m.StepId, out var completed))
         {
+            // RECLAIM BEFORE PARKING. A park is a nack, but it is a nack with requeue:false — the
+            // message leaves for the dead-letter exchange and never comes back, so the blob is
+            // orphaned exactly as it would be by an ack. data: keys carry no TTL and no sweeper
+            // covers them, and the commonest way to reach this branch is a workflow being stopped
+            // while its steps were still in flight: ApplyStopHandler removes it from L1, and every
+            // outcome still on the wire lands here. One leaked blob per in-flight step, permanently.
+            //
+            // This execution is over either way. The next scheduled fire will most likely meet the
+            // same condition and park too, which is the loud signal parking exists to give — but it
+            // will not also leak, which is the difference that matters.
+            //
+            // The cost is deliberate: the dead-lettered message names a key that no longer exists,
+            // so it can no longer be replayed by hand. That trade is taken knowingly. The blob is
+            // reclaimed for the same reason it is reclaimed on the acked path.
+            await ReclaimAsync(m.EntryId).ConfigureAwait(false);
+
             throw new InvalidOperationException(
                 "the outcome names a workflow or step this replica does not hold in L1");
+        }
+
+        // The opening half of a run's record. The fire logs "dispatched an entry step" and then goes
+        // quiet, so without this the only evidence an entry step ever finished was a hand-off line
+        // naming a successor — and an entry step that is ALSO terminal produced no such line at all.
+        // Both halves now name themselves, under the correlation id the fire minted.
+        if (entry.Definition.EntryStepIds.Contains(m.StepId))
+        {
+            _logger.LogInformation("the entry step completed with {Result}", m.Result);
         }
 
         var selection = StepAdvancement.SelectNext(m.Result, completed, entry.Steps);
@@ -144,7 +169,8 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         if (selection.Matches.Count == 0)
         {
             _logger.LogInformation(
-                "no successor accepts {Result} — the branch ends here", m.Result);
+                "the terminal step completed with {Result} — no successor accepts it, the run ends here",
+                m.Result);
         }
         else
         {
@@ -156,14 +182,37 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // Unconditional, and last. See the type remarks: every path reaching here has acked the
         // outcome as final, and a store fault must propagate so the classifier trips the gate and
         // requeues rather than acknowledging a hand-off whose source was never reclaimed.
-        if (m.EntryId != Guid.Empty)
-        {
-            _logger.LogDebug("reclaiming the source blob from L2");
+        await ReclaimAsync(m.EntryId).ConfigureAwait(false);
+    }
 
-            await _redis.GetDatabase()
-                .KeyDeleteAsync(L2ProjectionKeys.ExecutionData(m.EntryId))
-                .ConfigureAwait(false);
+    /// <summary>
+    /// Deletes the execution blob this outcome names, if it names one.
+    /// <para>
+    /// <b>Called on every disposition that ends this replica's responsibility for the message —
+    /// acked and parked alike.</b> Only a requeue-nack skips it, because that delivery is coming
+    /// back and will need the blob to still be there.
+    /// </para>
+    /// <para>
+    /// A store fault propagates rather than being swallowed, on both callers. On the acked path that
+    /// is what stops a hand-off being acknowledged with its source unreclaimed. On the parked path it
+    /// converts the park into a requeue — which is the better answer anyway: the store being
+    /// unreachable says nothing about the message, and a redelivery may well find L1 caught up.
+    /// </para>
+    /// </summary>
+    private async Task ReclaimAsync(Guid entryId)
+    {
+        // Guid.Empty is not a key: a failed source step, an output that failed its schema and a
+        // cancelled source step all report it, and it means there is no blob to reclaim.
+        if (entryId == Guid.Empty)
+        {
+            return;
         }
+
+        _logger.LogDebug("reclaiming the source blob from L2");
+
+        await _redis.GetDatabase()
+            .KeyDeleteAsync(L2ProjectionKeys.ExecutionData(entryId))
+            .ConfigureAwait(false);
     }
 
     /// <summary>

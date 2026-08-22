@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using BaseProcessor.Core.Identity;
 using Microsoft.Extensions.Hosting;
@@ -31,6 +32,33 @@ internal static class ProcessorPipelineMetrics
         "pipeline.duplicate.suppressed",
         unit: "{message}",
         description: "Dispatches whose input key was already reclaimed, so the author was not re-run.");
+
+    private static readonly Histogram<double> ProcessDuration = Meter.CreateHistogram<double>(
+        "pipeline.process.duration",
+        unit: "s",
+        description: "Time inside the author's transform — the only span of a hop whose length is not fixed.");
+
+    /// <summary>
+    /// How long the author's own transform took.
+    /// <para>
+    /// <b>This measures the author, not the framework, and that is the whole point of the
+    /// instrument.</b> It used to be recorded around the message handler in the shared consumer,
+    /// which covers a fixed sequence of store reads and sends — a span that cannot meaningfully
+    /// vary, so a histogram of it answered no question anyone had. Everything either side of
+    /// <c>ExecuteAsync</c> is this framework's own constant cost; the transform is somebody's
+    /// implementation, and it is the part that gets slow.
+    /// </para>
+    /// <para>
+    /// <paramref name="returned"/> separates a slow success from a slow failure, which otherwise
+    /// average together into a number that describes neither. It says whether the author returned
+    /// normally, NOT what the step decided — a step that reports itself failed still returned, and
+    /// <c>StepResult</c> is deliberately absent from every instrument here.
+    /// </para>
+    /// </summary>
+    internal static void RecordProcessDuration(long startedTimestamp, bool returned) =>
+        ProcessDuration.Record(
+            Stopwatch.GetElapsedTime(startedTimestamp).TotalSeconds,
+            new KeyValuePair<string, object?>("outcome", returned ? "returned" : "faulted"));
 
     /// <summary>
     /// One dispatch acknowledged without running the author, because an earlier attempt had already

@@ -127,14 +127,40 @@ internal sealed class NextStepHandoffHandler : IQueueMessageHandler
             // before or during the write and there is nothing to reclaim.
             var entryId = wrote ? h.EntryId : Guid.Empty;
 
-            await _sender.SendTransientAsync(
-                    OrchestratorQueues.Result,
-                    MessageTypes.StepOutcome,
-                    new StepOutcome(
-                        h.CorrelationId, h.ExecutionId, h.WorkflowId, h.StepId, h.ProcessorId,
-                        entryId, StepResult.Failed),
-                    ct)
-                .ConfigureAwait(false);
+            try
+            {
+                await _sender.SendTransientAsync(
+                        OrchestratorQueues.Result,
+                        MessageTypes.StepOutcome,
+                        new StepOutcome(
+                            h.CorrelationId, h.ExecutionId, h.WorkflowId, h.StepId, h.ProcessorId,
+                            entryId, StepResult.Failed),
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception report) when (!IsRecoverable(report) && wrote)
+            {
+                // THE ONE PARK PATH THAT CAN LEAK. Everything else here either acks — handing the
+                // key on to the pre hop, which reclaims it — or requeues, where the redelivery
+                // rewrites the same key. This arm is reached only when the outcome that WOULD have
+                // named the key cannot be sent, and deterministically so: nothing downstream will
+                // ever learn the key exists, the message goes to the dead-letter exchange, and the
+                // blob is orphaned for good.
+                //
+                // Reclaimed before rethrowing, for the same reason and with the same accepted cost
+                // as the L1-miss park in StepOutcomeHandler: the dead-lettered message can no longer
+                // be replayed by hand, and that is the price of not leaking. The filter requires
+                // `wrote`, because with no key written there is nothing to reclaim and a delete
+                // would only add a second way for this arm to fail.
+                _logger.LogError(
+                    report, "could not report the failed step either — reclaiming its input and parking");
+
+                await _redis.GetDatabase()
+                    .KeyDeleteAsync(L2ProjectionKeys.ExecutionData(h.EntryId))
+                    .ConfigureAwait(false);
+
+                throw;
+            }
         }
     }
 

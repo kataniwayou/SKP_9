@@ -210,7 +210,7 @@ public sealed class ConsoleObservabilityTests
         // points -- the same ones production code uses.
         await EgressMetrics.MeasureAsync("queue", "dest", "type", () => Task.CompletedTask);
         IngressMetrics.RecordConsumed(
-            "queue", "type", "acked", "handled", landed: true, startedTimestamp: null);
+            "queue", "type", "acked", "handled", landed: true);
         var gate = new L2Gate(NullLogger<L2Gate>.Instance);
         using var gateMetrics = new L2GateMetrics(gate);
 
