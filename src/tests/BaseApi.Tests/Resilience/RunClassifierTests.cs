@@ -11,15 +11,17 @@ public sealed class RunClassifierTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 8, 22, 12, 0, 0, TimeSpan.Zero);
 
-    /// <summary>
-    /// Fault opens at +145s -- the last timestamp <see cref="Run"/> can ever emit for a run that
-    /// starts at +140s, since every record in that helper lands on a fixed offset from its own
-    /// start (0..5s) rather than one that grows with record count. A window opening any later than
-    /// that would put the straddling fixtures' own natural span wholly outside it, so "straddles"
-    /// would never be true no matter how the run was built.
-    /// </summary>
+    /// <summary>The schedule the soak actually runs: inject the fault at +150s, heal observed at +220s.</summary>
     private static readonly FaultWindow Window =
-        new(T0 + TimeSpan.FromSeconds(145), T0 + TimeSpan.FromSeconds(220));
+        new(T0 + TimeSpan.FromSeconds(150), T0 + TimeSpan.FromSeconds(220));
+
+    /// <summary>
+    /// A run that begins inside the outage. Run() spans its start plus five seconds, so starting
+    /// here puts the whole run between FaultAt and HealedAt with margin at both ends -- deliberately
+    /// not flush against either edge, so a change to the helper's span cannot silently turn a
+    /// straddling fixture into a clear-of-window one and pass for the wrong reason.
+    /// </summary>
+    private static readonly DateTimeOffset StraddlingStart = T0 + TimeSpan.FromSeconds(155);
 
     [Fact]
     public void ACompleteRunIsComplete()
@@ -50,7 +52,7 @@ public sealed class RunClassifierTests
     [Fact]
     public void AShortRunStraddlingTheWindowWithAnExcuseIsAccounted()
     {
-        var records = Run(T0 + TimeSpan.FromSeconds(140), complete: false,
+        var records = Run(StraddlingStart, complete: false,
             excuse: Templates.StoreUnreachable);
 
         var classification = RunClassifier.Classify(Ledger(records), records, Window);
@@ -63,7 +65,7 @@ public sealed class RunClassifierTests
     [Fact]
     public void AShortRunStraddlingTheWindowWithNoExcuseIsUnaccounted()
     {
-        var records = Run(T0 + TimeSpan.FromSeconds(140), complete: false);
+        var records = Run(StraddlingStart, complete: false);
 
         var classification = RunClassifier.Classify(Ledger(records), records, Window);
 
@@ -78,8 +80,8 @@ public sealed class RunClassifierTests
     [InlineData("Cancelled")]
     public void ANonCompletedOutcomeInTheWindowIsAnExcuse(string result)
     {
-        var records = Run(T0 + TimeSpan.FromSeconds(140), complete: false)
-            .Append(Record(T0 + TimeSpan.FromSeconds(160), Templates.EntryStepCompleted, result))
+        var records = Run(StraddlingStart, complete: false)
+            .Append(Record(StraddlingStart + TimeSpan.FromSeconds(5), Templates.EntryStepCompleted, result))
             .ToList();
 
         var classification = RunClassifier.Classify(Ledger(records), records, Window);
@@ -90,8 +92,8 @@ public sealed class RunClassifierTests
     [Fact]
     public void ACompletedOutcomeIsNotAnExcuse()
     {
-        var records = Run(T0 + TimeSpan.FromSeconds(140), complete: false)
-            .Append(Record(T0 + TimeSpan.FromSeconds(160), Templates.EntryStepCompleted, "Completed"))
+        var records = Run(StraddlingStart, complete: false)
+            .Append(Record(StraddlingStart + TimeSpan.FromSeconds(5), Templates.EntryStepCompleted, "Completed"))
             .ToList();
 
         var classification = RunClassifier.Classify(Ledger(records), records, Window);
