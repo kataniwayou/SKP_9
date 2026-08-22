@@ -179,7 +179,22 @@ public static class OrchestratorHost
         // Off-cluster the state therefore stays follower and this process dispatches nothing. That is
         // deliberate: this workload only ever runs in Kubernetes, and a local run that silently
         // elected itself would be a local run that sends real work to real processor queues.
-        builder.Services.AddSingleton<LeaderState>();
+        // Constructed here rather than left to the container, so the ambient metric tag below can
+        // close over the SAME instance the election will drive. A type registration would defer
+        // construction to first resolution, and the first pipeline measurement can precede that.
+        var leaderState = new LeaderState();
+        builder.Services.AddSingleton(leaderState);
+
+        // role=leader|follower on every pipeline message instrument this replica emits. Installed
+        // during host construction, before any hosted service starts, because the identity
+        // bootstrap and the topology declaration both send before the election has run — and a
+        // measurement with the tag absent would be indistinguishable from a processor's.
+        //
+        // Orchestrator-only by construction: no other host calls Provide, so no other host's series
+        // carry the attribute at all. Read live per measurement, so a demoted replica attributes
+        // its next send to the follower it now is.
+        PipelineAmbientTag.Provide(
+            () => new KeyValuePair<string, object?>(OrchestratorRoleLogEnricher.Role, leaderState.Role));
 
         if (Environment.GetEnvironmentVariable("KUBERNETES_SERVICE_HOST") is not null)
         {

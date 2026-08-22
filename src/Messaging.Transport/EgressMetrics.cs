@@ -112,6 +112,11 @@ internal static class EgressMetrics
             { "outcome", outcome },
         };
 
+        // The host's process-wide tag, if it installed one: role=leader|follower on the
+        // orchestrator, absent on every other host. Added to the shared TagList so the counter and
+        // the histogram cannot disagree about which role the send belonged to.
+        PipelineAmbientTag.AppendTo(ref tags);
+
         Produced.Add(1, tags);
         Duration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, tags);
     }
