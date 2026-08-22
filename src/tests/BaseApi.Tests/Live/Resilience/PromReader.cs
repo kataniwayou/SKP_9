@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace BaseApi.Tests.Live.Resilience;
@@ -60,7 +61,15 @@ internal sealed class PromReader
 
         var raw = result[0].GetProperty("value")[1].GetString();
 
-        return double.TryParse(raw, out var value) ? value : null;
+        // CultureInfo.InvariantCulture, not the current culture: Prometheus always renders values
+        // with "." as the decimal separator. On a comma-decimal culture, a current-culture parse
+        // would fail on a genuinely present value like "1.5" and collapse it to null -- indistinguishable
+        // from a missing series. That inversion matters most for pipeline_gate_trips_total, where
+        // "absent" is itself the evidence the gate never tripped; misreporting a present value as
+        // absent would silently erase that evidence.
+        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
     }
 
     /// <summary>Every corroborating series, for printing beside a verdict.</summary>
