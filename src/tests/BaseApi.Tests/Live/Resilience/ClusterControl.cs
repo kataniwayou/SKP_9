@@ -83,23 +83,34 @@ internal static class ClusterControl
 
         public async ValueTask DisposeAsync()
         {
-            await _stop.CancelAsync();
-
             try
             {
-                await _keepalive;
+                await _stop.CancelAsync();
+
+                try
+                {
+                    await _keepalive;
+                }
+                catch (Exception)
+                {
+                    // The keepalive's own failure must not decide whether Redis gets released, and
+                    // must never replace the exception that is already unwinding the scenario. A
+                    // nonzero kubectl exit here is entirely plausible on a live cluster mid-fault --
+                    // RunOrThrowAsync throws on it -- and swallowing only OperationCanceledException
+                    // would let that throw skip the explicit release below and masquerade as the
+                    // scenario's own failure. The pause it was renewing self-expires regardless of
+                    // which way this exits; what matters is that the release still runs.
+                }
             }
-            catch (OperationCanceledException)
+            finally
             {
-                // The keepalive was told to stop. Expected on every clean path.
+                _stop.Dispose();
+
+                // Its own token: the scenario's may already be cancelled, and a release that skipped
+                // because the run was aborted is exactly the case the release exists for.
+                using var release = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+                await UnpauseRedisAsync(release.Token);
             }
-
-            _stop.Dispose();
-
-            // Its own token: the scenario's may already be cancelled, and a release that skipped
-            // because the run was aborted is exactly the case the release exists for.
-            using var release = new CancellationTokenSource(TimeSpan.FromMinutes(1));
-            await UnpauseRedisAsync(release.Token);
         }
 
         private static async Task KeepAliveAsync(CancellationToken ct)
@@ -129,6 +140,13 @@ internal static class ClusterControl
         {
             using var restore = new CancellationTokenSource(TimeSpan.FromMinutes(6));
 
+            // The scale-back is the first statement in this method and nothing precedes it that
+            // could throw and skip it -- that is deliberate, not incidental, and any future addition
+            // to this disposer must keep it that way rather than move work ahead of the restore.
+            // WaitForReadyAsync runs after, left unguarded: a rollout timeout there is real
+            // information -- the workload was told to come back and did not -- so it must surface
+            // rather than being swallowed the way the keepalive's own failure is swallowed in
+            // RedisPause, where nothing downstream depends on the keepalive having succeeded.
             await ScaleAsync(_kind, _name, _restoreTo, restore.Token);
             await WaitForReadyAsync(_kind, _name, TimeSpan.FromMinutes(5), restore.Token);
         }
