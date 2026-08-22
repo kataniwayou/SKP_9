@@ -61,9 +61,11 @@ internal static class Kubectl
             {
                 process.Kill(entireProcessTree: true);
             }
-            catch (InvalidOperationException)
+            catch (Exception)
             {
-                // Already gone. Nothing to kill, and nothing worth failing a restore over.
+                // Best-effort: the process may already be gone, or the kill itself may fail for a
+                // reason unrelated to why we are here (a Win32 permission error, say). Either way
+                // the fact worth surfacing is the cancellation below, not a failed cleanup attempt.
             }
 
             throw;
