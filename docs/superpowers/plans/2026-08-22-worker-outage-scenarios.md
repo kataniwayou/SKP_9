@@ -198,9 +198,12 @@ Add the template cases:
 
 ```csharp
         FaultKind.Processor => [Templates.HostShuttingDown],
-        FaultKind.Orchestrator => [Templates.SchedulerShuttingDown, Templates.HostShuttingDown],
+        FaultKind.Orchestrator => [Templates.SchedulerShuttingDown],
 ```
-in `ArrivalTemplates`, and:
+in `ArrivalTemplates` (the final fix wave removed `Templates.HostShuttingDown` from the
+orchestrator's list: `ServiceFor` returns null for `Orchestrator`, so that framework template would
+have matched unscoped and been satisfied by any pod's shutdown — it is not role-unique the way
+`SchedulerShuttingDown` is), and:
 ```csharp
         FaultKind.Processor => [Templates.ProcessorLoopsRetired, Templates.ConsumptionAdmitted],
         FaultKind.Orchestrator => [Templates.OrchestratorHydrated],

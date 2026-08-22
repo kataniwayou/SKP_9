@@ -19,6 +19,7 @@ namespace BaseApi.Tests.Live.Resilience;
 /// </para>
 /// </summary>
 [Trait("Category", Chaos.Category)]
+[Collection(Chaos.Category)]
 public sealed class RedisWipeScenarioTests
 {
     [Fact]
@@ -33,6 +34,11 @@ public sealed class RedisWipeScenarioTests
             TestContext.Current.CancellationToken);
 
         var report = SoakReport.Describe(result);
+
+        Assert.True(result.Runs.Count >= 9,
+            $"expected at least 9 fires in five minutes at a 30s cron, saw {result.Runs.Count}. "
+            + "A soak that barely fired would satisfy every assertion below without proving "
+            + $"anything.\n{report}");
 
         // Bounded: nothing clear of the window may be short. The wipe must not reach past itself.
         var clearOfWindow = result.Runs
@@ -63,5 +69,17 @@ public sealed class RedisWipeScenarioTests
 
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"the L2 wipe truncated {truncated.Count} run(s) of {result.Runs.Count}.\n{report}");
+
+        // Conditional, deliberately. Whether the wipe catches a step mid-flight depends on where the
+        // outage lands relative to the cron, so asserting that it always does would make this test
+        // fail on timing. But IF it truncated a run, that run must say why -- an L2 wipe that
+        // silently swallowed a step, with nothing on the record naming it, is exactly the outcome
+        // this scenario exists to rule out.
+        foreach (var run in truncated)
+        {
+            Assert.True(run.Excuses.Count > 0,
+                $"run {run.Ledger.CorrelationId} was truncated by the wipe with nothing accounting "
+                + $"for it.\n{report}");
+        }
     }
 }

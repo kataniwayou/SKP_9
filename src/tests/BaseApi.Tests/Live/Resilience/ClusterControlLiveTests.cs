@@ -7,6 +7,7 @@ namespace BaseApi.Tests.Live.Resilience;
 /// seconds — long enough to be real, short enough that an idle stack does not notice.
 /// </summary>
 [Trait("Category", Chaos.Category)]
+[Collection(Chaos.Category)]
 public sealed class ClusterControlLiveTests
 {
     [Fact]
@@ -61,7 +62,7 @@ public sealed class ClusterControlLiveTests
 
         await using (await ClusterControl.HoldRedisPausedAsync(ct))
         {
-            // The held pause is 45s and renewed, so a probe bounded well inside that window cannot
+            // The held pause is 24s and renewed, so a probe bounded well inside that window cannot
             // finish. Deterministic rather than racy: the margin is the whole pause, not a few ms.
             using var probe = CancellationTokenSource.CreateLinkedTokenSource(ct);
             probe.CancelAfter(TimeSpan.FromSeconds(10));

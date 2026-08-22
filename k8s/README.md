@@ -184,21 +184,37 @@ ready immediately.
 
 ## Resilience scenarios
 
-`src/tests/BaseApi.Tests/Live/Resilience` drives five timed orchestrations against this namespace
-and verifies them from Elasticsearch records. They are gated on **two** environment variables —
-`SKP_REALSTACK=1` and `SKP_CHAOS=1` — because they pause Redis and scale StatefulSets to zero.
-`SKP_REALSTACK=1` alone runs the read-only live tests and never touches infrastructure.
+`src/tests/BaseApi.Tests/Live/Resilience` drives **seven** timed orchestrations against this
+namespace and verifies them from Elasticsearch records:
+
+- **S1** happy path, **S2** Redis unavailable, **S3** RabbitMQ unavailable, **S4** both unavailable,
+  **S5** Redis scaled to zero (an L2 wipe, not an outage) — these five take a *dependency* away.
+- **S6** processor unavailable, **S7** orchestrator unavailable — these two take a *worker* away
+  instead, scaling the processor Deployment and the orchestrator StatefulSet to zero in turn.
+
+Each scenario takes 7-8 minutes; a full pass of all seven is roughly an hour. They assume exclusive
+use of the cluster: a workflow started by someone else mid-soak is attributed to the scenario, and
+running them concurrently races independent restore paths across the same objects — the test project
+enforces serialisation itself, so this is a correctness note, not an instruction to add locking.
+
+They are gated on **two** environment variables — `SKP_REALSTACK=1` and `SKP_CHAOS=1` — because they
+pause Redis and scale StatefulSets/Deployments to zero. `SKP_REALSTACK=1` alone runs the read-only
+live tests and never touches infrastructure.
+
+Run one scenario at a time, by name — this is the form the implementation plans prescribe, and the
+only way to see a scenario's `TestOutputHelper` output, which the runner hides for a passing test:
 
 ```
 ./k8s/port-forward-realstack.ps1
 $env:SKP_REALSTACK = "1"; $env:SKP_CHAOS = "1"
-dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
+dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj -- --filter-method "*ScenarioName*"
 ```
 
-Each scenario takes 7-8 minutes and assumes exclusive use of the cluster: a workflow started by
-someone else mid-soak is attributed to the scenario.
+The bare `--` before `--filter-method` is load-bearing: without it, MSBuild parses the switch itself
+and rejects it rather than passing it through to the test runner. Running the whole
+`BaseApi.Tests.csproj` project without a filter runs all seven back to back, in the same order.
 
-Three notes an operator will otherwise learn the hard way:
+Four notes an operator will otherwise learn the hard way:
 
 - **NetworkPolicy does nothing here.** kindnetd runs without `--network-policy`, so a policy is
   accepted by the API server and enforced by nothing. Redis is made unavailable with
@@ -208,5 +224,10 @@ Three notes an operator will otherwise learn the hard way:
   so scaling to zero wipes L2 rather than interrupting it. That is scenario S5, which asserts a
   bounded blast radius rather than zero loss.
 - **RabbitMQ scale-down is safe**, because its StatefulSet has a 1Gi PVC on the mnesia directory.
+- **After S5, confirm re-projection before walking away.** It deliberately wipes L2 — the projected
+  workflow and every processor liveness key are gone, not merely unavailable — and the scenario's own
+  assertions only prove the *pipeline* recovered, not that an operator glancing at the cluster
+  afterward will see a workflow. Check with
+  `curl -s http://localhost:18080/api/v1/workflows` before leaving.
 
 Design: `docs/superpowers/specs/2026-08-22-live-stack-resilience-scenarios-design.md`

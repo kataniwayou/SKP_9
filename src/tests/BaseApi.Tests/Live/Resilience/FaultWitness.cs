@@ -65,11 +65,18 @@ internal static class FaultWitness
                 + "The scenario is inconclusive: an unobserved fault is indistinguishable from no fault.");
         }
 
+        // First, not last. For Rabbit and Both the heal vocabulary includes ConsumptionAdmitted,
+        // which every consumer emits per queue on any resume -- so one late or unrelated resume
+        // anywhere in the search window (which runs to stoppedAt + 60s) would drag HealedAt forward
+        // if we took the last match. A too-narrow heal window fails loudly: a run judged clear of the
+        // window that was still affected breaks the zero-tolerance assertion in OutageVerdict. A too-
+        // wide one fails silently, by excusing a run that should have been condemned. This suite's
+        // whole discipline is to fail loud rather than pass quietly, so the narrow reading wins.
         var healed = records
             .Where(r => heal.Contains(r.Template, StringComparer.Ordinal))
             .Where(r => r.Timestamp > arrived.Timestamp)
             .OrderBy(r => r.Timestamp)
-            .LastOrDefault();
+            .FirstOrDefault();
 
         if (healed is null)
         {
@@ -89,7 +96,13 @@ internal static class FaultWitness
             [Templates.GateClosed, Templates.StoreUnreachable,
              Templates.ChannelShutDown, Templates.ConsumptionPaused],
         FaultKind.Processor => [Templates.HostShuttingDown],
-        FaultKind.Orchestrator => [Templates.SchedulerShuttingDown, Templates.HostShuttingDown],
+
+        // Templates.HostShuttingDown is deliberately absent here. It is a Microsoft.Hosting.Lifetime
+        // template every service in the deployment emits, and ServiceFor returns null for the
+        // orchestrator (searched unscoped, see below), so matching it here would be satisfied by any
+        // pod's shutdown -- witnessing a fault that never touched the orchestrator at all.
+        // SchedulerShuttingDown alone is enough: Quartz runs nowhere else in this deployment.
+        FaultKind.Orchestrator => [Templates.SchedulerShuttingDown],
         _ => [],
     };
 

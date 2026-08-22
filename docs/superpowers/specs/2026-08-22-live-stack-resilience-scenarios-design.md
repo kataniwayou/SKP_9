@@ -6,7 +6,7 @@ Scope: `src/tests/BaseApi.Tests/Live/Resilience`, `k8s/port-forward-realstack.ps
 
 ## 1. What this covers
 
-Five timed orchestrations against the running `skp` cluster, each five minutes
+Seven timed orchestrations against the running `skp` cluster, each five minutes
 long, each driven through the BaseApi `start`/`stop` endpoints, each verified
 **from Elasticsearch log records alone**. Prometheus is read for corroboration
 and for diagnosing a failure; no verdict depends on it.
@@ -443,7 +443,7 @@ That is precisely why the verdict is log-only and this table is evidence.
 | `FaultWitness` | the §5.3 arrival and heal records, and `t_heal` |
 | `PromReader` | §6 instant queries |
 | `OrchestrationSoak` | the §5.1 skeleton, parameterised by a fault schedule |
-| `S1…S5` | five test classes, one scenario each |
+| `S1…S7` | seven test classes, one scenario each |
 
 `RunLedger` and `RunClassifier` take no dependency on Elasticsearch or the
 cluster, so the oracle itself gets **hermetic** unit coverage against captured

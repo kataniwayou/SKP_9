@@ -7,6 +7,7 @@ namespace BaseApi.Tests.Live.Resilience;
 /// itself is covered hermetically in RunLedgerTests, which loads its fixture through the same method.
 /// </summary>
 [Trait("Category", Chaos.Category)]
+[Collection(Chaos.Category)]
 public sealed class ElasticReaderLiveTests
 {
     [Fact]
