@@ -87,7 +87,7 @@ def check_liveness_windows():
     One window in the rules is deliberately NOT the liveness window and is named here so
     the check can tell drift from design: TelemetryStale masks with
     `present_over_time(...[2m])` to drop a retired, version-stamped service_name, and 2m
-    is that rule's own floor (it must exceed the 45s threshold plus the 30s `for`). Any
+    is that rule's own floor (it must exceed the 45s threshold plus the 15s `for`). Any
     window that is neither LIVENESS nor a named exception is drift and fails.
     """
     m = re.search(r'^LIVENESS\s*=\s*"([^"]+)"', GEN.read_text(encoding="utf-8"), re.M)
