@@ -10,6 +10,8 @@ grafana/
   check-expressions.py     runs every panel expression against a live Prometheus
   audit-boards.js          opens every board in a browser and reports what rendered
   audit-nav.js             checks every board can reach every other board
+  chaos-timeline.js        samples every board at intervals across a fault window
+  chaos-probe.py           the same window from Prometheus, segmented before/during/after
   dashboards/
     skp-flow.json          cross-service conservation — open this one first
     skp-baseapi.json       API HTTP ingress
@@ -60,6 +62,153 @@ any one was authored — see below for what happened when it was not.
 **Nothing is provisioned any more.** The `grafana-dashboards` ConfigMap is empty and the
 file provider points at an empty directory; both are now vestigial and could be removed
 from whatever applies them.
+
+## Watching a fault, not a moment
+
+`audit-boards.js` and `audit-nav.js` each capture a single instant, which answers *does
+this panel render*. It cannot answer the question an outage asks: does this panel
+**change** when the thing it watches breaks, and how long does it take.
+
+```bash
+node grafana/chaos-timeline.js --label s3-broker --duration 680 --interval 15
+python grafana/chaos-probe.py --fault-at <ISO> --heal-at <ISO>
+```
+
+`chaos-timeline.js` opens all five boards once, keeps them open, and samples each in
+rotation. Loading fresh per sample would cost ~100s a sweep against a 60s fault window --
+the whole outage would fall between two samples. Loading once and letting `&refresh=`
+repaint in place costs ~2s a board. Background tabs get their timers throttled by
+Chromium, which stalls Grafana's own refresh loop, so each page is brought to the front
+before it is read.
+
+`chaos-probe.py` is the companion that makes a finding a fact rather than an impression.
+It range-queries every panel expression across the same window and segments it
+before / during / after. A panel that stayed green while its own expression moved is a
+threshold or rendering defect; a panel that stayed green while its expression stayed flat
+is a missing signal. Different findings, different fixes.
+
+## What the boards could not see, and what changed
+
+Seven resilience scenarios run one class at a time, each watched through all five boards.
+Every number below is measured, not inferred.
+
+### The resolution floor, which everything else sits on
+
+The datasource declares `timeInterval: 60s` because that is the OTLP export cadence, so
+Grafana floors `$__rate_interval` at **240s**, and every stat is a range query at a
+**60s step** reduced to `lastNotNull`. Two consequences an operator has to know:
+
+- **No rate panel can resolve a 60-second fault.** With the entire pipeline stopped,
+  `System flowing` still read 1.12 req/s a hundred seconds later; through a sixty-second
+  broker outage it moved 1.12 -> 0.92 and never left green.
+- **The stat tier lags the data by up to a minute on top of that.** In the Redis
+  scenario the gate metric fell at data-time t+175s and the stat rendered it at t+235s.
+  `kubectl` showed Redis NotReady 33 seconds before the boards did.
+
+Both are stated on the `System flowing` description now, because a reader who does not
+know the rate window will read that panel as a liveness check and be wrong.
+
+### A stale-held gauge counts the dead
+
+The collector republishes a series after the process feeding it is gone, and Prometheus's
+five-minute lookback holds it after that. Every gauge stat was therefore reading the
+posture of processes that no longer existed.
+
+With **all three orchestrator replicas deleted for 58 seconds**, confirmed against
+`kubectl`: `Consuming` 1, `L2 gate` 1, `Hydration admitted` 1, `Workers reporting` 5 --
+green throughout. The only number that moved anywhere was `Leaders elected`, and only
+because a leader releases its lease on graceful shutdown; an outright kill leaves it at 1.
+
+With **both processors deleted for 58 seconds** the processor board did not change a
+single stat, and `Workers reporting` went **5 -> 7** -- the dead replicas counted
+alongside their replacements. `Identity ready by replica` drew four lines for two pods.
+
+Every gauge expression is now wrapped in `last_over_time(...[100s])` (`present_over_time`
+where it is reporters being counted), which yields only series with a real sample in the
+window. `Workers reporting` counts live reporters. A new `Workers missing` stat reports
+the deepest dip anywhere in the range, so it names how many replicas left without being
+told how many there should be. A new `Data freshness` stat carries the number every other
+panel is downstream of.
+
+**Two things about that window and that stat were got wrong first, and both were caught
+by replaying the recorded outages rather than by reasoning.**
+
+The window started at 2m, which sounds safely above a 60s cadence and is useless: a
+replica that vanishes for a minute has to fall out of the window *before its replacement
+starts reporting*, and at 2m it never does. Replayed against three recorded ~58s
+disappearances, 2m dipped on none of them; 100s dipped on all three and stayed flat
+through the undisturbed baseline. Measured worst-case staleness on a healthy stack is
+57s, so 100s keeps ~40s of headroom.
+
+`Workers missing` was peak-minus-current, which put a fault stat on the wrong side of its
+own signal. The dip is only ~30s wide and a stat panel is a range query at a **60s step**,
+so the subtraction missed it about half the time -- and did, on the confirming re-run,
+where the board showed `Workers missing 0` through an outage the same expression had
+caught an hour earlier. It is now peak-minus-trough over `[$__range:15s]` subqueries,
+which evaluate at 15s regardless of the panel step. At the real 60s step that reads 0
+across the whole undisturbed baseline and 3 across every disappearance.
+
+**It still cannot be prompt.** A replica is missing once it has skipped its liveness
+window, so at a 60s export cadence it is reported 100-130s in, which for a sixty-second
+disappearance is after the event has ended. Nothing queryable fixes that -- a 58-second
+absence is shorter than the telemetry's own sampling period. The export interval fixes it,
+or a pod-liveness scrape does. Until then the panel says so in its own description.
+
+`Data freshness` is the one that degrades rather than dips, and on the confirming re-run
+it was the panel that caught the orchestrator disappearance: 42-45s through health,
+**2 mins** while the replicas were away.
+
+### A fault counter must be counted, not rated
+
+The same lesson the hop gaps already learned, unlearned three panels over. Scaling the
+broker to zero produced **two transient publishes and one parked delivery**. `Not acked`,
+`Ack lost`, `Egress faults` and `Retry amplification` are rates, so all four read 0.00
+for all three events -- 1/240 is a rounding error. The only trace anywhere was a new
+legend entry on a timeseries.
+
+`increase()` alone does not fix it either. These counters have **no series at all** in
+health -- the .NET counter is created on first increment -- so the first burst of a fault
+type arrives as a series whose first sample is already non-zero, and `increase()` measures
+growth *within* the window and reports 0 for exactly the case the verdict tier exists to
+catch. The `counted()` helper takes the larger of in-window growth and absolute total,
+which read 2 and 1 where `increase()` read 0.
+
+These stats are warn-at-one rather than red: once a fault series exists it is exported for
+the life of the process, so the number persists until the replica restarts. A fault that
+happened twenty minutes ago should not vanish from the verdict tier, but it should not
+read as an outage in progress either.
+
+### The Flow board could not tell Redis from RabbitMQ
+
+Both render as `Consuming 0` with every other stat green. The discriminator -- the L2 gate
+closes for Redis and stays open for the broker -- existed only on the worker boards, so
+the board an operator is told to open first could say *something broke* but not *what*.
+`L2 gate` is now on the Flow verdict tier.
+
+The `Posture` timeseries had the same hole from the other side: it drew gate, leader,
+hydration and identity, and omitted **consuming** -- the one posture signal that actually
+moved, in the Redis, broker and both-down scenarios alike. So the board's only history of
+the fault was a stat sparkline three centimetres wide. Consuming is on the panel now.
+
+### The hop-gap thresholds disagreed with each other
+
+`T_GAP` had steps on the positive side only, and the two hop gaps are one quantity
+measured in opposite directions. Measured across the suite: **+46/-47, +48/-46,
++43/-44** -- one panel orange, its twin green, for the same instant, every time. All six
+were artefacts of a scale-to-zero: a replica that leaves and returns gets a new series,
+and the produced and consumed counters for the same messages live on different services
+that restart at different moments. The steps are symmetric now, and both descriptions say
+what a restart inside the range does to them.
+
+### Two gaps the boards cannot close
+
+- **The wipe is indistinguishable from the pause.** Scaling Redis to zero destroys L2;
+  pausing it does not. Both render identically on every board -- gate 0, consuming 0. The
+  instrument that could separate them is `pipeline.duplicate.suppressed`, whose whole
+  description is "the entry was already absent", and it has **no series at all**, before
+  or after a deliberate wipe. That is an instrumentation gap, not a panel one.
+- **`landed="false"` still has no series**, so `Ack lost` remains unexercised by anything
+  the suite can inject.
 
 ## Reading the boards
 
