@@ -1,0 +1,85 @@
+# ============================================================================
+# prometheus — metrics scrape (Deployment + ClusterIP Service + ConfigMap subPath mount).
+# ============================================================================
+# Port of the compose `prometheus` block (compose.yaml L86-114). Prometheus scrapes
+# `otel-collector:8889` in-cluster (target configured in prometheus.yml, carried
+# VERBATIM by plan 80-01 into ConfigMap `prometheus-config`, data key `prometheus.yml`).
+# The config is mounted via a single-file `subPath` at compose's exact in-container
+# path (/etc/prometheus/prometheus.yml, T-80-07 — subPath preserves the image's
+# /etc/prometheus console libs). Ephemeral, no PVC (D-13, matches compose dev posture).
+#
+# Both compose command flags are carried verbatim: --config.file points at the mount,
+# --web.enable-lifecycle exposes POST /-/reload (dev convenience). The compose
+# `9090:9090` host publish is DROPPED (host reach via port-forward, plan 80-09), and
+# `depends_on: otel-collector` is DROPPED — k8s has no depends_on; ordering is handled
+# by the bring-up script (plan 80-09), and prometheus self-heals its scrape target.
+#
+# The compose wget /-/healthy healthcheck (10s/5s/retries 3/start 10s) becomes a
+# kubelet-side `httpGet: {path: /-/healthy, port: 9090}` readiness probe (200 == process
+# up + config loaded).
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: skp
+  labels:
+    app: prometheus
+    app.kubernetes.io/part-of: skp
+spec:
+  # ClusterIP (default) — in-cluster only; host reach is 127.0.0.1 port-forward (T-80-08, accept).
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: skp
+  labels:
+    app: prometheus
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.11.3        # verbatim (public image)
+          args:
+            # both compose command flags, verbatim
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--web.enable-lifecycle"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            # single-file subPath (not a whole-dir mount) → image console libs preserved (T-80-07)
+            - name: prom-config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+          # compose /-/healthy wget healthcheck → kubelet-side httpGet readiness (10s/5s/3/10s)
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+      volumes:
+        - name: prom-config
+          configMap:
+            name: prometheus-config    # ConfigMap authored in plan 80-01

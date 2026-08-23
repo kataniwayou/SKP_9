@@ -1,0 +1,179 @@
+# Two ConfigMaps replacing compose's bind-mounted config files (D-06).
+# Bodies carried BYTE-FOR-BYTE from compose/otel-collector-config.yaml and
+# prometheus.yml — do NOT edit scrape targets, exporters, or mapping.mode.
+#
+# NOTE for kustomization plan (80-07): these hand-authored ConfigMaps are the
+# canonical drop-in. If 80-07 uses a kustomize configMapGenerator it MUST set
+# disableNameSuffixHash: true AND reuse these SAME names (otel-collector-config,
+# prometheus-config) so the Deployment volume refs (80-04) do not break — this
+# file would then be dropped from the resource list.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: skp
+  labels:
+    app.kubernetes.io/part-of: skp
+data:
+  # Mounted (subPath) at /etc/otel-collector-config.yaml — compose.yaml L63.
+  otel-collector-config.yaml: |
+    # OTel Collector Contrib config — Phase 11 shape (was Phase 5 D-10 + Plan 05-02 fix-forward).
+    #
+    # Pipelines: logs → elasticsearch exporter (single-sink per Phase 11 D-01);
+    #            metrics → filter/health_metrics processor → prometheus exporter
+    #            (single-sink per Phase 11 D-02; D-04 preserves the Phase 5 fix-forward
+    #            that drops /health/* data points before egress);
+    #            traces → REMOVED (Phase 11 D-03 — no traces backend in v1).
+    #
+    # Receivers accept OTLP gRPC (4317) + HTTP (4318) — unchanged from Phase 5.
+    # health_check extension on :13133 — host-side `curl localhost:13133/` smoke probe
+    # (Phase 5 D-10 + RESEARCH Open Q4 carry-forward; distroless image has no in-container
+    # probe per Plan 05-01 deviation #1 + RESEARCH Pitfall 3).
+    #
+    # Backends (compose-internal DNS):
+    #   - http://elasticsearch:9200 (sk-elasticsearch container, D-12 dev posture)
+    #   - http://prometheus:9090 (scrape source: this collector exposes /metrics on :8889)
+    
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    
+    processors:
+      # Plan 05-02 fix-forward to Plan 05-01 (closes SC#4 metrics-half gap); Phase 11 D-04 re-points this processor at the Prometheus exporter pipeline (was [file, logging]).
+      #
+      # CONTEXT: OpenTelemetry.Instrumentation.AspNetCore 1.15.0's
+      # MeterProviderBuilder.AddAspNetCoreInstrumentation is PARAMETERLESS — no Filter
+      # callback exists on the metrics side (only on the TracerProviderBuilder overload).
+      # In .NET 8 the AspNetCore HTTP server metrics come from the built-in
+      # `Microsoft.AspNetCore.Hosting` Meter whose `http.server.request.duration`
+      # instrument has no per-tag drop knob; `.DisableHttpMetrics()` is .NET 9+ only.
+      #
+      # SOLUTION (Collector-side filtering): the otel-collector-contrib filterprocessor
+      # drops data points whose `metric.name == "http.server.request.duration"` AND whose
+      # `attributes["http.route"]` starts with `/health/`. SDK still emits, Collector
+      # drops data points whose http.route starts with /health/ before the Prometheus exporter — tests observe ZERO health-route samples in Prom queries (Phase 11 D-04).
+      #
+      # This is the idiomatic OTel architecture: SDK emits all, Collector applies
+      # ops-policy filtering. Backend filtering (Grafana/Tempo/Datadog) becomes a
+      # secondary layer atop this. Plan 05-01 OBSERV-08 / HEALTH-05 are now FULLY
+      # satisfied for metrics (previously partial — backend-only).
+      filter/health_metrics:
+        error_mode: ignore
+        metrics:
+          datapoint:
+            # Drop http.server.request.duration data points whose http.route is a health probe
+            - 'metric.name == "http.server.request.duration" and IsMatch(attributes["http.route"], "^/health/.*")'
+    
+    exporters:
+      # Phase 11 D-07 — exposes /metrics on :8889 for the sk-prometheus container to scrape.
+      # OTel → Prometheus naming (load-bearing for test assertions):
+      #   dot-form `http.server.request.duration` → underscore-form `http_server_request_duration`;
+      #   Histogram (unit="s") expands to `_count` + `_sum` + `_bucket` triplet with `_seconds` suffix
+      #   → final Prom name `http_server_request_duration_seconds_count` (and _sum / _bucket).
+      #   monotonic Sum gains `_total` suffix (e.g., `db.client.operations` → `db_client_operations_total`).
+      # (RESEARCH Pitfall 1 — the only complete reference for this mapping is the OTel spec at
+      #  https://opentelemetry.io/docs/specs/otel/compatibility/prometheus_and_openmetrics/.)
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        # CRITICAL per RESEARCH Pitfall 1: without resource_to_telemetry_conversion: true,
+        # resource attributes (service.name, service.version) do NOT become Prometheus labels.
+        # Phase 11 D-17 round-trip tests assert {service_name="sk-api"} — non-negotiable.
+        resource_to_telemetry_conversion:
+          enabled: true
+        # Emit sample timestamps from the OTLP source rather than scrape time. Reduces
+        # Prometheus's apparent metric latency by ~15s — improves E2E test determinism.
+        send_timestamps: true
+    
+      # Phase 11 D-06 — native elasticsearch exporter (otel-collector-contrib).
+      # mapping.mode: none preserves OTLP raw field structure (Body, SeverityText,
+      # Attributes.<key>, Resource.<key> — capital first letter) and produces the
+      # data stream `logs-generic-default` (backing index `.ds-logs-generic-default-NNNN`).
+      # NOTE (RESEARCH Open Q1): sk2_1's live ES on this host shows the OTel-mode index
+      # `logs-generic.otel-default` despite an identical `mapping.mode: none` YAML. Wave 0
+      # verification in Plan 11-07 confirms the actual index name on first sk_p compose-up
+      # by running `curl /_cat/indices`; the test helper constant is baked from that probe.
+      elasticsearch:
+        endpoints:
+          # Compose-internal hostname — resolves to sk-elasticsearch container via default
+          # compose network (Pattern 5: collector inside compose, tests outside via host-DNS).
+          - http://elasticsearch:9200
+        mapping:
+          mode: none
+        # No auth/tls blocks — dev posture per Phase 11 D-12 + sk2_1 lock-in.
+    
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    
+    service:
+      extensions: [health_check]
+      pipelines:
+        logs:
+          # Phase 11 D-01 — single sink. No file fan-out. No debug exporter.
+          receivers: [otlp]
+          exporters: [elasticsearch]
+        metrics:
+          # Phase 11 D-02 — single sink to Prometheus exporter.
+          # Phase 11 D-04 — filter/health_metrics processor re-pointed at this pipeline
+          # (was metrics→file in Phase 5; now metrics→prometheus). OBSERV-08 invariant
+          # preserved: /health/* data points dropped before reaching the Prom exporter.
+          receivers: [otlp]
+          processors: [filter/health_metrics]
+          exporters: [prometheus]
+        # Phase 11 D-03 — traces pipeline REMOVED. No traces backend in v1. OBSERV-12
+        # superseded to Out of Scope (REQUIREMENTS.md Phase 11 amendment). The collector
+        # will still ACCEPT trace OTLP records on the OTLP receiver but will silently
+        # drop them since no pipeline consumes them — this is intentional and matches
+        # sk2_1's lock-in posture.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: skp
+  labels:
+    app.kubernetes.io/part-of: skp
+data:
+  # Mounted (subPath) at /etc/prometheus/prometheus.yml — compose.yaml L96.
+  prometheus.yml: |
+    # Phase 11 D-08 — Prometheus scrape config for the otel-collector's prometheus exporter.
+    # Single static target — the collector exposes /metrics on :8889 (see compose/otel-collector-config.yaml
+    # exporters.prometheus.endpoint per Phase 11 D-07). 15s scrape interval matches sk2_1 lock-in.
+    #
+    # Layout: this file lives at the sk_p repo root (matches sk2_1's flat layout per D-08); the
+    # `prometheus` service in compose.yaml bind-mounts it read-only at /etc/prometheus/prometheus.yml.
+    
+    global:
+      scrape_interval: 15s        # D-07 / D-08: matches default; explicit for clarity
+      evaluation_interval: 15s    # Rule eval cadence (no rules defined — kept for default sanity)
+      scrape_timeout: 10s         # Prometheus default; explicit for clarity. Must be < scrape_interval per Prometheus validation.
+    
+    scrape_configs:
+      - job_name: 'otel-collector'
+        # NO authentication — dev mode (parallels compose.yaml D-12/D-13 no-auth posture).
+        # NO tls_config — dev mode (production hardening lives in a downstream service repo).
+        static_configs:
+          - targets:
+              # Compose-internal hostname; resolves to sk-otel-collector container via the
+              # default compose network. RESEARCH Pattern 5 — Prom container is INSIDE compose
+              # so it uses service-DNS, not host-DNS. Test code outside compose uses
+              # http://localhost:9090 (Prom HTTP API) instead.
+              - 'otel-collector:8889'
+        # Path defaults to /metrics — explicit for documentation clarity.
+        metrics_path: '/metrics'
+        # No metric_relabel_configs — we want raw OTel → Prometheus name translation.
+        # The resource_to_telemetry_conversion: true setting lives on the collector's
+        # prometheus exporter (Phase 11 D-07; compose/otel-collector-config.yaml). That is
+        # what makes `service.name` become the `service_name` Prom label — non-negotiable
+        # for Phase 11 D-17 round-trip test assertions.
+        #
+        # DELIBERATELY NO LABEL SURGERY HERE. In production, Prometheus is ORG-OWNED — we do
+        # not control its scrape config, so honor_labels / metric_relabel_configs are NOT
+        # available levers and must never be load-bearing for our label shape. Anything we
+        # need dropped or renamed has to be handled upstream, in the collector or the SDK
+        # resource. Keeping this file free of relabel rules keeps the local dev Prometheus an
+        # honest stand-in for the org one.
