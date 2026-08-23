@@ -65,6 +65,11 @@ spec:
             - name: prom-config
               mountPath: /etc/prometheus/prometheus.yml
               subPath: prometheus.yml
+            # second single-file subPath for the alert rules (Task 6) — same rationale as
+            # prometheus.yml above: a whole-dir mount would shadow the image's console libs.
+            - name: prom-config
+              mountPath: /etc/prometheus/skp-rules.yml
+              subPath: skp-rules.yml
           # compose /-/healthy wget healthcheck → kubelet-side httpGet readiness (10s/5s/3/10s)
           readinessProbe:
             httpGet:
