@@ -9,9 +9,13 @@ namespace: skp
 resources:
   - 00-namespace.yaml
   - 01-secret.yaml
+  - 02-configmaps.yaml
   - 10-postgres.yaml
   - 11-redis.yaml
   - 12-rabbitmq.yaml
+  - 20-otel-collector.yaml
+  - 21-prometheus.yaml
+  - 23-grafana.yaml
   - 30-baseapi-service.yaml
   - 33-processor-sample.yaml
   - 36-orchestrator.yaml

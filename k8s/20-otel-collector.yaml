@@ -1,0 +1,97 @@
+# ============================================================================
+# otel-collector — telemetry backbone (Deployment + 4-port ClusterIP Service + ConfigMap subPath mount).
+# ============================================================================
+# Port of the compose `otel-collector` block (compose.yaml L51-79). Every app
+# exports OTLP to `otel-collector:4317`; the collector exports logs to Elasticsearch
+# and exposes a Prometheus-scrape endpoint on :8889 (prometheus scrapes this). The
+# config is carried VERBATIM by plan 80-01 into ConfigMap `otel-collector-config`
+# (data key `otel-collector-config.yaml`) and mounted here via a single-file
+# `subPath` at the exact in-container path compose used (/etc/otel-collector-config.yaml,
+# T-80-07 — subPath preserves the distroless image's own dirs). Ephemeral, no PVC (D-13).
+#
+# The compose 4317/4318/8889/13133 host publishes are DROPPED — host reach comes
+# only via port-forward (plan 80-09). In-cluster reach is the ClusterIP Service DNS.
+#
+# PROBE UPGRADE (RESEARCH Pattern 6): compose had NO healthcheck (the contrib image
+# is distroless — no /bin/sh, wget, or curl, so no in-container probe is possible).
+# k8s uses a kubelet-side `httpGet: {path: /, port: 13133}` readiness probe, which
+# runs from the node and works on the distroless image — strictly better than the
+# compose no-healthcheck workaround. No liveness needed: restartPolicy Always covers
+# a hard crash, and otelcol-contrib exits non-zero on a bad config so a misconfigured
+# pod never stays Running.
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: skp
+  labels:
+    app: otel-collector
+    app.kubernetes.io/part-of: skp
+spec:
+  # ClusterIP (default) — in-cluster only; host reach is 127.0.0.1 port-forward (T-80-08, accept).
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: prom
+      port: 8889
+      targetPort: 8889
+    - name: health
+      port: 13133
+      targetPort: 13133
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: skp
+  labels:
+    app: otel-collector
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.152.0   # verbatim (public image, default pull policy)
+          args:
+            - "--config=/etc/otel-collector-config.yaml"         # compose `command`, verbatim
+          ports:
+            - containerPort: 4317
+            - containerPort: 4318
+            - containerPort: 8889
+            - containerPort: 13133
+          volumeMounts:
+            # single-file subPath (not a whole-dir mount) → image dirs preserved (T-80-07)
+            - name: otel-config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+          # kubelet-side httpGet works on the distroless image (compose had no probe)
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config    # ConfigMap authored in plan 80-01

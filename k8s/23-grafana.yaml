@@ -1,0 +1,274 @@
+# ============================================================================
+# grafana — dashboard UI (ClusterIP Service + Deployment + 2 provisioning ConfigMaps).
+# ============================================================================
+# Phase 87. Unlike every other manifest in k8s/ this has NO compose ancestor —
+# Grafana is new to the stack, so the header records the design decisions instead
+# of a port record.
+#
+# IMAGE PIN — the official grafana image, patch-pinned at 12.3.9, never a floating
+# tag (same rule as prom/prometheus:v3.11.3 in 21-prometheus.yaml). The 12.x line
+# specifically: Grafana
+# 13.0 REMOVED the Classic dashboard-JSON export (12.2 already made the V2 Resource
+# form the export default), which is the round-trip that lets a human iterate on a
+# panel in the editor, export, and commit the result back into k8s/dashboards/*.json
+# (OQ-5). Hand-authored classic JSON still provisions on 13.1.1 — verified — so this
+# is about keeping the authoring loop, not a hard runtime block.
+#
+# NO PERSISTENCE — /var/lib/grafana is an `emptyDir`, not a PVC. The ABSENCE of
+# persistence IS the requirement (DASH-03): deleting the pod must throw away every
+# byte of Grafana state and reproduce the datasource and both dashboards from this
+# repo alone. If a PVC ever appears here, "the repo is the single source of truth"
+# stops being provable. This is also the repo's first `emptyDir` and first
+# `securityContext` — neither has an analog in the other 14 manifests.
+#
+# LEAF-DIRECTORY MOUNT RULE — the three ConfigMap volumes mount at
+# /etc/grafana/provisioning/datasources, /etc/grafana/provisioning/dashboards and
+# /etc/grafana/dashboards. Mounting a ConfigMap over /etc/grafana/provisioning ITSELF
+# would shadow the image's sibling `alerting/`, `plugins/`, `access-control/` and
+# `notifiers/` subdirectories and Grafana would log provisioning errors at boot. That
+# is the same shadowing hazard T-80-07 guards against in 21-prometheus.yaml, but the
+# mechanism is INVERTED: prometheus mounts a single file by `subPath` to preserve its
+# sibling console libs; grafana needs whole directories, so it preserves its siblings
+# by mounting at the LEAVES instead. Note also that the dashboard JSONs mount at
+# /etc/grafana/dashboards — a SIBLING of the data dir. They are NEVER placed in a
+# subdirectory of /var/lib/grafana (the Helm-chart convention), which would nest a
+# ConfigMap volume inside the emptyDir and muddy the no-persistence story.
+#
+# CONFIGMAP SIZE CEILING — a ConfigMap may not exceed 1 MiB (the etcd request-size
+# limit; the apiserver rejects larger, loudly, at apply time). The generated
+# `grafana-dashboards` ConfigMap (kustomization.yaml configMapGenerator) carries both
+# dashboards; two 15-25 panel dashboards measure 40-120 KB, roughly 10x under. If the
+# pair ever approaches ~700 KB the remedy is to SPLIT into two ConfigMaps
+# (grafana-dashboards-runtime / grafana-dashboards-business) mounted at two paths, plus
+# a second provider entry in `grafana-dashboard-provider` (or one provider with
+# foldersFromFilesStructure: true). Do not pre-split.
+#
+# AUTH POSTURE (accepted, not mitigated) — anonymous access is ON with org role Viewer,
+# plus admin/admin for the API. This matches the stack's existing posture exactly: the
+# in-cluster Prometheus and Elasticsearch are both unauthenticated. Everything stays
+# ClusterIP with no NodePort and no Ingress, so the only host reach is a 127.0.0.1
+# port-forward. Auth hardening is explicitly OUT OF SCOPE per REQUIREMENTS.md, which is
+# why the admin password is a plain env value and NOT a `skp-dev-secrets` key — the
+# extra indirection would imply a security property this posture does not have.
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: skp
+  labels:
+    app: grafana
+    app.kubernetes.io/part-of: skp
+spec:
+  # ClusterIP (default) — in-cluster only; host reach is 127.0.0.1 port-forward (T-87-01).
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: skp
+  labels:
+    app: grafana
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      # FIRST securityContext in k8s/ — the grafana image ALREADY defaults to uid 472
+      # (verified: `id` in the container reports uid=472(grafana) gid=0(root)); pinning it
+      # here makes that explicit so the container can never silently run as root (T-87-05).
+      securityContext:
+        runAsUser: 472
+        runAsGroup: 0
+        fsGroup: 472
+      containers:
+        - name: grafana
+          # patch-pinned; 12.x keeps the Classic JSON export → the UI-edit/commit loop (OQ-5)
+          image: grafana/grafana:12.3.9
+          ports:
+            - containerPort: 3000
+          env:
+            # dev credentials — loopback-only posture, see AUTH POSTURE in the header (T-87-02)
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: "admin"
+            # port-forward → browser with zero login (DASH-01), read-only role (T-87-07)
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: "Viewer"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            # no outbound calls from a dev cluster (T-87-04)
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+            # NOTE: GF_PATHS_PROVISIONING is deliberately NOT set — the image default is
+            # already /etc/grafana/provisioning; overriding it only adds a failure mode.
+            # NOTE: GF_INSTALL_PLUGINS is deliberately absent — no boot-time code fetch,
+            # only the bundled core datasources are used (T-87-06).
+          volumeMounts:
+            # whole-DIRECTORY mounts at the provisioning LEAVES — see LEAF-DIRECTORY MOUNT
+            # RULE in the header; never at /etc/grafana/provisioning itself.
+            - name: gf-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: gf-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            # the dashboard JSONs live OUTSIDE the provisioning tree and outside the data dir
+            - name: gf-dashboards
+              mountPath: /etc/grafana/dashboards
+              readOnly: true
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+          # Phase-86 probe trio (32-keeper.yaml convention), all three on Grafana's single
+          # /api/health — it returns 200 with {"database":"ok",...} once the SQLite DB has
+          # migrated.
+          startupProbe:
+            # 30 × 5s = a 150s budget against a measured ~9s first-boot migration
+            httpGet:
+              path: /api/health
+              port: 3000
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            # memory-only — there is no `cpu` key anywhere in k8s/ and this is not the place
+            # to introduce one. The limit is doubled vs the 21-prometheus 256Mi house value
+            # because Grafana 12 idled at 100-150 MiB in the measured container.
+            requests:
+              memory: "128Mi"
+            limits:
+              memory: "512Mi"
+      volumes:
+        - name: gf-datasources
+          configMap:
+            name: grafana-datasources          # hand-authored below
+        - name: gf-provider
+          configMap:
+            name: grafana-dashboard-provider   # hand-authored below
+        - name: gf-dashboards
+          configMap:
+            name: grafana-dashboards           # GENERATED by kustomization.yaml configMapGenerator
+                                               # (disableNameSuffixHash: true keeps this name stable)
+        - name: grafana-storage
+          # DASH-03 — no PVC, deliberately disposable. A pod recreate must rebuild all
+          # Grafana state from the provisioning ConfigMaps, i.e. from this repo.
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: skp
+  labels:
+    app.kubernetes.io/part-of: skp
+data:
+  # Mounted (whole-dir, readOnly) at /etc/grafana/provisioning/datasources.
+  prometheus.yaml: |
+    apiVersion: 1
+
+    # prune: true removes datasources provisioned by a previous version of this file
+    # and since deleted from it.
+    prune: true
+
+    datasources:
+      - name: Prometheus
+        # STABLE, explicit uid — never let Grafana mint a random one. With an emptyDir data
+        # dir a pod recreate would otherwise produce a DIFFERENT uid every time. This uid is
+        # an operational property of THIS file and gives the verification script a fixed
+        # address (/api/datasources/uid/skp-prometheus/...). The dashboards never reference
+        # it: every panel goes through the `${datasource}` template variable, which is what
+        # makes the JSON portable to any other Grafana (DASH-04). The two never read each
+        # other, so they are not in tension.
+        uid: skp-prometheus
+        type: prometheus
+        # proxy — Grafana fetches server-side; the browser never talks to :9090
+        access: proxy
+        # bare Service DNS from k8s/21-prometheus.yaml
+        url: http://prometheus:9090
+        # DASH-02 — the default datasource on first boot, zero manual UI setup
+        isDefault: true
+        # UI cannot mutate it → the API then reports readOnly: true (T-87-03)
+        editable: false
+        jsonData:
+          # long PromQL survives; avoids URL length limits
+          httpMethod: POST
+          # EFFECTIVE series resolution, which is NOT prometheus.yml's scrape_interval.
+          #
+          # prometheus.yml sets scrape_interval: 15s (02-configmaps.yaml) and this value
+          # used to mirror it. That was wrong. The collector's prometheus exporter emits
+          # EXPLICIT millisecond timestamps on every sample (verify with
+          # `kubectl -n skp exec deployment/prometheus -- wget -qO- http://otel-collector:8889/metrics`
+          # — each line carries a third field). Prometheus honours an explicit timestamp
+          # and discards a re-scrape bearing one it already stored, so the stored
+          # resolution is the .NET SDK's PeriodicExportingMetricReader interval (60s),
+          # not the scrape interval. Measured: count_over_time(<any series>[2m]) == 2.
+          #
+          # Grafana derives $__rate_interval = max(4 × timeInterval, step + scrape).
+          # At 15s that floored to 60s, and rate() over a 60s window straddling samples
+          # exactly 60s apart usually sees ONE sample and returns no series — which
+          # silently emptied every rate() timeseries panel in the browser while instant
+          # queries (and 87-05's 5m substitution) kept passing. 60s here floors
+          # $__rate_interval at 240s, spanning four samples.
+          #
+          # If the export cadence changes, this must follow it — the scrape interval is
+          # not the number to track.
+          timeInterval: "60s"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: skp
+  labels:
+    app.kubernetes.io/part-of: skp
+data:
+  # Mounted (whole-dir, readOnly) at /etc/grafana/provisioning/dashboards.
+  skp.yaml: |
+    apiVersion: 1
+
+    providers:
+      - name: skp
+        orgId: 1
+        # both dashboards land in one named folder
+        folder: SKP
+        type: file
+        # UI cannot delete a provisioned dashboard
+        disableDeletion: true
+        # a UI "Save" is rejected with `Cannot save provisioned dashboard` (HTTP 400) — this
+        # is the mechanism that makes the repo the single source of truth (DASH-03, T-87-03)
+        allowUiUpdates: false
+        # re-reads the dir; with a ConfigMap this also picks up the kubelet's ConfigMap
+        # refresh (~60s) without a pod restart
+        updateIntervalSeconds: 30
+        options:
+          path: /etc/grafana/dashboards
+          foldersFromFilesStructure: false
