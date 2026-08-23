@@ -52,6 +52,20 @@ public sealed class L2GateProbe : BackgroundService
     {
         var consecutiveHealthy = 0;
 
+        // The gate begins closed, and nothing else says so. L2Gate logs transitions only — correctly,
+        // or every tick would emit a line — but a gate that starts closed and stays closed never
+        // transitions, so on a cold start into a Redis outage there is no "gate closed" record to
+        // find. One line, once, naming the starting state and what will leave it.
+        _logger.LogInformation(
+            "L2 gate starts closed — {HealthyChecksToOpen} consecutive healthy probes at {Interval} "
+            + "will open it; consumers stay paused until then",
+            _options.HealthyChecksToOpen, _options.Interval);
+
+        // Bounded to one line per outage episode rather than one per tick. The Debug-level records
+        // below stay where they are: they are the per-iteration detail, and turning them into
+        // warnings would flood the log for the length of an outage this design exists to ride out.
+        var reportedUnreachable = false;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             // FIRST, and before anything that can block. See the type remarks.
@@ -61,6 +75,11 @@ public sealed class L2GateProbe : BackgroundService
             {
                 if (await IsHealthyAsync(stoppingToken).ConfigureAwait(false))
                 {
+                    // Armed again for the next episode. The recovery itself is not announced here —
+                    // L2Gate's own "gate open" transition is the recovery record, and a second line
+                    // saying the same thing would only compete with it.
+                    reportedUnreachable = false;
+
                     consecutiveHealthy++;
                     if (consecutiveHealthy >= _options.HealthyChecksToOpen)
                     {
@@ -71,6 +90,15 @@ public sealed class L2GateProbe : BackgroundService
                 }
                 else
                 {
+                    if (!reportedUnreachable)
+                    {
+                        reportedUnreachable = true;
+                        _logger.LogWarning(
+                            "projection store unreachable — the L2 gate stays closed and consumers "
+                            + "stay paused until {HealthyChecksToOpen} consecutive probes succeed",
+                            _options.HealthyChecksToOpen);
+                    }
+
                     consecutiveHealthy = 0;
                     await _gate.TripAsync().ConfigureAwait(false);
                 }

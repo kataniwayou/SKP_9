@@ -216,7 +216,8 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
             // and try again. Letting it escape would fault the host over a condition the loop exists
             // to ride out.
             _logger.LogWarning(
-                ex, "could not send the {Type} request; will retry {CorrelationId}", type, correlationId);
+                ex, "could not send the {Type} request; will retry {CorrelationId} — {Reason}",
+                type, correlationId, BrokerFaultClassifier.Describe(ex));
             return null;
         }
 

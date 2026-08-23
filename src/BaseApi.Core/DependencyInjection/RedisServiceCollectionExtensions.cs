@@ -40,9 +40,12 @@ namespace BaseApi.Core.DependencyInjection;
 /// </para>
 ///
 /// <para>
-/// This extension does not probe Redis at startup and does not register a health check. Redis is a
-/// required, latched readiness dependency, but that check is registered in
-/// <c>HealthServiceCollectionExtensions</c>.
+/// This extension does not probe Redis at startup and does not register a health check.
+/// <b>Redis is neither required nor latched for readiness</b> — it is registered in
+/// <c>HealthServiceCollectionExtensions</c> capped at degraded and deliberately unlatched, because a
+/// latch that never self-heals is incompatible with pausing consumption to ride out an outage. That
+/// type's remarks carry the full reasoning; this note exists only so nobody reasons about readiness
+/// from here and reaches the opposite conclusion.
 /// </para>
 /// </summary>
 internal static class RedisServiceCollectionExtensions

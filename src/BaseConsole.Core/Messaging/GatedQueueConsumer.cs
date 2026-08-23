@@ -116,7 +116,9 @@ public sealed class GatedQueueConsumer : BackgroundService
                     // Never end the loop on a failure to converge — the broker may simply be down.
                     // The next pass retries, and until then the consumer stays in whatever state it
                     // already held, which is safe in both directions.
-                    _logger.LogWarning(ex, "consumer could not reach the state the gate calls for");
+                    _logger.LogWarning(
+                        ex, "consumer for {Queue} could not converge — {Reason}",
+                        _options.Queue, BrokerFaultClassifier.Describe(ex));
                 }
 
                 await WaitForSignalAsync(stoppingToken).ConfigureAwait(false);
