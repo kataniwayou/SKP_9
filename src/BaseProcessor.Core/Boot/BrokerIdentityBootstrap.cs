@@ -162,7 +162,8 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
             // A broker that is down or mid-reconnect is the same situation as an unanswered ask: wait
             // and try again. This is the window the design exists to let a processor ride out.
             _logger.LogWarning(
-                ex, "could not send the identity request; will retry {CorrelationId}", correlationId);
+                ex, "could not send the identity request; will retry {CorrelationId} — {Reason}",
+                correlationId, BrokerFaultClassifier.Describe(ex));
             return null;
         }
 

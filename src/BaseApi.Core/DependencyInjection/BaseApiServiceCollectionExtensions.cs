@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace BaseApi.Core.DependencyInjection;
 
 /// <summary>
-/// Composition root for the API service, chaining the seven sub-extensions in order.
+/// Composition root for the API service, chaining the eight sub-extensions in order.
 /// Observability is deliberately not part of the chain: it is invoked on the host builder instead,
 /// because <c>builder.Logging.AddOpenTelemetry</c> needs an <c>ILoggingBuilder</c>, which
 /// <c>IServiceCollection</c> does not expose.
@@ -22,6 +22,10 @@ public static class BaseApiServiceCollectionExtensions
         this IServiceCollection services, IConfiguration cfg)
         where TDbContext : BaseDbContext
         => services
+            // First, and for one reason: hosted services start in registration order, so this is what
+            // puts "can this process reach RabbitMQ and Redis?" at the top of the log rather than
+            // behind a migration attempt that may be sitting on a dead Postgres.
+            .AddBaseApiPreflight(cfg)
             .AddBaseApiPersistence<TDbContext>(cfg)
             .AddBaseApiHealth(cfg)
             .AddBaseApiErrorHandling()
