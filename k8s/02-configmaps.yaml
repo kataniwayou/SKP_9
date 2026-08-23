@@ -229,18 +229,25 @@ data:
               description: "Deliveries are being requeued because the projection store is unusable. If PipelineNotConsuming is firing and this is not, the fault is the broker, not the store."
 
           - alert: WorkersMissing
-            # Peak minus trough over five minutes at 15s resolution. Measured 0 across the
-            # undisturbed baseline; 3 for a lost orchestrator StatefulSet, 2 for a lost
-            # processor pair.
+            # Fewer replicas reporting now than five minutes ago. NOT peak-minus-trough over
+            # a window: that also fires on a monotonic increase -- a Deployment surging up
+            # during a redeploy -- and stays true for a full window after the replicas are
+            # back, which is the cry-wolf this rule set exists not to do. The dashboard stat
+            # of the same name DOES use peak-minus-trough, deliberately: a panel should tell
+            # a late arrival what happened, an alert should describe what is true now.
+            #
+            # The 40s liveness windows track LIVENESS in grafana/build-dashboards.py.
+            # Measured: 0 firing across the undisturbed baseline; a lost orchestrator
+            # StatefulSet drops the count by 3, a lost processor pair by 2.
             expr: >
-              (max_over_time((count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))))[5m:15s])
-               - min_over_time((count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))))[5m:15s])) > 0
-            for: 1m
+              count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s])))
+              < count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s] offset 5m)))
+            for: 2m
             labels:
               severity: warning
             annotations:
-              summary: "{{ $value }} worker replica(s) went away in the last five minutes"
-              description: "Replicas stopped reporting. This lags the event by roughly the liveness window plus one export, so a short disappearance is reported after it has ended."
+              summary: "Fewer worker replicas are reporting than five minutes ago"
+              description: "Replicas stopped reporting and have not come back. Detection lags the event by roughly the liveness window plus one export, so a disappearance shorter than that is reported after it has ended -- or not at all. A deliberate rolling restart will also trip this; it clears on its own once the count recovers."
 
           - alert: EgressFaults
             # unroutable = the queue is not declared; transient = the broker is unreachable.
@@ -251,4 +258,4 @@ data:
               severity: warning
             annotations:
               summary: "{{ $labels.service_name }} failed to publish ({{ $labels.outcome }})"
-              description: "{{ $value | printf \"%.0f\" }} send(s) did not reach the broker in five minutes. transient = broker unreachable; unroutable = queue not declared."
+              description: "{{ $value | printf \"%.0f\" }} send(s) did not reach the broker in five minutes. transient = broker unreachable; unroutable = queue not declared; refused = the broker answered and declined the publish."
