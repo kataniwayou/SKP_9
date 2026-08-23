@@ -330,7 +330,13 @@ Expected: four `success` lines. The Grafana restart is required — a datasource
 
 - [ ] **Step 5: Confirm the boards still render on a healthy stack**
 
+`chaos-timeline.js` writes to `<repo>/.chaos-timeline/<label>/` when `OUT_DIR` is unset, and nothing ignores that path. Add it before running, or the screenshots land in `git status` and someone commits a few hundred PNGs:
+
 ```bash
+grep -qxF '.chaos-timeline/' .gitignore || printf '
+# chaos-timeline.js sampler output — screenshots and timelines, never committed
+.chaos-timeline/
+' >> .gitignore
 export NODE_PATH="$(node -e 'console.log(require("path").resolve("."))')/node_modules"
 node grafana/chaos-timeline.js --label retune-verify --duration 90 --interval 20
 ```
@@ -340,7 +346,7 @@ Expected: five boards, `noData 0` and `err 0` on every sweep, `Data freshness` r
 - [ ] **Step 6: Commit**
 
 ```bash
-git add k8s/23-grafana.yaml grafana/build-dashboards.py grafana/dashboards
+git add k8s/23-grafana.yaml grafana/build-dashboards.py grafana/dashboards .gitignore
 git commit -m "fix(grafana): track the datasource and liveness window to the 15s resolution
 
 timeInterval is the effective series resolution, not the scrape interval, and
@@ -516,8 +522,12 @@ In `k8s/02-configmaps.yaml`, inside the `prometheus-config` ConfigMap's `data:` 
     # never been observed to change -- `landed="false"` has never occurred on this stack,
     # so there is deliberately no ack-loss rule.
     #
-    # The 40s liveness windows must track LIVENESS in grafana/build-dashboards.py. They are
-    # the same decision expressed twice because Prometheus cannot read the generator.
+    # The liveness windows must track LIVENESS in grafana/build-dashboards.py. They are the
+    # same decision expressed twice because Prometheus cannot read the generator. Read the
+    # value out of the generator rather than copying it from this plan -- Task 4's own
+    # verification step may have widened it:
+    #     grep -n '^LIVENESS' grafana/build-dashboards.py
+    # and substitute that value everywhere `[40s]` appears below.
     groups:
       - name: skp-pipeline
         interval: 15s
@@ -875,7 +885,7 @@ for pair in "s1-happy HappyPathScenarioTests" \
             "s5-orch OrchestratorUnavailableScenarioTests" \
             "s6-proc ProcessorUnavailableScenarioTests" \
             "s7-wipe RedisWipeScenarioTests" \
-            "s8-wedged WedgedReplicaScenarioTests"; do
+            "s8-partial PartialReplicaLossScenarioTests"; do
   set -- $pair
   curl -s -X POST http://localhost:18080/api/v1/orchestration/stop \
     -H 'Content-Type: application/json' -d '"4cd8af45-1295-43db-ab2e-e955dd82b5c5"'
