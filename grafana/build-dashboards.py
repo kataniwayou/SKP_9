@@ -116,11 +116,18 @@ def counted(series, window="$__range"):
     the window and therefore reports 0 for exactly that case: the first time a fault ever
     happens, which is the case the verdict tier exists to catch.
 
-    Measured: the broker scenario produced two transient publishes and one parked
-    delivery. `sum(increase(...))` read 0 for all three for the rest of the run, while
-    the rate-based stats these replace read 0.00 for the same reason plus the 240s rate
-    window. This form -- the larger of the in-window growth and the absolute total --
-    read 2 and 1.
+    Measured at the OLD 60s export cadence, which is when this shape was chosen: the
+    broker scenario produced two transient publishes and one parked delivery.
+    `sum(increase(...))` read 0 for all three for the rest of the run, while the
+    rate-based stats these replace read 0.00 for the same reason plus the 240s rate
+    window that cadence forced. This form -- the larger of the in-window growth and the
+    absolute total -- read 2 and 1. The cadence is 10s now and the rate window 60s, which
+    narrows the second half of that argument but not the first: the series-birth problem
+    is a property of the .NET counter, not of the window, so this form is still required.
+
+    The alert rules in k8s/02-configmaps.yaml carry the same shape for the same reason --
+    see EgressFaults there, which shipped as bare `increase()` and could not have caught
+    a first-ever fault.
 
     Consequence worth knowing: once a fault series exists it is exported for the life of
     the process, so this stat stays non-zero until the replica restarts. That is why the
@@ -496,10 +503,13 @@ def verdict_shared(layout, f):
              desc="Deliveries the consumer refused or sent back, COUNTED over the "
                   "visible range. Drill into 'reason' on the pipeline tier for why."
                   + PARA +
-                  "Counted rather than rated. As a rate this read 0.00 through every "
-                  "scenario in the chaos suite: the rate window is 240s here, so the "
-                  "single parked delivery the broker outage produced was 1/240 = 0.004, "
-                  "which rounds to nothing at any sane precision.",
+                  "Counted rather than rated. Measured at the old 60s export cadence, when "
+                  "the rate window here was 240s: as a rate this read 0.00 through every "
+                  "scenario in the chaos suite, because the single parked delivery the "
+                  "broker outage produced was 1/240 = 0.004, which rounds to nothing at "
+                  "any sane precision. The window is 60s now, which makes that same "
+                  "delivery 0.017 -- still nothing at this precision, which is why the "
+                  "panel is still counted rather than rated.",
              thresholds=T_WARN, decimals=0),
         stat(layout, "Ack lost",
              [counted(f'pipeline_messages_consumed_total{{{f},'
@@ -664,15 +674,20 @@ def build_flow():
              ['sum(rate(pipeline_messages_produced_total[$__rate_interval])) or vector(0)'],
              desc="Total egress across every worker. Zero during a run means the "
                   "pipeline has stopped, whatever else reads green." + PARA +
-                  "**Slow on purpose and slow by force.** $__rate_interval is 240s on "
-                  "this stack -- the datasource declares a 60s timeInterval because that "
-                  "is the OTLP export cadence, and Grafana floors the rate window at four "
-                  "times it. So this number averages the last four minutes and cannot "
-                  "fall to zero inside a shorter outage. Measured: with the whole pipeline "
-                  "stopped it still read 1.12 req/s a hundred seconds later, and through "
-                  "a sixty-second broker outage it only dipped 1.12 -> 0.92, never leaving "
-                  "green. Read the posture stats beside it for anything shorter than a few "
-                  "minutes; this one answers 'has throughput changed', not 'is it down'.",
+                  "**Slower than the fault you are chasing.** $__rate_interval is 60s on "
+                  "this stack -- the datasource declares a 15s timeInterval, matching the "
+                  "scrape, and Grafana floors the rate window at four times it. So this "
+                  "number averages the last minute and still cannot fall to zero inside a "
+                  "shorter outage." + PARA +
+                  "Measured at the OLD 60s export cadence, when timeInterval was 60s and "
+                  "$__rate_interval 240s: with the whole pipeline stopped this still read "
+                  "1.12 req/s a hundred seconds later, and through a sixty-second broker "
+                  "outage it only dipped 1.12 -> 0.92, never leaving green. Those are the "
+                  "numbers that bought the cadence change; a sixty-second fault now falls "
+                  "inside one rate window rather than a quarter of one, so the dilution is "
+                  "four times smaller -- not gone. Read the posture stats beside it for "
+                  "anything shorter than a minute; this one answers 'has throughput "
+                  "changed', not 'is it down'.",
              thresholds=[{"color": "red", "value": None}, {"color": "green", "value": 0.0001}],
              unit="reqps", decimals=2),
         stat(lay, "Consuming",
@@ -709,14 +724,23 @@ def build_flow():
               '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
              desc="Seconds since the least-fresh service last exported anything." + PARA +
                   "Every other panel on this board is downstream of this number. The "
-                  "export cadence is 60s, so it sawtooths 0-60 in health; sustained above "
-                  "that means a service has stopped reporting and its gauges are being "
-                  "held at whatever they last said.",
+                  "export cadence is 10s against a 15s scrape, so the effective resolution "
+                  "is 15s and this sawtooths 0-15 in health. Orange at 45 -- three missed "
+                  "samples -- and red at 90. Sustained above green means a service has "
+                  "stopped reporting and its gauges are being held at whatever they last "
+                  "said." + PARA +
+                  "The TelemetryStale alert rule fires off the same 45, deliberately, so "
+                  "the alert and this panel change colour at the same instant.",
              thresholds=T_STALE, unit="s", decimals=0),
     ]
 
     lay.newline()
-    panels.append(row(lay, "2 - Since: what happened in this range?"))
+    # Titled by TENSE, not by window. It used to read "what happened in this range?",
+    # which contradicted the one stat in the row whose window is not the range: Workers
+    # missing (5m) was deliberately moved OFF $__range to a fixed five minutes so the
+    # number stops changing when the reader zooms. Naming the row by its window made the
+    # row label wrong for that stat; naming it by tense is true of all six.
+    panels.append(row(lay, "2 - Since: what has already happened?"))
     panels += [
         stat(lay, "Outbound hop gap",
              ['sum(increase(pipeline_messages_produced_total{type="process-dispatch",'
@@ -762,10 +786,12 @@ def build_flow():
              desc="Share of deliveries that will be redone, in MESSAGES over the visible "
                   "range. Healthy is exactly zero." + PARA +
                   "Counted rather than rated, and that is what makes it able to fire at "
-                  "all. As a ratio of two 240s rates it read 0.0% through every scenario "
-                  "in the chaos suite, including the broker outage that parked a delivery: "
-                  "one parked message against a 240s denominator is a rounding error, "
-                  "while one parked message in a fifteen-minute range is a number."
+                  "all. Measured at the old 60s export cadence: as a ratio of two 240s "
+                  "rates it read 0.0% through every scenario in the chaos suite, including "
+                  "the broker outage that parked a delivery, because one parked message "
+                  "against a 240s denominator was a rounding error. The rate window is 60s "
+                  "now, which would make that same event 4x larger and still a rounding "
+                  "error; one parked message in a fifteen-minute range is a number."
                   + PARA +
                   "Green below 1%. Counting rather than rating makes this stat sticky for a "
                   "range width, and thresholded red-at-any-non-zero it stayed red through "
@@ -798,10 +824,12 @@ def build_flow():
                   "processor scenario, whose own answer was 2. A stated window is worth "
                   "more than a wider one." + PARA +
                   "**Peak minus trough, not peak minus now.** The dip is narrow and a stat "
-                  "panel is a range query at a coarse step, so a subtraction against the "
-                  "current value lands on the wrong side of the dip about half the time. "
-                  "The `[5m:15s]` subqueries evaluate at 15s regardless of the panel's "
-                  "step, which is what makes this catch a transient at all." + PARA +
+                  "panel is a range query at the datasource step, so a subtraction against "
+                  "the current value lands on the wrong side of the dip about half the "
+                  "time -- measured at the old 60s step, where it missed an outage the "
+                  "same expression had caught an hour earlier. The step is 15s now, but "
+                  "the `[5m:15s]` subqueries pin the evaluation at 15s regardless of it, "
+                  "which is what keeps this independent of the panel's own step." + PARA +
                   "**It cannot be prompt.** A replica is only missing once it has skipped "
                   "its liveness window, so detection takes roughly the liveness window "
                   "plus one export. Nothing queryable fixes the remainder: a fault shorter "
@@ -895,9 +923,13 @@ def build_flow():
                      "then links out to the source boards. The hop-gap panels span two "
                      "services and belong to neither source board." + PARA +
                      "The verdict tier is split by TENSE. Row 1 is the state right now. "
-                     "Row 2 is the worst thing that happened inside the visible range, "
-                     "and those stats stay non-zero after the event that caused them -- "
-                     "deliberately, so an operator arriving late is still told."),
+                     "Row 2 is the worst thing that has already happened, and those stats "
+                     "stay non-zero after the event that caused them -- deliberately, so "
+                     "an operator arriving late is still told." + PARA +
+                     "Row 2's stats are scoped to the visible range, with ONE exception: "
+                     "`Workers missing (5m)` is fixed at five minutes regardless of the "
+                     "range, so its number does not change when you zoom. Its own "
+                     "description says why."),
         variables=[
             var_datasource(),
             var_query("processor", "Processor",

@@ -462,7 +462,7 @@
       "id": 70,
       "type": "stat",
       "title": "Not acked",
-      "description": "Deliveries the consumer refused or sent back, COUNTED over the visible range. Drill into 'reason' on the pipeline tier for why.\n\nCounted rather than rated. As a rate this read 0.00 through every scenario in the chaos suite: the rate window is 240s here, so the single parked delivery the broker outage produced was 1/240 = 0.004, which rounds to nothing at any sane precision.",
+      "description": "Deliveries the consumer refused or sent back, COUNTED over the visible range. Drill into 'reason' on the pipeline tier for why.\n\nCounted rather than rated. Measured at the old 60s export cadence, when the rate window here was 240s: as a rate this read 0.00 through every scenario in the chaos suite, because the single parked delivery the broker outage produced was 1/240 = 0.004, which rounds to nothing at any sane precision. The window is 60s now, which makes that same delivery 0.017 -- still nothing at this precision, which is why the panel is still counted rather than rated.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"

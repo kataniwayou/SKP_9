@@ -2,7 +2,7 @@
   "id": null,
   "uid": "skp-flow",
   "title": "SKP Flow",
-  "description": "Cross-service conservation for the SKP pipeline. The board to open first: it answers whether the system is broken and where, then links out to the source boards. The hop-gap panels span two services and belong to neither source board.\n\nThe verdict tier is split by TENSE. Row 1 is the state right now. Row 2 is the worst thing that happened inside the visible range, and those stats stay non-zero after the event that caused them -- deliberately, so an operator arriving late is still told.",
+  "description": "Cross-service conservation for the SKP pipeline. The board to open first: it answers whether the system is broken and where, then links out to the source boards. The hop-gap panels span two services and belong to neither source board.\n\nThe verdict tier is split by TENSE. Row 1 is the state right now. Row 2 is the worst thing that has already happened, and those stats stay non-zero after the event that caused them -- deliberately, so an operator arriving late is still told.\n\nRow 2's stats are scoped to the visible range, with ONE exception: `Workers missing (5m)` is fixed at five minutes regardless of the range, so its number does not change when you zoom. Its own description says why.",
   "tags": [
     "skp",
     "skp-flow",
@@ -101,7 +101,7 @@
       "id": 2,
       "type": "stat",
       "title": "System flowing",
-      "description": "Total egress across every worker. Zero during a run means the pipeline has stopped, whatever else reads green.\n\n**Slow on purpose and slow by force.** $__rate_interval is 240s on this stack -- the datasource declares a 60s timeInterval because that is the OTLP export cadence, and Grafana floors the rate window at four times it. So this number averages the last four minutes and cannot fall to zero inside a shorter outage. Measured: with the whole pipeline stopped it still read 1.12 req/s a hundred seconds later, and through a sixty-second broker outage it only dipped 1.12 -> 0.92, never leaving green. Read the posture stats beside it for anything shorter than a few minutes; this one answers 'has throughput changed', not 'is it down'.",
+      "description": "Total egress across every worker. Zero during a run means the pipeline has stopped, whatever else reads green.\n\n**Slower than the fault you are chasing.** $__rate_interval is 60s on this stack -- the datasource declares a 15s timeInterval, matching the scrape, and Grafana floors the rate window at four times it. So this number averages the last minute and still cannot fall to zero inside a shorter outage.\n\nMeasured at the OLD 60s export cadence, when timeInterval was 60s and $__rate_interval 240s: with the whole pipeline stopped this still read 1.12 req/s a hundred seconds later, and through a sixty-second broker outage it only dipped 1.12 -> 0.92, never leaving green. Those are the numbers that bought the cadence change; a sixty-second fault now falls inside one rate window rather than a quarter of one, so the dilution is four times smaller -- not gone. Read the posture stats beside it for anything shorter than a minute; this one answers 'has throughput changed', not 'is it down'.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -365,7 +365,7 @@
       "id": 6,
       "type": "stat",
       "title": "Data freshness",
-      "description": "Seconds since the least-fresh service last exported anything.\n\nEvery other panel on this board is downstream of this number. The export cadence is 60s, so it sawtooths 0-60 in health; sustained above that means a service has stopped reporting and its gauges are being held at whatever they last said.",
+      "description": "Seconds since the least-fresh service last exported anything.\n\nEvery other panel on this board is downstream of this number. The export cadence is 10s against a 15s scrape, so the effective resolution is 15s and this sawtooths 0-15 in health. Orange at 45 -- three missed samples -- and red at 90. Sustained above green means a service has stopped reporting and its gauges are being held at whatever they last said.\n\nThe TelemetryStale alert rule fires off the same 45, deliberately, so the alert and this panel change colour at the same instant.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -435,7 +435,7 @@
     {
       "id": 7,
       "type": "row",
-      "title": "2 - Since: what happened in this range?",
+      "title": "2 - Since: what has already happened?",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -607,7 +607,7 @@
       "id": 10,
       "type": "stat",
       "title": "Retry amplification",
-      "description": "Share of deliveries that will be redone, in MESSAGES over the visible range. Healthy is exactly zero.\n\nCounted rather than rated, and that is what makes it able to fire at all. As a ratio of two 240s rates it read 0.0% through every scenario in the chaos suite, including the broker outage that parked a delivery: one parked message against a 240s denominator is a rounding error, while one parked message in a fifteen-minute range is a number.\n\nGreen below 1%. Counting rather than rating makes this stat sticky for a range width, and thresholded red-at-any-non-zero it stayed red through the two scenarios AFTER the one that parked a single delivery -- 0.2% of traffic, on the board an operator opens first. A few redone messages is something to notice; a twentieth of all deliveries being redone is the outage.",
+      "description": "Share of deliveries that will be redone, in MESSAGES over the visible range. Healthy is exactly zero.\n\nCounted rather than rated, and that is what makes it able to fire at all. Measured at the old 60s export cadence: as a ratio of two 240s rates it read 0.0% through every scenario in the chaos suite, including the broker outage that parked a delivery, because one parked message against a 240s denominator was a rounding error. The rate window is 60s now, which would make that same event 4x larger and still a rounding error; one parked message in a fifteen-minute range is a number.\n\nGreen below 1%. Counting rather than rating makes this stat sticky for a range width, and thresholded red-at-any-non-zero it stayed red through the two scenarios AFTER the one that parked a single delivery -- 0.2% of traffic, on the board an operator opens first. A few redone messages is something to notice; a twentieth of all deliveries being redone is the outage.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -812,7 +812,7 @@
       "id": 13,
       "type": "stat",
       "title": "Workers missing (5m)",
-      "description": "The deepest dip in live worker count over the last five minutes. Names how many replicas went away, without having to be told how many there ought to be -- it reads 3 for a lost orchestrator StatefulSet and 2 for a lost processor pair.\n\n**Five minutes, not the visible range.** Peak-minus-trough over $__range makes the number change when the reader zooms, and made back-to-back scenarios report the earlier, deeper one: 3 during the processor scenario, whose own answer was 2. A stated window is worth more than a wider one.\n\n**Peak minus trough, not peak minus now.** The dip is narrow and a stat panel is a range query at a coarse step, so a subtraction against the current value lands on the wrong side of the dip about half the time. The `[5m:15s]` subqueries evaluate at 15s regardless of the panel's step, which is what makes this catch a transient at all.\n\n**It cannot be prompt.** A replica is only missing once it has skipped its liveness window, so detection takes roughly the liveness window plus one export. Nothing queryable fixes the remainder: a fault shorter than the sampling period is not observable.",
+      "description": "The deepest dip in live worker count over the last five minutes. Names how many replicas went away, without having to be told how many there ought to be -- it reads 3 for a lost orchestrator StatefulSet and 2 for a lost processor pair.\n\n**Five minutes, not the visible range.** Peak-minus-trough over $__range makes the number change when the reader zooms, and made back-to-back scenarios report the earlier, deeper one: 3 during the processor scenario, whose own answer was 2. A stated window is worth more than a wider one.\n\n**Peak minus trough, not peak minus now.** The dip is narrow and a stat panel is a range query at the datasource step, so a subtraction against the current value lands on the wrong side of the dip about half the time -- measured at the old 60s step, where it missed an outage the same expression had caught an hour earlier. The step is 15s now, but the `[5m:15s]` subqueries pin the evaluation at 15s regardless of it, which is what keeps this independent of the panel's own step.\n\n**It cannot be prompt.** A replica is only missing once it has skipped its liveness window, so detection takes roughly the liveness window plus one export. Nothing queryable fixes the remainder: a fault shorter than the sampling period is not observable.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
