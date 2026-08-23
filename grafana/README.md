@@ -8,6 +8,7 @@ one on another machine without editing anything.
 grafana/
   build-dashboards.py      generator — edit this, not the JSON
   check-expressions.py     runs every panel expression against a live Prometheus
+  audit-boards.js          opens every board in a browser and reports what rendered
   dashboards/
     skp-flow.json          cross-service conservation — open this one first
     skp-baseapi.json       API HTTP ingress
@@ -156,6 +157,40 @@ and every one returned data. It was the wrong data.
 The variable now sets no `allValue`, so Grafana expands All to the enumerated option list
 `(sample-proc-v9|sample-proc|...)`. Any future variable that scopes a board to a subset of
 services needs the same treatment.
+
+## What only a rendered board showed
+
+Every one of these passed `check-expressions.py` — valid PromQL, data returned. They were
+found by opening the boards in a browser (`playwright-skill`, script in the scratchpad; it
+walks each panel and reports No-data and error states, which is the part a query check
+cannot see).
+
+**A conservation gap must be counted, not rated.** The hop-gap stats originally plotted
+`rate(produced) - rate(consumed)` with a fault threshold just above zero. Two counters
+scraped independently never agree instant to instant: measured over an hour, that
+difference had p50 `+0.000` but a max of `+0.074 req/s` and **exceeded the threshold in 13%
+of samples** — the operator's primary board would have been red an eighth of the time with
+nothing wrong. The same hour in counts: 1311 produced, 1313 acked. The panels now use
+`increase(...[$__range])` in messages, with a green band wide enough for scrape-boundary
+rounding. A real leak grows with the range; jitter does not.
+
+**`or vector(0)` does not rescue NaN.** The BaseAPI p95 stat rendered blank whenever there
+was no traffic, because `histogram_quantile` over an all-zero rate is 0/0. The fallback
+substitutes for an *empty* result, and NaN is a result. Any stat that can go NaN needs
+`noValue` text as well.
+
+**An axis scaled by a transient hides the healthy line.** Retry amplification sits flat at
+zero in health, but a rollout spike had left the axis running to 10000%, squashing the real
+signal into the baseline. It now carries `axisSoftMax`, which floors the axis without
+capping genuine excursions.
+
+**Five filled series on one line are one opaque block.** "Consuming by queue" draws the
+orchestrator's five queues, all at 1 in health. With area fill they merged into a solid
+shape in which a dip — the entire point of the panel — was invisible. Unfilled now.
+
+Two smaller ones: an instant-query table carried a Time column identical on every row while
+its value columns were clipped, and a panel titled "Route match failures" plotted every
+match status including success.
 
 ## Known gap: the API's queue side
 
