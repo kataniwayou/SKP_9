@@ -215,9 +215,10 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
             // A broker that is down or mid-reconnect is the same situation as an unanswered ask: wait
             // and try again. Letting it escape would fault the host over a condition the loop exists
             // to ride out.
+            var verdict = BrokerFaultClassifier.Classify(ex);
             _logger.LogWarning(
-                ex, "could not send the {Type} request; will retry {CorrelationId} — {Reason}",
-                type, correlationId, BrokerFaultClassifier.Describe(ex));
+                ex, "could not send the {Type} request; will retry {CorrelationId} [{Fault}]: {Reason}",
+                type, correlationId, verdict.Fault, verdict.Reason);
             return null;
         }
 
