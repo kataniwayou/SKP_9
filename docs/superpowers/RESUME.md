@@ -31,6 +31,16 @@ The 7 skips are Live/, gated on SKP_REALSTACK. Run them with the Redis forward u
   kubectl -n skp port-forward svc/redis 6380:6379
   SKP_REALSTACK=1 ./src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe     --filter-method "*TheMultiplexerReconnectsAndHydration*"
 
+KNOWN FLAKY (one sighting, 2026-08-23, not yet reproduced):
+- A timing-sensitive test in the Console suite reported `failed: 1` on a hermetic
+  run and passed on an immediate clean rerun with no code change in between. The
+  run that saw it did not capture the test name, so it cannot be pinned yet.
+  Recorded here because the only other trace of it is a gitignored task report.
+  If you see `failed: 1` on a hermetic run, CAPTURE THE TEST NAME before rerunning
+  -- that is the missing piece. Do not assume a single hermetic failure is a real
+  regression, and do not assume it is this one either: check the port-forwards
+  first (see below), then rerun once.
+
 REPO GOTCHAS THAT WILL BITE YOU:
 - --filter is SILENTLY IGNORED by this test runner. Run the whole project.
   --filter-method works for a single test, but only after a bare `--`:

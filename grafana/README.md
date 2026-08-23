@@ -115,10 +115,17 @@ evidence the change was worth making:
   that render lag is bounded by one scrape (15s) rather than one old-cadence step (60s).
 
 Both are stated on the `System flowing` description now, because a reader who does not
-know the rate window will read that panel as a liveness check and be wrong. (That panel's
-own description text in `dashboards/skp-flow.json` still quotes the old 60s/240s numbers
-verbatim -- it was not in scope for this task, since only this README changes here, but it
-is now itself stale and should be regenerated the next time `build-dashboards.py` runs.)
+know the rate window will read that panel as a liveness check and be wrong.
+
+Six panel descriptions were left quoting the old 60s cadence and the 240s rate window it
+forced, and an earlier revision of this paragraph said they "should be regenerated the
+next time `build-dashboards.py` runs". **That was wrong, and it is worth knowing why: the
+stale text was IN the generator**, in the `desc=` strings, so regenerating reproduced it
+exactly. Nothing self-heals here -- `dashboards/*.json` is a build artefact and every word
+in it comes from `build-dashboards.py`. They have since been fixed at the source and the
+boards regenerated: claims about the system now read 60s/15s/10s, and the measurements
+taken at the old cadence are kept, because they are the evidence behind the panel shapes,
+labelled as before-figures.
 
 ### A stale-held gauge counts the dead
 
@@ -135,36 +142,57 @@ With **both processors deleted for 58 seconds** the processor board did not chan
 single stat, and `Workers reporting` went **5 -> 7** -- the dead replicas counted
 alongside their replacements. `Identity ready by replica` drew four lines for two pods.
 
-Every gauge expression is now wrapped in `last_over_time(...[100s])` (`present_over_time`
+Every gauge expression is wrapped in `last_over_time(...[LIVENESS])` (`present_over_time`
 where it is reporters being counted), which yields only series with a real sample in the
-window. `Workers reporting` counts live reporters. A new `Workers missing` stat reports
-the deepest dip anywhere in the range, so it names how many replicas left without being
-told how many there should be. A new `Data freshness` stat carries the number every other
-panel is downstream of.
+window. **`LIVENESS` is `40s`**, and it is one constant in `build-dashboards.py` rather
+than a literal, because the alert rules have to agree with it -- see below.
+`Workers reporting` counts live reporters. A `Workers missing (5m)` stat reports the
+deepest dip in a fixed five-minute window, so it names how many replicas left without
+being told how many there should be. A `Data freshness` stat carries the number every
+other panel is downstream of.
 
 **Two things about that window and that stat were got wrong first, and both were caught
 by replaying the recorded outages rather than by reasoning.**
 
-The window started at 2m, which sounds safely above a 60s cadence and is useless: a
-replica that vanishes for a minute has to fall out of the window *before its replacement
+The window started at 2m, which sounded safely above the then-60s cadence and was useless:
+a replica that vanishes for a minute has to fall out of the window *before its replacement
 starts reporting*, and at 2m it never does. Replayed against three recorded ~58s
-disappearances, 2m dipped on none of them; 100s dipped on all three and stayed flat
-through the undisturbed baseline. Measured worst-case staleness on a healthy stack is
-57s, so 100s keeps ~40s of headroom.
+disappearances, 2m dipped on none of them; **100s** dipped on all three and stayed flat
+through the undisturbed baseline. Measured worst-case staleness on a healthy stack was
+then 57s, so 100s kept ~40s of headroom. **Those are before-figures.** At the 10s export
+cadence against a 15s scrape the effective sample spacing is 15s, and the window tracked
+down with it to the current **40s** -- wide enough to survive one late sample, tight enough
+that a replica which vanishes for a minute falls out before its replacement reports.
 
 `Workers missing` was peak-minus-current, which put a fault stat on the wrong side of its
-own signal. The dip is only ~30s wide and a stat panel is a range query at a **60s step**,
-so the subtraction missed it about half the time -- and did, on the confirming re-run,
-where the board showed `Workers missing 0` through an outage the same expression had
-caught an hour earlier. It is now peak-minus-trough over `[$__range:15s]` subqueries,
-which evaluate at 15s regardless of the panel step. At the real 60s step that reads 0
-across the whole undisturbed baseline and 3 across every disappearance.
+own signal. The dip is only ~30s wide and a stat panel is a range query at the datasource
+step, so the subtraction missed it about half the time -- and did, on the confirming re-run
+at the old **60s step**, where the board showed `Workers missing 0` through an outage the
+same expression had caught an hour earlier. It is now peak-minus-trough over `[5m:15s]`
+subqueries, which pin the evaluation at 15s regardless of the panel step. Note the window:
+it is a **fixed five minutes, not `$__range`**, so the number does not change when the
+reader zooms and back-to-back scenarios stop reporting the earlier, deeper one. Row 2 of
+the Flow board is therefore titled by tense rather than by window, and the board
+description names this stat as the one exception to "range-scoped".
 
-**It still cannot be prompt.** A replica is missing once it has skipped its liveness
-window, so at a 60s export cadence it is reported 100-130s in, which for a sixty-second
-disappearance is after the event has ended. Nothing queryable fixes that -- a 58-second
-absence is shorter than the telemetry's own sampling period. The export interval fixes it,
-or a pod-liveness scrape does. Until then the panel says so in its own description.
+**It still cannot be prompt, but it is twice as prompt.** A replica is missing once it has
+skipped its liveness window, so detection costs roughly the liveness window plus one
+export. At the 60s cadence that was **100-130s**, which for a sixty-second disappearance
+is after the event has ended. Measured at the current cadence across three replica-loss
+scenarios it is **~52-66s** (table below). What has not changed is the floor: a fault
+shorter than the sampling period is not observable, and no query fixes that. A pod-liveness
+scrape would. The panel says so in its own description.
+
+**The same arithmetic is what sizes the alert rules, and it bit them.** The observable dip
+is not the outage:
+
+    observable dip = outage - LIVENESS + one export = 58s - 40s + ~10s ~= 28s
+
+so a 58-second replica loss is true for only **two rule evaluations** at the 15s group
+interval -- 15s of continuous truth. `WorkersMissing` shipped at `for: 2m` and had never
+fired; `for: 30s` was tried and also reached `pending` only; `for: 15s` fires. The liveness
+window that stops the boards counting the dead is the same window that eats most of the
+outage before the alert can see it.
 
 `Data freshness` is the one that degrades rather than dips, and on the confirming re-run
 it was the panel that caught the orchestrator disappearance: 42-45s through health,
@@ -257,10 +285,13 @@ Confirmed still in effect at measurement time: `count_over_time(pipeline_gate_op
 read 7-8 depending on query-to-scrape alignment (5 series, 15s scrape, 2m window), and the
 Prometheus datasource's `timeInterval` was `15s`.
 
-`Workers missing` reports the worst dip in the visible range, so back-to-back scenarios
-inside one range width read the earlier, deeper event -- 3 rather than 2 during the
-processor scenario. Correct by its definition and worth knowing before reading it as the
-count for the fault in front of you.
+`Workers missing (5m)` reports the worst dip in a **fixed five-minute window**, not in the
+visible range. It read the visible range once, and that is exactly the reading that had to
+be fixed: back-to-back scenarios inside one range width reported the earlier, deeper event
+-- 3 rather than 2 during the processor scenario -- and the number moved when the reader
+zoomed. Five minutes is stated in the title for that reason. It is still a window and not
+an instant, so a scenario that follows another within five minutes can still show the
+earlier one; worth knowing before reading it as the count for the fault in front of you.
 
 **Two calibrations were wrong and the re-run is what showed it**, both of them introduced
 by the changes above:
@@ -283,7 +314,7 @@ and the produced and consumed counters for the same messages live on different s
 that restart at different moments. The steps are symmetric now, and both descriptions say
 what a restart inside the range does to them.
 
-### Two gaps the boards cannot close
+### Three gaps that are still open
 
 - **The wipe is indistinguishable from the pause.** Scaling Redis to zero destroys L2;
   pausing it does not. Both render identically on every board -- gate 0, consuming 0. The
@@ -292,6 +323,14 @@ what a restart inside the range does to them.
   or after a deliberate wipe. That is an instrumentation gap, not a panel one.
 - **`landed="false"` still has no series**, so `Ack lost` remains unexercised by anything
   the suite can inject.
+- **Nothing consumes the alerts.** The five rules in `k8s/02-configmaps.yaml` are real --
+  they evaluate, they reach `firing`, and `ALERTS` records it -- but `prometheus.yml` has
+  no `alerting:` stanza and `/api/v1/alertmanagers` returns empty. **A firing alert is
+  currently as passive as a dashboard**: it changes state inside Prometheus and stops
+  there. Nobody is paged, nothing is delivered, and the only way to see one is to query
+  `ALERTS` or open Prometheus. Deliberately not closed here -- standing up an Alertmanager
+  is its own piece of work -- but stated so this section does not read as though alerting
+  is finished. It is instrumented, not wired.
 
 **Partial replica loss -- what the new scenario found.**
 

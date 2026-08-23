@@ -329,6 +329,23 @@ Expected: four boards regenerated; `110 expressions returning data · 0 empty ·
 
 - [ ] **Step 4: Apply the datasource and re-import the boards**
 
+> **WARNING — restarting Grafana destroys every hand-imported board.** Grafana's storage on this stack is an `emptyDir`: its SQLite database dies with the pod. Only the four boards `build-dashboards.py` emits can be rebuilt from source. **`skp-runtime` cannot** — it predates the generator, is not in the ConfigMap, and exists only as rows in that database. A `rollout restart` deletes it permanently, along with any dashboard permissions, annotations, or edits made through the UI.
+>
+> Restart Grafana **only** when a provisioned file has genuinely changed (a datasource ConfigMap is read at boot, which is why this step needs it), and re-import the four generated boards immediately afterwards, as the loop below does. For a boards-only change, **skip the restart entirely** — the import API updates a live Grafana in place and is the safe default:
+>
+> ```bash
+> # boards-only change: no restart, just re-import
+> curl -s -u admin:admin -X POST http://localhost:13000/api/dashboards/db ...
+> ```
+>
+> After any restart, confirm all five boards are present before continuing:
+>
+> ```bash
+> curl -s -u admin:admin "http://localhost:13000/api/search?tag=skp" | python -c "import json,sys;[print(d['uid']) for d in json.load(sys.stdin)]"
+> ```
+>
+> Expected: `skp-flow`, `skp-orchestrator`, `skp-processor`, `skp-baseapi`, **and `skp-runtime`**. If `skp-runtime` is missing it is gone, and no step in this plan can restore it.
+
 ```bash
 kubectl apply -k k8s/
 kubectl -n skp rollout restart deploy/grafana && kubectl -n skp rollout status deploy/grafana --timeout=120s
@@ -636,15 +653,34 @@ Then, in the same ConfigMap's `prometheus.yml` key, add a `rule_files` stanza im
       - /etc/prometheus/skp-rules.yml
 ```
 
-- [ ] **Step 2: Confirm the new key is already mounted**
+- [ ] **Step 2: Mount the new key**
 
-No change to `k8s/21-prometheus.yaml` is needed. Its `prom-config` volume mounts the whole `prometheus-config` ConfigMap with no `items:` filter, so every key in it — including the new `skp-rules.yml` — appears under the mount path. Verify rather than assume:
+> **CORRECTION (final review).** This step originally read "No change to `k8s/21-prometheus.yaml` is needed. Its `prom-config` volume mounts the whole `prometheus-config` ConfigMap with no `items:` filter, so every key in it — including the new `skp-rules.yml` — appears under the mount path." **That was wrong on both counts**, and the implementer correctly deviated from it. The volume is not mounted as a directory at all: `21-prometheus.yaml` uses a single-file **`subPath`** mount (`mountPath: /etc/prometheus/prometheus.yml`, `subPath: prometheus.yml`), deliberately, so the image's `/etc/prometheus` console libs are not shadowed. A `subPath` mount exposes exactly the one key it names, so a new key appears nowhere. The manifest needs a **second `volumeMount` block** for `skp-rules.yml`, which is what shipped.
 
-```bash
-grep -n -A4 "configMap:" k8s/21-prometheus.yaml
+`k8s/21-prometheus.yaml` needs a second single-file `subPath` mount beside the existing one:
+
+```yaml
+            - name: prom-config
+              mountPath: /etc/prometheus/skp-rules.yml
+              subPath: skp-rules.yml
 ```
 
-Expected: `name: prometheus-config` with **no** `items:` list beneath it. If an `items:` list has appeared, add `- key: skp-rules.yml` / `path: skp-rules.yml` to it, or the rules file will not exist in the container and Prometheus will fail to start.
+Verify rather than assume:
+
+```bash
+grep -n -B2 -A2 "subPath" k8s/21-prometheus.yaml
+```
+
+Expected: **two** `subPath` entries, `prometheus.yml` and `skp-rules.yml`, both under `name: prom-config`. If the rules mount is missing the file will not exist in the container and Prometheus will fail to start.
+
+> **`subPath` mounts do not live-update.** This is the consequence that matters for every later rules edit. A ConfigMap projected as a *directory* is refreshed in place by the kubelet within a minute or two; a `subPath` mount is resolved once, at container start, and never again. So `kubectl apply -f k8s/02-configmaps.yaml` changes **nothing** inside the running Prometheus — the edit is invisible until the pod is replaced:
+>
+> ```bash
+> kubectl -n skp rollout restart deploy/prometheus
+> kubectl -n skp rollout status  deploy/prometheus --timeout=120s
+> ```
+>
+> `POST /-/reload` does not help either: the file on disk is still the old one, so Prometheus re-reads the same content. Restarting Prometheus is cheap and safe — but note its TSDB is an `emptyDir` with no PVC, so a restart **discards all history**. Any rule with an `offset` needs that much fresh data before it can evaluate: `WorkersMissing`'s `offset 5m` reference reads 0 for the first five minutes after a restart. Wait for it to warm before drawing conclusions from a chaos run.
 
 - [ ] **Step 3: Verify the rules parse before applying them**
 
