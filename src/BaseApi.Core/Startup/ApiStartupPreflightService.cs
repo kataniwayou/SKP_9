@@ -1,3 +1,4 @@
+using BaseApi.Core.Diagnostics;
 using Messaging.Transport;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -120,14 +121,16 @@ internal sealed class ApiStartupPreflightService : BackgroundService
             if (!rabbitOk)
             {
                 rabbitOk = await CheckAsync(
-                    RabbitMq, _rabbitEndpoint, _rabbit.CheckAsync, BrokerFaultClassifier.Describe, ct)
+                    RabbitMq, _rabbitEndpoint, _rabbit.CheckAsync,
+                    static ex => BrokerFaultClassifier.Classify(ex).ToString(), ct)
                     .ConfigureAwait(false);
             }
 
             if (!redisOk)
             {
                 redisOk = await CheckAsync(
-                    Redis, _redisEndpoint, PingRedisAsync, static ex => ex.Message, ct)
+                    Redis, _redisEndpoint, PingRedisAsync,
+                    static ex => RedisFaultClassifier.Classify(ex).ToString(), ct)
                     .ConfigureAwait(false);
             }
 
@@ -155,8 +158,8 @@ internal sealed class ApiStartupPreflightService : BackgroundService
     /// hidden behind that widening for the operator only skimming.
     /// <para>
     /// <paramref name="describe"/> is what turns a rejected password into something an operator can
-    /// act on: for the broker it names the configuration key at fault, where the raw exception says
-    /// only that the connection failed.
+    /// act on. It renders the whole verdict — what failed, whether waiting fixes it, and which setting
+    /// to correct — where the raw exception says only that the connection failed.
     /// </para>
     /// </summary>
     private async Task<bool> CheckAsync(

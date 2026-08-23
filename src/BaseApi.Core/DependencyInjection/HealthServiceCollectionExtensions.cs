@@ -1,9 +1,11 @@
 using BaseApi.Core.Configuration;
+using BaseApi.Core.Diagnostics;
 using BaseApi.Core.Gating;
 using BaseApi.Core.Health;
 using BaseApi.Core.Messaging;
 using HealthChecks.NpgSql;
 using Messaging.Transport;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -52,6 +54,9 @@ internal static class HealthServiceCollectionExtensions
         this IServiceCollection services, IConfiguration cfg)
     {
         services.AddSingleton<IStartupGate, StartupGate>();
+        services.AddSingleton<IMigrationState, MigrationState>();
+        services.TryAddSingleton<IMigrationRunner, MigrationRunner>();
+        services.TryAddSingleton(TimeProvider.System);
 
         // Fail fast on a missing connection string rather than letting null reach the Postgres check.
         var postgresConnStr = cfg.RequireConnectionString("Postgres");
@@ -63,13 +68,30 @@ internal static class HealthServiceCollectionExtensions
 
         // Per-process singleton latch — the latch state must persist across probe polls, so it is
         // never constructed per check.
+        // The latch exists so a pod whose Postgres is gone for good does not flap back into rotation.
+        // It must not fire for an outage that is recovering on its own, though — latching a transient
+        // fault manufactures the restart requirement the three-state verdict exists to avoid — so it
+        // latches only on a verdict an operator actually has to act on.
         services.AddKeyedSingleton(PostgresLatchKey, (sp, _) => new ApiLatchedReadinessHealthCheck(
             new NpgSqlHealthCheck(new NpgSqlHealthCheckOptions(postgresConnStr)),
-            failureThreshold));
+            failureThreshold,
+            static ex => ex is not null
+                         && PostgresFaultClassifier.Classify(ex).Fault != DependencyFault.Transient));
 
         services.AddHealthChecks()
             .AddCheck("self", () => HealthCheckResult.Healthy(), tags: new[] { "live" })
-            .AddCheck<StartupHealthCheck>("startup", tags: new[] { "startup", "ready" })
+            // `startup` only. The gate now means "the migration loop is running", not "the schema is
+            // applied" — see StartupHealthCheck. Leaving it on `ready` too would make readiness green
+            // before the schema existed.
+            .AddCheck<StartupHealthCheck>("startup", tags: new[] { "startup" })
+            // The claim the startup probe used to make, moved to the probe that can afford to make it:
+            // readiness has no budget to exhaust, so it can stay red for the length of an outage and
+            // recover without a restart.
+            .Add(new HealthCheckRegistration(
+                "migrations",
+                sp => new MigrationReadyHealthCheck(sp.GetRequiredService<IMigrationState>()),
+                failureStatus: null,
+                tags: new[] { "ready" }))
             // The factory resolves the per-process singleton latch, so its sticky state survives every
             // poll. The name stays "npgsql" to preserve the readiness response body contract.
             .Add(new HealthCheckRegistration(

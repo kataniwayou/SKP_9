@@ -4,16 +4,14 @@ using RabbitMQ.Client.Exceptions;
 namespace Messaging.Transport;
 
 /// <summary>
-/// Why a broker connection could not be opened, in the one form an operator reading
-/// <c>kubectl logs</c> can act on: whether nothing answered, or something answered and refused us.
+/// Turns a broker failure into a <see cref="DependencyVerdict"/>: whether nothing answered, or
+/// something answered and refused us, and what an operator should do about it.
 /// <para>
 /// <b>The distinction this exists to restore.</b> Every dependency loop in this system treats an
 /// unreachable broker and a rejected credential identically — same catch, same backoff, same forever
 /// — because both are conditions a broker that is still starting can legitimately produce, and
-/// giving up on either would be wrong. That is correct control flow and terrible diagnostics: the
-/// operator is left with a message that says the connection failed and an attached exception they
-/// have to widen the console to read. Classifying does not change what any loop does; it changes
-/// what the loop can say while it does it.
+/// giving up on either would be wrong. That is correct control flow and terrible diagnostics.
+/// Classifying does not change what any loop does; it changes what the loop can say while it does it.
 /// </para>
 /// <para>
 /// <b>The whole exception chain is walked, not just the outermost type</b> — the same reason
@@ -22,27 +20,27 @@ namespace Messaging.Transport;
 /// password as an unreachable host, which is the single most misleading answer available here.
 /// Refusals are therefore tested before unreachability, not after.
 /// </para>
+/// <para>
+/// <b>Ambiguity resolves toward waiting, never toward a restart.</b> An unrecognised failure is
+/// <see cref="DependencyFault.Transient"/>, because the cost of telling an operator to wait through
+/// something that needed a restart is one extra minute, while the cost of telling them to restart
+/// through something that was recovering is a destroyed log and a lost backoff.
+/// </para>
 /// </summary>
 public static class BrokerFaultClassifier
 {
-    /// <summary>What kind of failure a broker exception describes.</summary>
-    public enum Fault
-    {
-        /// <summary>Nothing answered: no route, no listener, or a connect that timed out.</summary>
-        Unreachable,
+    /// <summary>The configuration keys this classifier can name.</summary>
+    private const string CredentialKeys = "RabbitMq:Username / RabbitMq:Password";
 
-        /// <summary>The broker answered and rejected the username or password.</summary>
-        Credentials,
+    // AMQP reply codes. Named rather than inlined so the call site reads; the client exposes them on
+    // Constants, but importing that type for three integers pulls its whole surface into a file that
+    // needs none of it.
+    private const ushort AccessRefused = 403;       // authenticated, but not allowed this vhost
+    private const ushort PreconditionFailed = 406;  // the queue exists with different arguments
+    private const ushort NotAllowed = 530;          // the vhost is not available to this account
 
-        /// <summary>The credentials were accepted; the virtual host or its permissions were not.</summary>
-        Authorisation,
-
-        /// <summary>Something else. The exception's own message is the best available answer.</summary>
-        Other,
-    }
-
-    /// <inheritdoc cref="Fault"/>
-    public static Fault Classify(Exception ex)
+    /// <inheritdoc cref="DependencyVerdict"/>
+    public static DependencyVerdict Classify(Exception ex)
     {
         ArgumentNullException.ThrowIfNull(ex);
 
@@ -50,50 +48,67 @@ public static class BrokerFaultClassifier
 
         // Refusals first: the client nests these inside BrokerUnreachableException, so testing
         // unreachability first would swallow every one of them.
-        if (chain.Any(e => e is AuthenticationFailureException or PossibleAuthenticationFailureException))
+        if (chain.Any(e => e is AuthenticationFailureException))
         {
-            return Fault.Credentials;
+            return new DependencyVerdict(
+                DependencyFault.BlockedConfiguration,
+                "the broker rejected these credentials",
+                CredentialKeys);
         }
 
-        // 403 ACCESS_REFUSED and 530 NOT_ALLOWED are both "we know who you are and you may not have
-        // this vhost". They arrive as a connection shutdown rather than as a typed exception, so the
-        // reply code is the only thing that identifies them.
-        if (chain.OfType<OperationInterruptedException>().Any(e =>
-                e.ShutdownReason?.ReplyCode is AccessRefused or NotAllowed))
+        var shutdown = chain.OfType<OperationInterruptedException>()
+            .Select(e => e.ShutdownReason?.ReplyCode)
+            .FirstOrDefault(code => code is AccessRefused or PreconditionFailed or NotAllowed);
+
+        if (shutdown is AccessRefused or NotAllowed)
         {
-            return Fault.Authorisation;
+            // External rather than configuration, deliberately — see DependencyFault.BlockedExternal.
+            // A grant lands without a restart; a mistyped vhost is fixed in the manifest, which
+            // redeploys anyway. Both possibilities are named because the broker does not say which.
+            return new DependencyVerdict(
+                DependencyFault.BlockedExternal,
+                "the broker refused this account access to the virtual host — either the account "
+                + "lacks permission on it, or RabbitMq:VirtualHost names the wrong one");
+        }
+
+        if (shutdown is PreconditionFailed)
+        {
+            // The classic redeploy failure: a queue already exists with different arguments, so the
+            // declaration fails every time. No amount of waiting helps and no restart helps either —
+            // the queue has to be reconciled.
+            return new DependencyVerdict(
+                DependencyFault.BlockedExternal,
+                "a queue already exists with different arguments than this topology declares, so the "
+                + "declaration is refused every attempt");
+        }
+
+        if (chain.Any(e => e is PossibleAuthenticationFailureException))
+        {
+            // Deliberately transient despite the name. The client raises this when the connection dies
+            // during the handshake WITHOUT the broker saying why, which a broker that is still booting
+            // also produces. Calling it a credential fault would tell an operator to go change a
+            // password that is fine, during a twenty-second startup.
+            return new DependencyVerdict(
+                DependencyFault.Transient,
+                "the broker ended the handshake without saying why — usually a broker still starting; "
+                + $"if it persists once the broker is up, suspect {CredentialKeys}");
         }
 
         if (chain.Any(e => e is SocketException or ConnectFailureException or BrokerUnreachableException))
         {
-            return Fault.Unreachable;
+            return new DependencyVerdict(
+                DependencyFault.Transient,
+                "the broker is unreachable — nothing answered at RabbitMq:Host / RabbitMq:Port");
         }
 
-        return Fault.Other;
+        return new DependencyVerdict(DependencyFault.Transient, ex.Message);
     }
 
     /// <summary>
-    /// A short phrase naming the failure and, where one exists, the configuration key that fixes it.
-    /// Written to be readable inline in a log line without widening the console — the full exception
-    /// is attached separately at every call site and stays the authority on detail.
+    /// The verdict's reason alone, for call sites that render one inline and attach the exception
+    /// separately.
     /// </summary>
-    public static string Describe(Exception ex) => Classify(ex) switch
-    {
-        Fault.Credentials =>
-            "the broker rejected these credentials — check RabbitMq:Username and RabbitMq:Password",
-        Fault.Authorisation =>
-            "the broker refused this account access to the virtual host — check RabbitMq:VirtualHost "
-            + "and the account's permissions",
-        Fault.Unreachable =>
-            "the broker is unreachable — check RabbitMq:Host and RabbitMq:Port, and that the broker is up",
-        _ => ex.Message,
-    };
-
-    // Named rather than inlined so the two reply codes are readable at the call site; the client
-    // exposes them on Constants, but importing that type for two integers pulls its whole surface
-    // into a file that otherwise needs none of it.
-    private const ushort AccessRefused = 403;
-    private const ushort NotAllowed = 530;
+    public static string Describe(Exception ex) => Classify(ex).Reason;
 
     /// <summary>Flattens aggregates and walks inner exceptions, yielding every exception in the chain.</summary>
     private static IEnumerable<Exception> Unwrap(Exception ex)

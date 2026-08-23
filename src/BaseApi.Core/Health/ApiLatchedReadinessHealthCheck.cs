@@ -30,6 +30,7 @@ public sealed class ApiLatchedReadinessHealthCheck : IHealthCheck
 
     private readonly IHealthCheck _inner;
     private readonly int _failureThreshold;
+    private readonly Func<Exception?, bool> _latchable;
 
     // Single-prober assumption: the interlocked operations prevent torn reads but are not a
     // transactional read-modify-write across the whole check. That is exact under the standard model
@@ -38,10 +39,20 @@ public sealed class ApiLatchedReadinessHealthCheck : IHealthCheck
     private int _consecutiveFailures;
     private volatile bool _latched;
 
-    public ApiLatchedReadinessHealthCheck(IHealthCheck inner, int failureThreshold)
+    /// <param name="inner">The required-dependency check being decorated.</param>
+    /// <param name="failureThreshold">Consecutive latchable failures before the latch trips.</param>
+    /// <param name="latchable">
+    /// Whether a given failure is one the latch should count at all. Defaults to counting every
+    /// failure, which is the original behaviour; the Postgres registration passes a predicate that
+    /// excludes transient faults, so an outage that is recovering on its own never manufactures the
+    /// restart requirement the latch implies.
+    /// </param>
+    public ApiLatchedReadinessHealthCheck(
+        IHealthCheck inner, int failureThreshold, Func<Exception?, bool>? latchable = null)
     {
         _inner = inner;
         _failureThreshold = failureThreshold;
+        _latchable = latchable ?? (static _ => true);
     }
 
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -58,6 +69,15 @@ public sealed class ApiLatchedReadinessHealthCheck : IHealthCheck
 
         if (result.Status == HealthStatus.Unhealthy)
         {
+            if (!_latchable(result.Exception))
+            {
+                // A fault that clears by itself. Still unhealthy — nothing should be routed here — but
+                // the counter is left alone, so an outage cannot accumulate its way to a latch that
+                // says a restart is required when it is not. The counter is not reset either: a run of
+                // failures interleaving transient and non-transient ones is still a run.
+                return HealthCheckResult.Unhealthy(UnhealthyMessage);
+            }
+
             // Count consecutive failures; latch once the threshold is reached.
             if (Interlocked.Increment(ref _consecutiveFailures) >= _failureThreshold)
             {
