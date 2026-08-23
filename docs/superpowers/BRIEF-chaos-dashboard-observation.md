@@ -137,3 +137,51 @@ Findings and dashboard improvements. For each: which scenario exposed it, what t
 saw, what they should have seen, and the panel change that closes the gap. Ship the changes
 through `grafana/build-dashboards.py` — never by hand-editing the JSON, since the two worker
 boards share six panels emitted from one function precisely so they cannot drift.
+
+---
+
+## The prompt
+
+Paste this into the fresh session.
+
+```
+Run the chaos suite on SK_P9 and judge the dashboards, not the scenarios.
+
+REPO:   C:\Users\UserL\source\repos\SK_P9
+BRANCH: processor-sample-discovery (head 215e8a4, unpushed)
+
+READ FIRST: docs/superpowers/BRIEF-chaos-dashboard-observation.md
+It has the scenario table, the run commands and their double gate, the port
+collisions, and six measured things that will mislead you during an outage.
+The counter-reset one will bite in most scenarios — read it before believing
+any number taken across a scale-to-zero.
+
+THE JOB
+Run the seven resilience scenarios in src/tests/BaseApi.Tests/Live/Resilience/,
+one class at a time, and watch each one through the Grafana boards the way an
+operator would. Judge the BOARDS, not the scenarios — the scenarios carry their
+own verdicts.
+
+For each fault, answer: does an operator see that something broke, see WHAT
+broke, and see it without reaching for kubectl? A panel that stays green through
+an outage it should have caught is a finding. So is one that shows the fault too
+late, or too ambiguously to act on, or that cries wolf when nothing is wrong.
+
+BUILD THE MISSING TOOL FIRST
+grafana/audit-boards.js and grafana/audit-nav.js each capture a single moment.
+This job needs a third script that samples every board at intervals across a
+fault window, so before / during / after are comparable for one outage. Panels
+take 15-25s to paint after load; sample accordingly.
+
+DELIVER
+Findings plus concrete dashboard improvements. For each: which scenario exposed
+it, what the operator saw, what they should have seen, and the panel change that
+closes the gap. Ship changes through grafana/build-dashboards.py — never by
+hand-editing the JSON, since the two worker boards share six panels emitted from
+one function precisely so they cannot drift.
+
+ACCEPTED TRADE
+The suite scales the orchestrator, processor and broker to zero, so it destroys
+the orchestration deliberately left running (workflow 4cd8af45-1295-43db-ab2e-
+e955dd82b5c5). That was flagged and accepted. Restart it when the run is done.
+```
