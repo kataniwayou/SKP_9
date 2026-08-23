@@ -23,8 +23,15 @@ from datetime import datetime, timedelta, timezone
 
 DASH = pathlib.Path(__file__).parent / "dashboards"
 
+# $__rate_interval and $__interval carry the REAL values Grafana computes at the current
+# cadence -- timeInterval 15s (matching the scrape) gives $__interval 15s and floors
+# $__rate_interval at 4x that = 60s. Kept identical to grafana/check-expressions.py's SUBS
+# on purpose: a probe that replays the boards at a different window than the gate that
+# certifies them is measuring a third thing that nobody looks at. Change one, change both.
+# $__range stays 10m here (and 1h there) because it IS an operator choice rather than a
+# cadence constant, and a chaos scenario is minutes long.
 SUBS = {
-    "$__rate_interval": "1m", "$__interval": "30s", "$__range": "10m",
+    "$__rate_interval": "60s", "$__interval": "15s", "$__range": "10m",
     "$service_name": ".*", "$service_version": ".*", "$service_instance_id": ".*",
     "$processorId": ".*", "$processor": ".*", "$role": ".*",
     "$source": ".*", "$pod": ".*",
