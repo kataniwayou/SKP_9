@@ -423,21 +423,24 @@ def pipeline_shared(layout, f, role_f=""):
                    desc="Ingress. Exactly one increment per delivery, on every exit "
                         "path of the consumer.",
                    unit="reqps"),
-        timeseries(layout, "Produce duration (mean)",
-                   [(f'sum by (destination) (rate(pipeline_produce_duration_seconds_sum'
+        timeseries(layout, "Produce duration p95 / p99",
+                   [(f'histogram_quantile(0.95, sum by (le,destination) '
+                     f'(rate(pipeline_produce_duration_seconds_bucket{{{f}{rf}}}'
+                     f'[$__rate_interval])))', "p95 {{destination}}"),
+                    (f'histogram_quantile(0.99, sum by (le,destination) '
+                     f'(rate(pipeline_produce_duration_seconds_bucket{{{f}{rf}}}'
+                     f'[$__rate_interval])))', "p99 {{destination}}"),
+                    (f'sum by (destination) (rate(pipeline_produce_duration_seconds_sum'
                      f'{{{f}{rf}}}[$__rate_interval])) '
                      f'/ sum by (destination) (rate(pipeline_produce_duration_seconds_count'
-                     f'{{{f}{rf}}}[$__rate_interval]))', "{{destination}}")],
+                     f'{{{f}{rf}}}[$__rate_interval]))', "mean {{destination}}")],
                    desc="A real broker round-trip to publisher confirmation, not the "
-                        "time to write a frame." + PARA + "MEAN, NOT p95 -- and that is a "
-                        "workaround. The instrument records seconds but declares no "
-                        "bucket boundaries, so it inherits the .NET SDK defaults "
-                        "([0, 5, 10, 25 ... 10000]) which are tuned for milliseconds. "
-                        "Every observation lands in the first (0,5] bucket, so "
-                        "histogram_quantile interpolates across it and returns ~4.9s "
-                        "for a send that really takes ~20ms. sum/count is exact and "
-                        "unaffected. Restore the quantiles once the meter provider "
-                        "carries an ExplicitBucketHistogramConfiguration view.",
+                        "time to write a frame." + PARA + "The mean rides alongside the "
+                        "quantiles deliberately. It comes from sum/count and so is "
+                        "independent of bucket boundaries -- if it ever diverges wildly "
+                        "from p50, the ladder has stopped fitting the data. That is "
+                        "exactly how the millisecond-ladder defect was caught: p95 read "
+                        "4.9s while the mean read 15ms.",
                    unit="s"),
         timeseries(layout, "Consumer inflight by queue",
                    [(f'max by (queue) (pipeline_consumer_inflight{{{f}}})', "{{queue}}")],
@@ -918,19 +921,24 @@ def build_processor():
     panels.append(row(lay, "2 - Pipeline: what is broken?"))
     panels += pipeline_shared(lay, f)
     panels += [
-        timeseries(lay, "Process duration (mean) by outcome",
-                   [(f'sum by (outcome) (rate(pipeline_process_duration_seconds_sum'
+        timeseries(lay, "Process duration p95 / p99 by outcome",
+                   [(f'histogram_quantile(0.95, sum by (le,outcome) '
+                     f'(rate(pipeline_process_duration_seconds_bucket{{{f}}}'
+                     f'[$__rate_interval])))', "p95 {{outcome}}"),
+                    (f'histogram_quantile(0.99, sum by (le,outcome) '
+                     f'(rate(pipeline_process_duration_seconds_bucket{{{f}}}'
+                     f'[$__rate_interval])))', "p99 {{outcome}}"),
+                    (f'sum by (outcome) (rate(pipeline_process_duration_seconds_sum'
                      f'{{{f}}}[$__rate_interval])) '
                      f'/ sum by (outcome) (rate(pipeline_process_duration_seconds_count'
-                     f'{{{f}}}[$__rate_interval]))', "{{outcome}}")],
+                     f'{{{f}}}[$__rate_interval]))', "mean {{outcome}}")],
                    desc="The author's own transform -- the only span here whose length "
                         "is somebody's implementation rather than this framework's "
                         "constant cost. returned vs faulted keeps a slow success and a "
                         "slow failure from averaging into a number describing neither."
-                        + PARA + "MEAN, NOT p95, for the same bucket-boundary reason as the "
-                        "produce-duration panel: 100% of observations sit in the first "
-                        "(0,5] bucket, so every quantile reads ~4.9s regardless of the "
-                        "real value.",
+                        + PARA + "The mean rides alongside the quantiles as a "
+                        "bucket-independent cross-check, for the same reason it does on "
+                        "the produce-duration panel.",
                    unit="s"),
         timeseries(lay, "Identity ready by replica",
                    [(f'pipeline_identity_ready_ratio{{{f}}}', "{{service_instance_id}}")],
