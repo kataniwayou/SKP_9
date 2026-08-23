@@ -94,19 +94,31 @@ Every number below is measured, not inferred.
 
 ### The resolution floor, which everything else sits on
 
-The datasource declares `timeInterval: 60s` because that is the OTLP export cadence, so
-Grafana floors `$__rate_interval` at **240s**, and every stat is a range query at a
-**60s step** reduced to `lastNotNull`. Two consequences an operator has to know:
+**This section described a cadence the stack no longer has, and is rewritten rather than
+appended to.** The services now export OTLP every **10s** and Prometheus scrapes every
+**15s**, so the effective resolution is **15s** and Grafana floors `$__rate_interval` at
+**60s** -- every stat is a range query at a **15s step** reduced to `lastNotNull`.
 
-- **No rate panel can resolve a 60-second fault.** With the entire pipeline stopped,
+Before this change the datasource declared `timeInterval: 60s` because that was the OTLP
+export cadence, which floored `$__rate_interval` at **240s** and put every stat on a
+**60s step**. Two consequences followed, kept here as the before-case because they are the
+evidence the change was worth making:
+
+- **No rate panel could resolve a 60-second fault.** With the entire pipeline stopped,
   `System flowing` still read 1.12 req/s a hundred seconds later; through a sixty-second
-  broker outage it moved 1.12 -> 0.92 and never left green.
-- **The stat tier lags the data by up to a minute on top of that.** In the Redis
+  broker outage it moved 1.12 -> 0.92 and never left green. At `$__rate_interval` = 60s a
+  sixty-second fault is no longer diluted across a four-minute average -- it now falls
+  inside a single rate window instead of a quarter of one.
+- **The stat tier lagged the data by up to a minute on top of that.** In the Redis
   scenario the gate metric fell at data-time t+175s and the stat rendered it at t+235s.
-  `kubectl` showed Redis NotReady 33 seconds before the boards did.
+  `kubectl` showed Redis NotReady 33 seconds before the boards did. At the new cadence
+  that render lag is bounded by one scrape (15s) rather than one old-cadence step (60s).
 
 Both are stated on the `System flowing` description now, because a reader who does not
-know the rate window will read that panel as a liveness check and be wrong.
+know the rate window will read that panel as a liveness check and be wrong. (That panel's
+own description text in `dashboards/skp-flow.json` still quotes the old 60s/240s numbers
+verbatim -- it was not in scope for this task, since only this README changes here, but it
+is now itself stale and should be regenerated the next time `build-dashboards.py` runs.)
 
 ### A stale-held gauge counts the dead
 
@@ -215,8 +227,35 @@ Rows five and six are the ones the old boards could not see at all. Against `kub
 confirming all three orchestrator replicas absent for 58s, the previous build held every
 stat green; this one drops `Workers reporting` to 2, names `Workers missing` as 3, and
 takes `Data freshness` from 43s to 2 minutes. For the processor pair the old build's
-worker count went **up**, to 7. Detection lands ~110s after the pods go, which is the
-predicted 100-130s and still after a sixty-second outage has ended.
+worker count went **up**, to 7. Detection landed ~110s after the pods went, which was the
+predicted 100-130s at the 60s export cadence -- still after a sixty-second outage had
+already ended.
+
+**A third run, at the 10s export / 15s scrape cadence, measured this again rather than
+assuming the cadence change fixed it.** All eight scenarios (the six above, the L2 wipe,
+and a new partial-replica-loss case) were re-run with `chaos-timeline.js` sampling every
+board every 15s, and the true fault instant taken from `kubectl` pod-transition
+timestamps rather than the predicted t0+150s:
+
+| scenario | replicas removed | true fault instant (`kubectl`) | first sample a verdict stat moved | measured latency |
+|---|---|---|---|---|
+| orchestrator gone (S5) | 3 of 3 | pods absent ~21:56:29 | `Workers reporting` 5->2, `Workers missing` 0->3 at 21:57:20.85 | **~52s** |
+| processor gone (S6) | 2 of 2 | pods absent ~22:06:38.6 | `Workers reporting` 5->3, `Workers missing` 0->2 at 22:07:44.87 | **~66s** |
+| one processor replica gone (S8, new) | 1 of 2 | pod absent ~22:28:28.3 | `Workers reporting` 5->4, `Workers missing` 0->1 at 22:29:20.95 | **~53s** |
+
+Detection of an absent replica now lands in **~52-66s**, down from the **~110s** measured
+at the 60s cadence -- roughly halved. That is close to but a little above the naive
+one-liveness-window-plus-one-export arithmetic (40s + 10s = 50s): the sampler itself polls
+every 15s, so a discrete reading can add up to one more poll of slack on top of what a
+continuously-refreshing viewer would see, and the exact phase between the fault instant and
+the collector's own export tick moves the number around scenario to scenario. `Consuming`
+and `L2 gate` are not liveness-windowed and are unaffected by any of this -- they moved
+within one sample of t0+150s in every dependency-down scenario (Redis, broker, both, wipe),
+which is the ~15-30s the rate-independent gauges were already capable of.
+
+Confirmed still in effect at measurement time: `count_over_time(pipeline_gate_open_ratio[2m])`
+read 7-8 depending on query-to-scrape alignment (5 series, 15s scrape, 2m window), and the
+Prometheus datasource's `timeInterval` was `15s`.
 
 `Workers missing` reports the worst dip in the visible range, so back-to-back scenarios
 inside one range width read the earlier, deeper event -- 3 rather than 2 during the
@@ -253,6 +292,34 @@ what a restart inside the range does to them.
   or after a deliberate wipe. That is an instrumentation gap, not a panel one.
 - **`landed="false"` still has no series**, so `Ack lost` remains unexercised by anything
   the suite can inject.
+
+**Partial replica loss -- what the new scenario found.**
+
+> Scaling the processor deployment from 2 to 1 is the first scenario that removes *part* of a
+> dependency rather than all of it. The pipeline held -- no step lost. What the boards did with
+> it is more interesting than that:
+>
+> - **`Replica fan-out` did not show it.** It is `sum by (service_instance_id) (rate(...))`
+>   over a counter that is stale-held after its process dies, so a departed replica's series
+>   persists at rate zero instead of ending. The line flattens; it never stops.
+> - **`Consuming by queue` cannot show it at all.** Both processor replicas consume one shared
+>   queue, so a per-queue panel has no per-replica resolution by construction. This panel was
+>   never capable of this case, which is worth saying outright rather than filing as a miss.
+> - **`Workers reporting` and `Workers missing (5m)` did show it** -- 5->4 and 0->1 -- and are the
+>   only things that did.
+>
+> So the two panels built to expose one-replica-of-many failing are not the ones that expose
+> it. The worker-count stats are.
+
+**Grafana restarts destroy every dashboard.**
+
+> The `grafana-dashboards` ConfigMap is empty and Grafana's storage is an `emptyDir`, so
+> **any restart of the Grafana pod loses every hand-imported board.** This was found when a
+> mandated rollout restart wiped `skp-runtime`, which is the one board the generator cannot
+> rebuild. The README already says boards are imported by hand; it did not say that a restart
+> is destructive, which is the part that actually costs you something. Re-import from
+> `grafana/dashboards/` after any Grafana restart. Fixing it properly means provisioning the
+> boards or giving Grafana a PVC.
 
 ## Reading the boards
 
