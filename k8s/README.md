@@ -214,6 +214,22 @@ The bare `--` before `--filter-method` is load-bearing: without it, MSBuild pars
 and rejects it rather than passing it through to the test runner. Running the whole
 `BaseApi.Tests.csproj` project without a filter runs all seven back to back, in the same order.
 
+The forward script supervises what it starts, and needs to: `kubectl port-forward` exits on
+`error: lost connection to pod`, and RabbitMQ provokes that reliably — a client aborting the AMQP
+handshake mid-`starting`, which is what cancelling a processor boot looks like to the broker, makes
+it reset the connection. The forward is collateral, so the test that caused it usually passes and
+every broker-dependent test *after* it fails on a one-to-two-minute timeout that reads exactly like
+an identity-resolution bug. Unsupervised, that is three failures and a five-minute suite; supervised
+it is zero and fifty seconds. Two more switches:
+
+```
+./k8s/port-forward-realstack.ps1 -Status   # which forwards are up, and how often each has restarted
+./k8s/port-forward-realstack.ps1 -Stop     # tear down the forwards and their supervisors
+```
+
+`-Status` showing restarts against `rabbitmq` and zero elsewhere is the healthy picture, not a
+warning. Per-forward logs are in `%TEMP%\skp-port-forwards\`.
+
 Four notes an operator will otherwise learn the hard way:
 
 - **NetworkPolicy does nothing here.** kindnetd runs without `--network-policy`, so a policy is
