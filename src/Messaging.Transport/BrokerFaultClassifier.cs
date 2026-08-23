@@ -104,12 +104,6 @@ public static class BrokerFaultClassifier
         return new DependencyVerdict(DependencyFault.Transient, ex.Message);
     }
 
-    /// <summary>
-    /// The verdict's reason alone, for call sites that render one inline and attach the exception
-    /// separately.
-    /// </summary>
-    public static string Describe(Exception ex) => Classify(ex).Reason;
-
     /// <summary>Flattens aggregates and walks inner exceptions, yielding every exception in the chain.</summary>
     private static IEnumerable<Exception> Unwrap(Exception ex)
     {

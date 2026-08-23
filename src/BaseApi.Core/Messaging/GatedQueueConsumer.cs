@@ -96,13 +96,19 @@ public sealed class GatedQueueConsumer : BackgroundService
                     //
                     // Named rather than general. This is the only line a broker outage produces here,
                     // it repeats every ConvergeInterval, and it is therefore the line an operator sees
-                    // most of during one — so it carries the queue it is about and, through the
-                    // classifier, the difference between "nothing answered" and "something answered
-                    // and refused these credentials". The exception stays attached and remains the
-                    // authority on detail.
+                    // most of during one — so it carries the queue it is about, the verdict, and the
+                    // reason behind it. The exception stays attached and remains the authority on detail.
+                    //
+                    // The fault kind is one word rather than the verdict's full guidance sentence, and
+                    // that is a decision about volume: a live run emitted this line 187 times in an
+                    // hour, and 187 copies of "no action needed — this clears when the dependency
+                    // returns..." is a flood that buries the reason it accompanies. One word answers
+                    // the only question being asked here — do I need to act — and the preflight and
+                    // migration loops, which log far less often, still render the guidance in full.
+                    var verdict = BrokerFaultClassifier.Classify(ex);
                     _logger.LogWarning(
-                        ex, "consumer for {Queue} could not converge — {Reason}",
-                        _options.Queue, BrokerFaultClassifier.Describe(ex));
+                        ex, "consumer for {Queue} could not converge [{Fault}]: {Reason}",
+                        _options.Queue, verdict.Fault, verdict.Reason);
                 }
 
                 await WaitForSignalAsync(stoppingToken).ConfigureAwait(false);

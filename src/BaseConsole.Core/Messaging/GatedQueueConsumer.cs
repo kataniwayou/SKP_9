@@ -116,9 +116,17 @@ public sealed class GatedQueueConsumer : BackgroundService
                     // Never end the loop on a failure to converge — the broker may simply be down.
                     // The next pass retries, and until then the consumer stays in whatever state it
                     // already held, which is safe in both directions.
+                    //
+                    // The fault kind is one word rather than the verdict's full guidance sentence, and
+                    // that is a decision about volume: a live run emitted this line 187 times in an
+                    // hour, and 187 copies of "no action needed — this clears when the dependency
+                    // returns..." is a flood that buries the reason it accompanies. One word answers
+                    // the only question being asked here — do I need to act — and the preflight loop,
+                    // which logs far less often, still renders the guidance in full.
+                    var verdict = BrokerFaultClassifier.Classify(ex);
                     _logger.LogWarning(
-                        ex, "consumer for {Queue} could not converge — {Reason}",
-                        _options.Queue, BrokerFaultClassifier.Describe(ex));
+                        ex, "consumer for {Queue} could not converge [{Fault}]: {Reason}",
+                        _options.Queue, verdict.Fault, verdict.Reason);
                 }
 
                 await WaitForSignalAsync(stoppingToken).ConfigureAwait(false);
