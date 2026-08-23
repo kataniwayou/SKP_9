@@ -169,11 +169,13 @@ own signal. The dip is only ~30s wide and a stat panel is a range query at the d
 step, so the subtraction missed it about half the time -- and did, on the confirming re-run
 at the old **60s step**, where the board showed `Workers missing 0` through an outage the
 same expression had caught an hour earlier. It is now peak-minus-trough over `[5m:15s]`
-subqueries, which pin the evaluation at 15s regardless of the panel step. Note the window:
-it is a **fixed five minutes, not `$__range`**, so the number does not change when the
-reader zooms and back-to-back scenarios stop reporting the earlier, deeper one. Row 2 of
-the Flow board is therefore titled by tense rather than by window, and the board
-description names this stat as the one exception to "range-scoped".
+subqueries, which pin the evaluation at 15s regardless of the panel step. At the 60s panel
+step then in use that read 0 across the whole undisturbed baseline and 3 across every
+disappearance -- the measurement showing the subqueries had decoupled the stat from the
+step. Note the window: it is a **fixed five minutes, not `$__range`**, so the number does
+not change when the reader zooms and back-to-back scenarios stop reporting the earlier,
+deeper one. Row 2 of the Flow board is therefore titled by tense rather than by window, and
+the board description names this stat as the one exception to "range-scoped".
 
 **It still cannot be prompt, but it is twice as prompt.** A replica is missing once it has
 skipped its liveness window, so detection costs roughly the liveness window plus one
