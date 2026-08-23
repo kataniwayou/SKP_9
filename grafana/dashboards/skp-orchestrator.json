@@ -206,7 +206,7 @@
       "id": 41,
       "type": "stat",
       "title": "Consuming",
-      "description": "0 means no consumer tag on at least one queue -- nothing is listening. No other signal answers this.\n\nRestricted to replicas that have reported in the last 100s: a dead replica's gauge is held at its last value by the collector and by Prometheus's lookback, so an unrestricted min() reads the posture of processes that no longer exist.",
+      "description": "0 means no consumer tag on at least one queue -- nothing is listening. No other signal answers this.\n\nRestricted to replicas that have reported in the last 40s: a dead replica's gauge is held at its last value by the collector and by Prometheus's lookback, so an unrestricted min() reads the posture of processes that no longer exist.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -224,7 +224,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(last_over_time(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[100s])) or vector(0)",
+          "expr": "min(last_over_time(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -291,7 +291,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[100s])) or vector(0)",
+          "expr": "min(last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -358,7 +358,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(last_over_time(pipeline_hydration_admitted_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[100s])) or vector(0)",
+          "expr": "min(last_over_time(pipeline_hydration_admitted_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -425,7 +425,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count(last_over_time(pipeline_leader_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[100s]) == 1) or vector(0)",
+          "expr": "count(last_over_time(pipeline_leader_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s]) == 1) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -1060,7 +1060,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (queue) (last_over_time(pipeline_consumer_inflight{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[100s]))",
+          "expr": "max by (queue) (last_over_time(pipeline_consumer_inflight{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s]))",
           "legendFormat": "{{queue}}",
           "range": true,
           "editorMode": "code"
@@ -1222,7 +1222,7 @@
       "id": 55,
       "type": "timeseries",
       "title": "Consuming by queue",
-      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nA queue whose LINE STOPS is a replica that has gone away: the series is restricted to replicas reporting inside 100s, so a departure ends the line instead of freezing it at 1.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
+      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nA queue whose LINE STOPS is a replica that has gone away: the series is restricted to replicas reporting inside 40s, so a departure ends the line instead of freezing it at 1.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1240,7 +1240,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min by (queue) (last_over_time(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[100s]))",
+          "expr": "min by (queue) (last_over_time(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s]))",
           "legendFormat": "{{queue}}",
           "range": true,
           "editorMode": "code"
@@ -1329,7 +1329,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "last_over_time(pipeline_leader_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[100s])",
+          "expr": "last_over_time(pipeline_leader_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s])",
           "legendFormat": "{{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1418,7 +1418,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "last_over_time(pipeline_hydration_admitted_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[100s])",
+          "expr": "last_over_time(pipeline_hydration_admitted_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s])",
           "legendFormat": "{{service_instance_id}}",
           "range": true,
           "editorMode": "code"

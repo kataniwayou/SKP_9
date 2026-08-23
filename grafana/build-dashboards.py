@@ -60,8 +60,6 @@ T_GAP = [{"color": "red", "value": None},
          {"color": "green", "value": -25},
          {"color": "orange", "value": 25},
          {"color": "red", "value": 50}]
-# Seconds since the least-fresh service last exported. The export cadence is 60s, so this
-# sawtooths 0..60 in health; anything above that means a service has stopped reporting.
 # Share of deliveries that will be redone. Not red-at-any-non-zero: the counted form is
 # sticky for a range width, so one parked delivery during a broker outage kept this stat
 # red across the two scenarios that followed it, on the board an operator opens first.
@@ -70,9 +68,11 @@ T_GAP = [{"color": "red", "value": None},
 T_REDONE = [{"color": "green", "value": None},
             {"color": "orange", "value": 0.01},
             {"color": "red", "value": 0.05}]
+# Seconds since the least-fresh service last exported. The effective resolution is 15s, so
+# this sawtooths 0-15 in health; anything above that means a service has stopped reporting.
 T_STALE = [{"color": "green", "value": None},
-           {"color": "orange", "value": 90},
-           {"color": "red", "value": 150}]
+           {"color": "orange", "value": 45},
+           {"color": "red", "value": 90}]
 
 # ---------------------------------------------------------------------------
 # reading a stale-held gauge, and counting a fault that is rare
@@ -93,14 +93,13 @@ T_STALE = [{"color": "green", "value": None},
 # `last_over_time(x[LIVENESS])` yields only series with a real sample inside the window,
 # which is what "this replica is still reporting" means here.
 #
-# 100s, and the number was measured rather than chosen. The export cadence is 60s, so the
-# window has to survive one late export without declaring a healthy replica dead -- and it
-# has to be tight enough that a replica which vanishes for a minute actually falls out of
-# it before its replacement starts reporting. 2m fails the second test: replayed against
-# three recorded disappearances of ~58s each, a 2m window never dipped at all, while 100s
-# dipped on all three and stayed flat through the undisturbed baseline. The observed
-# worst-case staleness on a healthy stack is 57s, so 100s keeps ~40s of headroom.
-LIVENESS = "100s"
+# 40s, and the number is measured rather than chosen. The export cadence is 10s against a
+# 15s scrape, so the effective sample spacing is 15s and the window has to survive one late
+# sample without declaring a healthy replica dead -- and it has to be tight enough that a
+# replica which vanishes for a minute falls out of it before its replacement starts
+# reporting. At the old 60s cadence the equivalent number was 100s; 2m failed outright,
+# never dipping on three recorded ~58s disappearances.
+LIVENESS = "40s"
 
 
 def live(series):

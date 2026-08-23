@@ -1,0 +1,8 @@
+{
+  "name": "skp-grafana-tooling",
+  "private": true,
+  "description": "Playwright for the board audit and chaos-timeline scripts. Not a build; these are operator tools run by hand.",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}
