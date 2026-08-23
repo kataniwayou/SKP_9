@@ -9,6 +9,7 @@ grafana/
   build-dashboards.py      generator — edit this, not the JSON
   check-expressions.py     runs every panel expression against a live Prometheus
   audit-boards.js          opens every board in a browser and reports what rendered
+  audit-nav.js             checks every board can reach every other board
   dashboards/
     skp-flow.json          cross-service conservation — open this one first
     skp-baseapi.json       API HTTP ingress
@@ -52,9 +53,13 @@ read-only. A UI edit is lost on the next import, so treat this directory as the 
 truth by convention rather than by mechanism.
 
 `skp-runtime.json` is the one exception: it was exported from the old provisioning
-ConfigMap rather than generated, and is still provisioned into *this* cluster's Grafana
-from `grafana-dashboards`. The exported copy exists so the runtime board travels with the
-other four to a machine that has no such ConfigMap.
+ConfigMap rather than generated. `build-dashboards.py` still stamps the shared nav onto it
+(`normalize_imported`), because nav is a property of the *set* of boards rather than of how
+any one was authored — see below for what happened when it was not.
+
+**Nothing is provisioned any more.** The `grafana-dashboards` ConfigMap is empty and the
+file provider points at an empty directory; both are now vestigial and could be removed
+from whatever applies them.
 
 ## Reading the boards
 
@@ -191,6 +196,31 @@ shape in which a dip — the entire point of the panel — was invisible. Unfill
 Two smaller ones: an instant-query table carried a Time column identical on every row while
 its value columns were clipped, and a panel titled "Route match failures" plotted every
 match status including success.
+
+## A tag is not a link, and un-provisioning drops permissions
+
+Two failures that only showed up by clicking through the boards.
+
+**The runtime board was a one-way door.** It carried the `skp` tag, so it appeared in every
+other board's nav — but it had no `links` of its own, so landing on it left the reader with
+no way back, and only there. A tag makes a board a *destination*; a link makes it an
+*origin*. Nothing had been checking the two agreed. `build-dashboards.py` now stamps the
+nav onto any board in the directory it did not generate, and `audit-nav.js` fails if any
+board cannot reach every other.
+
+**Un-provisioning a dashboard can strip its permissions.** Removing `runtime.json` from the
+ConfigMap so it could be edited like the other four left the board with an empty ACL rather
+than an inherited one, and anonymous viewers got `Failed to load dashboard — Forbidden`
+while an admin saw it fine. The generated boards each carry an explicit ACL granting Viewer
+and Editor; the orphaned one carried none. Fixed on this instance with:
+
+```bash
+curl -u admin:admin -X POST http://localhost:3000/api/dashboards/uid/skp-runtime/permissions   -H 'Content-Type: application/json'   -d '{"items":[{"role":"Viewer","permission":1},{"role":"Editor","permission":2}]}'
+```
+
+This is an artefact of un-provisioning a board that already existed. A clean import onto a
+fresh Grafana inherits folder permissions normally and will not hit it — but check as
+whoever will actually read the board, not as admin, because admin sees it either way.
 
 ## Known gap: the API's queue side
 
