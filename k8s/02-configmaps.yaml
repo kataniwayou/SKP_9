@@ -186,30 +186,93 @@ data:
     # never been observed to change -- `landed="false"` has never occurred on this stack,
     # so there is deliberately no ack-loss rule.
     #
+    # THIS FILE IS MOUNTED subPath (k8s/21-prometheus.yaml, second volumeMount). A subPath
+    # mount does NOT live-update when the ConfigMap changes: `kubectl apply` alone changes
+    # nothing inside the running container. A rules edit needs
+    # `kubectl rollout restart deploy/prometheus` to take effect.
+    #
+    # VALIDATE BEFORE APPLYING. A malformed rules file stops Prometheus from starting and
+    # takes every dashboard with it. `promtool` and `tar` both exist in the prom image:
+    #     kubectl cp skp-rules.yml skp/<prom-pod>:/tmp/skp-rules.yml
+    #     kubectl exec -n skp <prom-pod> -- promtool check rules /tmp/skp-rules.yml
+    #
+    # WHY EVERY GAUGE AGGREGATE ENDS `or vector(0)`. An aggregation over a selector that
+    # matches nothing yields an EMPTY vector, the comparison never evaluates, and the rule
+    # is silent. That silences the whole rule set during a whole-stack outage -- the one
+    # failure mode where these rules matter most. The generator's stats all carry the
+    # fallback (`LIVE_WORKERS`, every `min(live(...))` in grafana/build-dashboards.py); the
+    # first copies of these rules dropped it. EgressFaults is the deliberate exception:
+    # it counts faults, so an empty input genuinely means "no faults have happened", and a
+    # labelless `vector(0)` fallback would strip the service_name/outcome its annotation
+    # prints -- the same reason `counted()`'s by-label callers cannot carry one.
+    #
     # The liveness windows must track LIVENESS in grafana/build-dashboards.py. They are the
-    # same decision expressed twice because Prometheus cannot read the generator. Read the
-    # value out of the generator rather than copying it from this plan -- Task 4's own
-    # verification step may have widened it:
-    #     grep -n '^LIVENESS' grafana/build-dashboards.py
-    # and substitute that value everywhere `[40s]` appears below.
+    # same decision expressed twice because Prometheus cannot read the generator. That
+    # coupling is now enforced rather than remembered: grafana/check-expressions.py's
+    # check_liveness_windows() fails if any liveness window in this file disagrees with
+    # LIVENESS. If you change one, change both and re-run that script.
     groups:
       - name: skp-pipeline
         interval: 15s
         rules:
           - alert: TelemetryStale
-            # First, because every other rule is downstream of it. Healthy sawtooths 0-15s.
-            expr: time() - min(max by (service_name) (timestamp(pipeline_gate_open_ratio))) > 60
-            for: 1m
+            # First, because every other rule is downstream of it. Healthy sawtooths 0-15s
+            # at the 10s export cadence against a 15s scrape.
+            #
+            # WHAT IT WATCHES, AND WHAT IT DOES NOT. The selector is
+            # `pipeline_gate_open_ratio`, which only the orchestrator and the processors
+            # export. baseapi does not export it at all, so baseapi going dark is invisible
+            # here -- the summary says "worker" rather than "service" for that reason.
+            #
+            # THE present_over_time MASK IS LOAD-BEARING. `service_name` on a processor is
+            # version-stamped from the database row (`sample-proc-v9`), so a redeploy
+            # RETIRES a name rather than restarting it. Prometheus's 5-minute lookback then
+            # keeps serving the dead name's last sample, and `timestamp()` on it returns
+            # that sample's own (receding) timestamp -- so the min stayed pinned to a name
+            # that no longer exists and the rule fired for minutes on a routine redeploy.
+            # `and present_over_time(...[2m])` keeps only series with a REAL sample in the
+            # last two minutes, which drops a retired name in 2m instead of 5m.
+            #
+            # `last_over_time(...[2m])` does NOT work here, and was measured not to before
+            # this rule was written: the `*_over_time` family stamps its output with the
+            # EVALUATION time, so `timestamp(last_over_time(x[2m]))` reads 0s staleness for
+            # every series, healthy or dead. Measured live: raw `timestamp()` gave 23.2s and
+            # 13.6s for the two live service_names at the same instant the wrapped form gave
+            # 0 and 0.
+            #
+            # Threshold 45, not a fourth invented number: it is T_STALE's orange step in
+            # grafana/build-dashboards.py, so this alert and the Data freshness panel change
+            # colour at the same instant. With `for: 30s` that is 75s of staleness to fire,
+            # down from 120s (60s threshold + 60s `for`), which is why the rule recorded
+            # zero firing seconds across a full chaos run.
+            #
+            # THE RESIDUAL, STATED RATHER THAN CLAIMED AWAY: a retired name is still stale
+            # for the ~45s between crossing the threshold and falling out of the 2m window,
+            # so a redeploy can still raise this for up to ~45s. That is down from ~3m
+            # before, not zero. Telling "retired" from "stalled" needs an expected-replica
+            # count this stack does not publish. Two minutes is the FLOOR for the window:
+            # anything shorter and the series drops out before 75s of staleness has
+            # elapsed, and the rule could never fire on a genuine stall at all.
+            expr: >-
+              time() - (min(max by (service_name) (
+              timestamp(pipeline_gate_open_ratio)
+              and present_over_time(pipeline_gate_open_ratio[2m])
+              )) or vector(0)) > 45
+            for: 30s
             labels:
               severity: warning
             annotations:
-              summary: "A service has stopped exporting metrics"
-              description: "Least-fresh service last exported {{ $value | humanizeDuration }} ago. Every other alert is unreliable while this is firing."
+              summary: "A pipeline worker has stopped exporting metrics"
+              description: "Least-fresh orchestrator/processor replica last exported {{ $value | humanizeDuration }} ago. A value in the decades means NOTHING matched the selector at all -- the vector(0) fallback subtracting from the Unix epoch -- which is a whole-stack telemetry outage, not a clock fault. baseapi is not watched by this rule; it does not export the selector. Every other alert is unreliable while this is firing."
 
           - alert: PipelineNotConsuming
             # Measured 1 throughout the undisturbed baseline; 0 within ~40s of a Redis
             # pause, a broker outage, both at once, and an L2 wipe.
-            expr: min(last_over_time(pipeline_consumer_consuming_ratio[40s])) == 0
+            #
+            # The `or vector(0)` makes a total absence of consumers read as 0 rather than
+            # as silence. That also means a cold stack with nothing running yet fires this,
+            # which is correct: no replica is consuming.
+            expr: (min(last_over_time(pipeline_consumer_consuming_ratio[40s])) or vector(0)) == 0
             for: 1m
             labels:
               severity: critical
@@ -220,7 +283,7 @@ data:
           - alert: L2GateShut
             # The discriminator: 0 for a Redis fault, 1 for a broker fault. Both close
             # PipelineNotConsuming, so this is what separates the two call-outs.
-            expr: min(last_over_time(pipeline_gate_open_ratio[40s])) == 0
+            expr: (min(last_over_time(pipeline_gate_open_ratio[40s])) or vector(0)) == 0
             for: 1m
             labels:
               severity: critical
@@ -229,33 +292,81 @@ data:
               description: "Deliveries are being requeued because the projection store is unusable. If PipelineNotConsuming is firing and this is not, the fault is the broker, not the store."
 
           - alert: WorkersMissing
-            # Fewer replicas reporting now than five minutes ago. NOT peak-minus-trough over
-            # a window: that also fires on a monotonic increase -- a Deployment surging up
-            # during a redeploy -- and stays true for a full window after the replicas are
-            # back, which is the cry-wolf this rule set exists not to do. The dashboard stat
-            # of the same name DOES use peak-minus-trough, deliberately: a panel should tell
-            # a late arrival what happened, an alert should describe what is true now.
+            # A DROP DETECTOR, and the annotation now says so. Fewer replicas reporting now
+            # than five minutes ago. NOT peak-minus-trough over a window: that also fires on
+            # a monotonic increase -- a Deployment surging up during a redeploy -- and stays
+            # true for a full window after the replicas are back. The dashboard stat of the
+            # same name DOES use peak-minus-trough, deliberately: a panel should tell a late
+            # arrival what happened, an alert should describe what is true now.
+            #
+            # `for: 30s` -- two evaluation intervals at this group's 15s interval, and the
+            # correction for the defect that made this rule dead on arrival. It shipped at
+            # `for: 2m`, needing 120s of sustained drop. The live dips this rule exists to
+            # catch measure 30-60s wide, so across a full eight-scenario chaos run -- three
+            # of whose scenarios remove replicas -- it reached `pending` for 150s total and
+            # `firing` for ZERO seconds. It had never once fired.
+            #
+            # THE HONEST TRADE AT THIS RESOLUTION: 30s is exactly two samples, so a 30s-wide
+            # dip sits on the boundary and may reach only `pending` and never `firing`. This
+            # rule reliably catches a dip of roughly 45s or more; a 30s dip is a coin flip,
+            # and anything shorter than one export is not observable at all. Do NOT read a
+            # silent WorkersMissing as "no replica was lost" -- read the Workers missing (5m)
+            # stat on SKP Flow, which is shaped to catch the transient this cannot.
+            #
+            # WHY IT SELF-CLEARS. The reference is a SLIDING `offset 5m`, so once the loss is
+            # older than about 5m40s (the offset plus the liveness window) the reference
+            # window sits inside the outage too, both sides count the reduced set, and this
+            # clears WHILE THE REPLICAS ARE STILL GONE. The expression measures a change, not
+            # an absence, and cannot express "and have not come back" -- the annotation used
+            # to claim exactly that and was wrong. Fixing the maths instead would mean
+            # comparing against a window maximum, which is the redeploy cry-wolf this rule
+            # was rewritten to remove. The words were the thing to change.
             #
             # The 40s liveness windows track LIVENESS in grafana/build-dashboards.py.
             # Measured: 0 firing across the undisturbed baseline; a lost orchestrator
             # StatefulSet drops the count by 3, a lost processor pair by 2.
-            expr: >
-              count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s])))
-              < count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s] offset 5m)))
-            for: 2m
+            expr: >-
+              (count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))) or vector(0))
+              <
+              (count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s] offset 5m))) or vector(0))
+            for: 30s
             labels:
               severity: warning
             annotations:
-              summary: "Fewer worker replicas are reporting than five minutes ago"
-              description: "Replicas stopped reporting and have not come back. Detection lags the event by roughly the liveness window plus one export, so a disappearance shorter than that is reported after it has ended -- or not at all. A deliberate rolling restart will also trip this; it clears on its own once the count recovers."
+              summary: "Worker replica count has dropped in the last five minutes"
+              description: "Fewer replicas are reporting now than five minutes ago. This detects the DROP, not the absence: the reference slides, so once the loss is older than about 5m40s this clears on its own even if the replicas never came back -- read Workers reporting on SKP Flow for the standing count. Detection lags the event by roughly the liveness window plus one export (~52-66s measured), and a dip much narrower than 45s may reach pending without ever firing. A deliberate rolling restart will also trip this."
 
           - alert: EgressFaults
             # unroutable = the queue is not declared; transient = the broker is unreachable.
             # Opposite remedies, which is why the reason label travels in the annotation.
-            expr: sum by (service_name,outcome) (increase(pipeline_messages_produced_total{outcome=~"transient|unroutable|refused"}[5m])) > 0
+            #
+            # THE LARGER OF IN-WINDOW GROWTH AND ABSOLUTE TOTAL -- `counted()`'s shape in
+            # grafana/build-dashboards.py, not bare `increase()`. These counters have no
+            # series at all in health: the .NET counter is created on first increment, so
+            # the first burst of a given fault type appears as a series whose very first
+            # exported sample is ALREADY non-zero, and `increase()` measures growth WITHIN
+            # the window and therefore reports 0 for precisely that case. This rule shipped
+            # as bare `increase(...[5m]) > 0` and fired in the last chaos run only because
+            # earlier scenarios had already created the series; on a fresh cluster the first
+            # egress fault would have been invisible to it while the Egress faults stat
+            # beside it read 2. Confirmed against this cluster after a redeploy: NO
+            # transient / unroutable / refused series exists at all right now.
+            #
+            # Outer parentheses are load-bearing. `>` binds tighter than `or` in PromQL, so
+            # `(A > B) or B > 0` parses as `(A > B) or (B > 0)` -- a different query. The
+            # comparison has to wrap the whole `or`.
+            #
+            # Consequence worth knowing, same as the panel: once a fault series exists it is
+            # exported for the life of the process, so this stays firing until the replica
+            # restarts. Severity is warning for that reason -- it means "this happened",
+            # not "this is happening".
+            expr: >-
+              (((sum by (service_name,outcome) (increase(pipeline_messages_produced_total{outcome=~"transient|unroutable|refused"}[5m])))
+              > (sum by (service_name,outcome) (max_over_time(pipeline_messages_produced_total{outcome=~"transient|unroutable|refused"}[5m]))))
+              or (sum by (service_name,outcome) (max_over_time(pipeline_messages_produced_total{outcome=~"transient|unroutable|refused"}[5m])))) > 0
             for: 1m
             labels:
               severity: warning
             annotations:
               summary: "{{ $labels.service_name }} failed to publish ({{ $labels.outcome }})"
-              description: "{{ $value | printf \"%.0f\" }} send(s) did not reach the broker in five minutes. transient = broker unreachable; unroutable = queue not declared; refused = the broker answered and declined the publish."
+              description: "{{ $value | printf \"%.0f\" }} send(s) did not reach the broker -- the larger of the last five minutes' growth and the process's running total, so a fault whose series was born inside the window still counts. transient = broker unreachable; unroutable = queue not declared; refused = the broker answered and declined the publish."
