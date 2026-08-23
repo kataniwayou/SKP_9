@@ -109,10 +109,28 @@ Only these four are copied. `references/k8s/` also holds `13-elasticsearch.yaml`
 
 ```bash
 kubectl kustomize k8s/ > /tmp/built.yaml && grep -c "^kind:" /tmp/built.yaml
-kubectl -n skp diff -k k8s/ ; echo "diff exit=$?"
+kubectl -n skp diff -k k8s/ > /tmp/adopt-diff.txt 2>&1; echo "diff exit=$?"
 ```
 
-Expected: the build succeeds, and `diff exit=0` (no changes). A non-zero exit means the copies differ from the cluster; go back to Step 2.
+The gate is **not** `diff exit=0`, and expecting that would be wrong for two reasons that have nothing to do with this task. `kubectl apply -k` stamps `app.kubernetes.io/managed-by: kustomize` on everything it manages, and the live objects were applied without it, so every resource shows a label-only hunk. Separately, `k8s/33-processor-sample.yaml` carries a pre-existing one-line drift against the cluster.
+
+What must hold is narrower, and is what this task is actually responsible for: **no hunk touches any of the four adopted objects except that label.** Check it directly — save this as `/tmp/gate.py` and run `python /tmp/gate.py`:
+
+```python
+import pathlib, re
+text = pathlib.Path('/tmp/adopt-diff.txt').read_text(encoding='utf-8', errors='replace')
+subst = [l for l in text.splitlines()
+         if re.match(r'^[+-][^+-]', l)
+         and 'managed-by' not in l
+         and not re.match(r'^[+-]\s*generation:', l)]
+print(f'{len(subst)} substantive changed line(s):')
+for l in subst:
+    print('   ', l)
+```
+
+Expected: the only substantive lines are `- value: unresolved` and `+ value: processor`. That is `Service__Name` on `processor-sample` — a fallback the manifest's own comment says is used only when a host starts without identity resolution, which the sample never does. It is not one of the four adopted files and it predates this task. Leave it alone: Task 3 rolls `processor-sample` anyway and will carry it.
+
+Any substantive line naming `otel-collector`, `prometheus`, `grafana` or one of the three ConfigMaps means a copy genuinely differs from the cluster — go back to Step 2.
 
 - [ ] **Step 5: Commit**
 
