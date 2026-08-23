@@ -572,13 +572,23 @@ def build_flow():
                      'outcome="accepted"}[$__rate_interval]))', "dispatched"),
                     ('sum(rate(pipeline_messages_consumed_total{type="process-dispatch",'
                      'disposition="acked"}[$__rate_interval]))', "picked up")],
-                   desc="The two lines should track. A widening fork is backlog.",
+                   desc="The two lines should track. A widening fork is backlog."
+                        + PARA +
+                        "Orchestrator and processor only. The API is not on this hop, "
+                        "but note that its own queue paths emit no metrics at all, so "
+                        "no panel on this board can see traffic the API publishes or "
+                        "consumes -- see the note panel on SKP BaseAPI.",
                    unit="reqps", w=12),
         timeseries(lay, "Return hop - processor to orchestrator",
                    [('sum(rate(pipeline_messages_produced_total{type="step-outcome",'
                      'outcome="accepted"}[$__rate_interval]))', "sent"),
                     ('sum(rate(pipeline_messages_consumed_total{type="step-outcome",'
                      'disposition="acked"}[$__rate_interval]))', "picked up")],
+                   desc="The same conservation check on the way back."
+                        + PARA +
+                        "The API also consumes step-outcome, and that consumption is "
+                        "NOT instrumented, so 'picked up' here counts the orchestrator "
+                        "alone. Read a shortfall as the API's share, not as loss.",
                    unit="reqps", w=12),
         timeseries(lay, "Per-processor dispatch",
                    [('sum by (destination) (rate(pipeline_messages_produced_total'
@@ -738,8 +748,15 @@ def build_baseapi():
                   "**no metrics at all**.\n\n"
                   "Absence on the Flow board is therefore not evidence of zero traffic "
                   "through the API's queues, and any produced-vs-consumed comparison "
-                  "that crosses into the API will not balance. Deliberate -- see §10 "
-                  "of the pipeline-metrics design."),
+                  "that crosses into the API will not balance." + PARA +
+                  "Deliberate, not an oversight. The reasoning is in section 10, "
+                  "'Out of scope', of "
+                  "`docs/superpowers/specs/2026-08-22-pipeline-metrics-design.md` "
+                  "in the SK_P repository, which also names the second dark path: "
+                  "`QueueFanoutPublisher` IS instrumented, but its only callers are "
+                  "the API's start and stop handlers, whose host never registers the "
+                  "`Messaging.Transport` meter -- so the instrument exists and emits "
+                  "nothing."),
     ]
 
     rt = row(lay, "3 - Runtime: is the process why?", collapsed=True)

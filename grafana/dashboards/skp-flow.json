@@ -646,7 +646,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Outbound hop - orchestrator to processor",
-      "description": "The two lines should track. A widening fork is backlog.",
+      "description": "The two lines should track. A widening fork is backlog.\n\nOrchestrator and processor only. The API is not on this hop, but note that its own queue paths emit no metrics at all, so no panel on this board can see traffic the API publishes or consumes -- see the note panel on SKP BaseAPI.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -744,7 +744,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "Return hop - processor to orchestrator",
-      "description": "",
+      "description": "The same conservation check on the way back.\n\nThe API also consumes step-outcome, and that consumption is NOT instrumented, so 'picked up' here counts the orchestrator alone. Read a shortfall as the API's share, not as loss.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
