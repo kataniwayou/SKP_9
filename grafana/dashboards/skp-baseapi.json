@@ -127,7 +127,7 @@
   },
   "panels": [
     {
-      "id": 20,
+      "id": 21,
       "type": "row",
       "title": "1 - Verdict: is the API broken?",
       "collapsed": false,
@@ -140,7 +140,7 @@
       "panels": []
     },
     {
-      "id": 21,
+      "id": 22,
       "type": "stat",
       "title": "5xx ratio",
       "description": "Health routes are dropped collector-side, so this is real traffic only.",
@@ -207,7 +207,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 23,
       "type": "stat",
       "title": "p95 latency",
       "description": "Across all routes. Break down by route on the ingress tier.\n\nBlank means no requests in the range, not a broken query. histogram_quantile over an all-zero rate is 0/0 = NaN, which `or vector(0)` cannot rescue -- it substitutes for an EMPTY result, and NaN is a result. The no-value text below is what covers that case.",
@@ -271,7 +271,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 24,
       "type": "stat",
       "title": "In-flight",
       "description": "",
@@ -334,7 +334,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 25,
       "type": "stat",
       "title": "Kestrel queued",
       "description": "Connections accepted but not yet served. Non-zero and sustained means the server is behind.",
@@ -401,7 +401,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 26,
       "type": "stat",
       "title": "DNS failures",
       "description": "Name resolution failing for postgres, redis, rabbitmq or the collector. A dependency signal nothing else on this board surfaces.",
@@ -468,7 +468,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 27,
       "type": "stat",
       "title": "Pods reporting",
       "description": "",
@@ -531,7 +531,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 28,
       "type": "row",
       "title": "2 - Ingress: what is broken?",
       "collapsed": false,
@@ -544,7 +544,7 @@
       "panels": []
     },
     {
-      "id": 28,
+      "id": 29,
       "type": "timeseries",
       "title": "Request rate by route",
       "description": "",
@@ -631,7 +631,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 30,
       "type": "timeseries",
       "title": "p95 / p99 by route",
       "description": "",
@@ -729,7 +729,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 31,
       "type": "timeseries",
       "title": "Status-code mix",
       "description": "202 is the orchestration verbs; they accept and queue rather than finishing the work.",
@@ -816,7 +816,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 32,
       "type": "timeseries",
       "title": "In-flight and Kestrel connections",
       "description": "",
@@ -926,7 +926,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 33,
       "type": "timeseries",
       "title": "Dependency name resolution",
       "description": "host_not_found means the service object is gone. try_again means the resolver timed out. Different faults, different remedies.",
@@ -1014,7 +1014,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 34,
       "type": "timeseries",
       "title": "Route matching by status",
       "description": "Split by match status. A `failure` series is a caller using the wrong URL -- the singular-vs-plural controller mistake returns a bare 404 with no body and looks like the API being down.\n\nThe success series is kept deliberately: it is the only panel here that distinguishes 'no failures' from 'no traffic at all'.",
@@ -1102,7 +1102,7 @@
       }
     },
     {
-      "id": 34,
+      "id": 35,
       "type": "text",
       "title": "The queue side is not instrumented",
       "gridPos": {
@@ -1118,7 +1118,7 @@
       "transparent": false
     },
     {
-      "id": 35,
+      "id": 36,
       "type": "row",
       "title": "3 - Runtime: is the process why?",
       "collapsed": true,
@@ -1130,7 +1130,7 @@
       },
       "panels": [
         {
-          "id": 36,
+          "id": 37,
           "type": "timeseries",
           "title": "Thread-pool queue length",
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
@@ -1217,7 +1217,7 @@
           }
         },
         {
-          "id": 37,
+          "id": 38,
           "type": "timeseries",
           "title": "GC pause time",
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",
@@ -1304,7 +1304,7 @@
           }
         },
         {
-          "id": 38,
+          "id": 39,
           "type": "timeseries",
           "title": "Exception rate",
           "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes.",
@@ -1391,7 +1391,7 @@
           }
         },
         {
-          "id": 39,
+          "id": 40,
           "type": "timeseries",
           "title": "Process restarts",
           "description": "A monotonic counter going backwards means the process is new. The one signal that explains a simultaneous gap in every other series.",
