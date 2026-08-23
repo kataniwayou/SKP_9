@@ -42,9 +42,81 @@ T_WARN = [{"color": "green", "value": None}, {"color": "orange", "value": 1}]
 # For a conservation gap counted in messages. Scrape boundaries put a handful of messages
 # on either side of zero even when nothing is lost, so the green band has to be wider than
 # one message -- see the Outbound hop gap description for the measurement behind these.
-T_GAP = [{"color": "green", "value": None},
+#
+# SYMMETRIC, and that is the fix rather than the decoration. The gap and its return-hop
+# twin are the same quantity measured in opposite directions, so one physical event puts
+# +N on one and -N on the other. With steps only on the positive side the pair disagreed
+# about the same instant: measured across the chaos suite, +46/-47 (S2), +48/-46 (S4),
+# +43/-44 (S6) -- one panel orange, its twin green, every time.
+T_GAP = [{"color": "red", "value": None},
+         {"color": "orange", "value": -50},
+         {"color": "green", "value": -10},
          {"color": "orange", "value": 10},
          {"color": "red", "value": 50}]
+# Seconds since the least-fresh service last exported. The export cadence is 60s, so this
+# sawtooths 0..60 in health; anything above that means a service has stopped reporting.
+T_STALE = [{"color": "green", "value": None},
+           {"color": "orange", "value": 90},
+           {"color": "red", "value": 150}]
+
+# ---------------------------------------------------------------------------
+# reading a stale-held gauge, and counting a fault that is rare
+# ---------------------------------------------------------------------------
+
+# The collector's prometheus exporter keeps publishing a series after the process that
+# fed it is gone, and Prometheus's own 5-minute lookback holds it after that. So a plain
+# gauge selector reports replicas that no longer exist, at whatever value they held when
+# they died.
+#
+# Measured, not theorised. During the chaos suite's orchestrator scenario all three
+# orchestrator replicas were deleted for 58 seconds; throughout that window
+# `min(pipeline_consumer_consuming_ratio)` stayed 1, `min(pipeline_gate_open_ratio)`
+# stayed 1, and `count(count by (service_instance_id) (pipeline_gate_open_ratio))` stayed
+# 5. In the processor scenario the same count went 5 -> 7 while two of five workers were
+# being deleted, because the dead replicas were held alongside the new ones.
+#
+# `last_over_time(x[LIVENESS])` yields only series with a real sample inside the window,
+# which is what "this replica is still reporting" means here.
+#
+# 100s, and the number was measured rather than chosen. The export cadence is 60s, so the
+# window has to survive one late export without declaring a healthy replica dead -- and it
+# has to be tight enough that a replica which vanishes for a minute actually falls out of
+# it before its replacement starts reporting. 2m fails the second test: replayed against
+# three recorded disappearances of ~58s each, a 2m window never dipped at all, while 100s
+# dipped on all three and stayed flat through the undisturbed baseline. The observed
+# worst-case staleness on a healthy stack is 57s, so 100s keeps ~40s of headroom.
+LIVENESS = "100s"
+
+
+def live(series):
+    """A gauge restricted to replicas that have actually reported recently."""
+    return f"last_over_time({series}[{LIVENESS}])"
+
+
+def counted(series, window="$__range"):
+    """A fault counter read as a count over the range, correct at series birth.
+
+    Fault counters here have no series at all in health -- the .NET counter is created on
+    first increment -- so the first burst of a given fault type appears as a series whose
+    very first exported sample is already non-zero. `increase()` measures growth WITHIN
+    the window and therefore reports 0 for exactly that case: the first time a fault ever
+    happens, which is the case the verdict tier exists to catch.
+
+    Measured: the broker scenario produced two transient publishes and one parked
+    delivery. `sum(increase(...))` read 0 for all three for the rest of the run, while
+    the rate-based stats these replace read 0.00 for the same reason plus the 240s rate
+    window. This form -- the larger of the in-window growth and the absolute total --
+    read 2 and 1.
+
+    Consequence worth knowing: once a fault series exists it is exported for the life of
+    the process, so this stat stays non-zero until the replica restarts. That is why the
+    stats using it are thresholded warn-at-one rather than red: a fault that happened
+    twenty minutes ago should not vanish from the verdict tier, but it should not read as
+    an outage in progress either.
+    """
+    grew = f"sum(increase({series}[{window}])) or vector(0)"
+    total = f"sum(max_over_time({series}[{window}])) or vector(0)"
+    return f"(({grew}) > ({total})) or ({total})"
 
 
 class Layout:
@@ -391,35 +463,49 @@ def verdict_shared(layout, f):
     """
     return [
         stat(layout, "Consuming",
-             [f'min(pipeline_consumer_consuming_ratio{{{f}}}) or vector(0)'],
+             [f'min({live(f"pipeline_consumer_consuming_ratio{{{f}}}")}) or vector(0)'],
              desc="0 means no consumer tag on at least one queue -- nothing is "
-                  "listening. No other signal answers this.",
+                  "listening. No other signal answers this." + PARA +
+                  "Restricted to replicas that have reported in the last " + LIVENESS +
+                  ": a dead replica's gauge is held at its last value by the collector "
+                  "and by Prometheus's lookback, so an unrestricted min() reads the "
+                  "posture of processes that no longer exist.",
              thresholds=T_POSTURE, decimals=0),
         stat(layout, "L2 gate",
-             [f'min(pipeline_gate_open_ratio{{{f}}}) or vector(0)'],
+             [f'min({live(f"pipeline_gate_open_ratio{{{f}}}")}) or vector(0)'],
              desc="The single best answer to 'why did the pipeline stop'. 0 means "
                   "the gate is shut and deliveries are being requeued.",
              thresholds=T_POSTURE, decimals=0),
         stat(layout, "Not acked",
-             [f'sum(rate(pipeline_messages_consumed_total{{{f},'
-              f'disposition=~"requeued|parked"}}[$__rate_interval])) or vector(0)'],
-             desc="Deliveries the consumer refused or sent back. Drill into "
-                  "'reason' on the pipeline tier for why.",
-             unit="reqps", decimals=2),
+             [counted(f'pipeline_messages_consumed_total{{{f},'
+                      f'disposition=~"requeued|parked"}}')],
+             desc="Deliveries the consumer refused or sent back, COUNTED over the "
+                  "visible range. Drill into 'reason' on the pipeline tier for why."
+                  + PARA +
+                  "Counted rather than rated. As a rate this read 0.00 through every "
+                  "scenario in the chaos suite: the rate window is 240s here, so the "
+                  "single parked delivery the broker outage produced was 1/240 = 0.004, "
+                  "which rounds to nothing at any sane precision.",
+             thresholds=T_WARN, decimals=0),
         stat(layout, "Ack lost",
-             [f'sum(rate(pipeline_messages_consumed_total{{{f},'
-              f'disposition="acked",landed="false"}}[$__rate_interval])) or vector(0)'],
+             [counted(f'pipeline_messages_consumed_total{{{f},'
+                      f'disposition="acked",landed="false"}}')],
              desc="The silent case: the handler ran to completion but the broker "
                   "never heard the ack, so it will redeliver. Cause is on the "
-                  "channel-resets panel.",
-             unit="reqps", decimals=2),
+                  "channel-resets panel. Counted over the range, for the reason "
+                  "'Not acked' gives.",
+             thresholds=T_WARN, decimals=0),
         stat(layout, "Egress faults",
-             [f'sum(rate(pipeline_messages_produced_total{{{f},'
-              f'outcome=~"transient|unroutable|refused"}}[$__rate_interval])) or vector(0)'],
+             [counted(f'pipeline_messages_produced_total{{{f},'
+                      f'outcome=~"transient|unroutable|refused"}}')],
              desc="unroutable = the queue is not declared. transient = the broker "
                   "is unreachable. Opposite remedies; this is the only signal that "
-                  "separates them.",
-             unit="reqps", decimals=2),
+                  "separates them." + PARA +
+                  "Counted over the range. Scaling the broker to zero for sixty seconds "
+                  "produced exactly two transient publishes; as a rate they were 0.00 on "
+                  "every board and the only trace of them anywhere was a new legend entry "
+                  "on the produced-by-outcome timeseries.",
+             thresholds=T_WARN, decimals=0),
         stat(layout, "Channel resets",
              [f'sum(increase(pipeline_consumer_channel_resets_total{{{f}}}[$__range])) '
               f'or vector(0)'],
@@ -468,7 +554,8 @@ def pipeline_shared(layout, f, role_f=""):
                         "4.9s while the mean read 15ms.",
                    unit="s"),
         timeseries(layout, "Consumer inflight by queue",
-                   [(f'max by (queue) (pipeline_consumer_inflight{{{f}}})', "{{queue}}")],
+                   [(f'max by (queue) ({live(f"pipeline_consumer_inflight{{{f}}}")})',
+                     "{{queue}}")],
                    desc="Deliveries inside a handler. PrefetchCount is 1, so a "
                         "sustained 1 is saturation -- the threshold line marks it.",
                    thresholds=[{"color": "green", "value": None},
@@ -482,10 +569,13 @@ def pipeline_shared(layout, f, role_f=""):
                    unit="reqps",
                    no_value="no channel churn in range"),
         timeseries(layout, "Consuming by queue",
-                   [(f'min by (queue) (pipeline_consumer_consuming_ratio{{{f}}})',
+                   [(f'min by (queue) ({live(f"pipeline_consumer_consuming_ratio{{{f}}}")})',
                      "{{queue}}")],
                    desc="Per-queue view of the verdict stat. A queue reading 0 while "
                         "the others read 1 is one wedged consumer, not an outage." + PARA +
+                        "A queue whose LINE STOPS is a replica that has gone away: the "
+                        "series is restricted to replicas reporting inside " + LIVENESS +
+                        ", so a departure ends the line instead of freezing it at 1." + PARA +
                         "Unfilled on purpose: the orchestrator has five queues, all sitting "
                         "at 1 in health, and five filled areas stacked on one line render as "
                         "a single opaque block in which a dip is invisible.",
@@ -539,6 +629,17 @@ def runtime_row(layout, f):
 # board 1 -- flow
 # ---------------------------------------------------------------------------
 
+# Selectors the flow board names more than once.
+REDONE = 'pipeline_messages_consumed_total{disposition=~"requeued|parked"}'
+NOT_LANDED = 'pipeline_messages_consumed_total{landed="false"}'
+EGRESS_FAULT = ('pipeline_messages_produced_total'
+                '{outcome=~"transient|unroutable|refused"}')
+# present_over_time rather than last_over_time: this counts reporters, and the value a
+# reporter holds is irrelevant to whether it is still there.
+LIVE_WORKERS = ('count(count by (service_instance_id) '
+                f'(present_over_time(pipeline_gate_open_ratio[{LIVENESS}]))) or vector(0)')
+
+
 def build_flow():
     lay = Layout()
     panels = []
@@ -548,7 +649,16 @@ def build_flow():
         stat(lay, "System flowing",
              ['sum(rate(pipeline_messages_produced_total[$__rate_interval])) or vector(0)'],
              desc="Total egress across every worker. Zero during a run means the "
-                  "pipeline has stopped, whatever else reads green.",
+                  "pipeline has stopped, whatever else reads green." + PARA +
+                  "**Slow on purpose and slow by force.** $__rate_interval is 240s on "
+                  "this stack -- the datasource declares a 60s timeInterval because that "
+                  "is the OTLP export cadence, and Grafana floors the rate window at four "
+                  "times it. So this number averages the last four minutes and cannot "
+                  "fall to zero inside a shorter outage. Measured: with the whole pipeline "
+                  "stopped it still read 1.12 req/s a hundred seconds later, and through "
+                  "a sixty-second broker outage it only dipped 1.12 -> 0.92, never leaving "
+                  "green. Read the posture stats beside it for anything shorter than a few "
+                  "minutes; this one answers 'has throughput changed', not 'is it down'.",
              thresholds=[{"color": "red", "value": None}, {"color": "green", "value": 0.0001}],
              unit="reqps", decimals=2),
         stat(lay, "Outbound hop gap",
@@ -563,7 +673,15 @@ def build_flow():
                   "difference that is noise centred on zero -- measured here over an hour: "
                   "p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of "
                   "the time on a perfectly healthy stack. The same hour in counts: 1311 "
-                  "produced, 1313 acked. A real leak grows with the range; jitter does not.",
+                  "produced, 1313 acked. A real leak grows with the range; jitter does not."
+                  + PARA +
+                  "**A restart inside the range puts tens of messages here and none of "
+                  "them are lost.** A replica that goes away and comes back gets a new "
+                  "series, and produced and consumed counters for the same messages live "
+                  "on different services that restart at different moments. Measured "
+                  "across the chaos suite: +46/-47, +48/-46, +43/-44, every one an "
+                  "artefact of a scale-to-zero and every one gone within a range width. "
+                  "Check the Workers reporting stat before believing a number here.",
              thresholds=T_GAP, decimals=0),
         stat(lay, "Return hop gap",
              ['sum(increase(pipeline_messages_produced_total{type="step-outcome",'
@@ -574,35 +692,97 @@ def build_flow():
                   "visible range." + PARA +
                   "The API also consumes step-outcome and that consumption is not "
                   "instrumented, so a positive value here is the API's share before it is "
-                  "anything else.",
+                  "anything else." + PARA +
+                  "Thresholded symmetrically with its outbound twin. The two measure one "
+                  "quantity in opposite directions, so a restart that puts +46 on one puts "
+                  "-47 on the other; with steps on the positive side only, the pair used to "
+                  "render one orange and one green for the same instant.",
              thresholds=T_GAP, decimals=0),
         stat(lay, "Retry amplification",
-             ['(sum(rate(pipeline_messages_consumed_total{disposition=~"requeued|parked"}'
-              '[$__rate_interval])) '
-              '+ sum(rate(pipeline_messages_consumed_total{landed="false"}'
-              '[$__rate_interval]))) '
-              '/ sum(rate(pipeline_messages_consumed_total[$__rate_interval])) or vector(0)'],
-             desc="Share of deliveries that will be redone. Healthy is exactly zero.",
+             [f'(({counted(REDONE)}) + ({counted(NOT_LANDED)})) '
+              f'/ (sum(increase(pipeline_messages_consumed_total[$__range])) > 0) '
+              f'or vector(0)'],
+             desc="Share of deliveries that will be redone, in MESSAGES over the visible "
+                  "range. Healthy is exactly zero." + PARA +
+                  "Counted rather than rated, and that is what makes it able to fire at "
+                  "all. As a ratio of two 240s rates it read 0.0% through every scenario "
+                  "in the chaos suite, including the broker outage that parked a delivery: "
+                  "one parked message against a 240s denominator is a rounding error, "
+                  "while one parked message in a fifteen-minute range is a number.",
              thresholds=T_FAULT, unit="percentunit", decimals=1),
         stat(lay, "Ack lost",
-             ['sum(rate(pipeline_messages_consumed_total{disposition="acked",'
-              'landed="false"}[$__rate_interval])) or vector(0)'],
-             desc="Work completed that the broker will hand out again.",
-             unit="reqps", decimals=2),
+             [counted('pipeline_messages_consumed_total{disposition="acked",'
+                      'landed="false"}')],
+             desc="Work completed that the broker will hand out again, counted over "
+                  "the visible range.",
+             thresholds=T_WARN, decimals=0),
         stat(lay, "Egress faults",
-             ['sum(rate(pipeline_messages_produced_total'
-              '{outcome=~"transient|unroutable|refused"}[$__rate_interval])) or vector(0)'],
-             desc="Any send that did not reach the broker, anywhere in the stack.",
-             unit="reqps", decimals=2),
+             [counted(EGRESS_FAULT)],
+             desc="Any send that did not reach the broker, anywhere in the stack, "
+                  "counted over the visible range.",
+             thresholds=T_WARN, decimals=0),
         stat(lay, "Consuming",
-             ['min(pipeline_consumer_consuming_ratio) or vector(0)'],
-             desc="Minimum across every queue in the deployment.",
+             [f'min({live("pipeline_consumer_consuming_ratio")}) or vector(0)'],
+             desc="Minimum across every queue in the deployment, over replicas that "
+                  "have reported in the last " + LIVENESS + ".",
+             thresholds=T_POSTURE, decimals=0),
+        stat(lay, "L2 gate",
+             [f'min({live("pipeline_gate_open_ratio")}) or vector(0)'],
+             desc="0 means the gate is shut somewhere and deliveries are being "
+                  "requeued." + PARA +
+                  "**This is what separates a store fault from a broker fault**, and it "
+                  "is on this board for that reason. Without it a Redis outage and a "
+                  "RabbitMQ outage render identically here -- Consuming drops to 0 in "
+                  "both and every other stat stays green -- and telling them apart means "
+                  "opening a worker board. The gate goes with Redis and stays open for "
+                  "the broker, so 'Consuming 0, gate 0' and 'Consuming 0, gate 1' are two "
+                  "different call-outs.",
              thresholds=T_POSTURE, decimals=0),
         stat(lay, "Workers reporting",
-             ['count(count by (service_instance_id) (pipeline_gate_open_ratio)) or vector(0)'],
-             desc="Expected: 3 orchestrator replicas + n processor replicas. A drop "
-                  "here precedes every other symptom.",
+             [LIVE_WORKERS],
+             desc="Orchestrator replicas plus processor replicas that have exported "
+                  "inside the last " + LIVENESS + "." + PARA +
+                  "**Counts live reporters, not series.** The collector republishes a "
+                  "series after the process feeding it is gone, and Prometheus holds it "
+                  "for another five minutes, so the obvious count() counts the dead. "
+                  "Measured: with all three orchestrator replicas deleted for 58 seconds "
+                  "the old expression read a steady 5, and while two of five workers were "
+                  "being deleted it read 7 -- the dead counted alongside their "
+                  "replacements.",
              thresholds=T_NEUTRAL, decimals=0),
+        stat(lay, "Workers missing",
+             [f'(max_over_time(({LIVE_WORKERS})[$__range:15s]) '
+              f'- min_over_time(({LIVE_WORKERS})[$__range:15s])) or vector(0)'],
+             desc="The deepest dip in live worker count anywhere in the visible range. "
+                  "Names how many replicas went away, without having to be told how many "
+                  "there ought to be -- it reads 3 for a lost orchestrator StatefulSet and "
+                  "2 for a lost processor pair." + PARA +
+                  "**Peak minus trough over the range, not peak minus now.** The dip is "
+                  "narrow -- a replica falls out of the liveness window only shortly before "
+                  "its replacement starts reporting -- and a stat panel here is a range "
+                  "query at a 60s step, so a subtraction against the current value lands "
+                  "on the wrong side of the dip about half the time. The `[$__range:15s]` "
+                  "subqueries evaluate at 15s regardless of the panel's step, which is what "
+                  "makes this catch a transient at all." + PARA +
+                  "It is therefore sticky: it reports the worst moment in the window rather "
+                  "than the state right now, and stays non-zero for a range width after the "
+                  "replicas come back. That is deliberate -- an operator arriving two "
+                  "minutes late should still be told." + PARA +
+                  "**It cannot be prompt.** A replica is only missing once it has skipped "
+                  "its liveness window, so at a 60s export cadence it is reported 100-130s "
+                  "in, which for a sixty-second disappearance is after the event has ended. "
+                  "Nothing queryable fixes that: the telemetry does not sample fast enough "
+                  "to resolve it. The export interval does, or a pod-liveness scrape does.",
+             thresholds=T_WARN, decimals=0),
+        stat(lay, "Data freshness",
+             ['time() - min(max by (service_name) '
+              '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
+             desc="Seconds since the least-fresh service last exported anything." + PARA +
+                  "Every other panel on this board is downstream of this number. The "
+                  "export cadence is 60s, so it sawtooths 0-60 in health; sustained above "
+                  "that means a service has stopped reporting and its gauges are being "
+                  "held at whatever they last said.",
+             thresholds=T_STALE, unit="s", decimals=0),
     ]
 
     panels.append(row(lay, "2 - Flow: where is it leaking?"))
@@ -648,13 +828,27 @@ def build_flow():
                    desc="Flat zero is healthy and is drawn as a line, not as an "
                         "empty panel.",
                    unit="percentunit", minv=0, soft_max=0.1),
-        timeseries(lay, "Posture - gate, leader, hydration, identity",
-                   [('min by (service_name) (pipeline_gate_open_ratio)', "gate {{service_name}}"),
-                    ('count(pipeline_leader_ratio == 1) or vector(0)', "leaders elected"),
-                    ('min(pipeline_hydration_admitted_ratio) or vector(0)', "hydration"),
-                    ('min(pipeline_identity_ready_ratio) or vector(0)', "identity")],
+        timeseries(lay, "Posture - consuming, gate, leader, hydration, identity",
+                   [(f'min by (service_name) ({live("pipeline_consumer_consuming_ratio")})',
+                     "consuming {{service_name}}"),
+                    (f'min by (service_name) ({live("pipeline_gate_open_ratio")})',
+                     "gate {{service_name}}"),
+                    (f'count({live("pipeline_leader_ratio")} == 1) or vector(0)',
+                     "leaders elected"),
+                    (f'min({live("pipeline_hydration_admitted_ratio")}) or vector(0)',
+                     "hydration"),
+                    (f'min({live("pipeline_identity_ready_ratio")}) or vector(0)',
+                     "identity")],
                    desc="Why the pipeline stopped, in one panel. Every series should "
-                        "sit at 1 -- leaders elected included.",
+                        "sit at 1 -- leaders elected included." + PARA +
+                        "**Consuming is on here now because it is the series that "
+                        "actually moves.** It was the only posture signal to change in "
+                        "the Redis, broker and both-down scenarios, and it was the one "
+                        "this panel did not draw -- so the board's single history of the "
+                        "fault was a stat sparkline three centimetres wide." + PARA +
+                        "Every series is restricted to replicas reporting inside " +
+                        LIVENESS + ", so a replica going away ends its line rather than "
+                        "freezing it at 1.",
                    minv=0, decimals=0),
         table(lay, "Message flow matrix",
               [('sum by (service_name,type) (rate(pipeline_messages_produced_total'
@@ -849,17 +1043,23 @@ def build_orchestrator():
     panels += v[:2]
     panels += [
         stat(lay, "Hydration admitted",
-             [f'min(pipeline_hydration_admitted_ratio{{{f}}}) or vector(0)'],
+             [f'min({live(f"pipeline_hydration_admitted_ratio{{{f}}}")}) or vector(0)'],
              desc="One-shot readiness. Separates 'not consuming because the store is "
                   "down' from 'not consuming because the first hydration pass has not "
                   "finished'.",
              thresholds=T_POSTURE, decimals=0),
         stat(lay, "Leaders elected",
-             [f'count(pipeline_leader_ratio{{{f}}} == 1) or vector(0)'],
+             [f'count({live(f"pipeline_leader_ratio{{{f}}}")} == 1) or vector(0)'],
              desc="Must be exactly 1. Followers reading 0 is by design and is NOT a "
                   "fault -- StepOutcomeHandler is deliberately not leader-gated, so a "
                   "follower is still expected to consume. Zero means nobody holds the "
-                  "lease; two means a split.",
+                  "lease; two means a split." + PARA +
+                  "This one stat did fall when all three replicas were deleted, and it "
+                  "is worth knowing why it was able to: a leader releases its lease on "
+                  "graceful shutdown and the SDK flushes that final export, so the gauge "
+                  "genuinely reached 0. A replica killed outright leaves it held at 1. "
+                  "Do not read a departure off this panel -- read it off Workers missing "
+                  "on SKP Flow.",
              thresholds=T_EXACTLY_ONE, decimals=0),
     ]
     panels += v[2:]
@@ -868,12 +1068,13 @@ def build_orchestrator():
     panels += pipeline_shared(lay, f, role_f=rf)
     panels += [
         timeseries(lay, "Leader by replica",
-                   [(f'pipeline_leader_ratio{{{f}}}', "{{service_instance_id}}")],
+                   [(f'{live(f"pipeline_leader_ratio{{{f}}}")}',
+                     "{{service_instance_id}}")],
                    desc="Explains why cron fires land on one replica. Only cron fires "
                         "are fenced by leadership.",
                    minv=0, maxv=1, decimals=0, fill=20),
         timeseries(lay, "Hydration admitted by replica",
-                   [(f'pipeline_hydration_admitted_ratio{{{f}}}',
+                   [(f'{live(f"pipeline_hydration_admitted_ratio{{{f}}}")}',
                      "{{service_instance_id}}")],
                    minv=0, maxv=1, decimals=0, fill=20),
         timeseries(lay, "Dispatch by destination",
@@ -950,15 +1151,14 @@ def build_processor():
     panels += v[:2]
     panels += [
         stat(lay, "Identity ready",
-             [f'min(pipeline_identity_ready_ratio{{{f}}}) or vector(0)'],
+             [f'min({live(f"pipeline_identity_ready_ratio{{{f}}}")}) or vector(0)'],
              desc="0 means the pod is up and waiting for a processor row whose "
                   "SourceHash matches its image. Running / NotReady with 0 restarts is "
                   "the designed behaviour, not a crash loop -- this is the metric that "
                   "makes that legible.",
              thresholds=T_POSTURE, decimals=0),
         stat(lay, "Duplicates suppressed",
-             [f'sum(increase(pipeline_duplicate_suppressed_total{{{f}}}[$__range])) '
-              f'or vector(0)'],
+             [counted(f'pipeline_duplicate_suppressed_total{{{f}}}')],
              desc="Deliveries acked having done no work, because the entry was already "
                   "absent. The primary idempotence mechanism; invisible under "
                   "disposition=acked. Rare is fine, frequent is a question.",
@@ -989,7 +1189,14 @@ def build_processor():
                         "the produce-duration panel.",
                    unit="s"),
         timeseries(lay, "Identity ready by replica",
-                   [(f'pipeline_identity_ready_ratio{{{f}}}', "{{service_instance_id}}")],
+                   [(f'{live(f"pipeline_identity_ready_ratio{{{f}}}")}',
+                     "{{service_instance_id}}")],
+                   desc="One line per replica that is still reporting." + PARA +
+                        "Unrestricted, this panel GAINS series during a rollout: the "
+                        "departed replicas are held by the collector and Prometheus while "
+                        "their replacements start exporting, so two live processors "
+                        "rendered as four lines all sitting at 1. A line that ends is a "
+                        "replica that left.",
                    minv=0, maxv=1, decimals=0, fill=20),
         timeseries(lay, "Duplicate suppression rate",
                    [(f'sum(rate(pipeline_duplicate_suppressed_total{{{f}}}'

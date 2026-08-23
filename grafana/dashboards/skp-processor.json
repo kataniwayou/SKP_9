@@ -178,7 +178,7 @@
   },
   "panels": [
     {
-      "id": 63,
+      "id": 66,
       "type": "row",
       "title": "1 - Verdict: is the processor broken?",
       "collapsed": false,
@@ -191,10 +191,10 @@
       "panels": []
     },
     {
-      "id": 64,
+      "id": 67,
       "type": "stat",
       "title": "Consuming",
-      "description": "0 means no consumer tag on at least one queue -- nothing is listening. No other signal answers this.",
+      "description": "0 means no consumer tag on at least one queue -- nothing is listening. No other signal answers this.\n\nRestricted to replicas that have reported in the last 100s: a dead replica's gauge is held at its last value by the collector and by Prometheus's lookback, so an unrestricted min() reads the posture of processes that no longer exist.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -212,7 +212,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}) or vector(0)",
+          "expr": "min(last_over_time(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[100s])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -258,7 +258,7 @@
       }
     },
     {
-      "id": 65,
+      "id": 68,
       "type": "stat",
       "title": "L2 gate",
       "description": "The single best answer to 'why did the pipeline stop'. 0 means the gate is shut and deliveries are being requeued.",
@@ -279,7 +279,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}) or vector(0)",
+          "expr": "min(last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[100s])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -325,7 +325,7 @@
       }
     },
     {
-      "id": 70,
+      "id": 73,
       "type": "stat",
       "title": "Identity ready",
       "description": "0 means the pod is up and waiting for a processor row whose SourceHash matches its image. Running / NotReady with 0 restarts is the designed behaviour, not a crash loop -- this is the metric that makes that legible.",
@@ -346,7 +346,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(pipeline_identity_ready_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}) or vector(0)",
+          "expr": "min(last_over_time(pipeline_identity_ready_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[100s])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -392,7 +392,7 @@
       }
     },
     {
-      "id": 71,
+      "id": 74,
       "type": "stat",
       "title": "Duplicates suppressed",
       "description": "Deliveries acked having done no work, because the entry was already absent. The primary idempotence mechanism; invisible under disposition=acked. Rare is fine, frequent is a question.",
@@ -413,7 +413,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(increase(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])) or vector(0)",
+          "expr": "((sum(increase(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])) or vector(0)) > (sum(max_over_time(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])) or vector(0))) or (sum(max_over_time(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])) or vector(0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -459,10 +459,10 @@
       }
     },
     {
-      "id": 66,
+      "id": 69,
       "type": "stat",
       "title": "Not acked",
-      "description": "Deliveries the consumer refused or sent back. Drill into 'reason' on the pipeline tier for why.",
+      "description": "Deliveries the consumer refused or sent back, COUNTED over the visible range. Drill into 'reason' on the pipeline tier for why.\n\nCounted rather than rated. As a rate this read 0.00 through every scenario in the chaos suite: the rate window is 240s here, so the single parked delivery the broker outage produced was 1/240 = 0.004, which rounds to nothing at any sane precision.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -480,7 +480,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}[$__rate_interval])) or vector(0)",
+          "expr": "((sum(increase(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}[$__range])) or vector(0)) > (sum(max_over_time(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}[$__range])) or vector(0))) or (sum(max_over_time(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}[$__range])) or vector(0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -502,8 +502,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "decimals": 2,
+          "unit": "short",
+          "decimals": 0,
           "mappings": [],
           "color": {
             "mode": "thresholds"
@@ -516,8 +516,8 @@
                 "value": null
               },
               {
-                "color": "red",
-                "value": 0.0001
+                "color": "orange",
+                "value": 1
               }
             ]
           }
@@ -526,10 +526,10 @@
       }
     },
     {
-      "id": 67,
+      "id": 70,
       "type": "stat",
       "title": "Ack lost",
-      "description": "The silent case: the handler ran to completion but the broker never heard the ack, so it will redeliver. Cause is on the channel-resets panel.",
+      "description": "The silent case: the handler ran to completion but the broker never heard the ack, so it will redeliver. Cause is on the channel-resets panel. Counted over the range, for the reason 'Not acked' gives.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -547,7 +547,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=\"acked\",landed=\"false\"}[$__rate_interval])) or vector(0)",
+          "expr": "((sum(increase(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=\"acked\",landed=\"false\"}[$__range])) or vector(0)) > (sum(max_over_time(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=\"acked\",landed=\"false\"}[$__range])) or vector(0))) or (sum(max_over_time(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=\"acked\",landed=\"false\"}[$__range])) or vector(0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -569,8 +569,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "decimals": 2,
+          "unit": "short",
+          "decimals": 0,
           "mappings": [],
           "color": {
             "mode": "thresholds"
@@ -583,8 +583,8 @@
                 "value": null
               },
               {
-                "color": "red",
-                "value": 0.0001
+                "color": "orange",
+                "value": 1
               }
             ]
           }
@@ -593,10 +593,10 @@
       }
     },
     {
-      "id": 68,
+      "id": 71,
       "type": "stat",
       "title": "Egress faults",
-      "description": "unroutable = the queue is not declared. transient = the broker is unreachable. Opposite remedies; this is the only signal that separates them.",
+      "description": "unroutable = the queue is not declared. transient = the broker is unreachable. Opposite remedies; this is the only signal that separates them.\n\nCounted over the range. Scaling the broker to zero for sixty seconds produced exactly two transient publishes; as a rate they were 0.00 on every board and the only trace of them anywhere was a new legend entry on the produced-by-outcome timeseries.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -614,7 +614,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}[$__rate_interval])) or vector(0)",
+          "expr": "((sum(increase(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0)) > (sum(max_over_time(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0))) or (sum(max_over_time(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -636,8 +636,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "decimals": 2,
+          "unit": "short",
+          "decimals": 0,
           "mappings": [],
           "color": {
             "mode": "thresholds"
@@ -650,8 +650,8 @@
                 "value": null
               },
               {
-                "color": "red",
-                "value": 0.0001
+                "color": "orange",
+                "value": 1
               }
             ]
           }
@@ -660,7 +660,7 @@
       }
     },
     {
-      "id": 69,
+      "id": 72,
       "type": "stat",
       "title": "Channel resets",
       "description": "Channel churn over the visible range. The cause of ack loss.",
@@ -727,7 +727,7 @@
       }
     },
     {
-      "id": 72,
+      "id": 75,
       "type": "row",
       "title": "2 - Pipeline: what is broken?",
       "collapsed": false,
@@ -740,7 +740,7 @@
       "panels": []
     },
     {
-      "id": 73,
+      "id": 76,
       "type": "timeseries",
       "title": "Produced by type and outcome",
       "description": "Egress. outcome != accepted is a fault.",
@@ -827,7 +827,7 @@
       }
     },
     {
-      "id": 74,
+      "id": 77,
       "type": "timeseries",
       "title": "Consumed by type and disposition",
       "description": "Ingress. Exactly one increment per delivery, on every exit path of the consumer.",
@@ -914,7 +914,7 @@
       }
     },
     {
-      "id": 75,
+      "id": 78,
       "type": "timeseries",
       "title": "Produce duration p95 / p99",
       "description": "A real broker round-trip to publisher confirmation, not the time to write a frame.\n\nThe mean rides alongside the quantiles deliberately. It comes from sum/count and so is independent of bucket boundaries -- if it ever diverges wildly from p50, the ladder has stopped fitting the data. That is exactly how the millisecond-ladder defect was caught: p95 read 4.9s while the mean read 15ms.",
@@ -1023,7 +1023,7 @@
       }
     },
     {
-      "id": 76,
+      "id": 79,
       "type": "timeseries",
       "title": "Consumer inflight by queue",
       "description": "Deliveries inside a handler. PrefetchCount is 1, so a sustained 1 is saturation -- the threshold line marks it.",
@@ -1044,7 +1044,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (queue) (pipeline_consumer_inflight{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"})",
+          "expr": "max by (queue) (last_over_time(pipeline_consumer_inflight{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[100s]))",
           "legendFormat": "{{queue}}",
           "range": true,
           "editorMode": "code"
@@ -1115,7 +1115,7 @@
       }
     },
     {
-      "id": 77,
+      "id": 80,
       "type": "timeseries",
       "title": "Channel resets by reason",
       "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.",
@@ -1203,10 +1203,10 @@
       }
     },
     {
-      "id": 78,
+      "id": 81,
       "type": "timeseries",
       "title": "Consuming by queue",
-      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
+      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nA queue whose LINE STOPS is a replica that has gone away: the series is restricted to replicas reporting inside 100s, so a departure ends the line instead of freezing it at 1.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1224,7 +1224,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min by (queue) (pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"})",
+          "expr": "min by (queue) (last_over_time(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[100s]))",
           "legendFormat": "{{queue}}",
           "range": true,
           "editorMode": "code"
@@ -1292,7 +1292,7 @@
       }
     },
     {
-      "id": 79,
+      "id": 82,
       "type": "timeseries",
       "title": "Process duration p95 / p99 by outcome",
       "description": "The author's own transform -- the only span here whose length is somebody's implementation rather than this framework's constant cost. returned vs faulted keeps a slow success and a slow failure from averaging into a number describing neither.\n\nThe mean rides alongside the quantiles as a bucket-independent cross-check, for the same reason it does on the produce-duration panel.",
@@ -1401,10 +1401,10 @@
       }
     },
     {
-      "id": 80,
+      "id": 83,
       "type": "timeseries",
       "title": "Identity ready by replica",
-      "description": "",
+      "description": "One line per replica that is still reporting.\n\nUnrestricted, this panel GAINS series during a rollout: the departed replicas are held by the collector and Prometheus while their replacements start exporting, so two live processors rendered as four lines all sitting at 1. A line that ends is a replica that left.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1422,7 +1422,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "pipeline_identity_ready_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}",
+          "expr": "last_over_time(pipeline_identity_ready_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[100s])",
           "legendFormat": "{{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1490,7 +1490,7 @@
       }
     },
     {
-      "id": 81,
+      "id": 84,
       "type": "timeseries",
       "title": "Duplicate suppression rate",
       "description": "Flat zero is healthy and is drawn, not left empty.",
@@ -1578,7 +1578,7 @@
       }
     },
     {
-      "id": 82,
+      "id": 85,
       "type": "timeseries",
       "title": "Replica fan-out",
       "description": "Replicas share one queue, so the broker round-robins. A replica sitting near zero while the others work is consuming nothing despite looking healthy.",
@@ -1665,7 +1665,7 @@
       }
     },
     {
-      "id": 83,
+      "id": 86,
       "type": "row",
       "title": "3 - Runtime: is the process why?",
       "collapsed": true,
@@ -1677,7 +1677,7 @@
       },
       "panels": [
         {
-          "id": 84,
+          "id": 87,
           "type": "timeseries",
           "title": "Thread-pool queue length",
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
@@ -1764,7 +1764,7 @@
           }
         },
         {
-          "id": 85,
+          "id": 88,
           "type": "timeseries",
           "title": "GC pause time",
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",
@@ -1851,7 +1851,7 @@
           }
         },
         {
-          "id": 86,
+          "id": 89,
           "type": "timeseries",
           "title": "Exception rate",
           "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes.",
@@ -1938,7 +1938,7 @@
           }
         },
         {
-          "id": 87,
+          "id": 90,
           "type": "timeseries",
           "title": "Process restarts",
           "description": "A monotonic counter going backwards means the process is new. The one signal that explains a simultaneous gap in every other series.",
