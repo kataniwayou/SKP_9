@@ -46,15 +46,30 @@ T_WARN = [{"color": "green", "value": None}, {"color": "orange", "value": 1}]
 # SYMMETRIC, and that is the fix rather than the decoration. The gap and its return-hop
 # twin are the same quantity measured in opposite directions, so one physical event puts
 # +N on one and -N on the other. With steps only on the positive side the pair disagreed
-# about the same instant: measured across the chaos suite, +46/-47 (S2), +48/-46 (S4),
-# +43/-44 (S6) -- one panel orange, its twin green, every time.
+# about the same instant: measured across the chaos suite, one panel orange and its twin
+# green, every time.
+#
+# +/-25 for the green band, and the old +/-10 was simply too tight to survive a run.
+# Measured over a full suite with no restart anywhere in range -- the undisturbed baseline
+# included -- the start and stop transients reach 12-13 EVERY time, so the primary board
+# went orange on a healthy soak. With a replica restart inside the range the same panels
+# reach 20-46, which is what the orange band is for: not "messages were lost" but "check
+# Workers reporting before you read this number".
 T_GAP = [{"color": "red", "value": None},
          {"color": "orange", "value": -50},
-         {"color": "green", "value": -10},
-         {"color": "orange", "value": 10},
+         {"color": "green", "value": -25},
+         {"color": "orange", "value": 25},
          {"color": "red", "value": 50}]
 # Seconds since the least-fresh service last exported. The export cadence is 60s, so this
 # sawtooths 0..60 in health; anything above that means a service has stopped reporting.
+# Share of deliveries that will be redone. Not red-at-any-non-zero: the counted form is
+# sticky for a range width, so one parked delivery during a broker outage kept this stat
+# red across the two scenarios that followed it, on the board an operator opens first.
+# A handful of redone messages in a fifteen-minute window is a thing to notice, not an
+# outage; a fifth of them being redone is an outage.
+T_REDONE = [{"color": "green", "value": None},
+            {"color": "orange", "value": 0.01},
+            {"color": "red", "value": 0.05}]
 T_STALE = [{"color": "green", "value": None},
            {"color": "orange", "value": 90},
            {"color": "red", "value": 150}]
@@ -708,8 +723,15 @@ def build_flow():
                   "all. As a ratio of two 240s rates it read 0.0% through every scenario "
                   "in the chaos suite, including the broker outage that parked a delivery: "
                   "one parked message against a 240s denominator is a rounding error, "
-                  "while one parked message in a fifteen-minute range is a number.",
-             thresholds=T_FAULT, unit="percentunit", decimals=1),
+                  "while one parked message in a fifteen-minute range is a number."
+                  + PARA +
+                  "Green below 1%. Counting rather than rating makes this stat sticky for a "
+                  "range width, and thresholded red-at-any-non-zero it stayed red through "
+                  "the two scenarios AFTER the one that parked a single delivery -- 0.2% of "
+                  "traffic, on the board an operator opens first. A few redone messages is "
+                  "something to notice; a twentieth of all deliveries being redone is the "
+                  "outage.",
+             thresholds=T_REDONE, unit="percentunit", decimals=1),
         stat(lay, "Ack lost",
              [counted('pipeline_messages_consumed_total{disposition="acked",'
                       'landed="false"}')],

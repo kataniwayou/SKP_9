@@ -190,6 +190,50 @@ hydration and identity, and omitted **consuming** -- the one posture signal that
 moved, in the Redis, broker and both-down scenarios alike. So the board's only history of
 the fault was a stat sparkline three centimetres wide. Consuming is on the panel now.
 
+### What the second run through the suite showed
+
+The whole suite was run again against the rebuilt boards. Six of the fixes fired on the
+faults that had been invisible to them:
+
+| fault | Consuming | L2 gate | Egress faults | Channel resets | Workers reporting | Workers missing | Data freshness |
+|---|---|---|---|---|---|---|---|
+| baseline | 1 | 1 | 0 | 0 | 5 | 0 | 41s |
+| Redis paused | **0** | **0** | 0 | 0 | 5 | 0 | 40s |
+| broker gone | **0** | 1 | **2** | **10** | 5 | 0 | 40s |
+| both gone | **0** | **0** | **4** | **29** | 5 | 0 | 39s |
+| orchestrator gone | 1 | 1 | 0 | 0 | **5→2** | **3** | **2 mins** |
+| processors gone | 1 | 1 | 0 | 0 | **5→3** | 2 | **2 mins** |
+| L2 wiped | **0** | **0** | 0 | 0 | 5 | 2 | 54s |
+
+The first three rows are the discrimination that was missing: a store fault, a broker
+fault and both at once are now three different readings on the board an operator opens
+first, where before they were one. `Egress faults` counted the two transient publishes
+that read `0.00 req/s` as a rate. On the worker boards `Not acked` reached 1 on the Redis
+and wipe scenarios, where the rate form had been flat zero.
+
+Rows five and six are the ones the old boards could not see at all. Against `kubectl`
+confirming all three orchestrator replicas absent for 58s, the previous build held every
+stat green; this one drops `Workers reporting` to 2, names `Workers missing` as 3, and
+takes `Data freshness` from 43s to 2 minutes. For the processor pair the old build's
+worker count went **up**, to 7. Detection lands ~110s after the pods go, which is the
+predicted 100-130s and still after a sixty-second outage has ended.
+
+`Workers missing` reports the worst dip in the visible range, so back-to-back scenarios
+inside one range width read the earlier, deeper event -- 3 rather than 2 during the
+processor scenario. Correct by its definition and worth knowing before reading it as the
+count for the fault in front of you.
+
+**Two calibrations were wrong and the re-run is what showed it**, both of them introduced
+by the changes above:
+
+- The gap band was too tight. With no restart anywhere in range -- the undisturbed
+  baseline included -- start and stop transients reach **12-13 every time**, so the primary
+  board went orange on a healthy soak. Green is +/-25 now; a restart in range puts 20-46
+  there, which is what orange is for.
+- `Retry amplification` was red at any non-zero. Counting makes it sticky for a range
+  width, so **one** parked delivery during the broker scenario kept it red at 0.2% through
+  the two scenarios that followed. Green below 1%, red at 5%.
+
 ### The hop-gap thresholds disagreed with each other
 
 `T_GAP` had steps on the positive side only, and the two hop gaps are one quantity

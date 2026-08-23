@@ -227,11 +227,11 @@
               },
               {
                 "color": "green",
-                "value": -10
+                "value": -25
               },
               {
                 "color": "orange",
-                "value": 10
+                "value": 25
               },
               {
                 "color": "red",
@@ -306,11 +306,11 @@
               },
               {
                 "color": "green",
-                "value": -10
+                "value": -25
               },
               {
                 "color": "orange",
-                "value": 10
+                "value": 25
               },
               {
                 "color": "red",
@@ -326,7 +326,7 @@
       "id": 5,
       "type": "stat",
       "title": "Retry amplification",
-      "description": "Share of deliveries that will be redone, in MESSAGES over the visible range. Healthy is exactly zero.\n\nCounted rather than rated, and that is what makes it able to fire at all. As a ratio of two 240s rates it read 0.0% through every scenario in the chaos suite, including the broker outage that parked a delivery: one parked message against a 240s denominator is a rounding error, while one parked message in a fifteen-minute range is a number.",
+      "description": "Share of deliveries that will be redone, in MESSAGES over the visible range. Healthy is exactly zero.\n\nCounted rather than rated, and that is what makes it able to fire at all. As a ratio of two 240s rates it read 0.0% through every scenario in the chaos suite, including the broker outage that parked a delivery: one parked message against a 240s denominator is a rounding error, while one parked message in a fifteen-minute range is a number.\n\nGreen below 1%. Counting rather than rating makes this stat sticky for a range width, and thresholded red-at-any-non-zero it stayed red through the two scenarios AFTER the one that parked a single delivery -- 0.2% of traffic, on the board an operator opens first. A few redone messages is something to notice; a twentieth of all deliveries being redone is the outage.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -380,8 +380,12 @@
                 "value": null
               },
               {
+                "color": "orange",
+                "value": 0.01
+              },
+              {
                 "color": "red",
-                "value": 0.0001
+                "value": 0.05
               }
             ]
           }
