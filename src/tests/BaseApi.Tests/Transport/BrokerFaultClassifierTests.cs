@@ -10,103 +10,122 @@ namespace BaseApi.Tests.Transport;
 public sealed class BrokerFaultClassifierTests
 {
     [Fact]
-    public void ANestedAuthenticationFailureIsCredentials()
+    public void ANestedAuthenticationFailureIsAConfigurationProblem()
     {
         // The client wraps this one, and the wrapper is BrokerUnreachableException — so a classifier
         // that read only the outermost type would report a wrong password as a dead host, which is
         // the answer that costs an operator the most time.
-        var ex = new BrokerUnreachableException(
-            new AuthenticationFailureException("ACCESS_REFUSED - Login was refused"));
+        var verdict = BrokerFaultClassifier.Classify(new BrokerUnreachableException(
+            new AuthenticationFailureException("ACCESS_REFUSED - Login was refused")));
 
-        Assert.Equal(BrokerFaultClassifier.Fault.Credentials, BrokerFaultClassifier.Classify(ex));
+        Assert.Equal(DependencyFault.BlockedConfiguration, verdict.Fault);
+        Assert.True(verdict.RestartRequired);
+        Assert.Contains("RabbitMq:Password", verdict.SettingKey!, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void APossibleAuthenticationFailureIsAlsoCredentials()
+    public void APossibleAuthenticationFailureIsTransient_BecauseABootingBrokerProducesIt()
     {
-        // The client raises this variant when the connection dies during the handshake without the
-        // broker having said why. It is still the credential path, and lumping it under Other would
-        // send the operator looking at the network.
-        var ex = new PossibleAuthenticationFailureException("handshake ended");
+        // Named for authentication, but the client raises it whenever the handshake dies without the
+        // broker saying why — which a broker that is still starting also does. Calling it a credential
+        // fault would tell an operator to change a password that is fine.
+        var verdict = BrokerFaultClassifier.Classify(
+            new PossibleAuthenticationFailureException("handshake ended"));
 
-        Assert.Equal(BrokerFaultClassifier.Fault.Credentials, BrokerFaultClassifier.Classify(ex));
+        Assert.Equal(DependencyFault.Transient, verdict.Fault);
+        Assert.False(verdict.RestartRequired);
+
+        // It still points at the credentials as the thing to suspect if it persists, so the hint is
+        // not lost — only the instruction.
+        Assert.Contains("RabbitMq:Password", verdict.Reason, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData((ushort)403)]   // ACCESS_REFUSED — the account may not have this vhost
-    [InlineData((ushort)530)]   // NOT_ALLOWED — the vhost does not exist for this account
-    public void ARefusedVirtualHostIsAuthorisation(ushort replyCode)
+    [InlineData((ushort)530)]   // NOT_ALLOWED — the vhost is not available to this account
+    public void ARefusedVirtualHostIsExternal_NotAConfigurationRestart(ushort replyCode)
     {
-        // These arrive as a connection shutdown rather than a typed exception, so the reply code is
-        // the only thing that identifies them.
-        var ex = new OperationInterruptedException(
-            new ShutdownEventArgs(ShutdownInitiator.Peer, replyCode, "ACCESS_REFUSED"));
+        // Deliberately external. A grant lands without a restart; a mistyped vhost is fixed in the
+        // manifest, which redeploys anyway. Reported the other way round, a missing grant would earn
+        // a restart that changes nothing and rotates away the log explaining the wait.
+        var verdict = BrokerFaultClassifier.Classify(new OperationInterruptedException(
+            new ShutdownEventArgs(ShutdownInitiator.Peer, replyCode, "ACCESS_REFUSED")));
 
-        Assert.Equal(BrokerFaultClassifier.Fault.Authorisation, BrokerFaultClassifier.Classify(ex));
+        Assert.Equal(DependencyFault.BlockedExternal, verdict.Fault);
+        Assert.False(verdict.RestartRequired);
+        Assert.Contains("RabbitMq:VirtualHost", verdict.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AShutdownWithAnUnrelatedReplyCodeIsNotAuthorisation()
+    public void ATopologyMismatchIsExternal_AndSaysWaitingWillNotHelp()
+    {
+        // 406 PRECONDITION_FAILED: a queue already exists with different arguments. The classic
+        // redeploy failure, and one no amount of backoff resolves.
+        var verdict = BrokerFaultClassifier.Classify(new OperationInterruptedException(
+            new ShutdownEventArgs(ShutdownInitiator.Peer, 406, "PRECONDITION_FAILED")));
+
+        Assert.Equal(DependencyFault.BlockedExternal, verdict.Fault);
+        Assert.Contains("different arguments", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AShutdownWithAnUnrelatedReplyCodeIsNotTreatedAsARefusal()
     {
         // 320 CONNECTION_FORCED is an operator closing the connection, not a refusal to admit us.
-        var ex = new OperationInterruptedException(
-            new ShutdownEventArgs(ShutdownInitiator.Peer, 320, "CONNECTION_FORCED"));
+        var verdict = BrokerFaultClassifier.Classify(new OperationInterruptedException(
+            new ShutdownEventArgs(ShutdownInitiator.Peer, 320, "CONNECTION_FORCED")));
 
-        Assert.NotEqual(BrokerFaultClassifier.Fault.Authorisation, BrokerFaultClassifier.Classify(ex));
+        Assert.Equal(DependencyFault.Transient, verdict.Fault);
     }
 
     [Fact]
-    public void ASocketFailureIsUnreachable()
+    public void ASocketFailureIsTransient()
     {
-        var ex = new BrokerUnreachableException(
-            new SocketException((int)SocketError.ConnectionRefused));
+        var verdict = BrokerFaultClassifier.Classify(
+            new BrokerUnreachableException(new SocketException((int)SocketError.ConnectionRefused)));
 
-        Assert.Equal(BrokerFaultClassifier.Fault.Unreachable, BrokerFaultClassifier.Classify(ex));
+        Assert.Equal(DependencyFault.Transient, verdict.Fault);
+        Assert.Contains("RabbitMq:Host", verdict.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AnAggregateIsFlattenedRatherThanFallingThroughToOther()
+    public void AnAggregateIsFlattenedRatherThanFallingThroughToTheDefault()
     {
         // A connect that raced several endpoints surfaces as an aggregate. Walking only InnerException
         // would miss every branch but the first.
-        var ex = new AggregateException(
+        var verdict = BrokerFaultClassifier.Classify(new AggregateException(
             new InvalidOperationException("unrelated"),
+            new BrokerUnreachableException(new AuthenticationFailureException("refused"))));
+
+        Assert.Equal(DependencyFault.BlockedConfiguration, verdict.Fault);
+    }
+
+    [Fact]
+    public void AnUnrecognisedFailureResolvesTowardWaiting_NeverTowardARestart()
+    {
+        // The asymmetry that governs every ambiguous case: telling someone to wait through something
+        // that needed a restart costs a minute; telling them to restart through something that was
+        // recovering destroys the log and the backoff.
+        var verdict = BrokerFaultClassifier.Classify(
+            new InvalidOperationException("the queue was not declared"));
+
+        Assert.Equal(DependencyFault.Transient, verdict.Fault);
+        Assert.False(verdict.RestartRequired);
+        Assert.Equal("the queue was not declared", verdict.Reason);
+    }
+
+    [Fact]
+    public void OnlyAConfigurationVerdictTellsTheOperatorToRestart()
+    {
+        // The whole point of three states rather than two: "deterministic" is not the same question
+        // as "do I touch this pod".
+        var config = BrokerFaultClassifier.Classify(
             new BrokerUnreachableException(new AuthenticationFailureException("refused")));
+        var external = BrokerFaultClassifier.Classify(new OperationInterruptedException(
+            new ShutdownEventArgs(ShutdownInitiator.Peer, 403, "ACCESS_REFUSED")));
 
-        Assert.Equal(BrokerFaultClassifier.Fault.Credentials, BrokerFaultClassifier.Classify(ex));
-    }
-
-    [Fact]
-    public void SomethingUnrecognisedIsOtherAndDescribesItself()
-    {
-        var ex = new InvalidOperationException("the queue was not declared");
-
-        Assert.Equal(BrokerFaultClassifier.Fault.Other, BrokerFaultClassifier.Classify(ex));
-        Assert.Equal("the queue was not declared", BrokerFaultClassifier.Describe(ex));
-    }
-
-    [Fact]
-    public void EveryDescriptionNamesTheConfigurationKeyThatFixesIt()
-    {
-        // The point of the classifier is that the log line itself is actionable. A description that
-        // named the failure without naming the knob would leave the operator exactly where they were.
-        Assert.Contains(
-            "RabbitMq:Password",
-            BrokerFaultClassifier.Describe(
-                new BrokerUnreachableException(new AuthenticationFailureException("refused"))),
-            StringComparison.Ordinal);
-
-        Assert.Contains(
-            "RabbitMq:VirtualHost",
-            BrokerFaultClassifier.Describe(new OperationInterruptedException(
-                new ShutdownEventArgs(ShutdownInitiator.Peer, 403, "ACCESS_REFUSED"))),
-            StringComparison.Ordinal);
-
-        Assert.Contains(
-            "RabbitMq:Host",
-            BrokerFaultClassifier.Describe(
-                new BrokerUnreachableException(new SocketException((int)SocketError.HostNotFound))),
-            StringComparison.Ordinal);
+        Assert.Contains("restart this pod", config.Guidance, StringComparison.Ordinal);
+        Assert.Contains("a restart will not either", external.Guidance, StringComparison.Ordinal);
     }
 
     [Fact]

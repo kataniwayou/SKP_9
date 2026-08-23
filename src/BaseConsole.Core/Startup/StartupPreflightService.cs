@@ -124,7 +124,8 @@ internal sealed class StartupPreflightService : BackgroundService
             if (!rabbitOk)
             {
                 rabbitOk = await CheckAsync(
-                    RabbitMq, _rabbitEndpoint, _rabbit.CheckAsync, BrokerFaultClassifier.Describe, ct)
+                    RabbitMq, _rabbitEndpoint, _rabbit.CheckAsync,
+                    static ex => BrokerFaultClassifier.Classify(ex).ToString(), ct)
                     .ConfigureAwait(false);
             }
 
