@@ -39,6 +39,12 @@ T_EXACTLY_ONE = [{"color": "red", "value": None},
                  {"color": "red", "value": 2}]
 T_NEUTRAL = [{"color": "text", "value": None}]
 T_WARN = [{"color": "green", "value": None}, {"color": "orange", "value": 1}]
+# For a conservation gap counted in messages. Scrape boundaries put a handful of messages
+# on either side of zero even when nothing is lost, so the green band has to be wider than
+# one message -- see the Outbound hop gap description for the measurement behind these.
+T_GAP = [{"color": "green", "value": None},
+         {"color": "orange", "value": 10},
+         {"color": "red", "value": 50}]
 
 
 class Layout:
@@ -90,7 +96,7 @@ def targets(exprs):
 
 
 def stat(layout, title, exprs, desc="", thresholds=T_FAULT, unit="short",
-         decimals=None, w=3, h=4, text_mode="auto"):
+         decimals=None, w=3, h=4, text_mode="auto", no_value=None):
     return {
         "id": _next_id(),
         "type": "stat",
@@ -114,6 +120,10 @@ def stat(layout, title, exprs, desc="", thresholds=T_FAULT, unit="short",
                 "mappings": [],
                 "color": {"mode": "thresholds"},
                 "thresholds": {"mode": "absolute", "steps": thresholds},
+                # `or vector(0)` covers an empty result. It does NOT cover NaN, which is
+                # what a quantile over zero traffic produces, so a stat that can go NaN
+                # needs text as well or it renders indistinguishable from a broken query.
+                **({"noValue": no_value} if no_value is not None else {}),
             },
             "overrides": [],
         },
@@ -123,7 +133,7 @@ def stat(layout, title, exprs, desc="", thresholds=T_FAULT, unit="short",
 def timeseries(layout, title, exprs, desc="", unit="short", w=8, h=8,
                stack=False, fill=8, legend_mode="list", legend_pos="bottom",
                minv=None, maxv=None, thresholds=None, draw_style="line",
-               decimals=None, no_value=None):
+               decimals=None, no_value=None, soft_max=None):
     custom = {
         "drawStyle": draw_style,
         "lineWidth": 1,
@@ -139,6 +149,11 @@ def timeseries(layout, title, exprs, desc="", unit="short", w=8, h=8,
         "hideFrom": {"legend": False, "tooltip": False, "viz": False},
         "thresholdsStyle": {"mode": "line" if thresholds else "off"},
     }
+    # A ratio that sits flat at zero in health gets an axis scaled to whatever transient
+    # once spiked -- after a rollout, 10000%. A soft max floors the axis so the healthy
+    # line is readable, while still expanding if the data genuinely exceeds it.
+    if soft_max is not None:
+        custom["axisSoftMax"] = soft_max
     defaults = {
         "unit": unit,
         "decimals": decimals,
@@ -175,7 +190,7 @@ def timeseries(layout, title, exprs, desc="", unit="short", w=8, h=8,
     }
 
 
-def table(layout, title, exprs, desc="", w=8, h=8):
+def table(layout, title, exprs, desc="", w=8, h=8, exclude=(), rename=None):
     return {
         "id": _next_id(),
         "type": "table",
@@ -185,7 +200,17 @@ def table(layout, title, exprs, desc="", w=8, h=8):
         "gridPos": layout.place(w, h),
         "targets": [dict(t, format="table", instant=True, range=False)
                     for t in targets(exprs)],
-        "transformations": [{"id": "merge", "options": {}}],
+        "transformations": [
+            {"id": "merge", "options": {}},
+            # Instant queries still carry a Time column, identical on every row, which here
+            # only steals width from the value.
+            # Table format discards legendFormat, so a two-query table arrives with columns
+            # called "Value #A" and "Value #B" and the reader has to guess which is which.
+            {"id": "organize", "options": {
+                "excludeByName": {k: True for k in exclude},
+                "renameByName": rename or {},
+            }},
+        ],
         "options": {"showHeader": True, "footer": {"show": False, "reducer": ["sum"]}},
         "fieldConfig": {
             "defaults": {
@@ -460,8 +485,11 @@ def pipeline_shared(layout, f, role_f=""):
                    [(f'min by (queue) (pipeline_consumer_consuming_ratio{{{f}}})',
                      "{{queue}}")],
                    desc="Per-queue view of the verdict stat. A queue reading 0 while "
-                        "the others read 1 is one wedged consumer, not an outage.",
-                   minv=0, maxv=1, decimals=0, fill=20, draw_style="line"),
+                        "the others read 1 is one wedged consumer, not an outage." + PARA +
+                        "Unfilled on purpose: the orchestrator has five queues, all sitting "
+                        "at 1 in health, and five filled areas stacked on one line render as "
+                        "a single opaque block in which a dip is invisible.",
+                   minv=0, maxv=1, decimals=0, fill=0, draw_style="line"),
     ]
 
 
@@ -524,21 +552,30 @@ def build_flow():
              thresholds=[{"color": "red", "value": None}, {"color": "green", "value": 0.0001}],
              unit="reqps", decimals=2),
         stat(lay, "Outbound hop gap",
-             ['sum(rate(pipeline_messages_produced_total{type="process-dispatch",'
-              'outcome="accepted"}[$__rate_interval])) '
-              '- sum(rate(pipeline_messages_consumed_total{type="process-dispatch",'
-              'disposition="acked"}[$__rate_interval])) or vector(0)'],
+             ['sum(increase(pipeline_messages_produced_total{type="process-dispatch",'
+              'outcome="accepted"}[$__range])) '
+              '- sum(increase(pipeline_messages_consumed_total{type="process-dispatch",'
+              'disposition="acked"}[$__range])) or vector(0)'],
              desc="Dispatches the orchestrator confirmed, minus acks the processors "
-                  "issued. Sustained positive means work is piling up between the two "
-                  "services -- the signal neither service board can show.",
-             thresholds=T_FAULT, unit="reqps", decimals=2),
+                  "issued, counted in MESSAGES over the visible range." + PARA +
+                  "Counts rather than a difference of rates, and the distinction is what "
+                  "makes the panel usable. Two counters scraped independently give a rate "
+                  "difference that is noise centred on zero -- measured here over an hour: "
+                  "p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of "
+                  "the time on a perfectly healthy stack. The same hour in counts: 1311 "
+                  "produced, 1313 acked. A real leak grows with the range; jitter does not.",
+             thresholds=T_GAP, decimals=0),
         stat(lay, "Return hop gap",
-             ['sum(rate(pipeline_messages_produced_total{type="step-outcome",'
-              'outcome="accepted"}[$__rate_interval])) '
-              '- sum(rate(pipeline_messages_consumed_total{type="step-outcome",'
-              'disposition="acked"}[$__rate_interval])) or vector(0)'],
-             desc="The same conservation check on the way back.",
-             thresholds=T_FAULT, unit="reqps", decimals=2),
+             ['sum(increase(pipeline_messages_produced_total{type="step-outcome",'
+              'outcome="accepted"}[$__range])) '
+              '- sum(increase(pipeline_messages_consumed_total{type="step-outcome",'
+              'disposition="acked"}[$__range])) or vector(0)'],
+             desc="The same conservation check on the way back, in messages over the "
+                  "visible range." + PARA +
+                  "The API also consumes step-outcome and that consumption is not "
+                  "instrumented, so a positive value here is the API's share before it is "
+                  "anything else.",
+             thresholds=T_GAP, decimals=0),
         stat(lay, "Retry amplification",
              ['(sum(rate(pipeline_messages_consumed_total{disposition=~"requeued|parked"}'
               '[$__rate_interval])) '
@@ -610,7 +647,7 @@ def build_flow():
                      'or vector(0)', "redone")],
                    desc="Flat zero is healthy and is drawn as a line, not as an "
                         "empty panel.",
-                   unit="percentunit", minv=0),
+                   unit="percentunit", minv=0, soft_max=0.1),
         timeseries(lay, "Posture - gate, leader, hydration, identity",
                    [('min by (service_name) (pipeline_gate_open_ratio)', "gate {{service_name}}"),
                     ('count(pipeline_leader_ratio == 1) or vector(0)', "leaders elected"),
@@ -625,7 +662,11 @@ def build_flow():
                ('sum by (service_name,type) (rate(pipeline_messages_consumed_total'
                 '[$__rate_interval]))', "consumed")],
               desc="Every service against every message type. The quickest way to see "
-                   "a type that is produced and never consumed."),
+                   "a type that is produced and never consumed.",
+              w=12,
+              exclude=("Time",),
+              rename={"Value #A": "produced /s", "Value #B": "consumed /s",
+                      "service_name": "service"}),
     ]
 
     return dashboard(
@@ -673,8 +714,13 @@ def build_baseapi():
              [f'histogram_quantile(0.95, sum by (le) '
               f'(rate(http_server_request_duration_seconds_bucket{{{f}}}'
               f'[$__rate_interval]))) or vector(0)'],
-             desc="Across all routes. Break down by route on the ingress tier.",
-             thresholds=T_NEUTRAL, unit="s", decimals=3),
+             desc="Across all routes. Break down by route on the ingress tier." + PARA +
+                  "Blank means no requests in the range, not a broken query. "
+                  "histogram_quantile over an all-zero rate is 0/0 = NaN, which `or "
+                  "vector(0)` cannot rescue -- it substitutes for an EMPTY result, and NaN "
+                  "is a result. The no-value text below is what covers that case.",
+             thresholds=T_NEUTRAL, unit="s", decimals=3,
+             no_value="no requests in range"),
         stat(lay, "In-flight",
              [f'sum(http_server_active_requests{{{f}}}) or vector(0)'],
              thresholds=T_NEUTRAL, decimals=0),
@@ -733,13 +779,15 @@ def build_baseapi():
                         "remedies.",
                    unit="reqps",
                    no_value="no resolution failures in range"),
-        timeseries(lay, "Route match failures",
+        timeseries(lay, "Route matching by status",
                    [(f'sum by (aspnetcore_routing_match_status) '
                      f'(rate(aspnetcore_routing_match_attempts_total{{{f}}}'
                      f'[$__rate_interval]))', "{{aspnetcore_routing_match_status}}")],
-                   desc="A failure here is a caller using the wrong URL -- the "
-                        "singular-vs-plural controller mistake returns a bare 404 with "
-                        "no body and looks like the API being down.",
+                   desc="Split by match status. A `failure` series is a caller using the "
+                        "wrong URL -- the singular-vs-plural controller mistake returns a "
+                        "bare 404 with no body and looks like the API being down." + PARA +
+                        "The success series is kept deliberately: it is the only panel here "
+                        "that distinguishes 'no failures' from 'no traffic at all'.",
                    unit="reqps",
                    no_value="no routing attempts in range"),
         textpanel(lay, "The queue side is not instrumented",

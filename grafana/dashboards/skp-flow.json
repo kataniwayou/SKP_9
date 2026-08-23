@@ -168,7 +168,7 @@
       "id": 3,
       "type": "stat",
       "title": "Outbound hop gap",
-      "description": "Dispatches the orchestrator confirmed, minus acks the processors issued. Sustained positive means work is piling up between the two services -- the signal neither service board can show.",
+      "description": "Dispatches the orchestrator confirmed, minus acks the processors issued, counted in MESSAGES over the visible range.\n\nCounts rather than a difference of rates, and the distinction is what makes the panel usable. Two counters scraped independently give a rate difference that is noise centred on zero -- measured here over an hour: p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of the time on a perfectly healthy stack. The same hour in counts: 1311 produced, 1313 acked. A real leak grows with the range; jitter does not.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -186,7 +186,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pipeline_messages_produced_total{type=\"process-dispatch\",outcome=\"accepted\"}[$__rate_interval])) - sum(rate(pipeline_messages_consumed_total{type=\"process-dispatch\",disposition=\"acked\"}[$__rate_interval])) or vector(0)",
+          "expr": "sum(increase(pipeline_messages_produced_total{type=\"process-dispatch\",outcome=\"accepted\"}[$__range])) - sum(increase(pipeline_messages_consumed_total{type=\"process-dispatch\",disposition=\"acked\"}[$__range])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -208,8 +208,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "decimals": 2,
+          "unit": "short",
+          "decimals": 0,
           "mappings": [],
           "color": {
             "mode": "thresholds"
@@ -222,8 +222,12 @@
                 "value": null
               },
               {
+                "color": "orange",
+                "value": 10
+              },
+              {
                 "color": "red",
-                "value": 0.0001
+                "value": 50
               }
             ]
           }
@@ -235,7 +239,7 @@
       "id": 4,
       "type": "stat",
       "title": "Return hop gap",
-      "description": "The same conservation check on the way back.",
+      "description": "The same conservation check on the way back, in messages over the visible range.\n\nThe API also consumes step-outcome and that consumption is not instrumented, so a positive value here is the API's share before it is anything else.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -253,7 +257,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pipeline_messages_produced_total{type=\"step-outcome\",outcome=\"accepted\"}[$__rate_interval])) - sum(rate(pipeline_messages_consumed_total{type=\"step-outcome\",disposition=\"acked\"}[$__rate_interval])) or vector(0)",
+          "expr": "sum(increase(pipeline_messages_produced_total{type=\"step-outcome\",outcome=\"accepted\"}[$__range])) - sum(increase(pipeline_messages_consumed_total{type=\"step-outcome\",disposition=\"acked\"}[$__range])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -275,8 +279,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "decimals": 2,
+          "unit": "short",
+          "decimals": 0,
           "mappings": [],
           "color": {
             "mode": "thresholds"
@@ -289,8 +293,12 @@
                 "value": null
               },
               {
+                "color": "orange",
+                "value": 10
+              },
+              {
                 "color": "red",
-                "value": 0.0001
+                "value": 50
               }
             ]
           }
@@ -993,7 +1001,8 @@
             },
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "axisSoftMax": 0.1
           },
           "mappings": [],
           "color": {
@@ -1145,7 +1154,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
         "y": 22
       },
@@ -1181,6 +1190,19 @@
         {
           "id": "merge",
           "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "produced /s",
+              "Value #B": "consumed /s",
+              "service_name": "service"
+            }
+          }
         }
       ],
       "options": {

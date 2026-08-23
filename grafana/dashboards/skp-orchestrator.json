@@ -1222,7 +1222,7 @@
       "id": 52,
       "type": "timeseries",
       "title": "Consuming by queue",
-      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.",
+      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1265,7 +1265,7 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 1,
-            "fillOpacity": 20,
+            "fillOpacity": 0,
             "gradientMode": "opacity",
             "spanNulls": false,
             "showPoints": "never",

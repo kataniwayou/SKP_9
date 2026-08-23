@@ -210,7 +210,7 @@
       "id": 19,
       "type": "stat",
       "title": "p95 latency",
-      "description": "Across all routes. Break down by route on the ingress tier.",
+      "description": "Across all routes. Break down by route on the ingress tier.\n\nBlank means no requests in the range, not a broken query. histogram_quantile over an all-zero rate is 0/0 = NaN, which `or vector(0)` cannot rescue -- it substitutes for an EMPTY result, and NaN is a result. The no-value text below is what covers that case.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -264,7 +264,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "no requests in range"
         },
         "overrides": []
       }
@@ -1015,8 +1016,8 @@
     {
       "id": 30,
       "type": "timeseries",
-      "title": "Route match failures",
-      "description": "A failure here is a caller using the wrong URL -- the singular-vs-plural controller mistake returns a bare 404 with no body and looks like the API being down.",
+      "title": "Route matching by status",
+      "description": "Split by match status. A `failure` series is a caller using the wrong URL -- the singular-vs-plural controller mistake returns a bare 404 with no body and looks like the API being down.\n\nThe success series is kept deliberately: it is the only panel here that distinguishes 'no failures' from 'no traffic at all'.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
