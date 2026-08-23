@@ -106,6 +106,25 @@ internal static class ClusterControl
         return new ScaledDown(kind, name, restoreTo);
     }
 
+    /// <summary>Scales a workload to a non-zero replica count and restores it on disposal.</summary>
+    /// <remarks>
+    /// Separate from <see cref="HoldScaledDownAsync"/> rather than a parameter on it, because the two
+    /// mean different things to a reader: that one takes a dependency away, this one takes away
+    /// SOME of it. A scenario that scaled "to zero, but one" would read as a mistake.
+    /// </remarks>
+    public static async Task<IAsyncDisposable> HoldScaledToAsync(
+        string kind, string name, int to, int restoreTo, CancellationToken ct)
+    {
+        if (to <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(to), to, "use HoldScaledDownAsync to take a workload away entirely");
+        }
+
+        await ScaleAsync(kind, name, to, ct);
+        return new ScaledDown(kind, name, restoreTo);
+    }
+
     private sealed class RedisPause : IAsyncDisposable
     {
         private readonly CancellationTokenSource _stop = new();
