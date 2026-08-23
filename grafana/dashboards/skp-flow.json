@@ -2,7 +2,7 @@
   "id": null,
   "uid": "skp-flow",
   "title": "SKP Flow",
-  "description": "Cross-service conservation for the SKP pipeline. The board to open first: it answers whether the system is broken and where, then links out to the source boards. The hop-gap panels span two services and belong to neither source board.",
+  "description": "Cross-service conservation for the SKP pipeline. The board to open first: it answers whether the system is broken and where, then links out to the source boards. The hop-gap panels span two services and belong to neither source board.\n\nThe verdict tier is split by TENSE. Row 1 is the state right now. Row 2 is the worst thing that happened inside the visible range, and those stats stay non-zero after the event that caused them -- deliberately, so an operator arriving late is still told.",
   "tags": [
     "skp",
     "skp-flow",
@@ -87,7 +87,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "1 - Verdict: is the system broken?",
+      "title": "1 - Verdict: is it broken right now?",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -167,8 +167,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Outbound hop gap",
-      "description": "Dispatches the orchestrator confirmed, minus acks the processors issued, counted in MESSAGES over the visible range.\n\nCounts rather than a difference of rates, and the distinction is what makes the panel usable. Two counters scraped independently give a rate difference that is noise centred on zero -- measured here over an hour: p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of the time on a perfectly healthy stack. The same hour in counts: 1311 produced, 1313 acked. A real leak grows with the range; jitter does not.\n\n**A restart inside the range puts tens of messages here and none of them are lost.** A replica that goes away and comes back gets a new series, and produced and consumed counters for the same messages live on different services that restart at different moments. Measured across the chaos suite: +46/-47, +48/-46, +43/-44, every one an artefact of a scale-to-zero and every one gone within a range width. Check the Workers reporting stat before believing a number here.",
+      "title": "Consuming",
+      "description": "Minimum across every queue in the deployment, over replicas that have reported in the last 40s.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -178,6 +178,287 @@
         "w": 3,
         "x": 3,
         "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "min(last_over_time(pipeline_consumer_consuming_ratio[40s])) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "L2 gate",
+      "description": "0 means the gate is shut somewhere and deliveries are being requeued.\n\n**This is what separates a store fault from a broker fault**, and it is on this board for that reason. Without it a Redis outage and a RabbitMQ outage render identically here -- Consuming drops to 0 in both and every other stat stays green -- and telling them apart means opening a worker board. The gate goes with Redis and stays open for the broker, so 'Consuming 0, gate 0' and 'Consuming 0, gate 1' are two different call-outs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "min(last_over_time(pipeline_gate_open_ratio[40s])) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Workers reporting",
+      "description": "Orchestrator replicas plus processor replicas that have exported inside the last 40s.\n\n**Counts live reporters, not series.** The collector republishes a series after the process feeding it is gone, and Prometheus holds it for another five minutes, so the obvious count() counts the dead. Measured: with all three orchestrator replicas deleted for 58 seconds the old expression read a steady 5, and while two of five workers were being deleted it read 7 -- the dead counted alongside their replacements.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Data freshness",
+      "description": "Seconds since the least-fresh service last exported anything.\n\nEvery other panel on this board is downstream of this number. The export cadence is 60s, so it sawtooths 0-60 in health; sustained above that means a service has stopped reporting and its gauges are being held at whatever they last said.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "time() - min(max by (service_name) (timestamp(pipeline_gate_open_ratio))) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 45
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "2 - Since: what happened in this range?",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Outbound hop gap",
+      "description": "Dispatches the orchestrator confirmed, minus acks the processors issued, counted in MESSAGES over the visible range.\n\nCounts rather than a difference of rates, and the distinction is what makes the panel usable. Two counters scraped independently give a rate difference that is noise centred on zero -- measured here over an hour: p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of the time on a perfectly healthy stack. The same hour in counts: 1311 produced, 1313 acked. A real leak grows with the range; jitter does not.\n\n**A restart inside the range puts tens of messages here and none of them are lost.** A replica that goes away and comes back gets a new series, and produced and consumed counters for the same messages live on different services that restart at different moments. Measured across the chaos suite: +46/-47, +48/-46, +43/-44, every one an artefact of a scale-to-zero and every one gone within a range width. Check the Workers reporting stat before believing a number here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 6
       },
       "targets": [
         {
@@ -244,7 +525,7 @@
       }
     },
     {
-      "id": 4,
+      "id": 9,
       "type": "stat",
       "title": "Return hop gap",
       "description": "The same conservation check on the way back, in messages over the visible range.\n\nThe API also consumes step-outcome and that consumption is not instrumented, so a positive value here is the API's share before it is anything else.\n\nThresholded symmetrically with its outbound twin. The two measure one quantity in opposite directions, so a restart that puts +46 on one puts -47 on the other; with steps on the positive side only, the pair used to render one orange and one green for the same instant.",
@@ -255,8 +536,8 @@
       "gridPos": {
         "h": 4,
         "w": 3,
-        "x": 6,
-        "y": 1
+        "x": 3,
+        "y": 6
       },
       "targets": [
         {
@@ -323,7 +604,7 @@
       }
     },
     {
-      "id": 5,
+      "id": 10,
       "type": "stat",
       "title": "Retry amplification",
       "description": "Share of deliveries that will be redone, in MESSAGES over the visible range. Healthy is exactly zero.\n\nCounted rather than rated, and that is what makes it able to fire at all. As a ratio of two 240s rates it read 0.0% through every scenario in the chaos suite, including the broker outage that parked a delivery: one parked message against a 240s denominator is a rounding error, while one parked message in a fifteen-minute range is a number.\n\nGreen below 1%. Counting rather than rating makes this stat sticky for a range width, and thresholded red-at-any-non-zero it stayed red through the two scenarios AFTER the one that parked a single delivery -- 0.2% of traffic, on the board an operator opens first. A few redone messages is something to notice; a twentieth of all deliveries being redone is the outage.",
@@ -334,8 +615,8 @@
       "gridPos": {
         "h": 4,
         "w": 3,
-        "x": 9,
-        "y": 1
+        "x": 6,
+        "y": 6
       },
       "targets": [
         {
@@ -394,7 +675,7 @@
       }
     },
     {
-      "id": 6,
+      "id": 11,
       "type": "stat",
       "title": "Ack lost",
       "description": "Work completed that the broker will hand out again, counted over the visible range.",
@@ -405,8 +686,8 @@
       "gridPos": {
         "h": 4,
         "w": 3,
-        "x": 12,
-        "y": 1
+        "x": 9,
+        "y": 6
       },
       "targets": [
         {
@@ -461,7 +742,7 @@
       }
     },
     {
-      "id": 7,
+      "id": 12,
       "type": "stat",
       "title": "Egress faults",
       "description": "Any send that did not reach the broker, anywhere in the stack, counted over the visible range.",
@@ -472,8 +753,8 @@
       "gridPos": {
         "h": 4,
         "w": 3,
-        "x": 15,
-        "y": 1
+        "x": 12,
+        "y": 6
       },
       "targets": [
         {
@@ -528,355 +809,87 @@
       }
     },
     {
-      "id": 8,
-      "type": "stat",
-      "title": "Consuming",
-      "description": "Minimum across every queue in the deployment, over replicas that have reported in the last 40s.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 3,
-        "x": 18,
-        "y": 1
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "min(last_over_time(pipeline_consumer_consuming_ratio[40s])) or vector(0)",
-          "legendFormat": "",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "mappings": [],
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 9,
-      "type": "stat",
-      "title": "L2 gate",
-      "description": "0 means the gate is shut somewhere and deliveries are being requeued.\n\n**This is what separates a store fault from a broker fault**, and it is on this board for that reason. Without it a Redis outage and a RabbitMQ outage render identically here -- Consuming drops to 0 in both and every other stat stays green -- and telling them apart means opening a worker board. The gate goes with Redis and stays open for the broker, so 'Consuming 0, gate 0' and 'Consuming 0, gate 1' are two different call-outs.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 3,
-        "x": 21,
-        "y": 1
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "min(last_over_time(pipeline_gate_open_ratio[40s])) or vector(0)",
-          "legendFormat": "",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "mappings": [],
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 10,
-      "type": "stat",
-      "title": "Workers reporting",
-      "description": "Orchestrator replicas plus processor replicas that have exported inside the last 40s.\n\n**Counts live reporters, not series.** The collector republishes a series after the process feeding it is gone, and Prometheus holds it for another five minutes, so the obvious count() counts the dead. Measured: with all three orchestrator replicas deleted for 58 seconds the old expression read a steady 5, and while two of five workers were being deleted it read 7 -- the dead counted alongside their replacements.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 3,
-        "x": 0,
-        "y": 5
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))) or vector(0)",
-          "legendFormat": "",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "mappings": [],
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 11,
-      "type": "stat",
-      "title": "Workers missing",
-      "description": "The deepest dip in live worker count anywhere in the visible range. Names how many replicas went away, without having to be told how many there ought to be -- it reads 3 for a lost orchestrator StatefulSet and 2 for a lost processor pair.\n\n**Peak minus trough over the range, not peak minus now.** The dip is narrow -- a replica falls out of the liveness window only shortly before its replacement starts reporting -- and a stat panel here is a range query at a 60s step, so a subtraction against the current value lands on the wrong side of the dip about half the time. The `[$__range:15s]` subqueries evaluate at 15s regardless of the panel's step, which is what makes this catch a transient at all.\n\nIt is therefore sticky: it reports the worst moment in the window rather than the state right now, and stays non-zero for a range width after the replicas come back. That is deliberate -- an operator arriving two minutes late should still be told.\n\n**It cannot be prompt.** A replica is only missing once it has skipped its liveness window, so at a 60s export cadence it is reported 100-130s in, which for a sixty-second disappearance is after the event has ended. Nothing queryable fixes that: the telemetry does not sample fast enough to resolve it. The export interval does, or a pod-liveness scrape does.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 3,
-        "x": 3,
-        "y": 5
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "(max_over_time((count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))) or vector(0))[$__range:15s]) - min_over_time((count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))) or vector(0))[$__range:15s])) or vector(0)",
-          "legendFormat": "",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "mappings": [],
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 12,
-      "type": "stat",
-      "title": "Data freshness",
-      "description": "Seconds since the least-fresh service last exported anything.\n\nEvery other panel on this board is downstream of this number. The export cadence is 60s, so it sawtooths 0-60 in health; sustained above that means a service has stopped reporting and its gauges are being held at whatever they last said.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 3,
-        "x": 6,
-        "y": 5
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "time() - min(max by (service_name) (timestamp(pipeline_gate_open_ratio))) or vector(0)",
-          "legendFormat": "",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "decimals": 0,
-          "mappings": [],
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 45
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
       "id": 13,
+      "type": "stat",
+      "title": "Workers missing (5m)",
+      "description": "The deepest dip in live worker count over the last five minutes. Names how many replicas went away, without having to be told how many there ought to be -- it reads 3 for a lost orchestrator StatefulSet and 2 for a lost processor pair.\n\n**Five minutes, not the visible range.** Peak-minus-trough over $__range makes the number change when the reader zooms, and made back-to-back scenarios report the earlier, deeper one: 3 during the processor scenario, whose own answer was 2. A stated window is worth more than a wider one.\n\n**Peak minus trough, not peak minus now.** The dip is narrow and a stat panel is a range query at a coarse step, so a subtraction against the current value lands on the wrong side of the dip about half the time. The `[5m:15s]` subqueries evaluate at 15s regardless of the panel's step, which is what makes this catch a transient at all.\n\n**It cannot be prompt.** A replica is only missing once it has skipped its liveness window, so detection takes roughly the liveness window plus one export. Nothing queryable fixes the remainder: a fault shorter than the sampling period is not observable.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max_over_time((count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))) or vector(0))[5m:15s]) - min_over_time((count(count by (service_instance_id) (present_over_time(pipeline_gate_open_ratio[40s]))) or vector(0))[5m:15s])) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
       "type": "row",
-      "title": "2 - Flow: where is it leaking?",
+      "title": "3 - Flow: where is it leaking?",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 10
       },
       "panels": []
     },
     {
-      "id": 14,
+      "id": 15,
       "type": "timeseries",
       "title": "Outbound hop - orchestrator to processor",
       "description": "The two lines should track. A widening fork is backlog.\n\nOrchestrator and processor only. The API is not on this hop, but note that its own queue paths emit no metrics at all, so no panel on this board can see traffic the API publishes or consumes -- see the note panel on SKP BaseAPI.",
@@ -888,7 +901,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 10
+        "y": 11
       },
       "targets": [
         {
@@ -974,7 +987,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 16,
       "type": "timeseries",
       "title": "Return hop - processor to orchestrator",
       "description": "The same conservation check on the way back.\n\nThe API also consumes step-outcome, and that consumption is NOT instrumented, so 'picked up' here counts the orchestrator alone. Read a shortfall as the API's share, not as loss.",
@@ -986,7 +999,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 10
+        "y": 11
       },
       "targets": [
         {
@@ -1072,7 +1085,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 17,
       "type": "timeseries",
       "title": "Per-processor dispatch",
       "description": "One series per processor. A line at zero while the others flow is one processor being starved -- invisible in any aggregate.",
@@ -1084,7 +1097,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 18
+        "y": 19
       },
       "targets": [
         {
@@ -1159,7 +1172,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 18,
       "type": "timeseries",
       "title": "Retry amplification over time",
       "description": "Flat zero is healthy and is drawn as a line, not as an empty panel.",
@@ -1171,7 +1184,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 18
+        "y": 19
       },
       "targets": [
         {
@@ -1248,7 +1261,7 @@
       }
     },
     {
-      "id": 18,
+      "id": 19,
       "type": "timeseries",
       "title": "Posture - consuming, gate, leader, hydration, identity",
       "description": "Why the pipeline stopped, in one panel. Every series should sit at 1 -- leaders elected included.\n\n**Consuming is on here now because it is the series that actually moves.** It was the only posture signal to change in the Redis, broker and both-down scenarios, and it was the one this panel did not draw -- so the board's single history of the fault was a stat sparkline three centimetres wide.\n\nEvery series is restricted to replicas reporting inside 40s, so a replica going away ends its line rather than freezing it at 1.",
@@ -1260,7 +1273,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 18
+        "y": 19
       },
       "targets": [
         {
@@ -1380,7 +1393,7 @@
       }
     },
     {
-      "id": 19,
+      "id": 20,
       "type": "table",
       "title": "Message flow matrix",
       "description": "Every service against every message type. The quickest way to see a type that is produced and never consumed.",
@@ -1392,7 +1405,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 27
       },
       "targets": [
         {

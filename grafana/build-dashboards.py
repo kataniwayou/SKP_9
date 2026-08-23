@@ -658,7 +658,7 @@ def build_flow():
     lay = Layout()
     panels = []
 
-    panels.append(row(lay, "1 - Verdict: is the system broken?"))
+    panels.append(row(lay, "1 - Verdict: is it broken right now?"))
     panels += [
         stat(lay, "System flowing",
              ['sum(rate(pipeline_messages_produced_total[$__rate_interval])) or vector(0)'],
@@ -675,6 +675,49 @@ def build_flow():
                   "minutes; this one answers 'has throughput changed', not 'is it down'.",
              thresholds=[{"color": "red", "value": None}, {"color": "green", "value": 0.0001}],
              unit="reqps", decimals=2),
+        stat(lay, "Consuming",
+             [f'min({live("pipeline_consumer_consuming_ratio")}) or vector(0)'],
+             desc="Minimum across every queue in the deployment, over replicas that "
+                  "have reported in the last " + LIVENESS + ".",
+             thresholds=T_POSTURE, decimals=0),
+        stat(lay, "L2 gate",
+             [f'min({live("pipeline_gate_open_ratio")}) or vector(0)'],
+             desc="0 means the gate is shut somewhere and deliveries are being "
+                  "requeued." + PARA +
+                  "**This is what separates a store fault from a broker fault**, and it "
+                  "is on this board for that reason. Without it a Redis outage and a "
+                  "RabbitMQ outage render identically here -- Consuming drops to 0 in "
+                  "both and every other stat stays green -- and telling them apart means "
+                  "opening a worker board. The gate goes with Redis and stays open for "
+                  "the broker, so 'Consuming 0, gate 0' and 'Consuming 0, gate 1' are two "
+                  "different call-outs.",
+             thresholds=T_POSTURE, decimals=0),
+        stat(lay, "Workers reporting",
+             [LIVE_WORKERS],
+             desc="Orchestrator replicas plus processor replicas that have exported "
+                  "inside the last " + LIVENESS + "." + PARA +
+                  "**Counts live reporters, not series.** The collector republishes a "
+                  "series after the process feeding it is gone, and Prometheus holds it "
+                  "for another five minutes, so the obvious count() counts the dead. "
+                  "Measured: with all three orchestrator replicas deleted for 58 seconds "
+                  "the old expression read a steady 5, and while two of five workers were "
+                  "being deleted it read 7 -- the dead counted alongside their "
+                  "replacements.",
+             thresholds=T_NEUTRAL, decimals=0),
+        stat(lay, "Data freshness",
+             ['time() - min(max by (service_name) '
+              '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
+             desc="Seconds since the least-fresh service last exported anything." + PARA +
+                  "Every other panel on this board is downstream of this number. The "
+                  "export cadence is 60s, so it sawtooths 0-60 in health; sustained above "
+                  "that means a service has stopped reporting and its gauges are being "
+                  "held at whatever they last said.",
+             thresholds=T_STALE, unit="s", decimals=0),
+    ]
+
+    lay.newline()
+    panels.append(row(lay, "2 - Since: what happened in this range?"))
+    panels += [
         stat(lay, "Outbound hop gap",
              ['sum(increase(pipeline_messages_produced_total{type="process-dispatch",'
               'outcome="accepted"}[$__range])) '
@@ -742,71 +785,31 @@ def build_flow():
              desc="Any send that did not reach the broker, anywhere in the stack, "
                   "counted over the visible range.",
              thresholds=T_WARN, decimals=0),
-        stat(lay, "Consuming",
-             [f'min({live("pipeline_consumer_consuming_ratio")}) or vector(0)'],
-             desc="Minimum across every queue in the deployment, over replicas that "
-                  "have reported in the last " + LIVENESS + ".",
-             thresholds=T_POSTURE, decimals=0),
-        stat(lay, "L2 gate",
-             [f'min({live("pipeline_gate_open_ratio")}) or vector(0)'],
-             desc="0 means the gate is shut somewhere and deliveries are being "
-                  "requeued." + PARA +
-                  "**This is what separates a store fault from a broker fault**, and it "
-                  "is on this board for that reason. Without it a Redis outage and a "
-                  "RabbitMQ outage render identically here -- Consuming drops to 0 in "
-                  "both and every other stat stays green -- and telling them apart means "
-                  "opening a worker board. The gate goes with Redis and stays open for "
-                  "the broker, so 'Consuming 0, gate 0' and 'Consuming 0, gate 1' are two "
-                  "different call-outs.",
-             thresholds=T_POSTURE, decimals=0),
-        stat(lay, "Workers reporting",
-             [LIVE_WORKERS],
-             desc="Orchestrator replicas plus processor replicas that have exported "
-                  "inside the last " + LIVENESS + "." + PARA +
-                  "**Counts live reporters, not series.** The collector republishes a "
-                  "series after the process feeding it is gone, and Prometheus holds it "
-                  "for another five minutes, so the obvious count() counts the dead. "
-                  "Measured: with all three orchestrator replicas deleted for 58 seconds "
-                  "the old expression read a steady 5, and while two of five workers were "
-                  "being deleted it read 7 -- the dead counted alongside their "
-                  "replacements.",
-             thresholds=T_NEUTRAL, decimals=0),
-        stat(lay, "Workers missing",
-             [f'(max_over_time(({LIVE_WORKERS})[$__range:15s]) '
-              f'- min_over_time(({LIVE_WORKERS})[$__range:15s])) or vector(0)'],
-             desc="The deepest dip in live worker count anywhere in the visible range. "
-                  "Names how many replicas went away, without having to be told how many "
-                  "there ought to be -- it reads 3 for a lost orchestrator StatefulSet and "
-                  "2 for a lost processor pair." + PARA +
-                  "**Peak minus trough over the range, not peak minus now.** The dip is "
-                  "narrow -- a replica falls out of the liveness window only shortly before "
-                  "its replacement starts reporting -- and a stat panel here is a range "
-                  "query at a 60s step, so a subtraction against the current value lands "
-                  "on the wrong side of the dip about half the time. The `[$__range:15s]` "
-                  "subqueries evaluate at 15s regardless of the panel's step, which is what "
-                  "makes this catch a transient at all." + PARA +
-                  "It is therefore sticky: it reports the worst moment in the window rather "
-                  "than the state right now, and stays non-zero for a range width after the "
-                  "replicas come back. That is deliberate -- an operator arriving two "
-                  "minutes late should still be told." + PARA +
+        stat(lay, "Workers missing (5m)",
+             [f'(max_over_time(({LIVE_WORKERS})[5m:15s]) '
+              f'- min_over_time(({LIVE_WORKERS})[5m:15s])) or vector(0)'],
+             desc="The deepest dip in live worker count over the last five minutes. Names "
+                  "how many replicas went away, without having to be told how many there "
+                  "ought to be -- it reads 3 for a lost orchestrator StatefulSet and 2 for "
+                  "a lost processor pair." + PARA +
+                  "**Five minutes, not the visible range.** Peak-minus-trough over "
+                  "$__range makes the number change when the reader zooms, and made "
+                  "back-to-back scenarios report the earlier, deeper one: 3 during the "
+                  "processor scenario, whose own answer was 2. A stated window is worth "
+                  "more than a wider one." + PARA +
+                  "**Peak minus trough, not peak minus now.** The dip is narrow and a stat "
+                  "panel is a range query at a coarse step, so a subtraction against the "
+                  "current value lands on the wrong side of the dip about half the time. "
+                  "The `[5m:15s]` subqueries evaluate at 15s regardless of the panel's "
+                  "step, which is what makes this catch a transient at all." + PARA +
                   "**It cannot be prompt.** A replica is only missing once it has skipped "
-                  "its liveness window, so at a 60s export cadence it is reported 100-130s "
-                  "in, which for a sixty-second disappearance is after the event has ended. "
-                  "Nothing queryable fixes that: the telemetry does not sample fast enough "
-                  "to resolve it. The export interval does, or a pod-liveness scrape does.",
+                  "its liveness window, so detection takes roughly the liveness window "
+                  "plus one export. Nothing queryable fixes the remainder: a fault shorter "
+                  "than the sampling period is not observable.",
              thresholds=T_WARN, decimals=0),
-        stat(lay, "Data freshness",
-             ['time() - min(max by (service_name) '
-              '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
-             desc="Seconds since the least-fresh service last exported anything." + PARA +
-                  "Every other panel on this board is downstream of this number. The "
-                  "export cadence is 60s, so it sawtooths 0-60 in health; sustained above "
-                  "that means a service has stopped reporting and its gauges are being "
-                  "held at whatever they last said.",
-             thresholds=T_STALE, unit="s", decimals=0),
     ]
 
-    panels.append(row(lay, "2 - Flow: where is it leaking?"))
+    panels.append(row(lay, "3 - Flow: where is it leaking?"))
     panels += [
         timeseries(lay, "Outbound hop - orchestrator to processor",
                    [('sum(rate(pipeline_messages_produced_total{type="process-dispatch",'
@@ -890,7 +893,11 @@ def build_flow():
         description=("Cross-service conservation for the SKP pipeline. The board to "
                      "open first: it answers whether the system is broken and where, "
                      "then links out to the source boards. The hop-gap panels span two "
-                     "services and belong to neither source board."),
+                     "services and belong to neither source board." + PARA +
+                     "The verdict tier is split by TENSE. Row 1 is the state right now. "
+                     "Row 2 is the worst thing that happened inside the visible range, "
+                     "and those stats stay non-zero after the event that caused them -- "
+                     "deliberately, so an operator arriving late is still told."),
         variables=[
             var_datasource(),
             var_query("processor", "Processor",
