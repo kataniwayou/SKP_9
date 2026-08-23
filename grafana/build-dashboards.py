@@ -1041,6 +1041,30 @@ def build_processor():
 
 # ---------------------------------------------------------------------------
 
+def normalize_imported():
+    """Stamp the shared nav onto boards in this directory that are not generated here.
+
+    skp-runtime.json is exported from the old provisioning ConfigMap rather than built by
+    this script, and it arrived carrying the `skp` tag but no `links`. The tag put it in
+    every other board's nav while the missing links left it with none of its own -- so
+    clicking through to it stranded the reader with no way back, and only there. Nav is a
+    property of the SET of boards, not of how any one of them was authored, so it is
+    applied to whatever is in the directory.
+    """
+    generated = {"skp-flow", "skp-baseapi", "skp-orchestrator", "skp-processor"}
+    for path in sorted(OUT.glob("*.json")):
+        if path.stem in generated:
+            continue
+        board = json.loads(path.read_text(encoding="utf-8"))
+        if board.get("links") == NAV:
+            continue
+        board["links"] = NAV
+        if "skp" not in board.get("tags", []):
+            board.setdefault("tags", []).append("skp")
+        path.write_text(json.dumps(board, indent=2) + chr(10), encoding="utf-8")
+        print(f"{path.relative_to(OUT.parent.parent)}  nav stamped (imported board)")
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     boards = [
@@ -1056,6 +1080,8 @@ def main():
         n += sum(1 for p in board["panels"] if p["type"] != "row")
         print(f"{path.relative_to(OUT.parent.parent)}  "
               f"{len(board['templating']['list'])} variables, {n} panels")
+
+    normalize_imported()
 
 
 if __name__ == "__main__":
