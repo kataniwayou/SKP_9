@@ -221,27 +221,23 @@ data:
         jsonData:
           # long PromQL survives; avoids URL length limits
           httpMethod: POST
-          # EFFECTIVE series resolution, which is NOT prometheus.yml's scrape_interval.
+          # EFFECTIVE series resolution, which is NOT prometheus.yml's scrape_interval and is
+          # NOT the SDK's export interval either -- it is whichever of the two is coarser.
           #
-          # prometheus.yml sets scrape_interval: 15s (02-configmaps.yaml) and this value
-          # used to mirror it. That was wrong. The collector's prometheus exporter emits
-          # EXPLICIT millisecond timestamps on every sample (verify with
+          # The collector's prometheus exporter emits EXPLICIT millisecond timestamps on every
+          # sample (verify with
           # `kubectl -n skp exec deployment/prometheus -- wget -qO- http://otel-collector:8889/metrics`
-          # — each line carries a third field). Prometheus honours an explicit timestamp
-          # and discards a re-scrape bearing one it already stored, so the stored
-          # resolution is the .NET SDK's PeriodicExportingMetricReader interval (60s),
-          # not the scrape interval. Measured: count_over_time(<any series>[2m]) == 2.
+          # -- each line carries a third field). Prometheus honours an explicit timestamp and
+          # discards a re-scrape bearing one it already stored, so the stored resolution is the
+          # coarser of the export interval and the scrape interval. The services export every
+          # 10s (OTEL_METRIC_EXPORT_INTERVAL) and Prometheus scrapes every 15s, so it is 15s.
+          # Measured: count_over_time(<any series>[2m]) == 8.
           #
-          # Grafana derives $__rate_interval = max(4 × timeInterval, step + scrape).
-          # At 15s that floored to 60s, and rate() over a 60s window straddling samples
-          # exactly 60s apart usually sees ONE sample and returns no series — which
-          # silently emptied every rate() timeseries panel in the browser while instant
-          # queries (and 87-05's 5m substitution) kept passing. 60s here floors
-          # $__rate_interval at 240s, spanning four samples.
-          #
-          # If the export cadence changes, this must follow it — the scrape interval is
-          # not the number to track.
-          timeInterval: "60s"
+          # Grafana derives $__rate_interval = max(4 x timeInterval, step + scrape). At 15s that
+          # is 60s, spanning four samples. This value must track the export cadence: at 60s it
+          # floored $__rate_interval at 240s, which is why a sixty-second outage moved no rate
+          # panel on any board.
+          timeInterval: "15s"
 ---
 apiVersion: v1
 kind: ConfigMap

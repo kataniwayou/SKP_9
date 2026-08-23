@@ -445,3 +445,6 @@ nugets/
 
 # Subagent-driven-development scratch (ledger, briefs, review packages).
 .superpowers/
+
+# chaos-timeline.js sampler output — screenshots and timelines, never committed
+.chaos-timeline/
