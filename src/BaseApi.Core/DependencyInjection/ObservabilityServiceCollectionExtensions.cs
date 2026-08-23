@@ -70,20 +70,20 @@ public static class ObservabilityServiceCollectionExtensions
             o.AddOtlpExporter();
         });
 
-        // The versioned service name is set on the meter provider's own resource via
-        // SetResourceBuilder, never via the shared ConfigureResource. In this OpenTelemetry version
-        // the shared configuration overrides the logs provider's own resource builder, so a
-        // versioned name set there leaks onto logs — which breaks any log query that filters on the
-        // bare service name. A per-provider resource keeps metrics versioned while logs stay bare.
+        // The resource is set on the meter provider's own builder via SetResourceBuilder, never via
+        // the shared ConfigureResource. In this OpenTelemetry version the shared configuration
+        // overrides the logs provider's own resource builder, so anything set there leaks onto logs.
+        // A per-provider resource keeps the two independent.
         builder.Services.AddOpenTelemetry()
             .WithMetrics(m => m
                 .SetResourceBuilder(ResourceBuilder.CreateDefault()
-                    // A combined name-and-version, so every metric series carries one human label.
-                    // serviceVersion is deliberately not passed separately: it is already
-                    // interpolated into the name here, and passing it too would restate the same
-                    // value as a second label on every series. Logs are unaffected — their service
-                    // name has no version suffix, so they still carry service.version.
-                    .AddService(serviceName: $"{serviceName}_{serviceVersion}")
+                    // Name and version as separate attributes, not interpolated into one string —
+                    // the same shape the console base library emits. The interpolation this replaces
+                    // buried the version inside service.name, which cost the metrics side its
+                    // service.version label entirely and left logs and metrics disagreeing about
+                    // what service.name meant. The Prometheus exporter derives exported_job from
+                    // service.name, so the suffix leaked into that label too.
+                    .AddService(serviceName: serviceName, serviceVersion: serviceVersion)
                     .AddAttributes(metricAttrs))
                 // The metrics-side ASP.NET Core instrumentation is parameterless in this version —
                 // there is no filter overload on the meter provider builder — so health-endpoint
