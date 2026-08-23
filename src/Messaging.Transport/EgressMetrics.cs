@@ -8,6 +8,43 @@ namespace Messaging.Transport;
 public static class EgressMeter
 {
     public const string Name = "Messaging.Transport";
+
+    /// <summary>
+    /// The duration histogram's instrument name, public for the same reason the meter name is: the
+    /// metrics provider has to name it to attach bucket boundaries, and a view whose name matches no
+    /// instrument is silently ignored — the same failure mode a mistyped <c>AddMeter</c> has.
+    /// </summary>
+    public const string DurationInstrument = "pipeline.produce.duration";
+
+    /// <summary>
+    /// Explicit bucket boundaries, in seconds, for every latency histogram in the stack.
+    /// <para>
+    /// <b>Without these the histogram cannot answer a quantile, and answers one anyway.</b> The
+    /// instruments record <see cref="System.TimeSpan.TotalSeconds"/>, but the SDK's default
+    /// boundaries are <c>[0, 5, 10, 25 … 10000]</c> — a ladder for milliseconds. Measured on the live
+    /// stack before this was set: 4767 of 4772 produce observations sat in the single <c>(0, 5]</c>
+    /// bucket, so <c>histogram_quantile</c> interpolated across it and reported roughly 4.9 SECONDS
+    /// for a send that really took 15 ms. Nothing errored; the number was simply the bucket edge
+    /// wearing a latency's clothes.
+    /// </para>
+    /// <para>
+    /// A 1-2.5-5 ladder from 1 ms to 10 s. Real means are 12–16 ms, which lands in <c>(0.01, 0.025]</c>
+    /// with four boundaries below it and eight above, so both a regression and a stall stay legible.
+    /// </para>
+    /// <para>
+    /// <b>The processor's transform histogram deliberately shares this ladder</b> rather than
+    /// defining its own. Both measure sub-second latency in seconds, and two ladders would make the
+    /// two unreadable on one axis for no gain.
+    /// </para>
+    /// <para>
+    /// A fresh array per call: <c>ExplicitBucketHistogramConfiguration.Boundaries</c> takes
+    /// <c>double[]</c>, and handing every caller the same instance would publish mutable state.
+    /// </para>
+    /// </summary>
+    public static double[] LatencySecondsBoundaries() =>
+    [
+        0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+    ];
 }
 
 /// <summary>
@@ -49,7 +86,7 @@ internal static class EgressMetrics
         description: "Messages handed to the broker, by route, destination, type and outcome.");
 
     private static readonly Histogram<double> Duration = Meter.CreateHistogram<double>(
-        "pipeline.produce.duration",
+        EgressMeter.DurationInstrument,
         unit: "s",
         description: "Time from the start of a send until the broker confirmed or refused it.");
 

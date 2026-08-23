@@ -96,33 +96,51 @@ The verdict tier is left unfiltered too: it answers *is anything wrong anywhere*
 role selection there would let a follower fault hide behind a leader view. There is a
 note panel on the board saying so.
 
-## Two defects the boards had to work around
+## Two defects found while building these boards
 
-### The duration histograms cannot answer quantiles
+### The duration histograms could not answer quantiles (fixed)
 
-`pipeline.produce.duration` and `pipeline.process.duration` both declare `unit: "s"` and
-record `Stopwatch.GetElapsedTime(...).TotalSeconds`, but neither supplies bucket
-boundaries, so both inherit the .NET SDK defaults: `[0, 5, 10, 25, 50, 75, 100, 250, 500,
-750, 1000, 2500, 5000, 7500, 10000]`. Those are tuned for **milliseconds**.
+`pipeline.produce.duration` and `pipeline.process.duration` record
+`Stopwatch.GetElapsedTime(...).TotalSeconds` and declare `unit: "s"`, but originally
+supplied no bucket boundaries — so both inherited the .NET SDK defaults
+`[0, 5, 10, 25 … 10000]`, a ladder for **milliseconds**.
 
-Measured on the live stack: 4767 of 4772 produce observations, and 2233 of 2233 process
-observations, land in the single `(0, 5]` bucket. `histogram_quantile` then interpolates
-linearly across that bucket and returns **~4.9 s for a send that really takes ~20 ms**.
+Measured before the fix: 4767 of 4772 produce observations and 2233 of 2233 process
+observations sat in the single `(0, 5]` bucket, so `histogram_quantile` interpolated
+across it and reported **~4.9 s for a send that really took 15 ms**. Nothing errored. The
+number was the bucket edge wearing a latency's clothes.
 
-Both panels therefore plot `sum / count` — exact, and unaffected by bucket choice — and
-say so in their descriptions. Restore the quantiles once the meter providers carry a view:
+Both meter providers now carry an explicit view, and the panels are back on p95/p99:
 
-```csharp
-.AddView("pipeline.produce.duration", new ExplicitBucketHistogramConfiguration
-{
-    Boundaries = [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
-})
-.AddView("pipeline.process.duration", new ExplicitBucketHistogramConfiguration { ... })
-```
+| | before | after |
+|---|---|---|
+| produce p95 | 4491 ms | **24.6 ms** |
+| process p95 | 4750 ms | **23.9 ms** |
+| mean (unchanged, bucket-independent) | 12–15 ms | 12–15 ms |
 
-`AddView` rather than an `InstrumentAdvice` on the `CreateHistogram` call, because advice
-requires .NET 9 and these projects target net8.0. Until that lands, the mean is the only
-honest number these histograms can produce.
+`EgressMeter.LatencySecondsBoundaries()` owns the ladder — a 1-2.5-5 progression from 1 ms
+to 10 s — and both views share it, so a hop's send time and its transform time stay
+readable on one axis. The view for `pipeline.produce.duration` lives in
+`AddBaseConsoleObservability` so both roles inherit it; the one for
+`pipeline.process.duration` lives in `ProcessorHost`, matching how the processor's meter
+itself is registered and keeping the shared method role-agnostic.
+
+`AddView` rather than `InstrumentAdvice` on the `CreateHistogram` call: advice needs
+.NET 9 and these projects target net8.0.
+
+**Both panels also plot the mean beside the quantiles**, and that is not decoration. The
+mean comes from `sum/count` and is independent of bucket boundaries, so a wild divergence
+between it and p50 means the ladder has stopped fitting the data. That divergence is
+precisely what exposed this defect.
+
+`LatencyHistogramBucketTests` guards it. A view whose instrument name matches nothing is
+silently ignored, so the tests read boundaries off an exported metric rather than asserting
+that `AddView` was called — and they were confirmed to fail against the pre-fix build.
+
+**Redeploy note.** Changing boundaries changes the `le` label set. Old and new series with
+a shared boundary (`le="5"`, `le="10"`) are the *same* Prometheus series, so a query window
+spanning the rollout sees a counter reset and reports nonsense for a few minutes. Wait out
+the window before reading quantiles after a deploy.
 
 ### `allValue: ".*"` broke the processor board
 

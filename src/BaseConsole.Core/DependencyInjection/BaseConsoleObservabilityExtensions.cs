@@ -137,6 +137,17 @@ public static class BaseConsoleObservabilityExtensions
                 .AddMeter(EgressMeter.Name)
                 .AddMeter(IngressMetrics.MeterName)
                 .AddMeter(L2GateMetrics.MeterName)
+                // Bucket boundaries for the send-latency histogram, on the shared call so both roles
+                // inherit them. Without a view the SDK applies a default ladder built for
+                // milliseconds while the instrument records seconds, and every observation collapses
+                // into the first bucket -- a histogram that answers quantiles with its own bucket
+                // edge instead of a latency. See EgressMeter.LatencySecondsBoundaries.
+                .AddView(
+                    EgressMeter.DurationInstrument,
+                    new ExplicitBucketHistogramConfiguration
+                    {
+                        Boundaries = EgressMeter.LatencySecondsBoundaries(),
+                    })
                 // No ASP.NET Core or HttpClient instrumentation: a worker's only inbound surface is
                 // its own health probes, so those would measure nothing but the probing.
                 .AddRuntimeInstrumentation()

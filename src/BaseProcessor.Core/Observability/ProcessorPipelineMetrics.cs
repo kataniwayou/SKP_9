@@ -10,6 +10,13 @@ namespace BaseProcessor.Core.Observability;
 public static class ProcessorPipelineMeter
 {
     public const string Name = "BaseProcessor.Core";
+
+    /// <summary>
+    /// The transform histogram's instrument name, public so <c>ProcessorHost</c> can name it when it
+    /// attaches bucket boundaries. A view whose name matches no instrument is silently ignored, so a
+    /// literal in two places would fail without an error.
+    /// </summary>
+    public const string ProcessDurationInstrument = "pipeline.process.duration";
 }
 
 /// <summary>
@@ -34,7 +41,7 @@ internal static class ProcessorPipelineMetrics
         description: "Dispatches whose input key was already reclaimed, so the author was not re-run.");
 
     private static readonly Histogram<double> ProcessDuration = Meter.CreateHistogram<double>(
-        "pipeline.process.duration",
+        ProcessorPipelineMeter.ProcessDurationInstrument,
         unit: "s",
         description: "Time inside the author's transform — the only span of a hop whose length is not fixed.");
 
