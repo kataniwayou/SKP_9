@@ -348,14 +348,34 @@ Expected: four `success` lines. The Grafana restart is required — a datasource
 
 - [ ] **Step 5: Confirm the boards still render on a healthy stack**
 
-`chaos-timeline.js` writes to `<repo>/.chaos-timeline/<label>/` when `OUT_DIR` is unset, and nothing ignores that path. Add it before running, or the screenshots land in `git status` and someone commits a few hundred PNGs:
+Two prerequisites, both one-off, both belonging to the first step that runs the sampler.
+
+**Playwright is not installed anywhere durable.** `grafana/chaos-timeline.js`, `audit-boards.js` and `audit-nav.js` all `require('playwright')`, and nothing in the repo provides it — it has only ever been installed into a throwaway scratchpad, so a clean checkout cannot run any of the three. Give `grafana/` its own minimal package so the scripts are self-contained:
+
+```bash
+cat > grafana/package.json <<'JSON'
+{
+  "name": "skp-grafana-tooling",
+  "private": true,
+  "description": "Playwright for the board audit and chaos-timeline scripts. Not a build; these are operator tools run by hand.",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}
+JSON
+(cd grafana && npm install)
+```
+
+`node_modules/` is already in `.gitignore` (line 288), so only `grafana/package.json` and `grafana/package-lock.json` are committed. The browsers themselves are already present under `~/AppData/Local/ms-playwright`; if `npm install` reports otherwise, run `(cd grafana && npx playwright install chromium)`.
+
+**The sampler writes into an unignored path.** `chaos-timeline.js` writes to `<repo>/.chaos-timeline/<label>/` when `OUT_DIR` is unset, and nothing ignores that. Add it, or the screenshots land in `git status` and someone commits a few hundred PNGs:
 
 ```bash
 grep -qxF '.chaos-timeline/' .gitignore || printf '
 # chaos-timeline.js sampler output — screenshots and timelines, never committed
 .chaos-timeline/
 ' >> .gitignore
-export NODE_PATH="$(node -e 'console.log(require("path").resolve("."))')/node_modules"
+export NODE_PATH="$PWD/grafana/node_modules"
 node grafana/chaos-timeline.js --label retune-verify --duration 90 --interval 20
 ```
 
@@ -364,7 +384,8 @@ Expected: five boards, `noData 0` and `err 0` on every sweep, `Data freshness` r
 - [ ] **Step 6: Commit**
 
 ```bash
-git add k8s/23-grafana.yaml grafana/build-dashboards.py grafana/dashboards .gitignore
+git add k8s/23-grafana.yaml grafana/build-dashboards.py grafana/dashboards .gitignore \
+        grafana/package.json grafana/package-lock.json
 git commit -m "fix(grafana): track the datasource and liveness window to the 15s resolution
 
 timeInterval is the effective series resolution, not the scrape interval, and
@@ -494,7 +515,7 @@ print(json.dumps({'dashboard':d,'overwrite':True,'message':'split verdict tier b
 curl -s -u admin:admin -X POST http://localhost:13000/api/dashboards/db \
   -H 'Content-Type: application/json' --data-binary @/tmp/imp.json \
   | python -c "import json,sys;r=json.load(sys.stdin);print(r.get('status'),r.get('version'))"
-export NODE_PATH="$(node -e 'console.log(require("path").resolve("."))')/node_modules"
+export NODE_PATH="$PWD/grafana/node_modules"
 node grafana/chaos-timeline.js --label tense-verify --duration 60 --interval 20
 ```
 
@@ -806,7 +827,7 @@ cd /c/Users/UserL/source/repos/SK_P9
 curl -s -X POST http://localhost:18080/api/v1/orchestration/stop \
   -H 'Content-Type: application/json' -d '"4cd8af45-1295-43db-ab2e-e955dd82b5c5"'
 sleep 55
-export NODE_PATH="$(node -e 'console.log(require("path").resolve("."))')/node_modules"
+export NODE_PATH="$PWD/grafana/node_modules"
 node grafana/chaos-timeline.js --label s8-partial --duration 560 --interval 15 &
 sleep 25
 SKP_REALSTACK=1 SKP_CHAOS=1 dotnet run --project src/tests/BaseApi.Tests --no-build -c Debug -- \
