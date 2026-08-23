@@ -175,6 +175,17 @@ spec:
             # export simply fails quietly, so this is an enrichment rather than a dependency.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://otel-collector:4317"
+            # 10s, against a 15s Prometheus scrape. The collector emits explicit sample
+            # timestamps and Prometheus discards a re-scrape bearing one it already stored,
+            # so an export interval EQUAL to the scrape interval aliases and leaves some
+            # scrapes with nothing new. Exporting faster than the scrape makes the effective
+            # resolution the scrape interval.
+            #
+            # Load-bearing for the dashboards: Grafana derives $__rate_interval from the
+            # datasource's timeInterval, which must track this value. At 60s it floored the
+            # rate window at 240s, which is why a sixty-second outage moved no rate panel.
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: "10000"
             - name: RabbitMq__Host
               value: rabbitmq
             - name: RabbitMq__Username
