@@ -945,9 +945,41 @@ For each scenario, the fault is injected 150s after the soak's t0 and released a
 
 Expected: roughly **30-45s**, being one liveness window (40s) plus at most one export (10s). If it has not improved, Task 3 or Task 4 did not take effect — re-check `count_over_time(<series>[2m]) == 8` and the datasource's `timeInterval`.
 
-- [ ] **Step 4: Update the README with the new numbers**
+- [ ] **Step 4: Update the README with the new numbers and the three findings this run produced**
 
-Replace the measured latencies in the "What the second run through the suite showed" section with the ones from Step 3, and add a line stating the export cadence they were measured at. Leave the old numbers visible as the before-figure — they are the evidence that the change mattered.
+Four edits to `grafana/README.md`, all in or beside the "What the second run through the suite showed" section.
+
+**(a) The latencies.** Replace the measured detection latencies with the ones from Step 3, and state the export cadence they were measured at. Leave the old numbers visible as the before-figure — they are the evidence the change mattered.
+
+**(b) The resolution floor section is now wrong and must be rewritten, not appended to.** It currently says `timeInterval: 60s` makes `$__rate_interval` 240s and that no rate panel can resolve a 60-second fault. That was true and is not any more. State the new chain: the services export every 10s, Prometheus scrapes every 15s, so the effective resolution is 15s and `$__rate_interval` is 60s. Keep the old figures as the before-case.
+
+**(c) Partial replica loss — what the new scenario found.** Add it under the gaps, with all three parts, because the shape of the finding is the useful bit:
+
+> Scaling the processor deployment from 2 to 1 is the first scenario that removes *part* of a
+> dependency rather than all of it. The pipeline held — no step lost. What the boards did with
+> it is more interesting than that:
+>
+> - **`Replica fan-out` did not show it.** It is `sum by (service_instance_id) (rate(...))`
+>   over a counter that is stale-held after its process dies, so a departed replica's series
+>   persists at rate zero instead of ending. The line flattens; it never stops.
+> - **`Consuming by queue` cannot show it at all.** Both processor replicas consume one shared
+>   queue, so a per-queue panel has no per-replica resolution by construction. This panel was
+>   never capable of this case, which is worth saying outright rather than filing as a miss.
+> - **`Workers reporting` and `Workers missing (5m)` did show it** — 5→4 and 0→1 — and are the
+>   only things that did.
+>
+> So the two panels built to expose one-replica-of-many failing are not the ones that expose
+> it. The worker-count stats are.
+
+**(d) Grafana restarts destroy every dashboard.** Add this to the gaps too — it is not caused by this work, it was found by it, and it is the kind of thing that is only discovered the expensive way:
+
+> The `grafana-dashboards` ConfigMap is empty and Grafana's storage is an `emptyDir`, so
+> **any restart of the Grafana pod loses every hand-imported board.** This was found when a
+> mandated rollout restart wiped `skp-runtime`, which is the one board the generator cannot
+> rebuild. The README already says boards are imported by hand; it did not say that a restart
+> is destructive, which is the part that actually costs you something. Re-import from
+> `grafana/dashboards/` after any Grafana restart. Fixing it properly means provisioning the
+> boards or giving Grafana a PVC.
 
 - [ ] **Step 5: Restart the standing orchestration**
 
