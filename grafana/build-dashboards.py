@@ -1017,6 +1017,33 @@ def build_flow():
              desc="Work completed that the broker will hand out again, counted over "
                   "the visible range.",
              thresholds=T_WARN, decimals=0),
+        stat(lay, "Dead-lettered",
+             ['sum(max by (queue) (last_over_time(pipeline_deadletter_depth[2m]))) '
+              'or vector(0)'],
+             desc="Work this deployment refused and **nobody has dealt with**. Should "
+                  "be 0. Anything else is a run that lost progress permanently and is "
+                  "still sitting in a queue with no consumer." + PARA +
+                  "**The one stat here that reports a LEVEL rather than an event.** "
+                  "`Retry amplification` and the parked disposition beside it are "
+                  "counters: they rise when a message is refused, stay visible for a "
+                  "rate window, and scroll away. This keeps reporting for as long as the "
+                  "message is still there." + PARA +
+                  "**Measured, and it is why this exists.** Six parked step outcomes "
+                  "were found in `orchestrator-result.dead` from four incidents across "
+                  "two days -- each a workflow run that lost progress. Every board read "
+                  "green, all five alert rules stayed inactive, and they were found only "
+                  "by querying the broker by hand. The counter had done its job at the "
+                  "time and had nothing left to say two days later." + PARA +
+                  "`max by (queue)` before the sum is load-bearing: every orchestrator "
+                  "replica probes the same queues and reports the same depth, because a "
+                  "queue depth is a property of the broker rather than of the replica "
+                  "asking. `sum` alone would multiply it by the replica count." + PARA +
+                  "The window is 2m rather than the " + LIVENESS + " used elsewhere: the "
+                  "probe runs every 30s by design -- a dead-letter queue changes only "
+                  "when something is refused, which is rare and never urgent to the "
+                  "second -- so a liveness-width window would flap on the probe's own "
+                  "cadence rather than on anything real.",
+             thresholds=T_WARN, decimals=0),
         stat(lay, "Egress faults",
              [counted(EGRESS_FAULT)],
              desc="Any send that did not reach the broker, anywhere in the stack, "
