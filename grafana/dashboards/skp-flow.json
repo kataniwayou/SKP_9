@@ -1482,7 +1482,7 @@
       "id": 21,
       "type": "table",
       "title": "Message flow matrix",
-      "description": "Every service against every message type. The quickest way to see a type that is produced and never consumed.",
+      "description": "Every message type, produced against consumed, with the difference. The quickest way to see a type that is produced and never consumed.\n\n**Grouped by type ALONE, and that is the whole point of the panel.** It used to group by `(service_name, type)` on both sides and merge them -- but the producer and the consumer of a type are DIFFERENT SERVICES, so the merge key never matched and the two halves of every hop landed on separate rows with the other column blank. Observed on this stack: `orchestrator / process-dispatch` produced 0.413 with consumed empty, and two rows below `sample-proc-v9 / process-dispatch` consumed 0.510 with produced empty. A reader had to do the join by eye, across non-adjacent rows, and a 23% discrepancy read as normal. A conservation table that cannot put the two sides of a conservation on one row is not one.\n\nDropping `service_name` is what buys the pairing, and it costs the who: read that off `Produced by type and outcome` and `Consumed by type and disposition` on the worker boards, which are per-service by construction.\n\n**`gap /s` is produced minus consumed, so it should hover at zero.** It is a difference of two independently scraped rates, so expect jitter either side -- measured over an hour, p50 +0.000 and max +0.074 req/s. A gap that holds one sign and grows is the signal; the hop-gap stats above count the same thing in messages, where a real leak accumulates and jitter does not.\n\n`step-outcome` is expected to show a positive gap: the API consumes it too and the API's queue side emits no metrics at all.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1500,7 +1500,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service_name,type) (rate(pipeline_messages_produced_total[$__rate_interval]))",
+          "expr": "sum by (type) (rate(pipeline_messages_produced_total[$__rate_interval]))",
           "legendFormat": "produced",
           "range": false,
           "editorMode": "code",
@@ -1513,7 +1513,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service_name,type) (rate(pipeline_messages_consumed_total[$__rate_interval]))",
+          "expr": "sum by (type) (rate(pipeline_messages_consumed_total[$__rate_interval]))",
           "legendFormat": "consumed",
           "range": false,
           "editorMode": "code",
@@ -1534,9 +1534,31 @@
             },
             "renameByName": {
               "Value #A": "produced /s",
-              "Value #B": "consumed /s",
-              "service_name": "service"
+              "Value #B": "consumed /s"
             }
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binary",
+            "binary": {
+              "left": {
+                "matcher": {
+                  "id": "byName",
+                  "options": "produced /s"
+                }
+              },
+              "operator": "-",
+              "right": {
+                "matcher": {
+                  "id": "byName",
+                  "options": "consumed /s"
+                }
+              }
+            },
+            "alias": "gap /s",
+            "replaceFields": false
           }
         }
       ],
@@ -1569,7 +1591,58 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "number"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gap /s"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "text",
+                      "value": -0.1
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0.1
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.3
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       }
     }
   ]
