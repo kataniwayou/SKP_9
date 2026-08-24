@@ -538,12 +538,20 @@ def verdict_shared(layout, f):
     ]
 
 
-def pipeline_shared(layout, f, role_f=""):
+def pipeline_shared(layout, f, role_f="", by_instance=False):
     """The six pipeline panels both worker roles carry.
 
     role_f is appended only on the orchestrator, where pipeline.messages.* and
     pipeline.produce.duration carry a `role` attribute. The processor emits no such
     attribute, so passing it there would match nothing.
+
+    by_instance splits "Consuming by queue" per replica. On the orchestrator that would
+    draw five queues times three replicas on one axis, which the panel's own note already
+    warns is unreadable -- and it gains nothing there, because each orchestrator queue has
+    one consumer. On the processor every replica consumes the SAME queue, so without this
+    the min collapses across them and the panel can say a consumer is wedged but never
+    which. A parameter rather than two copies of the panel, for the reason role_f is a
+    parameter: these two boards must not drift.
     """
     rf = role_f
     return [
@@ -592,14 +600,22 @@ def pipeline_shared(layout, f, role_f=""):
                         "and is what makes landed=false possible.",
                    unit="reqps",
                    no_value="no channel churn in range"),
-        timeseries(layout, "Consuming by queue",
-                   [(f'min by (queue) ({live(f"pipeline_consumer_consuming_ratio{{{f}}}")})',
-                     "{{queue}}")],
+        timeseries(layout, "Consuming by queue" + (" and replica" if by_instance else ""),
+                   [(f'min by (queue{",service_instance_id" if by_instance else ""}) '
+                     f'({live(f"pipeline_consumer_consuming_ratio{{{f}}}")})',
+                     "{{queue}}" + (" / {{service_instance_id}}" if by_instance else ""))],
                    desc="Per-queue view of the verdict stat. A queue reading 0 while "
                         "the others read 1 is one wedged consumer, not an outage." + PARA +
-                        "A queue whose LINE STOPS is a replica that has gone away: the "
-                        "series is restricted to replicas reporting inside " + LIVENESS +
-                        ", so a departure ends the line instead of freezing it at 1." + PARA +
+                        ("Split per replica on this board because every replica consumes "
+                         "the SAME queue, so a min across the queue alone cannot name which "
+                         "replica stopped. On the orchestrator each queue has one consumer "
+                         "and the split would only add lines."
+                         if by_instance else
+                         "Aggregated by queue on this board because each queue has one "
+                         "consumer. The processor board splits this per replica, where "
+                         "every replica shares one queue.") + PARA +
+                        "A line that ENDS is a replica that left; a line at 0 is one that "
+                        "is present and not consuming." + PARA +
                         "Unfilled on purpose: the orchestrator has five queues, all sitting "
                         "at 1 in health, and five filled areas stacked on one line render as "
                         "a single opaque block in which a dip is invisible.",
@@ -1227,7 +1243,7 @@ def build_processor():
     panels += v[2:]
 
     panels.append(row(lay, "2 - Pipeline: what is broken?"))
-    panels += pipeline_shared(lay, f)
+    panels += pipeline_shared(lay, f, by_instance=True)
     panels += [
         timeseries(lay, "Process duration p95 / p99 by outcome",
                    [(f'histogram_quantile(0.95, sum by (le,outcome) '
