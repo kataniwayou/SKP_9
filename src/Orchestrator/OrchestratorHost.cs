@@ -224,6 +224,32 @@ public static class OrchestratorHost
             TimeSpan.FromSeconds(30),
             sp.GetRequiredService<ILogger<DeadLetterDepthProbe>>()));
 
+        // How much work is WAITING, and whether the broker still has a consumer on each queue.
+        //
+        // The hop-gap panels count produced minus consumed, which is a conservation check, and a
+        // conservation check cannot tell a message sitting in a queue from a message that vanished
+        // -- both read as a gap. Depth is the term that separates them. It is also the only leading
+        // indicator the boards have: consuming drops after a consumer has already stopped, and a
+        // departed replica costs a liveness window plus an export to notice, but a queue starts
+        // filling the moment a consumer is merely slower than its producer.
+        //
+        // The per-replica control queue is on the list because nothing else can see it. It has
+        // exactly one consumer -- this replica -- so a wedge there is invisible to every aggregate
+        // on every board.
+        //
+        // Ten seconds, against the dead-letter probe's thirty. See QueueDepthProbe for why the two
+        // intervals differ and what the shorter one costs.
+        builder.Services.AddHostedService(sp => new QueueDepthProbe(
+            sp.GetRequiredService<RabbitMqConnection>(),
+            [
+                OrchestratorQueues.Control,
+                OrchestratorQueues.Result,
+                OrchestratorQueues.ResultPost,
+                OrchestratorFanout.PerReplica(instanceId.Value),
+            ],
+            TimeSpan.FromSeconds(10),
+            sp.GetRequiredService<ILogger<QueueDepthProbe>>()));
+
         // Loop 2 and its admission latch. The position of the next two lines is the point of them
         // being here at all: AddBaseConsoleGating below TryAdds AlwaysOpenAdmission as the default
         // IConsumerAdmission, and being above it is what turns that TryAdd into a no-op. Written
