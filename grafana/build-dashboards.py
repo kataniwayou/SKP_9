@@ -1568,8 +1568,12 @@ def build_flow():
                    "+0.074 req/s. A gap that holds one sign and grows is the signal; the "
                    "hop-gap stats above count the same thing in messages, where a real "
                    "leak accumulates and jitter does not." + PARA +
-                   "`step-outcome` is expected to show a positive gap: the API consumes "
-                   "it too and the API's queue side emits no metrics at all.",
+                   "`step-outcome` should bias POSITIVE **over a long enough range**, "
+                   "because the API consumes it too and the API's queue side emits no "
+                   "metrics at all -- so `consumed` undercounts that hop. Do not expect "
+                   "to see it at a one-minute rate window, where jitter is several times "
+                   "larger than the bias: measured at one instant, +0.015, and at "
+                   "another, -0.060.",
               w=12,
               exclude=("Time",),
               rename={"Value #A": "produced /s", "Value #B": "consumed /s"},
