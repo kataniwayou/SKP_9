@@ -1205,8 +1205,8 @@
     {
       "id": 82,
       "type": "timeseries",
-      "title": "Consuming by queue",
-      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nA queue whose LINE STOPS is a replica that has gone away: the series is restricted to replicas reporting inside 40s, so a departure ends the line instead of freezing it at 1.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
+      "title": "Consuming by queue and replica",
+      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nSplit per replica on this board because every replica consumes the SAME queue, so a min across the queue alone cannot name which replica stopped. On the orchestrator each queue has one consumer and the split would only add lines.\n\nA line that ENDS is a replica that left; a line at 0 is one that is present and not consuming.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1224,8 +1224,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min by (queue) (last_over_time(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[40s]))",
-          "legendFormat": "{{queue}}",
+          "expr": "min by (queue,service_instance_id) (last_over_time(pipeline_consumer_consuming_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[40s]))",
+          "legendFormat": "{{queue}} / {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
