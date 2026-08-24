@@ -655,11 +655,30 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                    thresholds=[{"color": "green", "value": None},
                                {"color": "orange", "value": 1}],
                    minv=0, decimals=0),
-        timeseries(layout, "Channel resets by reason",
-                   [(f'sum by (queue,reason) (rate(pipeline_consumer_channel_resets_total'
-                     f'{{{f}}}[$__rate_interval]))', "{{queue}} / {{reason}}")],
+        timeseries(layout, "Channel resets by reason" + (" and replica" if by_instance else ""),
+                   [(f'sum by (queue,reason{",service_instance_id" if by_instance else ""}) '
+                     f'(rate(pipeline_consumer_channel_resets_total'
+                     f'{{{f}}}[$__rate_interval]))',
+                     "{{queue}} / {{reason}}"
+                     + (" / {{service_instance_id}}" if by_instance else ""))],
                    desc="shutdown, recovered, reopened. Each renumbers delivery tags "
-                        "and is what makes landed=false possible.",
+                        "and is what makes landed=false possible." + PARA +
+                        ("Split per replica on this board for the reason the consuming "
+                         "panel beside it is: every replica consumes the SAME queue, so a "
+                         "sum by queue collapses across them and cannot name which replica "
+                         "is churning." + PARA +
+                         "**Measured, and this is the panel that caught S9.** When one "
+                         "replica of two had its broker connection closed and re-closed "
+                         "for a minute, this counter went 1 to 10 on that replica and "
+                         "stayed at 1 on its peer -- while `Consuming by queue and "
+                         "replica` read 1 throughout, correctly, because automatic "
+                         "recovery restored the consumer inside one export interval and "
+                         "the consuming gauge never carried the fault at all. Aggregated, "
+                         "this panel showed the churn without saying whose it was."
+                         if by_instance else
+                         "Aggregated by queue on this board because each queue has one "
+                         "consumer, so the queue already names the replica. The processor "
+                         "board splits this per replica, where they share one queue."),
                    unit="reqps",
                    no_value="no channel churn in range"),
         timeseries(layout, "Consuming by queue" + (" and replica" if by_instance else ""),

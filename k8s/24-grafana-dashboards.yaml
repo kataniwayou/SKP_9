@@ -4149,7 +4149,7 @@ data:
           "id": 55,
           "type": "timeseries",
           "title": "Channel resets by reason",
-          "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.",
+          "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.\n\nAggregated by queue on this board because each queue has one consumer, so the queue already names the replica. The processor board splits this per replica, where they share one queue.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -6174,8 +6174,8 @@ data:
         {
           "id": 81,
           "type": "timeseries",
-          "title": "Channel resets by reason",
-          "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.",
+          "title": "Channel resets by reason and replica",
+          "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.\n\nSplit per replica on this board for the reason the consuming panel beside it is: every replica consumes the SAME queue, so a sum by queue collapses across them and cannot name which replica is churning.\n\n**Measured, and this is the panel that caught S9.** When one replica of two had its broker connection closed and re-closed for a minute, this counter went 1 to 10 on that replica and stayed at 1 on its peer -- while `Consuming by queue and replica` read 1 throughout, correctly, because automatic recovery restored the consumer inside one export interval and the consuming gauge never carried the fault at all. Aggregated, this panel showed the churn without saying whose it was.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -6193,8 +6193,8 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (queue,reason) (rate(pipeline_consumer_channel_resets_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
-              "legendFormat": "{{queue}} / {{reason}}",
+              "expr": "sum by (queue,reason,service_instance_id) (rate(pipeline_consumer_channel_resets_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
+              "legendFormat": "{{queue}} / {{reason}} / {{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
