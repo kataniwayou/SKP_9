@@ -458,6 +458,47 @@ what a restart inside the range does to them.
 > The healthy peer reading flat zero is the half worth checking: the split names the culprit
 > *and* exonerates its neighbour, rather than smearing churn across both.
 
+**S10, a dependency 685x slower -- and every board reads green.**
+
+> The first fault this suite has injected that is *slow* rather than absent. Toxiproxy sits
+> permanently between the processor and Redis (`k8s/13-toxiproxy.yaml`), and a 300 ms downstream
+> latency toxic is added for the usual 60s window. Only the processor is repointed; the
+> orchestrator and the API still address Redis directly.
+>
+> **The injection was measured, not assumed.** From inside the cluster, `redis-cli --latency`
+> through the proxy:
+>
+> | | min | max | avg | samples in ~3s |
+> |---|---|---|---|---|
+> | no toxic | 0 | 1 | **0.44 ms** | 97 |
+> | 300 ms toxic | 301 | 302 | **301.25 ms** | 4 |
+>
+> A 685x increase in round-trip latency. This check exists because a scenario that injects nothing
+> and passes is the worst failure a resilience suite has available, and the S9 write-up above is
+> where that habit came from.
+>
+> **Nothing showed it. Not one panel, not one stat.** Across the whole run:
+>
+> - `process p95` flat at **0.024 s**, before, during and after -- no bump anywhere
+> - `process mean` flat at ~0.011 s
+> - `gate open` **1.000** throughout
+> - `gate trips` -- **no series at all**
+> - `consuming` **1.000** throughout
+> - every run Complete, nothing lost
+>
+> **The reason is an instrumentation gap, not a panel one: there is no store-latency instrument on
+> this stack.** No `redis_*` metric, no probe duration, nothing that times a call to L2. The metric
+> list has `pipeline_process_duration_seconds` and `pipeline_produce_duration_seconds` and that is
+> the whole of it, and neither moved -- the L2 gate probes on its own 5s timer rather than inside
+> the processing path, so a slow store does not inflate the one duration the boards do draw.
+>
+> So the honest statement is stronger than "a panel missed it": **these boards cannot see a degraded
+> dependency at all, only an absent one.** Nine scenarios injected absence and the boards were
+> tuned until they caught it. The first scenario to inject slowness found nothing to tune.
+>
+> Closing it needs an instrument before it needs a panel -- a timer around the L2 probe, or around
+> store calls generally, exported as a histogram. That is production code and wants its own plan.
+
 **A Grafana legend is not evidence that a line is still being drawn.**
 
 > The first reading above -- "the panel kept drawing the departed replica for the rest of the
