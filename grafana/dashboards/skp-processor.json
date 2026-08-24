@@ -392,73 +392,6 @@
       }
     },
     {
-      "id": 87,
-      "type": "stat",
-      "title": "Duplicates suppressed",
-      "description": "Deliveries acked having done no work, because the entry was already absent. The primary idempotence mechanism; invisible under disposition=acked. Rare is fine, frequent is a question.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 3,
-        "x": 21,
-        "y": 1
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "((sum(increase(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}) or vector(0)) - (sum(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}) or vector(0)) - (sum(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"} offset $__range) or vector(0)), 0))",
-          "legendFormat": "",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "mappings": [],
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
       "id": 82,
       "type": "stat",
       "title": "Not acked (5m)",
@@ -727,7 +660,7 @@
       }
     },
     {
-      "id": 88,
+      "id": 87,
       "type": "row",
       "title": "2 - Since: what has already happened?",
       "collapsed": false,
@@ -740,7 +673,7 @@
       "panels": []
     },
     {
-      "id": 89,
+      "id": 88,
       "type": "stat",
       "title": "Not acked",
       "description": "Deliveries refused or sent back over the visible range.",
@@ -807,7 +740,7 @@
       }
     },
     {
-      "id": 90,
+      "id": 89,
       "type": "stat",
       "title": "Ack lost",
       "description": "Work completed that the broker will hand out again, over the visible range.",
@@ -874,7 +807,7 @@
       }
     },
     {
-      "id": 91,
+      "id": 90,
       "type": "stat",
       "title": "Egress faults",
       "description": "Any send that did not reach the broker, over the visible range.",
@@ -941,7 +874,7 @@
       }
     },
     {
-      "id": 92,
+      "id": 91,
       "type": "stat",
       "title": "Channel resets",
       "description": "Channel churn over the visible range. Expect tens of these after any rollout -- check Process restarts beside it before reading this as a broker fault.",
@@ -1008,7 +941,7 @@
       }
     },
     {
-      "id": 93,
+      "id": 92,
       "type": "stat",
       "title": "Dead-lettered",
       "description": "Work this service refused that **nobody has dealt with**. Should be 0. Anything else is a run that lost progress permanently and is still sitting in a queue with no consumer.\n\n**This is the drill-down target for `Dead-lettered` on SKP Flow.** That stat existed only there: an operator who saw it non-zero and clicked through to a worker board found no dead-letter panel at all, and the only evidence was a `parked` series inside a five-series timeseries at a value indistinguishable from zero. The queue-by-queue breakdown is on the pipeline tier below.\n\n`max by (queue)` before the sum is load-bearing: every replica probes the same queues and reports the same depth, because a queue depth is a property of the broker rather than of the replica asking.\n\n**No `or vector(0)` here, deliberately.** Nothing reporting is not the same fact as nothing dead-lettered, and a fallback to 0 would render the two identically in green -- which is exactly the defect the hop-gap stats were carrying. On the processor board this reads as text rather than as a reassuring zero, because that deployment has a dead-letter queue and no probe measuring it.",
@@ -1076,7 +1009,7 @@
       }
     },
     {
-      "id": 94,
+      "id": 93,
       "type": "stat",
       "title": "Process restarts",
       "description": "Process starts across every replica of this service in the visible range. **Read this before believing any other number on the Since tier.**\n\nA restart renumbers channels, ends and restarts every series under a new identity, and puts tens of messages on the hop gaps that are not lost. Measured here: 18 over a three-hour range -- six for each of the three orchestrator replicas -- while `Workers reporting` sat green at 5 and `Workers missing (5m)` at 0, because every restart had completed and been replaced before either could see it.\n\nUntil now this number appeared nowhere except the bottom of SKP Runtime, below fifteen GC panels, and behind a collapsed row on the boards an operator opens first.",
@@ -1098,6 +1031,73 @@
             "uid": "${datasource}"
           },
           "expr": "sum(resets(process_runtime_dotnet_jit_methods_compiled_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 94,
+      "type": "stat",
+      "title": "Duplicates suppressed",
+      "description": "Deliveries acked having done no work, because the entry was already absent. The primary idempotence mechanism; invisible under disposition=acked. Rare is fine, frequent is a question.\n\n**This instrument has never emitted a series on this stack**, before or after a deliberate L2 wipe -- checked against Prometheus, which carries no metric name matching it at all. It is not dead code: `ProcessDispatchHandler` does call `RecordDuplicateSuppressed()`, so the path is wired and this stat will move the first time a duplicate is suppressed. The condition simply has not arisen.\n\nOn the Since tier rather than the verdict tier because a suppressed duplicate is not a fault in progress, and because a permanently-zero stat on a row an operator scans for colour is one more thing teaching them that this row is always green.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "((sum(increase(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}) or vector(0)) - (sum(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}) or vector(0)) - (sum(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"} offset $__range) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -2126,94 +2126,6 @@
     {
       "id": 106,
       "type": "timeseries",
-      "title": "Duplicate suppression rate",
-      "description": "Flat zero is healthy and is drawn, not left empty.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 35
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(pipeline_duplicate_suppressed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval])) or vector(0)",
-          "legendFormat": "suppressed",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "decimals": null,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "gradientMode": "opacity",
-            "spanNulls": false,
-            "showPoints": "never",
-            "pointSize": 4,
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "color": {
-            "mode": "palette-classic"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "min": 0
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 107,
-      "type": "timeseries",
       "title": "Replica fan-out",
       "description": "Replicas share one queue, so the broker round-robins. A replica sitting near zero while the others work is consuming nothing despite looking healthy.\n\n**A line that ENDS is a replica that left; a line flat at zero beside working peers is a replica that stopped working.** The `and on(service_instance_id) present_over_time(...)` clause ends the line a fixed ~40s after a replica's last export, whatever the dashboard's time range.\n\nWithout it the end of the line moves with the range. A departed replica's counter is stale-held, so `rate()` keeps returning a decaying value until fewer than two samples remain in the rate window -- and `$__rate_interval` grows with the range. Measured on the partial-replica-loss run, one replica scaled away at +185s: ungated, its line ran to +210s at a 1m rate interval, +270s at 2m, +450s at 5m and past the end of the run at 10m, fading toward zero the whole way. Gated, it ends at +210s in every one of those, at its true last rate rather than a decayed one.\n\nSo at this board's usual range the gate changes nothing -- a 1m rate window expires before the 40s liveness window does. It is load-bearing when you widen the range to look at a past incident, which is exactly when a six-minute fade would mislead you.\n\nNote the legend is not evidence here: Grafana lists every series that has data anywhere in the range, so a departed replica keeps its legend entry after its line has stopped. Read the line.",
       "datasource": {
@@ -2223,7 +2135,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
+        "x": 8,
         "y": 35
       },
       "targets": [
@@ -2299,7 +2211,7 @@
       }
     },
     {
-      "id": 108,
+      "id": 107,
       "type": "timeseries",
       "title": "Exception rate",
       "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
@@ -2387,7 +2299,7 @@
       }
     },
     {
-      "id": 109,
+      "id": 108,
       "type": "timeseries",
       "title": "Process restarts",
       "description": "A monotonic counter going backwards means the process is new. **The one signal that explains a simultaneous gap in every other series** -- and the one the hop gaps, `Channel resets` and `Replica fan-out` all tell you to go and check.\n\nA spike here beside a jump on any of those means the number there is a rollout artefact rather than lost work.",
@@ -2475,7 +2387,7 @@
       }
     },
     {
-      "id": 110,
+      "id": 109,
       "type": "row",
       "title": "4 - Runtime: is the process why?",
       "collapsed": true,
@@ -2487,7 +2399,7 @@
       },
       "panels": [
         {
-          "id": 111,
+          "id": 110,
           "type": "timeseries",
           "title": "Thread-pool queue length",
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
@@ -2574,7 +2486,7 @@
           }
         },
         {
-          "id": 112,
+          "id": 111,
           "type": "timeseries",
           "title": "GC pause time",
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",

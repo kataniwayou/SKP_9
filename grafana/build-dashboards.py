@@ -1957,18 +1957,30 @@ def build_processor():
                   "the designed behaviour, not a crash loop -- this is the metric that "
                   "makes that legible.",
              thresholds=T_POSTURE, decimals=0),
-        stat(lay, "Duplicates suppressed",
-             [recent(f'pipeline_duplicate_suppressed_total{{{f}}}')],
-             desc="Deliveries acked having done no work, because the entry was already "
-                  "absent. The primary idempotence mechanism; invisible under "
-                  "disposition=acked. Rare is fine, frequent is a question.",
-             thresholds=T_WARN, decimals=0),
     ]
     panels += v[2:]
 
     lay.newline()
     panels.append(row(lay, "2 - Since: what has already happened?"))
     panels += since_shared(lay, f)
+    panels += [
+        stat(lay, "Duplicates suppressed",
+             [recent(f'pipeline_duplicate_suppressed_total{{{f}}}')],
+             desc="Deliveries acked having done no work, because the entry was already "
+                  "absent. The primary idempotence mechanism; invisible under "
+                  "disposition=acked. Rare is fine, frequent is a question." + PARA +
+                  "**This instrument has never emitted a series on this stack**, before "
+                  "or after a deliberate L2 wipe -- checked against Prometheus, which "
+                  "carries no metric name matching it at all. It is not dead code: "
+                  "`ProcessDispatchHandler` does call `RecordDuplicateSuppressed()`, so "
+                  "the path is wired and this stat will move the first time a duplicate "
+                  "is suppressed. The condition simply has not arisen." + PARA +
+                  "On the Since tier rather than the verdict tier because a suppressed "
+                  "duplicate is not a fault in progress, and because a permanently-zero "
+                  "stat on a row an operator scans for colour is one more thing teaching "
+                  "them that this row is always green.",
+             thresholds=T_WARN, decimals=0),
+    ]
 
     panels.append(row(lay, "3 - Pipeline: what is broken?"))
     panels += pipeline_shared(lay, f, by_instance=True)
@@ -2013,11 +2025,26 @@ def build_processor():
                         "overlapping filled areas at the same value are one opaque block, "
                         "and which of the four had ended was not readable from it.",
                    mappings=M_READY),
-        timeseries(lay, "Duplicate suppression rate",
-                   [(f'sum(rate(pipeline_duplicate_suppressed_total{{{f}}}'
-                     f'[$__rate_interval])) or vector(0)', "suppressed")],
-                   desc="Flat zero is healthy and is drawn, not left empty.",
-                   unit="reqps", minv=0),
+        # `Duplicate suppression rate` was here and is deleted rather than fixed.
+        #
+        # It drew `rate(pipeline_duplicate_suppressed_total)`, an instrument that has
+        # never produced a series on this stack -- Prometheus carries no metric name
+        # matching it at all, before or after a deliberate L2 wipe. So the panel spent a
+        # full third of a row on a flat line at zero, on an axis auto-scaled to 0-100
+        # req/s because there was no data to scale it by, and its own description said
+        # "flat zero is healthy and is drawn, not left empty".
+        #
+        # That reasoning is right for a signal that CAN be zero and can move. It is wrong
+        # for one that has never moved: what it actually teaches an operator is that a
+        # blank panel on these boards is normal, which is the habit that makes the next
+        # genuinely-empty panel invisible.
+        #
+        # The instrument is NOT dead -- ProcessDispatchHandler calls
+        # RecordDuplicateSuppressed(), so the path is wired and will emit the first time
+        # a duplicate is suppressed. The `Duplicates suppressed` stat on the Since tier
+        # is retained for exactly that, and is the cheaper way to carry a condition that
+        # has not happened yet. Restore this panel when the stat first moves and there is
+        # a rate worth plotting.
         timeseries(lay, "Replica fan-out",
                    [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
                      f'{{{f},disposition="acked"}}[$__rate_interval])) '
