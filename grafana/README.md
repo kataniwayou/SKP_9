@@ -22,6 +22,10 @@ grafana/
 
 ## Importing
 
+**On this cluster you do not import.** The boards are provisioned from
+`k8s/24-grafana-dashboards.yaml` -- see **Changing a board**. Import by hand only into a
+Grafana that does not provision them, or to recover from a provisioning failure.
+
 **Dashboards → New → Import → Upload JSON file**, then pick the Prometheus datasource
 when prompted. Repeat per file. Order does not matter.
 
@@ -59,9 +63,36 @@ ConfigMap rather than generated. `build-dashboards.py` still stamps the shared n
 (`normalize_imported`), because nav is a property of the *set* of boards rather than of how
 any one was authored — see below for what happened when it was not.
 
-**Nothing is provisioned any more.** The `grafana-dashboards` ConfigMap is empty and the
-file provider points at an empty directory; both are now vestigial and could be removed
-from whatever applies them.
+**The boards are provisioned from this repo again.** `build-dashboards.py` inlines every
+board in `grafana/dashboards/` into `k8s/24-grafana-dashboards.yaml`, which is the
+`grafana-dashboards` ConfigMap the pod mounts. The provider was never removed and needed no
+changes -- folder `SKP`, `disableDeletion: true`, `allowUiUpdates: false`, re-read every 30s.
+
+Provisioning had been torn out so the boards could be edited in the UI, and that trade
+expired when the workflow became *edit the generator, never the JSON*: the editability being
+paid for was not being used, while the durability being given up cost a hand re-import on
+every restart. `allowUiUpdates: false` now makes that explicit -- a UI Save is rejected with
+`Cannot save provisioned dashboard` (HTTP 400).
+
+**Apply it server-side, and do not believe the error if you forget:**
+
+```bash
+python grafana/build-dashboards.py
+kubectl apply --server-side --field-manager=skp-dashboards -f k8s/24-grafana-dashboards.yaml
+```
+
+A plain `kubectl apply` fails with `metadata.annotations: Too long: may not be more than
+262144 bytes`. That is the 256 KiB ceiling on the `last-applied-configuration` annotation
+client-side apply writes -- **not** the 1 MiB ConfigMap ceiling, which the ~275 KB of boards
+is comfortably under. Shrinking the boards is not the fix.
+
+No restart is needed or wanted: the kubelet refreshes the mounted files (~60s) and the
+provider re-reads them (30s), so a board updates in place within about 90s.
+
+**Why a generated manifest rather than a `configMapGenerator`.** kustomize refuses to read
+files above its own kustomization directory (`../grafana/dashboards/*.json`) without
+`--load-restrictor LoadRestrictionsNone`, which would have to be remembered at every apply.
+Generating the ConfigMap keeps one source of truth and needs no flags.
 
 ## Watching a fault, not a moment
 
@@ -392,16 +423,39 @@ what a restart inside the range does to them.
 > same value whatever the system does, read as though it were reporting on the system. **Judge
 > series presence with a `query_range` against Prometheus, and use the sampled legends only for
 > what they can actually say** -- which panels had data at all, and what the verdict stats read.
+>
+> `chaos-probe.py` now does this for you: `spans()` reports where each series' line ENDS, and
+> the run prints `line ENDS at +195s (window +0..+410s): service_instance_id=...` beside the
+> panel. Re-judging the recorded run names the departed replica by itself on both per-replica
+> panels, while the orchestrator's aggregate `Consuming by queue` reports nothing ended --
+> the measured contrast behind the claim above.
+>
+> **Presence in a window was not enough, and the reason is worth keeping.** The first
+> implementation asked whether a series was present before the fault and absent during it.
+> That reported *nothing* for this run, correctly: a departed replica keeps drawing for up to
+> a rate window after its last export, so its series IS present early in any window drawn at
+> the true fault instant. The only way to make that test say "departed" is to slide the
+> window until it agrees. Where a line ends is a property of the series, not of the window it
+> is judged in -- so that is what the probe asks. `grafana/test-chaos-probe.py` pins both
+> directions, including the one that matters: a series flat at zero beside working peers is
+> **not** reported as departed.
 
-**Grafana restarts destroy every dashboard.**
+**Grafana restarts destroyed every dashboard, until the boards were provisioned again.**
 
-> The `grafana-dashboards` ConfigMap is empty and Grafana's storage is an `emptyDir`, so
-> **any restart of the Grafana pod loses every hand-imported board.** This was found when a
-> mandated rollout restart wiped `skp-runtime`, which is the one board the generator cannot
-> rebuild. The README already says boards are imported by hand; it did not say that a restart
-> is destructive, which is the part that actually costs you something. Re-import from
-> `grafana/dashboards/` after any Grafana restart. Fixing it properly means provisioning the
-> boards or giving Grafana a PVC.
+> The `grafana-dashboards` ConfigMap was empty and Grafana's storage is an `emptyDir`, so
+> **any restart of the Grafana pod lost every hand-imported board.** This was found when a
+> mandated rollout restart wiped `skp-runtime`, the one board the generator cannot rebuild
+> -- though it is tracked in git, so the cost was re-import toil rather than the board. The
+> README already said boards were imported by hand; it did not say a restart was
+> destructive, which is the part that actually cost you something.
+>
+> Closed by provisioning them from the repo -- see **Changing a board** above. All five
+> report `provisioned=true` in folder `SKP` with panel counts 20/20/26/25/17, and anonymous
+> viewers get 200 on every one, so the ACL artefact recorded below did not recur.
+>
+> **The storage is still an `emptyDir`, deliberately (DASH-03).** That is now the mechanism
+> rather than the hazard: a pod recreate must rebuild every board from this repo, which is
+> what makes the repo the source of truth instead of whatever a human last imported.
 
 ## Reading the boards
 
