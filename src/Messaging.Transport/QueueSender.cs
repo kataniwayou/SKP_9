@@ -49,6 +49,17 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(queue);
         ArgumentException.ThrowIfNullOrWhiteSpace(type);
 
+        // Every send, before anything that can fail. A queue we have dispatched to is a queue whose
+        // backlog is our problem, and this is the one method every send passes through -- which is
+        // what makes the depth probe's coverage complete rather than remembered. It was two
+        // hand-placed calls in the orchestrator first, and that covered the processor's work queue
+        // and nothing else: the orchestrator's own queues went unobserved during its own outage,
+        // taking the number of queues watched anywhere from 7 to 1. See DispatchedQueues.
+        //
+        // Before the serialization and the publish deliberately, so a queue whose very first send
+        // fails is still measured. That is the case where knowing the depth matters most.
+        DispatchedQueues.Record(queue);
+
         var payload = JsonSerializer.SerializeToUtf8Bytes(body, MessagingJson.Options);
 
         var properties = BuildProperties(type, replyTo, correlationId);

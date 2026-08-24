@@ -104,10 +104,6 @@ internal sealed class NextStepHandoffHandler : IQueueMessageHandler
             var dispatch = new ProcessDispatch(
                 h.CorrelationId, h.ExecutionId, h.WorkflowId, h.StepId, h.ProcessorId, h.Payload, h.EntryId);
 
-            // Registered BEFORE the send, so a queue whose very first dispatch fails is still
-            // measured. That is the case where knowing the depth matters most.
-            DispatchedQueues.Record(ProcessorQueues.Work(h.ProcessorId));
-
             // A dispatch STARTS a step, so the clock starts here rather than being inherited.
             // This handler runs inside the delivery of the PREVIOUS step's outcome, and without
             // this reset that step's origin would ride onward -- every step after the first would

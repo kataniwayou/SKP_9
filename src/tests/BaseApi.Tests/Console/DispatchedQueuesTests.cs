@@ -1,4 +1,4 @@
-using BaseConsole.Core.Messaging;
+using Messaging.Transport;
 using Xunit;
 
 namespace BaseApi.Tests.Console;
@@ -73,6 +73,84 @@ public sealed class DispatchedQueuesTests : IDisposable
         }
 
         Assert.Contains("processor-gone", DispatchedQueues.Snapshot());
+    }
+
+    [Fact]
+    public void AQueueTheBrokerSaysIsGoneIsDroppedAfterEnoughConsecutiveMisses()
+    {
+        // Recording every send means recording the exclusive per-replica reply queues too, and
+        // those are deleted with their process. Without a way out the set grows by one queue per
+        // replica generation forever, and the probe spends a round trip per interval on each.
+        DispatchedQueues.Record("proc-reply-dead");
+
+        for (var i = 0; i < DispatchedQueues.MissesBeforeDrop; i++)
+        {
+            DispatchedQueues.Note("proc-reply-dead", ProbeOutcome.Missing);
+        }
+
+        Assert.DoesNotContain("proc-reply-dead", DispatchedQueues.Snapshot());
+    }
+
+    [Fact]
+    public void OneMissShortOfTheThresholdKeepsTheQueue()
+    {
+        DispatchedQueues.Record("proc-reply-slow");
+
+        for (var i = 0; i < DispatchedQueues.MissesBeforeDrop - 1; i++)
+        {
+            DispatchedQueues.Note("proc-reply-slow", ProbeOutcome.Missing);
+        }
+
+        Assert.Contains("proc-reply-slow", DispatchedQueues.Snapshot());
+    }
+
+    [Fact]
+    public void AnUnreachableBrokerNeverDropsAnything()
+    {
+        // THE DISTINCTION THAT MAKES DROPPING SAFE. A broker outage fails every queue at once;
+        // counting that as "gone" would empty the registry at the exact moment the backlog it
+        // exists to measure was building. Only the broker itself answering 404 counts.
+        DispatchedQueues.Record("processor-live");
+
+        for (var i = 0; i < DispatchedQueues.MissesBeforeDrop * 3; i++)
+        {
+            DispatchedQueues.Note("processor-live", ProbeOutcome.Failed);
+        }
+
+        Assert.Contains("processor-live", DispatchedQueues.Snapshot());
+    }
+
+    [Fact]
+    public void AQueueThatAnswersAgainHasItsCountReArmed()
+    {
+        // A 404 stretch during a topology re-declare must not leave a live queue one miss from
+        // being forgotten for the rest of the process's life.
+        DispatchedQueues.Record("processor-flapping");
+
+        for (var i = 0; i < DispatchedQueues.MissesBeforeDrop - 1; i++)
+        {
+            DispatchedQueues.Note("processor-flapping", ProbeOutcome.Missing);
+        }
+
+        DispatchedQueues.Note("processor-flapping", ProbeOutcome.Ok);
+
+        for (var i = 0; i < DispatchedQueues.MissesBeforeDrop - 1; i++)
+        {
+            DispatchedQueues.Note("processor-flapping", ProbeOutcome.Missing);
+        }
+
+        Assert.Contains("processor-flapping", DispatchedQueues.Snapshot());
+    }
+
+    [Fact]
+    public void NotingAQueueThatWasNeverRecordedDoesNotAddIt()
+    {
+        // The probe reports on every queue it was given, including statically-configured ones.
+        // Those are not this registry's to remember or to forget.
+        DispatchedQueues.Note("orchestrator-control", ProbeOutcome.Ok);
+        DispatchedQueues.Note("orchestrator-control", ProbeOutcome.Missing);
+
+        Assert.Empty(DispatchedQueues.Snapshot());
     }
 
     [Fact]

@@ -258,7 +258,8 @@ public static class OrchestratorHost
             sp.GetRequiredService<RabbitMqConnection>(),
             () => [.. own, .. DispatchedQueues.Snapshot()],
             TimeSpan.FromSeconds(10),
-            sp.GetRequiredService<ILogger<QueueDepthProbe>>()));
+            sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
+            DispatchedQueues.Note));
 
         // Loop 2 and its admission latch. The position of the next two lines is the point of them
         // being here at all: AddBaseConsoleGating below TryAdds AlwaysOpenAdmission as the default
