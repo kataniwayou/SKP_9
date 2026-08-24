@@ -223,7 +223,33 @@ public static class BaseProcessorServiceCollectionExtensions
         // unconsumed" from "six unobservable".
         services.AddHostedService(sp => new QueueDepthProbe(
             sp.GetRequiredService<RabbitMqConnection>(),
-            () => [ProcessorQueues.Work(processorId), .. DispatchedQueues.Snapshot()],
+            // The orchestrator's two SHARED inbound queues are named explicitly, and that is a
+            // deliberate exception to "a queue we have dispatched to is our problem".
+            //
+            // That principle covers orchestrator-result, because the processor sends step outcomes
+            // there. It provably CANNOT cover a queue nobody else sends to: orchestrator-control is
+            // fed by the API, orchestrator-result-post by the orchestrator itself, and neither runs
+            // a depth probe. So both were observed only by the orchestrator, and went dark during
+            // the one outage where their depth matters -- measured, with the number of queues
+            // watched anywhere falling from 7 to 1.
+            //
+            // orchestrator-control is the one with real consequences: the API keeps accepting start
+            // and stop requests while the orchestrator is down, and they pile up there with no
+            // consumer. orchestrator-result-post is inert by comparison -- its producer and its
+            // consumer are both the orchestrator, so nothing accumulates while it is gone -- and is
+            // included because it costs one passive declare and closes the pair.
+            //
+            // The coupling this adds is to two constants on Messaging.Contracts that this assembly
+            // already references for OrchestratorQueues.Result. A processor watching a queue it
+            // never touches reads oddly; a queue whose only observer is the process that owns it
+            // reads worse.
+            () =>
+            [
+                ProcessorQueues.Work(processorId),
+                OrchestratorQueues.Control,
+                OrchestratorQueues.ResultPost,
+                .. DispatchedQueues.Snapshot(),
+            ],
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
             DispatchedQueues.Note));
