@@ -580,7 +580,8 @@ def statetimeline(layout, title, exprs, desc="", w=8, h=8, thresholds=None,
     }
 
 
-def table(layout, title, exprs, desc="", w=8, h=8, exclude=(), rename=None):
+def table(layout, title, exprs, desc="", w=8, h=8, exclude=(), rename=None,
+          extra_transforms=(), overrides=()):
     return {
         "id": _next_id(),
         "type": "table",
@@ -600,6 +601,7 @@ def table(layout, title, exprs, desc="", w=8, h=8, exclude=(), rename=None):
                 "excludeByName": {k: True for k in exclude},
                 "renameByName": rename or {},
             }},
+            *extra_transforms,
         ],
         "options": {"showHeader": True, "footer": {"show": False, "reducer": ["sum"]}},
         "fieldConfig": {
@@ -609,9 +611,21 @@ def table(layout, title, exprs, desc="", w=8, h=8, exclude=(), rename=None):
                 "mappings": [],
                 "thresholds": {"mode": "absolute", "steps": T_NEUTRAL},
             },
-            "overrides": [],
+            "overrides": list(overrides),
         },
     }
+
+
+def binary_field(left, operator, right, alias):
+    """A column computed from two others. Grafana 10+ takes matchers, not bare names."""
+    return {"id": "calculateField", "options": {
+        "mode": "binary",
+        "binary": {"left": {"matcher": {"id": "byName", "options": left}},
+                   "operator": operator,
+                   "right": {"matcher": {"id": "byName", "options": right}}},
+        "alias": alias,
+        "replaceFields": False,
+    }}
 
 
 def textpanel(layout, title, content, w=8, h=8):
@@ -1418,16 +1432,59 @@ def build_flow():
                         "brain; the colour will not tell you so, the tooltip will.",
                    mappings=M_POSTURE),
         table(lay, "Message flow matrix",
-              [('sum by (service_name,type) (rate(pipeline_messages_produced_total'
+              [('sum by (type) (rate(pipeline_messages_produced_total'
                 '[$__rate_interval]))', "produced"),
-               ('sum by (service_name,type) (rate(pipeline_messages_consumed_total'
+               ('sum by (type) (rate(pipeline_messages_consumed_total'
                 '[$__rate_interval]))', "consumed")],
-              desc="Every service against every message type. The quickest way to see "
-                   "a type that is produced and never consumed.",
+              desc="Every message type, produced against consumed, with the difference. "
+                   "The quickest way to see a type that is produced and never consumed."
+                   + PARA +
+                   "**Grouped by type ALONE, and that is the whole point of the panel.** "
+                   "It used to group by `(service_name, type)` on both sides and merge "
+                   "them -- but the producer and the consumer of a type are DIFFERENT "
+                   "SERVICES, so the merge key never matched and the two halves of every "
+                   "hop landed on separate rows with the other column blank. Observed on "
+                   "this stack: `orchestrator / process-dispatch` produced 0.413 with "
+                   "consumed empty, and two rows below `sample-proc-v9 / "
+                   "process-dispatch` consumed 0.510 with produced empty. A reader had "
+                   "to do the join by eye, across non-adjacent rows, and a 23% "
+                   "discrepancy read as normal. A conservation table that cannot put the "
+                   "two sides of a conservation on one row is not one." + PARA +
+                   "Dropping `service_name` is what buys the pairing, and it costs the "
+                   "who: read that off `Produced by type and outcome` and `Consumed by "
+                   "type and disposition` on the worker boards, which are per-service by "
+                   "construction." + PARA +
+                   "**`gap /s` is produced minus consumed, so it should hover at zero.** "
+                   "It is a difference of two independently scraped rates, so expect "
+                   "jitter either side -- measured over an hour, p50 +0.000 and max "
+                   "+0.074 req/s. A gap that holds one sign and grows is the signal; the "
+                   "hop-gap stats above count the same thing in messages, where a real "
+                   "leak accumulates and jitter does not." + PARA +
+                   "`step-outcome` is expected to show a positive gap: the API consumes "
+                   "it too and the API's queue side emits no metrics at all.",
               w=12,
               exclude=("Time",),
-              rename={"Value #A": "produced /s", "Value #B": "consumed /s",
-                      "service_name": "service"}),
+              rename={"Value #A": "produced /s", "Value #B": "consumed /s"},
+              extra_transforms=[
+                  binary_field("produced /s", "-", "consumed /s", "gap /s"),
+              ],
+              overrides=[
+                  # Three decimals on rates this small, or every cell reads 0.
+                  {"matcher": {"id": "byType", "options": "number"},
+                   "properties": [{"id": "decimals", "value": 3}]},
+                  # The gap is the column the panel exists for; colour it rather than
+                  # leaving the reader to subtract two numbers they can now see.
+                  {"matcher": {"id": "byName", "options": "gap /s"},
+                   "properties": [
+                       {"id": "custom.cellOptions",
+                        "value": {"type": "color-text"}},
+                       {"id": "thresholds", "value": {"mode": "absolute", "steps": [
+                           {"color": "red", "value": None},
+                           {"color": "text", "value": -0.1},
+                           {"color": "orange", "value": 0.1},
+                           {"color": "red", "value": 0.3}]}},
+                   ]},
+              ]),
     ]
 
     return dashboard(
