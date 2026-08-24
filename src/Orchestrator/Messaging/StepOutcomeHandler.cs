@@ -76,6 +76,44 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         }
     }
 
+    /// <summary>
+    /// Which half of the L1 lookup missed, or null when the outcome resolves.
+    /// <para>
+    /// <b>Two conditions, two different incidents, and they must not share a sentence.</b> A missing
+    /// WORKFLOW means this replica never activated it or has dropped it — a control-plane problem. A
+    /// missing STEP means the replica holds a definition that disagrees with the outcome in flight —
+    /// a versioning problem. The fixes have nothing in common.
+    /// </para>
+    /// <para>
+    /// <b>This is here because the undifferentiated message cost an investigation.</b> Six outcomes
+    /// were found dead-lettered on the live stack, every one of them carrying "the outcome names a
+    /// workflow or step this replica does not hold in L1". Separating the readings took correlating
+    /// dead-letter x-death headers against restart records across two days, and even then it did not
+    /// settle which half had failed — because nothing had recorded it. The step count comes along
+    /// because a replica holding the wrong number of steps is a versioning problem visible at a
+    /// glance, and the ids come along because a parked message is recoverable only by hand and the
+    /// ids are the only thing pairing a queued body to the line that refused it.
+    /// </para>
+    /// </summary>
+    internal static string? DescribeL1Miss(WorkflowL1Store store, Guid workflowId, Guid stepId)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        if (!store.TryGet(workflowId, out var entry))
+        {
+            return $"this replica does not hold workflow {workflowId} in L1, "
+                 + $"so the outcome for step {stepId} cannot be advanced";
+        }
+
+        if (!entry.Steps.ContainsKey(stepId))
+        {
+            return $"this replica holds workflow {workflowId} with {entry.Steps.Count} step(s) "
+                 + $"but that definition does not carry step {stepId}";
+        }
+
+        return null;
+    }
+
     private async Task RunAsync(StepOutcome m, CancellationToken ct)
     {
         _logger.LogDebug("advancing the graph on a {Result} outcome", m.Result);
@@ -87,6 +125,18 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // guessing which one it is, and keeps the message recoverable from the dead-letter queue.
         // Consumption is admitted only after the first hydration pass completes, which is what makes
         // the second reading narrow rather than routine.
+        //
+        // MEASURED ON THE LIVE STACK, and it does not match either reading cleanly. Six outcomes were
+        // found dead-lettered across four incidents over two days. In all four, the parking followed a
+        // broker reconnect or process restart by 66-171 seconds. In none of them was there any stop
+        // record -- no "removed the workflow from L1", no "stop applied" -- in the preceding 25
+        // minutes, so the stop reading above is unsupported despite being written here as the
+        // commonest. And in the clearest incident all three replicas logged "activated workflow" 107
+        // seconds BEFORE the parking, which rules out the announcement reading for that one.
+        //
+        // So both stated readings survive only as guesses, and the reason the question is still open
+        // is that the record did not say which lookup missed. It does now -- see DescribeL1Miss. The
+        // next occurrence should answer it rather than needing another two-day correlation.
         if (!_store.TryGet(m.WorkflowId, out var entry) ||
             !entry.Steps.TryGetValue(m.StepId, out var completed))
         {
@@ -106,8 +156,11 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             // reclaimed for the same reason it is reclaimed on the acked path.
             await ReclaimAsync(m.EntryId).ConfigureAwait(false);
 
-            throw new InvalidOperationException(
-                "the outcome names a workflow or step this replica does not hold in L1");
+            // Described only here, on the cold path. The condition above stays a short-circuited pair
+            // of dictionary hits because it is the hot path -- every outcome from every processor
+            // runs it -- and re-reading the store to build a sentence is affordable exactly once, in
+            // the branch that is about to throw the message away.
+            throw new InvalidOperationException(DescribeL1Miss(_store, m.WorkflowId, m.StepId));
         }
 
         // The opening half of a run's record. The fire logs "dispatched an entry step" and then goes
