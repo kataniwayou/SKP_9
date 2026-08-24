@@ -16,6 +16,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BaseProcessor.Core.DependencyInjection;
@@ -204,6 +205,22 @@ public static class BaseProcessorServiceCollectionExtensions
         services.AddScoped<IQueueMessageHandler, ProcessedDataHandler>();
 
         services.AddBaseConsoleGating(cfg, ProcessorQueues.Work(processorId));
+
+        // How much work is waiting on this processor's queue, and whether the broker still has a
+        // consumer on it.
+        //
+        // Registered here rather than in a host because every processor has exactly one work queue
+        // and it is named from the id this method already takes. A host that forgot would be a
+        // processor whose backlog nobody could see, and there would be nothing to notice.
+        //
+        // This is the queue where a backlog matters most: replicas share it, so it is the one place
+        // where the pipeline's throughput ceiling shows up as a level rather than as a rate that
+        // merely looks lower than usual.
+        services.AddHostedService(sp => new QueueDepthProbe(
+            sp.GetRequiredService<RabbitMqConnection>(),
+            [ProcessorQueues.Work(processorId)],
+            TimeSpan.FromSeconds(10),
+            sp.GetRequiredService<ILogger<QueueDepthProbe>>()));
 
         return services;
     }
