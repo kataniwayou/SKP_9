@@ -453,6 +453,22 @@ what a restart inside the range does to them.
 > report `provisioned=true` in folder `SKP` with panel counts 20/20/26/25/17, and anonymous
 > viewers get 200 on every one, so the ACL artefact recorded below did not recur.
 >
+> **Then actually restarted, because everything above is upstream of the claim.** A
+> `kubectl rollout restart deployment/grafana` replaced the pod with a fresh `emptyDir`, and
+> all five boards came back by themselves: same uids, same folder, same panel counts, still
+> `provisioned=true`, anonymous 200 on every one, no duplicates, the `skp-prometheus`
+> datasource re-provisioned as default, and a query through Grafana's datasource proxy
+> returning live data. `skp-runtime` -- the board a restart destroyed last time and the
+> generator cannot rebuild -- returned with its 17 panels.
+>
+> Provisioning being configured correctly is not the same claim as the boards surviving a
+> restart, and this project has twice shipped the first while believing the second.
+>
+> **The restart kills the Grafana port-forward.** `kubectl port-forward svc/grafana
+> 13000:3000` binds to a pod, not to the service, so the old process survives the pod that
+> backed it and every request returns `000`. Kill it and start a new one before concluding
+> anything about the boards.
+>
 > **The storage is still an `emptyDir`, deliberately (DASH-03).** That is now the mechanism
 > rather than the hazard: a pod recreate must rebuild every board from this repo, which is
 > what makes the repo the source of truth instead of whatever a human last imported.
