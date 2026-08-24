@@ -127,7 +127,7 @@
   },
   "panels": [
     {
-      "id": 26,
+      "id": 29,
       "type": "row",
       "title": "1 - Verdict: is the API broken?",
       "collapsed": false,
@@ -140,7 +140,7 @@
       "panels": []
     },
     {
-      "id": 27,
+      "id": 30,
       "type": "stat",
       "title": "5xx ratio",
       "description": "Health routes are dropped collector-side, so this is real traffic only.",
@@ -207,7 +207,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 31,
       "type": "stat",
       "title": "p95 latency",
       "description": "Across all routes. Break down by route on the ingress tier.\n\nBlank means no requests in the range, not a broken query. histogram_quantile over an all-zero rate is 0/0 = NaN, which `or vector(0)` cannot rescue -- it substitutes for an EMPTY result, and NaN is a result. The no-value text below is what covers that case.",
@@ -271,7 +271,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 32,
       "type": "stat",
       "title": "In-flight",
       "description": "Requests currently being served.\n\n**Deliberately uncoloured, unlike the presence stats beside it.** This number is healthy at 0 and healthy at 40; where it stops being healthy depends on a concurrency budget nobody has measured here, and a threshold picked without one would be a guess wearing a colour. `Kestrel queued` beside it is the panel with a real failure value -- anything sustained above zero means the server is behind.",
@@ -334,7 +334,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 33,
       "type": "stat",
       "title": "Kestrel queued",
       "description": "Connections accepted but not yet served. Non-zero and sustained means the server is behind.",
@@ -401,7 +401,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 34,
       "type": "stat",
       "title": "DNS failures (5m)",
       "description": "Name resolution failing for redis, rabbitmq or the collector, **counted in the last 5m**. A dependency signal nothing else on this board surfaces.\n\n**This was a rate, and a rate could not show it.** Measured on the live stack: `increase(...[3h])` counted 21 resolution failures inside the visible range while this stat read `0.00 req/s` in green, with the two spikes plainly drawn on `Dependency name resolution` three panels below. A fault counter has to be counted -- the same lesson the pipeline fault stats already carried, which this one had not been given.\n\nCounted over five minutes rather than the range so the verdict tier goes green again when resolution recovers. The range count is the stat below the note panel.",
@@ -468,7 +468,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 35,
       "type": "stat",
       "title": "Pods reporting",
       "description": "API replicas exporting runtime metrics. Red at zero.\n\nNo expected count, unlike `Workers reporting` on SKP Flow: this is a single Deployment, and absent-versus-present is the whole question. Scaled beyond one replica this cannot tell you that one of three is gone -- it would need a constant to do that, and the honest fix then is to add one rather than to read this panel as though it already had.",
@@ -535,7 +535,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 36,
       "type": "stat",
       "title": "Process restarts",
       "description": "API process starts in the visible range. A restart explains a gap in every other series on this board at once, and it explains latency quantiles that reset.\n\nOn the verdict tier because this board has no Since tier to hold it, and because it was previously readable only by expanding the Runtime row -- the timeseries beside `Exception rate` below carries the same signal per replica and over time.",
@@ -602,7 +602,7 @@
       }
     },
     {
-      "id": 34,
+      "id": 37,
       "type": "row",
       "title": "2 - Ingress: what is broken?",
       "collapsed": false,
@@ -615,7 +615,7 @@
       "panels": []
     },
     {
-      "id": 35,
+      "id": 38,
       "type": "timeseries",
       "title": "Request rate by route",
       "description": "",
@@ -702,7 +702,7 @@
       }
     },
     {
-      "id": 36,
+      "id": 39,
       "type": "timeseries",
       "title": "p95 / p99 by route",
       "description": "",
@@ -800,7 +800,7 @@
       }
     },
     {
-      "id": 37,
+      "id": 40,
       "type": "timeseries",
       "title": "Status-code mix",
       "description": "202 is the orchestration verbs; they accept and queue rather than finishing the work.",
@@ -887,7 +887,7 @@
       }
     },
     {
-      "id": 38,
+      "id": 41,
       "type": "timeseries",
       "title": "In-flight and Kestrel connections",
       "description": "",
@@ -997,7 +997,7 @@
       }
     },
     {
-      "id": 39,
+      "id": 42,
       "type": "timeseries",
       "title": "Dependency name resolution",
       "description": "host_not_found means the service object is gone. try_again means the resolver timed out. Different faults, different remedies.",
@@ -1085,7 +1085,7 @@
       }
     },
     {
-      "id": 40,
+      "id": 43,
       "type": "timeseries",
       "title": "Route matching by status",
       "description": "Split by match status. A `failure` series is a caller using the wrong URL -- the singular-vs-plural controller mistake returns a bare 404 with no body and looks like the API being down.\n\nThe success series is kept deliberately: it is the only panel here that distinguishes 'no failures' from 'no traffic at all'.",
@@ -1173,7 +1173,7 @@
       }
     },
     {
-      "id": 41,
+      "id": 44,
       "type": "text",
       "title": "The queue side is not instrumented",
       "gridPos": {
@@ -1189,7 +1189,7 @@
       "transparent": false
     },
     {
-      "id": 42,
+      "id": 45,
       "type": "stat",
       "title": "DNS failures (range)",
       "description": "Resolution failures over the visible range -- the tense the verdict stat deliberately does not answer.\n\nSits beside `Dependency name resolution` because that panel says WHEN and WHICH host, and this one says how many. `host_not_found` is a missing service object; `try_again` is a resolver timeout. Different faults, different remedies.",
@@ -1256,7 +1256,7 @@
       }
     },
     {
-      "id": 43,
+      "id": 46,
       "type": "timeseries",
       "title": "Exception rate",
       "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
@@ -1344,7 +1344,7 @@
       }
     },
     {
-      "id": 44,
+      "id": 47,
       "type": "timeseries",
       "title": "Process restarts",
       "description": "A monotonic counter going backwards means the process is new. **The one signal that explains a simultaneous gap in every other series** -- and the one the hop gaps, `Channel resets` and `Replica fan-out` all tell you to go and check.\n\nA spike here beside a jump on any of those means the number there is a rollout artefact rather than lost work.",
@@ -1432,7 +1432,7 @@
       }
     },
     {
-      "id": 45,
+      "id": 48,
       "type": "row",
       "title": "3 - Runtime: is the process why?",
       "collapsed": true,
@@ -1444,7 +1444,7 @@
       },
       "panels": [
         {
-          "id": 46,
+          "id": 49,
           "type": "timeseries",
           "title": "Thread-pool queue length",
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
@@ -1531,7 +1531,7 @@
           }
         },
         {
-          "id": 47,
+          "id": 50,
           "type": "timeseries",
           "title": "GC pause time",
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",
