@@ -1981,7 +1981,7 @@ data:
           "id": 8,
           "type": "stat",
           "title": "Outbound hop gap",
-          "description": "Dispatches the orchestrator confirmed, minus acks the processors issued, counted in MESSAGES over the visible range.\n\nCounts rather than a difference of rates, and the distinction is what makes the panel usable. Two counters scraped independently give a rate difference that is noise centred on zero -- measured here over an hour: p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of the time on a perfectly healthy stack. The same hour in counts: 1311 produced, 1313 acked. A real leak grows with the range; jitter does not.\n\n**A restart inside the range puts tens of messages here and none of them are lost.** A replica that goes away and comes back gets a new series, and produced and consumed counters for the same messages live on different services that restart at different moments. Measured across the chaos suite: +46/-47, +48/-46, +43/-44, every one an artefact of a scale-to-zero and every one gone within a range width. Check the Workers reporting stat before believing a number here.",
+          "description": "Dispatches the orchestrator confirmed, minus acks the processors issued, counted in MESSAGES over the visible range.\n\n**The `or vector(0)` is on each side, and that is load-bearing.** Written as `sum(A) - sum(B) or vector(0)` this panel read 0 -- green, the healthiest number it has -- whenever EITHER side had no series at all. `sum()` over an empty vector yields no sample, the subtraction propagates that emptiness, and the trailing fallback then substituted a perfect conservation for a total outage. Measured against this stack: with the producer selector matching nothing the old form read 0 while the new one reads -3813; with the consumer selector matching nothing, 0 against +3821. An orchestrator that stops dispatching and a processor that stops acking are the two faults this panel exists to catch, and it was blind to both of them.\n\nBoth sides absent still reads 0, and that is correct rather than overlooked: no traffic at all is `System flowing`'s question, not this one's.\n\nCounts rather than a difference of rates, and the distinction is what makes the panel usable. Two counters scraped independently give a rate difference that is noise centred on zero -- measured here over an hour: p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of the time on a perfectly healthy stack. The same hour in counts: 1311 produced, 1313 acked. A real leak grows with the range; jitter does not.\n\n**A restart inside the range puts tens of messages here and none of them are lost.** A replica that goes away and comes back gets a new series, and produced and consumed counters for the same messages live on different services that restart at different moments. Measured across the chaos suite: +46/-47, +48/-46, +43/-44, every one an artefact of a scale-to-zero and every one gone within a range width. Check the Workers reporting stat before believing a number here.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -1999,7 +1999,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(increase(pipeline_messages_produced_total{type=\"process-dispatch\",outcome=\"accepted\"}[$__range])) - sum(increase(pipeline_messages_consumed_total{type=\"process-dispatch\",disposition=\"acked\"}[$__range])) or vector(0)",
+              "expr": "(sum(increase(pipeline_messages_produced_total{type=\"process-dispatch\",outcome=\"accepted\"}[$__range])) or vector(0)) - (sum(increase(pipeline_messages_consumed_total{type=\"process-dispatch\",disposition=\"acked\"}[$__range])) or vector(0))",
               "legendFormat": "",
               "range": true,
               "editorMode": "code"
@@ -2060,7 +2060,7 @@ data:
           "id": 9,
           "type": "stat",
           "title": "Return hop gap",
-          "description": "The same conservation check on the way back, in messages over the visible range.\n\nThe API also consumes step-outcome and that consumption is not instrumented, so a positive value here is the API's share before it is anything else.\n\nThresholded symmetrically with its outbound twin. The two measure one quantity in opposite directions, so a restart that puts +46 on one puts -47 on the other; with steps on the positive side only, the pair used to render one orange and one green for the same instant.",
+          "description": "The same conservation check on the way back, in messages over the visible range.\n\nPer-side `or vector(0)`, for the reason its outbound twin gives: with the fallback on the whole expression, one side having no series at all rendered as a flawless zero.\n\nThe API also consumes step-outcome and that consumption is not instrumented, so a positive value here is the API's share before it is anything else.\n\nThresholded symmetrically with its outbound twin. The two measure one quantity in opposite directions, so a restart that puts +46 on one puts -47 on the other; with steps on the positive side only, the pair used to render one orange and one green for the same instant.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2078,7 +2078,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(increase(pipeline_messages_produced_total{type=\"step-outcome\",outcome=\"accepted\"}[$__range])) - sum(increase(pipeline_messages_consumed_total{type=\"step-outcome\",disposition=\"acked\"}[$__range])) or vector(0)",
+              "expr": "(sum(increase(pipeline_messages_produced_total{type=\"step-outcome\",outcome=\"accepted\"}[$__range])) or vector(0)) - (sum(increase(pipeline_messages_consumed_total{type=\"step-outcome\",disposition=\"acked\"}[$__range])) or vector(0))",
               "legendFormat": "",
               "range": true,
               "editorMode": "code"

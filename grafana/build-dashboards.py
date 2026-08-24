@@ -954,12 +954,26 @@ def build_flow():
     panels.append(row(lay, "2 - Since: what has already happened?"))
     panels += [
         stat(lay, "Outbound hop gap",
-             ['sum(increase(pipeline_messages_produced_total{type="process-dispatch",'
-              'outcome="accepted"}[$__range])) '
-              '- sum(increase(pipeline_messages_consumed_total{type="process-dispatch",'
-              'disposition="acked"}[$__range])) or vector(0)'],
+             ['(sum(increase(pipeline_messages_produced_total{type="process-dispatch",'
+              'outcome="accepted"}[$__range])) or vector(0)) '
+              '- (sum(increase(pipeline_messages_consumed_total{type="process-dispatch",'
+              'disposition="acked"}[$__range])) or vector(0))'],
              desc="Dispatches the orchestrator confirmed, minus acks the processors "
                   "issued, counted in MESSAGES over the visible range." + PARA +
+                  "**The `or vector(0)` is on each side, and that is load-bearing.** "
+                  "Written as `sum(A) - sum(B) or vector(0)` this panel read 0 -- green, "
+                  "the healthiest number it has -- whenever EITHER side had no series at "
+                  "all. `sum()` over an empty vector yields no sample, the subtraction "
+                  "propagates that emptiness, and the trailing fallback then substituted "
+                  "a perfect conservation for a total outage. Measured against this "
+                  "stack: with the producer selector matching nothing the old form read "
+                  "0 while the new one reads -3813; with the consumer selector matching "
+                  "nothing, 0 against +3821. An orchestrator that stops dispatching and a "
+                  "processor that stops acking are the two faults this panel exists to "
+                  "catch, and it was blind to both of them." + PARA +
+                  "Both sides absent still reads 0, and that is correct rather than "
+                  "overlooked: no traffic at all is `System flowing`'s question, not "
+                  "this one's." + PARA +
                   "Counts rather than a difference of rates, and the distinction is what "
                   "makes the panel usable. Two counters scraped independently give a rate "
                   "difference that is noise centred on zero -- measured here over an hour: "
@@ -976,12 +990,15 @@ def build_flow():
                   "Check the Workers reporting stat before believing a number here.",
              thresholds=T_GAP, decimals=0),
         stat(lay, "Return hop gap",
-             ['sum(increase(pipeline_messages_produced_total{type="step-outcome",'
-              'outcome="accepted"}[$__range])) '
-              '- sum(increase(pipeline_messages_consumed_total{type="step-outcome",'
-              'disposition="acked"}[$__range])) or vector(0)'],
+             ['(sum(increase(pipeline_messages_produced_total{type="step-outcome",'
+              'outcome="accepted"}[$__range])) or vector(0)) '
+              '- (sum(increase(pipeline_messages_consumed_total{type="step-outcome",'
+              'disposition="acked"}[$__range])) or vector(0))'],
              desc="The same conservation check on the way back, in messages over the "
                   "visible range." + PARA +
+                  "Per-side `or vector(0)`, for the reason its outbound twin gives: with "
+                  "the fallback on the whole expression, one side having no series at all "
+                  "rendered as a flawless zero." + PARA +
                   "The API also consumes step-outcome and that consumption is not "
                   "instrumented, so a positive value here is the API's share before it is "
                   "anything else." + PARA +
