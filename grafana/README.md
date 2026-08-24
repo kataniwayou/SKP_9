@@ -1438,38 +1438,40 @@ lands between the samples where a verdict stat is deviating. The sampler validat
 tier and proves a panel renders; **Prometheus is authoritative for magnitude**, and the two
 disagreeing here by three orders of magnitude is a good reminder of which answers which.
 
-### The last two shared queues are named explicitly, and that is a deliberate exception
+### The fix: the API probes what it sends to
 
 "A queue we have dispatched to is our problem" covers `orchestrator-result`, because the
 processor sends step outcomes there. It **provably cannot** cover a queue nobody else sends
-to: `orchestrator-control` is fed by the API and `orchestrator-result-post` by the
-orchestrator itself, and neither the API nor anything else runs a depth probe. Both were
-therefore watched only by the orchestrator.
+to — and `orchestrator-control` is fed by the **API**, which had no depth probe at all.
 
-So the processor's probe names them. `orchestrator-control` is the one with consequences —
-the API keeps accepting start and stop requests while the orchestrator is down and they pile
-up there. `orchestrator-result-post` is inert by comparison, since its producer and its
-consumer are both the orchestrator, and is included because it costs one passive declare and
-closes the pair.
+So the API runs one now, over the same send record. **The API is the only process that can
+see `orchestrator-control` while the orchestrator is gone**: it is the one publishing start
+and stop requests into that queue, and they pile up there with nothing to take them.
 
-The coupling is to two constants on `Messaging.Contracts` that the processor already
-references for `OrchestratorQueues.Result`. A processor watching a queue it never touches
-reads oddly; a queue whose only observer is the process that owns it reads worse.
+`QueueStatsProbe`, `QueueDepthProbe` and `QueueDepthMetrics` moved from `BaseConsole.Core`
+to `Messaging.Transport` for this — the API references the transport and not the console
+library — which also cost them their shared gating meter. They have their own,
+`Messaging.Transport.Queues`, registered by `AddBaseConsoleObservability` for the workers
+and directly by the API. **Changing the meter does not change the exported metric names**,
+so nothing on the dashboards moved.
 
 **Measured, scaling the orchestrator to zero:**
 
 | | before any of this | after |
 |---|---|---|
-| `orchestrator-control` live series | 3 → **NONE** | 5 → **2** (both processors) |
+| `orchestrator-control` live series | 3 -> **NONE** | 4 -> **1** (the API) |
 | queues observed anywhere | **1** | **4** |
-| `Queues unconsumed` | **0** — false green | **1** — correct |
+| `Queues unconsumed` | **0** -- false green | **1** -- correct |
 
-**What is still single-observer, by construction.** The per-replica fan-out queues
-`orchestrator-control.orchestrator-N` are named after a pod, so no other process can name
-one without being told; each has exactly one consumer, its own replica. They cannot be
-covered by a static list or by the send record, and a replica removed for good leaves its
-queue orphaned — which `k8s/36-orchestrator.yaml` already warns about from the other
-direction.
+An earlier attempt gave the processor a static list of orchestrator queue names. It worked
+and is gone: it coupled a processor to queues it never touches, and the API route closes the
+same gap while also giving the API a queue-side signal it never had.
+
+**Two queues remain single-observer, and both are inert.** `orchestrator-result-post` has
+the orchestrator as its only producer *and* its only consumer, so nothing accumulates there
+while the orchestrator is gone. The per-replica fan-out queues
+`orchestrator-control.orchestrator-N` are named after a pod, so nothing else can name one,
+and each has exactly one consumer by design.
 
 ## Known gap: the processor's dead-letter queue is not probed
 
