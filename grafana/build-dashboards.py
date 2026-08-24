@@ -1395,12 +1395,23 @@ def build_baseapi():
              desc="Connections accepted but not yet served. Non-zero and sustained "
                   "means the server is behind.",
              thresholds=T_WARN, decimals=0),
-        stat(lay, "DNS failures",
-             [f'sum(rate(dns_lookup_duration_seconds_count{{{f},error_type!=""}}'
-              f'[$__rate_interval])) or vector(0)'],
-             desc="Name resolution failing for postgres, redis, rabbitmq or the "
-                  "collector. A dependency signal nothing else on this board surfaces.",
-             unit="reqps", decimals=2),
+        stat(lay, "DNS failures (5m)",
+             [recent(f'dns_lookup_duration_seconds_count{{{f},error_type!=""}}',
+                     VERDICT_WINDOW)],
+             desc="Name resolution failing for redis, rabbitmq or the collector, "
+                  "**counted in the last " + VERDICT_WINDOW + "**. A dependency signal "
+                  "nothing else on this board surfaces." + PARA +
+                  "**This was a rate, and a rate could not show it.** Measured on the "
+                  "live stack: `increase(...[3h])` counted 21 resolution failures inside "
+                  "the visible range while this stat read `0.00 req/s` in green, with "
+                  "the two spikes plainly drawn on `Dependency name resolution` three "
+                  "panels below. A fault counter has to be counted -- the same lesson "
+                  "the pipeline fault stats already carried, which this one had not been "
+                  "given." + PARA +
+                  "Counted over five minutes rather than the range so the verdict tier "
+                  "goes green again when resolution recovers. The range count is the "
+                  "stat below the note panel.",
+             thresholds=T_WARN, decimals=0),
         stat(lay, "Pods reporting",
              [f'count(count by (service_instance_id) '
               f'(process_runtime_dotnet_assemblies_count{{{f}}})) or vector(0)'],
@@ -1481,6 +1492,15 @@ def build_baseapi():
                   "the API's start and stop handlers, whose host never registers the "
                   "`Messaging.Transport` meter -- so the instrument exists and emits "
                   "nothing."),
+        stat(lay, "DNS failures (range)",
+             [recent(f'dns_lookup_duration_seconds_count{{{f},error_type!=""}}')],
+             desc="Resolution failures over the visible range -- the tense the verdict "
+                  "stat deliberately does not answer." + PARA +
+                  "Sits beside `Dependency name resolution` because that panel says WHEN "
+                  "and WHICH host, and this one says how many. `host_not_found` is a "
+                  "missing service object; `try_again` is a resolver timeout. Different "
+                  "faults, different remedies.",
+             thresholds=T_WARN, decimals=0, h=8),
     ]
 
     rt = row(lay, "3 - Runtime: is the process why?", collapsed=True)
