@@ -408,6 +408,43 @@ what a restart inside the range does to them.
 > - **`Workers reporting` and `Workers missing (5m)` still show it** and are still the fastest
 >   signal.
 
+**S9, the wedged replica -- the fault the suite could not inject, and what it actually showed.**
+
+> Every other scenario removes something entirely. This one keeps the replica: process running,
+> HTTP answering, metrics arriving, every liveness window passed -- and its AMQP connection closed
+> and re-closed every 5s for a 60s window, so only its consumer is disturbed. The lever is
+> `rabbitmqctl close_connection`, which takes the **Erlang PID, not the connection name**, and
+> targets one replica because each holds exactly one connection reported under its pod IP.
+> `SIGSTOP` remains the wrong tool for this and is recorded as such below.
+>
+> **The fault was real and it was precisely aimed.** `pipeline_consumer_channel_resets_total` went
+> 1 -> 10 on the targeted replica across +195s..+255s, on both its channels, while the peer stayed
+> at 1 and was never touched. The exact `peer_host` match is what bought that: pod IPs share
+> prefixes here (`10.244.0.20` is a prefix of `10.244.0.205`), and a substring match would have
+> disconnected every replica, which is the broker-gone scenario.
+>
+> **Zero steps lost**, which was the standing obligation and is the least interesting part.
+>
+> **`Consuming by queue and replica` stayed at 1 throughout -- and that is correct, not a miss.**
+> Queried raw at a 5s step across the whole fault window, the targeted replica **never exported a
+> single `consuming=0` sample**. The client's automatic recovery re-established the consumer inside
+> one 10s export interval, every time. There was nothing for the panel to draw. A panel cannot show
+> a gap that never reached the exporter, and no liveness window would have helped: the metric never
+> carried the fault at all.
+>
+> So this did **not** produce a wedge. It produced a *flapping* consumer, and the stack absorbed it
+> completely. That is a genuine resilience result -- repeated connection kills over a minute cost
+> nothing measurable -- and it is worth more than a panel change would have been. **A true wedge --
+> a consumer that stays stopped while its process reports healthy -- still has not been produced on
+> this stack**, because nothing here can stop a consumer without the client putting it back.
+>
+> **What did resolve it per replica is drawn in a form that cannot resolve a replica.** Channel
+> resets caught this fault and named the right replica -- but the board draws it only as
+> `sum(...)` on the verdict stat and `sum by (queue,reason)` on the timeseries. Both processor
+> replicas share one queue, so the timeseries collapses across them exactly as `Consuming by queue`
+> did before it was split. The same one-parameter fix applies, and unlike last time it is now
+> indicated by a fault rather than by inspection.
+
 **A Grafana legend is not evidence that a line is still being drawn.**
 
 > The first reading above -- "the panel kept drawing the departed replica for the rest of the
