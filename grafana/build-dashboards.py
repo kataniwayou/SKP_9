@@ -126,6 +126,26 @@ FLOW_WINDOW = "4m"
 FLOW_LOW = 0.9
 FLOW_HIGH = 2.0
 
+# Queue depth in messages. DEPLOYMENT-SPECIFIC, like the flow band, and measured rather than
+# chosen: over a clean four-minute window every orchestrator queue held a flat 0, while the
+# processor work queue ran mean 0.65 with a max of 3. That burst is structural rather than noise --
+# a cron fire dispatches a batch, PrefetchCount is 1, and two replicas drain it one message at a
+# time -- so the green band has to clear it.
+#
+# Green below 5, which is above the measured healthy max with headroom. Orange to 20. Red beyond,
+# which at this workload's ~0.4 dispatches/s is roughly a minute of nothing being consumed.
+#
+# NOTE WHAT THIS IS AND IS NOT FOR. Depth is the DEGRADATION signal -- a consumer slower than its
+# producer, which nothing else here can see. It is a poor outage signal, and deliberately not tuned
+# to be one: with the processor deployment scaled to zero the queue reached only 4 in ninety
+# seconds, because a stalled pipeline stops feeding itself. `Queues unconsumed` beside it is the
+# sharp signal for a total stop, and it moves within one liveness window.
+DEPTH_ORANGE = 5
+DEPTH_RED = 20
+T_DEPTH = [{"color": "green", "value": None},
+           {"color": "orange", "value": DEPTH_ORANGE},
+           {"color": "red", "value": DEPTH_RED}]
+
 # Live reporters expected on this deployment: 3 orchestrator replicas + 2 processor
 # replicas. DEPLOYMENT-SPECIFIC, like the band above, and re-derive it anywhere else.
 #
@@ -1171,6 +1191,76 @@ def causes_row(layout, f, w=12):
     ]
 
 
+def depth_panels(layout, queue_filter, who):
+    """Queue depth and attached consumers, filtered BY QUEUE rather than by service.
+
+    Every other panel on the worker boards scopes itself with `service_name`, and that is exactly
+    wrong here. On these two instruments `service_name` labels the process doing the PROBING, not
+    the queue's owner -- and the whole point of the design is that the orchestrator probes the
+    processor's work queues, because a probe cannot report the consequence of its own host being
+    gone. Filtering the processor board by its own service_name would show only what the processor
+    itself reported, which is stale-held at the moment the panel matters.
+
+    So the filter is the queue name, and the panels read the same on either board.
+    """
+    return [
+        timeseries(layout, "Queue depth by queue",
+                   [(f'max by (queue) ({live(f"pipeline_queue_depth{{{queue_filter}}}")})',
+                     "{{queue}}")],
+                   desc="Messages waiting in each of " + who + ", right now." + PARA +
+                        "**The only leading indicator on these boards.** Every verdict stat is "
+                        "coincident or lagging -- consuming drops once a consumer has already "
+                        "stopped, and a departed replica costs a liveness window plus an export, "
+                        "measured at 52-66s. A queue starts filling the moment a consumer is merely "
+                        "SLOWER than its producer, which is the shape of most real degradations and "
+                        "which nothing here could previously see." + PARA +
+                        "**It is also what separates a queued message from a lost one.** The hop "
+                        "gaps are a conservation check, so a message sitting in a queue and a "
+                        "message that vanished are the same number to them. A gap roughly equal to "
+                        "the depth here is backlog; a gap far exceeding it is loss." + PARA +
+                        "Healthy on this stack is **0 on every orchestrator queue** and **mean 0.65, "
+                        "max 3** on the processor work queue -- that burst is structural, not noise: "
+                        "a cron fire dispatches a batch, PrefetchCount is 1, and the replicas drain "
+                        "it one message at a time. The reference line is at " + str(DEPTH_ORANGE) +
+                        ", above that measured maximum." + PARA +
+                        "`max by (queue)` because every replica probes the same queue and reports "
+                        "the same number -- a depth is a property of the broker, not of the replica "
+                        "asking -- so `sum` would multiply it by the replica count. Wrapped in "
+                        "`last_over_time(...[" + LIVENESS + "])` so a departed reporter's held "
+                        "sample cannot win the max.",
+                   thresholds=[{"color": "green", "value": None},
+                               {"color": "orange", "value": DEPTH_ORANGE}],
+                   unit="short", minv=0, decimals=0, fill=15,
+                   no_value="no queue depth reported -- nothing is probing these queues"),
+        timeseries(layout, "Consumers attached by queue",
+                   [(f'max by (queue) ({live(f"pipeline_queue_consumers{{{queue_filter}}}")})',
+                     "{{queue}}")],
+                   desc="How many consumers **the broker** has on each queue. Zero means nothing "
+                        "is listening." + PARA +
+                        "**This is the only broker-side signal on these boards.** "
+                        "`pipeline.consumer.consuming` is the process asserting its own health, "
+                        "which is why every panel reading it wraps it in a liveness window -- a "
+                        "dead replica's copy was held at 1 by the collector. This number comes from "
+                        "the broker's own reply and is 0 the moment a consumer detaches." + PARA +
+                        "**The liveness wrap is still load-bearing here, and it was measured.** "
+                        "Unwrapped, `max by (queue)` read a confident 2 against the broker's 0 for "
+                        "a whole processor outage, because it picked the departed pods' stale "
+                        "series over the orchestrator's fresh 0. Wrapped, it reads 0 within one "
+                        "liveness window." + PARA +
+                        "Expect 3 on the shared orchestrator queues (one per replica), 1 on each "
+                        "per-replica control queue, and 2 on the processor work queue. A count that "
+                        "drops without `Workers reporting` moving is a consumer that detached while "
+                        "its process stayed up." + PARA +
+                        "Not a complete answer: a consumer that reattaches inside one 10s probe "
+                        "interval -- which is what the S9 flapping-connection scenario produced -- "
+                        "is invisible here.",
+                   thresholds=[{"color": "red", "value": None},
+                               {"color": "green", "value": 1}],
+                   unit="short", minv=0, decimals=0, fill=0,
+                   no_value="no consumer count reported -- nothing is probing these queues"),
+    ]
+
+
 def runtime_row(layout, f):
     """The two runtime panels that genuinely answer 'is the process why'.
 
@@ -1300,6 +1390,37 @@ def build_flow():
                   "colour is what a reader scans first meant the panel that answers *do "
                   "the workers still exist* rendered the same grey at 5 and at 0.",
              thresholds=T_WORKERS, decimals=0),
+        stat(lay, "Deepest queue",
+             [f'max({live("pipeline_queue_depth")})'],
+             desc="The fullest queue anywhere in the deployment, in messages." + PARA +
+                  "**The one leading indicator in this row.** Everything else here reports a "
+                  "state that has already changed; this one moves while a consumer is merely "
+                  "slower than its producer, before any posture stat has anything to say." + PARA +
+                  "Green below " + str(DEPTH_ORANGE) + ", which clears the measured healthy "
+                  "maximum: every orchestrator queue holds a flat 0 and the processor work queue "
+                  "bursts to 3, because a cron fire dispatches a batch against a prefetch of 1. "
+                  "Red at " + str(DEPTH_RED) + ", roughly a minute of nothing being consumed at "
+                  "this workload's dispatch rate." + PARA +
+                  "**A poor outage signal, deliberately.** With the processor deployment scaled to "
+                  "zero this reached only 4 in ninety seconds, because a stalled pipeline stops "
+                  "feeding itself. `Queues unconsumed` beside it is the sharp signal for a total "
+                  "stop. Read this one for degradation, that one for absence." + PARA +
+                  "No `or vector(0)`: nothing probing and nothing queued are different facts, and "
+                  "a fallback would paint both green.",
+             thresholds=T_DEPTH, decimals=0,
+             no_value="no queue depth reported"),
+        stat(lay, "Queues unconsumed",
+             [f'count({live("pipeline_queue_consumers")} == 0) or vector(0)'],
+             desc="How many queues the **broker** currently has no consumer on. Should be 0." + PARA +
+                  "**The fastest signal on this board for a consumer that has gone away**, and the "
+                  "only one that does not depend on a process reporting on itself. "
+                  "`pipeline.consumer.consuming` is the process's own assertion; this is the "
+                  "broker's. Measured against a processor outage it reached 1 within one liveness "
+                  "window, while depth was still reading 1." + PARA +
+                  "It does not name the queue -- `Consumers attached by queue` on the worker boards "
+                  "does. And it cannot see a consumer that reattaches inside the 10s probe "
+                  "interval, which is what the S9 flapping-connection scenario produced.",
+             thresholds=T_WARN, decimals=0),
         stat(lay, "Data freshness",
              ['time() - min(max by (service_name) '
               '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
@@ -1539,6 +1660,7 @@ def build_flow():
                         "one row here that can legitimately exceed 1. Two is a split "
                         "brain; the colour will not tell you so, the tooltip will.",
                    mappings=M_POSTURE),
+        *depth_panels(lay, '', 'every queue in the deployment'),
         table(lay, "Message flow matrix",
               [('sum by (type) (rate(pipeline_messages_produced_total'
                 '[$__rate_interval]))', "produced"),
@@ -1893,6 +2015,7 @@ def build_orchestrator():
                         "across a leadership change. It is not a replica selector -- "
                         "service_instance_id is.",
                    unit="reqps"),
+        *depth_panels(lay, 'queue=~"orchestrator-.*"', "the orchestrator's queues"),
         textpanel(lay, "What the Role filter reaches",
                   "`role` is an attribute on **three instruments only**: "
                   "`pipeline.messages.produced`, `pipeline.messages.consumed` and "
@@ -2049,6 +2172,7 @@ def build_processor():
         # is retained for exactly that, and is the cheaper way to carry a condition that
         # has not happened yet. Restore this panel when the stat first moves and there is
         # a rate worth plotting.
+        *depth_panels(lay, 'queue=~"processor-$processorId"', "this processor's work queue"),
         timeseries(lay, "Replica fan-out",
                    [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
                      f'{{{f},disposition="acked"}}[$__rate_interval])) '
