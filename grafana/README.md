@@ -1355,6 +1355,47 @@ and any produced-vs-consumed comparison crossing into the API will not balance. 
 deliberate and stated on a text panel on `skp-baseapi.json` rather than left as an empty
 graph.
 
+## Known gap: the orchestrator's queues are unobserved while the orchestrator is gone
+
+The co-location blind spot, third instance. A queue is measured by the process that probes
+it, and the orchestrator is the only process probing `orchestrator-control`,
+`orchestrator-result` and `orchestrator-result-post` — so when it is scaled to zero, those
+queues stop being observed by anything.
+
+**Measured, with broker truth beside the instrument every 15s.** The orchestrator was
+absent for ~64 seconds:
+
+| time | broker `orchestrator-result` | live series | queues observed | `Queues unconsumed` |
+|---|---|---|---|---|
+| 19:34:18 | cons=3 | 3 | 7 | 0 |
+| 19:34:34 | **cons=0** | 3 | 7 | 0 |
+| 19:34:51 | **cons=0** | 3 | 7 | 0 |
+| 19:35:07 | **cons=0** | **NONE** | **1** | 0 |
+| 19:35:23 | **cons=0** | **NONE** | **1** | 0 |
+| 19:35:39 | cons=3 | 3 | 7 | **5** |
+
+Two distinct failures in one window. First the stale-held pair — the broker says nothing is
+listening while the instrument still reports 3, for the two samples it takes the liveness
+window to expire. Then the blind pair: the series drop out entirely, **`queues observed`
+falls from 7 to 1**, and `Queues unconsumed` reads a confident **0** — not because nothing
+is wrong but because six of the seven queues are no longer being watched at all. The stat
+cannot tell "no queues unconsumed" from "six queues unobservable".
+
+The `5` on the last row is real and is the panel working: the replacement replicas were
+reporting before their consumers had reattached.
+
+**The fix is not yet made, because there is a genuine fork.** The processor already sends
+step outcomes to `OrchestratorQueues.Result`, so recording sends in `DispatchedQueues` on
+the processor side would cover the queue that matters most — but not `orchestrator-control`
+or `-result-post`, which only the orchestrator ever sends to. Covering those means either
+giving the processor a static list of orchestrator queue names, which couples it to another
+role's topology, or recording every send inside `QueueSender` itself, which is automatic
+and complete but would also probe the exclusive per-replica reply queues and, since
+`DispatchedQueues` never forgets, keep warning about them after they are deleted.
+
+Until it is closed, read `Workers reporting` and `Data freshness` for an orchestrator
+outage. Both moved correctly throughout this window.
+
 ## Known gap: the processor's dead-letter queue is not probed
 
 `ProcessorQueues.Dead()` declares a `processor-{id}.dead` queue, but
