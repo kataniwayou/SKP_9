@@ -99,6 +99,13 @@ T_POSTURE = [{"color": "red", "value": None}, {"color": "green", "value": 1}]
 T_EXACTLY_ONE = [{"color": "red", "value": None},
                  {"color": "green", "value": 1},
                  {"color": "red", "value": 2}]
+# No colour at all. Correct ONLY for a number with no failure value -- `In-flight` is
+# healthy at 0 and healthy at 40, and inventing a step would be inventing a fact.
+#
+# It is NOT correct for a presence count, and it was being used as one. On a row titled
+# "is it broken?" the colour IS the signal: it is what a reader scans before reading any
+# digits. `Workers reporting` and `Pods reporting` both carried this, which meant the two
+# panels that answer "do the processes still exist" could not go red when they did not.
 T_NEUTRAL = [{"color": "text", "value": None}]
 
 # ---------------------------------------------------------------------------
@@ -118,6 +125,21 @@ T_NEUTRAL = [{"color": "text", "value": None}]
 FLOW_WINDOW = "4m"
 FLOW_LOW = 0.9
 FLOW_HIGH = 2.0
+
+# Live reporters expected on this deployment: 3 orchestrator replicas + 2 processor
+# replicas. DEPLOYMENT-SPECIFIC, like the band above, and re-derive it anywhere else.
+#
+# Adding it is a deliberate trade and worth stating. `Workers reporting` was built to
+# need no such number -- it reports how many are live, and `Workers missing (5m)` names
+# how many left, neither of which requires knowing how many there ought to be. But a
+# stat's colour follows its value, so a count-free expression cannot produce a colour;
+# it read grey at 5 and would have read grey at 0.
+#
+# The count-free detection is unchanged and still lives on `Workers missing (5m)`. This
+# constant buys the colour only. It fails conservatively: a deployment with more workers
+# than this reads green (the expectation is a floor), and one with fewer reads orange --
+# a false warning rather than a false all-clear.
+EXPECTED_WORKERS = 5
 
 # WHY THE WINDOW IS PINNED RATHER THAN $__rate_interval, which every other rate panel uses.
 # Traffic here is bursty -- one cron fire every 30s -- and a 60s window cannot smooth that.
@@ -179,6 +201,14 @@ T_REDONE = [{"color": "green", "value": None},
 T_STALE = [{"color": "green", "value": None},
            {"color": "orange", "value": 45},
            {"color": "red", "value": 90}]
+# Live reporters. Nothing reporting is red; some but not all is orange; the full set is
+# green. See EXPECTED_WORKERS for why a presence count needs an expectation at all.
+T_WORKERS = [{"color": "red", "value": None},
+             {"color": "orange", "value": 1},
+             {"color": "green", "value": EXPECTED_WORKERS}]
+# Presence with no expected count: absent is red, present is green. Enough for a single
+# Deployment, and it needs no deployment-specific constant.
+T_PRESENT = [{"color": "red", "value": None}, {"color": "green", "value": 1}]
 
 # ---------------------------------------------------------------------------
 # reading a stale-held gauge, and counting a fault that is rare
@@ -1038,8 +1068,18 @@ def build_flow():
                   "Measured: with all three orchestrator replicas deleted for 58 seconds "
                   "the old expression read a steady 5, and while two of five workers were "
                   "being deleted it read 7 -- the dead counted alongside their "
-                  "replacements.",
-             thresholds=T_NEUTRAL, decimals=0),
+                  "replacements." + PARA +
+                  "**Green is " + str(EXPECTED_WORKERS) + " on this deployment**, orange "
+                  "below it, red at nothing reporting at all. That number is "
+                  "deployment-specific and is the one thing here that has to be "
+                  "re-derived elsewhere -- the count itself does not, and neither does "
+                  "`Workers missing (5m)` beside it, which names how many left without "
+                  "being told how many there ought to be. The expectation buys the "
+                  "colour and nothing else." + PARA +
+                  "This stat had no thresholds at all until now, which on a row where "
+                  "colour is what a reader scans first meant the panel that answers *do "
+                  "the workers still exist* rendered the same grey at 5 and at 0.",
+             thresholds=T_WORKERS, decimals=0),
         stat(lay, "Data freshness",
              ['time() - min(max by (service_name) '
               '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
@@ -1342,6 +1382,13 @@ def build_baseapi():
              no_value="no requests in range"),
         stat(lay, "In-flight",
              [f'sum(http_server_active_requests{{{f}}}) or vector(0)'],
+             desc="Requests currently being served." + PARA +
+                  "**Deliberately uncoloured, unlike the presence stats beside it.** "
+                  "This number is healthy at 0 and healthy at 40; where it stops being "
+                  "healthy depends on a concurrency budget nobody has measured here, and "
+                  "a threshold picked without one would be a guess wearing a colour. "
+                  "`Kestrel queued` beside it is the panel with a real failure value -- "
+                  "anything sustained above zero means the server is behind.",
              thresholds=T_NEUTRAL, decimals=0),
         stat(lay, "Kestrel queued",
              [f'sum(kestrel_queued_connections{{{f}}}) or vector(0)'],
@@ -1357,7 +1404,14 @@ def build_baseapi():
         stat(lay, "Pods reporting",
              [f'count(count by (service_instance_id) '
               f'(process_runtime_dotnet_assemblies_count{{{f}}})) or vector(0)'],
-             thresholds=T_NEUTRAL, decimals=0),
+             desc="API replicas exporting runtime metrics. Red at zero." + PARA +
+                  "No expected count, unlike `Workers reporting` on SKP Flow: this is a "
+                  "single Deployment, and absent-versus-present is the whole question. "
+                  "Scaled beyond one replica this cannot tell you that one of three is "
+                  "gone -- it would need a constant to do that, and the honest fix then "
+                  "is to add one rather than to read this panel as though it already "
+                  "had.",
+             thresholds=T_PRESENT, decimals=0),
     ]
 
     panels.append(row(lay, "2 - Ingress: what is broken?"))

@@ -310,7 +310,7 @@
       "id": 5,
       "type": "stat",
       "title": "Workers reporting",
-      "description": "Orchestrator replicas plus processor replicas that have exported inside the last 40s.\n\n**Counts live reporters, not series.** The collector republishes a series after the process feeding it is gone, and Prometheus holds it for another five minutes, so the obvious count() counts the dead. Measured: with all three orchestrator replicas deleted for 58 seconds the old expression read a steady 5, and while two of five workers were being deleted it read 7 -- the dead counted alongside their replacements.",
+      "description": "Orchestrator replicas plus processor replicas that have exported inside the last 40s.\n\n**Counts live reporters, not series.** The collector republishes a series after the process feeding it is gone, and Prometheus holds it for another five minutes, so the obvious count() counts the dead. Measured: with all three orchestrator replicas deleted for 58 seconds the old expression read a steady 5, and while two of five workers were being deleted it read 7 -- the dead counted alongside their replacements.\n\n**Green is 5 on this deployment**, orange below it, red at nothing reporting at all. That number is deployment-specific and is the one thing here that has to be re-derived elsewhere -- the count itself does not, and neither does `Workers missing (5m)` beside it, which names how many left without being told how many there ought to be. The expectation buys the colour and nothing else.\n\nThis stat had no thresholds at all until now, which on a row where colour is what a reader scans first meant the panel that answers *do the workers still exist* rendered the same grey at 5 and at 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -360,8 +360,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "text",
+                "color": "red",
                 "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 5
               }
             ]
           }

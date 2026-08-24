@@ -274,7 +274,7 @@
       "id": 25,
       "type": "stat",
       "title": "In-flight",
-      "description": "",
+      "description": "Requests currently being served.\n\n**Deliberately uncoloured, unlike the presence stats beside it.** This number is healthy at 0 and healthy at 40; where it stops being healthy depends on a concurrency budget nobody has measured here, and a threshold picked without one would be a guess wearing a colour. `Kestrel queued` beside it is the panel with a real failure value -- anything sustained above zero means the server is behind.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -471,7 +471,7 @@
       "id": 28,
       "type": "stat",
       "title": "Pods reporting",
-      "description": "",
+      "description": "API replicas exporting runtime metrics. Red at zero.\n\nNo expected count, unlike `Workers reporting` on SKP Flow: this is a single Deployment, and absent-versus-present is the whole question. Scaled beyond one replica this cannot tell you that one of three is gone -- it would need a constant to do that, and the honest fix then is to add one rather than to read this panel as though it already had.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -521,8 +521,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "text",
+                "color": "red",
                 "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
               }
             ]
           }
