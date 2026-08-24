@@ -1025,6 +1025,74 @@
     },
     {
       "id": 57,
+      "type": "stat",
+      "title": "Dead-lettered",
+      "description": "Work this service refused that **nobody has dealt with**. Should be 0. Anything else is a run that lost progress permanently and is still sitting in a queue with no consumer.\n\n**This is the drill-down target for `Dead-lettered` on SKP Flow.** That stat existed only there: an operator who saw it non-zero and clicked through to a worker board found no dead-letter panel at all, and the only evidence was a `parked` series inside a five-series timeseries at a value indistinguishable from zero. The queue-by-queue breakdown is on the pipeline tier below.\n\n`max by (queue)` before the sum is load-bearing: every replica probes the same queues and reports the same depth, because a queue depth is a property of the broker rather than of the replica asking.\n\n**No `or vector(0)` here, deliberately.** Nothing reporting is not the same fact as nothing dead-lettered, and a fallback to 0 would render the two identically in green -- which is exactly the defect the hop-gap stats were carrying. On the processor board this reads as text rather than as a reassuring zero, because that deployment has a dead-letter queue and no probe measuring it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(max by (queue) (last_over_time(pipeline_deadletter_depth{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[2m])))",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "not probed"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 58,
       "type": "row",
       "title": "3 - Pipeline: what is broken?",
       "collapsed": false,
@@ -1037,7 +1105,7 @@
       "panels": []
     },
     {
-      "id": 58,
+      "id": 59,
       "type": "timeseries",
       "title": "Produced by type and outcome",
       "description": "Egress. outcome != accepted is a fault.",
@@ -1124,7 +1192,7 @@
       }
     },
     {
-      "id": 59,
+      "id": 60,
       "type": "timeseries",
       "title": "Consumed by type and disposition",
       "description": "Ingress. Exactly one increment per delivery, on every exit path of the consumer.",
@@ -1211,7 +1279,7 @@
       }
     },
     {
-      "id": 60,
+      "id": 61,
       "type": "timeseries",
       "title": "Produce duration p95 / p99",
       "description": "A real broker round-trip to publisher confirmation, not the time to write a frame.\n\nThe mean rides alongside the quantiles deliberately. It comes from sum/count and so is independent of bucket boundaries -- if it ever diverges wildly from p50, the ladder has stopped fitting the data. That is exactly how the millisecond-ladder defect was caught: p95 read 4.9s while the mean read 15ms.\n\n**The line at 50ms is where measured-normal ends**: steady p95 runs 20-35ms on this stack. Above it is a broker taking longer than it has been, which is worth noticing well before anything trips.",
@@ -1324,7 +1392,7 @@
       }
     },
     {
-      "id": 61,
+      "id": 62,
       "type": "timeseries",
       "title": "Consumer inflight by queue",
       "description": "Deliveries inside a handler. PrefetchCount is 1, so a sustained 1 is saturation -- the threshold line marks it.",
@@ -1416,7 +1484,7 @@
       }
     },
     {
-      "id": 62,
+      "id": 63,
       "type": "timeseries",
       "title": "Store probe latency p95 / p99",
       "description": "How long the projection store takes to answer the gate probe. **This is the only panel that can show a store that is slow rather than absent.**\n\nThe gate beside it answers *did the store reply inside the timeout*, which is a yes/no, and a yes/no cannot show degradation. Measured before this instrument existed: Redis made 685x slower for the processor -- 0.44ms to 301ms, verified with `redis-cli --latency` -- moved nothing on any board, because a store a thousand times slower and still inside a 2s budget is, to a yes/no, healthy. Past the budget it read as a full outage. Two states, working and gone, with nothing in between.\n\nHealthy on this stack is **mean ~0.9ms, p95 ~2ms**. A jump to tens or hundreds of milliseconds is a degraded store that will not trip the gate and will not lose you a step -- yet.\n\n**Timeouts are excluded on purpose** (`outcome=\"healthy\"`). A timed-out probe records the ceiling rather than its true duration, because the ping is abandoned rather than cancelled and how long it would have taken is unknowable. Including them would pin p99 at exactly the probe timeout and invite you to believe it. Those show up on `L2 gate` and `Gate trips` instead.\n\nThe mean rides alongside the quantiles for the reason the produce-duration panel gives: it comes from sum/count and is independent of bucket boundaries, so a wild divergence from p50 means the ladder has stopped fitting the data.\n\n**The line at 5ms is where measured-normal ends**, not an alarm: steady p95 is ~2ms with jitter to 6ms, so a p95 riding above the line is a store getting slower rather than a store that has failed. Nothing here fails at a single number -- the line exists so you can see whether this is the normal value without already knowing what the normal value is.",
@@ -1529,7 +1597,7 @@
       }
     },
     {
-      "id": 63,
+      "id": 64,
       "type": "timeseries",
       "title": "Channel resets by reason",
       "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.\n\nAggregated by queue on this board because each queue has one consumer, so the queue already names the replica. The processor board splits this per replica, where they share one queue.",
@@ -1617,7 +1685,100 @@
       }
     },
     {
-      "id": 64,
+      "id": 65,
+      "type": "timeseries",
+      "title": "Dead-letter depth by queue",
+      "description": "How many refused messages are sitting in each dead-letter queue, right now. Should be flat at zero; a step up is a workflow run that lost progress permanently.\n\n**The only panel here that reports a LEVEL rather than an event.** Every fault counter beside it rises, stays visible for a window, and scrolls away. This keeps reporting for as long as the message is still there -- which is how six parked step outcomes sat in `orchestrator-result.dead` across four incidents over two days with every board green.\n\n**On the processor board this is empty, and that is a finding rather than a rendering fault.** `ProcessorQueues.Dead()` declares a `processor-{id}.dead` queue, but `DeadLetterDepthProbe` is registered in `OrchestratorHost` only -- so the processor's dead-letter queue exists and nothing measures its depth. The panel is left on both boards, saying so, because an unmeasured queue an operator can name is worth more than a panel that quietly is not there.\n\nThe window is 2m rather than the 40s used elsewhere: the probe runs every 30s by design, so a liveness-width window would flap on the probe's own cadence rather than on anything real.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (queue) (last_over_time(pipeline_deadletter_depth{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[2m]))",
+          "legendFormat": "{{queue}}",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 25,
+            "gradientMode": "opacity",
+            "spanNulls": false,
+            "showPoints": "never",
+            "pointSize": 4,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "min": 0,
+          "noValue": "no dead-letter depth reported by this service -- see the panel description before reading this as zero"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 66,
       "type": "state-timeline",
       "title": "Consuming by queue",
       "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nAggregated by queue on this board because each queue has one consumer. The processor board splits this per replica, where every replica shares one queue.\n\nA row that ENDS is a replica that left; a row that turns red is one that is present and not consuming.\n\n**Drawn as a state timeline rather than as lines, and that is what makes it readable at all.** Every series sits at exactly 1 in health, so on a shared numeric axis they overlap into one line and only the last drawn is visible -- five orchestrator queues rendered as a single flat line across a three-hour range. One row per series is one answer per series.",
@@ -1628,7 +1789,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
+        "x": 8,
         "y": 27
       },
       "targets": [
@@ -1708,7 +1869,7 @@
       }
     },
     {
-      "id": 65,
+      "id": 67,
       "type": "state-timeline",
       "title": "Leader by replica",
       "description": "Which replica holds the lease, and when it changed hands. Explains why cron fires land on one replica; only cron fires are fenced by leadership.\n\n**One row per replica, because as overlaid lines this panel could not answer its own title.** Three replicas at 0/1 on one axis drew a single filled band with slivers in it -- the handovers were visible, whose they were was not.",
@@ -1719,7 +1880,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
+        "x": 16,
         "y": 27
       },
       "targets": [
@@ -1799,7 +1960,7 @@
       }
     },
     {
-      "id": 66,
+      "id": 68,
       "type": "state-timeline",
       "title": "Hydration admitted by replica",
       "description": "One-shot readiness per replica. A row that never turns green is a replica whose first hydration pass has not finished; a row that ends is a replica that left.",
@@ -1810,8 +1971,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 27
+        "x": 0,
+        "y": 35
       },
       "targets": [
         {
@@ -1890,7 +2051,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 69,
       "type": "timeseries",
       "title": "Dispatch by destination",
       "description": "Per-processor fan-out from this side of the hop.",
@@ -1901,7 +2062,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
+        "x": 8,
         "y": 35
       },
       "targets": [
@@ -1977,7 +2138,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 70,
       "type": "timeseries",
       "title": "Consumed by role",
       "description": "The role attribute records what this replica was AT THE TIME it handled the delivery, so a replica carries both values across a leadership change. It is not a replica selector -- service_instance_id is.",
@@ -1988,7 +2149,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
+        "x": 16,
         "y": 35
       },
       "targets": [
@@ -2064,14 +2225,14 @@
       }
     },
     {
-      "id": 69,
+      "id": 71,
       "type": "text",
       "title": "What the Role filter reaches",
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 35
+        "x": 0,
+        "y": 43
       },
       "options": {
         "mode": "markdown",
@@ -2080,7 +2241,7 @@
       "transparent": false
     },
     {
-      "id": 70,
+      "id": 72,
       "type": "row",
       "title": "4 - Runtime: is the process why?",
       "collapsed": true,
@@ -2088,11 +2249,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "panels": [
         {
-          "id": 71,
+          "id": 73,
           "type": "timeseries",
           "title": "Thread-pool queue length",
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
@@ -2104,7 +2265,7 @@
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 44
+            "y": 52
           },
           "targets": [
             {
@@ -2179,7 +2340,7 @@
           }
         },
         {
-          "id": 72,
+          "id": 74,
           "type": "timeseries",
           "title": "GC pause time",
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",
@@ -2191,7 +2352,7 @@
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 44
+            "y": 52
           },
           "targets": [
             {
@@ -2266,7 +2427,7 @@
           }
         },
         {
-          "id": 73,
+          "id": 75,
           "type": "timeseries",
           "title": "Exception rate",
           "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes.",
@@ -2278,7 +2439,7 @@
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 44
+            "y": 52
           },
           "targets": [
             {
@@ -2353,7 +2514,7 @@
           }
         },
         {
-          "id": 74,
+          "id": 76,
           "type": "timeseries",
           "title": "Process restarts",
           "description": "A monotonic counter going backwards means the process is new. The one signal that explains a simultaneous gap in every other series.",
@@ -2365,7 +2526,7 @@
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 44
+            "y": 52
           },
           "targets": [
             {
