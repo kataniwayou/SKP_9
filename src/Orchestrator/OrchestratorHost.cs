@@ -19,6 +19,7 @@ using Orchestrator.Messaging;
 using Orchestrator.Observability;
 using Orchestrator.Scheduling;
 using Quartz;
+using Microsoft.Extensions.Logging;
 
 namespace Orchestrator;
 
@@ -200,6 +201,28 @@ public static class OrchestratorHost
         {
             builder.Services.AddHostedService<LeaderElectionService>();
         }
+
+        // How much work this replica's queues have refused and nobody has dealt with. The three
+        // dead-letter queues are named explicitly rather than derived from the live queue names,
+        // because they are constants on the same contract that declares them -- deriving "<queue>
+        // .dead" would be a second, unenforced copy of a convention that already exists in one place.
+        //
+        // Every replica reports the same three queues, and their values agree because a queue depth
+        // is a property of the broker rather than of the replica asking. That redundancy is wanted:
+        // the number survives any one replica going away, and a board reads it with min() or max()
+        // rather than sum(), which would multiply the depth by the replica count.
+        builder.Services.AddHostedService(sp => new DeadLetterDepthProbe(
+            sp.GetRequiredService<RabbitMqConnection>(),
+            [
+                OrchestratorQueues.ResultDead,
+                OrchestratorQueues.ResultPostDead,
+                OrchestratorQueues.ControlDead,
+            ],
+            // Slower than any pipeline loop on purpose. A dead-letter queue changes only when
+            // something is refused, which is rare and never urgent to the second -- what matters is
+            // that the number is still there tomorrow, not that it arrived within a scrape.
+            TimeSpan.FromSeconds(30),
+            sp.GetRequiredService<ILogger<DeadLetterDepthProbe>>()));
 
         // Loop 2 and its admission latch. The position of the next two lines is the point of them
         // being here at all: AddBaseConsoleGating below TryAdds AlwaysOpenAdmission as the default
