@@ -213,8 +213,71 @@ def live(series):
     return f"last_over_time({series}[{LIVENESS}])"
 
 
+# The verdict tier answers "is it broken RIGHT NOW". This is the window it asks over.
+# Five minutes rather than the range, for the reason `Workers missing (5m)` uses a fixed
+# window: a verdict stat whose meaning changes when the reader zooms is not a verdict.
+VERDICT_WINDOW = "5m"
+
+
+def recent(series, window="$__range"):
+    """A fault counter read as growth over a window -- correct at series birth AND
+    correct across a process restart, and NOT sticky for the life of the process.
+
+    Supersedes `counted()`, which is kept below only because the alert rules in
+    k8s/02-configmaps.yaml still carry that shape and this file is the place the
+    difference is written down.
+
+    Two things break a naive count of a rare fault, and this form is the smallest one
+    that survives both:
+
+    - **Series birth.** These counters have no series at all in health -- the .NET
+      counter is created on first increment -- so the first ever fault arrives as a
+      series whose very first exported sample is already non-zero. `increase()` measures
+      growth WITHIN the window and reports 0 for exactly that case, which is the case a
+      verdict tier exists to catch. The `born` term covers it: nothing at the offset is
+      `vector(0)`, so the whole of the current value is counted as growth.
+
+    - **Counter reset.** A replica restarts, the counter returns to zero, and a plain
+      now-minus-then subtraction goes negative. The `grew` term covers it, because
+      `increase()` is reset-aware. Taking the larger of the two keeps whichever term is
+      the one telling the truth.
+
+    WHY THIS REPLACES `counted()`. That helper took the larger of in-window growth and
+    `max_over_time`, and `max_over_time` of a monotonic counter IS its current value --
+    the total since the process started, not since the window began. So it did not
+    report a count over the range at all; it reported a lifetime total that happened to
+    equal the range count only when the process was younger than the range. Every
+    description saying "counted over the visible range" was therefore describing
+    something the expression did not compute.
+
+    Measured on this stack, orchestrator channel resets over a 3h range:
+
+        counted()          63     <- the process lifetime total
+        recent("3h")       54.2   <- what actually happened in the visible 3 hours
+        recent("5m")        0     <- what is happening now
+
+    And it made the verdict tier permanently non-green. `Not acked` read 1 on both
+    worker boards against a single requeue that happened MORE than three hours earlier:
+    `counted()` 1, `recent("3h")` 0. A verdict row that warns at rest trains an operator
+    to ignore the colour, which costs more than the stale fact was worth.
+    """
+    grew = f"sum(increase({series}[{window}])) or vector(0)"
+    born = (f"clamp_min((sum({series}) or vector(0)) "
+            f"- (sum({series} offset {window}) or vector(0)), 0)")
+    return f"(({grew}) > ({born})) or ({born})"
+
+
 def counted(series, window="$__range"):
-    """A fault counter read as a count over the range, correct at series birth.
+    """SUPERSEDED by recent(). Retained as documentation of the alert rules' shape.
+
+    Nothing in this file calls it. The five rules in k8s/02-configmaps.yaml still carry
+    this form, and changing them is a Prometheus config edit -- which discards the whole
+    TSDB on restart -- so the divergence is recorded here rather than papered over. Both
+    forms catch a first-ever fault; only `recent()` stops reporting one that is over.
+
+    Original note follows.
+
+    A fault counter read as a count over the range, correct at series birth.
 
     Fault counters here have no series at all in health -- the .NET counter is created on
     first increment -- so the first burst of a given fault type appears as a series whose
@@ -603,11 +666,12 @@ def verdict_shared(layout, f):
              desc="The single best answer to 'why did the pipeline stop'. 0 means "
                   "the gate is shut and deliveries are being requeued.",
              thresholds=T_POSTURE, decimals=0),
-        stat(layout, "Not acked",
-             [counted(f'pipeline_messages_consumed_total{{{f},'
-                      f'disposition=~"requeued|parked"}}')],
-             desc="Deliveries the consumer refused or sent back, COUNTED over the "
-                  "visible range. Drill into 'reason' on the pipeline tier for why."
+        stat(layout, "Not acked (5m)",
+             [recent(f'pipeline_messages_consumed_total{{{f},'
+                     f'disposition=~"requeued|parked"}}', VERDICT_WINDOW)],
+             desc="Deliveries the consumer refused or sent back **in the last "
+                  + VERDICT_WINDOW + "**. Drill into 'reason' on the pipeline tier for "
+                  "why, and read the Since tier for the same count over the range."
                   + PARA +
                   "Counted rather than rated. Measured at the old 60s export cadence, when "
                   "the rate window here was 240s: as a rate this read 0.00 through every "
@@ -617,29 +681,75 @@ def verdict_shared(layout, f):
                   "delivery 0.017 -- still nothing at this precision, which is why the "
                   "panel is still counted rather than rated.",
              thresholds=T_WARN, decimals=0),
-        stat(layout, "Ack lost",
-             [counted(f'pipeline_messages_consumed_total{{{f},'
-                      f'disposition="acked",landed="false"}}')],
+        stat(layout, "Ack lost (5m)",
+             [recent(f'pipeline_messages_consumed_total{{{f},'
+                     f'disposition="acked",landed="false"}}', VERDICT_WINDOW)],
              desc="The silent case: the handler ran to completion but the broker "
                   "never heard the ack, so it will redeliver. Cause is on the "
-                  "channel-resets panel. Counted over the range, for the reason "
-                  "'Not acked' gives.",
+                  "channel-resets panel. Last " + VERDICT_WINDOW + " only.",
              thresholds=T_WARN, decimals=0),
-        stat(layout, "Egress faults",
-             [counted(f'pipeline_messages_produced_total{{{f},'
-                      f'outcome=~"transient|unroutable|refused"}}')],
+        stat(layout, "Egress faults (5m)",
+             [recent(f'pipeline_messages_produced_total{{{f},'
+                     f'outcome=~"transient|unroutable|refused"}}', VERDICT_WINDOW)],
              desc="unroutable = the queue is not declared. transient = the broker "
                   "is unreachable. Opposite remedies; this is the only signal that "
                   "separates them." + PARA +
-                  "Counted over the range. Scaling the broker to zero for sixty seconds "
-                  "produced exactly two transient publishes; as a rate they were 0.00 on "
-                  "every board and the only trace of them anywhere was a new legend entry "
-                  "on the produced-by-outcome timeseries.",
+                  "Last " + VERDICT_WINDOW + " only. Scaling the broker to zero for sixty "
+                  "seconds produced exactly two transient publishes; as a rate they were "
+                  "0.00 on every board and the only trace of them anywhere was a new "
+                  "legend entry on the produced-by-outcome timeseries.",
+             thresholds=T_WARN, decimals=0),
+        stat(layout, "Channel resets (5m)",
+             [recent(f'pipeline_consumer_channel_resets_total{{{f}}}',
+                     VERDICT_WINDOW)],
+             desc="Channel churn in the last " + VERDICT_WINDOW + ". The cause of ack "
+                  "loss." + PARA +
+                  "**Scoped to five minutes because over the range it is the loudest "
+                  "false positive on these boards.** A rollout renumbers every channel: "
+                  "measured here on an undisturbed stack, twelve minutes after a routine "
+                  "orchestrator restart, this read 54 over a three-hour range and sat "
+                  "orange with nothing wrong. The churn worth reacting to is churn that "
+                  "is still happening.",
+             thresholds=T_WARN, decimals=0),
+    ]
+
+
+def since_shared(layout, f):
+    """The same four fault counters over the visible range, for the Since tier.
+
+    The verdict tier above answers "is it broken right now" and goes green again when a
+    fault stops. That is what makes its colour worth reading -- and it is also how an
+    operator arriving five minutes late misses the event entirely. So the totals are not
+    dropped, they are moved: same instruments, same helper, `$__range` instead of a fixed
+    five minutes, under a row header that says which tense it is in.
+
+    This mirrors the split the Flow board has had from the start (row 1 "is it broken
+    right now?", row 2 "what has already happened?"). The worker boards had one row doing
+    both jobs, and the sticky half won: every one of these read non-zero on a healthy
+    stack.
+    """
+    return [
+        stat(layout, "Not acked",
+             [recent(f'pipeline_messages_consumed_total{{{f},'
+                     f'disposition=~"requeued|parked"}}')],
+             desc="Deliveries refused or sent back over the visible range.",
+             thresholds=T_WARN, decimals=0),
+        stat(layout, "Ack lost",
+             [recent(f'pipeline_messages_consumed_total{{{f},'
+                     f'disposition="acked",landed="false"}}')],
+             desc="Work completed that the broker will hand out again, over the "
+                  "visible range.",
+             thresholds=T_WARN, decimals=0),
+        stat(layout, "Egress faults",
+             [recent(f'pipeline_messages_produced_total{{{f},'
+                     f'outcome=~"transient|unroutable|refused"}}')],
+             desc="Any send that did not reach the broker, over the visible range.",
              thresholds=T_WARN, decimals=0),
         stat(layout, "Channel resets",
-             [f'sum(increase(pipeline_consumer_channel_resets_total{{{f}}}[$__range])) '
-              f'or vector(0)'],
-             desc="Channel churn over the visible range. The cause of ack loss.",
+             [recent(f'pipeline_consumer_channel_resets_total{{{f}}}')],
+             desc="Channel churn over the visible range. Expect tens of these after any "
+                  "rollout -- check Process restarts beside it before reading this as a "
+                  "broker fault.",
              thresholds=T_WARN, decimals=0),
     ]
 
@@ -1008,7 +1118,7 @@ def build_flow():
                   "render one orange and one green for the same instant.",
              thresholds=T_GAP, decimals=0),
         stat(lay, "Retry amplification",
-             [f'(({counted(REDONE)}) + ({counted(NOT_LANDED)})) '
+             [f'(({recent(REDONE)}) + ({recent(NOT_LANDED)})) '
               f'/ (sum(increase(pipeline_messages_consumed_total[$__range])) > 0) '
               f'or vector(0)'],
              desc="Share of deliveries that will be redone, in MESSAGES over the visible "
@@ -1029,7 +1139,7 @@ def build_flow():
                   "outage.",
              thresholds=T_REDONE, unit="percentunit", decimals=1),
         stat(lay, "Ack lost",
-             [counted('pipeline_messages_consumed_total{disposition="acked",'
+             [recent('pipeline_messages_consumed_total{disposition="acked",'
                       'landed="false"}')],
              desc="Work completed that the broker will hand out again, counted over "
                   "the visible range.",
@@ -1062,7 +1172,7 @@ def build_flow():
                   "cadence rather than on anything real.",
              thresholds=T_WARN, decimals=0),
         stat(lay, "Egress faults",
-             [counted(EGRESS_FAULT)],
+             [recent(EGRESS_FAULT)],
              desc="Any send that did not reach the broker, anywhere in the stack, "
                   "counted over the visible range.",
              thresholds=T_WARN, decimals=0),
@@ -1379,7 +1489,11 @@ def build_orchestrator():
     ]
     panels += v[2:]
 
-    panels.append(row(lay, "2 - Pipeline: what is broken?"))
+    lay.newline()
+    panels.append(row(lay, "2 - Since: what has already happened?"))
+    panels += since_shared(lay, f)
+
+    panels.append(row(lay, "3 - Pipeline: what is broken?"))
     panels += pipeline_shared(lay, f, role_f=rf)
     panels += [
         timeseries(lay, "Leader by replica",
@@ -1422,7 +1536,7 @@ def build_orchestrator():
                   w=8, h=8),
     ]
 
-    rt = row(lay, "3 - Runtime: is the process why?", collapsed=True)
+    rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
     rt["panels"] = runtime_row(lay, f)
     panels.append(rt)
 
@@ -1473,7 +1587,7 @@ def build_processor():
                   "makes that legible.",
              thresholds=T_POSTURE, decimals=0),
         stat(lay, "Duplicates suppressed",
-             [counted(f'pipeline_duplicate_suppressed_total{{{f}}}')],
+             [recent(f'pipeline_duplicate_suppressed_total{{{f}}}')],
              desc="Deliveries acked having done no work, because the entry was already "
                   "absent. The primary idempotence mechanism; invisible under "
                   "disposition=acked. Rare is fine, frequent is a question.",
@@ -1481,7 +1595,11 @@ def build_processor():
     ]
     panels += v[2:]
 
-    panels.append(row(lay, "2 - Pipeline: what is broken?"))
+    lay.newline()
+    panels.append(row(lay, "2 - Since: what has already happened?"))
+    panels += since_shared(lay, f)
+
+    panels.append(row(lay, "3 - Pipeline: what is broken?"))
     panels += pipeline_shared(lay, f, by_instance=True)
     panels += [
         timeseries(lay, "Process duration p95 / p99 by outcome",
@@ -1559,7 +1677,7 @@ def build_processor():
                    unit="reqps"),
     ]
 
-    rt = row(lay, "3 - Runtime: is the process why?", collapsed=True)
+    rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
     rt["panels"] = runtime_row(lay, f)
     panels.append(rt)
 

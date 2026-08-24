@@ -633,7 +633,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((((sum(increase(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"}[$__range])) or vector(0)) > (sum(max_over_time(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"}[$__range])) or vector(0))) or (sum(max_over_time(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"}[$__range])) or vector(0))) + (((sum(increase(pipeline_messages_consumed_total{landed=\"false\"}[$__range])) or vector(0)) > (sum(max_over_time(pipeline_messages_consumed_total{landed=\"false\"}[$__range])) or vector(0))) or (sum(max_over_time(pipeline_messages_consumed_total{landed=\"false\"}[$__range])) or vector(0)))) / (sum(increase(pipeline_messages_consumed_total[$__range])) > 0) or vector(0)",
+          "expr": "((((sum(increase(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"} offset $__range) or vector(0)), 0))) + (((sum(increase(pipeline_messages_consumed_total{landed=\"false\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{landed=\"false\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{landed=\"false\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{landed=\"false\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{landed=\"false\"} offset $__range) or vector(0)), 0)))) / (sum(increase(pipeline_messages_consumed_total[$__range])) > 0) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -704,7 +704,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_consumed_total{disposition=\"acked\",landed=\"false\"}[$__range])) or vector(0)) > (sum(max_over_time(pipeline_messages_consumed_total{disposition=\"acked\",landed=\"false\"}[$__range])) or vector(0))) or (sum(max_over_time(pipeline_messages_consumed_total{disposition=\"acked\",landed=\"false\"}[$__range])) or vector(0))",
+          "expr": "((sum(increase(pipeline_messages_consumed_total{disposition=\"acked\",landed=\"false\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{disposition=\"acked\",landed=\"false\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{disposition=\"acked\",landed=\"false\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{disposition=\"acked\",landed=\"false\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{disposition=\"acked\",landed=\"false\"} offset $__range) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -838,7 +838,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_produced_total{outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0)) > (sum(max_over_time(pipeline_messages_produced_total{outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0))) or (sum(max_over_time(pipeline_messages_produced_total{outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0))",
+          "expr": "((sum(increase(pipeline_messages_produced_total{outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_produced_total{outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{outcome=~\"transient|unroutable|refused\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_produced_total{outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{outcome=~\"transient|unroutable|refused\"} offset $__range) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
