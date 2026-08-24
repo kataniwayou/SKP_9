@@ -1355,7 +1355,7 @@ and any produced-vs-consumed comparison crossing into the API will not balance. 
 deliberate and stated on a text panel on `skp-baseapi.json` rather than left as an empty
 graph.
 
-## Known gap: the orchestrator's queues are unobserved while the orchestrator is gone
+## Closed: the orchestrator's queues went unobserved while the orchestrator was gone
 
 The co-location blind spot, third instance. A queue is measured by the process that probes
 it, and the orchestrator is the only process probing `orchestrator-control`,
@@ -1384,17 +1384,43 @@ cannot tell "no queues unconsumed" from "six queues unobservable".
 The `5` on the last row is real and is the panel working: the replacement replicas were
 reporting before their consumers had reattached.
 
-**The fix is not yet made, because there is a genuine fork.** The processor already sends
-step outcomes to `OrchestratorQueues.Result`, so recording sends in `DispatchedQueues` on
-the processor side would cover the queue that matters most — but not `orchestrator-control`
-or `-result-post`, which only the orchestrator ever sends to. Covering those means either
-giving the processor a static list of orchestrator queue names, which couples it to another
-role's topology, or recording every send inside `QueueSender` itself, which is automatic
-and complete but would also probe the exclusive per-replica reply queues and, since
-`DispatchedQueues` never forgets, keep warning about them after they are deleted.
+### The fix: record in the sender, and let the broker retire a queue
 
-Until it is closed, read `Workers reporting` and `Data freshness` for an orchestrator
-outage. Both moved correctly throughout this window.
+`DispatchedQueues.Record` now runs inside `QueueSender.SendAsync` — the one method every
+send passes through — rather than at hand-picked call sites. That is what makes the
+coverage complete instead of remembered: the two hand-placed calls it replaces covered the
+processor's work queue and nothing else, which is how this gap existed at all.
+
+The cost of recording *every* send is the exclusive per-replica reply queues, which are
+deleted with their process. Without a way out the registry grows by one queue per replica
+generation forever. So a queue that answers **404 on 30 consecutive passes** — five minutes
+at the probe's ten-second interval — is dropped.
+
+**Only a 404 counts, and that distinction is what makes dropping safe.** A broker outage
+fails every queue at once; treating that as "gone" would empty the registry at the exact
+moment the backlog it exists to measure was building. An unreachable broker is `Failed` and
+leaves the count untouched; only the broker itself answering "no such queue" is `Missing`.
+`DispatchedQueuesTests` pins both directions, and the re-arm: a 404 stretch during a
+topology re-declare must not leave a live queue one miss from being forgotten for good.
+
+**Re-measured on the same scenario, same prober, same 15s cadence:**
+
+| | before | after |
+|---|---|---|
+| `orchestrator-result` live series during the outage | **NONE** | **2** (both processors) |
+| consumers reported | — | **0**, matching the broker |
+| queues observed anywhere | **1** | **3** |
+| `Queues unconsumed` | **0** — false green | **1** — correct |
+
+The scenario passes. What has *not* changed is the stale-held lag at the start: for the
+three samples it takes the liveness window to expire, the instrument still reports the
+consumer count the departed replicas last published. That is inherent to a windowed gauge.
+
+**A residual gap remains, and it is the one this design implies.** `orchestrator-control`
+and `orchestrator-result-post` are still watched only by the orchestrator, because it is the
+only process that sends to them — "a queue we have dispatched to is our problem" cannot
+cover a queue nobody else dispatches to. `orchestrator-result`, the queue where step
+outcomes pile up, is the one that mattered and it is covered.
 
 ## Known gap: the processor's dead-letter queue is not probed
 

@@ -53,8 +53,9 @@ public sealed class QueueDepthProbe : QueueStatsProbe
         RabbitMqConnection connection,
         Func<IReadOnlyList<string>> queues,
         TimeSpan interval,
-        ILogger<QueueDepthProbe> logger)
-        : base(connection, queues, interval, logger)
+        ILogger<QueueDepthProbe> logger,
+        Action<string, ProbeOutcome>? onResult = null)
+        : base(connection, queues, interval, logger, onResult)
     {
     }
 

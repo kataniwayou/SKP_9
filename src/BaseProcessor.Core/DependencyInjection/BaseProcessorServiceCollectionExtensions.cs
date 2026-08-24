@@ -216,11 +216,17 @@ public static class BaseProcessorServiceCollectionExtensions
         // This is the queue where a backlog matters most: replicas share it, so it is the one place
         // where the pipeline's throughput ceiling shows up as a level rather than as a rate that
         // merely looks lower than usual.
+        // Its own work queue, plus every queue this processor has SENT to -- step outcomes go to
+        // orchestrator-result, which the orchestrator is otherwise the only process watching. That
+        // asymmetry was measured: with the orchestrator scaled to zero the number of queues observed
+        // anywhere fell from 7 to 1 and `Queues unconsumed` read a confident 0, unable to tell "none
+        // unconsumed" from "six unobservable".
         services.AddHostedService(sp => new QueueDepthProbe(
             sp.GetRequiredService<RabbitMqConnection>(),
-            [ProcessorQueues.Work(processorId)],
+            () => [ProcessorQueues.Work(processorId), .. DispatchedQueues.Snapshot()],
             TimeSpan.FromSeconds(10),
-            sp.GetRequiredService<ILogger<QueueDepthProbe>>()));
+            sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
+            DispatchedQueues.Note));
 
         return services;
     }

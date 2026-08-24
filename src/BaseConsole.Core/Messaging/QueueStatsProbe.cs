@@ -2,6 +2,7 @@ using Messaging.Transport;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Exceptions;
 
 namespace BaseConsole.Core.Messaging;
 
@@ -76,7 +77,8 @@ public abstract class QueueStatsProbe : BackgroundService
         RabbitMqConnection connection,
         Func<IReadOnlyList<string>> queues,
         TimeSpan interval,
-        ILogger logger)
+        ILogger logger,
+        Action<string, ProbeOutcome>? onResult = null)
     {
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _queues     = queues ?? throw new ArgumentNullException(nameof(queues));
@@ -84,7 +86,26 @@ public abstract class QueueStatsProbe : BackgroundService
             ? interval
             : throw new ArgumentOutOfRangeException(nameof(interval), interval, "must be positive");
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
+        _onResult   = onResult;
     }
+
+    /// <summary>
+    /// Tells a dynamic queue registry what each pass learned, so a queue the broker says is gone
+    /// stops being probed. Optional, because a statically-configured list has nothing to forget.
+    /// </summary>
+    private readonly Action<string, ProbeOutcome>? _onResult;
+
+    /// <summary>
+    /// A passive declare against a missing queue is answered by the broker closing the CHANNEL with
+    /// a 404, which the client surfaces as this. Distinguishing it from every other failure is what
+    /// makes dropping a queue safe: an unreachable broker fails every queue at once, and treating
+    /// that as "gone" would empty the registry at the exact moment the backlog it exists to measure
+    /// was building.
+    /// </summary>
+    private static ProbeOutcome Classify(Exception ex) =>
+        ex is OperationInterruptedException oi && oi.ShutdownReason?.ReplyCode == 404
+            ? ProbeOutcome.Missing
+            : ProbeOutcome.Failed;
 
     /// <summary>
     /// What this probe is for, in a few words, used in its start-up and failure log lines. A probe
@@ -113,6 +134,11 @@ public abstract class QueueStatsProbe : BackgroundService
         {
             var queues = _queues();
 
+            // Prune first: a queue dropped from a dynamic registry must leave the announced
+            // set too, or its return would be announced as nothing new and pass in silence.
+            _announced.IntersectWith(queues);
+            _failing.IntersectWith(queues);
+
             var added = queues.Where(q => _announced.Add(q)).ToList();
             if (added.Count > 0)
             {
@@ -126,6 +152,7 @@ public abstract class QueueStatsProbe : BackgroundService
                 try
                 {
                     Report(queue, await DeclareAsync(queue, stoppingToken).ConfigureAwait(false));
+                    _onResult?.Invoke(queue, ProbeOutcome.Ok);
 
                     // Recovered: re-arm the warning so the next episode is reported too.
                     if (_failing.Remove(queue))
@@ -154,6 +181,8 @@ public abstract class QueueStatsProbe : BackgroundService
                     {
                         _logger.LogWarning(ex, "could not read {Queue} for {Purpose}", queue, Purpose);
                     }
+
+                    _onResult?.Invoke(queue, Classify(ex));
                 }
             }
 
