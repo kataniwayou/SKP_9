@@ -337,7 +337,20 @@ the sampler.
 
 **Interfaces:**
 - Consumes: nothing from Task 1.
-- Produces: `fingerprint(metric: dict) -> str` and `present(series: list, lo: float, hi: float) -> set[str]`, plus four new keys on each JSON row: `series_before`, `series_during`, `series_after` (ints) and `left`, `arrived` (lists of fingerprint strings).
+- Produces: `fingerprint(metric: dict) -> str`, `real(v) -> bool`, `present(series, lo, hi) -> set[str]` and `spans(series, lo, hi) -> dict[str, tuple[float, float]]`, plus five new keys on each JSON row: `series_before`, `series_during`, `series_after` (ints), `left`/`arrived` (lists of fingerprints) and `ended` (list of `{series, at}`).
+
+**`spans()` was added during execution, and the reason is the whole point of the task.**
+The plan originally judged a departure by set difference — a series present before the fault
+and absent during it. Run against the recorded r5-partial data that reported **nothing**, and
+correctly so: a departed replica keeps drawing for up to a rate window after its last export,
+because that is what `rate()` does, so its series *is* present in the early part of any fault
+window drawn at the true fault instant. The only way to make the set difference say
+"departed" is to slide the window until it agrees — which is not measuring, and is the
+failure this project keeps re-learning.
+
+Where a line **ends** is a property of the series, not of the window it is judged in. `spans()`
+asks that instead, and needs no window tuning. `present()` is kept — it is tested, and segment
+membership is still the right question for "did this panel have data at all".
 
 - [ ] **Step 1: Write the failing test**
 
