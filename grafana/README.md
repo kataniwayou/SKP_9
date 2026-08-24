@@ -334,11 +334,11 @@ what a restart inside the range does to them.
   is its own piece of work -- but stated so this section does not read as though alerting
   is finished. It is instrumented, not wired.
 
-**Partial replica loss -- what the new scenario found.**
+**Partial replica loss -- what the new scenario found, and what the fix changed.**
 
 > Scaling the processor deployment from 2 to 1 is the first scenario that removes *part* of a
 > dependency rather than all of it. The pipeline held -- no step lost. What the boards did with
-> it is more interesting than that:
+> it is more interesting than that. The first reading was:
 >
 > - **`Replica fan-out` did not show it.** It is `sum by (service_instance_id) (rate(...))`
 >   over a counter that is stale-held after its process dies, so a departed replica's series
@@ -349,8 +349,49 @@ what a restart inside the range does to them.
 > - **`Workers reporting` and `Workers missing (5m)` did show it** -- 5->4 and 0->1 -- and are the
 >   only things that did.
 >
-> So the two panels built to expose one-replica-of-many failing are not the ones that expose
-> it. The worker-count stats are.
+> Both panels were changed and the scenario re-run. Judged against Prometheus range queries over
+> the run rather than against the sampled legends -- see the next bullet for why that distinction
+> decides the whole result. The departed replica's last export was at +185s.
+>
+> - **`Consuming by queue and replica` now shows it, and the first reading understated the
+>   panel.** Split per replica on the processor board, `min by (queue,service_instance_id)`
+>   draws the departed replica's line to +195s and stops; the survivor runs the whole 555s; the
+>   replacement's line starts at +255s. The aggregate form is a single flat line at 1 across the
+>   entire run -- not merely unable to name the replica, but blind to the departure altogether,
+>   because `min` over one shared queue is the survivor's value. That is the improvement, and it
+>   is the one worth having.
+> - **`Replica fan-out`'s first reading was wrong about the cause, and the fix is narrower than
+>   it looks.** The line does not persist at zero: ungated, `rate()` ends when fewer than two
+>   samples remain in the rate window, which at the board's usual 1m `$__rate_interval` is +210s
+>   -- 25s after the last export, and *before* the 40s liveness window expires. So the liveness
+>   gate is **a no-op at the range this board is normally read at**, and measured that way it
+>   changes nothing.
+>
+>   It becomes load-bearing when the range is widened, because `$__rate_interval` grows with it.
+>   Measured on the same run: ungated, the departed line ran to +210s at a 1m rate interval,
+>   +270s at 2m, +450s at 5m and past the end of the run at 10m, fading toward zero the whole
+>   way. Gated, it ends at +210s in all four, at its true last rate rather than a decayed one.
+>   The panel's honesty used to depend on the time range; now it does not. That is a smaller
+>   claim than "the panel could not tell a departure from an idle replica", and it is the one
+>   the measurement supports.
+> - **`Workers reporting` and `Workers missing (5m)` still show it** and are still the fastest
+>   signal.
+
+**A Grafana legend is not evidence that a line is still being drawn.**
+
+> The first reading above -- "the panel kept drawing the departed replica for the rest of the
+> run and only ever gained the replacement's name" -- came from `chaos-timeline.js`, which
+> renders each board at `from=now-15m` and records the panel's **legend text**. A Grafana
+> timeseries legend lists every series with data anywhere in the range, so a series whose line
+> stopped four minutes ago keeps its legend entry for the remaining eleven. A run shorter than
+> the range therefore *cannot* show a name disappearing, no matter what the lines do. Both
+> panels' legends accumulated names and dropped none, before and after the fix, exactly as that
+> mechanism requires.
+>
+> This is the `state=inactive` mistake wearing different clothes: an instrument that reports the
+> same value whatever the system does, read as though it were reporting on the system. **Judge
+> series presence with a `query_range` against Prometheus, and use the sampled legends only for
+> what they can actually say** -- which panels had data at all, and what the verdict stats read.
 
 **Grafana restarts destroy every dashboard.**
 
