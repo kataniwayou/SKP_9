@@ -16,6 +16,43 @@ internal static class OutageVerdict
     /// happening at all: a fire that never happened is not a lost step, and the ledger has no run to
     /// judge. See spec section 5.8.
     /// </param>
+    /// <summary>
+    /// The obligation for a fault that is not supposed to disturb the pipeline at all: every run
+    /// whole, no excuses available.
+    /// </summary>
+    /// <remarks>
+    /// <b>Not a weaker <see cref="AssertNoUnaccountedLoss"/> — a different one, and stricter.</b>
+    /// That method allows a run inside the fault window to be short provided a record accounts for
+    /// it, and it *requires* a witnessed window: its third obligation asks for a run beginning after
+    /// <c>Window.HealedAt</c>, and a scenario carrying <see cref="FaultKind.None"/> gets
+    /// <see cref="FaultWindow.None"/>, whose <c>HealedAt</c> is <see cref="DateTimeOffset.MaxValue"/>.
+    /// Nothing can begin after that, so the two are mutually exclusive by construction rather than
+    /// by judgement — asking for both produces "no run began after the fault healed at
+    /// 9999-12-31", which reads like a timing problem and is not one.
+    /// <para>
+    /// Use this where the claim is that the fault never reaches the pipeline: a dependency slow
+    /// enough to notice but not slow enough to trip anything. There is no window to straddle, so
+    /// every run is held to the undisturbed standard.
+    /// </para>
+    /// </remarks>
+    public static void AssertEveryRunComplete(SoakResult result, int minimumRuns = 9)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        var report = SoakReport.Describe(result);
+
+        Assert.True(result.Runs.Count >= minimumRuns,
+            $"expected at least {minimumRuns} fires in five minutes at a 30s cron, "
+            + $"saw {result.Runs.Count}.\n{report}");
+
+        var incomplete = result.Runs.Where(r => r.Verdict != RunVerdict.Complete).ToList();
+
+        Assert.True(incomplete.Count == 0,
+            $"{incomplete.Count} run(s) were incomplete while the dependency was merely slow. "
+            + "Nothing was taken away, so there is no excuse available for a short run.\n"
+            + report);
+    }
+
     public static void AssertNoUnaccountedLoss(SoakResult result, int minimumRuns = 9)
     {
         ArgumentNullException.ThrowIfNull(result);

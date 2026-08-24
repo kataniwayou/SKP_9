@@ -32,10 +32,13 @@ namespace BaseApi.Tests.Live.Resilience;
 /// degraded, when one workload's path to it is degraded, is reporting something untrue.
 /// </para>
 /// <para>
-/// <b>Reuses <see cref="FaultKind.Redis"/>.</b> When the gate closes it writes the same records a
-/// Redis outage does, because from the gate's point of view that is what happened. For S10 the gate
-/// is not expected to close at all, so the witness has nothing to find — which is why that scenario
-/// asserts on loss alone and leaves the board reading to the probe.
+/// <b>Reuses <see cref="FaultKind.Redis"/> for S11 only.</b> When the gate closes it writes the same
+/// records a Redis outage does, because from the gate's point of view that is what happened. S10
+/// carries <see cref="FaultKind.None"/> because the gate is not expected to close and the witness
+/// would have nothing to find — which is also why S10 must assert with
+/// <see cref="OutageVerdict.AssertEveryRunComplete"/>: the loss verdict requires a witnessed window
+/// and would otherwise fail against a heal time of 9999-12-31, which reads like a timing problem
+/// and is not one. Measured that way on the first attempt, with all ten runs Complete.
 /// </para>
 /// <para>
 /// <b>This lever does not self-expire.</b> A killed run leaves Redis slow for the processor
@@ -65,7 +68,12 @@ public sealed class SlowRedisScenarioTests
                 ct => ClusterControl.HoldRedisSlowAsync(UnderTimeout, ct)),
             TestContext.Current.CancellationToken);
 
-        OutageVerdict.AssertNoUnaccountedLoss(result);
+        // AssertEveryRunComplete, not AssertNoUnaccountedLoss: the claim here is that the fault
+        // never reaches the pipeline, so there is no window to straddle and no excuse available for
+        // a short run. The two are also mutually exclusive by construction -- see the remarks on
+        // AssertEveryRunComplete -- and asking for the wrong one reports a timing problem that is
+        // not one.
+        OutageVerdict.AssertEveryRunComplete(result);
     }
 
     [Fact]
