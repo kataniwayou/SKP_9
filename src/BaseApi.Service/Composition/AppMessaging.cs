@@ -44,6 +44,27 @@ internal static class AppMessaging
         services.AddSingleton<IRabbitMqTopology, FanoutTopology>();
         services.AddSingleton<IRabbitMqTopology, QueryTopology>();
 
+        // How deep the queues this API sends to are getting, and whether anything is listening.
+        //
+        // THE API IS THE ONLY PROCESS THAT CAN SEE orchestrator-control WHILE THE ORCHESTRATOR IS
+        // GONE. It is the one publishing start and stop requests into that queue, so they pile up
+        // there with nothing to take them -- and the orchestrator, being absent, cannot report its
+        // own backlog. Measured before this existed: with the orchestrator scaled to zero the
+        // number of queues observed anywhere fell from 7 to 1, and `Queues unconsumed` read a
+        // confident 0, unable to tell "none unconsumed" from "six unobservable".
+        //
+        // The list is whatever this process has SENT to -- QueueSender records every destination --
+        // so it needs no static queue names and nothing to keep in step with another role's
+        // topology. DispatchedQueues.Note lets a queue the broker says is gone stop being probed,
+        // which matters more here than anywhere: the API sends to a per-replica reply queue for
+        // every processor it ever answers.
+        services.AddHostedService(sp => new QueueDepthProbe(
+            sp.GetRequiredService<RabbitMqConnection>(),
+            DispatchedQueues.Snapshot,
+            TimeSpan.FromSeconds(10),
+            sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
+            DispatchedQueues.Note));
+
         // The gated control consumer, and the two handlers it dispatches to by message type.
         services.AddBaseApiGatedConsumer(OrchestratorQueues.Control);
         services.AddScoped<IQueueMessageHandler, StartOrchestrationHandler>();

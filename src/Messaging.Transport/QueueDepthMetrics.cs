@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 
-namespace BaseConsole.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// How much work is waiting in this process's live queues, and how many consumers the BROKER
@@ -40,12 +40,22 @@ namespace BaseConsole.Core.Messaging;
 public static class QueueDepthMetrics
 {
     /// <summary>
-    /// Must match the meter registered by <c>AddMeter</c> in <c>AddBaseConsoleObservability</c>. The
-    /// gating meter is reused rather than a new one introduced, for the reason
-    /// <see cref="DeadLetterDepthMetrics"/> gives: a typo'd meter name produces no error and no
-    /// metrics, and every extra name is another chance to make that mistake.
+    /// Its own meter, and the one place this name is written. Every host that wants queue depth
+    /// must pass it to <c>AddMeter</c> -- the console base does so for the workers, and the API
+    /// does so directly, because the API is not a console and shares none of that wiring.
+    /// <para>
+    /// A NEW name rather than the gating meter these instruments used to share. That meter is
+    /// <c>BaseConsole.Core.Gating</c>, registered by <c>AddBaseConsoleObservability</c>, and it is
+    /// unreachable from here now that this type lives in the transport -- which is where it had to
+    /// move for the API to run a probe at all. Changing the meter does not change the exported
+    /// metric names, so nothing on the dashboards moves.
+    /// </para>
+    /// <para>
+    /// A typo'd meter name produces no error and no metrics, which is why this is a constant every
+    /// registration reads rather than a literal written twice.
+    /// </para>
     /// </summary>
-    internal const string MeterName = DeadLetterDepthMetrics.MeterName;
+    public const string MeterName = "Messaging.Transport.Queues";
 
     internal const string DepthInstrument = "pipeline.queue.depth";
     internal const string ConsumersInstrument = "pipeline.queue.consumers";
