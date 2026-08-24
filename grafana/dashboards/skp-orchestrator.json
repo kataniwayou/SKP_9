@@ -190,7 +190,7 @@
   },
   "panels": [
     {
-      "id": 42,
+      "id": 43,
       "type": "row",
       "title": "1 - Verdict: is the orchestrator broken?",
       "collapsed": false,
@@ -203,7 +203,7 @@
       "panels": []
     },
     {
-      "id": 43,
+      "id": 44,
       "type": "stat",
       "title": "Consuming",
       "description": "0 means no consumer tag on at least one queue -- nothing is listening. No other signal answers this.\n\nRestricted to replicas that have reported in the last 40s: a dead replica's gauge is held at its last value by the collector and by Prometheus's lookback, so an unrestricted min() reads the posture of processes that no longer exist.",
@@ -270,7 +270,7 @@
       }
     },
     {
-      "id": 44,
+      "id": 45,
       "type": "stat",
       "title": "L2 gate",
       "description": "The single best answer to 'why did the pipeline stop'. 0 means the gate is shut and deliveries are being requeued.",
@@ -337,7 +337,7 @@
       }
     },
     {
-      "id": 49,
+      "id": 50,
       "type": "stat",
       "title": "Hydration admitted",
       "description": "One-shot readiness. Separates 'not consuming because the store is down' from 'not consuming because the first hydration pass has not finished'.",
@@ -404,7 +404,7 @@
       }
     },
     {
-      "id": 50,
+      "id": 51,
       "type": "stat",
       "title": "Leaders elected",
       "description": "Must be exactly 1. Followers reading 0 is by design and is NOT a fault -- StepOutcomeHandler is deliberately not leader-gated, so a follower is still expected to consume. Zero means nobody holds the lease; two means a split.\n\nThis one stat did fall when all three replicas were deleted, and it is worth knowing why it was able to: a leader releases its lease on graceful shutdown and the SDK flushes that final export, so the gauge genuinely reached 0. A replica killed outright leaves it held at 1. Do not read a departure off this panel -- read it off Workers missing on SKP Flow.",
@@ -475,7 +475,7 @@
       }
     },
     {
-      "id": 45,
+      "id": 46,
       "type": "stat",
       "title": "Not acked (5m)",
       "description": "Deliveries the consumer refused or sent back **in the last 5m**. Drill into 'reason' on the pipeline tier for why, and read the Since tier for the same count over the range.\n\nCounted rather than rated. Measured at the old 60s export cadence, when the rate window here was 240s: as a rate this read 0.00 through every scenario in the chaos suite, because the single parked delivery the broker outage produced was 1/240 = 0.004, which rounds to nothing at any sane precision. The window is 60s now, which makes that same delivery 0.017 -- still nothing at this precision, which is why the panel is still counted rather than rated.",
@@ -542,7 +542,7 @@
       }
     },
     {
-      "id": 46,
+      "id": 47,
       "type": "stat",
       "title": "Ack lost (5m)",
       "description": "The silent case: the handler ran to completion but the broker never heard the ack, so it will redeliver. Cause is on the channel-resets panel. Last 5m only.",
@@ -609,7 +609,7 @@
       }
     },
     {
-      "id": 47,
+      "id": 48,
       "type": "stat",
       "title": "Egress faults (5m)",
       "description": "unroutable = the queue is not declared. transient = the broker is unreachable. Opposite remedies; this is the only signal that separates them.\n\nLast 5m only. Scaling the broker to zero for sixty seconds produced exactly two transient publishes; as a rate they were 0.00 on every board and the only trace of them anywhere was a new legend entry on the produced-by-outcome timeseries.",
@@ -676,7 +676,7 @@
       }
     },
     {
-      "id": 48,
+      "id": 49,
       "type": "stat",
       "title": "Channel resets (5m)",
       "description": "Channel churn in the last 5m. The cause of ack loss.\n\n**Scoped to five minutes because over the range it is the loudest false positive on these boards.** A rollout renumbers every channel: measured here on an undisturbed stack, twelve minutes after a routine orchestrator restart, this read 54 over a three-hour range and sat orange with nothing wrong. The churn worth reacting to is churn that is still happening.",
@@ -743,7 +743,7 @@
       }
     },
     {
-      "id": 51,
+      "id": 52,
       "type": "row",
       "title": "2 - Since: what has already happened?",
       "collapsed": false,
@@ -756,7 +756,7 @@
       "panels": []
     },
     {
-      "id": 52,
+      "id": 53,
       "type": "stat",
       "title": "Not acked",
       "description": "Deliveries refused or sent back over the visible range.",
@@ -823,7 +823,7 @@
       }
     },
     {
-      "id": 53,
+      "id": 54,
       "type": "stat",
       "title": "Ack lost",
       "description": "Work completed that the broker will hand out again, over the visible range.",
@@ -890,7 +890,7 @@
       }
     },
     {
-      "id": 54,
+      "id": 55,
       "type": "stat",
       "title": "Egress faults",
       "description": "Any send that did not reach the broker, over the visible range.",
@@ -957,7 +957,7 @@
       }
     },
     {
-      "id": 55,
+      "id": 56,
       "type": "stat",
       "title": "Channel resets",
       "description": "Channel churn over the visible range. Expect tens of these after any rollout -- check Process restarts beside it before reading this as a broker fault.",
@@ -1024,7 +1024,7 @@
       }
     },
     {
-      "id": 56,
+      "id": 57,
       "type": "row",
       "title": "3 - Pipeline: what is broken?",
       "collapsed": false,
@@ -1037,7 +1037,7 @@
       "panels": []
     },
     {
-      "id": 57,
+      "id": 58,
       "type": "timeseries",
       "title": "Produced by type and outcome",
       "description": "Egress. outcome != accepted is a fault.",
@@ -1124,7 +1124,7 @@
       }
     },
     {
-      "id": 58,
+      "id": 59,
       "type": "timeseries",
       "title": "Consumed by type and disposition",
       "description": "Ingress. Exactly one increment per delivery, on every exit path of the consumer.",
@@ -1211,7 +1211,7 @@
       }
     },
     {
-      "id": 59,
+      "id": 60,
       "type": "timeseries",
       "title": "Produce duration p95 / p99",
       "description": "A real broker round-trip to publisher confirmation, not the time to write a frame.\n\nThe mean rides alongside the quantiles deliberately. It comes from sum/count and so is independent of bucket boundaries -- if it ever diverges wildly from p50, the ladder has stopped fitting the data. That is exactly how the millisecond-ladder defect was caught: p95 read 4.9s while the mean read 15ms.\n\n**The line at 50ms is where measured-normal ends**: steady p95 runs 20-35ms on this stack. Above it is a broker taking longer than it has been, which is worth noticing well before anything trips.",
@@ -1324,7 +1324,7 @@
       }
     },
     {
-      "id": 60,
+      "id": 61,
       "type": "timeseries",
       "title": "Consumer inflight by queue",
       "description": "Deliveries inside a handler. PrefetchCount is 1, so a sustained 1 is saturation -- the threshold line marks it.",
@@ -1416,7 +1416,7 @@
       }
     },
     {
-      "id": 61,
+      "id": 62,
       "type": "timeseries",
       "title": "Store probe latency p95 / p99",
       "description": "How long the projection store takes to answer the gate probe. **This is the only panel that can show a store that is slow rather than absent.**\n\nThe gate beside it answers *did the store reply inside the timeout*, which is a yes/no, and a yes/no cannot show degradation. Measured before this instrument existed: Redis made 685x slower for the processor -- 0.44ms to 301ms, verified with `redis-cli --latency` -- moved nothing on any board, because a store a thousand times slower and still inside a 2s budget is, to a yes/no, healthy. Past the budget it read as a full outage. Two states, working and gone, with nothing in between.\n\nHealthy on this stack is **mean ~0.9ms, p95 ~2ms**. A jump to tens or hundreds of milliseconds is a degraded store that will not trip the gate and will not lose you a step -- yet.\n\n**Timeouts are excluded on purpose** (`outcome=\"healthy\"`). A timed-out probe records the ceiling rather than its true duration, because the ping is abandoned rather than cancelled and how long it would have taken is unknowable. Including them would pin p99 at exactly the probe timeout and invite you to believe it. Those show up on `L2 gate` and `Gate trips` instead.\n\nThe mean rides alongside the quantiles for the reason the produce-duration panel gives: it comes from sum/count and is independent of bucket boundaries, so a wild divergence from p50 means the ladder has stopped fitting the data.\n\n**The line at 5ms is where measured-normal ends**, not an alarm: steady p95 is ~2ms with jitter to 6ms, so a p95 riding above the line is a store getting slower rather than a store that has failed. Nothing here fails at a single number -- the line exists so you can see whether this is the normal value without already knowing what the normal value is.",
@@ -1529,7 +1529,7 @@
       }
     },
     {
-      "id": 62,
+      "id": 63,
       "type": "timeseries",
       "title": "Channel resets by reason",
       "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.\n\nAggregated by queue on this board because each queue has one consumer, so the queue already names the replica. The processor board splits this per replica, where they share one queue.",
@@ -1617,7 +1617,7 @@
       }
     },
     {
-      "id": 63,
+      "id": 64,
       "type": "timeseries",
       "title": "Consuming by queue",
       "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nAggregated by queue on this board because each queue has one consumer. The processor board splits this per replica, where every replica shares one queue.\n\nA line that ENDS is a replica that left; a line at 0 is one that is present and not consuming.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
@@ -1706,7 +1706,7 @@
       }
     },
     {
-      "id": 64,
+      "id": 65,
       "type": "timeseries",
       "title": "Leader by replica",
       "description": "Explains why cron fires land on one replica. Only cron fires are fenced by leadership.",
@@ -1795,7 +1795,7 @@
       }
     },
     {
-      "id": 65,
+      "id": 66,
       "type": "timeseries",
       "title": "Hydration admitted by replica",
       "description": "",
@@ -1884,7 +1884,7 @@
       }
     },
     {
-      "id": 66,
+      "id": 67,
       "type": "timeseries",
       "title": "Dispatch by destination",
       "description": "Per-processor fan-out from this side of the hop.",
@@ -1971,7 +1971,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 68,
       "type": "timeseries",
       "title": "Consumed by role",
       "description": "The role attribute records what this replica was AT THE TIME it handled the delivery, so a replica carries both values across a leadership change. It is not a replica selector -- service_instance_id is.",
@@ -2058,7 +2058,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 69,
       "type": "text",
       "title": "What the Role filter reaches",
       "gridPos": {
@@ -2074,7 +2074,7 @@
       "transparent": false
     },
     {
-      "id": 69,
+      "id": 70,
       "type": "row",
       "title": "4 - Runtime: is the process why?",
       "collapsed": true,
@@ -2086,7 +2086,7 @@
       },
       "panels": [
         {
-          "id": 70,
+          "id": 71,
           "type": "timeseries",
           "title": "Thread-pool queue length",
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
@@ -2173,7 +2173,7 @@
           }
         },
         {
-          "id": 71,
+          "id": 72,
           "type": "timeseries",
           "title": "GC pause time",
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",
@@ -2260,7 +2260,7 @@
           }
         },
         {
-          "id": 72,
+          "id": 73,
           "type": "timeseries",
           "title": "Exception rate",
           "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes.",
@@ -2347,7 +2347,7 @@
           }
         },
         {
-          "id": 73,
+          "id": 74,
           "type": "timeseries",
           "title": "Process restarts",
           "description": "A monotonic counter going backwards means the process is new. The one signal that explains a simultaneous gap in every other series.",
