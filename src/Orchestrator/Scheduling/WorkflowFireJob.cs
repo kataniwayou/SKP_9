@@ -1,3 +1,4 @@
+using BaseConsole.Core.Messaging;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging;
@@ -180,6 +181,9 @@ public sealed class WorkflowFireJob(
                 var dispatch = new ProcessDispatch(
                     correlationId, Guid.Empty, workflowId, step.StepId, step.ProcessorId,
                     step.Payload, Guid.Empty);
+
+                // Before the send, so a queue whose first dispatch fails is still measured.
+                DispatchedQueues.Record(ProcessorQueues.Work(step.ProcessorId));
 
                 try
                 {

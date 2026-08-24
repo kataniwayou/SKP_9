@@ -42,16 +42,39 @@ namespace BaseConsole.Core.Messaging;
 public abstract class QueueStatsProbe : BackgroundService
 {
     private readonly RabbitMqConnection _connection;
-    private readonly IReadOnlyList<string> _queues;
+    private readonly Func<IReadOnlyList<string>> _queues;
     private readonly TimeSpan _interval;
     private readonly ILogger _logger;
 
     /// <summary>Queues currently failing to read, so each episode warns once rather than per tick.</summary>
     private readonly HashSet<string> _failing = [];
 
+    /// <summary>Queues already announced, so a list that grows logs only what is new.</summary>
+    private readonly HashSet<string> _announced = [];
+
     protected QueueStatsProbe(
         RabbitMqConnection connection,
         IReadOnlyList<string> queues,
+        TimeSpan interval,
+        ILogger logger)
+        : this(connection, () => queues ?? throw new ArgumentNullException(nameof(queues)), interval, logger)
+    {
+        ArgumentNullException.ThrowIfNull(queues);
+    }
+
+    /// <summary>
+    /// Resolves the queue list on EVERY pass rather than once at construction.
+    /// <para>
+    /// Needed because the queues that matter most are not known at startup. Processor work queues
+    /// are per-processor GUIDs resolved from the workflow graph at run time, so the orchestrator --
+    /// the process that must measure them, because it outlives the processors -- can only name them
+    /// once it has dispatched to one. See <see cref="DispatchedQueues"/> for the measurement that
+    /// forced this.
+    /// </para>
+    /// </summary>
+    protected QueueStatsProbe(
+        RabbitMqConnection connection,
+        Func<IReadOnlyList<string>> queues,
         TimeSpan interval,
         ILogger logger)
     {
@@ -75,25 +98,30 @@ public abstract class QueueStatsProbe : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (_queues.Count == 0)
-        {
-            // Said once, loudly. A probe measuring nothing looks identical from outside to a probe
-            // reporting zero, and the difference is the whole point of the instrument.
-            _logger.LogWarning("no queues configured for the {Purpose} probe; nothing will be reported", Purpose);
-            return;
-        }
-
         // The only record that this loop exists at all. Without it, "the probe never started" and
         // "the probe is running and the queues are empty" are the same observation from outside the
         // process -- both are silence plus a gauge reading zero. That ambiguity cost a debugging
         // cycle on the dead-letter probe.
+        //
+        // Logged every pass that brings a NEW queue rather than once at startup, because a dynamic
+        // list starts empty and fills as work flows. A single start-up line would name the empty set
+        // and never mention the queues that actually got measured.
         _logger.LogInformation(
-            "{Purpose} probe watching {QueueCount} queue(s) every {Interval}: {Queues}",
-            Purpose, _queues.Count, _interval, string.Join(", ", _queues));
+            "{Purpose} probe starting, every {Interval}", Purpose, _interval);
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var queue in _queues)
+            var queues = _queues();
+
+            var added = queues.Where(q => _announced.Add(q)).ToList();
+            if (added.Count > 0)
+            {
+                _logger.LogInformation(
+                    "{Purpose} probe now watching {QueueCount} queue(s); added: {Queues}",
+                    Purpose, queues.Count, string.Join(", ", added));
+            }
+
+            foreach (var queue in queues)
             {
                 try
                 {
