@@ -1416,6 +1416,28 @@ The scenario passes. What has *not* changed is the stale-held lag at the start: 
 three samples it takes the liveness window to expire, the instrument still reports the
 consumer count the departed replicas last published. That is inherent to a windowed gauge.
 
+### Re-validated across the suite, including the case the unit tests cannot prove
+
+Nine scenarios, 0 failures, 638 Playwright sweeps. Three things the earlier runs could not
+establish:
+
+- **The drop policy classifies a real broker outage correctly.** A unit test can assert that
+  `Failed` leaves the count untouched, but it cannot prove the exception RabbitMQ actually
+  throws when the broker is gone carries a reply code other than 404 — and if it did not, 30
+  consecutive failures during the outage would empty the registry at the worst moment. After
+  a run containing a full broker outage, both cross-role entries are still present and the
+  pipeline has been idle since, so nothing re-added them. They survived.
+- **Queues observed never collapsed**: min 3, max 8 across 128 samples, with zero samples at
+  two or below. Before this fix the same measurement fell to 1.
+- **`Queues unconsumed` peaked at 7**, never 17 — the dedupe holding at suite scale, reading
+  7 for total dependency loss and 1 for partial.
+
+**Step p95 ranged 0.049s to 54.0s** with a median of 0.089s. Worth noting how that was read:
+the Playwright sampler's own windows showed peaks of only ~0.1s, because a 30-second sweep
+lands between the samples where a verdict stat is deviating. The sampler validates the stat
+tier and proves a panel renders; **Prometheus is authoritative for magnitude**, and the two
+disagreeing here by three orders of magnitude is a good reminder of which answers which.
+
 **A residual gap remains, and it is the one this design implies.** `orchestrator-control`
 and `orchestrator-result-post` are still watched only by the orchestrator, because it is the
 only process that sends to them — "a queue we have dispatched to is our problem" cannot
