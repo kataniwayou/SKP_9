@@ -916,6 +916,21 @@ def since_shared(layout, f):
                   "queue and no probe measuring it.",
              thresholds=T_WARN, decimals=0,
              no_value="not probed"),
+        stat(layout, "Process restarts",
+             [f'sum({RESTARTS % f}) or vector(0)'],
+             desc="Process starts across every replica of this service in the visible "
+                  "range. **Read this before believing any other number on the Since "
+                  "tier.**" + PARA +
+                  "A restart renumbers channels, ends and restarts every series under a "
+                  "new identity, and puts tens of messages on the hop gaps that are not "
+                  "lost. Measured here: 18 over a three-hour range -- six for each of "
+                  "the three orchestrator replicas -- while `Workers reporting` sat "
+                  "green at 5 and `Workers missing (5m)` at 0, because every restart had "
+                  "completed and been replaced before either could see it." + PARA +
+                  "Until now this number appeared nowhere except the bottom of SKP "
+                  "Runtime, below fifteen GC panels, and behind a collapsed row on the "
+                  "boards an operator opens first.",
+             thresholds=T_WARN, decimals=0),
     ]
 
 
@@ -1106,12 +1121,64 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
     ]
 
 
-def runtime_row(layout, f):
-    """Four runtime panels, identical on all three source boards.
+RESTARTS = ('resets(process_runtime_dotnet_jit_methods_compiled_count_total'
+            '{%s}[$__range])')
 
-    Only the ones with a causal link to a pipeline symptom. Heap by generation,
-    fragmentation, allocation rate, JIT, assemblies, timers and lock contention answer
-    memory-and-perf questions instead, and stay on the SKP Runtime board.
+
+def causes_row(layout, f, w=12):
+    """Exception rate and process restarts, on the VISIBLE tier.
+
+    These two were in the collapsed Runtime row with the memory panels, and they do not
+    belong with them: they are not "is the process why", they are events an operator
+    needs to know happened before reading anything else on the board.
+
+    Measured on the live stack, and this is what moved them. `Process restarts` read 6
+    for EACH of the three orchestrator replicas over a three-hour range -- eighteen
+    process starts -- while `Workers reporting` sat green at 5 and `Workers missing (5m)`
+    at 0, because every restart had completed and been replaced. The only place that fact
+    appeared anywhere was the bottom of the SKP Runtime board, below fifteen GC panels,
+    behind a collapsed row on the boards an operator actually opens.
+
+    That is not a small omission. Restarts are the documented cause of the hop gaps
+    reading +46/-47, of `Channel resets` reaching tens, and of a replica's series ending
+    and restarting under a new identity. Every one of those panels tells the reader to go
+    and check for a restart, and until now none of them could be checked without
+    expanding a row titled as though it were about garbage collection.
+    """
+    return [
+        timeseries(layout, "Exception rate",
+                   [(f'sum by (service_instance_id) '
+                     f'(rate(process_runtime_dotnet_exceptions_count_total{{{f}}}'
+                     f'[$__rate_interval]))', "{{service_instance_id}}")],
+                   desc="Correlates with rising parked / refused dispositions and with "
+                        "faulted process outcomes. On the visible tier because a rising "
+                        "exception rate is a cause an operator should not have to expand "
+                        "a row to find.",
+                   unit="reqps", w=w, h=7,
+                   no_value="no exceptions in range"),
+        timeseries(layout, "Process restarts",
+                   [(f'sum by (service_instance_id) '
+                     f'(resets(process_runtime_dotnet_jit_methods_compiled_count_total'
+                     f'{{{f}}}[$__rate_interval]))', "{{service_instance_id}}")],
+                   desc="A monotonic counter going backwards means the process is new. "
+                        "**The one signal that explains a simultaneous gap in every "
+                        "other series** -- and the one the hop gaps, `Channel resets` "
+                        "and `Replica fan-out` all tell you to go and check." + PARA +
+                        "A spike here beside a jump on any of those means the number "
+                        "there is a rollout artefact rather than lost work.",
+                   w=w, h=7, decimals=0,
+                   no_value="no restarts in range"),
+    ]
+
+
+def runtime_row(layout, f):
+    """The two runtime panels that genuinely answer 'is the process why'.
+
+    Exception rate and process restarts used to be here and are on the visible tier now
+    -- see causes_row. What is left is the pair whose only use is explaining a symptom
+    you are already looking at. Heap by generation, fragmentation, allocation rate, JIT,
+    assemblies, timers and lock contention answer memory-and-perf questions instead, and
+    stay on the SKP Runtime board.
     """
     return [
         timeseries(layout, "Thread-pool queue length",
@@ -1121,7 +1188,7 @@ def runtime_row(layout, f):
                    desc="Explains consumption stalling while the gate is open and the "
                         "consumer still reports consuming=1: callbacks are starved, "
                         "not blocked.",
-                   w=6, h=7),
+                   w=12, h=7),
         timeseries(layout, "GC pause time",
                    [(f'sum by (service_instance_id) '
                      f'(rate(process_runtime_dotnet_gc_duration_nanoseconds_total'
@@ -1129,22 +1196,7 @@ def runtime_row(layout, f):
                      "{{service_instance_id}}")],
                    desc="Seconds of GC pause per second. Explains duration p99 spikes "
                         "with no broker or dependency fault.",
-                   unit="s", w=6, h=7),
-        timeseries(layout, "Exception rate",
-                   [(f'sum by (service_instance_id) '
-                     f'(rate(process_runtime_dotnet_exceptions_count_total{{{f}}}'
-                     f'[$__rate_interval]))', "{{service_instance_id}}")],
-                   desc="Correlates with rising parked / refused dispositions and with "
-                        "faulted process outcomes.",
-                   unit="reqps", w=6, h=7),
-        timeseries(layout, "Process restarts",
-                   [(f'sum by (service_instance_id) '
-                     f'(resets(process_runtime_dotnet_jit_methods_compiled_count_total'
-                     f'{{{f}}}[$__rate_interval]))', "{{service_instance_id}}")],
-                   desc="A monotonic counter going backwards means the process is new. "
-                        "The one signal that explains a simultaneous gap in every "
-                        "other series.",
-                   w=6, h=7, decimals=0),
+                   unit="s", w=12, h=7),
     ]
 
 
@@ -1646,6 +1698,16 @@ def build_baseapi():
                   "is to add one rather than to read this panel as though it already "
                   "had.",
              thresholds=T_PRESENT, decimals=0),
+        stat(lay, "Process restarts",
+             [f'sum({RESTARTS % f}) or vector(0)'],
+             desc="API process starts in the visible range. A restart explains a gap in "
+                  "every other series on this board at once, and it explains latency "
+                  "quantiles that reset." + PARA +
+                  "On the verdict tier because this board has no Since tier to hold it, "
+                  "and because it was previously readable only by expanding the Runtime "
+                  "row -- the timeseries beside `Exception rate` below carries the same "
+                  "signal per replica and over time.",
+             thresholds=T_WARN, decimals=0),
     ]
 
     panels.append(row(lay, "2 - Ingress: what is broken?"))
@@ -1725,6 +1787,8 @@ def build_baseapi():
                   "faults, different remedies.",
              thresholds=T_WARN, decimals=0, h=8),
     ]
+
+    panels += causes_row(lay, f)
 
     rt = row(lay, "3 - Runtime: is the process why?", collapsed=True)
     rt["panels"] = runtime_row(lay, f)
@@ -1840,6 +1904,8 @@ def build_orchestrator():
                   "follower fault hide behind a leader view.",
                   w=8, h=8),
     ]
+
+    panels += causes_row(lay, f)
 
     rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
     rt["panels"] = runtime_row(lay, f)
@@ -1986,6 +2052,8 @@ def build_processor():
                         "its legend entry after its line has stopped. Read the line.",
                    unit="reqps"),
     ]
+
+    panels += causes_row(lay, f)
 
     rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
     rt["panels"] = runtime_row(lay, f)
