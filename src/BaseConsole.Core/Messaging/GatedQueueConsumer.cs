@@ -296,6 +296,24 @@ public sealed class GatedQueueConsumer : BackgroundService
         {
             type = ea.BasicProperties.Type ?? "";
 
+            // Read before the gate check below, so a message requeued by a closed gate still
+            // contributes its wait -- a delivery that bounced off a shut gate WAITED, and dropping
+            // it would make the queue look fastest exactly while the pipeline was stopped.
+            var headers  = ea.BasicProperties.Headers;
+            var sentMs   = MessageClock.ReadHeader(headers, MessageClock.SentHeader);
+            var originMs = MessageClock.ReadHeader(headers, MessageClock.OriginHeader);
+
+            IngressMetrics.RecordArrival(_options.Queue, type, sentMs, originMs);
+
+            // Adopt this delivery's chain for everything the handler goes on to do. The ambient
+            // flows into the handler's sends, so a message caused by this one carries the ORIGINAL
+            // step's origin rather than the moment it was published -- which is what makes the
+            // orchestrator's view of a step's outcome a door-to-door measurement.
+            //
+            // Set here rather than beside the handler invocation because a requeue is also a
+            // consequence of this delivery, and the redelivery's own headers will re-establish it.
+            MessageClock.Adopt(originMs);
+
             // The gate can close between the broker handing this message over and it arriving here, and
             // messages already in flight when the subscription was cancelled still arrive. Re-checking
             // here is what makes a pause clean rather than a burst of failures.

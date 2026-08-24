@@ -108,6 +108,12 @@ internal sealed class NextStepHandoffHandler : IQueueMessageHandler
             // measured. That is the case where knowing the depth matters most.
             DispatchedQueues.Record(ProcessorQueues.Work(h.ProcessorId));
 
+            // A dispatch STARTS a step, so the clock starts here rather than being inherited.
+            // This handler runs inside the delivery of the PREVIOUS step's outcome, and without
+            // this reset that step's origin would ride onward -- every step after the first would
+            // report the cumulative run time under a name that says step.
+            MessageClock.BeginChain();
+
             await _sender
                 .SendTransientAsync(
                     ProcessorQueues.Work(h.ProcessorId), MessageTypes.ProcessDispatch, dispatch, ct)
