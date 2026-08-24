@@ -557,6 +557,46 @@ what a restart inside the range does to them.
 >
 > Same readings the second-run table records. The hop is invisible in every direction that matters.
 
+**Closing it: the store probe is timed now, and the fault that was invisible is not.**
+
+> S10 and S11 said the boards could not see degradation. The fix is an **instrument**, not a panel
+> -- there was nothing to draw, because nothing was timing the call. `pipeline.gate.probe.duration`
+> is a seconds histogram recorded on all three exit paths of `L2GateProbe.IsHealthyAsync`, tagged
+> `outcome` = `healthy` / `timeout` / `failed`, sharing the transport's bucket ladder.
+>
+> **Verified against the same fault that exposed the gap**, re-run unchanged at the same 15s
+> sampling resolution. The only difference is that the instrument now exists:
+>
+> | | baseline | during the 300 ms fault | after |
+> |---|---|---|---|
+> | **probe mean** | 0.8 ms | 142.6 → **301.4** → 117.2 ms | 0.7 ms |
+> | **probe p95** | ~2 ms | 475.0 → 487.5 → 467.7 ms | ~2 ms |
+> | `process p95` | 24.1 ms | 24.0 → 23.2 → 23.5 ms | 24.0 ms |
+> | `gate open` | 1 | 1 → 1 → 1 | 1 |
+> | `consuming` | 1 | 1 → 1 → 1 | 1 |
+>
+> **The probe mean peaks at 301.4 ms against an injected 300 ms**, and the independent control
+> through `redis-cli --latency` read 301.25 ms. Three measurements agreeing to a fraction of a
+> millisecond.
+>
+> Everything that was blind is still blind, correctly: the gate has no business tripping at 300 ms
+> and it did not. The instrument is the only thing that moved, by ~375x on the mean.
+>
+> **Read the mean, not the p95, for the magnitude.** 487 ms is interpolation inside the
+> `(0.25, 0.5]` bucket, not an observation -- which is exactly the property the produce-duration
+> panel already documents as the reason for plotting the mean beside the quantiles. This run is a
+> clean demonstration of that rationale rather than a defect in it.
+>
+> The three-sample ramp (142.6 → 301.4 → 117.2) is the 1-minute rate window smearing a 60-second
+> fault; only the middle sample sees the fault for its whole window.
+>
+> **What is still not covered.** The instrument times the *probe*, not real store calls, which is
+> deliberate -- the probe ticks every 5s whether or not work is flowing, so it reports during idle
+> periods, where a histogram over real traffic goes quiet exactly when a pipeline has stalled. The
+> consequence is that a store which is slow *only under load* would still be missed. Only the
+> console probe is instrumented; **the API's copy is not**, and that remains a separately-recorded
+> gap.
+
 **A Grafana legend is not evidence that a line is still being drawn.**
 
 > The first reading above -- "the panel kept drawing the departed replica for the rest of the
