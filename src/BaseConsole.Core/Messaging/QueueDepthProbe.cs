@@ -45,6 +45,19 @@ public sealed class QueueDepthProbe : QueueStatsProbe
     {
     }
 
+    /// <summary>
+    /// Resolves its queue list every pass. Used by the orchestrator, whose processor work queues are
+    /// per-processor GUIDs that only exist once something has been dispatched to them.
+    /// </summary>
+    public QueueDepthProbe(
+        RabbitMqConnection connection,
+        Func<IReadOnlyList<string>> queues,
+        TimeSpan interval,
+        ILogger<QueueDepthProbe> logger)
+        : base(connection, queues, interval, logger)
+    {
+    }
+
     protected override string Purpose => "queue depth";
 
     protected override void Report(string queue, QueueDeclareOk ok) =>

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using BaseConsole.Core.Gating;
+using BaseConsole.Core.Messaging;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
@@ -102,6 +103,10 @@ internal sealed class NextStepHandoffHandler : IQueueMessageHandler
             // handler already implements.
             var dispatch = new ProcessDispatch(
                 h.CorrelationId, h.ExecutionId, h.WorkflowId, h.StepId, h.ProcessorId, h.Payload, h.EntryId);
+
+            // Registered BEFORE the send, so a queue whose very first dispatch fails is still
+            // measured. That is the case where knowing the depth matters most.
+            DispatchedQueues.Record(ProcessorQueues.Work(h.ProcessorId));
 
             await _sender
                 .SendTransientAsync(

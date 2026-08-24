@@ -239,14 +239,24 @@ public static class OrchestratorHost
         //
         // Ten seconds, against the dead-letter probe's thirty. See QueueDepthProbe for why the two
         // intervals differ and what the shorter one costs.
+        //
+        // THE PROCESSOR WORK QUEUES ARE ON THIS LIST, AND THAT IS THE POINT. The processor probes
+        // its own queue too, but a probe cannot report the consequence of its own host being gone:
+        // with the processor deployment scaled to zero the broker went 0 -> 3 messages with 0
+        // consumers while the gauge read a confident 0 throughout, because the departed pods' last
+        // samples were held by the collector and Prometheus's lookback. The orchestrator outlives
+        // the processors, so it is the process that can answer this. See DispatchedQueues.
+        string[] own =
+        [
+            OrchestratorQueues.Control,
+            OrchestratorQueues.Result,
+            OrchestratorQueues.ResultPost,
+            OrchestratorFanout.PerReplica(instanceId.Value),
+        ];
+
         builder.Services.AddHostedService(sp => new QueueDepthProbe(
             sp.GetRequiredService<RabbitMqConnection>(),
-            [
-                OrchestratorQueues.Control,
-                OrchestratorQueues.Result,
-                OrchestratorQueues.ResultPost,
-                OrchestratorFanout.PerReplica(instanceId.Value),
-            ],
+            () => [.. own, .. DispatchedQueues.Snapshot()],
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>()));
 
