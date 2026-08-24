@@ -508,6 +508,13 @@ what a restart inside the range does to them.
 >
 > Closing it needs an instrument before it needs a panel -- a timer around the L2 probe, or around
 > store calls generally, exported as a histogram. That is production code and wants its own plan.
+>
+> **Closed twice over, and the second one is the general fix.** The store probe was timed first
+> (see below), which catches a slow dependency but only the one the probe happens to call. Then
+> `pipeline.step.elapsed` timed the whole step door to door, and re-running this exact scenario
+> moved it from **0.050-0.060s to 0.973s** on p95 -- a fault that "not one panel, not one stat"
+> could see now lands red on the board an operator opens first. See **Step latency, and the fault
+> that finally moved a panel**.
 
 **S11, a store slower than its own probe timeout -- and it reads exactly like an outage.**
 
@@ -696,7 +703,7 @@ what a restart inside the range does to them.
 > destructive, which is the part that actually cost you something.
 >
 > Closed by provisioning them from the repo -- see **Changing a board** above. All five
-> report `provisioned=true` in folder `SKP` with panel counts 20/20/26/25/17 (21/22/35/33/17
+> report `provisioned=true` in folder `SKP` with panel counts 20/20/26/25/17 (28/22/38/36/17
 > after the operator review below), and anonymous
 > viewers get 200 on every one, so the ACL artefact recorded below did not recur.
 >
@@ -741,10 +748,10 @@ Live panel counts, all `provisioned=true` in folder `SKP`:
 
 | board | panels | rows |
 |---|---|---|
-| `skp-flow` | 25 | Verdict / Since / Flow |
+| `skp-flow` | 28 | Verdict / Since / Flow |
 | `skp-baseapi` | 22 | Verdict / Ingress / Runtime |
-| `skp-orchestrator` | 37 | Verdict / Since / Pipeline / Runtime |
-| `skp-processor` | 35 | Verdict / Since / Pipeline / Runtime |
+| `skp-orchestrator` | 38 | Verdict / Since / Pipeline / Runtime |
+| `skp-processor` | 36 | Verdict / Since / Pipeline / Runtime |
 | `skp-runtime` | 17 | (no rows) |
 
 The collapsed Runtime tier carries **two** panels -- thread-pool queue and GC pause --
@@ -1000,13 +1007,8 @@ Unchanged, and still the largest gaps for an operator:
 
 - ~~**No backlog, queue depth or consumer lag anywhere.**~~ **Closed** — see
   **Queue depth, and the probe that could not see its own outage** below.
-- **No end-to-end latency or message age.** Per-hop produce and process durations exist;
-  door-to-door time for a workflow step does not. There is also no trace-context
-  propagation anywhere in `src/` — no `ActivitySource`, no `traceparent`, no propagator —
-  so this cannot be read off traces either. It needs a timestamp on the wire, and the
-  obvious in-process stopwatch does not work here: `orchestrator-result` is a shared
-  competing-consumer queue, so a step's outcome can land on a different replica than the
-  one that dispatched it.
+- ~~**No end-to-end latency or message age.**~~ **Closed** — see **Step latency, and the
+  fault that finally moved a panel** below.
 - **Degradation is still largely invisible**, beyond the store-probe instrument — see the
   S10/S11 write-up above.
 - **Nothing consumes the alerts**, and no rule covers work being discarded.
@@ -1111,6 +1113,92 @@ replicas drain it one at a time. Green below 5 clears that; red at 20.
 - **A consumer that reattaches inside one 10s probe interval is invisible** — which is
   exactly what the S9 flapping-connection scenario produced.
 - **Depth counts messages *ready*, not unacked.** Exact only because `PrefetchCount` is 1.
+- **Nothing alerts on it**, like everything else here.
+
+## Step latency, and the fault that finally moved a panel
+
+`pipeline.step.elapsed` and `pipeline.queue.wait` close the last measurement gap the
+operator review left open: how long a workflow *step* takes, and how much of that was
+spent waiting in the broker.
+
+**Neither could be borrowed from what was already here.** There is no trace context
+anywhere in `src/` — no `ActivitySource`, no `traceparent`, no propagator — so this cannot
+be read off traces. And the obvious in-process stopwatch cannot span a step:
+`orchestrator-result` is a shared competing-consumer queue, so a step's outcome is
+routinely consumed by a **different replica** than the one that dispatched it. The
+measurement has to travel with the message.
+
+**Two headers, two questions.** `x-skp-sent-ms` is stamped fresh on every publish, so the
+consumer's difference is this hop's broker wait — the term neither produce duration nor
+process duration contains, and therefore the one that goes missing when an end-to-end time
+grows and no component looks slow. `x-skp-origin-ms` is stamped once when a step begins and
+propagated unchanged by every message that step causes, so when the orchestrator consumes
+the step's outcome the difference is the whole door-to-door time.
+
+**Propagation needed no contract change**, which is why it was done this way.
+`IQueueMessageHandler` receives a body and nothing else — no properties, no headers — so a
+handler cannot see what it arrived with and cannot copy it forward. Threading it through
+meant changing that interface and every handler, or adding a field to three message records
+and keeping them in step. An `AsyncLocal` set by the consumer before it invokes the handler
+flows into everything the handler does, including its sends, and nothing else has to know
+it exists.
+
+**The chain is reset where a step is dispatched, not merely propagated.** A step's outcome
+is handled by the orchestrator, which dispatches the *next* step from inside that delivery
+— so an origin only ever propagated would ride from the first step to the last, and every
+step after the first would report cumulative run time under a name that says step.
+
+### It closes S10
+
+The S10 write-up above records, of 300ms of injected Redis latency on the processor's path:
+*"Nothing showed it. Not one panel, not one stat."* Process p95 flat at 24ms, gate 1,
+consuming 1, every run complete. Re-run unchanged with this instrument in place:
+
+| | baseline | during the 300ms fault |
+|---|---|---|
+| **step-outcome p95** | 0.050 – 0.060 s | **0.973 s** |
+| **step-outcome mean** | 0.036 – 0.037 s | **0.835 s** |
+
+Sixteen times on the quantile, twenty-three on the mean, against a fault that previously
+moved nothing anywhere. The toxic was removed afterwards and its absence proven against the
+proxy rather than assumed — a latency toxic has no expiry, so a killed run leaves Redis slow
+indefinitely.
+
+**The decomposition works, and that is the half worth having.** In the same window `Step
+duration` spiked to ~1s while `Queue wait by hop` put a matching ~500ms spike on the
+`processed-data` hop *inside the processor* — naming where the time went rather than merely
+reporting that a step got slower. A rise in step time with flat queue waits is the
+transform or a dependency; a rise that tracks one hop's wait is backlog on that queue, and
+`Queue depth by queue` says how deep.
+
+### The ladder is wider than the transport's, deliberately
+
+`EgressMeter.LatencySecondsBoundaries` stops at **10s**, which is right for a broker round
+trip and wrong here: these instruments exist because a pipeline can fall behind, and a
+backlogged step is measured in minutes. Everything past the last boundary lands in `+Inf`,
+where a quantile has nothing to interpolate between and reports the last edge — the
+millisecond-ladder defect from the other end, and just as silent. The arrival ladder reaches
+**300s**.
+
+The low end starts at **10ms** rather than 1ms, and that is honesty rather than laziness:
+both ends of every measurement here are stamped on different processes. On this single-node
+cluster skew is nil; across nodes NTP leaves milliseconds to tens of milliseconds, which is
+irrelevant at this magnitude and fatal to a figure claiming to resolve a 24ms hop. A ladder
+resolving 1ms would invite someone to read noise as a latency.
+
+`ArrivalHistogramBucketTests` guards both, by reading boundaries off an exported metric
+rather than asserting `AddView` was called — a view whose instrument name matches nothing is
+silently ignored. Writing those tests reproduced a smaller version of the same trap: they
+recorded *before* resolving the `MeterProvider`, so the SDK had not yet subscribed, the
+export was empty, and the assertion failed exactly as it would for a genuinely missing view.
+
+### What it still cannot do
+
+- **Absent headers are skipped, never recorded as zero.** During any rollout some messages
+  carry neither, and the API publishes through a copy of the sender that stamps nothing —
+  so a shortfall in the count is the API's share before it is anything else.
+- **Elapsed is clamped at zero.** A clock running backwards shows as a visible pile at
+  zero rather than poisoning the quantiles.
 - **Nothing alerts on it**, like everything else here.
 
 ## Two defects found while building these boards
