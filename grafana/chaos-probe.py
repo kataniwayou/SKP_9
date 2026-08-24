@@ -3,7 +3,13 @@
 
 The companion to chaos-timeline.js, and the reason findings can be stated as facts rather
 than impressions. The timeline says what a panel SHOWED; this says what the panel COULD
-have shown. A panel that stayed green while its own expression moved is a rendering or
+have shown -- both what its values did and which of its SERIES stopped.
+
+That last part is not a refinement. chaos-timeline.js renders at now-15m and records legend
+text, and a Grafana legend lists every series with data anywhere in the range -- so a run
+shorter than the range cannot show a name disappear, whatever the lines do. Judged that way,
+a panel that correctly ended a departed replica's line was reported as broken. Series
+presence is only available here, from the range data, which is why it lives here. A panel that stayed green while its own expression moved is a rendering or
 thresholding defect. A panel that stayed green while its expression stayed flat is a
 missing signal -- a different finding with a different fix.
 
@@ -76,6 +82,64 @@ def seg(series, lo, hi):
     return vals
 
 
+def fingerprint(metric):
+    """A stable name for one series: its label set, minus the metric name.
+
+    __name__ is dropped because a panel's expression may rename or aggregate away the
+    metric while the identity that matters -- which replica, which queue -- lives in the
+    remaining labels.
+    """
+    return ",".join(f"{k}={v}" for k, v in sorted(metric.items()) if k != "__name__")
+
+
+def real(v):
+    """A sample that would render. NaN draws blank rather than zero, so it is not one."""
+    try:
+        f = float(v)
+    except ValueError:
+        return False
+    return f == f                               # NaN != NaN
+
+
+def spans(series, lo, hi):
+    """fingerprint -> (first, last) real-sample timestamp inside [lo, hi].
+
+    The reading present() cannot give. Whether a series is ABSENT from a window depends on
+    where you put the window, and a departed replica keeps drawing for up to a rate window
+    after its last export -- legitimately, that is what rate() does. So a set difference
+    over a hand-chosen fault window reports "still present" for a line that has plainly
+    ended, and the only way to make it say otherwise is to move the window until it agrees,
+    which is not measuring.
+
+    Where a line ENDS is a property of the series, not of the window, so this asks that
+    instead.
+    """
+    out = {}
+    for s in series:
+        fp = fingerprint(s.get("metric", {}))
+        ts = [t for t, v in s.get("values", []) if lo <= t <= hi and real(v)]
+        if not ts:
+            continue
+        prev = out.get(fp)
+        first, last = min(ts), max(ts)
+        out[fp] = (min(prev[0], first), max(prev[1], last)) if prev else (first, last)
+    return out
+
+
+def present(series, lo, hi):
+    """Fingerprints of the series carrying at least one real sample in [lo, hi).
+
+    Presence, not value. A replica idling at zero is PRESENT; a replica whose line stopped
+    is not. seg() cannot make that distinction because it pools every series' samples into
+    one list, so one departure among several peers leaves the pool still full. NaN does not
+    count -- it renders blank rather than zero, and seg() already drops it.
+    """
+    return {fingerprint(s.get("metric", {}))
+            for s in series
+            for ts, v in s.get("values", [])
+            if lo <= ts < hi and real(v)}
+
+
 def describe(vals):
     if not vals:
         return "        --        "
@@ -92,6 +156,7 @@ def main():
     ap.add_argument("--out")
     args = ap.parse_args()
 
+    step_s = float(args.step.rstrip("s")) if args.step.endswith("s") else float(args.step)
     fault, heal = parse_ts(args.fault_at), parse_ts(args.heal_at)
     start, end = fault - timedelta(seconds=args.pad), heal + timedelta(seconds=args.pad)
     fts, hts = fault.timestamp(), heal.timestamp()
@@ -120,15 +185,38 @@ def main():
                 b = seg(series, start.timestamp(), fts)
                 d = seg(series, fts, hts)
                 a = seg(series, hts, end.timestamp())
+                pb = present(series, start.timestamp(), fts)
+                pd = present(series, fts, hts)
+                pa = present(series, hts, end.timestamp())
+                left, arrived = sorted(pb - pd), sorted(pd - pb)
+                sp = spans(series, start.timestamp(), end.timestamp())
+                ended = sorted((fp, last) for fp, (_, last) in sp.items()
+                               if end.timestamp() - last > 2 * step_s)
                 legend = (t.get("legendFormat") or "").strip()
                 name = f"{panel['title']}"[:44] + (f" [{legend[:6]}]" if legend else "")
                 # Moved = the during-segment left the range the before-segment occupied.
                 moved = bool(b and d) and (max(d) > max(b) * 1.5 + 1e-9 or min(d) < min(b) - 1e-9)
                 flag = " <<" if moved else ("  ~" if (b and not d) else "   ")
+                if left:
+                    flag += f" -{len(left)}"
+                if arrived:
+                    flag += f" +{len(arrived)}"
+                if ended:
+                    flag += f" end{len(ended)}"
                 print(f"   {name:50}{len(series):>4}  {describe(b)} {describe(d)} {describe(a)}{flag}")
+                for fp, last in ended:
+                    print(f"{'':56}line ENDS at +{last - start.timestamp():.0f}s "
+                          f"(window +0..+{end.timestamp() - start.timestamp():.0f}s): {fp[:110]}")
+                for fp in arrived:
+                    print(f"{'':56}series arrives during fault: {fp[:110]}")
                 rows.append({"board": board["title"], "panel": panel["title"], "legend": legend,
                              "expr": raw, "series": len(series), "before": b, "during": d,
-                             "after": a, "moved": moved})
+                             "after": a, "moved": moved,
+                             "series_before": len(pb), "series_during": len(pd),
+                             "series_after": len(pa), "left": left, "arrived": arrived,
+                             "ended": [{"series": fp,
+                                        "at": round(last - start.timestamp(), 1)}
+                                       for fp, last in ended]})
 
     if args.out:
         pathlib.Path(args.out).write_text(json.dumps(rows, indent=1), encoding="utf-8")
