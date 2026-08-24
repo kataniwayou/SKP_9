@@ -655,6 +655,44 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                    thresholds=[{"color": "green", "value": None},
                                {"color": "orange", "value": 1}],
                    minv=0, decimals=0),
+        timeseries(layout, "Store probe latency p95 / p99",
+                   [(f'histogram_quantile(0.95, sum by (le) '
+                     f'(rate(pipeline_gate_probe_duration_seconds_bucket'
+                     f'{{{f},outcome="healthy"}}[$__rate_interval])))', "p95"),
+                    (f'histogram_quantile(0.99, sum by (le) '
+                     f'(rate(pipeline_gate_probe_duration_seconds_bucket'
+                     f'{{{f},outcome="healthy"}}[$__rate_interval])))', "p99"),
+                    (f'sum(rate(pipeline_gate_probe_duration_seconds_sum'
+                     f'{{{f},outcome="healthy"}}[$__rate_interval])) '
+                     f'/ sum(rate(pipeline_gate_probe_duration_seconds_count'
+                     f'{{{f},outcome="healthy"}}[$__rate_interval]))', "mean")],
+                   desc="How long the projection store takes to answer the gate probe. "
+                        "**This is the only panel that can show a store that is slow "
+                        "rather than absent.**" + PARA +
+                        "The gate beside it answers *did the store reply inside the "
+                        "timeout*, which is a yes/no, and a yes/no cannot show "
+                        "degradation. Measured before this instrument existed: Redis "
+                        "made 685x slower for the processor -- 0.44ms to 301ms, verified "
+                        "with `redis-cli --latency` -- moved nothing on any board, "
+                        "because a store a thousand times slower and still inside a 2s "
+                        "budget is, to a yes/no, healthy. Past the budget it read as a "
+                        "full outage. Two states, working and gone, with nothing in "
+                        "between." + PARA +
+                        "Healthy on this stack is **mean ~0.9ms, p95 ~2ms**. A jump to "
+                        "tens or hundreds of milliseconds is a degraded store that will "
+                        "not trip the gate and will not lose you a step -- yet." + PARA +
+                        "**Timeouts are excluded on purpose** (`outcome=\"healthy\"`). A "
+                        "timed-out probe records the ceiling rather than its true "
+                        "duration, because the ping is abandoned rather than cancelled "
+                        "and how long it would have taken is unknowable. Including them "
+                        "would pin p99 at exactly the probe timeout and invite you to "
+                        "believe it. Those show up on `L2 gate` and `Gate trips` "
+                        "instead." + PARA +
+                        "The mean rides alongside the quantiles for the reason the "
+                        "produce-duration panel gives: it comes from sum/count and is "
+                        "independent of bucket boundaries, so a wild divergence from p50 "
+                        "means the ladder has stopped fitting the data.",
+                   unit="s"),
         timeseries(layout, "Channel resets by reason" + (" and replica" if by_instance else ""),
                    [(f'sum by (queue,reason{",service_instance_id" if by_instance else ""}) '
                      f'(rate(pipeline_consumer_channel_resets_total'
