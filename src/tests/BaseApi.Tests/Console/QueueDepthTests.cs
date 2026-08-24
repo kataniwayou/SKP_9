@@ -1,5 +1,5 @@
 using System.Diagnostics.Metrics;
-using BaseConsole.Core.Messaging;
+using Messaging.Transport;
 using Xunit;
 
 namespace BaseApi.Tests.Console;

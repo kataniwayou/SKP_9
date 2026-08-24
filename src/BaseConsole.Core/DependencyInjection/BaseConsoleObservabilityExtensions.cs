@@ -137,6 +137,9 @@ public static class BaseConsoleObservabilityExtensions
                 .AddMeter(EgressMeter.Name)
                 .AddMeter(IngressMetrics.MeterName)
                 .AddMeter(L2GateMetrics.MeterName)
+                // Queue depth and attached consumers. Its own meter because the types moved to
+                // the transport, where the API can reach them -- see QueueDepthMetrics.
+                .AddMeter(QueueDepthMetrics.MeterName)
                 // Bucket boundaries for the send-latency histogram, on the shared call so both roles
                 // inherit them. Without a view the SDK applies a default ladder built for
                 // milliseconds while the instrument records seconds, and every observation collapses

@@ -1,10 +1,9 @@
-using Messaging.Transport;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Exceptions;
 
-namespace BaseConsole.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// Reads what the broker says about a fixed list of queues, on a loop, and hands each reading to a

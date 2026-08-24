@@ -1,3 +1,4 @@
+using Messaging.Transport;
 using BaseApi.Core.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -91,6 +92,11 @@ public static class ObservabilityServiceCollectionExtensions
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
+                // Queue depth and attached consumers. The API is the only process that can
+                // observe orchestrator-control while the orchestrator is gone -- it is the one
+                // publishing start and stop requests into it, which pile up there with nothing
+                // to take them. See QueueDepthMetrics.
+                .AddMeter(QueueDepthMetrics.MeterName)
                 .AddOtlpExporter());
 
         return builder;

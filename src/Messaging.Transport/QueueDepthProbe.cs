@@ -1,8 +1,7 @@
-using Messaging.Transport;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 
-namespace BaseConsole.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// Reads how much work is waiting in this process's LIVE queues, and how many consumers the broker
