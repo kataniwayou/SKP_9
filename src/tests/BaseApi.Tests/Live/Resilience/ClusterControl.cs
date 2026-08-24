@@ -125,6 +125,235 @@ internal static class ClusterControl
         return new ScaledDown(kind, name, restoreTo);
     }
 
+    /// <summary>
+    /// How often a disconnected replica's returning connection is closed again.
+    /// <para>
+    /// The client reconnects on its own, so this is not a one-shot fault: it has to be re-applied
+    /// for as long as the wedge is meant to last. Five seconds against two kubectl execs per pass
+    /// (~1-2s each) keeps the loop ahead of a client that reconnects immediately.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan DisconnectInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The Erlang pids of every connection a given peer host holds, from
+    /// <c>rabbitmqctl -q list_connections pid name peer_host</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>The host match is exact, and that is the whole reason this is a separate function.</b>
+    /// Pod IPs on this cluster share prefixes -- <c>10.244.0.20</c> is a prefix of
+    /// <c>10.244.0.205</c> -- so a StartsWith or Contains match would disconnect a replica the
+    /// scenario did not name, or every replica at once, which is the broker-gone scenario rather
+    /// than this one. A scenario that injects the wrong fault and still passes is the worst failure
+    /// a resilience suite has available, so the parse is unit-tested away from the cluster.
+    /// <para>
+    /// The header row is skipped by its own content rather than by position, because <c>-q</c>
+    /// suppresses the "Listing connections ..." preamble but not the column names.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<string> ParseConnectionPids(string listOutput, string peerHost)
+    {
+        ArgumentNullException.ThrowIfNull(listOutput);
+
+        var pids = new List<string>();
+        foreach (var raw in listOutput.Split('\n'))
+        {
+            var columns = raw.Trim('\r').Split('\t');
+            if (columns.Length < 3)
+            {
+                continue;
+            }
+
+            if (!string.Equals(columns[2].Trim(), peerHost, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.Equals(columns[0], "pid", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            pids.Add(columns[0]);
+        }
+
+        return pids;
+    }
+
+    /// <summary>
+    /// Disconnects ONE processor replica from the broker and keeps it disconnected until disposed.
+    /// <para>
+    /// <b>The fault the suite could not previously inject.</b> Every other lever here takes a
+    /// dependency away entirely, or takes a replica away entirely. This one leaves the replica
+    /// running, serving HTTP and exporting metrics, and interferes only with its consumer -- which
+    /// is the difference between a replica that LEFT and a replica that STOPPED WORKING.
+    /// <c>Consuming by queue and replica</c> is the only panel that can resolve it.
+    /// </para>
+    /// <para>
+    /// <b>SIGSTOP is not the way in, and that negative result is why this lever exists.</b> The
+    /// processor image is distroless and carries no <c>kill</c>; an ephemeral debug container does
+    /// share the PID namespace and can signal PID 1, but a frozen process stops exporting metrics
+    /// too, so Prometheus cannot tell it from a departure -- the case the per-replica panels
+    /// already cover. The broker can disconnect one consumer while its process carries on.
+    /// </para>
+    /// <para>
+    /// <b>Self-healing, which is why this lever and not another.</b> Nothing is mutated that has to
+    /// be put back: a killed or crashed run simply stops closing the connection and the client
+    /// reconnects on its own. That is the same property that made CLIENT PAUSE the Redis lever
+    /// rather than a scale-down.
+    /// </para>
+    /// </summary>
+    public static async Task<IAsyncDisposable> HoldOneProcessorDisconnectedAsync(CancellationToken ct)
+    {
+        var (pod, ip) = await FirstProcessorPodAsync(ct);
+        await CloseConnectionsFromAsync(ip, ct);
+        return new Disconnected(pod, ip);
+    }
+
+    /// <summary>
+    /// The processor replica this scenario will disconnect: first by name, so a re-run picks the
+    /// same one whenever the pod set is unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Requires at least two replicas, and says so rather than proceeding. Disconnecting the only
+    /// replica would be the processor-unavailable scenario wearing a different lever, and the whole
+    /// point here is that a healthy peer keeps working beside the wedged one.
+    /// </remarks>
+    private static async Task<(string Pod, string Ip)> FirstProcessorPodAsync(CancellationToken ct)
+    {
+        var raw = await Kubectl.RunOrThrowAsync(
+            ct, "-n", Chaos.Namespace, "get", "pods", "-l", "app=processor-sample",
+            "-o", "jsonpath={range .items[*]}{.metadata.name} {.status.podIP}{\"\\n\"}{end}");
+
+        var pods = new List<(string Pod, string Ip)>();
+        foreach (var line in raw.Split('\n'))
+        {
+            var columns = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (columns.Length == 2)
+            {
+                pods.Add((columns[0], columns[1]));
+            }
+        }
+
+        pods.Sort((a, b) => string.CompareOrdinal(a.Pod, b.Pod));
+
+        if (pods.Count < 2)
+        {
+            throw new InvalidOperationException(
+                "the wedge scenario needs at least two processor replicas carrying pod IPs; found "
+                + pods.Count.ToString(CultureInfo.InvariantCulture)
+                + ". Wedging the only replica is the processor-unavailable scenario, not this one.");
+        }
+
+        return pods[0];
+    }
+
+    /// <summary>Closes every connection the given peer host holds, and reports how many there were.</summary>
+    private static async Task<int> CloseConnectionsFromAsync(string peerHost, CancellationToken ct)
+    {
+        var listing = await Kubectl.RunOrThrowAsync(
+            ct, "-n", Chaos.Namespace, "exec", "rabbitmq-0", "--",
+            "rabbitmqctl", "-q", "list_connections", "pid", "name", "peer_host");
+
+        var pids = ParseConnectionPids(listing, peerHost);
+        foreach (var pid in pids)
+        {
+            // close_connection takes the Erlang PID, not the connection name -- verified against
+            // RabbitMQ 4.1.8 on this cluster, where the name is rejected.
+            await Kubectl.RunOrThrowAsync(
+                ct, "-n", Chaos.Namespace, "exec", "rabbitmq-0", "--",
+                "rabbitmqctl", "close_connection", pid, "skp chaos: wedged replica scenario");
+        }
+
+        return pids.Count;
+    }
+
+    /// <summary>Blocks until the given peer host holds a broker connection again.</summary>
+    private static async Task WaitForConnectionAsync(string peerHost, CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var listing = await Kubectl.RunOrThrowAsync(
+                ct, "-n", Chaos.Namespace, "exec", "rabbitmq-0", "--",
+                "rabbitmqctl", "-q", "list_connections", "pid", "name", "peer_host");
+
+            if (ParseConnectionPids(listing, peerHost).Count > 0)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+        }
+    }
+
+    /// <summary>Keeps one replica disconnected, and on disposal waits for it to reconnect.</summary>
+    private sealed class Disconnected : IAsyncDisposable
+    {
+        private readonly CancellationTokenSource _stop = new();
+        private readonly Task _keepalive;
+        private readonly string _pod;
+        private readonly string _ip;
+
+        public Disconnected(string pod, string ip)
+        {
+            _pod = pod;
+            _ip = ip;
+
+            // Its own token, for the reason RedisPause documents: stopping the fault is the one
+            // thing that must still happen when the scenario is cancelled.
+            _keepalive = KeepClosedAsync(ip, _stop.Token);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await _stop.CancelAsync();
+
+                try
+                {
+                    await _keepalive;
+                }
+                catch (Exception)
+                {
+                    // The keepalive's own failure must not replace the exception already unwinding
+                    // the scenario, and must not skip the wait below. Nothing needs undoing either
+                    // way: once this loop stops, the client reconnects on its own.
+                }
+            }
+            finally
+            {
+                _stop.Dispose();
+
+                // Left to surface, the way ScaledDown leaves its rollout wait unguarded: a replica
+                // that never reconnects once nothing is closing it is real information -- the wedge
+                // outlived the fault, which is the failure mode this scenario exists to look for.
+                using var restore = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                try
+                {
+                    await WaitForConnectionAsync(_ip, restore.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new InvalidOperationException(
+                        $"{_pod} ({_ip}) did not reconnect to the broker within two minutes of the "
+                        + "fault being released; the wedge outlived the fault.");
+                }
+            }
+        }
+
+        private static async Task KeepClosedAsync(string ip, CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(DisconnectInterval, ct);
+                await CloseConnectionsFromAsync(ip, ct);
+            }
+        }
+    }
+
     private sealed class RedisPause : IAsyncDisposable
     {
         private readonly CancellationTokenSource _stop = new();
