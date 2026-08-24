@@ -40,6 +40,53 @@ internal sealed class L2GateMetrics : IHostedService, IDisposable
         description: "Times the projection store went away and consumption was paused at the broker.");
 
     /// <summary>
+    /// Must match the name the view in <c>AddBaseConsoleObservability</c> targets. A view whose
+    /// instrument name matches nothing is silently ignored, so a typo here costs the histogram its
+    /// bucket boundaries and nothing reports the mistake.
+    /// </summary>
+    internal const string ProbeDurationInstrument = "pipeline.gate.probe.duration";
+
+    /// <summary>
+    /// How long the store took to answer the gate probe.
+    /// <para>
+    /// <b>The instrument the gate could not be a substitute for.</b> The gate answers "did the store
+    /// reply inside <c>ProbeTimeout</c>", which is a yes/no. Measured on the live stack: Redis made
+    /// 685x slower for the processor — 0.44 ms to 301 ms, verified with <c>redis-cli --latency</c> —
+    /// moved nothing on any board, because a store a thousand times slower and still inside a 2 s
+    /// budget is, to a yes/no, a healthy store. Past the budget it read as a full outage instead.
+    /// Two states, working and gone, with nothing in between; this is what puts something in
+    /// between.
+    /// </para>
+    /// <para>
+    /// <b>Recorded from the probe rather than from real traffic</b> because the probe ticks on a
+    /// fixed interval whether or not anything is flowing, so this reports during idle periods too.
+    /// A histogram over real store calls would go quiet exactly when a pipeline has stalled, which
+    /// is when the latency question is most worth asking.
+    /// </para>
+    /// </summary>
+    private static readonly Histogram<double> ProbeDuration = Meter.CreateHistogram<double>(
+        ProbeDurationInstrument,
+        unit: "s",
+        description: "How long the projection store took to answer the gate probe.");
+
+    /// <summary>
+    /// Records one probe measurement.
+    /// <para>
+    /// <b><paramref name="outcome"/> is load-bearing, not decoration.</b> A timed-out probe records
+    /// the ceiling rather than the true duration — the ping is abandoned, not cancelled, so how long
+    /// it would have taken is unknowable. Folded into an untagged histogram those would pin the p99
+    /// at exactly <c>ProbeTimeout</c> and invite a reader to believe it. Tagged, a latency panel can
+    /// exclude them and a separate count can carry them.
+    /// </para>
+    /// </summary>
+    /// <param name="elapsed">Wall time from issuing the ping to learning its fate.</param>
+    /// <param name="outcome">healthy, timeout, or failed.</param>
+    internal static void RecordProbe(TimeSpan elapsed, string outcome) =>
+        ProbeDuration.Record(
+            elapsed.TotalSeconds,
+            new KeyValuePair<string, object?>("outcome", outcome));
+
+    /// <summary>
     /// Every live owner's gate, keyed by the owner itself.
     /// <para>
     /// <b>This registry exists so there is ONE observable instrument rather than one per owner.</b>

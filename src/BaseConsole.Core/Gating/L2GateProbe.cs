@@ -108,10 +108,29 @@ public sealed class L2GateProbe : BackgroundService
     /// negative result rather than an exception, because the caller's job is to decide about the
     /// gate, not to distinguish between ways of being unreachable.
     /// </summary>
+    /// <remarks>
+    /// <b>Timed, and the timing is the point.</b> Whether the store answered is a yes/no, and a
+    /// yes/no cannot show degradation: a store 685x slower but still inside <c>ProbeTimeout</c>
+    /// looks exactly like a healthy one, and one past the budget looks exactly like an absent one.
+    /// Both were measured on the live stack. See <see cref="L2GateMetrics.RecordProbe"/>.
+    /// <para>
+    /// <b>Only the console copy of this probe is instrumented.</b> <c>BaseApi.Core.Gating.L2Gate</c>
+    /// and its console twin must not diverge, which is why <see cref="L2GateMetrics"/> instruments
+    /// the gate from outside rather than from within — but the two <c>L2GateProbe</c>s already
+    /// differ (the API's carries a cold-start line and a bounded unreachable warning this one does
+    /// not), so that constraint does not reach here. The API's own observability is a separate,
+    /// separately-recorded gap.
+    /// </para>
+    /// </remarks>
     private async Task<bool> IsHealthyAsync(CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(_options.ProbeTimeout);
+
+        // Wall time from issuing the ping to learning its fate, on every exit path including the
+        // failures -- a probe that fails fast and one that fails slow are different incidents.
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        TimeSpan Elapsed() => System.Diagnostics.Stopwatch.GetElapsedTime(started);
 
         try
         {
@@ -134,15 +153,22 @@ public sealed class L2GateProbe : BackgroundService
                     TaskContinuationOptions.OnlyOnFaulted,
                     TaskScheduler.Default);
 
+                // The ceiling, not the true duration: the ping is still running and how long it
+                // would have taken is unknowable. That is exactly why the outcome is tagged.
+                L2GateMetrics.RecordProbe(Elapsed(), "timeout");
                 _logger.LogDebug("probe exceeded {Timeout}", _options.ProbeTimeout);
                 return false;
             }
 
             await ping.ConfigureAwait(false);   // surface a faulted ping
+            L2GateMetrics.RecordProbe(Elapsed(), "healthy");
             return true;
         }
         catch (Exception ex)
         {
+            // Recorded before returning, because a store that refuses instantly and one that fails
+            // after a second and a half are different faults with the same verdict.
+            L2GateMetrics.RecordProbe(Elapsed(), "failed");
             _logger.LogDebug(ex, "probe failed");
             return false;
         }

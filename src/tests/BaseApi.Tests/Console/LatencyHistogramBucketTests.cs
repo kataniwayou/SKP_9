@@ -128,39 +128,4 @@ public sealed class LatencyHistogramBucketTests
     /// metric point's <c>GetHistogramBuckets</c> enumerator, whose last entry is the +Inf overflow
     /// bucket -- that one is not a configured boundary and is dropped.
     /// </summary>
-    private sealed class BoundaryCapturingExporter : BaseExporter<Metric>
-    {
-        private readonly Dictionary<string, double[]> _boundaries = [];
-
-        public double[]? BoundariesFor(string instrument) =>
-            _boundaries.TryGetValue(instrument, out var b) ? b : null;
-
-        public override ExportResult Export(in Batch<Metric> batch)
-        {
-            foreach (var metric in batch)
-            {
-                if (metric.MetricType != MetricType.Histogram)
-                {
-                    continue;
-                }
-
-                foreach (ref readonly var point in metric.GetMetricPoints())
-                {
-                    var bounds = new List<double>();
-                    foreach (var bucket in point.GetHistogramBuckets())
-                    {
-                        if (!double.IsPositiveInfinity(bucket.ExplicitBound))
-                        {
-                            bounds.Add(bucket.ExplicitBound);
-                        }
-                    }
-
-                    _boundaries[metric.Name] = [.. bounds];
-                    break;
-                }
-            }
-
-            return ExportResult.Success;
-        }
-    }
 }

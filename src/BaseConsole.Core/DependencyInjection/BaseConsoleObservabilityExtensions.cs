@@ -148,6 +148,18 @@ public static class BaseConsoleObservabilityExtensions
                     {
                         Boundaries = EgressMeter.LatencySecondsBoundaries(),
                     })
+                // The gate probe's duration needs the same treatment and deliberately the same
+                // ladder: a store round trip and a broker send are both sub-second latencies in
+                // seconds, and two ladders would make them unreadable together for no gain. The
+                // ladder's low end matters more here than anywhere else -- a healthy probe on this
+                // stack is ~0.44ms and a degraded one 301ms, and those must not share a bucket or
+                // the instrument reproduces the blindness it was added to fix.
+                .AddView(
+                    L2GateMetrics.ProbeDurationInstrument,
+                    new ExplicitBucketHistogramConfiguration
+                    {
+                        Boundaries = EgressMeter.LatencySecondsBoundaries(),
+                    })
                 // No ASP.NET Core or HttpClient instrumentation: a worker's only inbound surface is
                 // its own health probes, so those would measure nothing but the probing.
                 .AddRuntimeInstrumentation()
