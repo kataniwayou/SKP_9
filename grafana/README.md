@@ -74,6 +74,12 @@ paid for was not being used, while the durability being given up cost a hand re-
 every restart. `allowUiUpdates: false` now makes that explicit -- a UI Save is rejected with
 `Cannot save provisioned dashboard` (HTTP 400).
 
+**The API import path is now closed, and that is the mechanism working.** Posting a board to
+`/api/dashboards/db` returns `Cannot save provisioned dashboard` (HTTP 400), because the provider
+sets `allowUiUpdates: false`. Regenerating and applying the ConfigMap is the only way a board
+changes on this cluster. The re-import runbook above is for a Grafana that does not provision
+these, or for recovering one that failed to.
+
 **Apply it server-side, and do not believe the error if you forget:**
 
 ```bash
@@ -438,12 +444,19 @@ what a restart inside the range does to them.
 > a consumer that stays stopped while its process reports healthy -- still has not been produced on
 > this stack**, because nothing here can stop a consumer without the client putting it back.
 >
-> **What did resolve it per replica is drawn in a form that cannot resolve a replica.** Channel
-> resets caught this fault and named the right replica -- but the board draws it only as
-> `sum(...)` on the verdict stat and `sum by (queue,reason)` on the timeseries. Both processor
-> replicas share one queue, so the timeseries collapses across them exactly as `Consuming by queue`
-> did before it was split. The same one-parameter fix applies, and unlike last time it is now
-> indicated by a fault rather than by inspection.
+> **What resolved it per replica was drawn in a form that could not resolve a replica -- now
+> fixed.** Channel resets caught this fault, but the timeseries drew it as `sum by (queue,reason)`,
+> and both processor replicas share one queue, so it collapsed across them exactly as
+> `Consuming by queue` did before it was split. `by_instance` now carries this panel too.
+> Re-judged against the recorded S9 window:
+>
+> | | during the fault |
+> |---|---|
+> | `sum by (queue,reason)` (old) | churn visible, `+195..+285s`, replica unknowable |
+> | `sum by (queue,reason,service_instance_id)` (new) | `jjvhq` peak 0.150 `+195..+285s`; **`vhbrf` flat zero** |
+>
+> The healthy peer reading flat zero is the half worth checking: the split names the culprit
+> *and* exonerates its neighbour, rather than smearing churn across both.
 
 **A Grafana legend is not evidence that a line is still being drawn.**
 

@@ -1134,7 +1134,7 @@
       "id": 55,
       "type": "timeseries",
       "title": "Channel resets by reason",
-      "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.",
+      "description": "shutdown, recovered, reopened. Each renumbers delivery tags and is what makes landed=false possible.\n\nAggregated by queue on this board because each queue has one consumer, so the queue already names the replica. The processor board splits this per replica, where they share one queue.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
