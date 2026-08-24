@@ -13,6 +13,7 @@ resources:
   - 10-postgres.yaml
   - 11-redis.yaml
   - 12-rabbitmq.yaml
+  - 13-toxiproxy.yaml
   - 20-otel-collector.yaml
   - 21-prometheus.yaml
   - 23-grafana.yaml

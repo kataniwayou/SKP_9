@@ -66,8 +66,13 @@ spec:
             - name: RabbitMq__Password
               valueFrom:
                 secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+            # Through toxiproxy, not straight to Redis -- see k8s/13-toxiproxy.yaml. The proxy is
+            # in the path ALWAYS rather than only during chaos, so a baseline run and a fault run
+            # differ in exactly one variable. Only the processor is repointed; the orchestrator and
+            # the API still address Redis directly, which makes a latency run an attribution test
+            # as well.
             - name: ConnectionStrings__Redis
-              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+              value: "toxiproxy:6379,abortConnect=false,connectTimeout=5000"
             - name: ConsoleHealth__Port
               value: "8081"
           ports:
