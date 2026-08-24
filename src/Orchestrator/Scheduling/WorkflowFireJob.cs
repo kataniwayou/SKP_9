@@ -185,6 +185,12 @@ public sealed class WorkflowFireJob(
                 // Before the send, so a queue whose first dispatch fails is still measured.
                 DispatchedQueues.Record(ProcessorQueues.Work(step.ProcessorId));
 
+                // A dispatch starts a step, so it starts the clock. A cron fire is not inside any
+                // delivery, so there is nothing to inherit here -- this is belt-and-braces with the
+                // handoff path, and it keeps the rule "a dispatch begins a chain" true at every
+                // site rather than at one.
+                MessageClock.BeginChain();
+
                 try
                 {
                     await sender.SendAsync(

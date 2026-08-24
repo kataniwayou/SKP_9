@@ -111,6 +111,22 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
             DeliveryMode = DeliveryModes.Persistent,
             ContentType  = "application/json",
             Type         = type,
+
+            // Two timestamps, answering two different questions on the receiving side. `sent` is
+            // fresh on every hop and yields the broker wait for THIS hop; `origin` is stamped once
+            // when a step begins and propagated unchanged by every message that step causes, so the
+            // orchestrator consuming the step's outcome measures the whole door-to-door time.
+            //
+            // Stamped here rather than at the call sites because every publish in the system goes
+            // through this method, and a hop that forgot would be a hole in the measurement with
+            // nothing to indicate it. See MessageClock for why this rides the wire at all -- there
+            // is no trace context in this codebase, and a shared competing-consumer result queue
+            // means no in-process clock can span a step.
+            Headers = new Dictionary<string, object?>
+            {
+                [MessageClock.SentHeader]   = MessageClock.NowMilliseconds(),
+                [MessageClock.OriginHeader] = MessageClock.OriginForSend(),
+            },
         };
 
         if (replyTo is not null)

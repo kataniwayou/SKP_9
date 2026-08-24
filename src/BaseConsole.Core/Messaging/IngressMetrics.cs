@@ -41,6 +41,48 @@ internal static class IngressMetrics
         unit: "1",
         description: "Times the delivery numbering was invalidated, by cause. This is why landed=false happens.");
 
+    internal const string QueueWaitInstrument = "pipeline.queue.wait";
+    internal const string StepElapsedInstrument = "pipeline.step.elapsed";
+
+    /// <summary>
+    /// The bucket ladder for the two arrival histograms. **Deliberately not the transport's.**
+    /// <para>
+    /// <c>EgressMeter.LatencySecondsBoundaries</c> stops at 10s, which is right for a broker round
+    /// trip and wrong here: the whole reason these instruments exist is a pipeline falling behind,
+    /// and a backlogged step is measured in minutes. Everything past the last boundary lands in
+    /// <c>+Inf</c>, where a quantile has nothing to interpolate between and reports the last edge —
+    /// which is exactly the defect that made a 15ms send read as 4.9s, in the other direction.
+    /// </para>
+    /// <para>
+    /// The low end starts at 10ms rather than 1ms, and that is honesty rather than laziness: both
+    /// ends of these measurements are stamped on different processes, so nothing below NTP skew is
+    /// a real number. A ladder resolving 1ms would invite someone to read a figure that is noise.
+    /// </para>
+    /// </summary>
+    public static double[] ArrivalSecondsBoundaries() =>
+    [
+        0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
+    ];
+
+    /// <summary>
+    /// How long this delivery sat in the broker: the term neither produce duration nor process
+    /// duration contains, and therefore the one that goes missing when an end-to-end time grows.
+    /// </summary>
+    private static readonly Histogram<double> QueueWait = Meter.CreateHistogram<double>(
+        QueueWaitInstrument,
+        unit: "s",
+        description: "Seconds between a message being published and a consumer picking it up.");
+
+    /// <summary>
+    /// Seconds since the step that caused this message was dispatched. On a
+    /// <c>step-outcome</c> delivery at the orchestrator this is the whole door-to-door step time —
+    /// the only measurement here of what a workflow experiences rather than what a component does.
+    /// </summary>
+    private static readonly Histogram<double> StepElapsed = Meter.CreateHistogram<double>(
+        StepElapsedInstrument,
+        unit: "s",
+        description: "Seconds since the step that caused this message began.");
+
     /// <summary>
     /// Every live consumer's subscription state, keyed by the queue it reads.
     /// <para>
@@ -125,5 +167,38 @@ internal static class IngressMetrics
         PipelineAmbientTag.AppendTo(ref tags);
 
         Consumed.Add(1, tags);
+    }
+
+    /// <summary>
+    /// Records how long this delivery waited in the broker, and how long the step that caused it has
+    /// been running.
+    /// <para>
+    /// <b>Each is recorded ONLY if its header was present.</b> A message published by a build
+    /// without these instruments carries neither, and during any rollout there are always some.
+    /// Recording those as zero — or as an elapsed time since the epoch — would bury the real
+    /// distribution under a spike that means nothing. The two are independent: the API publishes
+    /// through a copy of the sender that stamps nothing, so a message can plausibly arrive with one
+    /// and not the other.
+    /// </para>
+    /// <para>
+    /// Recorded before the handler runs rather than after, deliberately: this measures the time the
+    /// message spent waiting to be picked up, and adding the handler's own duration would fold in
+    /// the number <c>pipeline.process.duration</c> already reports on its own.
+    /// </para>
+    /// </summary>
+    internal static void RecordArrival(string queue, string type, long? sentMs, long? originMs)
+    {
+        var tags = new TagList { { "queue", queue }, { "type", type } };
+        PipelineAmbientTag.AppendTo(ref tags);
+
+        if (sentMs is { } sent)
+        {
+            QueueWait.Record(MessageClock.ElapsedSeconds(sent), tags);
+        }
+
+        if (originMs is { } origin)
+        {
+            StepElapsed.Record(MessageClock.ElapsedSeconds(origin), tags);
+        }
     }
 }
