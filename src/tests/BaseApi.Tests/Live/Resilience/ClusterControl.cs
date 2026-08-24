@@ -288,6 +288,116 @@ internal static class ClusterControl
         }
     }
 
+    /// <summary>The toxiproxy proxy the processor's Redis connection string points at.</summary>
+    private const string RedisProxy = "redis";
+
+    /// <summary>
+    /// The toxic this suite owns. Named rather than anonymous so a stale one left by a killed run
+    /// can be found and cleared on the next entry.
+    /// </summary>
+    private const string SlowToxic = "skp-slow";
+
+    /// <summary>
+    /// Makes Redis slow for the processor -- and only for the processor -- until disposed.
+    /// <para>
+    /// <b>The fault class every other scenario here misses.</b> The rest remove something entirely;
+    /// this one leaves Redis working and merely late. Which band matters is decided by a number
+    /// already in the code: <c>L2GateOptions.ProbeTimeout</c> is 2 seconds, probed every 5. Below
+    /// it the gate should stay open and the question is whether anything on the boards moves at
+    /// all; above it the probe fails, and the question is whether that is distinguishable from
+    /// Redis being absent.
+    /// </para>
+    /// <para>
+    /// <b>Downstream only.</b> The toxic delays Redis's replies rather than the requests, which is
+    /// what "slow dependency" means from the client's side and adds the full latency to every
+    /// round trip exactly once. Delaying both directions would double it for no extra realism.
+    /// </para>
+    /// <para>
+    /// <b>This lever is NOT self-healing, and that is its one weakness against CLIENT PAUSE.</b> A
+    /// toxic has no expiry: a killed run leaves Redis slow indefinitely. Two things compensate --
+    /// entry clears a stale toxic of the same name before adding its own, so a previous casualty
+    /// cannot poison this run, and disposal verifies the removal actually took rather than assuming
+    /// the call worked.
+    /// </para>
+    /// </summary>
+    public static async Task<IAsyncDisposable> HoldRedisSlowAsync(TimeSpan latency, CancellationToken ct)
+    {
+        var pod = await ToxiproxyPodAsync(ct);
+
+        // Tolerant: `toxic remove` exits 1 with `HTTP 404: toxic not found` when there is nothing
+        // to remove, which is the normal case and not a failure.
+        await RemoveSlowToxicAsync(pod, ct);
+
+        await Kubectl.RunOrThrowAsync(
+            ct, "-n", Chaos.Namespace, "exec", pod, "--",
+            "/toxiproxy-cli", "toxic", "add",
+            "-t", "latency",
+            "-a", "latency=" + ((long)latency.TotalMilliseconds).ToString(CultureInfo.InvariantCulture),
+            "-n", SlowToxic,
+            // The proxy name comes LAST: the CLI parses options before the positional argument, and
+            // putting the name first fails with "Required argument 'type' was empty", which reads
+            // like a missing flag rather than a misplaced one.
+            RedisProxy);
+
+        return new RedisSlow(pod);
+    }
+
+    private static async Task<string> ToxiproxyPodAsync(CancellationToken ct)
+    {
+        var raw = await Kubectl.RunOrThrowAsync(
+            ct, "-n", Chaos.Namespace, "get", "pods", "-l", "app=toxiproxy",
+            "-o", "jsonpath={.items[0].metadata.name}");
+
+        var pod = raw.Trim();
+        if (pod.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "no toxiproxy pod found; the processor's Redis connection string points at it, so "
+                + "the pipeline is not running either. Apply k8s/13-toxiproxy.yaml.");
+        }
+
+        return pod;
+    }
+
+    /// <summary>Removes this suite's toxic, tolerating its absence.</summary>
+    private static async Task RemoveSlowToxicAsync(string pod, CancellationToken ct) =>
+        await Kubectl.RunAsync(
+            ct, "-n", Chaos.Namespace, "exec", pod, "--",
+            "/toxiproxy-cli", "toxic", "remove", "-n", SlowToxic, RedisProxy);
+
+    /// <summary>Holds the latency toxic, and on disposal proves it is gone rather than assuming.</summary>
+    private sealed class RedisSlow : IAsyncDisposable
+    {
+        private readonly string _pod;
+
+        public RedisSlow(string pod) => _pod = pod;
+
+        public async ValueTask DisposeAsync()
+        {
+            // Its own token: the scenario's may already be cancelled, and a release skipped because
+            // the run was aborted is exactly the case this release exists for. Nothing here expires
+            // on its own, so a skipped release leaves the stack degraded until somebody notices.
+            using var release = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+
+            await RemoveSlowToxicAsync(_pod, release.Token);
+
+            // Verified, not assumed. The remove is issued tolerantly because a 404 is normal, which
+            // means a genuine failure would also pass quietly -- so the state is read back.
+            var inspect = await Kubectl.RunOrThrowAsync(
+                release.Token, "-n", Chaos.Namespace, "exec", _pod, "--",
+                "/toxiproxy-cli", "inspect", RedisProxy);
+
+            if (inspect.Contains(SlowToxic, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"the '{SlowToxic}' toxic is still on proxy '{RedisProxy}' after removal; Redis "
+                    + "is still slow for the processor and will stay that way, because a toxic has "
+                    + $"no expiry. Clear it by hand: kubectl exec -n {Chaos.Namespace} {_pod} -- "
+                    + $"/toxiproxy-cli toxic remove -n {SlowToxic} {RedisProxy}");
+            }
+        }
+    }
+
     /// <summary>Keeps one replica disconnected, and on disposal waits for it to reconnect.</summary>
     private sealed class Disconnected : IAsyncDisposable
     {
