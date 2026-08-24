@@ -1625,7 +1625,7 @@ data:
           "id": 2,
           "type": "stat",
           "title": "System flowing",
-          "description": "Total egress across every worker. Zero during a run means the pipeline has stopped, whatever else reads green.\n\n**Slower than the fault you are chasing.** $__rate_interval is 60s on this stack -- the datasource declares a 15s timeInterval, matching the scrape, and Grafana floors the rate window at four times it. So this number averages the last minute and still cannot fall to zero inside a shorter outage.\n\nMeasured at the OLD 60s export cadence, when timeInterval was 60s and $__rate_interval 240s: with the whole pipeline stopped this still read 1.12 req/s a hundred seconds later, and through a sixty-second broker outage it only dipped 1.12 -> 0.92, never leaving green. Those are the numbers that bought the cadence change; a sixty-second fault now falls inside one rate window rather than a quarter of one, so the dilution is four times smaller -- not gone. Read the posture stats beside it for anything shorter than a minute; this one answers 'has throughput changed', not 'is it down'.",
+          "description": "Total egress across every worker. Zero during a run means the pipeline has stopped, whatever else reads green.\n\n**Slower than the fault you are chasing.** $__rate_interval is 60s on this stack -- the datasource declares a 15s timeInterval, matching the scrape, and Grafana floors the rate window at four times it. So this number averages the last minute and still cannot fall to zero inside a shorter outage.\n\nMeasured at the OLD 60s export cadence, when timeInterval was 60s and $__rate_interval 240s: with the whole pipeline stopped this still read 1.12 req/s a hundred seconds later, and through a sixty-second broker outage it only dipped 1.12 -> 0.92, never leaving green. Those are the numbers that bought the cadence change; a sixty-second fault now falls inside one rate window rather than a quarter of one, so the dilution is four times smaller -- not gone. Read the posture stats beside it for anything shorter than a minute; this one answers 'has throughput changed', not 'is it down'.\n\n**Green means the expected rate, not merely a non-zero one.** It used to go green above 0.0001 req/s, which made the colour answer 'is anything moving' while the text above claimed it answered 'has throughput changed'. A collapse from 1.39 to 0.001 req/s -- a thousandfold -- stayed green. Green is now 0.9 to 2.0 req/s, orange outside it, red only at a standstill.\n\n**Measured, not chosen:** 1.383-1.392 req/s across eighteen consecutive undisturbed minutes, a spread of 0.5%. The band is far wider than that jitter because it must also survive the ~4 minute ramp after any restart, during which this legitimately reads orange and passes through zero.\n\n**The window is pinned at 4m rather than $__rate_interval, and that is what makes a band possible at all.** Traffic is bursty -- one cron fire every 30s -- and a 60s window cannot smooth it: sampled every 5s, rate[60s] swings 0.957 to 1.905 while rate[4m] holds 1.344 to 1.524. A band on the 60s form would flap on burst phase alone.\n\n**This number is the most deployment-specific thing on these boards.** It describes this workload, not this architecture. Re-derive it anywhere else.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -1643,7 +1643,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(pipeline_messages_produced_total[$__rate_interval])) or vector(0)",
+              "expr": "sum(rate(pipeline_messages_produced_total[4m])) or vector(0)",
               "legendFormat": "",
               "range": true,
               "editorMode": "code"
@@ -1679,8 +1679,16 @@ data:
                     "value": null
                   },
                   {
-                    "color": "green",
+                    "color": "orange",
                     "value": 0.0001
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.9
+                  },
+                  {
+                    "color": "orange",
+                    "value": 2.0
                   }
                 ]
               }
@@ -3948,7 +3956,7 @@ data:
           "id": 53,
           "type": "timeseries",
           "title": "Produce duration p95 / p99",
-          "description": "A real broker round-trip to publisher confirmation, not the time to write a frame.\n\nThe mean rides alongside the quantiles deliberately. It comes from sum/count and so is independent of bucket boundaries -- if it ever diverges wildly from p50, the ladder has stopped fitting the data. That is exactly how the millisecond-ladder defect was caught: p95 read 4.9s while the mean read 15ms.",
+          "description": "A real broker round-trip to publisher confirmation, not the time to write a frame.\n\nThe mean rides alongside the quantiles deliberately. It comes from sum/count and so is independent of bucket boundaries -- if it ever diverges wildly from p50, the ladder has stopped fitting the data. That is exactly how the millisecond-ladder defect was caught: p95 read 4.9s while the mean read 15ms.\n\n**The line at 50ms is where measured-normal ends**: steady p95 runs 20-35ms on this stack. Above it is a broker taking longer than it has been, which is worth noticing well before anything trips.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -4033,7 +4041,7 @@ data:
                   "viz": false
                 },
                 "thresholdsStyle": {
-                  "mode": "off"
+                  "mode": "line"
                 }
               },
               "mappings": [],
@@ -4046,6 +4054,10 @@ data:
                   {
                     "color": "green",
                     "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.05
                   }
                 ]
               }
@@ -4149,7 +4161,7 @@ data:
           "id": 55,
           "type": "timeseries",
           "title": "Store probe latency p95 / p99",
-          "description": "How long the projection store takes to answer the gate probe. **This is the only panel that can show a store that is slow rather than absent.**\n\nThe gate beside it answers *did the store reply inside the timeout*, which is a yes/no, and a yes/no cannot show degradation. Measured before this instrument existed: Redis made 685x slower for the processor -- 0.44ms to 301ms, verified with `redis-cli --latency` -- moved nothing on any board, because a store a thousand times slower and still inside a 2s budget is, to a yes/no, healthy. Past the budget it read as a full outage. Two states, working and gone, with nothing in between.\n\nHealthy on this stack is **mean ~0.9ms, p95 ~2ms**. A jump to tens or hundreds of milliseconds is a degraded store that will not trip the gate and will not lose you a step -- yet.\n\n**Timeouts are excluded on purpose** (`outcome=\"healthy\"`). A timed-out probe records the ceiling rather than its true duration, because the ping is abandoned rather than cancelled and how long it would have taken is unknowable. Including them would pin p99 at exactly the probe timeout and invite you to believe it. Those show up on `L2 gate` and `Gate trips` instead.\n\nThe mean rides alongside the quantiles for the reason the produce-duration panel gives: it comes from sum/count and is independent of bucket boundaries, so a wild divergence from p50 means the ladder has stopped fitting the data.",
+          "description": "How long the projection store takes to answer the gate probe. **This is the only panel that can show a store that is slow rather than absent.**\n\nThe gate beside it answers *did the store reply inside the timeout*, which is a yes/no, and a yes/no cannot show degradation. Measured before this instrument existed: Redis made 685x slower for the processor -- 0.44ms to 301ms, verified with `redis-cli --latency` -- moved nothing on any board, because a store a thousand times slower and still inside a 2s budget is, to a yes/no, healthy. Past the budget it read as a full outage. Two states, working and gone, with nothing in between.\n\nHealthy on this stack is **mean ~0.9ms, p95 ~2ms**. A jump to tens or hundreds of milliseconds is a degraded store that will not trip the gate and will not lose you a step -- yet.\n\n**Timeouts are excluded on purpose** (`outcome=\"healthy\"`). A timed-out probe records the ceiling rather than its true duration, because the ping is abandoned rather than cancelled and how long it would have taken is unknowable. Including them would pin p99 at exactly the probe timeout and invite you to believe it. Those show up on `L2 gate` and `Gate trips` instead.\n\nThe mean rides alongside the quantiles for the reason the produce-duration panel gives: it comes from sum/count and is independent of bucket boundaries, so a wild divergence from p50 means the ladder has stopped fitting the data.\n\n**The line at 5ms is where measured-normal ends**, not an alarm: steady p95 is ~2ms with jitter to 6ms, so a p95 riding above the line is a store getting slower rather than a store that has failed. Nothing here fails at a single number -- the line exists so you can see whether this is the normal value without already knowing what the normal value is.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -4234,7 +4246,7 @@ data:
                   "viz": false
                 },
                 "thresholdsStyle": {
-                  "mode": "off"
+                  "mode": "line"
                 }
               },
               "mappings": [],
@@ -4247,6 +4259,10 @@ data:
                   {
                     "color": "green",
                     "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.005
                   }
                 ]
               }
@@ -6083,7 +6099,7 @@ data:
           "id": 80,
           "type": "timeseries",
           "title": "Produce duration p95 / p99",
-          "description": "A real broker round-trip to publisher confirmation, not the time to write a frame.\n\nThe mean rides alongside the quantiles deliberately. It comes from sum/count and so is independent of bucket boundaries -- if it ever diverges wildly from p50, the ladder has stopped fitting the data. That is exactly how the millisecond-ladder defect was caught: p95 read 4.9s while the mean read 15ms.",
+          "description": "A real broker round-trip to publisher confirmation, not the time to write a frame.\n\nThe mean rides alongside the quantiles deliberately. It comes from sum/count and so is independent of bucket boundaries -- if it ever diverges wildly from p50, the ladder has stopped fitting the data. That is exactly how the millisecond-ladder defect was caught: p95 read 4.9s while the mean read 15ms.\n\n**The line at 50ms is where measured-normal ends**: steady p95 runs 20-35ms on this stack. Above it is a broker taking longer than it has been, which is worth noticing well before anything trips.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -6168,7 +6184,7 @@ data:
                   "viz": false
                 },
                 "thresholdsStyle": {
-                  "mode": "off"
+                  "mode": "line"
                 }
               },
               "mappings": [],
@@ -6181,6 +6197,10 @@ data:
                   {
                     "color": "green",
                     "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.05
                   }
                 ]
               }
@@ -6284,7 +6304,7 @@ data:
           "id": 82,
           "type": "timeseries",
           "title": "Store probe latency p95 / p99",
-          "description": "How long the projection store takes to answer the gate probe. **This is the only panel that can show a store that is slow rather than absent.**\n\nThe gate beside it answers *did the store reply inside the timeout*, which is a yes/no, and a yes/no cannot show degradation. Measured before this instrument existed: Redis made 685x slower for the processor -- 0.44ms to 301ms, verified with `redis-cli --latency` -- moved nothing on any board, because a store a thousand times slower and still inside a 2s budget is, to a yes/no, healthy. Past the budget it read as a full outage. Two states, working and gone, with nothing in between.\n\nHealthy on this stack is **mean ~0.9ms, p95 ~2ms**. A jump to tens or hundreds of milliseconds is a degraded store that will not trip the gate and will not lose you a step -- yet.\n\n**Timeouts are excluded on purpose** (`outcome=\"healthy\"`). A timed-out probe records the ceiling rather than its true duration, because the ping is abandoned rather than cancelled and how long it would have taken is unknowable. Including them would pin p99 at exactly the probe timeout and invite you to believe it. Those show up on `L2 gate` and `Gate trips` instead.\n\nThe mean rides alongside the quantiles for the reason the produce-duration panel gives: it comes from sum/count and is independent of bucket boundaries, so a wild divergence from p50 means the ladder has stopped fitting the data.",
+          "description": "How long the projection store takes to answer the gate probe. **This is the only panel that can show a store that is slow rather than absent.**\n\nThe gate beside it answers *did the store reply inside the timeout*, which is a yes/no, and a yes/no cannot show degradation. Measured before this instrument existed: Redis made 685x slower for the processor -- 0.44ms to 301ms, verified with `redis-cli --latency` -- moved nothing on any board, because a store a thousand times slower and still inside a 2s budget is, to a yes/no, healthy. Past the budget it read as a full outage. Two states, working and gone, with nothing in between.\n\nHealthy on this stack is **mean ~0.9ms, p95 ~2ms**. A jump to tens or hundreds of milliseconds is a degraded store that will not trip the gate and will not lose you a step -- yet.\n\n**Timeouts are excluded on purpose** (`outcome=\"healthy\"`). A timed-out probe records the ceiling rather than its true duration, because the ping is abandoned rather than cancelled and how long it would have taken is unknowable. Including them would pin p99 at exactly the probe timeout and invite you to believe it. Those show up on `L2 gate` and `Gate trips` instead.\n\nThe mean rides alongside the quantiles for the reason the produce-duration panel gives: it comes from sum/count and is independent of bucket boundaries, so a wild divergence from p50 means the ladder has stopped fitting the data.\n\n**The line at 5ms is where measured-normal ends**, not an alarm: steady p95 is ~2ms with jitter to 6ms, so a p95 riding above the line is a store getting slower rather than a store that has failed. Nothing here fails at a single number -- the line exists so you can see whether this is the normal value without already knowing what the normal value is.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -6369,7 +6389,7 @@ data:
                   "viz": false
                 },
                 "thresholdsStyle": {
-                  "mode": "off"
+                  "mode": "line"
                 }
               },
               "mappings": [],
@@ -6382,6 +6402,10 @@ data:
                   {
                     "color": "green",
                     "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.005
                   }
                 ]
               }
@@ -6570,7 +6594,7 @@ data:
           "id": 85,
           "type": "timeseries",
           "title": "Process duration p95 / p99 by outcome",
-          "description": "The author's own transform -- the only span here whose length is somebody's implementation rather than this framework's constant cost. returned vs faulted keeps a slow success and a slow failure from averaging into a number describing neither.\n\nThe mean rides alongside the quantiles as a bucket-independent cross-check, for the same reason it does on the produce-duration panel.",
+          "description": "The author's own transform -- the only span here whose length is somebody's implementation rather than this framework's constant cost. returned vs faulted keeps a slow success and a slow failure from averaging into a number describing neither.\n\nThe mean rides alongside the quantiles as a bucket-independent cross-check, for the same reason it does on the produce-duration panel.\n\n**The line at 50ms is where measured-normal ends**: steady p95 runs 17-43ms here, clustered at 24ms. This is the transform's own cost, so a p95 that settles above the line is the processor getting slower at its actual job -- the thing no verdict stat will ever show you, because nothing is broken.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -6655,7 +6679,7 @@ data:
                   "viz": false
                 },
                 "thresholdsStyle": {
-                  "mode": "off"
+                  "mode": "line"
                 }
               },
               "mappings": [],
@@ -6668,6 +6692,10 @@ data:
                   {
                     "color": "green",
                     "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.05
                   }
                 ]
               }

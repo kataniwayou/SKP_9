@@ -101,7 +101,7 @@
       "id": 2,
       "type": "stat",
       "title": "System flowing",
-      "description": "Total egress across every worker. Zero during a run means the pipeline has stopped, whatever else reads green.\n\n**Slower than the fault you are chasing.** $__rate_interval is 60s on this stack -- the datasource declares a 15s timeInterval, matching the scrape, and Grafana floors the rate window at four times it. So this number averages the last minute and still cannot fall to zero inside a shorter outage.\n\nMeasured at the OLD 60s export cadence, when timeInterval was 60s and $__rate_interval 240s: with the whole pipeline stopped this still read 1.12 req/s a hundred seconds later, and through a sixty-second broker outage it only dipped 1.12 -> 0.92, never leaving green. Those are the numbers that bought the cadence change; a sixty-second fault now falls inside one rate window rather than a quarter of one, so the dilution is four times smaller -- not gone. Read the posture stats beside it for anything shorter than a minute; this one answers 'has throughput changed', not 'is it down'.",
+      "description": "Total egress across every worker. Zero during a run means the pipeline has stopped, whatever else reads green.\n\n**Slower than the fault you are chasing.** $__rate_interval is 60s on this stack -- the datasource declares a 15s timeInterval, matching the scrape, and Grafana floors the rate window at four times it. So this number averages the last minute and still cannot fall to zero inside a shorter outage.\n\nMeasured at the OLD 60s export cadence, when timeInterval was 60s and $__rate_interval 240s: with the whole pipeline stopped this still read 1.12 req/s a hundred seconds later, and through a sixty-second broker outage it only dipped 1.12 -> 0.92, never leaving green. Those are the numbers that bought the cadence change; a sixty-second fault now falls inside one rate window rather than a quarter of one, so the dilution is four times smaller -- not gone. Read the posture stats beside it for anything shorter than a minute; this one answers 'has throughput changed', not 'is it down'.\n\n**Green means the expected rate, not merely a non-zero one.** It used to go green above 0.0001 req/s, which made the colour answer 'is anything moving' while the text above claimed it answered 'has throughput changed'. A collapse from 1.39 to 0.001 req/s -- a thousandfold -- stayed green. Green is now 0.9 to 2.0 req/s, orange outside it, red only at a standstill.\n\n**Measured, not chosen:** 1.383-1.392 req/s across eighteen consecutive undisturbed minutes, a spread of 0.5%. The band is far wider than that jitter because it must also survive the ~4 minute ramp after any restart, during which this legitimately reads orange and passes through zero.\n\n**The window is pinned at 4m rather than $__rate_interval, and that is what makes a band possible at all.** Traffic is bursty -- one cron fire every 30s -- and a 60s window cannot smooth it: sampled every 5s, rate[60s] swings 0.957 to 1.905 while rate[4m] holds 1.344 to 1.524. A band on the 60s form would flap on burst phase alone.\n\n**This number is the most deployment-specific thing on these boards.** It describes this workload, not this architecture. Re-derive it anywhere else.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -119,7 +119,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pipeline_messages_produced_total[$__rate_interval])) or vector(0)",
+          "expr": "sum(rate(pipeline_messages_produced_total[4m])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -155,8 +155,16 @@
                 "value": null
               },
               {
-                "color": "green",
+                "color": "orange",
                 "value": 0.0001
+              },
+              {
+                "color": "green",
+                "value": 0.9
+              },
+              {
+                "color": "orange",
+                "value": 2.0
               }
             ]
           }
