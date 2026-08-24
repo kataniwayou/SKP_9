@@ -741,10 +741,10 @@ Live panel counts, all `provisioned=true` in folder `SKP`:
 
 | board | panels | rows |
 |---|---|---|
-| `skp-flow` | 21 | Verdict / Since / Flow |
+| `skp-flow` | 25 | Verdict / Since / Flow |
 | `skp-baseapi` | 22 | Verdict / Ingress / Runtime |
-| `skp-orchestrator` | 35 | Verdict / Since / Pipeline / Runtime |
-| `skp-processor` | 33 | Verdict / Since / Pipeline / Runtime |
+| `skp-orchestrator` | 37 | Verdict / Since / Pipeline / Runtime |
+| `skp-processor` | 35 | Verdict / Since / Pipeline / Runtime |
 | `skp-runtime` | 17 | (no rows) |
 
 The collapsed Runtime tier carries **two** panels -- thread-pool queue and GC pause --
@@ -998,15 +998,120 @@ it first fires. The graph goes; the stat stays, moved to the Since tier.
 
 Unchanged, and still the largest gaps for an operator:
 
-- **No backlog, queue depth or consumer lag anywhere.** The hop gap is a conservation
-  check, so a message sitting in a queue and a message lost are the same number to it.
-  Broker-side metrics are off the table (org-owned), so this needs an app-side gauge. It
-  is the one instrument that would most change what these boards can detect.
+- ~~**No backlog, queue depth or consumer lag anywhere.**~~ **Closed** — see
+  **Queue depth, and the probe that could not see its own outage** below.
 - **No end-to-end latency or message age.** Per-hop produce and process durations exist;
-  door-to-door time for a workflow step does not.
+  door-to-door time for a workflow step does not. There is also no trace-context
+  propagation anywhere in `src/` — no `ActivitySource`, no `traceparent`, no propagator —
+  so this cannot be read off traces either. It needs a timestamp on the wire, and the
+  obvious in-process stopwatch does not work here: `orchestrator-result` is a shared
+  competing-consumer queue, so a step's outcome can land on a different replica than the
+  one that dispatched it.
 - **Degradation is still largely invisible**, beyond the store-probe instrument — see the
   S10/S11 write-up above.
 - **Nothing consumes the alerts**, and no rule covers work being discarded.
+
+## Queue depth, and the probe that could not see its own outage
+
+The largest gap the operator review left open. `pipeline.queue.depth` and
+`pipeline.queue.consumers` close it, and the way the first attempt failed is the part
+worth keeping.
+
+**Why depth changes what these boards can detect.** The hop gaps are a conservation
+check — produced minus consumed — and a conservation check cannot tell a message sitting
+in a queue from a message that vanished. Both render as a gap. Depth is the term that
+separates them: a gap roughly equal to the depth is backlog, a gap far exceeding it is
+loss.
+
+It is also **the only leading indicator here**. Every other verdict signal is coincident
+or lagging: `Consuming` drops once a consumer has already stopped, `Data freshness`
+degrades after exports stop, and a departed replica costs a liveness window plus an export
+(52–66s). A queue starts filling the moment a consumer is merely *slower* than its
+producer, which is the shape of most real degradations.
+
+**Read by passive `queue.declare`**, over the AMQP connection the process already holds —
+the mechanism `DeadLetterDepthProbe` already used, and for the same reason: the broker and
+Prometheus are org-owned in production, so no scrape target, no plugin, no broker-wide
+metrics. `QueueDeclareOk` returns the consumer count alongside the message count, which is
+the only **broker-side** signal on these boards. `pipeline.consumer.consuming` is the
+process asserting its own health.
+
+### The first design was blind to the outage it exists to catch
+
+Registering the probe on the processor meant its work queue was probed **only by the pods
+whose absence causes it to fill**. Measured against `rabbitmqctl` with the deployment
+scaled to zero:
+
+| time | broker | instrument |
+|---|---|---|
+| 16:54:23 | 0 msgs / 0 consumers | depth=0 |
+| 16:54:36 | 1 msgs / 0 consumers | depth=0 |
+| 16:55:16 | 2 msgs / 0 consumers | depth=0 |
+| 16:55:43 | 3 msgs / 0 consumers | depth=0 |
+
+A real backlog formed and the gauge read a confident zero throughout, because the departed
+pods' last samples were held by the collector and by Prometheus's five-minute lookback.
+**This is the stale-held gauge defect this file already documents, in its worst form**: a
+probe cannot report the consequence of its own host being gone.
+
+It would have passed every check this project had. The expression returned data, the
+panel rendered, the log was quiet, and the tests were green.
+
+**The fix is that the orchestrator probes the processor's queues**, because it outlives
+them. Their names are per-processor GUIDs resolved from the workflow graph at run time, so
+there is no static list: `DispatchedQueues` records every queue this process has dispatched
+to — a queue we have sent work to is, by definition, a queue whose backlog is our problem —
+and `QueueStatsProbe` resolves its list every pass rather than once at construction. The
+liveness index in L2 would have been the wrong source for exactly the reason the self-probe
+was: a processor that is gone drops out of it precisely when its queue is filling.
+
+Same test after the fix — depth tracks the broker one probe interval behind, which is the
+10s interval plus an export and a scrape:
+
+| time | broker | instrument |
+|---|---|---|
+| 17:05:45 | 1 msgs | depth=0 |
+| 17:05:59 | 1 msgs | depth=1 |
+| 17:06:25 | 2 msgs | depth=2 |
+| 17:07:05 | 4 msgs | depth=3 |
+
+### The consumers gauge needs the liveness window, and the panels carry it
+
+Unwrapped, `max by (queue)` read a confident **2** against the broker's **0** for a whole
+outage, because it picked the departed pods' stale series over the orchestrator's fresh 0.
+Both forms sampled side by side:
+
+| broker | `max by (queue)` | `max by (queue) (last_over_time(...[40s]))` |
+|---|---|---|
+| 0 consumers | 2 | 2 |
+| 0 consumers | 2 | **0** |
+| 0 consumers | 2 | **0** |
+
+The wrapped form corrects itself within one liveness window. Every depth and consumers
+panel uses it.
+
+### Two things about the panels
+
+**Filtered by queue, not by service.** On these instruments `service_name` labels the
+process doing the *probing*, not the queue's owner — that is the whole point of the design.
+Filtering the processor board by its own `service_name` would show only what the processor
+reported about itself, stale-held at exactly the moment the panel matters. It keys on
+`queue=~"processor-$processorId"` instead.
+
+**Depth is a degradation signal and a poor outage signal, deliberately.** With the
+processors scaled to zero the queue reached only 4 in ninety seconds, because a stalled
+pipeline stops feeding itself. `Queues unconsumed` is the sharp signal for a total stop and
+moved within one liveness window in the same test. Thresholds are measured: over a clean
+four-minute window every orchestrator queue held a flat 0 while the processor work queue
+ran **mean 0.65, max 3** — a cron fire dispatches a batch against `PrefetchCount` 1 and two
+replicas drain it one at a time. Green below 5 clears that; red at 20.
+
+### What it still cannot do
+
+- **A consumer that reattaches inside one 10s probe interval is invisible** — which is
+  exactly what the S9 flapping-connection scenario produced.
+- **Depth counts messages *ready*, not unacked.** Exact only because `PrefetchCount` is 1.
+- **Nothing alerts on it**, like everything else here.
 
 ## Two defects found while building these boards
 
