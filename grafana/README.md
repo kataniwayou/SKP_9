@@ -1438,11 +1438,38 @@ lands between the samples where a verdict stat is deviating. The sampler validat
 tier and proves a panel renders; **Prometheus is authoritative for magnitude**, and the two
 disagreeing here by three orders of magnitude is a good reminder of which answers which.
 
-**A residual gap remains, and it is the one this design implies.** `orchestrator-control`
-and `orchestrator-result-post` are still watched only by the orchestrator, because it is the
-only process that sends to them — "a queue we have dispatched to is our problem" cannot
-cover a queue nobody else dispatches to. `orchestrator-result`, the queue where step
-outcomes pile up, is the one that mattered and it is covered.
+### The last two shared queues are named explicitly, and that is a deliberate exception
+
+"A queue we have dispatched to is our problem" covers `orchestrator-result`, because the
+processor sends step outcomes there. It **provably cannot** cover a queue nobody else sends
+to: `orchestrator-control` is fed by the API and `orchestrator-result-post` by the
+orchestrator itself, and neither the API nor anything else runs a depth probe. Both were
+therefore watched only by the orchestrator.
+
+So the processor's probe names them. `orchestrator-control` is the one with consequences —
+the API keeps accepting start and stop requests while the orchestrator is down and they pile
+up there. `orchestrator-result-post` is inert by comparison, since its producer and its
+consumer are both the orchestrator, and is included because it costs one passive declare and
+closes the pair.
+
+The coupling is to two constants on `Messaging.Contracts` that the processor already
+references for `OrchestratorQueues.Result`. A processor watching a queue it never touches
+reads oddly; a queue whose only observer is the process that owns it reads worse.
+
+**Measured, scaling the orchestrator to zero:**
+
+| | before any of this | after |
+|---|---|---|
+| `orchestrator-control` live series | 3 → **NONE** | 5 → **2** (both processors) |
+| queues observed anywhere | **1** | **4** |
+| `Queues unconsumed` | **0** — false green | **1** — correct |
+
+**What is still single-observer, by construction.** The per-replica fan-out queues
+`orchestrator-control.orchestrator-N` are named after a pod, so no other process can name
+one without being told; each has exactly one consumer, its own replica. They cannot be
+covered by a static list or by the send record, and a replica removed for good leaves its
+queue orphaned — which `k8s/36-orchestrator.yaml` already warns about from the other
+direction.
 
 ## Known gap: the processor's dead-letter queue is not probed
 
