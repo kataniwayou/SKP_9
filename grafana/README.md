@@ -597,6 +597,53 @@ what a restart inside the range does to them.
 > console probe is instrumented; **the API's copy is not**, and that remains a separately-recorded
 > gap.
 
+**Green now means the expected rate, not merely a non-zero one.**
+
+> `System flowing` went green above **0.0001 req/s**. So the colour answered *is anything moving*
+> while the panel's own text claimed it answered *has throughput changed* -- and a collapse from
+> 1.39 to 0.001 req/s, a thousandfold, stayed green. That is the steady-state twin of the S10
+> finding: these boards were built to detect absence, and absence is not the only way a pipeline
+> goes wrong.
+>
+> Green is now **0.9 - 2.0 req/s**, orange outside it, red only at a standstill. Verified against
+> the live system: 1.335 req/s reads green, and a halving, a tenth and a thousandth all read orange
+> where every one of them previously read green.
+>
+> **The window had to be pinned to make a band possible at all.** Traffic is bursty -- one cron fire
+> every 30s -- and the panel used `$__rate_interval`, 60s here, which cannot smooth that. Measured
+> at one instant, sampling every 5s:
+>
+> | rate window | sampled every | min | max | spread |
+> |---|---|---|---|---|
+> | `[60s]` | 5s | 0.957 | 1.905 | **0.948** |
+> | `[60s]` | 30s | 1.107 | 1.394 | 0.287 |
+> | `[4m]` | 5s | 1.344 | 1.524 | 0.180 |
+>
+> A band on the 60s form would flap on burst phase alone. The stat is pinned at `[4m]`, where the
+> steady state is **1.383-1.392 req/s across eighteen undisturbed minutes** -- a spread of 0.5%.
+>
+> **The middle row of that table is a trap worth naming.** Confirming this with a range query
+> stepped at 30s samples a 30s-periodic signal at exactly its own period, aliases the swing away,
+> and reports a rock-steady value that depends entirely on which phase you landed on. It read a
+> confident 0.961 that way, against a true mean of 1.386, and it looked like the tightest number in
+> the whole measurement.
+
+**Three panels now say where normal ends.**
+
+> The measured normals were written in panel descriptions -- prose you have to hover to read -- so
+> an operator had to already know that 24ms was right. They are reference lines now: **5ms** on
+> store probe latency (steady p95 ~2ms, jitter to 6ms), **50ms** on produce duration (steady 20-35ms)
+> and **50ms** on process duration (steady 17-43ms, clustered at 24ms).
+>
+> Not alarm thresholds -- none of these panels has a failure mode that a single number separates.
+> They answer the question a stat row cannot: *is what I am looking at the normal value?* A p95
+> settling above the line is a dependency or a transform getting slower, which no verdict stat will
+> ever show, because nothing is broken.
+>
+> **These are the most deployment-specific numbers on these boards** -- they describe this workload
+> rather than this architecture, and unlike `LIVENESS` they are not enforced by any check. Re-derive
+> all four before trusting a green band anywhere else.
+
 **A Grafana legend is not evidence that a line is still being drawn.**
 
 > The first reading above -- "the panel kept drawing the departed replica for the rest of the

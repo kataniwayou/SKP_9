@@ -100,6 +100,50 @@ T_EXACTLY_ONE = [{"color": "red", "value": None},
                  {"color": "green", "value": 1},
                  {"color": "red", "value": 2}]
 T_NEUTRAL = [{"color": "text", "value": None}]
+
+# ---------------------------------------------------------------------------
+# expected steady state
+# ---------------------------------------------------------------------------
+#
+# THESE ARE MEASURED, AND THEY ARE THE MOST ENVIRONMENT-SPECIFIC NUMBERS ON THESE BOARDS.
+# Everything else here describes a shape that transfers; these describe this deployment's
+# workload. Re-derive them before trusting a green band on any other cluster or at any other
+# traffic level -- a band copied from here would report a healthy system as degraded, or the
+# reverse, which is the exact failure these boards exist to prevent.
+#
+# System flowing's steady state, measured over eighteen consecutive undisturbed minutes:
+# 1.383 - 1.392 req/s, a spread of 0.5%. The band below is deliberately far wider than that
+# jitter, because it must also survive the ~4 minute ramp after any restart -- the rate window
+# has to refill, and the stat legitimately passes through zero on the way.
+FLOW_WINDOW = "4m"
+FLOW_LOW = 0.9
+FLOW_HIGH = 2.0
+
+# WHY THE WINDOW IS PINNED RATHER THAN $__rate_interval, which every other rate panel uses.
+# Traffic here is bursty -- one cron fire every 30s -- and a 60s window cannot smooth that.
+# Measured at one instant, sampling every 5s: rate[60s] swings 0.957 to 1.905, a factor of two,
+# while rate[4m] holds 1.344 to 1.524. A fixed band on the 60s form would flap continuously
+# through nothing but the burst phase.
+#
+# Beware of confirming this with a range query stepped at 30s: that samples a 30s-periodic
+# signal at exactly its own period, aliases the swing away, and reports a rock-steady value
+# that depends entirely on which phase you happened to land on. It read 0.961 that way, against
+# a true mean of 1.386.
+T_FLOW = [{"color": "red", "value": None},
+          {"color": "orange", "value": 0.0001},
+          {"color": "green", "value": FLOW_LOW},
+          {"color": "orange", "value": FLOW_HIGH}]
+
+
+def normal_upto(ceiling):
+    """A reference line at the top of measured-normal: green below it, orange above.
+
+    Not an alarm threshold -- these panels have no failure mode that a single number
+    separates. It answers the question a stat row cannot: *is what I am looking at the
+    normal value?* Without it an operator has to already know that 24ms is right, and
+    "know the number" is not something a dashboard should require.
+    """
+    return [{"color": "green", "value": None}, {"color": "orange", "value": ceiling}]
 T_WARN = [{"color": "green", "value": None}, {"color": "orange", "value": 1}]
 # For a conservation gap counted in messages. Scrape boundaries put a handful of messages
 # on either side of zero even when nothing is lost, so the green band has to be wider than
@@ -645,7 +689,12 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                         "independent of bucket boundaries -- if it ever diverges wildly "
                         "from p50, the ladder has stopped fitting the data. That is "
                         "exactly how the millisecond-ladder defect was caught: p95 read "
-                        "4.9s while the mean read 15ms.",
+                        "4.9s while the mean read 15ms." + PARA +
+                        "**The line at 50ms is where measured-normal ends**: steady p95 "
+                        "runs 20-35ms on this stack. Above it is a broker taking longer "
+                        "than it has been, which is worth noticing well before anything "
+                        "trips.",
+                   thresholds=normal_upto(0.05),
                    unit="s"),
         timeseries(layout, "Consumer inflight by queue",
                    [(f'max by (queue) ({live(f"pipeline_consumer_inflight{{{f}}}")})',
@@ -691,7 +740,14 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                         "The mean rides alongside the quantiles for the reason the "
                         "produce-duration panel gives: it comes from sum/count and is "
                         "independent of bucket boundaries, so a wild divergence from p50 "
-                        "means the ladder has stopped fitting the data.",
+                        "means the ladder has stopped fitting the data." + PARA +
+                        "**The line at 5ms is where measured-normal ends**, not an alarm: "
+                        "steady p95 is ~2ms with jitter to 6ms, so a p95 riding above the "
+                        "line is a store getting slower rather than a store that has "
+                        "failed. Nothing here fails at a single number -- the line exists "
+                        "so you can see whether this is the normal value without already "
+                        "knowing what the normal value is.",
+                   thresholds=normal_upto(0.005),
                    unit="s"),
         timeseries(layout, "Channel resets by reason" + (" and replica" if by_instance else ""),
                    [(f'sum by (queue,reason{",service_instance_id" if by_instance else ""}) '
@@ -806,7 +862,7 @@ def build_flow():
     panels.append(row(lay, "1 - Verdict: is it broken right now?"))
     panels += [
         stat(lay, "System flowing",
-             ['sum(rate(pipeline_messages_produced_total[$__rate_interval])) or vector(0)'],
+             [f'sum(rate(pipeline_messages_produced_total[{FLOW_WINDOW}])) or vector(0)'],
              desc="Total egress across every worker. Zero during a run means the "
                   "pipeline has stopped, whatever else reads green." + PARA +
                   "**Slower than the fault you are chasing.** $__rate_interval is 60s on "
@@ -822,8 +878,28 @@ def build_flow():
                   "inside one rate window rather than a quarter of one, so the dilution is "
                   "four times smaller -- not gone. Read the posture stats beside it for "
                   "anything shorter than a minute; this one answers 'has throughput "
-                  "changed', not 'is it down'.",
-             thresholds=[{"color": "red", "value": None}, {"color": "green", "value": 0.0001}],
+                  "changed', not 'is it down'." + PARA +
+                  "**Green means the expected rate, not merely a non-zero one.** It used "
+                  "to go green above 0.0001 req/s, which made the colour answer 'is "
+                  "anything moving' while the text above claimed it answered 'has "
+                  "throughput changed'. A collapse from 1.39 to 0.001 req/s -- a "
+                  "thousandfold -- stayed green. Green is now " + str(FLOW_LOW) + " to "
+                  + str(FLOW_HIGH) + " req/s, orange outside it, red only at a standstill." + PARA +
+                  "**Measured, not chosen:** 1.383-1.392 req/s across eighteen "
+                  "consecutive undisturbed minutes, a spread of 0.5%. The band is far "
+                  "wider than that jitter because it must also survive the ~4 minute ramp "
+                  "after any restart, during which this legitimately reads orange and "
+                  "passes through zero." + PARA +
+                  "**The window is pinned at " + FLOW_WINDOW + " rather than "
+                  "$__rate_interval, and that is what makes a band possible at all.** "
+                  "Traffic is bursty -- one cron fire every 30s -- and a 60s window cannot "
+                  "smooth it: sampled every 5s, rate[60s] swings 0.957 to 1.905 while "
+                  "rate[4m] holds 1.344 to 1.524. A band on the 60s form would flap on "
+                  "burst phase alone." + PARA +
+                  "**This number is the most deployment-specific thing on these boards.** "
+                  "It describes this workload, not this architecture. Re-derive it "
+                  "anywhere else.",
+             thresholds=T_FLOW,
              unit="reqps", decimals=2),
         stat(lay, "Consuming",
              [f'min({live("pipeline_consumer_consuming_ratio")}) or vector(0)'],
@@ -1381,7 +1457,13 @@ def build_processor():
                         "slow failure from averaging into a number describing neither."
                         + PARA + "The mean rides alongside the quantiles as a "
                         "bucket-independent cross-check, for the same reason it does on "
-                        "the produce-duration panel.",
+                        "the produce-duration panel." + PARA +
+                        "**The line at 50ms is where measured-normal ends**: steady p95 "
+                        "runs 17-43ms here, clustered at 24ms. This is the transform's "
+                        "own cost, so a p95 that settles above the line is the processor "
+                        "getting slower at its actual job -- the thing no verdict stat "
+                        "will ever show you, because nothing is broken.",
+                   thresholds=normal_upto(0.05),
                    unit="s"),
         timeseries(lay, "Identity ready by replica",
                    [(f'{live(f"pipeline_identity_ready_ratio{{{f}}}")}',
