@@ -538,6 +538,25 @@ what a restart inside the range does to them.
 > would send an operator to Redis when Redis was entirely healthy and only one client's path to it
 > was degraded. Open the worker board before touching the dependency.
 
+**The permanent extra hop cost nothing, and that was checked rather than assumed.**
+
+> Toxiproxy sits in the processor's Redis path on every run now, not just chaos ones, so every
+> earlier measurement is taken through a component that did not exist when it was taken. Both Redis
+> scenarios were re-run to find out whether that mattered.
+>
+> `RedisUnavailableScenarioTests` and `RedisWipeScenarioTests` both pass. But a pass only proves no
+> steps were lost -- it says nothing about whether the boards still *detect* anything, which is the
+> half that would have regressed. Reading the verdict stats over the same half hour shows three
+> distinct dips to 0 on both `L2 gate` and `Consuming`, one per scenario:
+>
+> | episode | scenario |
+> |---|---|
+> | 11:20:11 .. 11:20:41 | S11, the 3 s latency |
+> | 11:31:41 .. 11:33:11 | Redis unavailable (CLIENT PAUSE) |
+> | 11:39:41 .. 11:40:41 | Redis wipe |
+>
+> Same readings the second-run table records. The hop is invisible in every direction that matters.
+
 **A Grafana legend is not evidence that a line is still being drawn.**
 
 > The first reading above -- "the panel kept drawing the departed replica for the rest of the
