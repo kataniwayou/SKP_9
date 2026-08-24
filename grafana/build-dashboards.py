@@ -893,6 +893,29 @@ def since_shared(layout, f):
                   "rollout -- check Process restarts beside it before reading this as a "
                   "broker fault.",
              thresholds=T_WARN, decimals=0),
+        stat(layout, "Dead-lettered",
+             [f'sum(max by (queue) '
+              f'(last_over_time(pipeline_deadletter_depth{{{f}}}[2m])))'],
+             desc="Work this service refused that **nobody has dealt with**. Should be "
+                  "0. Anything else is a run that lost progress permanently and is still "
+                  "sitting in a queue with no consumer." + PARA +
+                  "**This is the drill-down target for `Dead-lettered` on SKP Flow.** "
+                  "That stat existed only there: an operator who saw it non-zero and "
+                  "clicked through to a worker board found no dead-letter panel at all, "
+                  "and the only evidence was a `parked` series inside a five-series "
+                  "timeseries at a value indistinguishable from zero. The queue-by-queue "
+                  "breakdown is on the pipeline tier below." + PARA +
+                  "`max by (queue)` before the sum is load-bearing: every replica probes "
+                  "the same queues and reports the same depth, because a queue depth is "
+                  "a property of the broker rather than of the replica asking." + PARA +
+                  "**No `or vector(0)` here, deliberately.** Nothing reporting is not the "
+                  "same fact as nothing dead-lettered, and a fallback to 0 would render "
+                  "the two identically in green -- which is exactly the defect the hop-gap "
+                  "stats were carrying. On the processor board this reads as text rather "
+                  "than as a reassuring zero, because that deployment has a dead-letter "
+                  "queue and no probe measuring it.",
+             thresholds=T_WARN, decimals=0,
+             no_value="not probed"),
     ]
 
 
@@ -1027,6 +1050,35 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                          "board splits this per replica, where they share one queue."),
                    unit="reqps",
                    no_value="no channel churn in range"),
+        timeseries(layout, "Dead-letter depth by queue",
+                   [(f'max by (queue) (last_over_time('
+                     f'pipeline_deadletter_depth{{{f}}}[2m]))', "{{queue}}")],
+                   desc="How many refused messages are sitting in each dead-letter "
+                        "queue, right now. Should be flat at zero; a step up is a "
+                        "workflow run that lost progress permanently." + PARA +
+                        "**The only panel here that reports a LEVEL rather than an "
+                        "event.** Every fault counter beside it rises, stays visible for "
+                        "a window, and scrolls away. This keeps reporting for as long as "
+                        "the message is still there -- which is how six parked step "
+                        "outcomes sat in `orchestrator-result.dead` across four "
+                        "incidents over two days with every board green." + PARA +
+                        "**On the processor board this is empty, and that is a finding "
+                        "rather than a rendering fault.** `ProcessorQueues.Dead()` "
+                        "declares a `processor-{id}.dead` queue, but "
+                        "`DeadLetterDepthProbe` is registered in `OrchestratorHost` "
+                        "only -- so the processor's dead-letter queue exists and nothing "
+                        "measures its depth. The panel is left on both boards, saying "
+                        "so, because an unmeasured queue an operator can name is worth "
+                        "more than a panel that quietly is not there." + PARA +
+                        "The window is 2m rather than the " + LIVENESS + " used "
+                        "elsewhere: the probe runs every 30s by design, so a "
+                        "liveness-width window would flap on the probe's own cadence "
+                        "rather than on anything real.",
+                   thresholds=[{"color": "green", "value": None},
+                               {"color": "orange", "value": 1}],
+                   minv=0, decimals=0, fill=25,
+                   no_value="no dead-letter depth reported by this service -- see the "
+                            "panel description before reading this as zero"),
         statetimeline(layout,
                    "Consuming by queue" + (" and replica" if by_instance else ""),
                    [(f'min by (queue{",service_instance_id" if by_instance else ""}) '
@@ -1301,8 +1353,7 @@ def build_flow():
                   "the visible range.",
              thresholds=T_WARN, decimals=0),
         stat(lay, "Dead-lettered",
-             ['sum(max by (queue) (last_over_time(pipeline_deadletter_depth[2m]))) '
-              'or vector(0)'],
+             ['sum(max by (queue) (last_over_time(pipeline_deadletter_depth[2m])))'],
              desc="Work this deployment refused and **nobody has dealt with**. Should "
                   "be 0. Anything else is a run that lost progress permanently and is "
                   "still sitting in a queue with no consumer." + PARA +
@@ -1325,8 +1376,13 @@ def build_flow():
                   "probe runs every 30s by design -- a dead-letter queue changes only "
                   "when something is refused, which is rare and never urgent to the "
                   "second -- so a liveness-width window would flap on the probe's own "
-                  "cadence rather than on anything real.",
-             thresholds=T_WARN, decimals=0),
+                  "cadence rather than on anything real." + PARA +
+                  "**No `or vector(0)`:** no probe reporting and no messages dead-lettered "
+                  "are different facts, and a fallback to zero would paint both green. "
+                  "Only the orchestrator runs the probe, so this reads as text if it "
+                  "stops -- see `Dead-letter depth by queue` on the worker boards.",
+             thresholds=T_WARN, decimals=0,
+             no_value="no dead-letter probe reporting"),
         stat(lay, "Egress faults",
              [recent(EGRESS_FAULT)],
              desc="Any send that did not reach the broker, anywhere in the stack, "
