@@ -1454,8 +1454,19 @@ def build_flow():
              thresholds=T_DEPTH, decimals=0,
              no_value="no queue depth reported"),
         stat(lay, "Queues unconsumed",
-             [f'count({live("pipeline_queue_consumers")} == 0) or vector(0)'],
+             [f'count(max by (queue) ({live("pipeline_queue_consumers")}) == 0) '
+              f'or vector(0)'],
              desc="How many queues the **broker** currently has no consumer on. Should be 0." + PARA +
+                  "**`max by (queue)` before the count, and the chaos suite is what caught "
+                  "its absence.** Every replica probes every queue, so this instrument "
+                  "carries one series per reporter per queue -- 17 series for the 7 queues "
+                  "this deployment has. Counting series rather than queues made the stat "
+                  "read **17** during the broker outage, and 3 and 5 during two others: a "
+                  "panel titled *queues* reporting more than twice as many as exist." + PARA +
+                  "It read 0 either way on a healthy stack, which is why it survived "
+                  "review, an expression check and a rendered-board audit. The number is "
+                  "only wrong when it is non-zero, and it is only non-zero during an "
+                  "outage." + PARA +
                   "**The fastest signal on this board for a consumer that has gone away**, and the "
                   "only one that does not depend on a process reporting on itself. "
                   "`pipeline.consumer.consuming` is the process's own assertion; this is the "
