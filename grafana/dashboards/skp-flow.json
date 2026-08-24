@@ -519,6 +519,78 @@
     {
       "id": 8,
       "type": "stat",
+      "title": "Step p95",
+      "description": "**Door to door: how long a workflow step actually takes**, from the orchestrator dispatching it to the orchestrator being told it finished.\n\nThe only number on these boards that measures what a WORKFLOW experiences rather than what a component does. Every other duration here is one component's share -- a broker round trip, the author's transform, a store probe -- and a step can get slower without any of them moving.\n\n**It closes the fault this board set could not see.** S10 injects 300ms of Redis latency on the processor's path only; the write-up of it records that *nothing showed it, not one panel, not one stat*. Measured again with this instrument in place: p95 **0.050-0.060s** healthy against **0.973s** during the fault, and the mean 0.036s against 0.835s. Sixteen times on the quantile, twenty-three on the mean.\n\n**Read on `step-outcome` deliveries only**, which is where the round trip completes. The same instrument on other types reports a partial: on `process-dispatch` at the processor it is the dispatch's own queue wait, because the step has only just begun.\n\n**Both ends of this are stamped on different processes**, so it carries NTP skew -- nil on this single node, milliseconds to tens across nodes. Irrelevant at this magnitude, and the reason the bucket ladder starts at 10ms rather than pretending to resolve a 24ms hop.\n\nBlank means no steps completed in the window, not a broken query: a quantile over an all-zero rate is NaN, which `or vector(0)` cannot rescue.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pipeline_step_elapsed_seconds_bucket{type=\"step-outcome\"}[$__rate_interval])))",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.25
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
+          },
+          "noValue": "no steps completed in range"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
       "title": "Data freshness",
       "description": "Seconds since the least-fresh service last exported anything.\n\nEvery other panel on this board is downstream of this number. The export cadence is 10s against a 15s scrape, so the effective resolution is 15s and this sawtooths 0-15 in health. Orange at 45 -- three missed samples -- and red at 90. Sustained above green means a service has stopped reporting and its gauges are being held at whatever they last said.\n\nThe TelemetryStale alert rule fires off the same 45, deliberately, so the alert and this panel change colour at the same instant.",
       "datasource": {
@@ -528,7 +600,7 @@
       "gridPos": {
         "h": 4,
         "w": 3,
-        "x": 18,
+        "x": 21,
         "y": 1
       },
       "targets": [
@@ -588,7 +660,7 @@
       }
     },
     {
-      "id": 9,
+      "id": 10,
       "type": "row",
       "title": "2 - Since: what has already happened?",
       "collapsed": false,
@@ -601,7 +673,7 @@
       "panels": []
     },
     {
-      "id": 10,
+      "id": 11,
       "type": "stat",
       "title": "Outbound hop gap",
       "description": "Dispatches the orchestrator confirmed, minus acks the processors issued, counted in MESSAGES over the visible range.\n\n**The `or vector(0)` is on each side, and that is load-bearing.** Written as `sum(A) - sum(B) or vector(0)` this panel read 0 -- green, the healthiest number it has -- whenever EITHER side had no series at all. `sum()` over an empty vector yields no sample, the subtraction propagates that emptiness, and the trailing fallback then substituted a perfect conservation for a total outage. Measured against this stack: with the producer selector matching nothing the old form read 0 while the new one reads -3813; with the consumer selector matching nothing, 0 against +3821. An orchestrator that stops dispatching and a processor that stops acking are the two faults this panel exists to catch, and it was blind to both of them.\n\nBoth sides absent still reads 0, and that is correct rather than overlooked: no traffic at all is `System flowing`'s question, not this one's.\n\nCounts rather than a difference of rates, and the distinction is what makes the panel usable. Two counters scraped independently give a rate difference that is noise centred on zero -- measured here over an hour: p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of the time on a perfectly healthy stack. The same hour in counts: 1311 produced, 1313 acked. A real leak grows with the range; jitter does not.\n\n**A restart inside the range puts tens of messages here and none of them are lost.** A replica that goes away and comes back gets a new series, and produced and consumed counters for the same messages live on different services that restart at different moments. Measured across the chaos suite: +46/-47, +48/-46, +43/-44, every one an artefact of a scale-to-zero and every one gone within a range width. Check the Workers reporting stat before believing a number here.",
@@ -680,7 +752,7 @@
       }
     },
     {
-      "id": 11,
+      "id": 12,
       "type": "stat",
       "title": "Return hop gap",
       "description": "The same conservation check on the way back, in messages over the visible range.\n\nPer-side `or vector(0)`, for the reason its outbound twin gives: with the fallback on the whole expression, one side having no series at all rendered as a flawless zero.\n\nThe API also consumes step-outcome and that consumption is not instrumented, so a positive value here is the API's share before it is anything else.\n\nThresholded symmetrically with its outbound twin. The two measure one quantity in opposite directions, so a restart that puts +46 on one puts -47 on the other; with steps on the positive side only, the pair used to render one orange and one green for the same instant.",
@@ -759,7 +831,7 @@
       }
     },
     {
-      "id": 12,
+      "id": 13,
       "type": "stat",
       "title": "Retry amplification",
       "description": "Share of deliveries that will be redone, in MESSAGES over the visible range. Healthy is exactly zero.\n\nCounted rather than rated, and that is what makes it able to fire at all. Measured at the old 60s export cadence: as a ratio of two 240s rates it read 0.0% through every scenario in the chaos suite, including the broker outage that parked a delivery, because one parked message against a 240s denominator was a rounding error. The rate window is 60s now, which would make that same event 4x larger and still a rounding error; one parked message in a fifteen-minute range is a number.\n\nGreen below 1%. Counting rather than rating makes this stat sticky for a range width, and thresholded red-at-any-non-zero it stayed red through the two scenarios AFTER the one that parked a single delivery -- 0.2% of traffic, on the board an operator opens first. A few redone messages is something to notice; a twentieth of all deliveries being redone is the outage.",
@@ -830,7 +902,7 @@
       }
     },
     {
-      "id": 13,
+      "id": 14,
       "type": "stat",
       "title": "Ack lost",
       "description": "Work completed that the broker will hand out again, counted over the visible range.",
@@ -897,7 +969,7 @@
       }
     },
     {
-      "id": 14,
+      "id": 15,
       "type": "stat",
       "title": "Dead-lettered",
       "description": "Work this deployment refused and **nobody has dealt with**. Should be 0. Anything else is a run that lost progress permanently and is still sitting in a queue with no consumer.\n\n**The one stat here that reports a LEVEL rather than an event.** `Retry amplification` and the parked disposition beside it are counters: they rise when a message is refused, stay visible for a rate window, and scroll away. This keeps reporting for as long as the message is still there.\n\n**Measured, and it is why this exists.** Six parked step outcomes were found in `orchestrator-result.dead` from four incidents across two days -- each a workflow run that lost progress. Every board read green, all five alert rules stayed inactive, and they were found only by querying the broker by hand. The counter had done its job at the time and had nothing left to say two days later.\n\n`max by (queue)` before the sum is load-bearing: every orchestrator replica probes the same queues and reports the same depth, because a queue depth is a property of the broker rather than of the replica asking. `sum` alone would multiply it by the replica count.\n\nThe window is 2m rather than the 40s used elsewhere: the probe runs every 30s by design -- a dead-letter queue changes only when something is refused, which is rare and never urgent to the second -- so a liveness-width window would flap on the probe's own cadence rather than on anything real.\n\n**No `or vector(0)`:** no probe reporting and no messages dead-lettered are different facts, and a fallback to zero would paint both green. Only the orchestrator runs the probe, so this reads as text if it stops -- see `Dead-letter depth by queue` on the worker boards.",
@@ -965,7 +1037,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 16,
       "type": "stat",
       "title": "Egress faults",
       "description": "Any send that did not reach the broker, anywhere in the stack, counted over the visible range.",
@@ -1032,7 +1104,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 17,
       "type": "stat",
       "title": "Workers missing (5m)",
       "description": "The deepest dip in live worker count over the last five minutes. Names how many replicas went away, without having to be told how many there ought to be -- it reads 3 for a lost orchestrator StatefulSet and 2 for a lost processor pair.\n\n**Five minutes, not the visible range.** Peak-minus-trough over $__range makes the number change when the reader zooms, and made back-to-back scenarios report the earlier, deeper one: 3 during the processor scenario, whose own answer was 2. A stated window is worth more than a wider one.\n\n**Peak minus trough, not peak minus now.** The dip is narrow and a stat panel is a range query at the datasource step, so a subtraction against the current value lands on the wrong side of the dip about half the time -- measured at the old 60s step, where it missed an outage the same expression had caught an hour earlier. The step is 15s now, but the `[5m:15s]` subqueries pin the evaluation at 15s regardless of it, which is what keeps this independent of the panel's own step.\n\n**It cannot be prompt.** A replica is only missing once it has skipped its liveness window, so detection takes roughly the liveness window plus one export. Nothing queryable fixes the remainder: a fault shorter than the sampling period is not observable.",
@@ -1099,7 +1171,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 18,
       "type": "row",
       "title": "3 - Flow: where is it leaking?",
       "collapsed": false,
@@ -1112,7 +1184,7 @@
       "panels": []
     },
     {
-      "id": 18,
+      "id": 19,
       "type": "timeseries",
       "title": "Outbound hop - orchestrator to processor",
       "description": "The two lines should track. A widening fork is backlog.\n\nOrchestrator and processor only. The API is not on this hop, but note that its own queue paths emit no metrics at all, so no panel on this board can see traffic the API publishes or consumes -- see the note panel on SKP BaseAPI.",
@@ -1210,7 +1282,7 @@
       }
     },
     {
-      "id": 19,
+      "id": 20,
       "type": "timeseries",
       "title": "Return hop - processor to orchestrator",
       "description": "The same conservation check on the way back.\n\nThe API also consumes step-outcome, and that consumption is NOT instrumented, so 'picked up' here counts the orchestrator alone. Read a shortfall as the API's share, not as loss.",
@@ -1308,7 +1380,7 @@
       }
     },
     {
-      "id": 20,
+      "id": 21,
       "type": "timeseries",
       "title": "Per-processor dispatch",
       "description": "One series per processor. A line at zero while the others flow is one processor being starved -- invisible in any aggregate.",
@@ -1395,7 +1467,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 22,
       "type": "timeseries",
       "title": "Retry amplification over time",
       "description": "Flat zero is healthy and is drawn as a line, not as an empty panel.",
@@ -1484,7 +1556,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 23,
       "type": "state-timeline",
       "title": "Posture - consuming, gate, leader, hydration, identity",
       "description": "Why the pipeline stopped, in one panel. Every series should sit at 1 -- leaders elected included.\n\n**Consuming is on here now because it is the series that actually moves.** It was the only posture signal to change in the Redis, broker and both-down scenarios, and it was the one this panel did not draw -- so the board's single history of the fault was a stat sparkline three centimetres wide.\n\nEvery series is restricted to replicas reporting inside 40s, so a replica going away ends its row rather than freezing it at 1.\n\n**One row per signal.** As overlaid lines this was six booleans on one axis: they all sit at 1 in health, so they rendered as a single line and a dip could not be attributed to any of them. The panel that was supposed to say *why the pipeline stopped* could say only *something did*.\n\n`leaders elected` is a count rather than a posture and is the one row here that can legitimately exceed 1. Two is a split brain; the colour will not tell you so, the tooltip will.",
@@ -1619,7 +1691,209 @@
       }
     },
     {
-      "id": 23,
+      "id": 24,
+      "type": "timeseries",
+      "title": "Step duration p95 / p99",
+      "description": "Door-to-door step time over the range: dispatch to outcome, across both services and three broker hops.\n\n**Read this beside `Queue wait by hop`, which is what it decomposes into.** A rise here with flat queue waits is the author's transform or a dependency getting slower; a rise that tracks one hop's wait is backlog on that queue, and `Queue depth by queue` names it.\n\nThe mean rides alongside the quantiles for the reason the produce-duration panel gives: it comes from sum/count and is independent of bucket boundaries, so a wild divergence from p50 means the ladder has stopped fitting the data. **This ladder is deliberately wider than the transport's** -- it reaches 300s rather than stopping at 10s, because a backlogged step is measured in minutes and everything past the last boundary lands in +Inf, where a quantile reports the edge rather than a latency.\n\n**The line at 0.25s is where measured-normal ends**, not an alarm: healthy p95 here is 0.050-0.060s. Under 300ms of injected Redis latency it reached 0.973s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pipeline_step_elapsed_seconds_bucket{type=\"step-outcome\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pipeline_step_elapsed_seconds_bucket{type=\"step-outcome\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(pipeline_step_elapsed_seconds_sum{type=\"step-outcome\"}[$__rate_interval])) / sum(rate(pipeline_step_elapsed_seconds_count{type=\"step-outcome\"}[$__rate_interval]))",
+          "legendFormat": "mean",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": null,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": false,
+            "showPoints": "never",
+            "pointSize": 4,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.25
+              }
+            ]
+          },
+          "noValue": "no steps completed in range"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Queue wait by hop",
+      "description": "p95 seconds each message type spent sitting in the broker before a consumer picked it up, per hop.\n\n**The term neither produce duration nor process duration contains**, and therefore the one that goes missing when an end-to-end time grows and no component looks slow. Produce duration ends at the broker's confirmation; process duration starts when a handler is entered. This is the gap between them.\n\nHealthy on this stack is **20-45ms per hop**. A hop that climbs while the others stay flat is backlog on that one queue -- check `Queue depth by queue` and `Consumers attached by queue` for whether anything is still draining it.\n\nRecorded on arrival, before the handler runs, so it does not fold in the transform time `Process duration` already reports.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le,queue,type) (rate(pipeline_queue_wait_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{type}} -> {{queue}}",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": null,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": false,
+            "showPoints": "never",
+            "pointSize": 4,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no deliveries carrying a send timestamp in range"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 26,
       "type": "timeseries",
       "title": "Queue depth by queue",
       "description": "Messages waiting in each of every queue in the deployment, right now.\n\n**The only leading indicator on these boards.** Every verdict stat is coincident or lagging -- consuming drops once a consumer has already stopped, and a departed replica costs a liveness window plus an export, measured at 52-66s. A queue starts filling the moment a consumer is merely SLOWER than its producer, which is the shape of most real degradations and which nothing here could previously see.\n\n**It is also what separates a queued message from a lost one.** The hop gaps are a conservation check, so a message sitting in a queue and a message that vanished are the same number to them. A gap roughly equal to the depth here is backlog; a gap far exceeding it is loss.\n\nHealthy on this stack is **0 on every orchestrator queue** and **mean 0.65, max 3** on the processor work queue -- that burst is structural, not noise: a cron fire dispatches a batch, PrefetchCount is 1, and the replicas drain it one message at a time. The reference line is at 5, above that measured maximum.\n\n`max by (queue)` because every replica probes the same queue and reports the same number -- a depth is a property of the broker, not of the replica asking -- so `sum` would multiply it by the replica count. Wrapped in `last_over_time(...[40s])` so a departed reporter's held sample cannot win the max.",
@@ -1630,7 +1904,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
+        "x": 16,
         "y": 27
       },
       "targets": [
@@ -1712,7 +1986,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 27,
       "type": "timeseries",
       "title": "Consumers attached by queue",
       "description": "How many consumers **the broker** has on each queue. Zero means nothing is listening.\n\n**This is the only broker-side signal on these boards.** `pipeline.consumer.consuming` is the process asserting its own health, which is why every panel reading it wraps it in a liveness window -- a dead replica's copy was held at 1 by the collector. This number comes from the broker's own reply and is 0 the moment a consumer detaches.\n\n**The liveness wrap is still load-bearing here, and it was measured.** Unwrapped, `max by (queue)` read a confident 2 against the broker's 0 for a whole processor outage, because it picked the departed pods' stale series over the orchestrator's fresh 0. Wrapped, it reads 0 within one liveness window.\n\nExpect 3 on the shared orchestrator queues (one per replica), 1 on each per-replica control queue, and 2 on the processor work queue. A count that drops without `Workers reporting` moving is a consumer that detached while its process stayed up.\n\nNot a complete answer: a consumer that reattaches inside one 10s probe interval -- which is what the S9 flapping-connection scenario produced -- is invisible here.",
@@ -1723,8 +1997,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 27
+        "x": 0,
+        "y": 35
       },
       "targets": [
         {
@@ -1805,7 +2079,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 28,
       "type": "table",
       "title": "Message flow matrix",
       "description": "Every message type, produced against consumed, with the difference. The quickest way to see a type that is produced and never consumed.\n\n**Grouped by type ALONE, and that is the whole point of the panel.** It used to group by `(service_name, type)` on both sides and merge them -- but the producer and the consumer of a type are DIFFERENT SERVICES, so the merge key never matched and the two halves of every hop landed on separate rows with the other column blank. Observed on this stack: `orchestrator / process-dispatch` produced 0.413 with consumed empty, and two rows below `sample-proc-v9 / process-dispatch` consumed 0.510 with produced empty. A reader had to do the join by eye, across non-adjacent rows, and a 23% discrepancy read as normal. A conservation table that cannot put the two sides of a conservation on one row is not one.\n\nDropping `service_name` is what buys the pairing, and it costs the who: read that off `Produced by type and outcome` and `Consumed by type and disposition` on the worker boards, which are per-service by construction.\n\n**`gap /s` is produced minus consumed, so it should hover at zero.** It is a difference of two independently scraped rates, so expect jitter either side -- measured over an hour, p50 +0.000 and max +0.074 req/s. A gap that holds one sign and grows is the signal; the hop-gap stats above count the same thing in messages, where a real leak accumulates and jitter does not.\n\n`step-outcome` should bias POSITIVE **over a long enough range**, because the API consumes it too and the API's queue side emits no metrics at all -- so `consumed` undercounts that hop. Do not expect to see it at a one-minute rate window, where jitter is several times larger than the bias: measured at one instant, +0.015, and at another, -0.060.",
@@ -1816,7 +2090,7 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 8,
         "y": 35
       },
       "targets": [

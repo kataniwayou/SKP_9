@@ -146,6 +146,21 @@ T_DEPTH = [{"color": "green", "value": None},
            {"color": "orange", "value": DEPTH_ORANGE},
            {"color": "red", "value": DEPTH_RED}]
 
+# Door-to-door step latency. DEPLOYMENT-SPECIFIC, and measured on both sides.
+#
+# Healthy p95 is 0.050-0.060s and mean 0.036-0.037s, taken over three consecutive samples on an
+# undisturbed stack. Under the S10 fault -- 300ms of injected Redis latency on the processor's path
+# only -- the same p95 read 0.973s and the mean 0.835s, a 16x and 23x move.
+#
+# Green below 0.25s clears the healthy figure by four times, which is wide enough that ordinary
+# burst phase cannot reach it. Red at 1s is just under what a 300ms dependency fault produced, so
+# the fault that used to be invisible lands red rather than merely orange.
+STEP_ORANGE = 0.25
+STEP_RED = 1.0
+T_STEP = [{"color": "green", "value": None},
+          {"color": "orange", "value": STEP_ORANGE},
+          {"color": "red", "value": STEP_RED}]
+
 # Live reporters expected on this deployment: 3 orchestrator replicas + 2 processor
 # replicas. DEPLOYMENT-SPECIFIC, like the band above, and re-derive it anywhere else.
 #
@@ -1085,6 +1100,35 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                          "board splits this per replica, where they share one queue."),
                    unit="reqps",
                    no_value="no channel churn in range"),
+        timeseries(layout, "Queue wait p95 / p99",
+                   [(f'histogram_quantile(0.95, sum by (le,queue) '
+                     f'(rate(pipeline_queue_wait_seconds_bucket{{{f}}}'
+                     f'[$__rate_interval])))', "p95 {{queue}}"),
+                    (f'histogram_quantile(0.99, sum by (le,queue) '
+                     f'(rate(pipeline_queue_wait_seconds_bucket{{{f}}}'
+                     f'[$__rate_interval])))', "p99 {{queue}}")],
+                   desc="Seconds a delivery sat in the broker before this service picked "
+                        "it up, per queue." + PARA +
+                        "**Neither produce duration nor process duration contains this "
+                        "term.** Produce duration ends at the broker's confirmation; "
+                        "process duration begins when a handler is entered. The wait "
+                        "between them was unmeasured, which is why an end-to-end time "
+                        "could grow with every component still looking fast." + PARA +
+                        "Healthy is **20-45ms**. A queue whose wait climbs while its peers "
+                        "stay flat is backlog on that queue alone -- `Queue depth by "
+                        "queue` below says how deep and `Consumers attached by queue` "
+                        "says whether anything is still draining it." + PARA +
+                        "Recorded on arrival, before the handler runs, so the transform's "
+                        "own cost is not folded in here as well as on `Process duration`."
+                        + PARA +
+                        "**Recorded only when the message carried a send timestamp.** A "
+                        "message published by a build without this instrument has none, "
+                        "and during a rollout there are always some -- they are skipped "
+                        "rather than recorded as zero, which would bury the real "
+                        "distribution. The API's queue side stamps nothing at all.",
+                   thresholds=normal_upto(0.1),
+                   unit="s",
+                   no_value="no deliveries carrying a send timestamp in range"),
         timeseries(layout, "Dead-letter depth by queue",
                    [(f'max by (queue) (last_over_time('
                      f'pipeline_deadletter_depth{{{f}}}[2m]))', "{{queue}}")],
@@ -1421,6 +1465,37 @@ def build_flow():
                   "does. And it cannot see a consumer that reattaches inside the 10s probe "
                   "interval, which is what the S9 flapping-connection scenario produced.",
              thresholds=T_WARN, decimals=0),
+        stat(lay, "Step p95",
+             ['histogram_quantile(0.95, sum by (le) '
+              '(rate(pipeline_step_elapsed_seconds_bucket{type="step-outcome"}'
+              '[$__rate_interval])))'],
+             desc="**Door to door: how long a workflow step actually takes**, from the "
+                  "orchestrator dispatching it to the orchestrator being told it finished."
+                  + PARA +
+                  "The only number on these boards that measures what a WORKFLOW "
+                  "experiences rather than what a component does. Every other duration "
+                  "here is one component's share -- a broker round trip, the author's "
+                  "transform, a store probe -- and a step can get slower without any of "
+                  "them moving." + PARA +
+                  "**It closes the fault this board set could not see.** S10 injects 300ms "
+                  "of Redis latency on the processor's path only; the write-up of it "
+                  "records that *nothing showed it, not one panel, not one stat*. Measured "
+                  "again with this instrument in place: p95 **0.050-0.060s** healthy "
+                  "against **0.973s** during the fault, and the mean 0.036s against "
+                  "0.835s. Sixteen times on the quantile, twenty-three on the mean." + PARA +
+                  "**Read on `step-outcome` deliveries only**, which is where the round "
+                  "trip completes. The same instrument on other types reports a partial: "
+                  "on `process-dispatch` at the processor it is the dispatch's own queue "
+                  "wait, because the step has only just begun." + PARA +
+                  "**Both ends of this are stamped on different processes**, so it carries "
+                  "NTP skew -- nil on this single node, milliseconds to tens across nodes. "
+                  "Irrelevant at this magnitude, and the reason the bucket ladder starts "
+                  "at 10ms rather than pretending to resolve a 24ms hop." + PARA +
+                  "Blank means no steps completed in the window, not a broken query: a "
+                  "quantile over an all-zero rate is NaN, which `or vector(0)` cannot "
+                  "rescue.",
+             thresholds=T_STEP, unit="s", decimals=3,
+             no_value="no steps completed in range"),
         stat(lay, "Data freshness",
              ['time() - min(max by (service_name) '
               '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
@@ -1660,6 +1735,59 @@ def build_flow():
                         "one row here that can legitimately exceed 1. Two is a split "
                         "brain; the colour will not tell you so, the tooltip will.",
                    mappings=M_POSTURE),
+        timeseries(lay, "Step duration p95 / p99",
+                   [('histogram_quantile(0.95, sum by (le) '
+                     '(rate(pipeline_step_elapsed_seconds_bucket{type="step-outcome"}'
+                     '[$__rate_interval])))', "p95"),
+                    ('histogram_quantile(0.99, sum by (le) '
+                     '(rate(pipeline_step_elapsed_seconds_bucket{type="step-outcome"}'
+                     '[$__rate_interval])))', "p99"),
+                    ('sum(rate(pipeline_step_elapsed_seconds_sum{type="step-outcome"}'
+                     '[$__rate_interval])) / '
+                     'sum(rate(pipeline_step_elapsed_seconds_count{type="step-outcome"}'
+                     '[$__rate_interval]))', "mean")],
+                   desc="Door-to-door step time over the range: dispatch to outcome, "
+                        "across both services and three broker hops." + PARA +
+                        "**Read this beside `Queue wait by hop`, which is what it "
+                        "decomposes into.** A rise here with flat queue waits is the "
+                        "author's transform or a dependency getting slower; a rise that "
+                        "tracks one hop's wait is backlog on that queue, and `Queue depth "
+                        "by queue` names it." + PARA +
+                        "The mean rides alongside the quantiles for the reason the "
+                        "produce-duration panel gives: it comes from sum/count and is "
+                        "independent of bucket boundaries, so a wild divergence from p50 "
+                        "means the ladder has stopped fitting the data. **This ladder is "
+                        "deliberately wider than the transport's** -- it reaches 300s "
+                        "rather than stopping at 10s, because a backlogged step is "
+                        "measured in minutes and everything past the last boundary lands "
+                        "in +Inf, where a quantile reports the edge rather than a "
+                        "latency." + PARA +
+                        "**The line at " + str(STEP_ORANGE) + "s is where measured-normal "
+                        "ends**, not an alarm: healthy p95 here is 0.050-0.060s. Under "
+                        "300ms of injected Redis latency it reached 0.973s.",
+                   thresholds=normal_upto(STEP_ORANGE),
+                   unit="s",
+                   no_value="no steps completed in range"),
+        timeseries(lay, "Queue wait by hop",
+                   [('histogram_quantile(0.95, sum by (le,queue,type) '
+                     '(rate(pipeline_queue_wait_seconds_bucket[$__rate_interval])))',
+                     "{{type}} -> {{queue}}")],
+                   desc="p95 seconds each message type spent sitting in the broker before "
+                        "a consumer picked it up, per hop." + PARA +
+                        "**The term neither produce duration nor process duration "
+                        "contains**, and therefore the one that goes missing when an "
+                        "end-to-end time grows and no component looks slow. Produce "
+                        "duration ends at the broker's confirmation; process duration "
+                        "starts when a handler is entered. This is the gap between them."
+                        + PARA +
+                        "Healthy on this stack is **20-45ms per hop**. A hop that climbs "
+                        "while the others stay flat is backlog on that one queue -- check "
+                        "`Queue depth by queue` and `Consumers attached by queue` for "
+                        "whether anything is still draining it." + PARA +
+                        "Recorded on arrival, before the handler runs, so it does not "
+                        "fold in the transform time `Process duration` already reports.",
+                   unit="s",
+                   no_value="no deliveries carrying a send timestamp in range"),
         *depth_panels(lay, '', 'every queue in the deployment'),
         table(lay, "Message flow matrix",
               [('sum by (type) (rate(pipeline_messages_produced_total'
