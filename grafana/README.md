@@ -499,6 +499,45 @@ what a restart inside the range does to them.
 > Closing it needs an instrument before it needs a panel -- a timer around the L2 probe, or around
 > store calls generally, exported as a histogram. That is production code and wants its own plan.
 
+**S11, a store slower than its own probe timeout -- and it reads exactly like an outage.**
+
+> Same lever, 3 s instead of 300 ms, which is past the 2 s `L2GateOptions.ProbeTimeout`. The probe
+> cannot finish inside its budget, so the gate closes. What the boards then show:
+>
+> | | before | during | after |
+> |---|---|---|---|
+> | `gate open` (processor) | 1 | **0** | 1 |
+> | `consuming` (processor) | 1 | **0** | 1 |
+> | `process p95` | 0.024 s | **0.024 s** | 0.024 s |
+>
+> `Consuming 0`, `L2 gate 0` is **character for character the "Redis paused" row** in the second-run
+> table above. A store that is merely slow and a store that is gone produce the same reading, and
+> nothing anywhere separates them.
+>
+> **Put S10 and S11 together and the shape is a cliff, not a gradient.** At 300 ms -- 685x slower
+> than normal -- literally nothing moves. At 3 s, everything moves at once and reports an outage.
+> There is no intermediate rendering, because there is no intermediate *instrument*: the boards have
+> exactly two states for the store, working and gone, and which one a degraded store gets depends on
+> which side of a 2 s probe timeout it lands. Note the duration panel is flat at 0.024 s even here,
+> in the run where the pipeline demonstrably stopped.
+>
+> **This is the third instance of one missing distinction**, not three coincidences: a wipe reads
+> like a pause, a slow store reads like an absent one, and a departed replica once read like an idle
+> one. Each time the instrument answers "is it there" when the question was "what is it doing".
+>
+> **Attribution, which the boards do get right.** Only the processor's path to Redis was slow:
+>
+> | | during |
+> |---|---|
+> | processor gate | **0** |
+> | orchestrator gate | **1** |
+> | Flow board `L2 gate` (min across services) | **0** |
+>
+> The worker boards name the affected workload correctly and exonerate the other. The Flow stat is a
+> `min`, so it reads 0 -- right for its tier, which asks *is something broken*, but on its own it
+> would send an operator to Redis when Redis was entirely healthy and only one client's path to it
+> was degraded. Open the worker board before touching the dependency.
+
 **A Grafana legend is not evidence that a line is still being drawn.**
 
 > The first reading above -- "the panel kept drawing the departed replica for the rest of the
