@@ -482,6 +482,104 @@ def timeseries(layout, title, exprs, desc="", unit="short", w=8, h=8,
     }
 
 
+# Value -> (label, colour) for the posture strips.
+#
+# The label is not decoration: a state timeline legends itself by DISTINCT VALUE, and
+# with colour driven off thresholds alone that legend reads "< 1" and "1+" -- which tells
+# a reader nothing about which end is the healthy one. Naming the states puts the answer
+# on the panel.
+#
+# The colour is carried here rather than by a threshold step because these gauges do not
+# all mean the same thing at 0. A follower replica is 0 on pipeline.leader and is working
+# exactly as designed; rendering it red -- which a red-below-1 threshold does, and did --
+# says the opposite of what the panel's own description says. Only the states that are
+# genuinely wrong are red.
+M_CONSUMING = {"0": ("stopped", "red"), "1": ("consuming", "green")}
+M_GATE = {"0": ("shut", "red"), "1": ("open", "green")}
+M_LEADER = {"0": ("follower", "semi-dark-blue"), "1": ("leader", "green")}
+M_ADMITTED = {"0": ("not admitted", "red"), "1": ("admitted", "green")}
+# Orange rather than red: a processor waiting for a matching processor row is the
+# designed two-stage boot, not a crash. It still is not doing work.
+M_READY = {"0": ("not ready", "orange"), "1": ("ready", "green")}
+M_POSTURE = {"0": ("down", "red"), "1": ("ok", "green")}
+
+
+def mapping(pairs):
+    return [{"type": "value",
+             "options": {k: {"text": t, "color": c, "index": i}
+                         for i, (k, (t, c)) in enumerate(sorted(pairs.items()))}}]
+
+
+def statetimeline(layout, title, exprs, desc="", w=8, h=8, thresholds=None,
+                  mappings=None, no_value=None):
+    """A 0/1 posture drawn as bands per series rather than as overlaid lines.
+
+    WHY THIS PANEL TYPE EXISTS HERE. Six panels drew booleans on a shared numeric axis,
+    and a shared axis is the wrong instrument for them: every series sits at exactly 1 in
+    health, so they render as one line and only the last one drawn is visible. Observed
+    on the live boards -- `Leader by replica` drew three replicas as a single filled band
+    with white slivers in it, and could not answer the question in its own title; five
+    queues on `Consuming by queue` were one flat line at 1 for three hours.
+
+    A state timeline gives each series its own row, so N series are N answers rather than
+    one. It also renders the case those panels were written to show and could not: a
+    series that ENDS leaves an empty row from that point (spanNulls and insertNulls both
+    false), which is a replica that left, and is visually distinct from a row that drops
+    to the failed colour, which is a replica that is present and not working.
+    """
+    return {
+        "id": _next_id(),
+        "type": "state-timeline",
+        "title": title,
+        "description": desc,
+        "datasource": DS,
+        "gridPos": layout.place(w, h),
+        "targets": targets(exprs),
+        "options": {
+            # Collapse consecutive identical samples, or a 15s-resolution boolean draws
+            # ~700 separate bands across a three-hour range.
+            "mergeValues": True,
+            "showValue": "never",
+            "alignValue": "left",
+            "rowHeight": 0.9,
+            # No perPage. Setting it turns on Grafana's pager, which drew a "< 1 >"
+            # control under every one of these for a single page of five rows.
+            "legend": {"displayMode": "list", "placement": "bottom",
+                       "showLegend": True, "calcs": []},
+            "tooltip": {"mode": "single", "sort": "none"},
+        },
+        "fieldConfig": {
+            "defaults": {
+                "custom": {
+                    "lineWidth": 0,
+                    "fillOpacity": 70,
+                    "spanNulls": False,
+                    "insertNulls": False,
+                    "hideFrom": {"legend": False, "tooltip": False, "viz": False},
+                },
+                # NOT thresholds, and the reason is the legend rather than the colour.
+                # Grafana builds a state timeline's legend from the threshold STEPS
+                # whenever the colour mode is `thresholds` and there is more than one
+                # step -- which rendered as "< 1  1+" under every one of these panels,
+                # naming neither state and telling a reader nothing about which end is
+                # healthy. With a fixed mode it builds the legend from the distinct
+                # values instead, so the value mappings' own labels appear: "consuming"
+                # and "stopped", "leader" and "follower".
+                #
+                # Every colour therefore comes from the mappings. fixedColor is what a
+                # value NONE of them names falls back to -- purple, deliberately unlike
+                # any mapped state, so `leaders elected 2` on the Posture panel reads as
+                # "this is not one of the states we know" rather than blending into ok.
+                "color": {"mode": "fixed", "fixedColor": "purple"},
+                "thresholds": {"mode": "absolute", "steps": thresholds or T_NEUTRAL},
+                "mappings": mapping(mappings) if mappings else [],
+                **({"noValue": no_value} if no_value is not None else {}),
+            },
+            "overrides": [],
+        },
+    }
+
+
 def table(layout, title, exprs, desc="", w=8, h=8, exclude=(), rename=None):
     return {
         "id": _next_id(),
@@ -915,7 +1013,8 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                          "board splits this per replica, where they share one queue."),
                    unit="reqps",
                    no_value="no channel churn in range"),
-        timeseries(layout, "Consuming by queue" + (" and replica" if by_instance else ""),
+        statetimeline(layout,
+                   "Consuming by queue" + (" and replica" if by_instance else ""),
                    [(f'min by (queue{",service_instance_id" if by_instance else ""}) '
                      f'({live(f"pipeline_consumer_consuming_ratio{{{f}}}")})',
                      "{{queue}}" + (" / {{service_instance_id}}" if by_instance else ""))],
@@ -929,12 +1028,15 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                          "Aggregated by queue on this board because each queue has one "
                          "consumer. The processor board splits this per replica, where "
                          "every replica shares one queue.") + PARA +
-                        "A line that ENDS is a replica that left; a line at 0 is one that "
-                        "is present and not consuming." + PARA +
-                        "Unfilled on purpose: the orchestrator has five queues, all sitting "
-                        "at 1 in health, and five filled areas stacked on one line render as "
-                        "a single opaque block in which a dip is invisible.",
-                   minv=0, maxv=1, decimals=0, fill=0, draw_style="line"),
+                        "A row that ENDS is a replica that left; a row that turns red is "
+                        "one that is present and not consuming." + PARA +
+                        "**Drawn as a state timeline rather than as lines, and that is "
+                        "what makes it readable at all.** Every series sits at exactly 1 "
+                        "in health, so on a shared numeric axis they overlap into one "
+                        "line and only the last drawn is visible -- five orchestrator "
+                        "queues rendered as a single flat line across a three-hour range. "
+                        "One row per series is one answer per series.",
+                   mappings=M_CONSUMING),
     ]
 
 
@@ -1285,7 +1387,7 @@ def build_flow():
                    desc="Flat zero is healthy and is drawn as a line, not as an "
                         "empty panel.",
                    unit="percentunit", minv=0, soft_max=0.1),
-        timeseries(lay, "Posture - consuming, gate, leader, hydration, identity",
+        statetimeline(lay, "Posture - consuming, gate, leader, hydration, identity",
                    [(f'min by (service_name) ({live("pipeline_consumer_consuming_ratio")})',
                      "consuming {{service_name}}"),
                     (f'min by (service_name) ({live("pipeline_gate_open_ratio")})',
@@ -1304,9 +1406,17 @@ def build_flow():
                         "this panel did not draw -- so the board's single history of the "
                         "fault was a stat sparkline three centimetres wide." + PARA +
                         "Every series is restricted to replicas reporting inside " +
-                        LIVENESS + ", so a replica going away ends its line rather than "
-                        "freezing it at 1.",
-                   minv=0, decimals=0),
+                        LIVENESS + ", so a replica going away ends its row rather than "
+                        "freezing it at 1." + PARA +
+                        "**One row per signal.** As overlaid lines this was six booleans "
+                        "on one axis: they all sit at 1 in health, so they rendered as a "
+                        "single line and a dip could not be attributed to any of them. "
+                        "The panel that was supposed to say *why the pipeline stopped* "
+                        "could say only *something did*." + PARA +
+                        "`leaders elected` is a count rather than a posture and is the "
+                        "one row here that can legitimately exceed 1. Two is a split "
+                        "brain; the colour will not tell you so, the tooltip will.",
+                   mappings=M_POSTURE),
         table(lay, "Message flow matrix",
               [('sum by (service_name,type) (rate(pipeline_messages_produced_total'
                 '[$__rate_interval]))', "produced"),
@@ -1570,16 +1680,24 @@ def build_orchestrator():
     panels.append(row(lay, "3 - Pipeline: what is broken?"))
     panels += pipeline_shared(lay, f, role_f=rf)
     panels += [
-        timeseries(lay, "Leader by replica",
+        statetimeline(lay, "Leader by replica",
                    [(f'{live(f"pipeline_leader_ratio{{{f}}}")}',
                      "{{service_instance_id}}")],
-                   desc="Explains why cron fires land on one replica. Only cron fires "
-                        "are fenced by leadership.",
-                   minv=0, maxv=1, decimals=0, fill=20),
-        timeseries(lay, "Hydration admitted by replica",
+                   desc="Which replica holds the lease, and when it changed hands. "
+                        "Explains why cron fires land on one replica; only cron fires "
+                        "are fenced by leadership." + PARA +
+                        "**One row per replica, because as overlaid lines this panel "
+                        "could not answer its own title.** Three replicas at 0/1 on one "
+                        "axis drew a single filled band with slivers in it -- the "
+                        "handovers were visible, whose they were was not.",
+                   mappings=M_LEADER),
+        statetimeline(lay, "Hydration admitted by replica",
                    [(f'{live(f"pipeline_hydration_admitted_ratio{{{f}}}")}',
                      "{{service_instance_id}}")],
-                   minv=0, maxv=1, decimals=0, fill=20),
+                   desc="One-shot readiness per replica. A row that never turns green is "
+                        "a replica whose first hydration pass has not finished; a row "
+                        "that ends is a replica that left.",
+                   mappings=M_ADMITTED),
         timeseries(lay, "Dispatch by destination",
                    [(f'sum by (destination) (rate(pipeline_messages_produced_total'
                      f'{{{f},type="process-dispatch",destination=~"processor-$processor"}}'
@@ -1701,16 +1819,21 @@ def build_processor():
                         "will ever show you, because nothing is broken.",
                    thresholds=normal_upto(0.05),
                    unit="s"),
-        timeseries(lay, "Identity ready by replica",
+        statetimeline(lay, "Identity ready by replica",
                    [(f'{live(f"pipeline_identity_ready_ratio{{{f}}}")}',
                      "{{service_instance_id}}")],
-                   desc="One line per replica that is still reporting." + PARA +
+                   desc="One row per replica that is still reporting. Red is a pod that "
+                        "is up and waiting for a processor row matching its image -- the "
+                        "designed behaviour, not a crash loop." + PARA +
                         "Unrestricted, this panel GAINS series during a rollout: the "
                         "departed replicas are held by the collector and Prometheus while "
                         "their replacements start exporting, so two live processors "
-                        "rendered as four lines all sitting at 1. A line that ends is a "
-                        "replica that left.",
-                   minv=0, maxv=1, decimals=0, fill=20),
+                        "rendered as four series all sitting at 1. A row that ends is a "
+                        "replica that left." + PARA +
+                        "Drawn as a state timeline for that reason among others: four "
+                        "overlapping filled areas at the same value are one opaque block, "
+                        "and which of the four had ended was not readable from it.",
+                   mappings=M_READY),
         timeseries(lay, "Duplicate suppression rate",
                    [(f'sum(rate(pipeline_duplicate_suppressed_total{{{f}}}'
                      f'[$__rate_interval])) or vector(0)', "suppressed")],
