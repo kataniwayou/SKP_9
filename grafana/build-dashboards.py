@@ -1265,11 +1265,26 @@ def build_processor():
                    unit="reqps", minv=0),
         timeseries(lay, "Replica fan-out",
                    [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
-                     f'{{{f},disposition="acked"}}[$__rate_interval]))',
+                     f'{{{f},disposition="acked"}}[$__rate_interval])) '
+                     f'and on(service_instance_id) '
+                     f'present_over_time(pipeline_identity_ready_ratio{{{f}}}[{LIVENESS}])',
                      "{{service_instance_id}}")],
                    desc="Replicas share one queue, so the broker round-robins. A "
                         "replica sitting near zero while the others work is consuming "
-                        "nothing despite looking healthy.",
+                        "nothing despite looking healthy." + PARA +
+                        "**A line that ENDS is a replica that left; a line flat at zero "
+                        "beside working peers is a replica that stopped working.** Those "
+                        "are different incidents and the panel could not tell them apart "
+                        "before: a departed replica's counter is stale-held by the "
+                        "collector and by Prometheus's lookback, so `rate()` returned a "
+                        "decaying value for a full rate window and the line sagged to "
+                        "zero rather than stopping. The `and on(service_instance_id) "
+                        "present_over_time(...)` clause drops any replica that has not "
+                        "reported inside the liveness window, so a departure now ends "
+                        "the series." + PARA +
+                        "Measured: when one of two processors was scaled away, this "
+                        "panel kept drawing the departed replica for the rest of the run "
+                        "and only ever gained the replacement's name.",
                    unit="reqps"),
     ]
 
