@@ -1,8 +1,10 @@
 # SKP Grafana dashboards
 
-Five boards, as plain portable JSON. **Nothing here is provisioned.** These files are
-imported by hand, which is what lets the same file land in this cluster's Grafana and in
-one on another machine without editing anything.
+Five boards, as plain portable JSON. **They are provisioned from this repo** -- see
+**Changing a board** -- and they are also portable, so the same file lands in this
+cluster's Grafana and in one on another machine without editing anything. Those two
+properties are independent: provisioning is how this cluster gets them, portability is
+what lets any other Grafana import them by hand.
 
 ```
 grafana/
@@ -256,6 +258,14 @@ These stats are warn-at-one rather than red: once a fault series exists it is ex
 the life of the process, so the number persists until the replica restarts. A fault that
 happened twenty minutes ago should not vanish from the verdict tier, but it should not
 read as an outage in progress either.
+
+> **Superseded — `counted()` is no longer called by any panel.** Everything above is
+> still the right diagnosis and the wrong remedy. "The number persists until the replica
+> restarts" was written as a feature and turned out to be the cost: the absolute-total
+> branch made these stats report a process lifetime rather than a range, so the verdict
+> tier warned on a healthy stack and its colour stopped meaning anything. `recent()`
+> replaces it and keeps both properties this section was built for. See
+> **The operator review** below for the measurement.
 
 ### The Flow board could not tell Redis from RabbitMQ
 
@@ -686,7 +696,8 @@ what a restart inside the range does to them.
 > destructive, which is the part that actually cost you something.
 >
 > Closed by provisioning them from the repo -- see **Changing a board** above. All five
-> report `provisioned=true` in folder `SKP` with panel counts 20/20/26/25/17, and anonymous
+> report `provisioned=true` in folder `SKP` with panel counts 20/20/26/25/17 (21/22/35/33/17
+> after the operator review below), and anonymous
 > viewers get 200 on every one, so the ACL artefact recorded below did not recur.
 >
 > **Then actually restarted, because everything above is upstream of the claim.** A
@@ -711,17 +722,38 @@ what a restart inside the range does to them.
 
 ## Reading the boards
 
-Three tiers, in the order the questions actually get asked:
+Four tiers on the worker boards, in the order the questions actually get asked:
 
-1. **Verdict** — stat row. Is it broken?
-2. **Pipeline** — timeseries. What is broken?
-3. **Runtime** — collapsed, four panels. Is the process why?
+1. **Verdict** — stat row. Is it broken **right now**? Fault stats here count over a
+   fixed 5m and go green again when the fault stops, which is what makes the colour on
+   this row worth reading.
+2. **Since** — stat row. What has already **happened** in the visible range? The same
+   instruments, `$__range` instead of 5m, plus dead-letter depth and process restarts.
+3. **Pipeline** — timeseries and state timelines. What is broken?
+4. **Runtime** — collapsed, two panels. Is the process why?
 
-Tier 3 carries only the four runtime metrics with a causal link to a pipeline symptom
-(thread-pool queue, GC pause, exceptions, restarts). The other thirteen answer
+`skp-flow` has the same tense split (Verdict / Since / Flow) and has had since it was
+built; the worker boards had one row doing both jobs until the operator review below.
+`skp-baseapi` has three tiers (Verdict / Ingress / Runtime) and no Since row -- it
+carries `DNS failures (range)` and `Process restarts` instead.
+
+Live panel counts, all `provisioned=true` in folder `SKP`:
+
+| board | panels | rows |
+|---|---|---|
+| `skp-flow` | 21 | Verdict / Since / Flow |
+| `skp-baseapi` | 22 | Verdict / Ingress / Runtime |
+| `skp-orchestrator` | 35 | Verdict / Since / Pipeline / Runtime |
+| `skp-processor` | 33 | Verdict / Since / Pipeline / Runtime |
+| `skp-runtime` | 17 | (no rows) |
+
+The collapsed Runtime tier carries **two** panels -- thread-pool queue and GC pause --
+because those only explain a symptom you are already looking at. Exception rate and
+process restarts used to be there and are on the visible tier now; the review section
+below has the measurement that moved them. The remaining thirteen runtime metrics answer
 memory-and-perf questions and live on `skp-runtime.json`.
 
-### Why fault panels end in `or vector(0)`
+### Why fault panels end in `or vector(0)` — and the three that must not
 
 A counter that has never incremented exports no series, so a fault expression written
 plainly renders **No data** — visually identical to a broken query, a bad variable, or a
@@ -729,9 +761,26 @@ dead scrape. On a healthy stack that is most of them: measured on this cluster, 
 of six `disposition`/`reason` pairs exists, `landed="false"` has never occurred, and
 `pipeline_duplicate_suppressed_total` has zero series.
 
-Every fault stat therefore ends `or vector(0)` and is thresholded green-at-zero, so
-healthy reads as an explicit green `0`. The three breakdown-by-label panels that cannot
-use that trick (the fallback would draw an unlabelled series) set `noValue` text instead.
+Most fault stats therefore end `or vector(0)` and are thresholded green-at-zero, so
+healthy reads as an explicit green `0`. Breakdown-by-label panels that cannot use that
+trick (the fallback would draw an unlabelled series) set `noValue` text instead.
+
+**The trick is wrong wherever absence and zero are different facts, and it had silently
+become wrong in four places.** A trailing `or vector(0)` substitutes for an empty result,
+and "nothing reported" then renders identically to "nothing happened" — in green, on a
+verdict tier:
+
+- **The two hop gaps.** `sum(A) - sum(B) or vector(0)`: `sum()` over an empty vector
+  yields no sample, the subtraction propagates the emptiness, and the fallback painted a
+  total outage as a perfect conservation. The fallback is per-side now, so an absent
+  producer reads −3813 and an absent consumer +3821.
+- **The three dead-letter stats.** No probe reporting is not the same fact as no messages
+  dead-lettered. They carry `noValue` text instead, which is how the processor board says
+  `not probed` rather than a reassuring `0` — see the instrumentation gap below.
+
+The rule the boards follow now: `or vector(0)` where the metric exists and the counter
+simply has not fired; `noValue` text where the *series* not existing is itself the thing
+worth knowing.
 
 ### Two panels that mean less than they look like
 
@@ -741,6 +790,12 @@ follower at zero is still expected to be consuming. The verdict stat is
 `count(pipeline_leader_ratio == 1)`, which must be exactly 1 — zero means nobody holds
 the lease, two means a split.
 
+This paragraph existed while `Leader by replica` rendered every follower **red**, because
+a red-below-1 posture threshold is what 0 means everywhere else on these boards. The
+panel said the opposite of the text above it for as long as both existed. Colours on the
+state timelines come from per-value mappings now, so follower is blue, a processor
+waiting for its identity row is orange, and only genuinely-wrong states are red.
+
 **The orchestrator's Role filter reaches four panels, not the board.** `role` is an
 attribute on three instruments only — `pipeline.messages.produced`,
 `pipeline.messages.consumed`, `pipeline.produce.duration`. The gauges and
@@ -749,6 +804,209 @@ a series that has no `role` label, so applying the variable board-wide would emp
 The verdict tier is left unfiltered too: it answers *is anything wrong anywhere*, and a
 role selection there would let a follower fault hide behind a leader view. There is a
 note panel on the board saying so.
+
+## The operator review
+
+Nine changes, from a pass that asked one question of every panel: **would this help
+someone detect an infra outage, a pipeline anomaly or a defect, at three in the morning,
+without already knowing the system?** Every finding below was verified against live
+Prometheus or against a rendered page before it was acted on, and each landed as its own
+commit.
+
+The structure was already right. Everything here is a defect inside it.
+
+### The boards warned at rest, so the colour meant nothing
+
+Three of the four boards showed orange on a healthy stack: `Not acked 1` and
+`Channel resets 54` on the orchestrator, `Not acked 1` on the processor. An operator who
+sees orange every day stops reading orange — and the one stat that had earned it,
+`Dead-lettered 7`, gets the same trained indifference.
+
+**`counted()` did not compute what its callers claimed.** It took the larger of in-window
+growth and `max_over_time`, and `max_over_time` of a monotonic counter IS its current
+value: the total since the process started, not since the window began. So every
+description reading "counted over the visible range" described something the expression
+did not compute. Measured on orchestrator channel resets over a 3h range:
+
+| form | reads | what it actually is |
+|---|---|---|
+| `counted()` | 63 | the process lifetime total |
+| `recent("3h")` | 54.2 | what happened in the visible three hours |
+| `recent("5m")` | 0 | what is happening now |
+
+`Not acked` read 1 against a single requeue that happened *more than three hours before
+the visible range began*.
+
+`recent()` replaces it: the larger of `increase()` (reset-aware) and a clamped
+now-minus-offset delta (birth-aware). Both failure modes `counted()` existed for are
+still covered — a counter that resets on restart, and a fault series whose very first
+exported sample is already non-zero — without the lifetime stickiness. The verdict tier
+then asks over a fixed 5m, and the range totals moved to the new Since row.
+
+`counted()` is still in `build-dashboards.py`, uncalled, with a note: the five alert
+rules in `k8s/02-configmaps.yaml` carry its shape, and changing those is a Prometheus
+config edit that discards the whole TSDB. The divergence is recorded rather than papered
+over.
+
+### The two presence stats could not go red
+
+`Workers reporting` and `Pods reporting` both carried `T_NEUTRAL`. Confirmed by reading
+the computed colour out of the rendered page rather than off a screenshot:
+`rgb(204,204,220)` — the same grey at 5 workers that it would show at 0. On a row titled
+*is it broken?* the colour is what a reader scans before any digits, and the two panels
+that answer *do the processes still exist* were the ones with none.
+
+`Workers reporting` is red below 1, orange below `EXPECTED_WORKERS`, green at it. That
+constant is new and deployment-specific, and the trade is worth stating: the panel was
+built to need no expected count, and that count-free detection is untouched — it still
+lives on `Workers missing (5m)`. The constant buys the **colour** only, and fails
+conservatively, because fewer workers than expected reads orange rather than green.
+
+`In-flight` and `p95 latency` keep `T_NEUTRAL` deliberately and now say why: no measured
+failure value exists for either, and a step picked without one is a guess wearing a
+colour.
+
+### A fault counter must be counted — including the one nobody converted
+
+The pipeline fault stats were converted from rates to counts because a rare fault against
+a 60s rate window rounds to nothing. `DNS failures` never got the same treatment and had
+the identical defect. Measured while the panel showed `0.00 req/s` in green:
+
+| | reads |
+|---|---|
+| `increase(dns_lookup_duration_seconds_count{error_type!=""}[3h])` | **21.04** |
+| the same over `[6h]` | **35.02** |
+| the rate form the stat actually used | **0** |
+
+— with the spikes plainly drawn on `Dependency name resolution` three panels below. The
+verdict tier said the API's dependencies were fine while the board's own ingress tier
+showed them failing. Split by tense now: `DNS failures (5m)` on the verdict row,
+`DNS failures (range)` beside the note panel.
+
+### Six panels drew booleans on a shared axis, so only one showed
+
+Every series on these sits at exactly 1 in health. As overlaid lines they render as ONE
+line and only the last drawn is visible, which made each panel unable to answer the
+question in its own title:
+
+| panel | what it actually rendered |
+|---|---|
+| `Leader by replica` | three replicas as a single filled band with slivers — handovers visible, whose they were not |
+| `Consuming by queue` | five orchestrator queues as one flat line across three hours |
+| `Identity ready by replica` | four series (two live, two stale-held) as one opaque block |
+
+All six are state timelines now — one row per series, each labelled. A row that **ends**
+is a replica that left; a row in the failed colour is one that is present and not
+working. The line form could not distinguish those two at all.
+
+**Two rendering defects here were invisible to `check-expressions.py` and showed up only
+on screen**, which is the same lesson `audit-boards.js` was written for:
+
+- The legend read `< 1  1+`, naming neither state. Grafana builds a state timeline's
+  legend from the **threshold steps** whenever colour mode is `thresholds` and there is
+  more than one step. Colour comes from the value mappings now and the mode is fixed, so
+  the legend reads `leader / follower`, `consuming`, `admitted`.
+- Followers rendered red, contradicting the panel's own description. See the leader note
+  above.
+
+### The flow matrix could not put a hop's two sides on one row
+
+Both targets grouped by `(service_name, type)` and were merged on that key. But the
+producer and the consumer of a type are **different services**, so the key never matched
+and every hop landed as two rows with the other column blank:
+
+```
+orchestrator     process-dispatch   0.413    (blank)
+sample-proc-v9   process-dispatch  (blank)    0.510
+```
+
+Two non-adjacent rows, a 23% discrepancy between them, and nothing to suggest they were
+the same quantity. A conservation table that cannot put the two sides of a conservation
+on one row is not one.
+
+Grouped by `type` alone now, with a computed `gap /s` column. Live reading — four types,
+four rows, every gap inside the scrape-boundary jitter the hop-gap stats already
+document:
+
+| type | produced /s | consumed /s | gap /s |
+|---|---|---|---|
+| next-step-handoff | 0.255 | 0.280 | −0.025 |
+| process-dispatch | 0.305 | 0.255 | 0.050 |
+| step-outcome | 0.240 | 0.300 | −0.060 |
+| processed-data | 0.255 | 0.240 | 0.015 |
+
+Dropping `service_name` costs the *who*, which the description says outright: that is
+what `Produced by type and outcome` and `Consumed by type and disposition` on the worker
+boards are for.
+
+### The dead-letter drill-down dead-ended
+
+`Dead-lettered 7` — the stat that found a real correctness defect — existed on `skp-flow`
+alone. An operator who saw it non-zero and clicked through to a worker board found no
+dead-letter panel at all; the only evidence there was a `step-outcome / parked` series
+inside a five-series timeseries, at a value visually indistinguishable from zero.
+
+Both worker boards now carry a `Dead-lettered` stat on the Since tier and a
+`Dead-letter depth by queue` timeseries on the pipeline tier, emitted from the shared
+functions so the two cannot drift.
+
+**That surfaced an instrumentation gap.** `ProcessorQueues.Dead()` declares a
+`processor-{id}.dead` queue, but `DeadLetterDepthProbe` is registered in
+`OrchestratorHost` **only** — so the processor's dead-letter queue exists and nothing
+measures its depth. The panel is kept on both boards and says so, because an unmeasured
+queue an operator can name is worth more than a panel that quietly is not there.
+
+### Restarts and exceptions were behind a collapsed row
+
+`Process restarts` read **6 for each of the three orchestrator replicas** over a
+three-hour range — eighteen process starts — while `Workers reporting` sat green at 5 and
+`Workers missing (5m)` at 0, because every restart had completed and been replaced before
+either could see it. The only place that fact appeared was the bottom of `skp-runtime`,
+below fifteen GC panels, and behind a row titled as though it were about garbage
+collection on the boards an operator actually opens.
+
+That is not a small omission. A restart is the documented cause of the hop gaps reading
++46/−47, of `Channel resets` reaching tens, and of a replica's series ending and
+restarting under a new identity. Every one of those panels tells the reader to go and
+check for a restart, and none of them could be checked without expanding the
+wrong-looking row.
+
+`Exception rate` and `Process restarts` are on the visible tier of all three source
+boards now, and a `Process restarts` stat sits on the Since tier of both worker boards.
+Live reading on the orchestrator: **15, orange**, against green everywhere else.
+
+### An always-blank panel teaches the wrong habit
+
+`pipeline_duplicate_suppressed_total` has never produced a series here — zero series, and
+no metric name matching `duplicate` or `suppress` exists at all, before or after a
+deliberate L2 wipe. So `Duplicate suppression rate` spent a full third of a row on a flat
+line at zero, on an axis auto-scaled to 0–100 req/s because there was no data to scale it
+by. Its own description defended this: *"flat zero is healthy and is drawn, not left
+empty."*
+
+That reasoning is right for a signal that can move and wrong for one that never has. What
+it teaches an operator is that a blank panel here is normal, and that habit is what makes
+the next genuinely-empty panel invisible.
+
+**The fix is narrower than the review proposed, and reading the source is why.** The
+review said delete both duplicate-suppression panels. `ProcessDispatchHandler.cs:175`
+calls `RecordDuplicateSuppressed()`, so this is an untriggered path rather than dead
+code, and deleting all of it would drop coverage of a real idempotence signal the moment
+it first fires. The graph goes; the stat stays, moved to the Since tier.
+
+### What this pass did not close
+
+Unchanged, and still the largest gaps for an operator:
+
+- **No backlog, queue depth or consumer lag anywhere.** The hop gap is a conservation
+  check, so a message sitting in a queue and a message lost are the same number to it.
+  Broker-side metrics are off the table (org-owned), so this needs an app-side gauge. It
+  is the one instrument that would most change what these boards can detect.
+- **No end-to-end latency or message age.** Per-hop produce and process durations exist;
+  door-to-door time for a workflow step does not.
+- **Degradation is still largely invisible**, beyond the store-probe instrument — see the
+  S10/S11 write-up above.
+- **Nothing consumes the alerts**, and no rule covers work being discarded.
 
 ## Two defects found while building these boards
 
@@ -839,11 +1097,32 @@ capping genuine excursions.
 
 **Five filled series on one line are one opaque block.** "Consuming by queue" draws the
 orchestrator's five queues, all at 1 in health. With area fill they merged into a solid
-shape in which a dip — the entire point of the panel — was invisible. Unfilled now.
+shape in which a dip — the entire point of the panel — was invisible. Unfilling them was
+the first fix and it was not enough: unfilled lines at the same value still overlap, and
+only the last drawn is visible. These six panels are **state timelines** now, one row per
+series. See the operator review below.
 
 Two smaller ones: an instant-query table carried a Time column identical on every row while
 its value columns were clipped, and a panel titled "Route match failures" plotted every
 match status including success.
+
+**A stat with no thresholds renders the same grey at 5 and at 0.** `Workers reporting` and
+`Pods reporting` both carried `T_NEUTRAL`, which a query check cannot see and a screenshot
+can be misread about — the colour was confirmed by reading `getComputedStyle(...).color`
+off the rendered page: `rgb(204,204,220)`.
+
+**A state timeline legends itself from the threshold steps, not from the data.** Six panels
+converted to `state-timeline` rendered a legend reading `< 1  1+`, naming neither state,
+because Grafana takes that path whenever colour mode is `thresholds` and there is more than
+one step. In the same conversion every follower replica rendered **red**, because
+red-below-1 is what a posture threshold means — contradicting the panel description sitting
+directly above it. Both are in **The operator review**; both passed
+`check-expressions.py` without complaint.
+
+**An always-blank panel is invisible to a query check by construction.** `Duplicate
+suppression rate` returned data on every run of `check-expressions.py` — `or vector(0)` saw
+to that — while rendering an empty graph on an axis scaled 0–100 req/s. A check that asks
+"did this expression return something" cannot ask "was the something worth a panel".
 
 ## A tag is not a link, and un-provisioning drops permissions
 
@@ -882,3 +1161,18 @@ So absence on the Flow board is not evidence of zero traffic through the API's q
 and any produced-vs-consumed comparison crossing into the API will not balance. This is
 deliberate and stated on a text panel on `skp-baseapi.json` rather than left as an empty
 graph.
+
+## Known gap: the processor's dead-letter queue is not probed
+
+`ProcessorQueues.Dead()` declares a `processor-{id}.dead` queue, but
+`DeadLetterDepthProbe` is registered in `OrchestratorHost` only. So the queue exists,
+messages can be parked into it, and **nothing measures its depth** — the same class of
+blind spot the dead-letter instrument was built to close on the orchestrator side, left
+open on the other.
+
+Found while adding the dead-letter drill-down, not by a failing check. `Dead-lettered` on
+`skp-processor` reads `not probed` and `Dead-letter depth by queue` carries no-value text
+saying the same, because a green `0` there would claim something nobody has measured.
+
+Closing it is one `AddHostedService` in the processor host plus the queue names to probe.
+Unlike the API gap above, this one is an oversight rather than a decision.
