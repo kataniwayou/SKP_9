@@ -1345,9 +1345,9 @@
     },
     {
       "id": 20,
-      "type": "timeseries",
+      "type": "state-timeline",
       "title": "Posture - consuming, gate, leader, hydration, identity",
-      "description": "Why the pipeline stopped, in one panel. Every series should sit at 1 -- leaders elected included.\n\n**Consuming is on here now because it is the series that actually moves.** It was the only posture signal to change in the Redis, broker and both-down scenarios, and it was the one this panel did not draw -- so the board's single history of the fault was a stat sparkline three centimetres wide.\n\nEvery series is restricted to replicas reporting inside 40s, so a replica going away ends its line rather than freezing it at 1.",
+      "description": "Why the pipeline stopped, in one panel. Every series should sit at 1 -- leaders elected included.\n\n**Consuming is on here now because it is the series that actually moves.** It was the only posture signal to change in the Redis, broker and both-down scenarios, and it was the one this panel did not draw -- so the board's single history of the fault was a stat sparkline three centimetres wide.\n\nEvery series is restricted to replicas reporting inside 40s, so a replica going away ends its row rather than freezing it at 1.\n\n**One row per signal.** As overlaid lines this was six booleans on one axis: they all sit at 1 in health, so they rendered as a single line and a dip could not be attributed to any of them. The panel that was supposed to say *why the pipeline stopped* could say only *something did*.\n\n`leaders elected` is a count rather than a posture and is the one row here that can legitimately exceed 1. Two is a split brain; the colour will not tell you so, the tooltip will.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1416,6 +1416,10 @@
         }
       ],
       "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.9,
         "legend": {
           "displayMode": "list",
           "placement": "bottom",
@@ -1423,54 +1427,53 @@
           "calcs": []
         },
         "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+          "mode": "single",
+          "sort": "none"
         }
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "decimals": 0,
           "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "gradientMode": "opacity",
+            "lineWidth": 0,
+            "fillOpacity": 70,
             "spanNulls": false,
-            "showPoints": "never",
-            "pointSize": 4,
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
+            "insertNulls": false,
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
-            },
-            "thresholdsStyle": {
-              "mode": "off"
             }
           },
-          "mappings": [],
           "color": {
-            "mode": "palette-classic"
+            "mode": "fixed",
+            "fixedColor": "purple"
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
           },
-          "min": 0
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "down",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "ok",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       }

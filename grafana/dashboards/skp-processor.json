@@ -1602,9 +1602,9 @@
     },
     {
       "id": 96,
-      "type": "timeseries",
+      "type": "state-timeline",
       "title": "Consuming by queue and replica",
-      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nSplit per replica on this board because every replica consumes the SAME queue, so a min across the queue alone cannot name which replica stopped. On the orchestrator each queue has one consumer and the split would only add lines.\n\nA line that ENDS is a replica that left; a line at 0 is one that is present and not consuming.\n\nUnfilled on purpose: the orchestrator has five queues, all sitting at 1 in health, and five filled areas stacked on one line render as a single opaque block in which a dip is invisible.",
+      "description": "Per-queue view of the verdict stat. A queue reading 0 while the others read 1 is one wedged consumer, not an outage.\n\nSplit per replica on this board because every replica consumes the SAME queue, so a min across the queue alone cannot name which replica stopped. On the orchestrator each queue has one consumer and the split would only add lines.\n\nA row that ENDS is a replica that left; a row that turns red is one that is present and not consuming.\n\n**Drawn as a state timeline rather than as lines, and that is what makes it readable at all.** Every series sits at exactly 1 in health, so on a shared numeric axis they overlap into one line and only the last drawn is visible -- five orchestrator queues rendered as a single flat line across a three-hour range. One row per series is one answer per series.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1629,6 +1629,10 @@
         }
       ],
       "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.9,
         "legend": {
           "displayMode": "list",
           "placement": "bottom",
@@ -1636,55 +1640,53 @@
           "calcs": []
         },
         "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+          "mode": "single",
+          "sort": "none"
         }
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "decimals": 0,
           "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 0,
-            "gradientMode": "opacity",
+            "lineWidth": 0,
+            "fillOpacity": 70,
             "spanNulls": false,
-            "showPoints": "never",
-            "pointSize": 4,
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
+            "insertNulls": false,
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
-            },
-            "thresholdsStyle": {
-              "mode": "off"
             }
           },
-          "mappings": [],
           "color": {
-            "mode": "palette-classic"
+            "mode": "fixed",
+            "fixedColor": "purple"
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
           },
-          "min": 0,
-          "max": 1
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "stopped",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "consuming",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       }
@@ -1804,9 +1806,9 @@
     },
     {
       "id": 98,
-      "type": "timeseries",
+      "type": "state-timeline",
       "title": "Identity ready by replica",
-      "description": "One line per replica that is still reporting.\n\nUnrestricted, this panel GAINS series during a rollout: the departed replicas are held by the collector and Prometheus while their replacements start exporting, so two live processors rendered as four lines all sitting at 1. A line that ends is a replica that left.",
+      "description": "One row per replica that is still reporting. Red is a pod that is up and waiting for a processor row matching its image -- the designed behaviour, not a crash loop.\n\nUnrestricted, this panel GAINS series during a rollout: the departed replicas are held by the collector and Prometheus while their replacements start exporting, so two live processors rendered as four series all sitting at 1. A row that ends is a replica that left.\n\nDrawn as a state timeline for that reason among others: four overlapping filled areas at the same value are one opaque block, and which of the four had ended was not readable from it.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1831,6 +1833,10 @@
         }
       ],
       "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.9,
         "legend": {
           "displayMode": "list",
           "placement": "bottom",
@@ -1838,55 +1844,53 @@
           "calcs": []
         },
         "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+          "mode": "single",
+          "sort": "none"
         }
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "decimals": 0,
           "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 20,
-            "gradientMode": "opacity",
+            "lineWidth": 0,
+            "fillOpacity": 70,
             "spanNulls": false,
-            "showPoints": "never",
-            "pointSize": 4,
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
+            "insertNulls": false,
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
-            },
-            "thresholdsStyle": {
-              "mode": "off"
             }
           },
-          "mappings": [],
           "color": {
-            "mode": "palette-classic"
+            "mode": "fixed",
+            "fixedColor": "purple"
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
           },
-          "min": 0,
-          "max": 1
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "not ready",
+                  "color": "orange",
+                  "index": 0
+                },
+                "1": {
+                  "text": "ready",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       }
