@@ -536,6 +536,73 @@
     },
     {
       "id": 29,
+      "type": "stat",
+      "title": "Process restarts",
+      "description": "API process starts in the visible range. A restart explains a gap in every other series on this board at once, and it explains latency quantiles that reset.\n\nOn the verdict tier because this board has no Since tier to hold it, and because it was previously readable only by expanding the Runtime row -- the timeseries beside `Exception rate` below carries the same signal per replica and over time.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(resets(process_runtime_dotnet_jit_methods_compiled_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__range])) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
       "type": "row",
       "title": "2 - Ingress: what is broken?",
       "collapsed": false,
@@ -548,7 +615,7 @@
       "panels": []
     },
     {
-      "id": 30,
+      "id": 31,
       "type": "timeseries",
       "title": "Request rate by route",
       "description": "",
@@ -635,7 +702,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 32,
       "type": "timeseries",
       "title": "p95 / p99 by route",
       "description": "",
@@ -733,7 +800,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 33,
       "type": "timeseries",
       "title": "Status-code mix",
       "description": "202 is the orchestration verbs; they accept and queue rather than finishing the work.",
@@ -820,7 +887,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 34,
       "type": "timeseries",
       "title": "In-flight and Kestrel connections",
       "description": "",
@@ -930,7 +997,7 @@
       }
     },
     {
-      "id": 34,
+      "id": 35,
       "type": "timeseries",
       "title": "Dependency name resolution",
       "description": "host_not_found means the service object is gone. try_again means the resolver timed out. Different faults, different remedies.",
@@ -1018,7 +1085,7 @@
       }
     },
     {
-      "id": 35,
+      "id": 36,
       "type": "timeseries",
       "title": "Route matching by status",
       "description": "Split by match status. A `failure` series is a caller using the wrong URL -- the singular-vs-plural controller mistake returns a bare 404 with no body and looks like the API being down.\n\nThe success series is kept deliberately: it is the only panel here that distinguishes 'no failures' from 'no traffic at all'.",
@@ -1106,7 +1173,7 @@
       }
     },
     {
-      "id": 36,
+      "id": 37,
       "type": "text",
       "title": "The queue side is not instrumented",
       "gridPos": {
@@ -1122,7 +1189,7 @@
       "transparent": false
     },
     {
-      "id": 37,
+      "id": 38,
       "type": "stat",
       "title": "DNS failures (range)",
       "description": "Resolution failures over the visible range -- the tense the verdict stat deliberately does not answer.\n\nSits beside `Dependency name resolution` because that panel says WHEN and WHICH host, and this one says how many. `host_not_found` is a missing service object; `try_again` is a resolver timeout. Different faults, different remedies.",
@@ -1189,7 +1256,183 @@
       }
     },
     {
-      "id": 38,
+      "id": 39,
+      "type": "timeseries",
+      "title": "Exception rate",
+      "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 11,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "legendFormat": "{{service_instance_id}}",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": null,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": false,
+            "showPoints": "never",
+            "pointSize": 4,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no exceptions in range"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Process restarts",
+      "description": "A monotonic counter going backwards means the process is new. **The one signal that explains a simultaneous gap in every other series** -- and the one the hop gaps, `Channel resets` and `Replica fan-out` all tell you to go and check.\n\nA spike here beside a jump on any of those means the number there is a rollout artefact rather than lost work.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (service_instance_id) (resets(process_runtime_dotnet_jit_methods_compiled_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "legendFormat": "{{service_instance_id}}",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": false,
+            "showPoints": "never",
+            "pointSize": 4,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no restarts in range"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 41,
       "type": "row",
       "title": "3 - Runtime: is the process why?",
       "collapsed": true,
@@ -1197,11 +1440,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 37
       },
       "panels": [
         {
-          "id": 39,
+          "id": 42,
           "type": "timeseries",
           "title": "Thread-pool queue length",
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
@@ -1211,9 +1454,9 @@
           },
           "gridPos": {
             "h": 7,
-            "w": 6,
+            "w": 12,
             "x": 0,
-            "y": 31
+            "y": 38
           },
           "targets": [
             {
@@ -1288,7 +1531,7 @@
           }
         },
         {
-          "id": 40,
+          "id": 43,
           "type": "timeseries",
           "title": "GC pause time",
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",
@@ -1298,9 +1541,9 @@
           },
           "gridPos": {
             "h": 7,
-            "w": 6,
-            "x": 6,
-            "y": 31
+            "w": 12,
+            "x": 12,
+            "y": 38
           },
           "targets": [
             {
@@ -1331,180 +1574,6 @@
             "defaults": {
               "unit": "s",
               "decimals": null,
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 1,
-                "fillOpacity": 8,
-                "gradientMode": "opacity",
-                "spanNulls": false,
-                "showPoints": "never",
-                "pointSize": 4,
-                "axisPlacement": "auto",
-                "axisLabel": "",
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "stacking": {
-                  "mode": "none",
-                  "group": "A"
-                },
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "color": {
-                "mode": "palette-classic"
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 41,
-          "type": "timeseries",
-          "title": "Exception rate",
-          "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "gridPos": {
-            "h": 7,
-            "w": 6,
-            "x": 12,
-            "y": 31
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
-              "legendFormat": "{{service_instance_id}}",
-              "range": true,
-              "editorMode": "code"
-            }
-          ],
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true,
-              "calcs": []
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "decimals": null,
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 1,
-                "fillOpacity": 8,
-                "gradientMode": "opacity",
-                "spanNulls": false,
-                "showPoints": "never",
-                "pointSize": 4,
-                "axisPlacement": "auto",
-                "axisLabel": "",
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "stacking": {
-                  "mode": "none",
-                  "group": "A"
-                },
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "color": {
-                "mode": "palette-classic"
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 42,
-          "type": "timeseries",
-          "title": "Process restarts",
-          "description": "A monotonic counter going backwards means the process is new. The one signal that explains a simultaneous gap in every other series.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "gridPos": {
-            "h": 7,
-            "w": 6,
-            "x": 18,
-            "y": 31
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "expr": "sum by (service_instance_id) (resets(process_runtime_dotnet_jit_methods_compiled_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
-              "legendFormat": "{{service_instance_id}}",
-              "range": true,
-              "editorMode": "code"
-            }
-          ],
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true,
-              "calcs": []
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "decimals": 0,
               "custom": {
                 "drawStyle": "line",
                 "lineWidth": 1,
