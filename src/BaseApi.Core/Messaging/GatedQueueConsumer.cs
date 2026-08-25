@@ -1,4 +1,5 @@
 using BaseApi.Core.Gating;
+using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -297,12 +298,55 @@ public sealed class GatedQueueConsumer : BackgroundService
                     break;
 
                 default:
+                {
                     // Taken as a property of the message rather than of the environment. A parked
                     // message can be recovered by hand; a message requeued forever is an outage that
                     // never resolves, so the ambiguous case is deliberately resolved toward parking.
-                    _logger.LogError(ex, "refusing message of type {Type} — parking", type);
-                    await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
+                    //
+                    // LOGGED AFTER THE NACK RATHER THAN BEFORE IT, AND THAT ORDER IS THE POINT. A
+                    // rejection is a park only if the broker was actually told, and SafeNackAsync
+                    // returns false when the channel died in between -- in which case the broker
+                    // REQUEUES the delivery instead of dead-lettering it. Logged first, the line
+                    // asserted a park that had not happened, and the only correction went to Debug,
+                    // which is below the level shipped to the log store.
+                    //
+                    // It matters more here than on the worker side, not less: this consumer emits no
+                    // ingress metrics at all, so unlike BaseConsole.Core's twin there is no `landed`
+                    // dimension on a counter to fall back on. This log line is the only artifact an
+                    // orchestrator-control park leaves in this process.
+                    var landed = await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
+
+                    // The ids, lifted off the delivery's own headers rather than the body. The
+                    // handler opened a scope over these too, but it opened it INSIDE HandleAsync, so
+                    // the exception that got us here disposed it on the way out -- which is why a
+                    // park record carried no ids at all until the sender began stamping them. Read
+                    // here rather than at the top of the delivery because, unlike its BaseConsole
+                    // twin, this consumer has no other use for the header table. Keyed to the same
+                    // fields the handler's scope uses. See MessageIdHeaders.
+                    using var ids = _logger.BeginScope(
+                        MessageIdHeaders.ReadScope(ea.BasicProperties.Headers));
+
+                    if (landed)
+                    {
+                        _logger.LogError(
+                            ex, "refusing message of type {Type} on {Queue} — parked",
+                            type, _options.Queue);
+                    }
+                    else
+                    {
+                        // Not a park. Said in full rather than as a flag, because the operator reading
+                        // this is deciding whether to go looking in the dead-letter queue, and there
+                        // will be nothing there.
+                        _logger.LogError(
+                            ex,
+                            "refusing message of type {Type} on {Queue} — NOT parked: the channel was "
+                            + "gone before the broker was told, so it will be redelivered rather than "
+                            + "dead-lettered",
+                            type, _options.Queue);
+                    }
+
                     break;
+                }
             }
         }
     }
@@ -335,26 +379,34 @@ public sealed class GatedQueueConsumer : BackgroundService
         }
     }
 
-    private async Task SafeNackAsync(BasicDeliverEventArgs ea, bool requeue, long epoch)
+    /// <summary>
+    /// Rejects a delivery. Returns whether the broker was actually told — false means the rejection
+    /// never reached it, so the delivery is redelivered rather than dead-lettered. The park branch
+    /// reads this to avoid claiming a park that did not happen; the requeue branches ignore it,
+    /// because an undelivered requeue and a delivered one have the same outcome.
+    /// </summary>
+    private async Task<bool> SafeNackAsync(BasicDeliverEventArgs ea, bool requeue, long epoch)
     {
         if (!TagStillValid(epoch) || _channel is null)
         {
             // A tag from a previous epoch is meaningless now, and rejecting it would be a
             // channel-level error that closes the channel permanently. Everything unacknowledged has
             // already been requeued by the broker.
-            return;
+            return false;
         }
 
         try
         {
             await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: requeue)
                 .ConfigureAwait(false);
+            return true;
         }
         catch (Exception ex) when (ex is AlreadyClosedException
                                       or OperationInterruptedException
                                       or ObjectDisposedException)
         {
             _logger.LogDebug(ex, "rejection dropped — channel gone");
+            return false;
         }
     }
 
