@@ -3,6 +3,7 @@ using System.Text.Json;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Orchestrator.L1;
@@ -38,6 +39,13 @@ public sealed class ApplyHandlerTests
         public WorkflowL1Store Store { get; } = new();
 
         public RecordingWorkflowScheduler Scheduler { get; } = new();
+
+        /// <summary>
+        /// The clock the stop path stamps its mark from. Fake so a test can put a redelivered stop
+        /// half an hour after the first one and assert the mark did not move — real time would make
+        /// that assertion either untestable or a race.
+        /// </summary>
+        public FakeTimeProvider Clock { get; } = new();
 
         public Harness()
         {
@@ -86,6 +94,12 @@ public sealed class ApplyHandlerTests
         /// </summary>
         public void RemoveWorkflowFromL2(Guid workflowId) => _live.Remove(workflowId);
 
+        /// <summary>
+        /// The write the API runs before it publishes a start: L2 holds the workflow again. The
+        /// stubbed reads are closures over <c>_live</c>, so putting the id back is all it takes.
+        /// </summary>
+        public void RestoreWorkflowToL2(Guid workflowId) => _live.Add(workflowId);
+
         /// <summary>An L2 that cannot be reached at all.</summary>
         public Harness WithStoreFault()
         {
@@ -102,7 +116,7 @@ public sealed class ApplyHandlerTests
             NullLogger<ApplyStartHandler>.Instance);
 
         public ApplyStopHandler BuildStop() => new(
-            _reader, Store, Scheduler, NullLogger<ApplyStopHandler>.Instance);
+            _reader, Store, Scheduler, Clock, NullLogger<ApplyStopHandler>.Instance);
     }
 
     private static byte[] Body<T>(T message) =>
@@ -115,7 +129,7 @@ public sealed class ApplyHandlerTests
 
         await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
 
-        Assert.True(h.Store.TryGet(W, out _));
+        Assert.True(h.Store.TryGetActive(W, out _));
     }
 
     [Fact]
@@ -126,7 +140,7 @@ public sealed class ApplyHandlerTests
 
         await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
 
-        Assert.True(h.Store.TryGet(W, out _));
+        Assert.True(h.Store.TryGetActive(W, out _));
         Assert.Equal(1, h.Scheduler.LiveJobCount);
 
         // LiveJobCount alone is a net count: it cannot tell teardown-then-apply from a broken order
@@ -146,7 +160,7 @@ public sealed class ApplyHandlerTests
 
         await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
 
-        Assert.False(h.Store.TryGet(W, out _));
+        Assert.False(h.Store.TryGetIncludingStopped(W, out _));
     }
 
     [Fact]
@@ -168,35 +182,96 @@ public sealed class ApplyHandlerTests
 
         await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
 
-        Assert.True(h.Store.TryGet(W, out _));
+        Assert.True(h.Store.TryGetActive(W, out _));
         Assert.Equal(1, h.Scheduler.LiveJobCount);
     }
 
     [Fact]
-    public async Task AStopUnschedulesThenRemovesOnceL2ConfirmsTheRemoval()
+    public async Task AStopUnschedulesThenMarksOnceL2ConfirmsTheRemoval()
     {
         var h = new Harness().WithWorkflow(W, "0 * * * *");
         await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
         h.RemoveWorkflowFromL2(W);
 
-        // Spec section 7.3 states the sequence as "unschedule the stored jobId, then remove from L1".
-        // Neither Calls nor LiveJobCount can see that order — store.Remove is not a scheduler call, so
-        // it is invisible to both. Sampling the store's own state from inside UnscheduleAsync is what
-        // makes the order observable: if unschedule genuinely ran first, the workflow is still in L1 at
-        // that instant.
-        var workflowStillHeldAtUnschedule = false;
-        h.Scheduler.OnUnscheduleAsync = () => workflowStillHeldAtUnschedule = h.Store.TryGet(W, out _);
+        // Spec section 7.3 states the sequence as "unschedule the stored jobId, then drop it from the
+        // active set". Neither Calls nor LiveJobCount can see that order — the mark is not a scheduler
+        // call, so it is invisible to both. Sampling the store's own state from inside UnscheduleAsync
+        // is what makes the order observable: if unschedule genuinely ran first, the workflow is still
+        // active at that instant.
+        var workflowStillActiveAtUnschedule = false;
+        h.Scheduler.OnUnscheduleAsync = () => workflowStillActiveAtUnschedule = h.Store.TryGetActive(W, out _);
 
         await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
 
-        Assert.True(workflowStillHeldAtUnschedule, "unschedule must run before the workflow leaves L1");
-        Assert.False(h.Store.TryGet(W, out _));
+        Assert.True(workflowStillActiveAtUnschedule, "unschedule must run before the workflow is marked");
+        Assert.False(h.Store.TryGetActive(W, out _));
         Assert.Equal(0, h.Scheduler.LiveJobCount);
 
         // The net count above is satisfied by exactly one schedule and one unschedule regardless of
         // their order; the sequence pins that the stop's teardown is the one and only scheduler call
         // to follow the start's.
         Assert.Equal(new[] { "ScheduleAsync", "UnscheduleAsync" }, h.Scheduler.Calls);
+    }
+
+    [Fact]
+    public async Task AStopMarksTheEntryRatherThanDeletingItSoInFlightStepsStillResolve()
+    {
+        // The whole point of the change. Removing the entry settled the control plane instantly and
+        // broke the data plane for a full round trip: every step still running when the stop landed
+        // came back to StepOutcomeHandler, found no workflow in L1 and was parked. The definition has
+        // to survive the stop, carrying the instant it was stopped.
+        var h = new Harness().WithWorkflow(W, "0 * * * *");
+        await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
+        h.RemoveWorkflowFromL2(W);
+
+        await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
+
+        Assert.True(h.Store.TryGetIncludingStopped(W, out var stopped));
+        Assert.NotNull(stopped.DeletedAt);
+
+        // Still resolvable, but off every path that could start new work — the two halves of what a
+        // mark means, and a test that checked only the first would pass on a stop that did nothing.
+        Assert.False(h.Store.TryGetActive(W, out _));
+    }
+
+    [Fact]
+    public async Task ARedeliveredStopDoesNotRefreshTheMarkThatWouldPostponeTheReap()
+    {
+        // The reap is what bounds how long a stopped workflow stays resolvable. Re-stamping on every
+        // delivery would push that out by a full grace period each time, so a stop redelivered on a
+        // loop would keep the entry alive indefinitely — a leak that looks like correct idempotency.
+        var h = new Harness().WithWorkflow(W, "0 * * * *");
+        await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
+        h.RemoveWorkflowFromL2(W);
+
+        await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
+        Assert.True(h.Store.TryGetIncludingStopped(W, out var first));
+
+        h.Clock.Advance(TimeSpan.FromMinutes(30));
+        await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
+
+        Assert.True(h.Store.TryGetIncludingStopped(W, out var second));
+        Assert.Equal(first.DeletedAt, second.DeletedAt);
+    }
+
+    [Fact]
+    public async Task AStartInsideTheGracePeriodClearsTheMarkAndMakesTheWorkflowActiveAgain()
+    {
+        // The other half of the lifecycle: a workflow stopped and started again before the reap must
+        // come back fully, not as a marked entry that resolves outcomes but never fires. Nothing in
+        // the activation path clears the mark explicitly — Store.Set writes a fresh entry — so this
+        // asserts that the un-marking actually happens rather than that someone remembered to do it.
+        var h = new Harness().WithWorkflow(W, "0 * * * *");
+        await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
+        h.RemoveWorkflowFromL2(W);
+        await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
+        Assert.False(h.Store.TryGetActive(W, out _));
+
+        h.RestoreWorkflowToL2(W);
+        await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
+
+        Assert.True(h.Store.TryGetActive(W, out var restarted));
+        Assert.Null(restarted.DeletedAt);
     }
 
     [Fact]

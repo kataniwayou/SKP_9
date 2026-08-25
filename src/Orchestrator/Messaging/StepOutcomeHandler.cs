@@ -99,7 +99,7 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     {
         ArgumentNullException.ThrowIfNull(store);
 
-        if (!store.TryGet(workflowId, out var entry))
+        if (!store.TryGetIncludingStopped(workflowId, out var entry))
         {
             return $"this replica does not hold workflow {workflowId} in L1, "
                  + $"so the outcome for step {stepId} cannot be advanced";
@@ -119,33 +119,43 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         _logger.LogDebug("advancing the graph on a {Result} outcome", m.Result);
         var started = Stopwatch.GetTimestamp();
 
-        // L1 is a per-replica mirror of L2 and this queue is shared, so a miss here has two readings:
+        // L1 is a per-replica mirror of L2 and this queue is shared, so a miss here had two readings:
         // the workflow was stopped while this step was still running, or this replica has not yet
-        // drained the start announcement for it. Parking treats both as faults to look at rather than
-        // guessing which one it is, and keeps the message recoverable from the dead-letter queue.
+        // drained the start announcement for it. Parking treats a miss as a fault to look at rather
+        // than guessing which one it is, and keeps the message recoverable from the dead-letter queue.
         // Consumption is admitted only after the first hydration pass completes, which is what makes
         // the second reading narrow rather than routine.
         //
-        // MEASURED ON THE LIVE STACK, and it does not match either reading cleanly. Six outcomes were
+        // MEASURED ON THE LIVE STACK, and it did not match either reading cleanly. Six outcomes were
         // found dead-lettered across four incidents over two days. In all four, the parking followed a
         // broker reconnect or process restart by 66-171 seconds. In none of them was there any stop
-        // record -- no "removed the workflow from L1", no "stop applied" -- in the preceding 25
-        // minutes, so the stop reading above is unsupported despite being written here as the
-        // commonest. And in the clearest incident all three replicas logged "activated workflow" 107
-        // seconds BEFORE the parking, which rules out the announcement reading for that one.
+        // record -- no removal line, no "stop applied" -- in the preceding 25 minutes, so the stop
+        // reading was unsupported despite being written here as the commonest. And in the clearest
+        // incident all three replicas logged "activated workflow" 107 seconds BEFORE the parking,
+        // which rules out the announcement reading for that one.
         //
-        // So both stated readings survive only as guesses, and the reason the question is still open
-        // is that the record did not say which lookup missed. It does now -- see DescribeL1Miss. The
-        // next occurrence should answer it rather than needing another two-day correlation.
-        if (!_store.TryGet(m.WorkflowId, out var entry) ||
+        // THE FIRST READING IS NOW DESIGNED OUT rather than merely diagnosed: a stop marks the L1
+        // entry instead of removing it (see ApplyStopHandler), so a workflow stopped mid-flight still
+        // resolves here for a full round trip. What survives is the second reading, plus the case the
+        // measurements above actually point at -- a restart, after which nothing rebuilds the marks,
+        // because L2 no longer holds a stopped workflow for hydration to find. An outcome arriving in
+        // that window still parks, and DescribeL1Miss is still what says which lookup missed.
+        // INCLUDING STOPPED, and that is the point of the lookup split. A workflow stopped while this
+        // step was running keeps its L1 entry, marked, for a full round trip — so the outcome resolves
+        // here and its run drains instead of being parked. That reading is no longer a reason to reach
+        // the branch below at all, which narrows what reaching it means: this replica has not drained
+        // the start announcement, or it holds a definition that disagrees with the outcome in flight.
+        if (!_store.TryGetIncludingStopped(m.WorkflowId, out var entry) ||
             !entry.Steps.TryGetValue(m.StepId, out var completed))
         {
             // RECLAIM BEFORE PARKING. A park is a nack, but it is a nack with requeue:false — the
             // message leaves for the dead-letter exchange and never comes back, so the blob is
             // orphaned exactly as it would be by an ack. data: keys carry no TTL and no sweeper
-            // covers them, and the commonest way to reach this branch is a workflow being stopped
-            // while its steps were still in flight: ApplyStopHandler removes it from L1, and every
-            // outcome still on the wire lands here. One leaked blob per in-flight step, permanently.
+            // covers them, so every outcome that lands here without this leaks one blob permanently.
+            // This used to be the routine case rather than the rare one -- a stop removed the
+            // workflow from L1 and every outcome still on the wire arrived here, one leaked blob per
+            // in-flight step. Marking instead of removing closed that; the reclaim stays because the
+            // readings that remain leak exactly the same way, just less often.
             //
             // This execution is over either way. The next scheduled fire will most likely meet the
             // same condition and park too, which is the loud signal parking exists to give — but it
@@ -161,6 +171,18 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             // runs it -- and re-reading the store to build a sentence is affordable exactly once, in
             // the branch that is about to throw the message away.
             throw new InvalidOperationException(DescribeL1Miss(_store, m.WorkflowId, m.StepId));
+        }
+
+        // The record that the grace period did its job. Without it, "stopped mid-flight and drained
+        // cleanly" and "was never stopped at all" produce identical logs, so the only visible evidence
+        // the mark was ever load-bearing would be the absence of a parked message -- which is not
+        // evidence anyone can search for. Information rather than Debug for the same reason the
+        // activation line is: it fires once per stopped run, not once per anything hot.
+        if (entry.DeletedAt is { } stoppedAt)
+        {
+            _logger.LogInformation(
+                "the workflow was stopped at {StoppedAt}; resolving this outcome anyway so the run drains",
+                stoppedAt);
         }
 
         // The opening half of a run's record. The fire logs "dispatched an entry step" and then goes

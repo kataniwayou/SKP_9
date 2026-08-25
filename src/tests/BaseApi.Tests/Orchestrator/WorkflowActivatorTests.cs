@@ -79,7 +79,7 @@ public sealed class WorkflowActivatorTests
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 
-        Assert.True(h.Store.TryGet(W, out var entry));
+        Assert.True(h.Store.TryGetActive(W, out var entry));
         Assert.Equal(W, entry.Definition.WorkflowId);
 
         // The job id handed to the scheduler must be the job id L1 recorded, and this is the only
@@ -99,7 +99,7 @@ public sealed class WorkflowActivatorTests
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 
-        Assert.True(h.Store.TryGet(W, out _));
+        Assert.True(h.Store.TryGetActive(W, out _));
         Assert.Empty(h.Scheduler.Scheduled);
     }
 
@@ -112,7 +112,7 @@ public sealed class WorkflowActivatorTests
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 
-        Assert.False(h.Store.TryGet(W, out _));
+        Assert.False(h.Store.TryGetActive(W, out _));
         Assert.Empty(h.Scheduler.Scheduled);
     }
 
@@ -123,12 +123,12 @@ public sealed class WorkflowActivatorTests
         // a second live job for the same workflow.
         var h = new Harness().WithWorkflow(W, cron: "0 * * * *", entry: S, processor: P);
         await h.Build().ActivateAsync(W, CancellationToken.None);
-        var first = h.Store.TryGet(W, out var e1) ? e1.JobId : Guid.Empty;
+        var first = h.Store.TryGetActive(W, out var e1) ? e1.JobId : Guid.Empty;
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 
         Assert.Contains(first, h.Scheduler.Unscheduled);
-        Assert.True(h.Store.TryGet(W, out var e2));
+        Assert.True(h.Store.TryGetActive(W, out var e2));
         Assert.NotEqual(first, e2.JobId);
 
         // Teardown strictly before apply. Harmless to get wrong today — the two job keys differ, so a

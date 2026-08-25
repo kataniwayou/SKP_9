@@ -255,8 +255,8 @@ public sealed class HydrationServiceTests
 
         await h.Build().RunOnceAsync(CancellationToken.None);
 
-        Assert.True(h.Store.TryGet(W1, out _));
-        Assert.True(h.Store.TryGet(W2, out _));
+        Assert.True(h.Store.TryGetActive(W1, out _));
+        Assert.True(h.Store.TryGetActive(W2, out _));
     }
 
     [Fact]
@@ -313,7 +313,7 @@ public sealed class HydrationServiceTests
         await run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         Assert.True(h.Admission.IsOpen);
-        Assert.True(h.Store.TryGet(W1, out _));
+        Assert.True(h.Store.TryGetActive(W1, out _));
     }
 
     [Fact]
@@ -398,8 +398,8 @@ public sealed class HydrationServiceTests
         await Assert.ThrowsAsync<RedisConnectionException>(
             () => h.Build().RunOnceAsync(CancellationToken.None));
 
-        Assert.True(h.Store.TryGet(W1, out _));    // the half that got through is still mirrored
-        Assert.False(h.Store.TryGet(W2, out _));
+        Assert.True(h.Store.TryGetActive(W1, out _));    // the half that got through is still mirrored
+        Assert.False(h.Store.TryGetActive(W2, out _));
         Assert.False(h.Admission.IsOpen);
         Assert.False(h.Heartbeat.IsRetired);
 
@@ -429,7 +429,7 @@ public sealed class HydrationServiceTests
 
         Assert.True(h.Admission.IsOpen);
         Assert.True(h.Heartbeat.IsRetired);
-        Assert.True(h.Store.TryGet(W1, out _));
+        Assert.True(h.Store.TryGetActive(W1, out _));
     }
 
     [Fact]
@@ -459,7 +459,7 @@ public sealed class HydrationServiceTests
 
         // And the surviving job is the one L1 points at: what was torn down is the first pass's job,
         // not the current one. A teardown that ran in the other order would leave these equal.
-        Assert.True(h.Store.TryGet(W1, out var w1));
+        Assert.True(h.Store.TryGetActive(W1, out var w1));
         Assert.DoesNotContain(w1.JobId, h.Scheduler.Unscheduled);
     }
 }

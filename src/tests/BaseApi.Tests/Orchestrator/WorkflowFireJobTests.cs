@@ -87,8 +87,18 @@ public sealed class WorkflowFireJobTests
         /// </summary>
         public void SupersedeJob(Guid workflowId) => Store.Set(workflowId, _definition, Guid.NewGuid());
 
-        /// <summary>Drops the workflow from L1, as a stop applied mid-fire would.</summary>
-        public void StopWorkflow(Guid workflowId) => Store.Remove(workflowId);
+        /// <summary>
+        /// Marks the workflow stopped, as a stop applied mid-fire would.
+        /// <para>
+        /// <b>Marked, not removed, and that is what makes these tests worth having.</b> A stop leaves
+        /// the entry in L1 — with its job id intact — so that steps still in flight can resolve
+        /// against the definition. The fire job therefore cannot ask "is it in L1"; it has to ask
+        /// whether the workflow is still active, and a lookup that admitted marked entries would match
+        /// this fire's own job id and arm the next fire of a workflow that was just stopped.
+        /// </para>
+        /// </summary>
+        public void StopWorkflow(Guid workflowId) =>
+            Store.MarkDeleted(workflowId, DateTimeOffset.UnixEpoch);
 
         public WorkflowFireJob Build() => new(
             Store, Scheduler, Sender, State, NullLogger<WorkflowFireJob>.Instance);
@@ -255,11 +265,17 @@ public sealed class WorkflowFireJobTests
     [Fact]
     public async Task AFireForAWorkflowStoppedMidFireDoesNotReschedule()
     {
-        // The same check on its other outcome — L1 empty rather than holding a different id — and it
-        // is only reachable mid-fire. A stop applied before the fire returns at the very first L1
-        // lookup and never reaches the check at all, which is what AFireForAWorkflowAbsentFromL1
-        // covers; applying it from inside the dispatch is what makes this the second outcome of the
-        // *second* lookup and not a duplicate of that test.
+        // The same check on its other outcome — the workflow no longer active, rather than active
+        // under a different job id — and it is only reachable mid-fire. A stop applied before the fire
+        // returns at the very first L1 lookup and never reaches the check at all, which is what
+        // AFireForAWorkflowAbsentFromL1 covers; applying it from inside the dispatch is what makes
+        // this the second outcome of the *second* lookup and not a duplicate of that test.
+        //
+        // THIS IS THE RESURRECTION GUARD, and it only became one when stops started marking instead
+        // of deleting. The marked entry keeps this fire's own job id, so a second lookup that admitted
+        // marked entries would match, fall through, and arm the next fire of a workflow that was just
+        // stopped — and then the next, indefinitely. The stop would stand on the API side and be
+        // silently undone here. Nothing else in the suite would notice.
         var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
 
         await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(),

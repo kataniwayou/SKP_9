@@ -227,18 +227,46 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
     }
 
     [Fact]
+    public void TheReapLoopIsWatchedForLiveness()
+    {
+        // Watched the same way as hydration and for the same reason: a loop that stopped turning is
+        // invisible from outside the process, and this one going quiet leaks one L1 entry per workflow
+        // ever stopped. `live` and nothing else — not `ready`, because a replica that has not reaped
+        // yet serves correctly, and not `startup`, because the loop beats on its first iteration and
+        // is never what holds a cold pod back.
+        var registration = Assert.Single(
+            _host.Services.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations,
+            r => r.Name == OrchestratorHost.ReapLoop);
+
+        Assert.Equal(["live"], registration.Tags);
+        Assert.Equal(HealthStatus.Unhealthy, registration.FailureStatus);
+
+        // Constructing it is what proves the keyed heartbeat resolves. An unkeyed lookup here would
+        // fail to resolve at startup, and this is the only place that would say so.
+        Assert.IsType<LoopLivenessHealthCheck>(registration.Factory(_host.Services));
+    }
+
+    [Fact]
     public void EachLoopHasItsOwnHeartbeatHolder()
     {
-        // Both heartbeats are keyed, and they must be two holders rather than one. A holder shared
-        // between two loops lets the live loop's beat refresh the stamp the dead loop's liveness check
-        // reads, so a stopped loop stays invisible for as long as any other loop is turning. Both keys
-        // are read from the code that owns them, never restated as literals here.
+        // Every heartbeat is keyed, and they must be separate holders rather than one shared. A holder
+        // shared between two loops lets the live loop's beat refresh the stamp the dead loop's
+        // liveness check reads, so a stopped loop stays invisible for as long as any other loop is
+        // turning. All keys are read from the code that owns them, never restated as literals here.
+        //
+        // Hydration and reap make that concrete: they have opposite lifetimes. Hydration finishes and
+        // retires; the reap loop runs forever. Sharing a holder would let the retirement flag one of
+        // them sets report the other as permanently healthy.
         var gate = _host.Services.GetRequiredKeyedService<ILoopHeartbeat>(
             ConsoleRedisServiceCollectionExtensions.GateLoop);
         var hydration = _host.Services.GetRequiredKeyedService<ILoopHeartbeat>(
             OrchestratorHost.HydrationLoop);
+        var reap = _host.Services.GetRequiredKeyedService<ILoopHeartbeat>(
+            OrchestratorHost.ReapLoop);
 
         Assert.NotSame(gate, hydration);
+        Assert.NotSame(gate, reap);
+        Assert.NotSame(hydration, reap);
     }
 
     [Fact]
