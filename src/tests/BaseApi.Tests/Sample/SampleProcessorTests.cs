@@ -35,6 +35,23 @@ public sealed class SampleProcessorTests
     private static int NumberIn(ProcessedData p)
         => JsonDocument.Parse(p.Data).RootElement.GetProperty("number").GetInt32();
 
+    /// <summary>
+    /// Every branch this dispatch sent, in order. A list rather than a single captured value because
+    /// the entry step now sends two, and an <c>Arg.Do</c> that overwrites one variable would silently
+    /// report only the second — which is exactly the failure these facts exist to catch.
+    /// </summary>
+    private static async Task<List<ProcessedData>> SendsOf(
+        IQueueSender sender, SampleProcessor processor,
+        byte[] data, string config, Guid executionId)
+    {
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        await processor.ExecuteAsync(data, config, executionId, CancellationToken.None);
+        return sends;
+    }
+
     [Fact]
     public async Task AddsItsConfiguredNumberToTheIncomingOne()
     {
@@ -50,19 +67,44 @@ public sealed class SampleProcessorTests
     }
 
     [Fact]
-    public async Task SeedsTheTraversalAtOneHundredWhenItIsTheEntryStep()
+    public async Task TheEntryStepOpensTwoLineagesSeededOneHundredApart()
     {
-        // A source step: no upstream number to add to, so the author produces the origin itself and
-        // then adds its own contribution like every other step. The sentinel executionId is the test,
-        // not the empty data — see the next fact for why those are not the same question.
+        // A source step: no upstream number to add to, so the author produces the origins itself --
+        // two of them, because one lineage cannot demonstrate that two do not collide. Each gets its
+        // own contribution added like every other step.
         var (processor, sender) = Build(Guid.Empty);
-        ProcessedData? sent = null;
-        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => sent = p),
-                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        await processor.ExecuteAsync([], """{"Number":7}""", Guid.Empty, CancellationToken.None);
+        var sends = await SendsOf(sender, processor, [], """{"Number":7}""", Guid.Empty);
 
-        Assert.Equal(107, NumberIn(sent!));
+        Assert.Equal([107, 207], sends.Select(NumberIn).ToArray());
+    }
+
+    [Fact]
+    public async Task TheTwoEntryLineagesCarryDifferentExecutionIds()
+    {
+        // The point of the pair. Two sends under ONE id would be a single lineage forking, and a
+        // collision between them would be invisible because there would be nothing to collide.
+        var (processor, sender) = Build(Guid.Empty);
+
+        var sends = await SendsOf(sender, processor, [], """{"Number":1}""", Guid.Empty);
+
+        Assert.Equal(2, sends.Count);
+        Assert.All(sends, s => Assert.NotEqual(Guid.Empty, s.ExecutionId));
+        Assert.NotEqual(sends[0].ExecutionId, sends[1].ExecutionId);
+    }
+
+    [Fact]
+    public async Task ADownstreamStepSendsOneBranchOnTheLineageItWasHanded()
+    {
+        // Only the entry step fans out. A downstream step that also doubled would multiply the run
+        // 2^depth and the two lineages could no longer be told apart at the terminal.
+        var (processor, sender) = Build(E);
+
+        var sends = await SendsOf(sender, processor, Encoding.UTF8.GetBytes("""{"number":40}"""),
+                                  """{"Number":2}""", E);
+
+        Assert.Equal(42, NumberIn(Assert.Single(sends)));
+        Assert.Equal(E, sends[0].ExecutionId);
     }
 
     [Fact]
@@ -82,30 +124,50 @@ public sealed class SampleProcessorTests
     }
 
     [Fact]
-    public async Task ASevenStepPathCarriesTheSeedToOneHundredAndSeven()
+    public async Task BothLineagesReachTheTerminalWithoutCollidingAtOneHundredAndSevenAndTwoHundredAndSeven()
     {
-        // The whole point of the seed, in one fact: with every assignment carrying number 1, the value
-        // is a count of the hops travelled, so the terminal step of the seeded graph's seven-step path
-        // — A, B, C, one of D, one of E, one of F, G — reports 107. The live scenarios read exactly
-        // this off Elasticsearch to witness L2 traversal; this pins the arithmetic without a cluster.
-        byte[] carried = [];
-        var executionId = Guid.Empty;
+        // The whole point, in one fact. With every assignment carrying number 1 the value is a count
+        // of the hops travelled, so the terminal step of the seeded graph's seven-step path -- A, B,
+        // C, one of D, one of E, one of F, G -- reports 107 on the lineage the entry step seeded 100
+        // and 207 on the one it seeded 200.
+        //
+        // Both lineages are driven through the SAME seven steps here, and each carries its own data
+        // and its own execution id the whole way. Two distinct terminal values is the assertion that
+        // matters: a shared key, or a read that crossed lineages, collapses them to one value twice
+        // over. The live scenarios read exactly this off Elasticsearch; this pins the arithmetic and
+        // the separation without a cluster.
+        var path = new[] { "Step_A", "Step_B", "Step_C", "Step_D1", "Step_E1", "Step_F1", "Step_G" };
 
-        foreach (var label in new[] { "Step_A", "Step_B", "Step_C", "Step_D1", "Step_E1", "Step_F1", "Step_G" })
+        // Step_A: the one step that fans out, and the only place the two lineages are born.
+        var (entry, entrySender) = Build(Guid.Empty);
+        var opened = await SendsOf(entrySender, entry, [], $$"""{"Number":1,"Label":"{{path[0]}}"}""",
+                                   Guid.Empty);
+
+        Assert.Equal(2, opened.Count);
+        Assert.NotEqual(opened[0].ExecutionId, opened[1].ExecutionId);
+
+        var terminals = new List<int>();
+        foreach (var branch in opened)
         {
-            var (processor, sender) = Build(executionId);
-            ProcessedData? sent = null;
-            await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => sent = p),
-                                   Arg.Any<CancellationToken>(), Arg.Any<string?>());
+            var carried = branch.Data;
+            var executionId = branch.ExecutionId;
 
-            await processor.ExecuteAsync(carried, $$"""{"Number":1,"Label":"{{label}}"}""",
-                                         executionId, CancellationToken.None);
+            foreach (var label in path.Skip(1))
+            {
+                var (processor, sender) = Build(executionId);
+                var sends = await SendsOf(sender, processor, carried,
+                                          $$"""{"Number":1,"Label":"{{label}}"}""", executionId);
 
-            carried = sent!.Data;
-            executionId = sent.ExecutionId;
+                // Downstream never forks: one branch in, one branch out, same lineage.
+                var only = Assert.Single(sends);
+                Assert.Equal(executionId, only.ExecutionId);
+                carried = only.Data;
+            }
+
+            terminals.Add(JsonDocument.Parse(carried).RootElement.GetProperty("number").GetInt32());
         }
 
-        Assert.Equal(107, JsonDocument.Parse(carried).RootElement.GetProperty("number").GetInt32());
+        Assert.Equal([107, 207], terminals);
     }
 
     [Fact]
@@ -133,25 +195,6 @@ public sealed class SampleProcessorTests
         await processor.ExecuteAsync(Encoding.UTF8.GetBytes("""{"number":5}"""), "", E, CancellationToken.None);
 
         Assert.Equal(5, NumberIn(sent!));
-    }
-
-    [Fact]
-    public async Task OpensANewLineageOnAnEntryStepAndReusesItDownstream()
-    {
-        var (entry, entrySender) = Build(Guid.Empty);
-        ProcessedData? fromEntry = null;
-        await entrySender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => fromEntry = p),
-                                    Arg.Any<CancellationToken>(), Arg.Any<string?>());
-        await entry.ExecuteAsync([], "", Guid.Empty, CancellationToken.None);
-
-        var (down, downSender) = Build(E);
-        ProcessedData? fromDown = null;
-        await downSender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => fromDown = p),
-                                   Arg.Any<CancellationToken>(), Arg.Any<string?>());
-        await down.ExecuteAsync(Encoding.UTF8.GetBytes("""{"number":1}"""), "", E, CancellationToken.None);
-
-        Assert.NotEqual(Guid.Empty, fromEntry!.ExecutionId);
-        Assert.Equal(E, fromDown!.ExecutionId);
     }
 
     [Fact]

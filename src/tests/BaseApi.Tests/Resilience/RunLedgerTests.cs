@@ -23,7 +23,7 @@ public sealed class RunLedgerTests
     public void TheCapturedRunSatisfiesEveryInvariant()
     {
         var ledger = RunLedger.From(
-            CompleteRun[0].CorrelationId!, CompleteRun, WorkflowShape.V8FanoutProof);
+            CompleteRun[0].CorrelationId!, CompleteRun, WorkflowShape.SingleLineageCapture);
 
         Assert.Empty(ledger.Breaches);
         Assert.True(ledger.IsComplete);
@@ -33,7 +33,7 @@ public sealed class RunLedgerTests
     public void TheLedgerCountsTheCanonicalHistogram()
     {
         var ledger = RunLedger.From(
-            CompleteRun[0].CorrelationId!, CompleteRun, WorkflowShape.V8FanoutProof);
+            CompleteRun[0].CorrelationId!, CompleteRun, WorkflowShape.SingleLineageCapture);
 
         Assert.Equal(1, ledger.Count(Templates.EntryDispatched));
         Assert.Equal(10, ledger.Count(Templates.HandoffDispatched));
@@ -60,7 +60,7 @@ public sealed class RunLedgerTests
         var maimed = DropOne(CompleteRun, template);
 
         var ledger = RunLedger.From(
-            CompleteRun[0].CorrelationId!, maimed, WorkflowShape.V8FanoutProof);
+            CompleteRun[0].CorrelationId!, maimed, WorkflowShape.SingleLineageCapture);
 
         Assert.Contains(ledger.Breaches, b => b.Invariant == invariant);
     }
@@ -71,7 +71,7 @@ public sealed class RunLedgerTests
         var maimed = DropOne(CompleteRun, Templates.HandoffDispatched);
 
         var ledger = RunLedger.From(
-            CompleteRun[0].CorrelationId!, maimed, WorkflowShape.V8FanoutProof);
+            CompleteRun[0].CorrelationId!, maimed, WorkflowShape.SingleLineageCapture);
 
         Assert.Contains(ledger.Breaches, b => b.Invariant == "I1");
         Assert.Contains(ledger.Breaches, b => b.Invariant == "I4");
@@ -90,7 +90,7 @@ public sealed class RunLedgerTests
         var maimed = DropOne(CompleteRun, Templates.TerminalCompleted);
 
         var ledger = RunLedger.From(
-            CompleteRun[0].CorrelationId!, maimed, WorkflowShape.V8FanoutProof);
+            CompleteRun[0].CorrelationId!, maimed, WorkflowShape.SingleLineageCapture);
 
         Assert.Contains(ledger.Breaches, b => b.Invariant == "I5");
         Assert.Contains(ledger.Breaches, b => b.Invariant == "I7");
@@ -107,7 +107,7 @@ public sealed class RunLedgerTests
         var maimed = DropOne(CompleteRun, Templates.AuthorConfig);
 
         var ledger = RunLedger.From(
-            CompleteRun[0].CorrelationId!, maimed, WorkflowShape.V8FanoutProof);
+            CompleteRun[0].CorrelationId!, maimed, WorkflowShape.SingleLineageCapture);
 
         Assert.Equal(new[] { "I6" }, ledger.Breaches.Select(b => b.Invariant).ToArray());
     }
@@ -116,7 +116,7 @@ public sealed class RunLedgerTests
     public void TheLedgerSpansTheRunsFirstAndLastRecord()
     {
         var ledger = RunLedger.From(
-            CompleteRun[0].CorrelationId!, CompleteRun, WorkflowShape.V8FanoutProof);
+            CompleteRun[0].CorrelationId!, CompleteRun, WorkflowShape.SingleLineageCapture);
 
         Assert.Equal(CompleteRun.Min(r => r.Timestamp), ledger.StartedAt);
         Assert.Equal(CompleteRun.Max(r => r.Timestamp), ledger.EndedAt);

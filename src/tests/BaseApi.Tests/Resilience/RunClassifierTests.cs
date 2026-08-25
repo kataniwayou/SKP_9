@@ -156,7 +156,7 @@ public sealed class RunClassifierTests
     }
 
     private static RunLedger Ledger(IReadOnlyCollection<LogRecord> records) =>
-        RunLedger.From("run", records, WorkflowShape.V8FanoutProof);
+        RunLedger.From("run", records, WorkflowShape.SingleLineageCapture);
 
     /// <summary>
     /// A synthetic run over five seconds. Complete emits the canonical histogram; incomplete drops
