@@ -60,55 +60,69 @@ public sealed class SampleProcessor(ILogger<SampleProcessor> logger) : BaseProce
         // it in place — which is why the outcome those two send names that key, so the orchestrator
         // reclaims what this step could not.
 
-        // The entry step has no upstream number to add to, so it seeds one. 100 is arbitrary and
-        // deliberately far from any step's own contribution: every value downstream is that origin
-        // plus one hop's baseNumber per step, which makes the number a running count of the path
-        // travelled rather than an opaque total. With every assignment carrying number 1, the
-        // terminal step of a seven-step path reports 107 and the L2 traversal is readable off the
-        // logs alone. The sentinel executionId is the test for "am I the entry step" — the same
-        // one the branch lineage below turns on, and truer than data.Length, which is also empty
-        // for a downstream step whose predecessor sent nothing.
-        var processed = executionId == Guid.Empty ? 100 : incoming;
-        processed += baseNumber;
-
-        // A deliberate, narrow exception to the rule the config line above states, and the only one
-        // in this file. Downstream, `processed` IS derived from `data` — so this template renders
-        // runtime content, which the framework never does and a real processor should not copy. It is
-        // defensible only because this sample's payload is a synthetic hop counter authored by the
-        // workflow rather than anything a caller supplied: there is nothing here to leak. A processor
-        // carrying real content logs the SHAPE of its result — a count, a length, an outcome — and
-        // never the content, and joins on the ids for the rest.
+        // The entry step opens TWO lineages, seeded 100 and 200; every other step continues the one
+        // it was handed. The sentinel executionId is the test for "am I the entry step" — truer than
+        // data.Length, which is also empty for a downstream step whose predecessor sent nothing.
         //
-        // What it buys is the traversal itself. The line rides the dispatch scope, so ordering one
-        // correlation id by timestamp reads the value climbing 101, 102 ... 107 across the graph, and
-        // a hop that never ran is a gap in that sequence rather than an absence someone has to notice.
-        logger.LogInformation("step {Label} produced {Processed}", label, processed);
+        // The seeds are far apart on purpose. Each is an origin, and every step adds its baseNumber,
+        // so with each assignment carrying number 1 the value is a running count of the hops behind
+        // it: the terminal step of the seeded graph's seven-step path reports 107 on one lineage and
+        // 207 on the other. Two digits that never overlap is what makes the pair a COLLISION TEST
+        // rather than a second copy of the first one. Both lineages traverse the same ten steps at
+        // the same time, and each step's input is read from L2 under a key the framework mints per
+        // branch — so a key that collided, or a read that crossed lineages, shows up as a 107 where a
+        // 207 belongs, or as one value arriving twice. Reading 107 and 207 side by side at Step_G is
+        // the evidence that the two never touched.
+        var seeds = executionId == Guid.Empty ? new[] { 100, 200 } : new[] { incoming };
 
-        var outgoing = JsonSerializer.SerializeToUtf8Bytes(
-            new { number = processed, label }, ProcessorConfig.SerializerOptions);
-
-        // An entry step opens a lineage; a downstream step reuses the inbound one so the lineage
-        // holds. The new id is random, so a redelivered dispatch opens a second lineage rather than
-        // reopening this one — the same replay cost the branch ids carry, and the reason this method
-        // is written to tolerate running twice on one input.
-        var branchExecutionId = executionId == Guid.Empty ? NewExecutionId() : executionId;
-
-        try
+        foreach (var seed in seeds)
         {
-            await SendToPostAsync(outgoing, branchExecutionId, ct);
-        }
-        catch (PostSendException)
-        {
-            // A detection point, not a handler: with a fan-out, this is where an author learns which
-            // branch was lost. Then it MUST propagate.
+            var processed = seed + baseNumber;
+
+            // A deliberate, narrow exception to the rule the config line above states, and the only one
+            // in this file. Downstream, `processed` IS derived from `data` — so this template renders
+            // runtime content, which the framework never does and a real processor should not copy. It is
+            // defensible only because this sample's payload is a synthetic hop counter authored by the
+            // workflow rather than anything a caller supplied: there is nothing here to leak. A processor
+            // carrying real content logs the SHAPE of its result — a count, a length, an outcome — and
+            // never the content, and joins on the ids for the rest.
             //
-            // Bare `throw;` is load-bearing. It preserves the type, so the framework returns the whole
-            // dispatch to the queue and replays every branch. Wrapping it, or throwing something new,
-            // falls through to the general catch — which reports the step failed and acknowledges the
-            // message, recording a business outcome that never happened while the work is silently
-            // lost. The replay re-sends the branches that did land, under fresh ids; that is the
-            // accepted cost of a transient here, and it is why this transform stays side-effect free.
-            throw;
+            // What it buys is the traversal itself. The line rides the dispatch scope, so ordering one
+            // correlation id by timestamp reads each lineage climbing 101..107 and 201..207 across the
+            // graph, and a hop that never ran is a gap in that sequence rather than an absence someone
+            // has to notice.
+            logger.LogInformation("step {Label} produced {Processed}", label, processed);
+
+            var outgoing = JsonSerializer.SerializeToUtf8Bytes(
+                new { number = processed, label }, ProcessorConfig.SerializerOptions);
+
+            // An entry step opens a lineage PER BRANCH; a downstream step reuses the inbound one so the
+            // lineage holds. Minting inside the loop is the whole point: two sends under one id would be
+            // one lineage forking, which is the case this test is trying to tell apart from two.
+            //
+            // The new id is random, so a redelivered dispatch opens two further lineages rather than
+            // reopening these — the same replay cost the branch ids carry, and the reason this method is
+            // written to tolerate running twice on one input.
+            var branchExecutionId = executionId == Guid.Empty ? NewExecutionId() : executionId;
+
+            try
+            {
+                await SendToPostAsync(outgoing, branchExecutionId, ct);
+            }
+            catch (PostSendException)
+            {
+                // A detection point, not a handler: with a fan-out, this is where an author learns which
+                // branch was lost — and now that the entry step really does fan out, the second seed is a
+                // branch that can be lost while the first one landed. Then it MUST propagate.
+                //
+                // Bare `throw;` is load-bearing. It preserves the type, so the framework returns the whole
+                // dispatch to the queue and replays every branch. Wrapping it, or throwing something new,
+                // falls through to the general catch — which reports the step failed and acknowledges the
+                // message, recording a business outcome that never happened while the work is silently
+                // lost. The replay re-sends the branches that did land, under fresh ids; that is the
+                // accepted cost of a transient here, and it is why this transform stays side-effect free.
+                throw;
+            }
         }
     }
 }

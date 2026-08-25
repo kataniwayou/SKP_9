@@ -72,8 +72,13 @@ internal sealed class RunLedger
         Require(breaches, "I2", counts[Templates.StepReturned] == counts[Templates.RunningTheStep],
             $"steps returned {counts[Templates.StepReturned]}, started {counts[Templates.RunningTheStep]}");
 
-        Require(breaches, "I3", counts[Templates.BranchCompleted] == counts[Templates.StepReturned],
-            $"branches persisted {counts[Templates.BranchCompleted]}, returned {counts[Templates.StepReturned]}");
+        // Against the shape's BRANCH count, not the return count. Those were the same number only
+        // while every step sent exactly one branch per execution; the entry step now opens two
+        // lineages from its single execution, so a run legitimately persists one more branch than it
+        // returned steps and the old equality read that surplus as a breach.
+        Require(breaches, "I3", counts[Templates.BranchCompleted] == shape.Branches,
+            $"branches persisted {counts[Templates.BranchCompleted]} of {shape.Branches}"
+            + $", steps returned {counts[Templates.StepReturned]}");
 
         Require(breaches, "I4", counts[Templates.HandoffDispatched] == counts[Templates.HandedOff],
             $"handoffs dispatched {counts[Templates.HandoffDispatched]}, decided {counts[Templates.HandedOff]}");
@@ -93,9 +98,13 @@ internal sealed class RunLedger
             $"advances {counts[Templates.AdvancedSuccessors]} plus terminals "
             + $"{counts[Templates.TerminalCompleted]}, branches persisted {counts[Templates.BranchCompleted]}");
 
-        Require(breaches, "I8", counts[Templates.EntryStepCompleted] == counts[Templates.EntryDispatched],
-            $"entry outcomes {counts[Templates.EntryStepCompleted]}, "
-            + $"entry dispatches {counts[Templates.EntryDispatched]}");
+        // Against the shape's ENTRY BRANCH count, not the entry dispatch count. The orchestrator
+        // reports one entry outcome per branch the entry step sent, and the two were the same number
+        // only while it sent exactly one. The entry step now opens two lineages from its single
+        // dispatch, so the old equality read the second lineage's outcome as an unexplained surplus.
+        Require(breaches, "I8", counts[Templates.EntryStepCompleted] == shape.EntryBranches,
+            $"entry outcomes {counts[Templates.EntryStepCompleted]} of {shape.EntryBranches}"
+            + $", entry dispatches {counts[Templates.EntryDispatched]}");
 
         return new RunLedger(
             correlationId,
