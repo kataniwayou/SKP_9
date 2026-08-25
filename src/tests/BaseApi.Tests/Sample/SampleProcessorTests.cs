@@ -50,9 +50,11 @@ public sealed class SampleProcessorTests
     }
 
     [Fact]
-    public async Task SeedsItsOwnValueWhenThereIsNoInput()
+    public async Task SeedsTheTraversalAtOneHundredWhenItIsTheEntryStep()
     {
-        // A source step: no upstream data, so the author produces the whole value.
+        // A source step: no upstream number to add to, so the author produces the origin itself and
+        // then adds its own contribution like every other step. The sentinel executionId is the test,
+        // not the empty data — see the next fact for why those are not the same question.
         var (processor, sender) = Build(Guid.Empty);
         ProcessedData? sent = null;
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => sent = p),
@@ -60,7 +62,64 @@ public sealed class SampleProcessorTests
 
         await processor.ExecuteAsync([], """{"Number":7}""", Guid.Empty, CancellationToken.None);
 
+        Assert.Equal(107, NumberIn(sent!));
+    }
+
+    [Fact]
+    public async Task DoesNotSeedADownstreamStepThatWasSentNothing()
+    {
+        // Empty data downstream is a predecessor that sent an empty branch, not an entry step. Keying
+        // the seed off data.Length would restart the count here and a lost prefix would read as a
+        // complete run.
+        var (processor, sender) = Build(E);
+        ProcessedData? sent = null;
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => sent = p),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        await processor.ExecuteAsync([], """{"Number":7}""", E, CancellationToken.None);
+
         Assert.Equal(7, NumberIn(sent!));
+    }
+
+    [Fact]
+    public async Task ASevenStepPathCarriesTheSeedToOneHundredAndSeven()
+    {
+        // The whole point of the seed, in one fact: with every assignment carrying number 1, the value
+        // is a count of the hops travelled, so the terminal step of the seeded graph's seven-step path
+        // — A, B, C, one of D, one of E, one of F, G — reports 107. The live scenarios read exactly
+        // this off Elasticsearch to witness L2 traversal; this pins the arithmetic without a cluster.
+        byte[] carried = [];
+        var executionId = Guid.Empty;
+
+        foreach (var label in new[] { "Step_A", "Step_B", "Step_C", "Step_D1", "Step_E1", "Step_F1", "Step_G" })
+        {
+            var (processor, sender) = Build(executionId);
+            ProcessedData? sent = null;
+            await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => sent = p),
+                                   Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+            await processor.ExecuteAsync(carried, $$"""{"Number":1,"Label":"{{label}}"}""",
+                                         executionId, CancellationToken.None);
+
+            carried = sent!.Data;
+            executionId = sent.ExecutionId;
+        }
+
+        Assert.Equal(107, JsonDocument.Parse(carried).RootElement.GetProperty("number").GetInt32());
+    }
+
+    [Fact]
+    public async Task WritesTheProcessedValueAndLabelToTheRunsTrace()
+    {
+        // The traversal record: one line per step naming the label and the value it produced, so a
+        // run's climb from 101 to 107 is readable by joining on the correlation id the framework's
+        // open scope puts on this line.
+        var (processor, _) = Build(E);
+
+        await processor.ExecuteAsync(Encoding.UTF8.GetBytes("""{"number":40}"""),
+                                     """{"Number":2,"Label":"Step_B"}""", E, CancellationToken.None);
+
+        Assert.Contains(Log.Records, r => r.Message.Contains("step Step_B produced 42", StringComparison.Ordinal));
     }
 
     [Fact]
