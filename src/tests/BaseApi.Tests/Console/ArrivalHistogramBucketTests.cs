@@ -141,4 +141,17 @@ public sealed class ArrivalHistogramBucketTests
         Assert.Contains(bounds, b => b > 0.025 && b < 0.05);
         Assert.Contains(bounds, b => b > 0.05 && b < 0.1);
     }
+
+    [Fact]
+    public void TheArrivalLadderResolvesTheRungTheStepTailNowLandsIn()
+    {
+        // Measured after the first widening shipped: p99 still overstated by 29% because the last
+        // ~1% of step-elapsed samples sat in (60, 75] and a quantile has to spread them across the
+        // whole rung. ES put the true maximum at 61ms, i.e. packed against the bottom edge -- the
+        // same shape the (50, 100] rung had before, one rung along. Splitting it is what stops the
+        // tail being reported at the far edge of wherever it happens to land.
+        var bounds = IngressMetrics.ArrivalSecondsBoundaries();
+
+        Assert.Contains(bounds, b => b > 0.06 && b < 0.075);
+    }
 }

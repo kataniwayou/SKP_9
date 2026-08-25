@@ -75,10 +75,17 @@ internal static class IngressMetrics
     /// </list>
     /// <b>Expect every quantile panel fed by these two instruments to drop when this ships.</b> That
     /// is the interpolation being removed, not the pipeline getting faster.
+    /// <para>
+    /// <c>0.065</c> was added after measuring the result of the six above. Step-elapsed p95 came
+    /// back within 13% of the truth but p99 still overstated by 29%, because the last ~1% of samples
+    /// had moved into <c>(60, 75]</c> and sat against its bottom edge — ES put the true maximum at
+    /// 61ms. That is the same shape <c>(50, 100]</c> had before, one rung along, and the tail is
+    /// exactly where a p99 reads. Splitting it is the second half of the same fix, not a new one.
+    /// </para>
     /// </remarks>
     public static double[] ArrivalSecondsBoundaries() =>
     [
-        0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05, 0.06, 0.075, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
+        0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05, 0.06, 0.065, 0.075, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
     ];
 
     /// <summary>
