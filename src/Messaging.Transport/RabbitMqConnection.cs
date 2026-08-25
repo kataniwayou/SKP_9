@@ -27,26 +27,78 @@ namespace Messaging.Transport;
 /// a consumer that awaited its own cancellation would wait for a confirmation delivered by the very
 /// dispatcher its handler is occupying.
 /// </para>
+/// <para>
+/// <b>The queue-stats probes get their OWN connection, and that is a consequence of the line above.</b>
+/// Dispatch concurrency of 1 means one dispatcher per connection serves every consumer on it, so
+/// anything else that occupies that connection's dispatcher delays deliveries. <see cref="QueueStatsProbe"/>
+/// opens and closes a channel per queue per pass, which is exactly such an occupant. The separation
+/// is justified by that coupling alone: a measurement path should not be able to slow the path it
+/// measures, whatever the size of the effect turns out to be.
+/// </para>
+/// <para>
+/// <b>It is NOT known to fix the 210s cycle, and this comment exists partly to stop that being
+/// assumed.</b> There is a real, twice-confirmed periodicity on this stack -- one workload burst in
+/// seven runs slow, on a 210s cycle (Prometheus: eta^2 = 0.65 against burst-index mod 7; and
+/// independently in Elasticsearch end-to-end lineage duration: +79ms at the same phase,
+/// permutation p = 0.0005). This probe was the leading suspect, because its <c>Task.Delay</c> comes
+/// AFTER its work, so its period free-runs while the workload burst is wall-clock locked, and the
+/// two would beat.
+/// </para>
+/// <para>
+/// That was tested by disabling the probe and it did NOT convict it. The window could only resolve a
+/// 155ms effect against a 79ms one, so its null proved nothing, and its point estimate was unchanged.
+/// Worse for the theory: the slow phase sits at the same ABSOLUTE wall-clock position before and
+/// after a pod restart, whereas a process-local free-running timer would land somewhere new. So the
+/// cause is still open -- treat a future measurement, not this split, as the thing that settles it.
+/// </para>
+/// <para>
+/// Whatever the cause, it is only visible when consumers have no slack: at eight replicas nothing
+/// measurable happened. Which is the argument for making this structural rather than a tuning knob.
+/// </para>
 /// </summary>
 public sealed class RabbitMqConnection : IAsyncDisposable
 {
+    /// <summary>
+    /// DI key for the probe-only connection. Registered alongside the primary one by the same
+    /// extension method, so a host cannot acquire one without the other.
+    /// </summary>
+    public const string ProbeKey = "probe";
+
+    /// <summary>
+    /// <c>ClientProvidedName</c> values, which the broker reports per connection. Without them both
+    /// connections are anonymous and indistinguishable in <c>rabbitmqctl list_connections</c> --
+    /// which is the exact view an operator needs when deciding whether probe traffic is interfering
+    /// with delivery, the question that produced this split in the first place.
+    /// </summary>
+    public const string PrimaryName = "skp-primary";
+    public const string ProbeName   = "skp-probe";
+
     private readonly RabbitMqOptions _options;
     private readonly IEnumerable<IRabbitMqTopology> _topologies;
     private readonly ILogger<RabbitMqConnection> _logger;
+    private readonly string _clientName;
 
     // Guards initialisation only. Once _connection is non-null every caller takes the fast path and
     // never touches the semaphore again.
     private readonly SemaphoreSlim _init = new(1, 1);
     private IConnection? _connection;
 
+    /// <param name="clientName">
+    /// What the broker reports for this connection. Defaulted rather than required so the three
+    /// tests that construct this type directly keep compiling; the DI registrations pass it
+    /// explicitly, which is also why this type keeps exactly one constructor -- a second overload
+    /// would put the container in the business of choosing between them.
+    /// </param>
     public RabbitMqConnection(
         IOptions<RabbitMqOptions> options,
         IEnumerable<IRabbitMqTopology> topologies,
-        ILogger<RabbitMqConnection> logger)
+        ILogger<RabbitMqConnection> logger,
+        string clientName = PrimaryName)
     {
         _options    = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _topologies = topologies ?? throw new ArgumentNullException(nameof(topologies));
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clientName = clientName ?? throw new ArgumentNullException(nameof(clientName));
     }
 
     /// <summary>
@@ -97,13 +149,21 @@ public sealed class RabbitMqConnection : IAsyncDisposable
                 AutomaticRecoveryEnabled    = true,
                 TopologyRecoveryEnabled     = true,
                 ConsumerDispatchConcurrency = 1,
+                ClientProvidedName          = _clientName,
             };
 
             var connection = await factory.CreateConnectionAsync(ct).ConfigureAwait(false);
+
+            // The probe connection declares topology too, rather than skipping it as an
+            // optimisation. A passive declare against a queue that does not exist yet throws, and
+            // the probe reports that as a warning per queue -- so a topology-free probe connection
+            // would trade a few milliseconds at startup for a burst of warnings that mean nothing.
+            // Declares are idempotent, so the second run costs one channel and no semantics.
             await DeclareTopologyAsync(connection, ct).ConfigureAwait(false);
 
             _connection = connection;
-            _logger.LogInformation("broker connection open; topology declared");
+            _logger.LogInformation(
+                "broker connection open as {ClientName}; topology declared", _clientName);
             return connection;
         }
         finally

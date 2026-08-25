@@ -59,7 +59,7 @@ internal static class AppMessaging
         // which matters more here than anywhere: the API sends to a per-replica reply queue for
         // every processor it ever answers.
         services.AddHostedService(sp => new QueueDepthProbe(
-            sp.GetRequiredService<RabbitMqConnection>(),
+            sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             DispatchedQueues.Snapshot,
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),

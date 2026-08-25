@@ -225,7 +225,7 @@ public static class OrchestratorHost
         // the number survives any one replica going away, and a board reads it with min() or max()
         // rather than sum(), which would multiply the depth by the replica count.
         builder.Services.AddHostedService(sp => new DeadLetterDepthProbe(
-            sp.GetRequiredService<RabbitMqConnection>(),
+            sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             [
                 OrchestratorQueues.ResultDead,
                 OrchestratorQueues.ResultPostDead,
@@ -268,7 +268,7 @@ public static class OrchestratorHost
         ];
 
         builder.Services.AddHostedService(sp => new QueueDepthProbe(
-            sp.GetRequiredService<RabbitMqConnection>(),
+            sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             () => [.. own, .. DispatchedQueues.Snapshot()],
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),

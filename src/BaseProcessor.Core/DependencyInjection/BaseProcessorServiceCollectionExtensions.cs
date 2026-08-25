@@ -222,7 +222,7 @@ public static class BaseProcessorServiceCollectionExtensions
         // anywhere fell from 7 to 1 and `Queues unconsumed` read a confident 0, unable to tell "none
         // unconsumed" from "six unobservable".
         services.AddHostedService(sp => new QueueDepthProbe(
-            sp.GetRequiredService<RabbitMqConnection>(),
+            sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             () => [ProcessorQueues.Work(processorId), .. DispatchedQueues.Snapshot()],
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
@@ -251,7 +251,7 @@ public static class BaseProcessorServiceCollectionExtensions
         // changes only when something is refused, which is rare and never urgent to the second.
         // What matters is that the number is still there tomorrow.
         services.AddHostedService(sp => new DeadLetterDepthProbe(
-            sp.GetRequiredService<RabbitMqConnection>(),
+            sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             [ProcessorQueues.Dead(processorId)],
             TimeSpan.FromSeconds(30),
             sp.GetRequiredService<ILogger<DeadLetterDepthProbe>>()));
