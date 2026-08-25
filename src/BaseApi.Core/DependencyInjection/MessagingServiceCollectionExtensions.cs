@@ -5,6 +5,8 @@ using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace BaseApi.Core.DependencyInjection;
 
@@ -49,10 +51,24 @@ public static class MessagingServiceCollectionExtensions
             o.VirtualHost = cfg["RabbitMq:VirtualHost"] ?? "/";
         });
 
-        // One connection per process, shared by the sender and every consumer. Registering the
-        // concrete type rather than an interface is deliberate: it owns lifetime and topology, and
-        // there is no second implementation to swap in.
-        services.TryAddSingleton<RabbitMqConnection>();
+        // One connection for the sender and every consumer, and a SECOND one used only by the
+        // queue-stats probes. Registering the concrete type rather than an interface is deliberate:
+        // it owns lifetime and topology, and there is no second implementation to swap in.
+        //
+        // Constructed by explicit factories rather than by the container's constructor selection,
+        // so each is given its client name here. See RabbitMqConnection's remarks for why the
+        // probes are kept off the connection that carries consumer dispatch.
+        services.TryAddSingleton(sp => new RabbitMqConnection(
+            sp.GetRequiredService<IOptions<RabbitMqOptions>>(),
+            sp.GetServices<IRabbitMqTopology>(),
+            sp.GetRequiredService<ILogger<RabbitMqConnection>>(),
+            RabbitMqConnection.PrimaryName));
+
+        services.TryAddKeyedSingleton(RabbitMqConnection.ProbeKey, (sp, _) => new RabbitMqConnection(
+            sp.GetRequiredService<IOptions<RabbitMqOptions>>(),
+            sp.GetServices<IRabbitMqTopology>(),
+            sp.GetRequiredService<ILogger<RabbitMqConnection>>(),
+            RabbitMqConnection.ProbeName));
         services.TryAddSingleton<IQueueSender, QueueSender>();
         services.TryAddSingleton<IQueueFanoutPublisher, QueueFanoutPublisher>();
 
