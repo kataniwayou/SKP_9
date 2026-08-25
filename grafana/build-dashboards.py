@@ -652,12 +652,29 @@ def table(layout, title, exprs, desc="", w=8, h=8, exclude=(), rename=None,
 
 
 def binary_field(left, operator, right, alias):
-    """A column computed from two others. Grafana 10+ takes matchers, not bare names."""
+    """A column computed from two others, naming the operands as BARE FIELD NAMES.
+
+    This used to emit `{"matcher": {"id": "byName", "options": name}}` per operand, under
+    a docstring claiming Grafana 10+ requires matchers rather than bare names. Whatever
+    that was observed against, it is not true of the versions these boards have to run on,
+    and the matcher form is the narrower of the two:
+
+        Grafana 12.3.9  matcher form  ok        bare names  ok
+        Grafana 11.1.0  matcher form  BROKEN    bare names  ok
+
+    On 11.1.0 the matcher form throws `z.replace is not a function` -- 11.x calls
+    `.replace()` on the operand, which under that form is an object. The throw aborts the
+    WHOLE transformation chain, not just this step, so `Message flow matrix` lost its
+    merge and its renames too and rendered raw `Time / type / Value #A` columns behind an
+    error corner. One unsupported spelling took out every transform on the panel.
+
+    Bare names are accepted by both, so they are what this emits. Verified by importing
+    both spellings into both versions and reading the rendered panel, not by reading a
+    changelog.
+    """
     return {"id": "calculateField", "options": {
         "mode": "binary",
-        "binary": {"left": {"matcher": {"id": "byName", "options": left}},
-                   "operator": operator,
-                   "right": {"matcher": {"id": "byName", "options": right}}},
+        "binary": {"left": left, "operator": operator, "right": right},
         "alias": alias,
         "replaceFields": False,
     }}
