@@ -2143,19 +2143,9 @@
           "options": {
             "mode": "binary",
             "binary": {
-              "left": {
-                "matcher": {
-                  "id": "byName",
-                  "options": "produced /s"
-                }
-              },
+              "left": "produced /s",
               "operator": "-",
-              "right": {
-                "matcher": {
-                  "id": "byName",
-                  "options": "consumed /s"
-                }
-              }
+              "right": "consumed /s"
             },
             "alias": "gap /s",
             "replaceFields": false
