@@ -38,6 +38,17 @@ internal sealed record RunClassification(
 /// window, whether or not it names this run. That is weaker than a per-run attribution; it is the
 /// strongest claim these records can support, not a compromise chosen for convenience.
 /// </para>
+/// <para>
+/// <b>A redelivered step is not a third tier, and deliberately never reaches this class.</b> When a
+/// replica is removed mid-execution its delivery is redelivered and finished elsewhere, so the run
+/// lost nothing -- but it left a step start with no return, and the replica went away above every
+/// catch block, so no excuse of either tier exists to spend on it. Rather than invent an excuse for a
+/// run that does not need one, <see cref="RunLedger"/> pairs each step start with its own return and
+/// finds the ledger whole; the run arrives here Complete and the two rules above never come into it.
+/// That keeps the excuse tiers meaning what they say -- a record admitting something went wrong --
+/// and keeps the forgiveness independent of the window's observed edges, which matters because the
+/// broker's redelivery can land well after the heal record was written.
+/// </para>
 /// </summary>
 internal static class RunClassifier
 {

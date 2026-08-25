@@ -11,7 +11,23 @@ namespace BaseApi.Tests.Live.Resilience;
 /// carries <c>attributes.Result</c> = "Completed" alongside the rendered text. Substring-matching
 /// the body for "Failed" would be a second, weaker spelling of a fact already on the record.
 /// </para>
+/// <para>
+/// <b><see cref="StepId"/> and <see cref="EntryId"/> ride the log scope, not any template.</b>
+/// <c>ProcessDispatchHandler</c> opens <c>ExecutionLogScope.BuildScope(dispatch)</c> around the whole
+/// of its <c>RunAsync</c>, so every record that hop writes carries the dispatch's ids whether or not
+/// its template names one. Together the pair identifies the dispatch a record belongs to, which is
+/// what lets <see cref="RunLedger"/> pair a step's start with its return rather than only counting
+/// both.
+/// </para>
 /// </summary>
+/// <param name="StepId">
+/// The step's position in the graph, or null where the scope omitted it.
+/// </param>
+/// <param name="EntryId">
+/// The L2 key this dispatch reads. Null for a source step, which has no upstream input and whose
+/// id <c>ExecutionLogScope</c> therefore omits rather than zeroes -- so null here means "this
+/// dispatch had no input key", never "the attribute was lost".
+/// </param>
 internal sealed record LogRecord(
     DateTimeOffset Timestamp,
     string Template,
@@ -19,7 +35,9 @@ internal sealed record LogRecord(
     string? CorrelationId,
     string? Result,
     string Service,
-    string Scope)
+    string Scope,
+    string? StepId = null,
+    string? EntryId = null)
 {
     /// <summary>
     /// Projects one <c>_source</c> object. Used by both the live reader and the hermetic fixture
@@ -45,7 +63,9 @@ internal sealed record LogRecord(
             Scope: source.TryGetProperty("scope", out var scope)
                 && scope.TryGetProperty("name", out var name)
                     ? name.GetString() ?? string.Empty
-                    : string.Empty);
+                    : string.Empty,
+            StepId: Attribute(attributes, "StepId"),
+            EntryId: Attribute(attributes, "EntryId"));
     }
 
     /// <summary>
