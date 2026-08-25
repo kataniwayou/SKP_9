@@ -43,6 +43,24 @@ internal static class SoakReport
                 $"  {run.Ledger.CorrelationId} started {run.Ledger.StartedAt:HH:mm:ss}");
         }
 
+        // Complete or not, a run that carried a redelivery is not the same event as one that did not,
+        // and the ledger forgives it silently -- correctly, since nothing was lost. Named here so the
+        // difference is legible: if a scenario fails for some other reason, the reader can see that a
+        // replica also went away underneath a step, which is usually the thing worth knowing.
+        var redelivered = result.Runs.Where(r => r.Ledger.SupersededCount > 0).ToList();
+
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"runs carrying a redelivered step (not a loss): {redelivered.Count}");
+
+        foreach (var run in redelivered)
+        {
+            foreach (var attempt in run.Ledger.Superseded)
+            {
+                report.AppendLine(CultureInfo.InvariantCulture,
+                    $"  {run.Ledger.CorrelationId} {attempt}");
+            }
+        }
+
         foreach (var run in result.Runs.Where(r => r.Verdict != RunVerdict.Complete))
         {
             report.AppendLine(CultureInfo.InvariantCulture,
