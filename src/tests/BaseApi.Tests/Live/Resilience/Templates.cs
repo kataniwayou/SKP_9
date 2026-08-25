@@ -37,7 +37,24 @@ internal static class Templates
 
     public const string StoreUnreachable =
         "projection store unreachable \u2014 returning message to {Queue}";
-    public const string RefusingAndParking = "refusing message of type {Type} \u2014 parking";
+    /// <summary>
+    /// The park record, as the consumer now writes it: after the nack, naming the queue, and saying
+    /// `parked` only when the broker was actually told. Paired with <see cref="RefusingNotParked"/>,
+    /// which is the same catch block reporting that the rejection never landed.
+    /// </summary>
+    public const string RefusingAndParking =
+        "refusing message of type {Type} on {Queue} \u2014 parked";
+
+    /// <summary>
+    /// The other half of the park branch: the channel died before the broker heard the rejection, so
+    /// the delivery is REDELIVERED rather than dead-lettered. It accounts for a short ledger exactly
+    /// as a park does -- the run did not advance -- but an operator must not go looking for the
+    /// message in a dead-letter queue, because it is not there.
+    /// </summary>
+    public const string RefusingNotParked =
+        "refusing message of type {Type} on {Queue} \u2014 NOT parked: the channel was gone before "
+        + "the broker was told, so it will be redelivered rather than dead-lettered";
+
     public const string SendFailedReturning =
         "send failed while handling {Type} \u2014 returning message to {Queue}";
     public const string EntryDispatchSendFailed = "the entry-step dispatch failed to send; continuing";
@@ -95,7 +112,7 @@ internal static class Templates
     /// </summary>
     public static readonly IReadOnlyList<string> ProcessScopedExcuses =
     [
-        StoreUnreachable, RefusingAndParking, SendFailedReturning,
+        StoreUnreachable, RefusingAndParking, RefusingNotParked, SendFailedReturning,
     ];
 
     // ---- worker lifecycle edges, for S6 and S7 ----

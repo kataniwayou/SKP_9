@@ -1,4 +1,5 @@
 using BaseConsole.Core.Gating;
+using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -405,8 +406,51 @@ public sealed class GatedQueueConsumer : BackgroundService
                             // Taken as a property of the message rather than of the environment. A parked
                             // message can be recovered by hand; a message requeued forever is an outage that
                             // never resolves, so the ambiguous case is deliberately resolved toward parking.
-                            _logger.LogError(ex, "refusing message of type {Type} — parking", type);
+                            //
+                            // LOGGED AFTER THE NACK RATHER THAN BEFORE IT, AND THAT ORDER IS THE POINT.
+                            // A rejection is a park only if the broker was actually told, and
+                            // SafeNackAsync returns false when the channel died in between -- in which
+                            // case the broker REQUEUES the delivery instead of dead-lettering it.
+                            // Logged first, the line asserted a park that had not happened, and the only
+                            // correction went to Debug, which is below the level shipped to the log
+                            // store. "Parked" and "quietly redelivered" then read identically forever
+                            // after, which is the one thing a park record exists to distinguish.
+                            //
+                            // The queue name rides along for the reason the two requeue branches above
+                            // already carry it: an orchestrator replica consumes three gated queues, and
+                            // a park line naming only the message type cannot say which of them refused
+                            // it. Attributing eleven parked outcomes to their queue took reading x-death
+                            // headers off the bodies because this line did not say.
                             var landed = await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
+
+                            // The ids, lifted off the delivery's own headers rather than the body.
+                            // The handler opened a scope over these too, but it opened it INSIDE
+                            // HandleAsync, so the exception that got us here disposed it on the way
+                            // out -- which is why a park record carried no ids at all until the
+                            // sender began stamping them. Keyed to the same fields the handler's
+                            // scope uses, so a parked message is queryable beside the run it belongs
+                            // to. See MessageIdHeaders.
+                            using var ids = _logger.BeginScope(MessageIdHeaders.ReadScope(headers));
+
+                            if (landed)
+                            {
+                                _logger.LogError(
+                                    ex, "refusing message of type {Type} on {Queue} — parked",
+                                    type, _options.Queue);
+                            }
+                            else
+                            {
+                                // Not a park. Said in full rather than as a flag, because the operator
+                                // reading this is deciding whether to go looking in the dead-letter
+                                // queue, and there will be nothing there.
+                                _logger.LogError(
+                                    ex,
+                                    "refusing message of type {Type} on {Queue} — NOT parked: the channel "
+                                    + "was gone before the broker was told, so it will be redelivered "
+                                    + "rather than dead-lettered",
+                                    type, _options.Queue);
+                            }
+
                             Record("parked", "refused", landed);
                             break;
                         }
