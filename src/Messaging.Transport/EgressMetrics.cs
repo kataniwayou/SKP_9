@@ -41,9 +41,26 @@ public static class EgressMeter
     /// <c>double[]</c>, and handing every caller the same instance would publish mutable state.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// <b>Four rungs were added on 2026-08-25 after an audit found every instrument on this ladder
+    /// interpolating.</b> A quantile is only ever a position inside the rung that holds the mass, so
+    /// a rung wider than the thing being measured yields an edge rather than a latency.
+    /// <list type="bullet">
+    /// <item><description><c>0.00025</c> and <c>0.0005</c> — a healthy gate probe answers in ~0.44ms
+    /// and <b>96.9%</b> of probes landed in the old first rung, <c>(0, 1]</c>. The instrument exists
+    /// to stop the store reading as two states, working and gone; with no rung inside the healthy
+    /// range it reproduced exactly that, one level down.</description></item>
+    /// <item><description><c>0.015</c> and <c>0.02</c> — produce duration means 10.8ms and process
+    /// duration 12.3ms, putting <b>55%</b> and <b>64%</b> of their samples in one <c>(10, 25]</c>
+    /// rung.</description></item>
+    /// </list>
+    /// Both instruments here are <c>Stopwatch</c> measurements taken inside a single process, so
+    /// unlike <c>IngressMetrics.ArrivalSecondsBoundaries</c> there is no clock-skew argument against
+    /// resolving them finely — that ladder's 10ms floor is an honesty limit, this one's was not.
+    /// </remarks>
     public static double[] LatencySecondsBoundaries() =>
     [
-        0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+        0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.015, 0.02, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
     ];
 }
 
