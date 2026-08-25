@@ -598,7 +598,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "ops",
+          "noValue": "no exceptions in range"
         },
         "overrides": []
       },
