@@ -60,8 +60,32 @@ public sealed class SampleProcessor(ILogger<SampleProcessor> logger) : BaseProce
         // it in place — which is why the outcome those two send names that key, so the orchestrator
         // reclaims what this step could not.
 
-        var processed = JsonSerializer.SerializeToUtf8Bytes(
-            new { number = incoming + baseNumber, label }, ProcessorConfig.SerializerOptions);
+        // The entry step has no upstream number to add to, so it seeds one. 100 is arbitrary and
+        // deliberately far from any step's own contribution: every value downstream is that origin
+        // plus one hop's baseNumber per step, which makes the number a running count of the path
+        // travelled rather than an opaque total. With every assignment carrying number 1, the
+        // terminal step of a seven-step path reports 107 and the L2 traversal is readable off the
+        // logs alone. The sentinel executionId is the test for "am I the entry step" — the same
+        // one the branch lineage below turns on, and truer than data.Length, which is also empty
+        // for a downstream step whose predecessor sent nothing.
+        var processed = executionId == Guid.Empty ? 100 : incoming;
+        processed += baseNumber;
+
+        // A deliberate, narrow exception to the rule the config line above states, and the only one
+        // in this file. Downstream, `processed` IS derived from `data` — so this template renders
+        // runtime content, which the framework never does and a real processor should not copy. It is
+        // defensible only because this sample's payload is a synthetic hop counter authored by the
+        // workflow rather than anything a caller supplied: there is nothing here to leak. A processor
+        // carrying real content logs the SHAPE of its result — a count, a length, an outcome — and
+        // never the content, and joins on the ids for the rest.
+        //
+        // What it buys is the traversal itself. The line rides the dispatch scope, so ordering one
+        // correlation id by timestamp reads the value climbing 101, 102 ... 107 across the graph, and
+        // a hop that never ran is a gap in that sequence rather than an absence someone has to notice.
+        logger.LogInformation("step {Label} produced {Processed}", label, processed);
+
+        var outgoing = JsonSerializer.SerializeToUtf8Bytes(
+            new { number = processed, label }, ProcessorConfig.SerializerOptions);
 
         // An entry step opens a lineage; a downstream step reuses the inbound one so the lineage
         // holds. The new id is random, so a redelivered dispatch opens a second lineage rather than
@@ -71,7 +95,7 @@ public sealed class SampleProcessor(ILogger<SampleProcessor> logger) : BaseProce
 
         try
         {
-            await SendToPostAsync(processed, branchExecutionId, ct);
+            await SendToPostAsync(outgoing, branchExecutionId, ct);
         }
         catch (PostSendException)
         {
