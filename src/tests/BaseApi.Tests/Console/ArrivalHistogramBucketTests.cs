@@ -154,4 +154,30 @@ public sealed class ArrivalHistogramBucketTests
 
         Assert.Contains(bounds, b => b > 0.06 && b < 0.075);
     }
+
+    [Fact]
+    public void NoRungInTheOperatingBandSpansMoreThanHalfAgain()
+    {
+        // Stated as a property rather than a boundary list, because the boundary list is what keeps
+        // going stale. Every quantile is a position inside the rung that holds it, so a rung's span
+        // IS the error bar on any quantile drawn from it -- and this ladder is read across two very
+        // different workloads: the three-step probe lives near 32ms, the ten-step fanout near 114ms
+        // with a tail to ~180. Fitting rungs to one of them left the other reading its bucket edge.
+        //
+        // 1.5x caps the worst-case overstatement at 50% of a rung's lower edge, everywhere between
+        // 10ms and 250ms. Outside that band the ladder stays coarse on purpose: below 10ms is the
+        // clock-skew floor, above 250ms is backlog territory where an order of magnitude is the
+        // interesting distinction.
+        var bounds = IngressMetrics.ArrivalSecondsBoundaries();
+        var band = bounds.Where(b => b >= 0.01 && b <= 0.25).ToArray();
+
+        var widest = band.Zip(band.Skip(1), (lo, hi) => (lo, hi, ratio: hi / lo))
+                         .OrderByDescending(x => x.ratio)
+                         .First();
+
+        Assert.True(
+            widest.ratio <= 1.5 + 1e-9,
+            $"({widest.lo * 1000:g}, {widest.hi * 1000:g}]ms spans {widest.ratio:F2}x -- "
+            + "a quantile landing there is that far from a measurement");
+    }
 }

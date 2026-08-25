@@ -82,10 +82,25 @@ internal static class IngressMetrics
     /// 61ms. That is the same shape <c>(50, 100]</c> had before, one rung along, and the tail is
     /// exactly where a p99 reads. Splitting it is the second half of the same fix, not a new one.
     /// </para>
+    /// <para>
+    /// <c>0.125, 0.15, 0.175, 0.2</c> close the last gap in the operating band. Everything above was
+    /// fitted to the three-step probe workflow, which lives near 32ms; the ten-step fanout workflow
+    /// lives near <b>114ms with a tail to ~180ms</b>, i.e. entirely inside what was a single 150ms
+    /// rung — the original defect, unmoved, waiting for the workload to come back. Between 10ms and
+    /// 250ms no rung now spans more than <b>1.5x</b>, which caps the worst-case overstatement of any
+    /// quantile at half a rung wherever either workload happens to sit. That property is asserted in
+    /// <c>ArrivalHistogramBucketTests</c>, deliberately as a property rather than a boundary list,
+    /// because the list is what keeps going stale.
+    /// </para>
+    /// <para>
+    /// Outside the band the ladder stays coarse on purpose: below 10ms is the skew floor above, and
+    /// above 250ms is backlog territory where an order of magnitude is the interesting distinction.
+    /// </para>
     /// </remarks>
     public static double[] ArrivalSecondsBoundaries() =>
     [
-        0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05, 0.06, 0.065, 0.075, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
+        0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05, 0.06, 0.065, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.25,
+        0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
     ];
 
     /// <summary>
