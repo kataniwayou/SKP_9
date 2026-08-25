@@ -2217,6 +2217,26 @@
                 }
               },
               {
+                "id": "noValue",
+                "value": "one side only"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "nan",
+                      "result": {
+                        "text": "one side only",
+                        "color": "text",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",

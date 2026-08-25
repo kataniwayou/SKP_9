@@ -809,6 +809,21 @@ def link(title, uid_tag):
 
 NAV = [link("SKP boards", "skp")]
 
+# Panel-level `noValue` text stamped onto boards this script does not generate, keyed by
+# panel title. Same reason as NAV: the wording an empty panel uses is a property of the
+# SET of boards, not of how any one of them was authored.
+#
+# `Exception rate` exists on all four worker-facing boards. The three generated ones say
+# "no exceptions in range"; the imported runtime board said "No data" for the identical
+# condition, so a reader moving between them was told two different things by the same
+# query. Worse, "No data" cannot distinguish *no exceptions were thrown* from *the
+# instrument is missing* -- which is exactly the ambiguity the generated boards spend a
+# noValue on avoiding, and the runtime board is where a reader goes to check the
+# instrument.
+IMPORTED_NO_VALUE = {
+    "Exception rate": "no exceptions in range",
+}
+
 
 # ---------------------------------------------------------------------------
 # shared panel sets
@@ -1851,6 +1866,43 @@ def build_flow():
                    "properties": [
                        {"id": "custom.cellOptions",
                         "value": {"type": "color-text"}},
+                       # A type present on ONE side only subtracts a number from an
+                       # absent cell, and the difference rendered `NaN` -- the one
+                       # rendering a reader cannot tell from a broken query, which is
+                       # what every other noValue on these boards exists to avoid.
+                       #
+                       # It is not a transient. `orchestration-started` is PRODUCED by
+                       # the API, whose queue side emits no metrics at all (the same
+                       # fact the paragraph above invokes to explain step-outcome's
+                       # positive bias), so its produced cell is permanently absent and
+                       # this row rendered NaN on every load, forever.
+                       #
+                       # Filling the missing side with zero was the alternative and is
+                       # worse: it would state a measured zero where nothing was
+                       # measured, and colour the resulting -1.9 red on a board whose
+                       # own description explains why that hop cannot balance. Naming
+                       # the condition keeps the blank cell beside it as the evidence
+                       # for WHICH side is missing.
+                       #
+                       # It takes a MAPPING, not noValue, and that is not a style
+                       # choice -- it is the only one of the two that fires. Verified
+                       # on the live board: with noValue alone the cell still read
+                       # `NaN`, because Grafana's display processor returns the
+                       # noValue text for null and undefined only, and a subtraction
+                       # against an absent operand yields a genuine NaN, which falls
+                       # through to the numeric formatter. The `nan` special mapping
+                       # is what catches it. noValue is kept for the neighbouring
+                       # shape -- a cell that is null rather than NaN.
+                       {"id": "noValue", "value": "one side only"},
+                       # `color: text` rather than a threshold colour: a structurally
+                       # one-sided type is a documented property of this stack, not a
+                       # fault, and the threshold steps below would otherwise paint it
+                       # red for being negative.
+                       {"id": "mappings", "value": [
+                           {"type": "special",
+                            "options": {"match": "nan",
+                                        "result": {"text": "one side only",
+                                                   "color": "text", "index": 0}}}]},
                        {"id": "thresholds", "value": {"mode": "absolute", "steps": [
                            {"color": "red", "value": None},
                            {"color": "text", "value": -0.1},
@@ -2393,19 +2445,37 @@ def normalize_imported():
     clicking through to it stranded the reader with no way back, and only there. Nav is a
     property of the SET of boards, not of how any one of them was authored, so it is
     applied to whatever is in the directory.
+
+    The same applies to the wording an empty panel uses -- see IMPORTED_NO_VALUE.
     """
     generated = {"skp-flow", "skp-baseapi", "skp-orchestrator", "skp-processor"}
     for path in sorted(OUT.glob("*.json")):
         if path.stem in generated:
             continue
         board = json.loads(path.read_text(encoding="utf-8"))
-        if board.get("links") == NAV:
-            continue
-        board["links"] = NAV
+        changed = []
+
+        if board.get("links") != NAV:
+            board["links"] = NAV
+            changed.append("nav")
         if "skp" not in board.get("tags", []):
             board.setdefault("tags", []).append("skp")
+            changed.append("tag")
+
+        for panel in board.get("panels", []):
+            text = IMPORTED_NO_VALUE.get(panel.get("title"))
+            if text is None:
+                continue
+            defaults = panel.setdefault("fieldConfig", {}).setdefault("defaults", {})
+            if defaults.get("noValue") != text:
+                defaults["noValue"] = text
+                changed.append(f"noValue:{panel['title']}")
+
+        if not changed:
+            continue
         path.write_text(json.dumps(board, indent=2) + chr(10), encoding="utf-8")
-        print(f"{path.relative_to(OUT.parent.parent)}  nav stamped (imported board)")
+        print(f"{path.relative_to(OUT.parent.parent)}  "
+              f"stamped (imported board): {', '.join(changed)}")
 
 
 def main():
