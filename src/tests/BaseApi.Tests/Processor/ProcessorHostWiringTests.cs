@@ -5,6 +5,7 @@ using BaseProcessor.Core.DependencyInjection;
 using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Liveness;
 using BaseProcessor.Core.Startup;
+using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,6 +46,37 @@ public sealed class ProcessorHostWiringTests
         }).Build();
 
         services.AddBaseProcessor(cfg);
+        return services.BuildServiceProvider(validateScopes: true);
+    }
+
+    /// <summary>
+    /// The id every processor queue name is derived from. A fixed value rather than a fresh Guid so
+    /// a failure names the same queue twice running.
+    /// </summary>
+    private static readonly ProcessorIdentityFound Identity = new(
+        Guid.Parse("11111111-2222-3333-4444-555555555555"), null, null, null, "sample", "1.0.0");
+
+    /// <summary>
+    /// The Stage-2 graph, which is a different graph: the one-argument <c>AddBaseProcessor</c> that
+    /// <see cref="Build"/> uses does not call <c>AddProcessorExecution</c> at all, so the work queue,
+    /// its topology and both probes exist only here.
+    /// </summary>
+    private static ServiceProvider BuildWithIdentity()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(Substitute.For<IConnectionMultiplexer>());
+        services.AddSingleton<IEnumerable<IRabbitMqTopology>>([]);
+
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
+            ["RabbitMq:Host"]           = "localhost",
+            ["RabbitMq:Username"]       = "guest",
+            ["RabbitMq:Password"]       = "guest",
+        }).Build();
+
+        services.AddBaseProcessor(cfg, Identity);
         return services.BuildServiceProvider(validateScopes: true);
     }
 
@@ -102,6 +134,26 @@ public sealed class ProcessorHostWiringTests
         var hosted = sp.GetServices<IHostedService>().ToList();
         Assert.Contains(hosted, h => h is ProcessorStartupOrchestrator);
         Assert.Contains(hosted, h => h is ProcessorLivenessHeartbeat);
+    }
+
+    [Fact]
+    public async Task BothQueueProbesRunAsHostedServices()
+    {
+        // These two answer different questions -- what is WAITING and what was REFUSED -- and both
+        // are invisible from outside the process when absent. A missing dead-letter probe is the
+        // worse of the two: the processor board's `Dead-lettered` stat and `Dead-letter depth by
+        // queue` panel are emitted from the same shared function as the orchestrator's and have
+        // always been there, so without this registration they render a confident zero rather than
+        // no data. An absent series and an empty queue are the same picture, and the board shows
+        // the reassuring one.
+        //
+        // Enumerating IHostedService constructs every one of them, which is the point: a probe that
+        // resolved but was never hosted would leave the panels exactly as blind.
+        await using var sp = BuildWithIdentity();
+
+        var hosted = sp.GetServices<IHostedService>().ToList();
+        Assert.Contains(hosted, h => h is QueueDepthProbe);
+        Assert.Contains(hosted, h => h is DeadLetterDepthProbe);
     }
 
     [Fact]

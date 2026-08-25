@@ -228,6 +228,34 @@ public static class BaseProcessorServiceCollectionExtensions
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
             DispatchedQueues.Note));
 
+        // How much work this processor has REFUSED and nobody has dealt with.
+        //
+        // The depth probe above measures work that is waiting; this measures work that has been
+        // thrown away. They are different questions and only this one is permanent: a message in
+        // the work queue is drained by the next healthy consumer, while a message parked here has
+        // no consumer by design and stays until an operator deals with it by hand.
+        //
+        // ITS PANELS ALREADY EXIST AND HAVE BEEN READING A CONFIDENT ZERO. `Dead-lettered` and
+        // `Dead-letter depth by queue` are emitted onto both worker boards from one shared function
+        // in build-dashboards.py, so the processor board has carried them all along -- with nothing
+        // in this process reporting the series behind them. That is the same trap
+        // DeadLetterDepthMetrics documents from orchestrator-result.dead: an absent series and an
+        // empty queue are the same picture from outside, and the board renders the reassuring one.
+        //
+        // A static single-element list, unlike the depth probe above: a processor has exactly one
+        // dead-letter queue and its name is derived from the id this method already takes, so there
+        // is nothing to discover at run time and nothing to forget.
+        //
+        // Thirty seconds against the depth probe's ten, matching the orchestrator's own
+        // dead-letter probe and for the reason DeadLetterDepthProbe gives: a dead-letter queue
+        // changes only when something is refused, which is rare and never urgent to the second.
+        // What matters is that the number is still there tomorrow.
+        services.AddHostedService(sp => new DeadLetterDepthProbe(
+            sp.GetRequiredService<RabbitMqConnection>(),
+            [ProcessorQueues.Dead(processorId)],
+            TimeSpan.FromSeconds(30),
+            sp.GetRequiredService<ILogger<DeadLetterDepthProbe>>()));
+
         return services;
     }
 }
