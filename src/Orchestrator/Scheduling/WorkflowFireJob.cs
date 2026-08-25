@@ -73,11 +73,14 @@ public sealed class WorkflowFireJob(
         using (logger.BeginScope(ExecutionLogScope.BuildScope(
                    Guid.Empty, workflowId, Guid.Empty, Guid.Empty, Guid.Empty)))
         {
-            if (!store.TryGet(workflowId, out var entry))
+            // ACTIVE, not merely held. A stop marks the L1 entry and leaves it in place so steps still
+            // in flight can resolve against the definition, so "is it in L1" no longer answers "may it
+            // dispatch". Reading the marked entry here would have a stopped workflow keep firing.
+            if (!store.TryGetActive(workflowId, out var entry))
             {
                 // The workflow was stopped and this job is on its way out. Returning without
-                // rescheduling is the point: arming a successor would resurrect what the stop deleted.
-                logger.LogInformation("the workflow is no longer in L1; this fire dispatches nothing");
+                // rescheduling is the point: arming a successor would resurrect what the stop halted.
+                logger.LogInformation("the workflow is not active in L1; this fire dispatches nothing");
                 return;
             }
 
@@ -99,8 +102,14 @@ public sealed class WorkflowFireJob(
 
             // Re-read L1 rather than reusing the entry above. The whole value of this check is that it
             // sees what landed *while* the dispatch was running — a start that superseded this job, or
-            // a stop that removed the workflow outright. A cached read would see neither.
-            if (!store.TryGet(workflowId, out var current) || current.JobId != jobId)
+            // a stop that marked the workflow. A cached read would see neither.
+            //
+            // ACTIVE, and this is the call site where getting it wrong is worst. A stop leaves the
+            // entry in place with its JobId intact, so a lookup that admitted marked entries would
+            // match this fire's own job, fall through, and call RescheduleAsync — arming the next fire
+            // of a workflow that was just stopped, and then the next, indefinitely. The stop would
+            // survive on the API side and be silently undone here.
+            if (!store.TryGetActive(workflowId, out var current) || current.JobId != jobId)
             {
                 logger.LogInformation(
                     "this fire's job is no longer the one L1 holds; standing down without rescheduling");

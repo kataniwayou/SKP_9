@@ -68,6 +68,19 @@ public static class OrchestratorHost
     public const string HydrationReady = "orchestrator-hydrated";
 
     /// <summary>
+    /// Heartbeat key for the L1 reap loop, and the name its liveness check is registered under. A
+    /// second key rather than a share of <see cref="HydrationLoop"/>'s: one holder per loop — see
+    /// <see cref="ILoopHeartbeat"/> — because a holder shared between two loops lets the live one's
+    /// beat cover for the dead one, and these two have opposite lifetimes. Hydration finishes and
+    /// retires; this one runs for the life of the process.
+    /// <para>
+    /// Points at <see cref="L1ReapService.LoopName"/> rather than restating the literal, for the same
+    /// reason <see cref="HydrationLoop"/> does.
+    /// </para>
+    /// </summary>
+    public const string ReapLoop = L1ReapService.LoopName;
+
+    /// <summary>
     /// The production entry point: builds the host, starts it, and returns it running.
     /// </summary>
     public static async Task<IHost> StartAsync(
@@ -280,6 +293,14 @@ public static class OrchestratorHost
         builder.Services.AddKeyedSingleton<ILoopHeartbeat>(
             HydrationLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
 
+        // Loop 3 and its own heartbeat holder. Not leader-gated: L1 is per-replica in-memory state, so
+        // each replica marked its own stopped workflows and each has to prune its own. Gating this on
+        // leadership would leave every follower's marks permanent.
+        builder.Services.AddKeyedSingleton<ILoopHeartbeat>(
+            ReapLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
+
+        builder.Services.AddHostedService<L1ReapService>();
+
         // A heartbeat nobody reads proves nothing. The window is HydrationService's own backoff cap
         // times its stale factor, derived there so it cannot fall below the delay it has to cover.
         // Tagged `live` and nothing else: a hydration loop still retrying an unreachable L2 is this
@@ -308,7 +329,28 @@ public static class OrchestratorHost
                 HydrationReady,
                 sp => new HydrationReadyHealthCheck(sp.GetRequiredService<HydrationAdmission>()),
                 HealthStatus.Unhealthy,
-                ["ready"]));
+                ["ready"]))
+            // And the reap loop, which is watched the same way and for the same reason: a loop that
+            // stopped turning is invisible from outside the process, and this one going quiet leaks
+            // one L1 entry per workflow ever stopped.
+            //
+            // Its window is much wider than hydration's because the cadences differ — five minutes
+            // against a backoff capped at thirty seconds — which is exactly why LoopLivenessHealthCheck
+            // takes the window as an argument instead of binding one options type both loops would
+            // have to agree on. Derived at the service, so it cannot drift from the period it covers.
+            //
+            // `live` and nothing else. Not `ready`: a replica that has not reaped yet serves
+            // correctly, and nothing about this loop gates traffic. Not `startup`: the loop beats on
+            // its first iteration, so it is never the thing holding a cold pod back.
+            .Add(new HealthCheckRegistration(
+                ReapLoop,
+                sp => new LoopLivenessHealthCheck(
+                    sp.GetRequiredKeyedService<ILoopHeartbeat>(ReapLoop),
+                    L1ReapService.LivenessWindow,
+                    "l1-reap",
+                    sp.GetRequiredService<TimeProvider>()),
+                HealthStatus.Unhealthy,
+                ["live"]));
 
         // What makes "the queue exists before hydration reads L2" true. Opening the shared connection
         // is what declares topology, and the only other thing here that opens it is the gated

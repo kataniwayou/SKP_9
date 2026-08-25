@@ -47,7 +47,16 @@ public sealed class WorkflowActivator(
             return;
         }
 
-        if (store.TryGet(workflowId, out var held))
+        // ACTIVE, not merely held, and the distinction matters on the restart path. A marked entry has
+        // no job left to tear down: ApplyStopHandler unschedules strictly before it marks, so "marked"
+        // implies "already unscheduled". Tearing down again would be a second DeleteJob against a job
+        // that is gone — harmless in Quartz, but it would state a teardown that did not happen and put
+        // this method's convergence argument on a call that cannot be doing what it claims.
+        //
+        // Store.Set below then writes a fresh entry carrying no DeletedAt, which is what clears the
+        // stop. The un-marking is a side effect of the write rather than a separate call this path
+        // could forget to make.
+        if (store.TryGetActive(workflowId, out var held))
         {
             await scheduler.UnscheduleAsync(held.JobId, ct).ConfigureAwait(false);
         }

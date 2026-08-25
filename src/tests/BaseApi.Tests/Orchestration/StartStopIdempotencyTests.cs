@@ -123,7 +123,7 @@ public sealed class StartStopIdempotencyTests
                 new WorkflowActivator(_reader, L1, Scheduler, NullLogger<WorkflowActivator>.Instance),
                 NullLogger<ApplyStartHandler>.Instance);
             var stop = new ApplyStopHandler(
-                _reader, L1, Scheduler, NullLogger<ApplyStopHandler>.Instance);
+                _reader, L1, Scheduler, TimeProvider.System, NullLogger<ApplyStopHandler>.Instance);
 
             foreach (var (type, body) in Publisher.Drain())
             {
@@ -293,12 +293,12 @@ public sealed class StartStopIdempotencyTests
 
         await c.ApiStartAsync(Definition(S1, S2));
         await c.DeliverAsync();
-        Assert.True(c.L1.TryGet(W, out var first));
+        Assert.True(c.L1.TryGetActive(W, out var first));
 
         await c.ApiStartAsync(Definition(S1, S2));
         await c.DeliverAsync();
 
-        Assert.True(c.L1.TryGet(W, out var second));
+        Assert.True(c.L1.TryGetActive(W, out var second));
         Assert.Equal(Shape(first.Definition), Shape(second.Definition));
         Assert.Equal(1, c.Scheduler.LiveJobCount);
         Assert.Equal([first.JobId], c.Scheduler.Unscheduled);
@@ -315,29 +315,36 @@ public sealed class StartStopIdempotencyTests
         await c.ApiStartAsync(Definition(S1, S2));
         await c.DeliverAsync();
 
-        Assert.True(c.L1.TryGet(W, out var entry));
+        Assert.True(c.L1.TryGetActive(W, out var entry));
         Assert.Equal([S1, S2], entry.Definition.Steps.Select(s => s.StepId));
         Assert.Equal(Cron, entry.Definition.Cron);
         Assert.Equal([(W, entry.JobId, Cron)], c.Scheduler.Scheduled);
     }
 
     [Fact]
-    public async Task TheStopChainRunTwiceLeavesTheReplicaEmptyAndUnschedulesOnlyTheLiveJob()
+    public async Task TheStopChainRunTwiceLeavesTheReplicaInactiveAndUnschedulesOnlyTheLiveJob()
     {
         var c = new Chain();
         await c.ApiStartAsync(Definition(S1, S2));
         await c.DeliverAsync();
-        Assert.True(c.L1.TryGet(W, out var live));
+        Assert.True(c.L1.TryGetActive(W, out var live));
 
         await c.ApiStopAsync(W);
         await c.DeliverAsync();
 
         // The redelivery: the API cleans an already-absent projection and announces again, and the
-        // replica finds nothing in L1 to tear down. Neither half has anything left to do.
+        // replica finds the entry its predecessor already marked. Neither half has anything left to
+        // do — and in particular the second delivery must not unschedule a second time, which is what
+        // the single-element Unscheduled assertion below pins.
         await c.ApiStopAsync(W);
         await c.DeliverAsync();
 
-        Assert.False(c.L1.TryGet(W, out _));
+        // Inactive, not absent. The entry survives the stop by design so that steps still in flight
+        // resolve against it; what the stop guarantees is that nothing can dispatch from it again.
+        Assert.False(c.L1.TryGetActive(W, out _));
+        Assert.True(c.L1.TryGetIncludingStopped(W, out var marked));
+        Assert.NotNull(marked.DeletedAt);
+
         Assert.Equal([live.JobId], c.Scheduler.Unscheduled);
         Assert.Equal(0, c.Scheduler.LiveJobCount);
         Assert.Empty(c.L2.Keys());
@@ -360,7 +367,7 @@ public sealed class StartStopIdempotencyTests
 
         await c.DeliverAsync();
 
-        Assert.True(c.L1.TryGet(W, out var entry));
+        Assert.True(c.L1.TryGetActive(W, out var entry));
         Assert.Equal([S1, S2], entry.Definition.Steps.Select(s => s.StepId));
         Assert.Equal(1, c.Scheduler.LiveJobCount);
     }
@@ -380,7 +387,11 @@ public sealed class StartStopIdempotencyTests
 
         Assert.Empty(c.L2.Keys());
         Assert.Empty(c.L2.Members(L2ProjectionKeys.ParentIndex()));
-        Assert.False(c.L1.TryGet(W, out _));
+
+        // L2 is empty and nothing is scheduled, which is what "where it started" means for the two
+        // things that outlive the process. L1 still holds the marked entry — it is a per-replica
+        // mirror with a grace period on it, and the reap loop is what returns it to empty.
+        Assert.False(c.L1.TryGetActive(W, out _));
         Assert.Equal(0, c.Scheduler.LiveJobCount);
         Assert.Equal(2, c.Scheduler.Scheduled.Count);
         Assert.Equal(2, c.Scheduler.Unscheduled.Count);

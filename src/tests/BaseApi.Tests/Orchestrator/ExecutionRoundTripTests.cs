@@ -404,19 +404,57 @@ public sealed class ExecutionRoundTripTests
         Assert.Equal(2, h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Count());
     }
 
+    // ------------------------------------------------- draining a run whose workflow was stopped
+
+    [Fact]
+    public async Task AnOutcomeForAWorkflowStoppedMidRunStillAdvancesInsteadOfParking()
+    {
+        // THE POINT OF THE WHOLE MARK. Before it, a stop tore the workflow out of L1 and every step
+        // still on the wire came back here to find nothing — one parked message and one leaked blob
+        // per in-flight step, on a queue shared by the entire deployment. Six such outcomes were found
+        // dead-lettered on the live stack. The definition now survives the stop for a grace period,
+        // and this asserts that the run gets to finish rather than being cut off mid-graph.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
+        Seed(h, Entry, Output);
+
+        // Stopped, but not yet reaped: exactly the state ApplyStopHandler leaves behind.
+        h.Store.MarkDeleted(W, DateTimeOffset.UnixEpoch);
+        Assert.False(h.Store.TryGetActive(W, out _));
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+        await h.Drain();
+
+        // The successor was dispatched with its own payload and its own copy of A's bytes — the same
+        // outcome an unstopped workflow would produce. Nothing about the hand-off is degraded by the
+        // stop; the stop only means no NEW run starts, and that is the fire job's business, not this
+        // handler's.
+        var sent = h.Bus.Sent.Single(s => s.Type == MessageTypes.ProcessDispatch);
+        var dispatch = (ProcessDispatch)sent.Body;
+
+        Assert.Equal(B, dispatch.StepId);
+        Assert.Equal(Output, h.L2.Value(L2ProjectionKeys.ExecutionData(dispatch.EntryId)));
+
+        // And the source blob was still reclaimed. A drained run that leaked its blobs would trade the
+        // parked message for a permanent leak, which is not a fix.
+        Assert.False(await h.L2.Db.KeyExistsAsync(L2ProjectionKeys.ExecutionData(Entry)));
+    }
+
     // ------------------------------------------------- reclaim on every disposition that ends here
 
     [Fact]
     public async Task AnOutcomeForAWorkflowThisReplicaNoLongerHoldsIsParkedWithItsBlobReclaimed()
     {
-        // The commonest way to reach this: the workflow was stopped while its steps were in flight,
-        // so ApplyStopHandler removed it from L1 and every outcome still on the wire lands here. A
-        // park is a nack with requeue:false -- the message leaves for the dead-letter exchange and
-        // never returns -- so without the reclaim this leaks one blob per in-flight step, forever.
+        // This used to be the commonest way to reach the park: a stop removed the workflow from L1 and
+        // every outcome still on the wire landed here. A stop now marks instead, so an outcome that
+        // arrives during the grace period resolves — and the way to actually reach the park is to
+        // outlast it, which is what the reap below stands for. A park is a nack with requeue:false
+        // (the message leaves for the dead-letter exchange and never returns), so without the reclaim
+        // this leaks one blob per in-flight step, forever.
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
         Seed(h, Entry, Output);
 
-        h.Store.Remove(W);
+        h.Store.MarkDeleted(W, DateTimeOffset.UnixEpoch);
+        h.Store.ReapDeletedBefore(DateTimeOffset.UnixEpoch);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
