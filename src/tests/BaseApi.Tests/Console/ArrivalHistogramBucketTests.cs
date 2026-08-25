@@ -116,4 +116,29 @@ public sealed class ArrivalHistogramBucketTests
         // skew is a real number. A ladder resolving 1ms would invite reading noise as a latency.
         Assert.True(IngressMetrics.ArrivalSecondsBoundaries()[0] >= 0.01);
     }
+
+    [Fact]
+    public void TheArrivalLadderResolvesTheHopLatencyThisSystemActuallyHas()
+    {
+        // Measured 2026-08-25: queue wait means sit at 11-14ms on every hop, which put 51% of all
+        // samples in a single (10, 25] rung. A quantile drawn from a rung holding half the mass is
+        // arithmetic between its two edges, not a measurement -- p95 read 24.4ms because 25 is a
+        // boundary, not because anything took 24.4ms.
+        var bounds = IngressMetrics.ArrivalSecondsBoundaries();
+
+        Assert.Contains(bounds, b => b > 0.01 && b < 0.025);
+    }
+
+    [Fact]
+    public void TheArrivalLadderResolvesAStepAndItsTail()
+    {
+        // Step elapsed means sit near 40ms, and its tail runs to 76ms. Without a rung inside either
+        // span, 90% of samples landed in (25, 50] and the tail in (50, 100] -- so p95/p99 reported
+        // 86 and 97ms against a measured 54 and 62. Both spans need a rung, not just the tail: the
+        // body of the distribution is as unresolved as its edge.
+        var bounds = IngressMetrics.ArrivalSecondsBoundaries();
+
+        Assert.Contains(bounds, b => b > 0.025 && b < 0.05);
+        Assert.Contains(bounds, b => b > 0.05 && b < 0.1);
+    }
 }

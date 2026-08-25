@@ -59,9 +59,26 @@ internal static class IngressMetrics
     /// a real number. A ladder resolving 1ms would invite someone to read a figure that is noise.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// <b>Six rungs were added on 2026-08-25, all of them ABOVE the 10ms floor.</b> The floor is the
+    /// honesty limit the paragraph above states and it has not moved; what changed is that the rungs
+    /// resting on it were wider than the system they measure, so the quantiles they fed were
+    /// arithmetic between two edges rather than measurements.
+    /// <list type="bullet">
+    /// <item><description><c>0.015</c>, <c>0.02</c> — queue-wait means sit at 11-14ms on every hop,
+    /// which put <b>51%</b> of samples in one <c>(10, 25]</c> rung and pinned p95 at 24.4ms because
+    /// 25 is a boundary.</description></item>
+    /// <item><description><c>0.03</c>, <c>0.04</c>, <c>0.06</c>, <c>0.075</c> — step elapsed means
+    /// ~40ms with a tail to 76ms, which put <b>90%</b> of samples in <c>(25, 50]</c> and the tail in
+    /// <c>(50, 100]</c>. The panel reported p95 86ms and p99 97ms against 54ms and 62ms measured
+    /// from the orchestrator's own logs over the same window.</description></item>
+    /// </list>
+    /// <b>Expect every quantile panel fed by these two instruments to drop when this ships.</b> That
+    /// is the interpolation being removed, not the pipeline getting faster.
+    /// </remarks>
     public static double[] ArrivalSecondsBoundaries() =>
     [
-        0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
+        0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05, 0.06, 0.075, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
     ];
 
     /// <summary>

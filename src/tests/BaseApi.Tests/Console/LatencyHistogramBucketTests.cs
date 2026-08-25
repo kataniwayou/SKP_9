@@ -109,6 +109,33 @@ public sealed class LatencyHistogramBucketTests
     }
 
     [Fact]
+    public void TheLatencyLadderResolvesTheConfirmRoundTripThisSystemActuallyHas()
+    {
+        // Measured 2026-08-25: produce duration means 10.8ms and process duration 12.3ms, which put
+        // 55% and 64% of their samples in a single (10, 25] rung. Both are Stopwatch measurements
+        // taken inside one process, so unlike the arrival ladder there is no clock-skew argument
+        // against resolving them -- the rung was simply wider than the thing being measured.
+        var bounds = EgressMeter.LatencySecondsBoundaries();
+
+        Assert.Contains(bounds, b => b > 0.01 && b < 0.025);
+    }
+
+    [Fact]
+    public void TheLatencyLadderResolvesAHealthyGateProbe()
+    {
+        // The gate probe is the starkest case on the stack: a healthy probe answers in ~0.44ms and
+        // 96.9% of them landed in the ladder's FIRST rung, (0, 1]. The instrument was added to stop
+        // the store reading as two states, working and gone -- and with no rung inside the healthy
+        // range it reproduced exactly that, one level down. Two boundaries below a millisecond give
+        // the healthy range three rungs to live in.
+        var bounds = EgressMeter.LatencySecondsBoundaries();
+
+        Assert.True(
+            bounds.Count(b => b < 0.001) >= 2,
+            $"only {bounds.Count(b => b < 0.001)} boundaries below 1ms; a healthy probe is unresolved");
+    }
+
+    [Fact]
     public void TheBoundariesAreNotSharedMutableState()
     {
         // ExplicitBucketHistogramConfiguration.Boundaries takes double[], so handing every caller the
