@@ -15,4 +15,4 @@ namespace Messaging.Contracts;
 /// </para>
 /// </summary>
 /// <param name="WorkflowId">The workflow whose projection is to be removed.</param>
-public sealed record StopOrchestration(Guid WorkflowId);
+public sealed record StopOrchestration(Guid WorkflowId) : IWorkflowScopedMessage;

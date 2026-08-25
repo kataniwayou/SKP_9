@@ -52,7 +52,7 @@ public sealed class QueueFanoutPublisher : IQueueFanoutPublisher, IAsyncDisposab
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(body, MessagingJson.Options);
 
-        var properties = QueueSender.BuildProperties(type, replyTo: null, correlationId: null);
+        var properties = QueueSender.BuildProperties(type, replyTo: null, correlationId: null, body);
 
         try
         {

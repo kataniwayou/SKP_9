@@ -62,7 +62,7 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(body, MessagingJson.Options);
 
-        var properties = BuildProperties(type, replyTo, correlationId);
+        var properties = BuildProperties(type, replyTo, correlationId, body);
 
         // The gate wait is inside the measured window: sends serialise behind one channel, so
         // queueing behind another send is latency this caller genuinely waited out.
@@ -112,7 +112,14 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
     /// one that was never asked for.
     /// </para>
     /// </summary>
-    internal static BasicProperties BuildProperties(string type, string? replyTo, string? correlationId)
+    /// <remarks>
+    /// <b>The body is a required parameter, not an overload, and that is deliberate.</b> The ids it
+    /// carries are stamped as headers here — see <see cref="MessageIdHeaders"/> — and a three-argument
+    /// version that quietly stamped nothing would be the easy call to reach for. Making every caller
+    /// name the body means a new sender cannot omit them without deciding to.
+    /// </remarks>
+    internal static BasicProperties BuildProperties<T>(
+        string type, string? replyTo, string? correlationId, T body)
     {
         var properties = new BasicProperties
         {
@@ -149,6 +156,12 @@ public sealed class QueueSender : IQueueSender, IAsyncDisposable
         {
             properties.CorrelationId = correlationId;
         }
+
+        // The execution ids, for anything holding the delivery rather than the deserialized body --
+        // the consumer's catch block above all, which is where a park is logged and where the
+        // handler's own log scope has already been disposed by the unwinding exception. Stamps
+        // nothing for a payload that carries no ids, so queries and replies are unaffected.
+        MessageIdHeaders.Stamp(properties.Headers!, body);
 
         return properties;
     }

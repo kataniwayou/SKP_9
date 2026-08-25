@@ -31,7 +31,7 @@ public sealed record ProcessDispatch(
     Guid StepId,
     Guid ProcessorId,
     string Payload,
-    Guid EntryId);
+    Guid EntryId) : IExecutionMessage;
 
 /// <summary>
 /// Processor to itself: one branch of output, ready to be validated, persisted and reported.
@@ -64,7 +64,7 @@ public sealed record ProcessedData(
     Guid StepId,
     Guid ProcessorId,
     Guid EntryId,
-    byte[] Data);
+    byte[] Data) : IExecutionMessage;
 
 /// <summary>
 /// Processor to orchestrator: how one step ended. One message for all three terminals, discriminated
@@ -100,4 +100,4 @@ public sealed record StepOutcome(
     Guid StepId,
     Guid ProcessorId,
     Guid EntryId,
-    StepResult Result);
+    StepResult Result) : IExecutionMessage;
