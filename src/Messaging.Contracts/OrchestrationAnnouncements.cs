@@ -15,7 +15,7 @@ namespace Messaging.Contracts;
 /// else.
 /// </para>
 /// </summary>
-public sealed record OrchestrationStarted(Guid WorkflowId);
+public sealed record OrchestrationStarted(Guid WorkflowId) : IWorkflowScopedMessage;
 
 /// <summary>
 /// L2 no longer holds this workflow. Published once the API's clean has committed.
@@ -24,4 +24,4 @@ public sealed record OrchestrationStarted(Guid WorkflowId);
 /// responsible for the removal itself.
 /// </para>
 /// </summary>
-public sealed record OrchestrationStopped(Guid WorkflowId);
+public sealed record OrchestrationStopped(Guid WorkflowId) : IWorkflowScopedMessage;

@@ -35,4 +35,4 @@ public sealed record NextStepHandoff(
     Guid ProcessorId,
     string Payload,
     Guid EntryId,
-    byte[] Data);
+    byte[] Data) : IExecutionMessage;
