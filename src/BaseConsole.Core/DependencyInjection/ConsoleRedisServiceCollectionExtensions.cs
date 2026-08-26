@@ -106,8 +106,13 @@ public static class ConsoleRedisServiceCollectionExtensions
         // loop's beat refresh the stamp for both and a dead loop stays invisible. There is no unkeyed
         // registration anywhere in this stack, so a plain AddHostedService<L2GateProbe>() would build
         // a service graph that fails to resolve at startup.
+        // Wrapped, so this loop gets both signals from one registration: the stamp the liveness
+        // check below reads, and pipeline.loop.iterations, whose rate is the only one of the two
+        // a board can draw. Registering a heartbeat without the wrapper is now the visible
+        // omission -- see CountingLoopHeartbeat.
         services.AddKeyedSingleton<ILoopHeartbeat>(
-            GateLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
+            GateLoop, (sp, _) => new CountingLoopHeartbeat(
+                new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()), GateLoop));
         services.AddHostedService(sp => ActivatorUtilities.CreateInstance<L2GateProbe>(
             sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(GateLoop)));
 
