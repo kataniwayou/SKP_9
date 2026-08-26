@@ -284,9 +284,8 @@ def recent(series, window="$__range"):
     """A fault counter read as growth over a window -- correct at series birth AND
     correct across a process restart, and NOT sticky for the life of the process.
 
-    Supersedes `counted()`, which is kept below only because the alert rules in
-    k8s/02-configmaps.yaml still carry that shape and this file is the place the
-    difference is written down.
+    Supersedes `counted()`, which is now deleted along with the alert rules that were
+    its only remaining reason to exist. The measurement that condemned it is kept below.
 
     Two things break a naive count of a rare fault, and this form is the smallest one
     that survives both:
@@ -328,46 +327,56 @@ def recent(series, window="$__range"):
     return f"(({grew}) > ({born})) or ({born})"
 
 
-def counted(series, window="$__range"):
-    """SUPERSEDED by recent(). Retained as documentation of the alert rules' shape.
+def seeded(expr, carrier, tag_sets):
+    """Union `expr` with zero-valued series carrying `tag_sets`, so a dimension that has
+    no samples still renders a line at 0 instead of vanishing from the legend.
 
-    Nothing in this file calls it. The five rules in k8s/02-configmaps.yaml still carry
-    this form, and changing them is a Prometheus config edit -- which discards the whole
-    TSDB on restart -- so the divergence is recorded here rather than papered over. Both
-    forms catch a first-ever fault; only `recent()` stops reporting one that is over.
+    WHY A PANEL NEEDS THIS. These are .NET counters, created on first increment, so a
+    disposition that has not occurred has no series at all -- and a legend that lists
+    `acked` alone is indistinguishable from one where `requeued` and `parked` exist and
+    are flat at zero. The first is a healthy pipeline; the second is the same pipeline
+    with the two failure paths visibly quiet. An operator cannot tell them apart, which
+    is the same class of defect as the `_ratio` suffix that rendered a confident green 0.
 
-    Original note follows.
+    THE LABEL SETS MUST MATCH EXACTLY OR THE SEED DOUBLES THE SERIES. PromQL's `or`
+    keeps every series on the left and adds only those on the right whose label set
+    matches nothing on the left. So a seed carrying {queue,disposition} against a real
+    series carrying {queue,disposition,reason} does not dedupe -- both render, and the
+    panel grows a permanent zero line beside every live one. Every caller here passes
+    the full grouping key, and for consumer paths that means the exact
+    (disposition, reason) pairs GatedQueueConsumer actually emits, not their cross
+    product: `acked/refused` is not a state this consumer can reach.
 
-    A fault counter read as a count over the range, correct at series birth.
+    Seeds are appended after the real expression, so `or` resolves in the right
+    direction: real data wins, the seed only fills a hole.
 
-    Fault counters here have no series at all in health -- the .NET counter is created on
-    first increment -- so the first burst of a given fault type appears as a series whose
-    very first exported sample is already non-zero. `increase()` measures growth WITHIN
-    the window and therefore reports 0 for exactly that case: the first time a fault ever
-    happens, which is the case the verdict tier exists to catch.
+    THE SEED IS DERIVED FROM THE METRIC, NEVER WRITTEN AS A LITERAL, and that is what
+    `carrier` is for. The obvious form is `label_replace(vector(0), "queue",
+    "processor-$processorId", ...)`, and it breaks the moment the reader picks All: the
+    variable interpolates to `.*`, and the panel grows a legend entry for a queue
+    literally named `processor-.*`. `carrier` is instead a `group by (...)` over the same
+    instrument across `$__range`, so it yields one label-free-valued series per REAL
+    label value; the label_replace calls then add the enumerable dimension on top, and
+    `* 0` flattens it. No variable is ever spelled into a label value.
 
-    Measured at the OLD 60s export cadence, which is when this shape was chosen: the
-    broker scenario produced two transient publishes and one parked delivery.
-    `sum(increase(...))` read 0 for all three for the rest of the run, while the
-    rate-based stats these replace read 0.00 for the same reason plus the 240s rate
-    window that cadence forced. This form -- the larger of the in-window growth and the
-    absolute total -- read 2 and 1. The cadence is 10s now and the rate window 60s, which
-    narrows the second half of that argument but not the first: the series-birth problem
-    is a property of the .NET counter, not of the window, so this form is still required.
-
-    The alert rules in k8s/02-configmaps.yaml carry the same shape for the same reason --
-    see EgressFaults there, which shipped as bare `increase()` and could not have caught
-    a first-ever fault.
-
-    Consequence worth knowing: once a fault series exists it is exported for the life of
-    the process, so this stat stays non-zero until the replica restarts. That is why the
-    stats using it are thresholded warn-at-one rather than red: a fault that happened
-    twenty minutes ago should not vanish from the verdict tier, but it should not read as
-    an outage in progress either.
+    `group by` rather than `sum by`: the value is discarded by `* 0` anyway, and `group`
+    says so.
     """
-    grew = f"sum(increase({series}[{window}])) or vector(0)"
-    total = f"sum(max_over_time({series}[{window}])) or vector(0)"
-    return f"(({grew}) > ({total})) or ({total})"
+    # No seeds means no change at all, not a redundant paren wrap. Every caller that does
+    # not opt in must produce a byte-identical expression to the one it produced before
+    # this helper existed -- otherwise adding a seed to ONE board rewrites the queries on
+    # every other one, which is exactly the blast radius this parameterisation exists to
+    # avoid.
+    if not tag_sets:
+        return expr
+
+    parts = [f"({expr})"]
+    for tags in tag_sets:
+        v = carrier
+        for key, value in tags.items():
+            v = f'label_replace({v}, "{key}", "{value}", "", "")'
+        parts.append(f"({v} * 0)")
+    return " or ".join(parts)
 
 
 class Layout:
@@ -848,8 +857,25 @@ WORKER_F = ('service_name=~"$service_name",service_version=~"$service_version",'
             'service_instance_id=~"$service_instance_id"')
 
 
-def verdict_shared(layout, f):
+def verdict_shared(layout, f, window=VERDICT_WINDOW):
     """The three verdict stats both worker roles carry.
+
+    `window` is the fault-counter lookback, defaulting to the module constant. It reaches
+    the title through the same parameter and is never written as a literal -- a title
+    reading `(5m)` over a query reading `[15m]` is a lie waiting to happen.
+
+    IT CANNOT BECOME `$__range`, AND THAT IS THE WHOLE REASON THIS TIER EXISTS. Its job
+    is "is it broken RIGHT NOW"; the Since tier below already reads the same instruments
+    over the dashboard range. Point both at `$__range` and the two rows become the same
+    four panels twice -- which is the defect the split was introduced to fix, measured:
+    the worker boards once had one row doing both jobs and the sticky half won, so every
+    fault counter read non-zero on a healthy stack. A verdict row that warns at rest
+    trains an operator to ignore the colour, which costs more than the stale fact is
+    worth. See recent() for the numbers.
+
+    A dashboard variable was tried here and removed. It let the reader widen "now" but
+    added a control to every board for a number nobody had wanted to change, and a
+    verdict window is a design decision rather than a view preference.
 
     Deliberately NOT filtered by $role even on the orchestrator: this tier answers
     "is anything wrong anywhere", and a role filter here would let a follower fault
@@ -874,11 +900,11 @@ def verdict_shared(layout, f):
              desc="The single best answer to 'why did the pipeline stop'. 0 means "
                   "the gate is shut and deliveries are being requeued.",
              thresholds=T_POSTURE, decimals=0),
-        stat(layout, "Not acked (5m)",
+        stat(layout, f"Not acked ({window})",
              [recent(f'pipeline_messages_consumed_total{{{f},'
-                     f'disposition=~"requeued|parked"}}', VERDICT_WINDOW)],
+                     f'disposition=~"requeued|parked"}}', window)],
              desc="Deliveries the consumer refused or sent back **in the last "
-                  + VERDICT_WINDOW + "**. Drill into 'reason' on the pipeline tier for "
+                  + window + "**. Drill into 'reason' on the pipeline tier for "
                   "why, and read the Since tier for the same count over the range."
                   + PARA +
                   "Counted rather than rated. Measured at the old 60s export cadence, when "
@@ -896,13 +922,13 @@ def verdict_shared(layout, f):
                   "landed: a park the broker was not told about is redelivered rather "
                   "than dead-lettered, so it never arrives there.",
              thresholds=T_WARN, decimals=0),
-        stat(layout, "Egress faults (5m)",
+        stat(layout, f"Egress faults ({window})",
              [recent(f'pipeline_messages_produced_total{{{f},'
-                     f'outcome=~"transient|unroutable|refused"}}', VERDICT_WINDOW)],
+                     f'outcome=~"transient|unroutable|refused"}}', window)],
              desc="unroutable = the queue is not declared. transient = the broker "
                   "is unreachable. Opposite remedies; this is the only signal that "
                   "separates them." + PARA +
-                  "Last " + VERDICT_WINDOW + " only. Scaling the broker to zero for sixty "
+                  "Last " + window + " only. Scaling the broker to zero for sixty "
                   "seconds produced exactly two transient publishes; as a rate they were "
                   "0.00 on every board and the only trace of them anywhere was a new "
                   "legend entry on the produced-by-outcome timeseries.",
@@ -910,8 +936,14 @@ def verdict_shared(layout, f):
     ]
 
 
-def since_shared(layout, f):
+def since_shared(layout, f, restarts=True):
     """The same fault counters over the visible range, for the Since tier.
+
+    `restarts` drops the JIT-reset restart stat for a caller that measures restarts
+    properly. It defaults to True so every other board is unchanged; the processor board
+    passes False, because `resets()` on the JIT counter CANNOT SEE a restart on this
+    deployment -- see RESTARTS below for the measurement -- and it carries
+    `pipeline.process.start.timestamp` instead, which moves exactly once per process.
 
     The verdict tier above answers "is it broken right now" and goes green again when a
     fault stops. That is what makes its colour worth reading -- and it is also how an
@@ -924,7 +956,7 @@ def since_shared(layout, f):
     both jobs, and the sticky half won: every one of these read non-zero on a healthy
     stack.
     """
-    return [
+    panels = [
         stat(layout, "Not acked",
              [recent(f'pipeline_messages_consumed_total{{{f},'
                      f'disposition=~"requeued|parked"}}')],
@@ -958,6 +990,12 @@ def since_shared(layout, f):
                   "queue and no probe measuring it.",
              thresholds=T_WARN, decimals=0,
              no_value="not probed"),
+    ]
+
+    if not restarts:
+        return panels
+
+    panels.append(
         stat(layout, "Process restarts",
              [f'sum({RESTARTS % f}) or vector(0)'],
              desc="Process starts across every replica of this service in the visible "
@@ -972,12 +1010,23 @@ def since_shared(layout, f):
                   "Until now this number appeared nowhere except the bottom of SKP "
                   "Runtime, below fifteen GC panels, and behind a collapsed row on the "
                   "boards an operator opens first.",
-             thresholds=T_WARN, decimals=0),
-    ]
+             thresholds=T_WARN, decimals=0))
+    return panels
 
 
-def pipeline_shared(layout, f, role_f=""):
+def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=False):
     """The five pipeline panels both worker roles carry.
+
+    `consumed_seed` is a list of label sets handed to seeded(), so a consumer path that
+    has not occurred still draws a flat zero instead of leaving the legend short.
+    `enumerate_names` does the same for the queue and destination dimensions, without a
+    list: the seed carrier already enumerates the real names across `$__range`, so a
+    queue that was quiet for the last rate window still keeps its legend entry.
+
+    Both default off -- every board that does not opt in is unchanged. Only the processor
+    board opts in, because only there is the set of dispositions a closed, enumerable
+    property of the code (GatedQueueConsumer records exactly six disposition/reason
+    pairs) rather than of whatever the workload happened to do.
 
     role_f is appended only on the orchestrator, where pipeline.messages.* and
     pipeline.produce.duration carry a `role` attribute. The processor emits no such
@@ -1003,9 +1052,12 @@ def pipeline_shared(layout, f, role_f=""):
                    desc="Egress. outcome != accepted is a fault.",
                    unit="reqps"),
         timeseries(layout, "Consumer paths",
-                   [(f'sum by (queue,disposition,reason) '
-                     f'(rate(pipeline_messages_consumed_total'
-                     f'{{{f}{rf}}}[$__rate_interval]))',
+                   [(seeded(f'sum by (queue,disposition,reason) '
+                            f'(rate(pipeline_messages_consumed_total'
+                            f'{{{f}{rf}}}[$__rate_interval]))',
+                            f'group by (queue) (last_over_time('
+                            f'pipeline_messages_consumed_total{{{f}{rf}}}[$__range]))',
+                            consumed_seed or []),
                      "{{queue}} / {{disposition}} / {{reason}}")],
                    desc="Ingress, split by which exit the delivery took. Exactly one "
                         "increment per delivery, on every exit path of the consumer."
@@ -1148,9 +1200,29 @@ def pipeline_shared(layout, f, role_f=""):
 RESTARTS = ('resets(process_runtime_dotnet_jit_methods_compiled_count_total'
             '{%s}[$__range])')
 
+# MEASURED 2026-08-26, AND IT IS WHY THE PROCESSOR BOARD NO LONGER CARRIES THIS.
+# `resets()` sees a counter go BACKWARDS on a series that survives. A rollout does not
+# produce one: the replacement pod carries a new `service_instance_id`, so the old
+# series ends and a new one is born rather than resetting. Checked minutes after a
+# deliberate `rollout restart` that replaced both processor replicas:
+#
+#   process_runtime_dotnet_jit_methods_compiled_count_total   16942, 16985   (alive)
+#   sum(resets(...[30m]))                                     0
+#   sum by (service_instance_id) (resets(...[30m]))           0, 0, 0, 0
+#
+# So on a deployment where restarts arrive as pod replacements -- which is every
+# restart this cluster has -- the panel is pinned to a confident zero. It can only ever
+# catch an in-place container restart inside a surviving pod. `pipeline.process.start.
+# timestamp` with `changes()` measures the fact directly and is what the processor board
+# uses; the other boards keep this one until they carry that instrument too.
 
-def causes_row(layout, f, w=12):
+
+def causes_row(layout, f, w=12, restarts=True):
     """Exception rate and process restarts, on the VISIBLE tier.
+
+    `restarts` drops the restart timeseries for a board that measures restarts with the
+    start-timestamp gauge instead. The remaining panel widens to fill the row rather than
+    leaving half of it empty.
 
     These two were in the collapsed Runtime row with the memory panels, and they do not
     belong with them: they are not "is the process why", they are events an operator
@@ -1169,7 +1241,7 @@ def causes_row(layout, f, w=12):
     now none of them could be checked without expanding a row titled as though it were
     about garbage collection.
     """
-    return [
+    panels = [
         timeseries(layout, "Exception rate",
                    [(f'sum by (service_instance_id) '
                      f'(rate(process_runtime_dotnet_exceptions_count_total{{{f}}}'
@@ -1178,8 +1250,14 @@ def causes_row(layout, f, w=12):
                         "faulted process outcomes. On the visible tier because a rising "
                         "exception rate is a cause an operator should not have to expand "
                         "a row to find.",
-                   unit="reqps", w=w, h=7,
+                   unit="reqps", w=w if restarts else 24, h=7,
                    no_value="no exceptions in range"),
+    ]
+
+    if not restarts:
+        return panels
+
+    panels.append(
         timeseries(layout, "Process restarts",
                    [(f'sum by (service_instance_id) '
                      f'(resets(process_runtime_dotnet_jit_methods_compiled_count_total'
@@ -1191,12 +1269,20 @@ def causes_row(layout, f, w=12):
                         "A spike here beside a jump on any of those means the number "
                         "there is a rollout artefact rather than lost work.",
                    w=w, h=7, decimals=0,
-                   no_value="no restarts in range"),
-    ]
+                   no_value="no restarts in range"))
+    return panels
 
 
-def depth_panels(layout, queue_filter, who):
+def depth_panels(layout, queue_filter, who, enumerate_names=False):
     """Queue depth and attached consumers, filtered BY QUEUE rather than by service.
+
+    `enumerate_names` keeps a queue's legend entry when it has gone quiet inside the
+    liveness window, by unioning the live max with a zero-valued series per queue seen
+    anywhere in `$__range`. Applied to DEPTH ONLY, never to attached consumers: the
+    probe reports a zero depth explicitly ("zero is a report, not a silence"), so a
+    seeded 0 there says the same thing the probe would, while on the consumer count a
+    seeded 0 would render an unprobed queue as a red "nothing is listening" -- which is
+    the exact fault that panel exists to report, manufactured out of an absence.
 
     Every other panel on the worker boards scopes itself with `service_name`, and that is exactly
     wrong here. On these two instruments `service_name` labels the process doing the PROBING, not
@@ -1209,7 +1295,11 @@ def depth_panels(layout, queue_filter, who):
     """
     return [
         timeseries(layout, "Queue depth by queue",
-                   [(f'max by (queue) ({live(f"pipeline_queue_depth{{{queue_filter}}}")})',
+                   [(seeded(
+                       f'max by (queue) ({live(f"pipeline_queue_depth{{{queue_filter}}}")})',
+                       f'group by (queue) (last_over_time('
+                       f'pipeline_queue_depth{{{queue_filter}}}[$__range]))',
+                       [{}] if enumerate_names else []),
                      "{{queue}}")],
                    desc="Messages waiting in each of " + who + ", right now." + PARA +
                         "**The only leading indicator on these boards.** Every verdict stat is "
@@ -1337,16 +1427,37 @@ def queue_wait_panel(layout, wait_f, dest_f, w=8, h=8):
                       no_value="no deliveries carrying a send timestamp in range")
 
 
-def runtime_row(layout, f):
-    """The two runtime panels that genuinely answer 'is the process why'.
+def runtime_row(layout, f, full=False):
+    """The runtime panels that answer 'is the process why'.
 
     Exception rate and process restarts used to be here and are on the visible tier now
-    -- see causes_row. What is left is the pair whose only use is explaining a symptom
-    you are already looking at. Heap by generation, fragmentation, allocation rate, JIT,
-    assemblies, timers and lock contention answer memory-and-perf questions instead, and
-    stay on the SKP Runtime board.
+    -- see causes_row.
+
+    `full` decides how much of the SKP Runtime board this row absorbs. Off, it is the
+    original pair whose only use is explaining a symptom you are already looking at.
+    On, it adds the six panels an operator would otherwise leave the board to find --
+    which is the point: SKP Runtime is going away, and a per-service board that sends
+    you elsewhere to answer "is it memory" has not answered the question.
+
+    ONLY SIX OF THE FIFTEEN, and the omissions are deliberate:
+
+    - `Process restarts in range` reads `resets()` on the JIT counter and CANNOT SEE a
+      restart on this deployment -- measured, see RESTARTS. It is not carried forward
+      anywhere; `Restarts` on the Since tier measures the fact directly.
+    - `Exception rate` is already on the visible tier via causes_row, and duplicating it
+      inside a collapsed row is how a board grows two panels with one title.
+    - `Pods reporting` is a fleet question, and every board here is scoped to one
+      service; `Replica fan-out` and `Identity ready by replica` answer it per replica.
+    - Heap fragmentation, live object bytes, thread-pool completion rate, loaded
+      assemblies, active timers and JIT methods/sec are diagnostics for a memory
+      investigation that is already underway. They belong in a profiler session, not in
+      the row an operator opens while a queue is backing up. If SKP Runtime is retired
+      they are worth keeping SOMEWHERE, and that is a separate decision from this one.
+
+    Paired left-to-right so the two halves of each question sit together: queue beside
+    threads, pause beside its cause, heap beside committed, allocation beside contention.
     """
-    return [
+    panels = [
         timeseries(layout, "Thread-pool queue length",
                    [(f'max by (service_instance_id) '
                      f'(process_runtime_dotnet_thread_pool_queue_length{{{f}}})',
@@ -1355,6 +1466,28 @@ def runtime_row(layout, f):
                         "consumer still reports consuming=1: callbacks are starved, "
                         "not blocked.",
                    w=12, h=7),
+    ]
+
+    if full:
+        panels.append(
+            timeseries(layout, "Thread-pool threads",
+                       [(f'max by (service_instance_id) '
+                         f'(process_runtime_dotnet_thread_pool_threads_count{{{f}}})',
+                         "{{service_instance_id}}")],
+                       desc="**Read beside the queue length to its left -- neither is "
+                            "conclusive alone.** A queue that is rising while this is "
+                            "FLAT is starvation: every thread is blocked and the pool is "
+                            "not injecting more. A queue rising while this CLIMBS is the "
+                            "pool injecting, and the ~1/s injection rate simply lagging "
+                            "the arrival rate -- which resolves itself and is not a "
+                            "fault." + PARA +
+                            "The distinction matters here because the consumer runs at "
+                            "PrefetchCount 1: one blocked callback is one replica doing "
+                            "nothing, and the broker will keep the queue rather than "
+                            "hand the work to its peer.",
+                       w=12, h=7))
+
+    panels.append(
         timeseries(layout, "GC pause time",
                    [(f'sum by (service_instance_id) '
                      f'(rate(process_runtime_dotnet_gc_duration_nanoseconds_total'
@@ -1362,8 +1495,80 @@ def runtime_row(layout, f):
                      "{{service_instance_id}}")],
                    desc="Seconds of GC pause per second. Explains duration p99 spikes "
                         "with no broker or dependency fault.",
-                   unit="s", w=12, h=7),
+                   unit="s", w=12, h=7))
+
+    if not full:
+        return panels
+
+    panels += [
+        timeseries(layout, "GC collections / sec by generation",
+                   [(f'sum by (service_instance_id, generation) '
+                     f'(rate(process_runtime_dotnet_gc_collections_count_total'
+                     f'{{{f}}}[$__rate_interval]))',
+                     "{{service_instance_id}} / {{generation}}")],
+                   desc="**The cause behind the pause time to its left.** Pause seconds "
+                        "answer *how much*, this answers *why*: gen0 is cheap and "
+                        "constant, and a gen2 rate that is anything but near-flat is the "
+                        "collection that actually costs you." + PARA +
+                        "Split by generation rather than summed, because a summed "
+                        "collection rate is dominated by gen0 and moves for reasons that "
+                        "never cost a millisecond.",
+                   unit="ops", w=12, h=7),
+        timeseries(layout, "GC heap size by generation",
+                   [(f'sum by (service_instance_id, generation) '
+                     f'(process_runtime_dotnet_gc_heap_size_bytes{{{f}}})',
+                     "{{service_instance_id}} / {{generation}}")],
+                   desc="Managed heap, by generation. **The leak signal**: a gen2 or LOH "
+                        "line that steps up and never comes back down across several "
+                        "collections is retention, and it ends in an OOMKill that every "
+                        "pipeline panel will report as a restart with no cause." + PARA +
+                        "By generation rather than a single total, because a rising "
+                        "total is normal between collections and says nothing; a rising "
+                        "gen2 FLOOR is the part that does not come back.",
+                   unit="bytes", w=12, h=7),
+        timeseries(layout, "GC committed memory",
+                   [(f'sum by (service_instance_id) '
+                     f'(process_runtime_dotnet_gc_committed_memory_size_bytes{{{f}}})',
+                     "{{service_instance_id}}")],
+                   desc="What the GC has committed from the OS -- **the number the "
+                        "container limit is compared against**, not the managed heap "
+                        "beside it. The two diverge, and the gap is why a pod can be "
+                        "OOMKilled while its heap looks healthy: committed memory is "
+                        "returned to the OS lazily, so it tracks the high-water mark "
+                        "rather than the live set." + PARA +
+                        "Read this against the pod's memory limit; read the heap panel "
+                        "for whether the growth is real retention.",
+                   unit="bytes", w=12, h=7),
+        timeseries(layout, "Allocation rate",
+                   [(f'sum by (service_instance_id) '
+                     f'(rate(process_runtime_dotnet_gc_allocations_size_bytes_total'
+                     f'{{{f}}}[$__rate_interval]))',
+                     "{{service_instance_id}}")],
+                   desc="Bytes allocated per second -- **upstream of every other panel "
+                        "in this row.** Collections, pause time and committed memory are "
+                        "all consequences of this number; it is the one that moves first "
+                        "when a transform starts allocating per message." + PARA +
+                        "Expect it to track the consumed rate. Allocation climbing while "
+                        "`Consumer paths` stays flat means the cost per message grew, "
+                        "which is a code change rather than a load change.",
+                   unit="Bps", w=12, h=7),
+        timeseries(layout, "Lock contention rate",
+                   [(f'sum by (service_instance_id) '
+                     f'(rate(process_runtime_dotnet_monitor_lock_contention_count_total'
+                     f'{{{f}}}[$__rate_interval]))',
+                     "{{service_instance_id}}")],
+                   desc="Monitor contentions per second: threads that had to WAIT for a "
+                        "lock rather than take it. **The stall with no external cause** "
+                        "-- gate open, broker healthy, store fast, and throughput down "
+                        "anyway." + PARA +
+                        "It earns a place on a processor board specifically because the "
+                        "concrete processor is a SINGLETON with per-dispatch state in "
+                        "plain fields, safe only because prefetch is 1. Contention here "
+                        "is the first sign that an author's transform introduced sharing "
+                        "the seam's design does not expect.",
+                   unit="ops", w=12, h=7),
     ]
+    return panels
 
 
 # ---------------------------------------------------------------------------
@@ -2071,7 +2276,51 @@ def build_baseapi():
 # board 3 -- orchestrator
 # ---------------------------------------------------------------------------
 
+# The six disposition/reason pairs GatedQueueConsumer can record, and no others: the cross
+# product would invent `acked/refused`, which no path produces. Seeding these keeps
+# `requeued` and `parked` on the legend at zero, so a healthy pipeline is visibly a
+# pipeline whose failure paths are quiet rather than one whose failure paths are
+# unmeasured. Module scope because BOTH worker boards run the same consumer.
+CONSUMER_PATHS = [
+    {"disposition": "acked",    "reason": "handled"},
+    {"disposition": "parked",   "reason": "refused"},
+    {"disposition": "requeued", "reason": "gate_closed"},
+    {"disposition": "requeued", "reason": "store_unreachable"},
+    {"disposition": "requeued", "reason": "send_failed"},
+    {"disposition": "requeued", "reason": "escaped"},
+]
+DISPOSITIONS = [{"disposition": d} for d in ("acked", "requeued", "parked")]
+
+
 def build_orchestrator():
+    """The processor board's structure, on the orchestrator's instruments.
+
+    DELIBERATELY THE SAME PANELS, IN THE SAME ORDER, UNDER THE SAME TITLES. The two hosts
+    run the same consumer, the same gate, the same probes and the same loops; a reader who
+    has learned one board should not have to learn the other. Every shared panel comes from
+    the same helper, so the pair cannot drift.
+
+    Two substitutions and nothing else:
+
+    - `pipeline.identity.ready` does not exist here -- a control-plane replica has no
+      identity row to resolve -- so `pipeline.leader` takes both of its slots, the Verdict
+      stat and the per-replica timeline.
+    - The `role` filter reaches the five instruments that carry the ambient tag and
+      nothing else. A `role=~"leader"` matcher does not match a series with no `role`
+      label, so applying it board-wide would empty every gauge and broker-side level.
+
+    `Hydration admitted` and `Hydration admitted by replica` are the board's only
+    ADDITIONS to the mirrored set, and they are additions rather than substitutions:
+    `pipeline.hydration.admitted` exists on no other host, so without them it would be the
+    one live instrument in the stack with no panel anywhere.
+
+    Panels this board used to carry and no longer does: `Leaders elected` (folded into the
+    `Leader` stat), `Dispatch by
+    destination` and `Consumed by role` (slices of `Produced by type and outcome` and
+    `Messages consumed by disposition`), the `What the Role filter reaches` text panel (its
+    content is the `role` variable's description now), and the JIT-reset `Process restarts`
+    pair -- see RESTARTS for why that one can measure nothing on this deployment.
+    """
     lay = Layout()
     f = WORKER_F
     rf = ',role=~"$role"'
@@ -2079,109 +2328,127 @@ def build_orchestrator():
 
     panels.append(row(lay, "1 - Verdict: is the orchestrator broken?"))
     v = verdict_shared(lay, f)
-    # v[:1] is the posture half (L2 gate) and v[1:] the fault counters. It was v[:2] /
-    # v[2:] while `Consuming` led the list; that stat is gone with its instrument.
     panels += v[:1]
     panels += [
+        stat(lay, "Leader",
+             [f'count({live(f"pipeline_leader_ratio{{{f}}}")} == 1) or vector(0)'],
+             desc="Measures how many replicas hold the lease. Must be exactly 1: 0 means "
+                  "nobody is firing schedules, 2 means a split." + PARA +
+                  "**A follower reading 0 is not a fault**, which is why this COUNTS "
+                  "leaders rather than taking a minimum the way `Identity ready` does on "
+                  "the processor board. Leadership fences cron fires only; followers are "
+                  "expected to consume normally." + PARA +
+                  "Do not read a DEPARTURE off this. A leader releases its lease on "
+                  "graceful shutdown and the SDK flushes that export, so it genuinely "
+                  "reaches 0; a replica killed outright leaves it held at 1.",
+             thresholds=T_EXACTLY_ONE, decimals=0),
         stat(lay, "Hydration admitted",
              [f'min({live(f"pipeline_hydration_admitted_ratio{{{f}}}")}) or vector(0)'],
-             desc="One-shot readiness. Separates 'not consuming because the store is "
-                  "down' from 'not consuming because the first hydration pass has not "
-                  "finished'.",
+             desc="Measures `pipeline.hydration.admitted`, minimum across replicas. 1 "
+                  "once every replica's first hydration pass has finished and "
+                  "consumption was admitted." + PARA +
+                  "**One-shot, and the only thing that separates two states which look "
+                  "identical from outside the process**: not consuming because the store "
+                  "is down, and not consuming because hydration has not finished yet. "
+                  "`Gate open` answers the first; this answers the second.",
              thresholds=T_POSTURE, decimals=0),
-        stat(lay, "Leaders elected",
-             [f'count({live(f"pipeline_leader_ratio{{{f}}}")} == 1) or vector(0)'],
-             desc="Must be exactly 1. Followers reading 0 is by design and is NOT a "
-                  "fault -- StepOutcomeHandler is deliberately not leader-gated, so a "
-                  "follower is still expected to consume. Zero means nobody holds the "
-                  "lease; two means a split." + PARA +
-                  "This one stat did fall when all three replicas were deleted, and it "
-                  "is worth knowing why it was able to: a leader releases its lease on "
-                  "graceful shutdown and the SDK flushes that final export, so the gauge "
-                  "genuinely reached 0. A replica killed outright leaves it held at 1. "
-                  "Do not read a departure off this panel -- read it off Workers missing "
-                  "on SKP Flow.",
-             thresholds=T_EXACTLY_ONE, decimals=0),
     ]
     panels += v[1:]
 
     lay.newline()
     panels.append(row(lay, "2 - Since: what has already happened?"))
-    panels += since_shared(lay, f)
-
-    panels.append(row(lay, "3 - Pipeline: what is broken?"))
-    panels += pipeline_shared(lay, f, role_f=rf)
+    panels += since_shared(lay, f, restarts=False)
     panels += [
-        statetimeline(lay, "Leader by replica",
-                   [(f'{live(f"pipeline_leader_ratio{{{f}}}")}',
-                     "{{service_instance_id}}")],
-                   desc="Which replica holds the lease, and when it changed hands. "
-                        "Explains why cron fires land on one replica; only cron fires "
-                        "are fenced by leadership." + PARA +
-                        "**One row per replica, because as overlaid lines this panel "
-                        "could not answer its own title.** Three replicas at 0/1 on one "
-                        "axis drew a single filled band with slivers in it -- the "
-                        "handovers were visible, whose they were was not.",
-                   mappings=M_LEADER),
-        statetimeline(lay, "Hydration admitted by replica",
-                   [(f'{live(f"pipeline_hydration_admitted_ratio{{{f}}}")}',
-                     "{{service_instance_id}}")],
-                   desc="One-shot readiness per replica. A row that never turns green is "
-                        "a replica whose first hydration pass has not finished; a row "
-                        "that ends is a replica that left.",
-                   mappings=M_ADMITTED),
-        timeseries(lay, "Dispatch by destination",
-                   [(f'sum by (destination) (rate(pipeline_messages_produced_total'
-                     f'{{{f},type="process-dispatch",destination=~"processor-$processor"}}'
-                     f'[$__rate_interval]))', "{{destination}}")],
-                   desc="Per-processor fan-out from this side of the hop.",
-                   unit="reqps"),
-        timeseries(lay, "Consumed by role",
-                   [(f'sum by (role,type) (rate(pipeline_messages_consumed_total'
-                     f'{{{f}{rf}}}[$__rate_interval]))', "{{role}} / {{type}}")],
-                   desc="The role attribute records what this replica was AT THE TIME "
-                        "it handled the delivery, so a replica carries both values "
-                        "across a leadership change. It is not a replica selector -- "
-                        "service_instance_id is.",
-                   unit="reqps"),
-        *depth_panels(lay, 'queue=~"orchestrator-.*"', "the orchestrator's queues"),
-        # The produce side is filtered by DESTINATION, not by service: the orchestrator's
-        # queues are published to by the processors and the API, so this board's own
-        # service filter would select the wrong half of the subtraction.
-        queue_wait_panel(lay, f, 'destination=~"orchestrator-.*"'),
-        textpanel(lay, "What the Role filter reaches",
-                  "`role` is an attribute on **three instruments only**: "
-                  "`pipeline.messages.produced`, `pipeline.messages.consumed` and "
-                  "`pipeline.produce.duration`. Verified against the live stack.\n\n"
-                  "The gauges (`gate.open`, `leader`, `hydration.admitted`, "
-                  "`identity.ready`) and the broker-side levels (`queue.depth`, "
-                  "`queue.consumers`, `deadletter.depth`) carry **no** `role`, so the "
-                  "filter is applied only to the panels that can honour it. Applying it "
-                  "board-wide would empty the rest, because a `role=~\"leader\"` "
-                  "matcher does not match a series that has no `role` label.\n\n"
-                  "`Queue wait by queue` is the one panel deliberately left unfiltered on "
-                  "both halves. The wait it corrects for is stamped by the SENDER, which "
-                  "is a different service on the other side of the hop and carries no "
-                  "role of this board's, so a role selection there would subtract a term "
-                  "measured over a population the filter cannot reach.\n\n"
-                  "The verdict tier is deliberately left unfiltered as well: it answers "
-                  "*is anything wrong anywhere*, and a role selection there would let a "
-                  "follower fault hide behind a leader view.",
-                  w=8, h=8),
+        stat(lay, "Restarts",
+             [f'max(changes(pipeline_process_start_timestamp_seconds{{{f}}}[$__range])) '
+              f'or vector(0)'],
+             desc="",
+             thresholds=T_WARN, decimals=0),
     ]
 
-    panels += causes_row(lay, f)
+    panels.append(row(lay, "3 - Pipeline: what is broken?"))
+    panels += pipeline_shared(lay, f, role_f=rf, consumed_seed=CONSUMER_PATHS,
+                              enumerate_names=True)
+    panels += [
+        timeseries(lay, "L2 gate and trips by replica",
+                   [(f'{live(f"pipeline_gate_open_ratio{{{f}}}")}',
+                     "gate {{service_instance_id}}"),
+                    (f'increase(pipeline_gate_trips_total{{{f}}}[$__range])',
+                     "trips {{service_instance_id}}")],
+                   desc="", minv=0, decimals=0,
+                   no_value="no gate reporting -- this replica is not exporting at all"),
+        statetimeline(lay, "Leader by replica",
+                      [(f'{live(f"pipeline_leader_ratio{{{f}}}")}',
+                        "{{service_instance_id}}")],
+                      desc="", mappings=M_LEADER),
+        statetimeline(lay, "Hydration admitted by replica",
+                      [(f'{live(f"pipeline_hydration_admitted_ratio{{{f}}}")}',
+                        "{{service_instance_id}}")],
+                      desc="Measures `pipeline.hydration.admitted` per replica. One-shot: "
+                           "a row turns green once and stays there for the life of the "
+                           "process." + PARA +
+                           "A row that never turns green is a replica whose first "
+                           "hydration pass has not finished — it is up, and deliberately "
+                           "not consuming. A row that ENDS is a replica that left." + PARA +
+                           "Read beside `Loop iterations by loop`, where the matching "
+                           "`orchestrator-hydration` loop drops to zero at the same moment "
+                           "for the same reason: that loop retires once this turns green.",
+                      mappings=M_ADMITTED),
+        *depth_panels(lay, 'queue=~"orchestrator-.*"', "the orchestrator's queues",
+                      enumerate_names=True),
+        timeseries(lay, "Replica fan-out",
+                   [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
+                     f'{{{f},disposition="acked"}}[$__rate_interval])) '
+                     f'and on(service_instance_id) '
+                     f'present_over_time(pipeline_gate_open_ratio{{{f}}}[{LIVENESS}])',
+                     "{{service_instance_id}}")],
+                   desc="", unit="reqps"),
+    ]
+
+    panels += [
+        timeseries(lay, "Loop rate by loop",
+                   [(f'rate(pipeline_loop_iterations_total{{{f}}}[$__rate_interval])',
+                     "{{loop}} {{service_instance_id}}")],
+                   desc="", unit="reqps", decimals=3),
+        timeseries(lay, "Consumer duration by disposition",
+                   [(seeded(f'sum by (queue,disposition) '
+                            f'(rate(pipeline_consumer_duration_seconds_sum{{{f}}}'
+                            f'[$__rate_interval])) '
+                            f'/ sum by (queue,disposition) '
+                            f'(rate(pipeline_consumer_duration_seconds_count{{{f}}}'
+                            f'[$__rate_interval]))',
+                            f'group by (queue) (last_over_time('
+                            f'pipeline_consumer_duration_seconds_count{{{f}}}[$__range]))',
+                            DISPOSITIONS),
+                     "mean {{queue}} {{disposition}}")],
+                   desc="", unit="s"),
+        # The produce side is filtered by DESTINATION, not by this board's service filter:
+        # the orchestrator's queues are published to by the processors and the API, so a
+        # service filter would select the wrong half of the subtraction.
+        queue_wait_panel(lay, f, 'destination=~"orchestrator-.*"'),
+    ]
+
+    lay.newline()
+    panels += causes_row(lay, f, restarts=False)
 
     rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
-    rt["panels"] = runtime_row(lay, f)
+    rt["panels"] = runtime_row(lay, f, full=True)
     panels.append(rt)
+
+    # Titles aligned to the instruments. See ORCHESTRATOR_PANELS.
+    relabel(panels, ORCHESTRATOR_PANELS)
+
+    for title in grafana11_axis_fix(panels):
+        print(f"  grafana11 axis fix: dropped decimals on {title}")
 
     return dashboard(
         uid="skp-orchestrator",
         title="SKP Orchestrator",
-        description=("Orchestrator control plane -- 3 replicas across 5 queues. Five "
-                     "pipeline panels are shared with the processor board and generated "
-                     "from one source so the two cannot drift."),
+        description=("Orchestrator control plane -- 3 replicas across 5 queues. The panel "
+                     "set mirrors SKP Processor and is generated from the same helpers, "
+                     "with pipeline.leader standing in for pipeline.identity.ready, "
+                     "plus two panels for pipeline.hydration.admitted, which exists on no "
+                     "other host."),
         variables=[
             var_datasource(),
             var_constant("service_name", "orchestrator"),
@@ -2190,11 +2457,18 @@ def build_orchestrator():
             var_query("service_instance_id", "Replica",
                       'label_values(pipeline_gate_open_ratio{service_name="orchestrator"}, service_instance_id)'),
             var_custom("role", "Role", ["leader", "follower"],
-                       desc="Applies only to the produced / consumed / produce-duration "
-                            "panels -- the three instruments that carry a role "
-                            "attribute. See the note panel on the pipeline tier."),
-            var_query("processor", "Processor",
-                      'label_values(pipeline_messages_produced_total{service_name="orchestrator",type="process-dispatch"}, destination)'),
+                       desc="What this replica WAS when it handled the delivery, not a "
+                            "replica selector -- service_instance_id is that, and one "
+                            "replica carries both values across a leadership change. "
+                            "Reaches the five instruments carrying the ambient tag: "
+                            "messages.produced, messages.consumed, produce.duration, "
+                            "queue.wait and consumer.duration. The gauges and broker-side "
+                            "levels have no role label, so the filter is not applied to "
+                            "them -- a role matcher does not match a series that has no "
+                            "role label, and applying it board-wide would empty them. The "
+                            "Verdict tier is left unfiltered on purpose: it answers *is "
+                            "anything wrong anywhere*, and a role selection there would "
+                            "let a follower fault hide behind a leader view."),
         ],
         panels=panels,
         links=NAV,
@@ -2205,6 +2479,278 @@ def build_orchestrator():
 # ---------------------------------------------------------------------------
 # board 4 -- processor
 # ---------------------------------------------------------------------------
+
+def grafana11_axis_fix(panels):
+    """Drop `decimals` from any timeseries that also sets `noValue`. Grafana 11.1 only.
+
+    MEASURED ON A REAL grafana/grafana:11.1.0 AGAINST THIS BOARD. A timeseries carrying
+    BOTH `decimals: 0` and a `noValue` string renders that string as its Y-AXIS TICK
+    LABELS, once per tick it cannot format, wiping out the axis:
+
+        11.1.0                                     12.3.9
+          2                                          2
+        o gate reporting -- this replica is not..
+          1  ------------------------               1  ------------------------
+        o gate reporting -- this replica is not..
+          0                                          0
+
+    The trigger is an auto-scaled axis landing on FRACTIONAL ticks -- data topping out
+    at 1 with `min: 0` scales to 0..2 and ticks every 0.5, which `decimals: 0` cannot
+    render, so 11.1 substitutes noValue where 12.x drops the tick. It is therefore
+    DATA-DEPENDENT: `Queue depth by queue` and `Consumers attached by queue` escape
+    today only because their ranges (0..100, 0..3) happen to tick on integers, and would
+    break the moment a range shrank to 0..2.
+
+    Three variants were rendered side by side at the real 8-wide grid size:
+      A  decimals + noValue   -> axis destroyed
+      B  no decimals          -> clean, noValue preserved
+      C  no noValue           -> clean, message lost
+    B is applied here. The noValue strings are load-bearing -- they are what separates
+    "nothing is probing this queue" from "this queue is empty", a distinction several
+    panel descriptions depend on -- so losing them to fix an axis is the wrong trade.
+    The cost is fractional ticks on a small range, which is cosmetic.
+
+    Expressed as a RULE rather than a list of four panel titles, so a panel that gains a
+    noValue later cannot quietly reintroduce the defect.
+
+    Stat panels are untouched: they have no axis, and `Dead-letter depth (all queues)`
+    carries both properties while rendering correctly on 11.1.
+    """
+    fixed = []
+
+    def walk(ps):
+        for p in ps:
+            if p.get("type") == "row":
+                walk(p.get("panels", []))
+                continue
+            defaults = p.get("fieldConfig", {}).get("defaults", {})
+            if (p.get("type") == "timeseries"
+                    and defaults.get("noValue") is not None
+                    and defaults.get("decimals") is not None):
+                del defaults["decimals"]
+                fixed.append(p["title"])
+
+    walk(panels)
+    return fixed
+
+
+def relabel(panels, table):
+    """Retitle and re-describe panels on ONE board, keyed by the title the builder gave.
+
+    A post-pass rather than parameters on the helpers, and that is the whole point: most
+    of these panels come from verdict_shared / since_shared / pipeline_shared, which the
+    flow, baseapi and orchestrator boards also call. Threading a title override through
+    every one of them would put four boards in the blast radius of a rename on one.
+
+    Recurses into a collapsed row's children, and raises on a key that matched nothing --
+    a rename table that silently stops applying is how a board and its spec drift apart.
+    """
+    seen = set()
+
+    def walk(ps):
+        for p in ps:
+            if p.get("type") == "row":
+                walk(p.get("panels", []))
+                continue
+            entry = table.get(p.get("title"))
+            if entry:
+                seen.add(p["title"])
+                p["title"], p["description"] = entry
+
+    walk(panels)
+    missed = set(table) - seen
+    if missed:
+        raise SystemExit(f"relabel: these titles matched no panel: {sorted(missed)}")
+
+
+# Titles aligned to the instrument each panel reads, with descriptions that lead with
+# WHAT IS MEASURED and keep only the caveat a reader needs at the panel. The long-form
+# reasoning that used to sit in these strings is in the metrics-rewrite spec; a panel
+# tooltip is not the place to re-argue a design decision.
+#
+# Section 7 of the spec is the binding panel list and has been amended to match: the
+# names here and the names there move together or the board and its authority disagree.
+PIPELINE_PANELS = {
+    "L2 gate": (
+        "Gate open",
+        "Measures `pipeline.gate.open`, minimum across replicas. 1 = the projection "
+        "store is usable and consumers may run; 0 = the gate is shut and every delivery "
+        "is being requeued."),
+    f"Egress faults ({VERDICT_WINDOW})": (
+        "Produce faults",
+        "Measures `pipeline.messages.produced` with outcome transient, unroutable or "
+        "refused, over the last " + VERDICT_WINDOW + "." + PARA +
+        "unroutable = the queue is not declared. transient = the broker is unreachable. "
+        "Opposite remedies, which is why the outcome is a tag."),
+    "Egress faults": (
+        "Produce faults (range)",
+        "Measures `pipeline.messages.produced` with a non-accepted outcome, over the "
+        "visible range." + PARA +
+        "`(range)` is what separates it from the Verdict tier's `Produce faults`, which "
+        "reads the same instrument over the last " + VERDICT_WINDOW + ". Same question, "
+        "two tenses -- without the qualifier the board carries two panels under one "
+        "title."),
+    "Not acked": (
+        "Not acked (range)",
+        "Measures `pipeline.messages.consumed` with disposition requeued or parked, over "
+        "the visible range." + PARA +
+        "The Verdict tier's `Not acked` is the same instrument over the last "
+        + VERDICT_WINDOW + "."),
+    "Dead-lettered": (
+        "Dead-letter depth (all queues)",
+        "Measures `pipeline.deadletter.depth`, summed across this service's dead-letter "
+        "queues, right now." + PARA +
+        "A level, not a count of events: it falls when someone drains the queue. Should "
+        "be 0; anything else is work that lost progress permanently."),
+    "L2 BIT verdicts": (
+        "Gate probe outcomes",
+        "Measures the RATE of `pipeline.gate.probe.duration` observations, split by "
+        "outcome — healthy, timeout or failed." + PARA +
+        "Probe attempts per second, not gate state. The gate's own posture is `Gate "
+        "open`; this is what the probe found each time it asked."),
+    "Store probe latency p95 / p99": (
+        "Gate probe duration",
+        "Measures `pipeline.gate.probe.duration` — how long the projection store took to "
+        "answer the gate probe. p95, p99 and mean." + PARA +
+        "All three read `outcome=\"healthy\"` only. A timed-out probe records the ceiling "
+        "rather than a latency and would pin p99 at exactly the probe timeout; those are "
+        "counted on `Gate probe outcomes` instead."),
+    "Produce duration p95 / p99": (
+        "Produce duration",
+        "Measures `pipeline.produce.duration` by destination — from the start of a send "
+        "until the broker confirmed or refused it, publisher confirm included. p95, p99 "
+        "and mean." + PARA +
+        "Read the mean: at this sample rate the quantiles interpolate between bucket "
+        "edges and flip between rungs rather than moving."),
+    "Consumer paths": (
+        "Messages consumed by disposition",
+        "Measures the rate of `pipeline.messages.consumed` by queue, disposition and "
+        "reason. Exactly one increment per delivery, on every exit path." + PARA +
+        "All six disposition/reason pairs are seeded, so a path flat at zero is a quiet "
+        "path rather than an unmeasured one."),
+    "L2 gate and trips by replica": (
+        "Gate open and trips by replica",
+        "Measures `pipeline.gate.open` per replica, with `increase(pipeline.gate.trips)` "
+        "over the range beside it." + PARA +
+        "The counter is what sees a fault that HEALED: a trip that shut the gate and "
+        "reopened it leaves the gauge back at 1 with nothing to show. An absent trips "
+        "series means never tripped — that counter is unseeded, so it has no series "
+        "until the first trip."),
+    "Loop rate by loop": (
+        "Loop iterations by loop",
+        "Measures the rate of `pipeline.loop.iterations` by loop. Expected: l2-gate "
+        "0.2/s, processor-liveness and queue-depth 0.1/s." + PARA +
+        "The counter is seeded with Add(0) per loop at startup, so 0 means the loop "
+        "stopped. An EMPTY panel means the process is not reporting at all."),
+    "Replica fan-out": (
+        "Messages consumed by replica",
+        "Measures the rate of acked `pipeline.messages.consumed` per replica. Replicas "
+        "share one queue and the broker round-robins, so a replica near zero beside "
+        "working peers is consuming nothing while still looking healthy." + PARA +
+        "Gated on identity liveness, so a departed replica's line ENDS at its true last "
+        "rate instead of decaying with the range."),
+
+    # Same treatment, title unchanged: these already named their instrument, but carried
+    # a thousand to two thousand characters of design argument in a tooltip.
+    f"Not acked ({VERDICT_WINDOW})": (
+        "Not acked",
+        "Measures `pipeline.messages.consumed` with disposition requeued or parked, over "
+        "the last " + VERDICT_WINDOW + ". Split by `reason` on `Messages consumed by "
+        "disposition`." + PARA +
+        "A redelivery counts twice, by design: a delivery whose ack the broker never "
+        "heard comes back and increments again."),
+    "Restarts": (
+        "Restarts",
+        "Measures `changes(pipeline.process.start.timestamp)` across replicas over the "
+        "visible range. The gauge holds the process start time and moves exactly once "
+        "per process." + PARA +
+        "`max`, not `sum`: this answers *did anything restart*. It sees an in-place "
+        "container restart, because InstanceId is the pod name and the value moves on an "
+        "existing series; a rollout that REPLACES the pod starts a new series instead."),
+    "Queue depth by queue": (
+        "Queue depth by queue",
+        "Measures `pipeline.queue.depth` per queue — messages ready and not yet taken, "
+        "from the broker's own passive declare." + PARA +
+        "The only leading indicator on this board: a queue fills as soon as a consumer "
+        "is merely SLOWER than its producer. Healthy here is 0 on orchestrator queues "
+        "and mean 0.65 / max 3 on the work queue, where prefetch 1 drains a cron batch "
+        "one message at a time."),
+    "Consumers attached by queue": (
+        "Consumers attached by queue",
+        "Measures `pipeline.queue.consumers` per queue — how many consumers THE BROKER "
+        "has attached. 0 means nothing is listening." + PARA +
+        "Expect 2 on the processor work queue. Wrapped in a 40s liveness window: "
+        "unwrapped, a departed pod's stale series read a confident 2 against the "
+        "broker's 0 for a whole outage."),
+    "Dead-letter depth by queue": (
+        "Dead-letter depth by queue",
+        "Measures `pipeline.deadletter.depth` per queue — refused messages nobody has "
+        "dealt with yet." + PARA +
+        "A level, not a rate: it steps up on a park and falls only when someone drains "
+        "the queue. Read on the park event rather than waiting for the 5-minute poll."),
+    "Consumer duration by disposition": (
+        "Consumer duration by disposition",
+        "Measures `pipeline.consumer.duration` — how long a delivery was held, on every "
+        "exit path including the ones that never reached a handler." + PARA +
+        "All three dispositions are seeded, so a flat zero is a path nothing took, not a "
+        "fast one; `Messages consumed by disposition` tells them apart. A mean rather "
+        "than a quantile, because at this sample rate quantiles interpolate."),
+    "Queue wait by queue": (
+        "Queue wait by queue",
+        "Measures `pipeline.queue.wait` — seconds between a message being published and "
+        "a consumer picking it up, as a mean by queue." + PARA +
+        "`raw` double-counts the sender's own publisher confirm: the header is stamped "
+        "before the publish, so ~12 of ~13ms sits in both this and "
+        "`pipeline.produce.duration`. `net` subtracts the produce mean for the same "
+        "destination and is the true broker wait."),
+    "Thread-pool threads": (
+        "Thread-pool threads",
+        "Measures `process_runtime_dotnet_thread_pool_threads_count` per replica." +
+        PARA +
+        "Read beside the queue length: a queue rising while this stays FLAT is "
+        "starvation; rising while this CLIMBS is the pool injecting and merely lagging "
+        "arrivals. At prefetch 1, one blocked callback is one idle replica."),
+}
+
+
+# The processor's own entries. `Identity ready by replica` exists on no other board, and
+# relabel() raises on a key that matches nothing, so it cannot live in the shared table.
+PROCESSOR_PANELS = {
+    **PIPELINE_PANELS,
+    "Identity ready by replica": (
+        "Identity ready by replica",
+        "Measures `pipeline.identity.ready` per replica. Red is a pod that is up and "
+        "waiting for a processor row matching its SourceHash — the designed behaviour, "
+        "not a crash loop." + PARA +
+        "A row that ENDS is a replica that left. Departed replicas linger for one "
+        "liveness window, which is why this is a state timeline and not a filled area."),
+}
+
+
+# The orchestrator's own entries. Same shape, two substitutions and one override:
+# `pipeline.identity.ready` does not exist on this host -- there is no identity row to
+# resolve -- and `pipeline.leader` is the posture gauge that takes its place.
+ORCHESTRATOR_PANELS = {
+    **PIPELINE_PANELS,
+    "Leader by replica": (
+        "Leader by replica",
+        "Measures `pipeline.leader` per replica — which one holds the lease, and when "
+        "it changed hands." + PARA +
+        "**A follower reading 0 is not a fault.** Leadership fences cron fires only; "
+        "`StepOutcomeHandler` is deliberately not gated on it, so a replica at 0 is "
+        "expected to be consuming normally. One row per replica because three replicas "
+        "overlaid at 0/1 drew a single band whose handovers were visible but unattributable."),
+    "Loop rate by loop": (
+        "Loop iterations by loop",
+        "Measures the rate of `pipeline.loop.iterations` by loop. Measured on this host: "
+        "l2-gate 0.2/s, queue-depth 0.1/s, orchestrator-l1-reap 0.003/s (a 5-minute "
+        "period)." + PARA +
+        "**`orchestrator-hydration` sits at ZERO in steady state and that is correct.** "
+        "It is the one loop in the stack that finishes and RETIRES, so it beats during "
+        "the first hydration pass and never again. Zero on the other three means the "
+        "loop stopped; an empty panel means the process is not reporting at all."),
+}
+
 
 def build_processor():
     lay = Layout()
@@ -2229,12 +2775,12 @@ def build_processor():
 
     lay.newline()
     panels.append(row(lay, "2 - Since: what has already happened?"))
-    panels += since_shared(lay, f)
+    panels += since_shared(lay, f, restarts=False)
     panels += [
-        stat(lay, "Restarts (1h)",
-             [f'max(changes(pipeline_process_start_timestamp_seconds{{{f}}}[1h])) '
+        stat(lay, "Restarts",
+             [f'max(changes(pipeline_process_start_timestamp_seconds{{{f}}}[$__range])) '
               f'or vector(0)'],
-             desc="How many times any replica restarted in the last hour. The gauge holds "
+             desc="How many times any replica restarted, over the visible range. The gauge holds "
                   "the process start time and moves exactly once per process, so "
                   "changes() over a window is the restart count." + PARA +
                   "**It works because InstanceId resolves to POD_NAME**, which is stable "
@@ -2244,33 +2790,38 @@ def build_processor():
                   "`max` rather than `sum` across replicas: this answers *did anything "
                   "restart*, and a sum would report a rollout of two replicas as two "
                   "restarts of one." + PARA +
-                  "**Beside `Process restarts`, which infers the same fact rather than "
-                  "measuring it**: that one reads `resets()` on the JIT-compiled-methods "
-                  "counter going backwards, over the visible range. Two derivations of "
-                  "one event, deliberately kept together -- this gauge moves exactly once "
-                  "per process and cannot be fooled by a counter that merely paused, and "
-                  "a disagreement between the two is worth a look." + PARA +
-                  "The windows differ on purpose: this one is a fixed hour, so its number "
-                  "does not change when the reader zooms, and its neighbour follows the "
-                  "visible range.",
+                  "**It is now the ONLY restart signal on this board, and the two "
+                  "`Process restarts` panels that used to sit beside it are gone.** They "
+                  "read `resets()` on the JIT-compiled-methods counter, which cannot see "
+                  "a restart on this deployment: a rollout replaces the pod, so the old "
+                  "series ends and a new one is born under a new `service_instance_id` "
+                  "rather than going backwards. Measured minutes after a deliberate "
+                  "rollout that replaced both replicas, `sum(resets(...[30m]))` was 0 "
+                  "against a live counter at ~16.9k. Two panels showing a confident zero "
+                  "for an event that had just happened is worse than one panel showing "
+                  "the truth." + PARA +
+                  "**The window follows the visible range** rather than a fixed hour, so "
+                  "this reads the same tense as everything else on the Since tier. Zoom "
+                  "out and the count grows because you are asking about more time.",
              thresholds=T_WARN, decimals=0),
     ]
 
     panels.append(row(lay, "3 - Pipeline: what is broken?"))
-    panels += pipeline_shared(lay, f)
+    panels += pipeline_shared(lay, f, consumed_seed=CONSUMER_PATHS,
+                              enumerate_names=True)
     panels += [
         timeseries(lay, "L2 gate and trips by replica",
                    [(f'{live(f"pipeline_gate_open_ratio{{{f}}}")}',
                      "gate {{service_instance_id}}"),
-                    (f'increase(pipeline_gate_trips_total{{{f}}}[1h])',
-                     "trips 1h {{service_instance_id}}")],
+                    (f'increase(pipeline_gate_trips_total{{{f}}}[$__range])',
+                     "trips {{service_instance_id}}")],
                    desc="The gate's posture per replica, and how many times it has "
-                        "tripped in the last hour." + PARA +
+                        "tripped over the visible range." + PARA +
                         "**The two are paired because the gauge alone cannot see a fault "
                         "that healed.** A trip that closed the gate and reopened it "
                         "leaves the gauge back at 1 with nothing to show, and the verdict "
-                        "stat beside it green -- while the counter keeps the fact for an "
-                        "hour. A store that is flapping reads as a healthy store on every "
+                        "stat beside it green -- while the counter keeps the fact for the "
+                        "whole range. A store that is flapping reads as a healthy store on every "
                         "posture signal on this board except this line." + PARA +
                         "**A trips series that is ABSENT means never tripped, not never "
                         "measured.** `pipeline.gate.trips` is a .NET counter, created on "
@@ -2291,8 +2842,11 @@ def build_processor():
                         "replica's gate sits at exactly 1 and the lines overlap into one, "
                         "which is why the instantaneous answer belongs to the `L2 gate` "
                         "verdict stat and the HISTORY belongs here." + PARA +
-                        "The window is a fixed hour rather than $__range, so the number "
-                        "does not change when the reader zooms.",
+                        "**The window follows $__range rather than a fixed hour.** The fixed "
+                        "hour was chosen so the number would not move when the reader "
+                        "zoomed; the cost was a panel whose window disagreed with every "
+                        "neighbour and with its own legend. Zoom out and the count grows "
+                        "because you are asking about more time.",
                    minv=0, decimals=0,
                    no_value="no gate reporting -- this replica is not exporting at all"),
         statetimeline(lay, "Identity ready by replica",
@@ -2327,7 +2881,8 @@ def build_processor():
         # Process duration is subsumed by `Consumer duration by disposition` below, which
         # measures more rather than less: the transform plus everything around it, on every
         # exit path including the ones that never reached a handler at all.
-        *depth_panels(lay, 'queue=~"processor-$processorId"', "this processor's work queue"),
+        *depth_panels(lay, 'queue=~"processor-$processorId"', "this processor's work queue",
+                      enumerate_names=True),
         timeseries(lay, "Replica fan-out",
                    [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
                      f'{{{f},disposition="acked"}}[$__rate_interval])) '
@@ -2381,17 +2936,28 @@ def build_processor():
                    unit="reqps", decimals=2),
 
         timeseries(lay, "Consumer duration by disposition",
-                   [(f'sum by (queue,disposition) '
-                     f'(rate(pipeline_consumer_duration_seconds_sum{{{f}}}'
-                     f'[$__rate_interval])) '
-                     f'/ sum by (queue,disposition) '
-                     f'(rate(pipeline_consumer_duration_seconds_count{{{f}}}'
-                     f'[$__rate_interval]))',
+                   [(seeded(f'sum by (queue,disposition) '
+                            f'(rate(pipeline_consumer_duration_seconds_sum{{{f}}}'
+                            f'[$__rate_interval])) '
+                            f'/ sum by (queue,disposition) '
+                            f'(rate(pipeline_consumer_duration_seconds_count{{{f}}}'
+                            f'[$__rate_interval]))',
+                            f'group by (queue) (last_over_time('
+                            f'pipeline_consumer_duration_seconds_count{{{f}}}[$__range]))',
+                            DISPOSITIONS),
                      "mean {{queue}} {{disposition}}")],
                    desc="How long a delivery was held, on every path including the ones "
                         "that never reached a handler. Split by disposition so a slow "
                         "success and a slow refusal cannot average into a number "
                         "describing neither." + PARA +
+                        "**All three dispositions are seeded, so `requeued` and `parked` "
+                        "hold the legend at zero when no delivery took those paths.** A "
+                        "zero here is NOT a fast refusal -- it is the absence of one, and "
+                        "the way to tell them apart is `Consumer paths` above: a real "
+                        "fast path has a non-zero rate there, a seeded one does not. The "
+                        "seed exists because a legend listing `acked` alone cannot be "
+                        "told from a board where the two failure paths were never "
+                        "instrumented." + PARA +
                         "**Wider than the pipeline.process.duration it replaces**, which "
                         "measured the author's transform alone and so was blank for every "
                         "delivery that bounced off a shut gate -- exactly the deliveries "
@@ -2414,11 +2980,23 @@ def build_processor():
     # exception rate and process restarts are read together, and the grid would
     # otherwise put one beside a pipeline panel and the other a row below.
     lay.newline()
-    panels += causes_row(lay, f)
+    panels += causes_row(lay, f, restarts=False)
 
+    # full=True: this board absorbs the runtime panels an operator would otherwise
+    # leave for SKP Runtime, which is being retired. The other boards keep the pair
+    # until the same decision is made for them.
     rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
-    rt["panels"] = runtime_row(lay, f)
+    rt["panels"] = runtime_row(lay, f, full=True)
     panels.append(rt)
+
+    # Titles aligned to the instruments. See PIPELINE_PANELS.
+    relabel(panels, PROCESSOR_PANELS)
+
+    # Grafana 11.1 axis compatibility. Applied to THIS board only, matching the standing
+    # scope; the orchestrator and flow boards carry the same latent defect through
+    # depth_panels() and pipeline_shared() and are deliberately left for a separate call.
+    for title in grafana11_axis_fix(panels):
+        print(f"  grafana11 axis fix: dropped decimals on {title}")
 
     return dashboard(
         uid="skp-processor",
@@ -2442,6 +3020,10 @@ def build_processor():
                       'label_values(pipeline_identity_ready_ratio{service_name=~"$service_name"}, service_instance_id)'),
             var_query("processorId", "Processor id",
                       'label_values(pipeline_identity_ready_ratio{service_name=~"$service_name"}, processorId)'),
+            # The verdict tier's lookback, chosen by the reader instead of compiled in.
+            # It feeds both the query and the panel title, so the two cannot disagree.
+            # Single-select: a multi-select All would interpolate to `.*`, which is not
+            # a duration and would not parse.
         ],
         panels=panels,
         links=NAV,
