@@ -146,20 +146,16 @@ T_DEPTH = [{"color": "green", "value": None},
            {"color": "orange", "value": DEPTH_ORANGE},
            {"color": "red", "value": DEPTH_RED}]
 
-# Door-to-door step latency. DEPLOYMENT-SPECIFIC, and measured on both sides.
+# THE DOOR-TO-DOOR STEP THRESHOLDS ARE GONE, WITH THE INSTRUMENT THEY COLOURED.
 #
-# Healthy p95 is 0.050-0.060s and mean 0.036-0.037s, taken over three consecutive samples on an
-# undisturbed stack. Under the S10 fault -- 300ms of injected Redis latency on the processor's path
-# only -- the same p95 read 0.973s and the mean 0.835s, a 16x and 23x move.
+# `Step p95` and `Step duration p95 / p99` read `pipeline.step.elapsed`, retired by the
+# metrics rewrite (section 6 of the 2026-08-26 spec). They were the only two panels on any
+# board that measured what a WORKFLOW experiences rather than what a component does --
+# healthy p95 0.050-0.060s, and 0.973s under the S10 fault that no other panel could see.
 #
-# Green below 0.25s clears the healthy figure by four times, which is wide enough that ordinary
-# burst phase cannot reach it. Red at 1s is just under what a 300ms dependency fault produced, so
-# the fault that used to be invisible lands red rather than merely orange.
-STEP_ORANGE = 0.25
-STEP_RED = 1.0
-T_STEP = [{"color": "green", "value": None},
-          {"color": "orange", "value": STEP_ORANGE},
-          {"color": "red", "value": STEP_RED}]
+# Nothing here replaces that. `Queue wait by queue` plus `Consumer duration by
+# disposition` decompose the same interval per hop, but no panel now sums them end to end.
+# Recorded rather than quietly dropped, because the gap is real.
 
 # Live reporters expected on this deployment: 3 orchestrator replicas + 2 processor
 # replicas. DEPLOYMENT-SPECIFIC, like the band above, and re-derive it anywhere else.
@@ -529,7 +525,6 @@ def timeseries(layout, title, exprs, desc="", unit="short", w=8, h=8,
 # exactly as designed; rendering it red -- which a red-below-1 threshold does, and did --
 # says the opposite of what the panel's own description says. Only the states that are
 # genuinely wrong are red.
-M_CONSUMING = {"0": ("stopped", "red"), "1": ("consuming", "green")}
 M_GATE = {"0": ("shut", "red"), "1": ("open", "green")}
 M_LEADER = {"0": ("follower", "semi-dark-blue"), "1": ("leader", "green")}
 M_ADMITTED = {"0": ("not admitted", "red"), "1": ("admitted", "green")}
@@ -854,22 +849,26 @@ WORKER_F = ('service_name=~"$service_name",service_version=~"$service_version",'
 
 
 def verdict_shared(layout, f):
-    """The six verdict stats both worker roles carry.
+    """The three verdict stats both worker roles carry.
 
     Deliberately NOT filtered by $role even on the orchestrator: this tier answers
     "is anything wrong anywhere", and a role filter here would let a follower fault
     hide behind a leader selection.
+
+    THREE, and it was six. `Consuming` read `pipeline.consumer.consuming`, `Channel
+    resets (5m)` read `pipeline.consumer.channel.resets`, and `Ack lost (5m)` read the
+    `landed` dimension of `pipeline.messages.consumed` -- all three retired by the
+    metrics rewrite (spec sections 6 and 5.7). The questions they answered are not
+    lost, they moved: *is anything listening* is `Consumers attached by queue`, which
+    is the broker's own count rather than the process asserting its own health and
+    needs no liveness window; *did an ack go missing* now shows as an extra `consumed`
+    increment, because a redelivery is consumed twice.
+
+    The order is posture first, then fault counters. Both callers splice their
+    role-specific posture stats between the two halves -- v[:1] and v[1:] -- so
+    anything added here changes those indices.
     """
     return [
-        stat(layout, "Consuming",
-             [f'min({live(f"pipeline_consumer_consuming_ratio{{{f}}}")}) or vector(0)'],
-             desc="0 means no consumer tag on at least one queue -- nothing is "
-                  "listening. No other signal answers this." + PARA +
-                  "Restricted to replicas that have reported in the last " + LIVENESS +
-                  ": a dead replica's gauge is held at its last value by the collector "
-                  "and by Prometheus's lookback, so an unrestricted min() reads the "
-                  "posture of processes that no longer exist.",
-             thresholds=T_POSTURE, decimals=0),
         stat(layout, "L2 gate",
              [f'min({live(f"pipeline_gate_open_ratio{{{f}}}")}) or vector(0)'],
              desc="The single best answer to 'why did the pipeline stop'. 0 means "
@@ -888,14 +887,14 @@ def verdict_shared(layout, f):
                   "broker outage produced was 1/240 = 0.004, which rounds to nothing at "
                   "any sane precision. The window is 60s now, which makes that same "
                   "delivery 0.017 -- still nothing at this precision, which is why the "
-                  "panel is still counted rather than rated.",
-             thresholds=T_WARN, decimals=0),
-        stat(layout, "Ack lost (5m)",
-             [recent(f'pipeline_messages_consumed_total{{{f},'
-                     f'disposition="acked",landed="false"}}', VERDICT_WINDOW)],
-             desc="The silent case: the handler ran to completion but the broker "
-                  "never heard the ack, so it will redeliver. Cause is on the "
-                  "channel-resets panel. Last " + VERDICT_WINDOW + " only.",
+                  "panel is still counted rather than rated." + PARA +
+                  "**A redelivery is counted here twice and that is not a defect.** With "
+                  "`landed` retired, a delivery the broker never heard the ack for comes "
+                  "back and increments `consumed` again -- so a lost ack, which used to "
+                  "have a stat of its own, now shows up as ingress the pipeline did not "
+                  "need. `Dead-letter depth by queue` is the check for a park that never "
+                  "landed: a park the broker was not told about is redelivered rather "
+                  "than dead-lettered, so it never arrives there.",
              thresholds=T_WARN, decimals=0),
         stat(layout, "Egress faults (5m)",
              [recent(f'pipeline_messages_produced_total{{{f},'
@@ -908,23 +907,11 @@ def verdict_shared(layout, f):
                   "0.00 on every board and the only trace of them anywhere was a new "
                   "legend entry on the produced-by-outcome timeseries.",
              thresholds=T_WARN, decimals=0),
-        stat(layout, "Channel resets (5m)",
-             [recent(f'pipeline_consumer_channel_resets_total{{{f}}}',
-                     VERDICT_WINDOW)],
-             desc="Channel churn in the last " + VERDICT_WINDOW + ". The cause of ack "
-                  "loss." + PARA +
-                  "**Scoped to five minutes because over the range it is the loudest "
-                  "false positive on these boards.** A rollout renumbers every channel: "
-                  "measured here on an undisturbed stack, twelve minutes after a routine "
-                  "orchestrator restart, this read 54 over a three-hour range and sat "
-                  "orange with nothing wrong. The churn worth reacting to is churn that "
-                  "is still happening.",
-             thresholds=T_WARN, decimals=0),
     ]
 
 
 def since_shared(layout, f):
-    """The same four fault counters over the visible range, for the Since tier.
+    """The same fault counters over the visible range, for the Since tier.
 
     The verdict tier above answers "is it broken right now" and goes green again when a
     fault stops. That is what makes its colour worth reading -- and it is also how an
@@ -943,22 +930,10 @@ def since_shared(layout, f):
                      f'disposition=~"requeued|parked"}}')],
              desc="Deliveries refused or sent back over the visible range.",
              thresholds=T_WARN, decimals=0),
-        stat(layout, "Ack lost",
-             [recent(f'pipeline_messages_consumed_total{{{f},'
-                     f'disposition="acked",landed="false"}}')],
-             desc="Work completed that the broker will hand out again, over the "
-                  "visible range.",
-             thresholds=T_WARN, decimals=0),
         stat(layout, "Egress faults",
              [recent(f'pipeline_messages_produced_total{{{f},'
                      f'outcome=~"transient|unroutable|refused"}}')],
              desc="Any send that did not reach the broker, over the visible range.",
-             thresholds=T_WARN, decimals=0),
-        stat(layout, "Channel resets",
-             [recent(f'pipeline_consumer_channel_resets_total{{{f}}}')],
-             desc="Channel churn over the visible range. Expect tens of these after any "
-                  "rollout -- check Process restarts beside it before reading this as a "
-                  "broker fault.",
              thresholds=T_WARN, decimals=0),
         stat(layout, "Dead-lettered",
              [f'sum(max by (queue) '
@@ -1001,20 +976,24 @@ def since_shared(layout, f):
     ]
 
 
-def pipeline_shared(layout, f, role_f="", by_instance=False):
-    """The six pipeline panels both worker roles carry.
+def pipeline_shared(layout, f, role_f=""):
+    """The five pipeline panels both worker roles carry.
 
     role_f is appended only on the orchestrator, where pipeline.messages.* and
     pipeline.produce.duration carry a `role` attribute. The processor emits no such
     attribute, so passing it there would match nothing.
 
-    by_instance splits "Consuming by queue" per replica. On the orchestrator that would
-    draw five queues times three replicas on one axis, which the panel's own note already
-    warns is unreadable -- and it gains nothing there, because each orchestrator queue has
-    one consumer. On the processor every replica consumes the SAME queue, so without this
-    the min collapses across them and the panel can say a consumer is wedged but never
-    which. A parameter rather than two copies of the panel, for the reason role_f is a
-    parameter: these two boards must not drift.
+    FIVE, and it was nine. `Consumer inflight by queue`, `Channel resets by reason` and
+    `Consuming by queue` all read instruments the metrics rewrite retired (spec section
+    6); `Queue wait p95 / p99` is not gone but has moved, to queue_wait_panel() below,
+    which has to filter the produce side by DESTINATION rather than by service and so
+    cannot take this helper's service filter.
+
+    The `by_instance` parameter went with them. It existed to split the two per-replica
+    consumer panels, and both are gone: what a replica is actually doing is on `Replica
+    fan-out` on the processor board, and whether anything is attached at all is
+    `Consumers attached by queue`, which is the broker's count and not the process's own
+    assertion about itself.
     """
     rf = role_f
     return [
@@ -1023,11 +1002,28 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                      f'{{{f}{rf}}}[$__rate_interval]))', "{{type}} / {{outcome}}")],
                    desc="Egress. outcome != accepted is a fault.",
                    unit="reqps"),
-        timeseries(layout, "Consumed by type and disposition",
-                   [(f'sum by (type,disposition) (rate(pipeline_messages_consumed_total'
-                     f'{{{f}{rf}}}[$__rate_interval]))', "{{type}} / {{disposition}}")],
-                   desc="Ingress. Exactly one increment per delivery, on every exit "
-                        "path of the consumer.",
+        timeseries(layout, "Consumer paths",
+                   [(f'sum by (queue,disposition,reason) '
+                     f'(rate(pipeline_messages_consumed_total'
+                     f'{{{f}{rf}}}[$__rate_interval]))',
+                     "{{queue}} / {{disposition}} / {{reason}}")],
+                   desc="Ingress, split by which exit the delivery took. Exactly one "
+                        "increment per delivery, on every exit path of the consumer."
+                        + PARA +
+                        "**Grouped by `reason` rather than by `type`, and that is what "
+                        "makes it triagable.** Without the reason all four requeue causes "
+                        "collapse into one number and `gate_closed` dominates it: during "
+                        "any store outage every in-flight delivery bounces off the shut "
+                        "gate, and that benign flood buries `send_failed` -- a broker send "
+                        "failing inside a handler -- and `escaped`, which is an unhandled "
+                        "path and therefore a bug. Six real pairs exist, not three times "
+                        "six." + PARA +
+                        "The `type` dimension it used to carry is on `Message flow matrix` "
+                        "on SKP Flow, which is where a produced-against-consumed reading "
+                        "belongs; the queue names the hop here." + PARA +
+                        "`landed` is gone from this instrument, so a redelivered message "
+                        "increments this twice. Ingress exceeding the hop's egress is the "
+                        "shape a lost ack now makes.",
                    unit="reqps"),
         timeseries(layout, "Produce duration p95 / p99",
                    [(f'histogram_quantile(0.95, sum by (le,destination) '
@@ -1053,14 +1049,6 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                         "trips.",
                    thresholds=normal_upto(0.05),
                    unit="s"),
-        timeseries(layout, "Consumer inflight by queue",
-                   [(f'max by (queue) ({live(f"pipeline_consumer_inflight{{{f}}}")})',
-                     "{{queue}}")],
-                   desc="Deliveries inside a handler. PrefetchCount is 1, so a "
-                        "sustained 1 is saturation -- the threshold line marks it.",
-                   thresholds=[{"color": "green", "value": None},
-                               {"color": "orange", "value": 1}],
-                   minv=0, decimals=0),
         timeseries(layout, "Store probe latency p95 / p99",
                    [(f'histogram_quantile(0.95, sum by (le) '
                      f'(rate(pipeline_gate_probe_duration_seconds_bucket'
@@ -1106,61 +1094,6 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                         "knowing what the normal value is.",
                    thresholds=normal_upto(0.005),
                    unit="s"),
-        timeseries(layout, "Channel resets by reason" + (" and replica" if by_instance else ""),
-                   [(f'sum by (queue,reason{",service_instance_id" if by_instance else ""}) '
-                     f'(rate(pipeline_consumer_channel_resets_total'
-                     f'{{{f}}}[$__rate_interval]))',
-                     "{{queue}} / {{reason}}"
-                     + (" / {{service_instance_id}}" if by_instance else ""))],
-                   desc="shutdown, recovered, reopened. Each renumbers delivery tags "
-                        "and is what makes landed=false possible." + PARA +
-                        ("Split per replica on this board for the reason the consuming "
-                         "panel beside it is: every replica consumes the SAME queue, so a "
-                         "sum by queue collapses across them and cannot name which replica "
-                         "is churning." + PARA +
-                         "**Measured, and this is the panel that caught S9.** When one "
-                         "replica of two had its broker connection closed and re-closed "
-                         "for a minute, this counter went 1 to 10 on that replica and "
-                         "stayed at 1 on its peer -- while `Consuming by queue and "
-                         "replica` read 1 throughout, correctly, because automatic "
-                         "recovery restored the consumer inside one export interval and "
-                         "the consuming gauge never carried the fault at all. Aggregated, "
-                         "this panel showed the churn without saying whose it was."
-                         if by_instance else
-                         "Aggregated by queue on this board because each queue has one "
-                         "consumer, so the queue already names the replica. The processor "
-                         "board splits this per replica, where they share one queue."),
-                   unit="reqps",
-                   no_value="no channel churn in range"),
-        timeseries(layout, "Queue wait p95 / p99",
-                   [(f'histogram_quantile(0.95, sum by (le,queue) '
-                     f'(rate(pipeline_queue_wait_seconds_bucket{{{f}}}'
-                     f'[$__rate_interval])))', "p95 {{queue}}"),
-                    (f'histogram_quantile(0.99, sum by (le,queue) '
-                     f'(rate(pipeline_queue_wait_seconds_bucket{{{f}}}'
-                     f'[$__rate_interval])))', "p99 {{queue}}")],
-                   desc="Seconds a delivery sat in the broker before this service picked "
-                        "it up, per queue." + PARA +
-                        "**Neither produce duration nor process duration contains this "
-                        "term.** Produce duration ends at the broker's confirmation; "
-                        "process duration begins when a handler is entered. The wait "
-                        "between them was unmeasured, which is why an end-to-end time "
-                        "could grow with every component still looking fast." + PARA +
-                        "Healthy is **20-45ms**. A queue whose wait climbs while its peers "
-                        "stay flat is backlog on that queue alone -- `Queue depth by "
-                        "queue` below says how deep and `Consumers attached by queue` "
-                        "says whether anything is still draining it." + PARA +
-                        "Recorded on arrival, before the handler runs, so the transform's "
-                        "own cost is not folded in here as well as on `Process duration`."
-                        + PARA +
-                        "**Recorded only when the message carried a send timestamp.** A "
-                        "message published by a build without this instrument has none, "
-                        "and during a rollout there are always some -- they are skipped "
-                        "rather than recorded as zero, which would bury the real "
-                        "distribution. The API's queue side stamps nothing at all.",
-                   thresholds=normal_upto(0.1),
-                   unit="s",
-                   no_value="no deliveries carrying a send timestamp in range"),
         timeseries(layout, "Dead-letter depth by queue",
                    [(f'max by (queue) (last_over_time('
                      f'pipeline_deadletter_depth{{{f}}}[2m]))', "{{queue}}")],
@@ -1190,30 +1123,6 @@ def pipeline_shared(layout, f, role_f="", by_instance=False):
                    minv=0, decimals=0, fill=25,
                    no_value="no dead-letter depth reported by this service -- see the "
                             "panel description before reading this as zero"),
-        statetimeline(layout,
-                   "Consuming by queue" + (" and replica" if by_instance else ""),
-                   [(f'min by (queue{",service_instance_id" if by_instance else ""}) '
-                     f'({live(f"pipeline_consumer_consuming_ratio{{{f}}}")})',
-                     "{{queue}}" + (" / {{service_instance_id}}" if by_instance else ""))],
-                   desc="Per-queue view of the verdict stat. A queue reading 0 while "
-                        "the others read 1 is one wedged consumer, not an outage." + PARA +
-                        ("Split per replica on this board because every replica consumes "
-                         "the SAME queue, so a min across the queue alone cannot name which "
-                         "replica stopped. On the orchestrator each queue has one consumer "
-                         "and the split would only add lines."
-                         if by_instance else
-                         "Aggregated by queue on this board because each queue has one "
-                         "consumer. The processor board splits this per replica, where "
-                         "every replica shares one queue.") + PARA +
-                        "A row that ENDS is a replica that left; a row that turns red is "
-                        "one that is present and not consuming." + PARA +
-                        "**Drawn as a state timeline rather than as lines, and that is "
-                        "what makes it readable at all.** Every series sits at exactly 1 "
-                        "in health, so on a shared numeric axis they overlap into one "
-                        "line and only the last drawn is visible -- five orchestrator "
-                        "queues rendered as a single flat line across a three-hour range. "
-                        "One row per series is one answer per series.",
-                   mappings=M_CONSUMING),
     ]
 
 
@@ -1236,10 +1145,10 @@ def causes_row(layout, f, w=12):
     behind a collapsed row on the boards an operator actually opens.
 
     That is not a small omission. Restarts are the documented cause of the hop gaps
-    reading +46/-47, of `Channel resets` reaching tens, and of a replica's series ending
-    and restarting under a new identity. Every one of those panels tells the reader to go
-    and check for a restart, and until now none of them could be checked without
-    expanding a row titled as though it were about garbage collection.
+    reading +46/-47 and of a replica's series ending and restarting under a new identity.
+    Every one of those panels tells the reader to go and check for a restart, and until
+    now none of them could be checked without expanding a row titled as though it were
+    about garbage collection.
     """
     return [
         timeseries(layout, "Exception rate",
@@ -1258,8 +1167,8 @@ def causes_row(layout, f, w=12):
                      f'{{{f}}}[$__rate_interval]))', "{{service_instance_id}}")],
                    desc="A monotonic counter going backwards means the process is new. "
                         "**The one signal that explains a simultaneous gap in every "
-                        "other series** -- and the one the hop gaps, `Channel resets` "
-                        "and `Replica fan-out` all tell you to go and check." + PARA +
+                        "other series** -- and the one the hop gaps and `Replica "
+                        "fan-out` both tell you to go and check." + PARA +
                         "A spike here beside a jump on any of those means the number "
                         "there is a rollout artefact rather than lost work.",
                    w=w, h=7, decimals=0,
@@ -1313,10 +1222,12 @@ def depth_panels(layout, queue_filter, who):
                      "{{queue}}")],
                    desc="How many consumers **the broker** has on each queue. Zero means nothing "
                         "is listening." + PARA +
-                        "**This is the only broker-side signal on these boards.** "
-                        "`pipeline.consumer.consuming` is the process asserting its own health, "
-                        "which is why every panel reading it wraps it in a liveness window -- a "
-                        "dead replica's copy was held at 1 by the collector. This number comes from "
+                        "**This is now the ONLY signal that anything is listening, and that is "
+                        "why the process's own assertion was retired.** "
+                        "`pipeline.consumer.consuming` was the process saying so about itself, "
+                        "which is why every panel reading it had to wrap it in a liveness window "
+                        "-- a dead replica's copy was held at 1 by the collector, so it read "
+                        "healthiest exactly when the replica was gone. This number comes from "
                         "the broker's own reply and is 0 the moment a consumer detaches." + PARA +
                         "**The liveness wrap is still load-bearing here, and it was measured.** "
                         "Unwrapped, `max by (queue)` read a confident 2 against the broker's 0 for "
@@ -1335,6 +1246,76 @@ def depth_panels(layout, queue_filter, who):
                    unit="short", minv=0, decimals=0, fill=0,
                    no_value="no consumer count reported -- nothing is probing these queues"),
     ]
+
+
+def queue_wait_panel(layout, wait_f, dest_f, w=8, h=8):
+    """Seconds between publish and pickup, raw and net of the publisher confirm.
+
+    TWO FILTERS, and the second one is why this panel is not inside pipeline_shared().
+    The wait is recorded by the CONSUMER, so `wait_f` is the board's own service filter.
+    The correction term is `pipeline.produce.duration`, which is recorded by the SENDER
+    -- a different service on the other side of the hop -- so it is filtered by
+    `destination` instead, for exactly the reason depth_panels() filters by queue: a
+    service filter here selects the wrong process and the panel is silently empty.
+    Passing this board's service filter to both sides gives the processor board the
+    processor's OWN sends, whose destination is orchestrator-result, and the join then
+    matches nothing at all.
+
+    Both halves are means. Quantiles off this ladder are interpolation between rung
+    edges, and at ~20 samples a window they flip between two rungs rather than moving.
+    """
+    wait_mean = (f'avg by (queue) ('
+                 f'rate(pipeline_queue_wait_seconds_sum{{{wait_f}}}[$__rate_interval]) '
+                 f'/ rate(pipeline_queue_wait_seconds_count{{{wait_f}}}[$__rate_interval]))')
+    produce_mean = (f'avg by (queue) (label_replace('
+                    f'rate(pipeline_produce_duration_seconds_sum{{{dest_f}}}'
+                    f'[$__rate_interval]) '
+                    f'/ rate(pipeline_produce_duration_seconds_count{{{dest_f}}}'
+                    f'[$__rate_interval]), '
+                    f'"queue", "$1", "destination", "(.*)"))')
+    return timeseries(layout, "Queue wait by queue",
+                      [(wait_mean, "raw {{queue}}"),
+                       (f'{wait_mean} - on(queue) group_left {produce_mean}',
+                        "net {{queue}}")],
+                      desc="Seconds a delivery sat in the broker between the publish and "
+                           "this service picking it up, per queue." + PARA +
+                           "**Neither produce duration nor consumer duration contains "
+                           "this term.** Produce duration ends at the broker's "
+                           "confirmation; consumer duration begins when the delivery "
+                           "reaches this process. The wait between them was unmeasured, "
+                           "which is how an end-to-end time could grow with every "
+                           "component still looking fast." + PARA +
+                           "**TWO SERIES BECAUSE THE RAW ONE IS WRONG.** The sent header "
+                           "is stamped before the publish, so the sender's own publisher "
+                           "confirm -- about 12 of ~13ms on this stack -- sits inside this "
+                           "number AND inside produce duration. The net series subtracts "
+                           "it and is the one to read; the raw series is here to show how "
+                           "much of it was never broker wait at all." + PARA +
+                           "**Net is directional, not exact.** It is a difference of two "
+                           "means taken over different populations -- different messages, "
+                           "different processes -- so do not read a millisecond off it. "
+                           "Near zero is the healthy reading. Growing is real queueing, "
+                           "and `Queue depth by queue` beside it says how deep while "
+                           "`Consumers attached by queue` says whether anything is still "
+                           "draining it." + PARA +
+                           "**Three parts of that expression are load-bearing and each "
+                           "fails to NO-DATA rather than to an error.** `label_replace` "
+                           "renames `destination` to `queue`: the two hold the same "
+                           "string under different label names, and no vector match joins "
+                           "them without it. `avg by (queue)` on BOTH sides, before the "
+                           "subtraction, because the halves come from different processes "
+                           "-- `instance` and `job` differ, so an unaggregated match is "
+                           "many-to-many, which returns nothing. And the produce side is "
+                           "filtered by destination rather than by service, because the "
+                           "sender is not this board's service. A blank net series with a "
+                           "drawn raw one means one of the three has been broken." + PARA +
+                           "**Recorded only when the message carried a send timestamp.** A "
+                           "message published by a build without the header has none, and "
+                           "during a rollout there are always some -- they are skipped "
+                           "rather than recorded as zero, which would bury the real "
+                           "distribution. The API's queue side stamps nothing at all.",
+                      unit="s", w=w, h=h,
+                      no_value="no deliveries carrying a send timestamp in range")
 
 
 def runtime_row(layout, f):
@@ -1372,7 +1353,6 @@ def runtime_row(layout, f):
 
 # Selectors the flow board names more than once.
 REDONE = 'pipeline_messages_consumed_total{disposition=~"requeued|parked"}'
-NOT_LANDED = 'pipeline_messages_consumed_total{landed="false"}'
 EGRESS_FAULT = ('pipeline_messages_produced_total'
                 '{outcome=~"transient|unroutable|refused"}')
 # present_over_time rather than last_over_time: this counts reporters, and the value a
@@ -1427,11 +1407,6 @@ def build_flow():
                   "anywhere else.",
              thresholds=T_FLOW,
              unit="reqps", decimals=2),
-        stat(lay, "Consuming",
-             [f'min({live("pipeline_consumer_consuming_ratio")}) or vector(0)'],
-             desc="Minimum across every queue in the deployment, over replicas that "
-                  "have reported in the last " + LIVENESS + ".",
-             thresholds=T_POSTURE, decimals=0),
         stat(lay, "L2 gate",
              [f'min({live("pipeline_gate_open_ratio")}) or vector(0)'],
              desc="0 means the gate is shut somewhere and deliveries are being "
@@ -1500,45 +1475,16 @@ def build_flow():
                   "only wrong when it is non-zero, and it is only non-zero during an "
                   "outage." + PARA +
                   "**The fastest signal on this board for a consumer that has gone away**, and the "
-                  "only one that does not depend on a process reporting on itself. "
-                  "`pipeline.consumer.consuming` is the process's own assertion; this is the "
-                  "broker's. Measured against a processor outage it reached 1 within one liveness "
-                  "window, while depth was still reading 1." + PARA +
+                  "only one that does not depend on a process reporting on itself. It is also the "
+                  "only one left: `pipeline.consumer.consuming` was the process's own assertion "
+                  "about itself and is retired, because a departed replica's copy was held at 1 by "
+                  "the collector -- it read healthiest exactly when the replica was gone. Measured "
+                  "against a processor outage this reached 1 within one liveness window, while "
+                  "depth was still reading 1." + PARA +
                   "It does not name the queue -- `Consumers attached by queue` on the worker boards "
                   "does. And it cannot see a consumer that reattaches inside the 10s probe "
                   "interval, which is what the S9 flapping-connection scenario produced.",
              thresholds=T_WARN, decimals=0),
-        stat(lay, "Step p95",
-             ['histogram_quantile(0.95, sum by (le) '
-              '(rate(pipeline_step_elapsed_seconds_bucket{type="step-outcome"}'
-              '[$__rate_interval])))'],
-             desc="**Door to door: how long a workflow step actually takes**, from the "
-                  "orchestrator dispatching it to the orchestrator being told it finished."
-                  + PARA +
-                  "The only number on these boards that measures what a WORKFLOW "
-                  "experiences rather than what a component does. Every other duration "
-                  "here is one component's share -- a broker round trip, the author's "
-                  "transform, a store probe -- and a step can get slower without any of "
-                  "them moving." + PARA +
-                  "**It closes the fault this board set could not see.** S10 injects 300ms "
-                  "of Redis latency on the processor's path only; the write-up of it "
-                  "records that *nothing showed it, not one panel, not one stat*. Measured "
-                  "again with this instrument in place: p95 **0.050-0.060s** healthy "
-                  "against **0.973s** during the fault, and the mean 0.036s against "
-                  "0.835s. Sixteen times on the quantile, twenty-three on the mean." + PARA +
-                  "**Read on `step-outcome` deliveries only**, which is where the round "
-                  "trip completes. The same instrument on other types reports a partial: "
-                  "on `process-dispatch` at the processor it is the dispatch's own queue "
-                  "wait, because the step has only just begun." + PARA +
-                  "**Both ends of this are stamped on different processes**, so it carries "
-                  "NTP skew -- nil on this single node, milliseconds to tens across nodes. "
-                  "Irrelevant at this magnitude, and the reason the bucket ladder starts "
-                  "at 10ms rather than pretending to resolve a 24ms hop." + PARA +
-                  "Blank means no steps completed in the window, not a broken query: a "
-                  "quantile over an all-zero rate is NaN, which `or vector(0)` cannot "
-                  "rescue.",
-             thresholds=T_STEP, unit="s", decimals=3,
-             no_value="no steps completed in range"),
         stat(lay, "Data freshness",
              ['time() - min(max by (service_name) '
               '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
@@ -1617,11 +1563,18 @@ def build_flow():
                   "render one orange and one green for the same instant.",
              thresholds=T_GAP, decimals=0),
         stat(lay, "Retry amplification",
-             [f'(({recent(REDONE)}) + ({recent(NOT_LANDED)})) '
+             [f'({recent(REDONE)}) '
               f'/ (sum(increase(pipeline_messages_consumed_total[$__range])) > 0) '
               f'or vector(0)'],
              desc="Share of deliveries that will be redone, in MESSAGES over the visible "
                   "range. Healthy is exactly zero." + PARA +
+                  "**Requeued and parked only.** It used to add a `landed=\"false\"` term "
+                  "for the ack the broker never heard; that dimension is retired, and a "
+                  "delivery whose ack was lost is now redelivered and counted again in the "
+                  "denominator as well as being invisible in the numerator. So this "
+                  "understates the redone share by whatever lost acks cost -- read it "
+                  "beside the two hop gaps, which count the same event as a conservation "
+                  "failure." + PARA +
                   "Counted rather than rated, and that is what makes it able to fire at "
                   "all. Measured at the old 60s export cadence: as a ratio of two 240s "
                   "rates it read 0.0% through every scenario in the chaos suite, including "
@@ -1637,12 +1590,6 @@ def build_flow():
                   "something to notice; a twentieth of all deliveries being redone is the "
                   "outage.",
              thresholds=T_REDONE, unit="percentunit", decimals=1),
-        stat(lay, "Ack lost",
-             [recent('pipeline_messages_consumed_total{disposition="acked",'
-                      'landed="false"}')],
-             desc="Work completed that the broker will hand out again, counted over "
-                  "the visible range.",
-             thresholds=T_WARN, decimals=0),
         stat(lay, "Dead-lettered",
              ['sum(max by (queue) (last_over_time(pipeline_deadletter_depth[2m])))'],
              desc="Work this deployment refused and **nobody has dealt with**. Should "
@@ -1739,18 +1686,19 @@ def build_flow():
                         "aggregate.",
                    unit="reqps"),
         timeseries(lay, "Retry amplification over time",
-                   [('(sum(rate(pipeline_messages_consumed_total'
+                   [('sum(rate(pipeline_messages_consumed_total'
                      '{disposition=~"requeued|parked"}[$__rate_interval])) '
-                     '+ sum(rate(pipeline_messages_consumed_total{landed="false"}'
-                     '[$__rate_interval]))) '
                      '/ sum(rate(pipeline_messages_consumed_total[$__rate_interval])) '
                      'or vector(0)', "redone")],
                    desc="Flat zero is healthy and is drawn as a line, not as an "
-                        "empty panel.",
+                        "empty panel." + PARA +
+                        "Requeued and parked only, for the reason the stat above gives: "
+                        "the `landed` dimension this used to add is retired.",
                    unit="percentunit", minv=0, soft_max=0.1),
-        statetimeline(lay, "Posture - consuming, gate, leader, hydration, identity",
-                   [(f'min by (service_name) ({live("pipeline_consumer_consuming_ratio")})',
-                     "consuming {{service_name}}"),
+        statetimeline(lay, "Posture - consumers, gate, leader, hydration, identity",
+                   [(f'clamp_max(min(max by (queue) '
+                     f'({live("pipeline_queue_consumers")})), 1)',
+                     "consumers attached"),
                     (f'min by (service_name) ({live("pipeline_gate_open_ratio")})',
                      "gate {{service_name}}"),
                     (f'count({live("pipeline_leader_ratio")} == 1) or vector(0)',
@@ -1761,11 +1709,15 @@ def build_flow():
                      "identity")],
                    desc="Why the pipeline stopped, in one panel. Every series should "
                         "sit at 1 -- leaders elected included." + PARA +
-                        "**Consuming is on here now because it is the series that "
-                        "actually moves.** It was the only posture signal to change in "
-                        "the Redis, broker and both-down scenarios, and it was the one "
-                        "this panel did not draw -- so the board's single history of the "
-                        "fault was a stat sparkline three centimetres wide." + PARA +
+                        "**The first row is the one that actually moves**, and it is "
+                        "broker-side now. It used to be `pipeline.consumer.consuming` -- "
+                        "the only posture signal to change in the Redis, broker and "
+                        "both-down scenarios -- and that instrument is retired, because it "
+                        "was the process asserting its own health and a departed replica's "
+                        "copy was held at 1. `pipeline.queue.consumers` is the broker's own "
+                        "count, clamped to a posture: 0 when ANY queue in the deployment "
+                        "has nothing attached to it, 1 when they all do. `Queues "
+                        "unconsumed` above is the same fact as a number." + PARA +
                         "Every series is restricted to replicas reporting inside " +
                         LIVENESS + ", so a replica going away ends its row rather than "
                         "freezing it at 1." + PARA +
@@ -1778,60 +1730,8 @@ def build_flow():
                         "one row here that can legitimately exceed 1. Two is a split "
                         "brain; the colour will not tell you so, the tooltip will.",
                    mappings=M_POSTURE),
-        timeseries(lay, "Step duration p95 / p99",
-                   [('histogram_quantile(0.95, sum by (le) '
-                     '(rate(pipeline_step_elapsed_seconds_bucket{type="step-outcome"}'
-                     '[$__rate_interval])))', "p95"),
-                    ('histogram_quantile(0.99, sum by (le) '
-                     '(rate(pipeline_step_elapsed_seconds_bucket{type="step-outcome"}'
-                     '[$__rate_interval])))', "p99"),
-                    ('sum(rate(pipeline_step_elapsed_seconds_sum{type="step-outcome"}'
-                     '[$__rate_interval])) / '
-                     'sum(rate(pipeline_step_elapsed_seconds_count{type="step-outcome"}'
-                     '[$__rate_interval]))', "mean")],
-                   desc="Door-to-door step time over the range: dispatch to outcome, "
-                        "across both services and three broker hops." + PARA +
-                        "**Read this beside `Queue wait by hop`, which is what it "
-                        "decomposes into.** A rise here with flat queue waits is the "
-                        "author's transform or a dependency getting slower; a rise that "
-                        "tracks one hop's wait is backlog on that queue, and `Queue depth "
-                        "by queue` names it." + PARA +
-                        "The mean rides alongside the quantiles for the reason the "
-                        "produce-duration panel gives: it comes from sum/count and is "
-                        "independent of bucket boundaries, so a wild divergence from p50 "
-                        "means the ladder has stopped fitting the data. **This ladder is "
-                        "deliberately wider than the transport's** -- it reaches 300s "
-                        "rather than stopping at 10s, because a backlogged step is "
-                        "measured in minutes and everything past the last boundary lands "
-                        "in +Inf, where a quantile reports the edge rather than a "
-                        "latency." + PARA +
-                        "**The line at " + str(STEP_ORANGE) + "s is where measured-normal "
-                        "ends**, not an alarm: healthy p95 here is 0.050-0.060s. Under "
-                        "300ms of injected Redis latency it reached 0.973s.",
-                   thresholds=normal_upto(STEP_ORANGE),
-                   unit="s",
-                   no_value="no steps completed in range"),
-        timeseries(lay, "Queue wait by hop",
-                   [('histogram_quantile(0.95, sum by (le,queue,type) '
-                     '(rate(pipeline_queue_wait_seconds_bucket[$__rate_interval])))',
-                     "{{type}} -> {{queue}}")],
-                   desc="p95 seconds each message type spent sitting in the broker before "
-                        "a consumer picked it up, per hop." + PARA +
-                        "**The term neither produce duration nor process duration "
-                        "contains**, and therefore the one that goes missing when an "
-                        "end-to-end time grows and no component looks slow. Produce "
-                        "duration ends at the broker's confirmation; process duration "
-                        "starts when a handler is entered. This is the gap between them."
-                        + PARA +
-                        "Healthy on this stack is **20-45ms per hop**. A hop that climbs "
-                        "while the others stay flat is backlog on that one queue -- check "
-                        "`Queue depth by queue` and `Consumers attached by queue` for "
-                        "whether anything is still draining it." + PARA +
-                        "Recorded on arrival, before the handler runs, so it does not "
-                        "fold in the transform time `Process duration` already reports.",
-                   unit="s",
-                   no_value="no deliveries carrying a send timestamp in range"),
         *depth_panels(lay, '', 'every queue in the deployment'),
+        queue_wait_panel(lay, '', ''),
         table(lay, "Message flow matrix",
               [('sum by (type) (rate(pipeline_messages_produced_total'
                 '[$__rate_interval]))', "produced"),
@@ -2160,7 +2060,9 @@ def build_orchestrator():
 
     panels.append(row(lay, "1 - Verdict: is the orchestrator broken?"))
     v = verdict_shared(lay, f)
-    panels += v[:2]
+    # v[:1] is the posture half (L2 gate) and v[1:] the fault counters. It was v[:2] /
+    # v[2:] while `Consuming` led the list; that stat is gone with its instrument.
+    panels += v[:1]
     panels += [
         stat(lay, "Hydration admitted",
              [f'min({live(f"pipeline_hydration_admitted_ratio{{{f}}}")}) or vector(0)'],
@@ -2182,7 +2084,7 @@ def build_orchestrator():
                   "on SKP Flow.",
              thresholds=T_EXACTLY_ONE, decimals=0),
     ]
-    panels += v[2:]
+    panels += v[1:]
 
     lay.newline()
     panels.append(row(lay, "2 - Since: what has already happened?"))
@@ -2224,16 +2126,25 @@ def build_orchestrator():
                         "service_instance_id is.",
                    unit="reqps"),
         *depth_panels(lay, 'queue=~"orchestrator-.*"', "the orchestrator's queues"),
+        # The produce side is filtered by DESTINATION, not by service: the orchestrator's
+        # queues are published to by the processors and the API, so this board's own
+        # service filter would select the wrong half of the subtraction.
+        queue_wait_panel(lay, f, 'destination=~"orchestrator-.*"'),
         textpanel(lay, "What the Role filter reaches",
                   "`role` is an attribute on **three instruments only**: "
                   "`pipeline.messages.produced`, `pipeline.messages.consumed` and "
                   "`pipeline.produce.duration`. Verified against the live stack.\n\n"
                   "The gauges (`gate.open`, `leader`, `hydration.admitted`, "
-                  "`consumer.consuming`, `consumer.inflight`) and "
-                  "`consumer.channel.resets` carry **no** `role`, so the filter is "
-                  "applied only to the four panels that can honour it. Applying it "
+                  "`identity.ready`) and the broker-side levels (`queue.depth`, "
+                  "`queue.consumers`, `deadletter.depth`) carry **no** `role`, so the "
+                  "filter is applied only to the panels that can honour it. Applying it "
                   "board-wide would empty the rest, because a `role=~\"leader\"` "
                   "matcher does not match a series that has no `role` label.\n\n"
+                  "`Queue wait by queue` is the one panel deliberately left unfiltered on "
+                  "both halves. The wait it corrects for is stamped by the SENDER, which "
+                  "is a different service on the other side of the hop and carries no "
+                  "role of this board's, so a role selection there would subtract a term "
+                  "measured over a population the filter cannot reach.\n\n"
                   "The verdict tier is deliberately left unfiltered as well: it answers "
                   "*is anything wrong anywhere*, and a role selection there would let a "
                   "follower fault hide behind a leader view.",
@@ -2249,7 +2160,7 @@ def build_orchestrator():
     return dashboard(
         uid="skp-orchestrator",
         title="SKP Orchestrator",
-        description=("Orchestrator control plane -- 3 replicas across 5 queues. Six "
+        description=("Orchestrator control plane -- 3 replicas across 5 queues. Five "
                      "pipeline panels are shared with the processor board and generated "
                      "from one source so the two cannot drift."),
         variables=[
@@ -2283,7 +2194,9 @@ def build_processor():
 
     panels.append(row(lay, "1 - Verdict: is the processor broken?"))
     v = verdict_shared(lay, f)
-    panels += v[:2]
+    # v[:1] is the posture half (L2 gate) and v[1:] the fault counters. It was v[:2] /
+    # v[2:] while `Consuming` led the list; that stat is gone with its instrument.
+    panels += v[:1]
     panels += [
         stat(lay, "Identity ready",
              [f'min({live(f"pipeline_identity_ready_ratio{{{f}}}")}) or vector(0)'],
@@ -2293,58 +2206,40 @@ def build_processor():
                   "makes that legible.",
              thresholds=T_POSTURE, decimals=0),
     ]
-    panels += v[2:]
+    panels += v[1:]
 
     lay.newline()
     panels.append(row(lay, "2 - Since: what has already happened?"))
     panels += since_shared(lay, f)
     panels += [
-        stat(lay, "Duplicates suppressed",
-             [recent(f'pipeline_duplicate_suppressed_total{{{f}}}')],
-             desc="Deliveries acked having done no work, because the entry was already "
-                  "absent. The primary idempotence mechanism; invisible under "
-                  "disposition=acked. Rare is fine, frequent is a question." + PARA +
-                  "**This instrument has never emitted a series on this stack**, before "
-                  "or after a deliberate L2 wipe -- checked against Prometheus, which "
-                  "carries no metric name matching it at all. It is not dead code: "
-                  "`ProcessDispatchHandler` does call `RecordDuplicateSuppressed()`, so "
-                  "the path is wired and this stat will move the first time a duplicate "
-                  "is suppressed. The condition simply has not arisen." + PARA +
-                  "On the Since tier rather than the verdict tier because a suppressed "
-                  "duplicate is not a fault in progress, and because a permanently-zero "
-                  "stat on a row an operator scans for colour is one more thing teaching "
-                  "them that this row is always green.",
+        stat(lay, "Restarts (1h)",
+             [f'max(changes(pipeline_process_start_timestamp_seconds{{{f}}}[1h])) '
+              f'or vector(0)'],
+             desc="How many times any replica restarted in the last hour. The gauge holds "
+                  "the process start time and moves exactly once per process, so "
+                  "changes() over a window is the restart count." + PARA +
+                  "**It works because InstanceId resolves to POD_NAME**, which is stable "
+                  "across container restarts within a pod -- a restart moves the value on "
+                  "an EXISTING series rather than creating a new one, which is what "
+                  "changes() needs to see it at all." + PARA +
+                  "`max` rather than `sum` across replicas: this answers *did anything "
+                  "restart*, and a sum would report a rollout of two replicas as two "
+                  "restarts of one." + PARA +
+                  "**Beside `Process restarts`, which infers the same fact rather than "
+                  "measuring it**: that one reads `resets()` on the JIT-compiled-methods "
+                  "counter going backwards, over the visible range. Two derivations of "
+                  "one event, deliberately kept together -- this gauge moves exactly once "
+                  "per process and cannot be fooled by a counter that merely paused, and "
+                  "a disagreement between the two is worth a look." + PARA +
+                  "The windows differ on purpose: this one is a fixed hour, so its number "
+                  "does not change when the reader zooms, and its neighbour follows the "
+                  "visible range.",
              thresholds=T_WARN, decimals=0),
     ]
 
     panels.append(row(lay, "3 - Pipeline: what is broken?"))
-    panels += pipeline_shared(lay, f, by_instance=True)
+    panels += pipeline_shared(lay, f)
     panels += [
-        timeseries(lay, "Process duration p95 / p99 by outcome",
-                   [(f'histogram_quantile(0.95, sum by (le,outcome) '
-                     f'(rate(pipeline_process_duration_seconds_bucket{{{f}}}'
-                     f'[$__rate_interval])))', "p95 {{outcome}}"),
-                    (f'histogram_quantile(0.99, sum by (le,outcome) '
-                     f'(rate(pipeline_process_duration_seconds_bucket{{{f}}}'
-                     f'[$__rate_interval])))', "p99 {{outcome}}"),
-                    (f'sum by (outcome) (rate(pipeline_process_duration_seconds_sum'
-                     f'{{{f}}}[$__rate_interval])) '
-                     f'/ sum by (outcome) (rate(pipeline_process_duration_seconds_count'
-                     f'{{{f}}}[$__rate_interval]))', "mean {{outcome}}")],
-                   desc="The author's own transform -- the only span here whose length "
-                        "is somebody's implementation rather than this framework's "
-                        "constant cost. returned vs faulted keeps a slow success and a "
-                        "slow failure from averaging into a number describing neither."
-                        + PARA + "The mean rides alongside the quantiles as a "
-                        "bucket-independent cross-check, for the same reason it does on "
-                        "the produce-duration panel." + PARA +
-                        "**The line at 50ms is where measured-normal ends**: steady p95 "
-                        "runs 17-43ms here, clustered at 24ms. This is the transform's "
-                        "own cost, so a p95 that settles above the line is the processor "
-                        "getting slower at its actual job -- the thing no verdict stat "
-                        "will ever show you, because nothing is broken.",
-                   thresholds=normal_upto(0.05),
-                   unit="s"),
         statetimeline(lay, "Identity ready by replica",
                    [(f'{live(f"pipeline_identity_ready_ratio{{{f}}}")}',
                      "{{service_instance_id}}")],
@@ -2360,26 +2255,23 @@ def build_processor():
                         "overlapping filled areas at the same value are one opaque block, "
                         "and which of the four had ended was not readable from it.",
                    mappings=M_READY),
-        # `Duplicate suppression rate` was here and is deleted rather than fixed.
+        # TWO PANELS AND A STAT ARE GONE FROM THIS ROW, WITH THE INSTRUMENTS THEY READ.
         #
-        # It drew `rate(pipeline_duplicate_suppressed_total)`, an instrument that has
-        # never produced a series on this stack -- Prometheus carries no metric name
-        # matching it at all, before or after a deliberate L2 wipe. So the panel spent a
-        # full third of a row on a flat line at zero, on an axis auto-scaled to 0-100
-        # req/s because there was no data to scale it by, and its own description said
-        # "flat zero is healthy and is drawn, not left empty".
+        # `Duplicate suppression rate` and `Duplicates suppressed` read
+        # pipeline.duplicate.suppressed, and `Process duration p95 / p99 by outcome` read
+        # pipeline.process.duration. Both are retired -- section 6 of the 2026-08-26
+        # metrics-rewrite spec.
         #
-        # That reasoning is right for a signal that CAN be zero and can move. It is wrong
-        # for one that has never moved: what it actually teaches an operator is that a
-        # blank panel on these boards is normal, which is the habit that makes the next
-        # genuinely-empty panel invisible.
+        # The duplicate path is not unmeasured, it is folded in: that branch returns
+        # normally and the delivery is ACKed, so it now counts as an acked delivery like
+        # any other. The cost is that the acked count mixes real transform runs with
+        # skipped duplicates, and the 'entry absent' condition -- which ProcessDispatchHandler
+        # documents as possibly a silent LOSS rather than a safe duplicate -- has only its
+        # log line left. Recorded here because no panel can now show it.
         #
-        # The instrument is NOT dead -- ProcessDispatchHandler calls
-        # RecordDuplicateSuppressed(), so the path is wired and will emit the first time
-        # a duplicate is suppressed. The `Duplicates suppressed` stat on the Since tier
-        # is retained for exactly that, and is the cheaper way to carry a condition that
-        # has not happened yet. Restore this panel when the stat first moves and there is
-        # a rate worth plotting.
+        # Process duration is subsumed by `Consumer duration by disposition` below, which
+        # measures more rather than less: the transform plus everything around it, on every
+        # exit path including the ones that never reached a handler at all.
         *depth_panels(lay, 'queue=~"processor-$processorId"', "this processor's work queue"),
         timeseries(lay, "Replica fan-out",
                    [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
@@ -2414,6 +2306,52 @@ def build_processor():
                         "that has data anywhere in the range, so a departed replica keeps "
                         "its legend entry after its line has stopped. Read the line.",
                    unit="reqps"),
+    ]
+
+    panels += [
+        timeseries(lay, "Loop rate by loop",
+                   [(f'rate(pipeline_loop_iterations_total{{{f}}}[$__rate_interval])',
+                     "{{loop}} {{service_instance_id}}")],
+                   desc="Every watched loop's actual cadence. l2-gate should sit at "
+                        "0.2/s, processor-liveness and queue-depth at 0.1/s." + PARA +
+                        "**This is what the liveness health checks cannot say.** A stale "
+                        "window is binary -- it fires at 15s or 30s and says nothing "
+                        "before that -- while a loop running at 0.12/s instead of 0.2/s "
+                        "is degrading and still green on every probe." + PARA +
+                        "Zero means the loop is gone, and it is a READING rather than an "
+                        "absence: the counter is seeded with Add(0) per loop at startup, "
+                        "so the series exists from the first export whether or not the "
+                        "loop has ever run. An empty panel here is a process that is not "
+                        "reporting at all.",
+                   unit="reqps", decimals=2),
+
+        timeseries(lay, "Consumer duration by disposition",
+                   [(f'sum by (queue,disposition) '
+                     f'(rate(pipeline_consumer_duration_seconds_sum{{{f}}}'
+                     f'[$__rate_interval])) '
+                     f'/ sum by (queue,disposition) '
+                     f'(rate(pipeline_consumer_duration_seconds_count{{{f}}}'
+                     f'[$__rate_interval]))',
+                     "mean {{queue}} {{disposition}}")],
+                   desc="How long a delivery was held, on every path including the ones "
+                        "that never reached a handler. Split by disposition so a slow "
+                        "success and a slow refusal cannot average into a number "
+                        "describing neither." + PARA +
+                        "**Wider than the pipeline.process.duration it replaces**, which "
+                        "measured the author's transform alone and so was blank for every "
+                        "delivery that bounced off a shut gate -- exactly the deliveries "
+                        "worth timing during a store outage." + PARA +
+                        "A mean rather than a quantile, deliberately: quantiles off this "
+                        "ladder are interpolation between rung edges, and at the sample "
+                        "counts this board sees they flip between levels rather than "
+                        "moving.",
+                   unit="s"),
+
+        # The produce side is filtered by DESTINATION, not by this board's service filter:
+        # the processor's work queue is published to by the ORCHESTRATOR, so filtering the
+        # correction term by processor service_name selects the processor's own sends --
+        # destination orchestrator-result -- and the join then matches nothing at all.
+        queue_wait_panel(lay, f, 'destination=~"processor-$processorId"'),
     ]
 
     panels += causes_row(lay, f)
