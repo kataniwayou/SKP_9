@@ -298,7 +298,7 @@ is the check: parks that do not appear there did not land.
 | `pipeline.consumer.inflight` | Designed to be read against `PrefetchCount` for saturation. Prefetch is 1, so it is 0 or 1 and says nothing. |
 | `pipeline.consumer.channel.resets` | Existed to explain `landed=false`, which is dropped. A lost ack now shows as an extra `consumed` increment. |
 | `pipeline.process.duration` | Subsumed by `pipeline.consumer.duration` (5.3). Its `AddView` in `ProcessorHost.Create` goes with it. |
-| `pipeline.step.elapsed` | Out of scope for the processor board. |
+| `pipeline.step.elapsed` | Removed from the set by decision, with its cost on the table at the time. **Correction, 2026-08-26:** an earlier draft of this row said "out of scope for the processor board", which was factually wrong — it was never on the processor board. It lived on **SKP Flow**, so removing it takes the only door-to-door measure of what a workflow experiences off a board this rewrite does not otherwise touch. The removal stands; the reason given for it did not. See §10.4. |
 | `pipeline.duplicate.suppressed` | That path returns normally and the delivery is ACKed, so it is counted there. **Consequence:** the acked count now mixes real transform runs with skipped duplicates, and the "entry absent" condition — which `ProcessDispatchHandler` documents as possibly a *silent loss* rather than a safe duplicate — has only its log line left. |
 
 `ProcessorPipelineMetrics`' own two instruments are both removed; its `Meter`
@@ -357,8 +357,18 @@ avg by (queue) (
 )
 ```
 
-Three things about that expression are load-bearing and each fails silently if
-got wrong:
+> **Correction, 2026-08-26 — the expressions above are shown without a dashboard
+> variable filter, and that omission was load-bearing.** An earlier draft
+> interpolated the processor board's own worker filter into *both* halves. That
+> makes the net series **permanently empty**: the produce term is emitted by the
+> **sender**, a different service, which cannot match a filter naming the
+> processor. In the generator the two halves take **separate** filters — the
+> wait side the consuming host's, the produce side a `destination=~…` filter —
+> the way `depth_panels` already does. Verified live once corrected: raw 23.2ms,
+> net 12.1ms, which matches the documented ~12ms publisher-confirm double-count.
+
+Four things about that expression are load-bearing and each fails silently if
+got wrong. The filter split above is the fourth; these are the other three:
 
 - **`label_replace` is required.** Wait is labelled `queue`; produce is labelled
   `destination`. They hold the same string and no vector match joins them
@@ -433,3 +443,19 @@ as a broken reference.
    unchanged by this design.
 3. **The 210s queue-wait cycle** remains open, with `QueueDepthProbe` accused and
    not convicted. Keeping the probe keeps the suspicion live.
+4. **`pipeline.step.elapsed` leaves the flow board, not the processor board.**
+   Recorded here because §6's original one-line justification for its removal
+   was wrong, and a wrong reason outlives a right decision.
+
+   The instrument was never on the processor board. It lived on **SKP Flow**,
+   where it was the only measurement of what a *workflow* experiences
+   door-to-door rather than what a component does — added because a chaos
+   scenario showed nothing without it. Removing it from the set therefore takes
+   a panel off a board this rewrite does not otherwise touch.
+
+   The removal stands: it was decided with that cost explicitly on the table.
+   What did not stand was calling it out of scope for a board it was never on.
+   If the flow board's door-to-door question turns out to matter more than the
+   leanness this set was trimmed for, the instrument is restorable — it is one
+   histogram and one `RecordArrival` argument, both recoverable from the
+   `pre-metrics-rewrite` tag.
