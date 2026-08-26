@@ -93,19 +93,7 @@ public static class ProcessorHost
         // call configured rather than replacing it.
         builder.Services.AddOpenTelemetry()
             .WithMetrics(m => m
-                .AddMeter(ProcessorPipelineMeter.Name)
-                // The transform histogram needs the same treatment the shared call gives the send
-                // histogram, and for the same reason -- it records seconds and would otherwise get a
-                // millisecond ladder. It is configured here rather than in AddBaseConsoleObservability
-                // so that method's contract stays role-agnostic, matching how the meter itself is
-                // registered. The boundaries are deliberately the transport's, so a hop's send time
-                // and its transform time remain readable on one axis.
-                .AddView(
-                    ProcessorPipelineMeter.ProcessDurationInstrument,
-                    new ExplicitBucketHistogramConfiguration
-                    {
-                        Boundaries = EgressMeter.LatencySecondsBoundaries(),
-                    }));
+                .AddMeter(ProcessorPipelineMeter.Name));
 
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
