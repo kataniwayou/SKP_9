@@ -32,6 +32,9 @@ public static class ProcessStartMetrics
     /// </summary>
     public const string MeterName = "BaseConsole.Core.Process";
 
+    /// <summary>
+    /// The name that dashboards and alert rules query.
+    /// </summary>
     public const string StartTimestampInstrument = "pipeline.process.start.timestamp";
 
     private static readonly Meter Meter = new(MeterName);
