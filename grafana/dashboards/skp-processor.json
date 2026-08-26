@@ -1315,6 +1315,106 @@
     },
     {
       "id": 94,
+      "type": "timeseries",
+      "title": "L2 gate and trips by replica",
+      "description": "The gate's posture per replica, and how many times it has tripped in the last hour.\n\n**The two are paired because the gauge alone cannot see a fault that healed.** A trip that closed the gate and reopened it leaves the gauge back at 1 with nothing to show, and the verdict stat beside it green -- while the counter keeps the fact for an hour. A store that is flapping reads as a healthy store on every posture signal on this board except this line.\n\n**A trips series that is ABSENT means never tripped, not never measured.** `pipeline.gate.trips` is a .NET counter, created on first increment, so there is no series at all until the first trip -- unlike `pipeline.loop.iterations`, which is seeded. Checked against Prometheus at the time of writing: the name exists in the series index from an earlier trip, and carries no current samples. The gate line draws either way, so this panel is not empty when the counter is.\n\nExported as `_total` with no `_ratio`, despite the instrument's `unit: \"1\"`. That suffix is applied to the GAUGES -- `pipeline_gate_open_ratio` on this very panel is one of them -- and not to counters. Verified against Prometheus's series index, because a wrong name here fails to no-data rather than to an error.\n\n**One axis, two magnitudes, on purpose.** The gate is 0 or 1 and the trips count is small, so they read together; in health every replica's gate sits at exactly 1 and the lines overlap into one, which is why the instantaneous answer belongs to the `L2 gate` verdict stat and the HISTORY belongs here.\n\nThe window is a fixed hour rather than $__range, so the number does not change when the reader zooms.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 19
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[40s])",
+          "legendFormat": "gate {{service_instance_id}}",
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "increase(pipeline_gate_trips_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[1h])",
+          "legendFormat": "trips 1h {{service_instance_id}}",
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": false,
+            "showPoints": "never",
+            "pointSize": 4,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "min": 0,
+          "noValue": "no gate reporting -- this replica is not exporting at all"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 95,
       "type": "state-timeline",
       "title": "Identity ready by replica",
       "description": "One row per replica that is still reporting. Red is a pod that is up and waiting for a processor row matching its image -- the designed behaviour, not a crash loop.\n\nUnrestricted, this panel GAINS series during a rollout: the departed replicas are held by the collector and Prometheus while their replacements start exporting, so two live processors rendered as four series all sitting at 1. A row that ends is a replica that left.\n\nDrawn as a state timeline for that reason among others: four overlapping filled areas at the same value are one opaque block, and which of the four had ended was not readable from it.",
@@ -1325,8 +1425,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 19
+        "x": 0,
+        "y": 27
       },
       "targets": [
         {
@@ -1405,7 +1505,7 @@
       }
     },
     {
-      "id": 95,
+      "id": 96,
       "type": "timeseries",
       "title": "Queue depth by queue",
       "description": "Messages waiting in each of this processor's work queue, right now.\n\n**The only leading indicator on these boards.** Every verdict stat is coincident or lagging -- consuming drops once a consumer has already stopped, and a departed replica costs a liveness window plus an export, measured at 52-66s. A queue starts filling the moment a consumer is merely SLOWER than its producer, which is the shape of most real degradations and which nothing here could previously see.\n\n**It is also what separates a queued message from a lost one.** The hop gaps are a conservation check, so a message sitting in a queue and a message that vanished are the same number to them. A gap roughly equal to the depth here is backlog; a gap far exceeding it is loss.\n\nHealthy on this stack is **0 on every orchestrator queue** and **mean 0.65, max 3** on the processor work queue -- that burst is structural, not noise: a cron fire dispatches a batch, PrefetchCount is 1, and the replicas drain it one message at a time. The reference line is at 5, above that measured maximum.\n\n`max by (queue)` because every replica probes the same queue and reports the same number -- a depth is a property of the broker, not of the replica asking -- so `sum` would multiply it by the replica count. Wrapped in `last_over_time(...[40s])` so a departed reporter's held sample cannot win the max.",
@@ -1416,7 +1516,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
+        "x": 8,
         "y": 27
       },
       "targets": [
@@ -1498,7 +1598,7 @@
       }
     },
     {
-      "id": 96,
+      "id": 97,
       "type": "timeseries",
       "title": "Consumers attached by queue",
       "description": "How many consumers **the broker** has on each queue. Zero means nothing is listening.\n\n**This is now the ONLY signal that anything is listening, and that is why the process's own assertion was retired.** `pipeline.consumer.consuming` was the process saying so about itself, which is why every panel reading it had to wrap it in a liveness window -- a dead replica's copy was held at 1 by the collector, so it read healthiest exactly when the replica was gone. This number comes from the broker's own reply and is 0 the moment a consumer detaches.\n\n**The liveness wrap is still load-bearing here, and it was measured.** Unwrapped, `max by (queue)` read a confident 2 against the broker's 0 for a whole processor outage, because it picked the departed pods' stale series over the orchestrator's fresh 0. Wrapped, it reads 0 within one liveness window.\n\nExpect 3 on the shared orchestrator queues (one per replica), 1 on each per-replica control queue, and 2 on the processor work queue. A count that drops without `Workers reporting` moving is a consumer that detached while its process stayed up.\n\nNot a complete answer: a consumer that reattaches inside one 10s probe interval -- which is what the S9 flapping-connection scenario produced -- is invisible here.",
@@ -1509,7 +1609,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
+        "x": 16,
         "y": 27
       },
       "targets": [
@@ -1591,7 +1691,7 @@
       }
     },
     {
-      "id": 97,
+      "id": 98,
       "type": "timeseries",
       "title": "Replica fan-out",
       "description": "Replicas share one queue, so the broker round-robins. A replica sitting near zero while the others work is consuming nothing despite looking healthy.\n\n**A line that ENDS is a replica that left; a line flat at zero beside working peers is a replica that stopped working.** The `and on(service_instance_id) present_over_time(...)` clause ends the line a fixed ~40s after a replica's last export, whatever the dashboard's time range.\n\nWithout it the end of the line moves with the range. A departed replica's counter is stale-held, so `rate()` keeps returning a decaying value until fewer than two samples remain in the rate window -- and `$__rate_interval` grows with the range. Measured on the partial-replica-loss run, one replica scaled away at +185s: ungated, its line ran to +210s at a 1m rate interval, +270s at 2m, +450s at 5m and past the end of the run at 10m, fading toward zero the whole way. Gated, it ends at +210s in every one of those, at its true last rate rather than a decayed one.\n\nSo at this board's usual range the gate changes nothing -- a 1m rate window expires before the 40s liveness window does. It is load-bearing when you widen the range to look at a past incident, which is exactly when a six-minute fade would mislead you.\n\nNote the legend is not evidence here: Grafana lists every series that has data anywhere in the range, so a departed replica keeps its legend entry after its line has stopped. Read the line.",
@@ -1602,8 +1702,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 27
+        "x": 0,
+        "y": 35
       },
       "targets": [
         {
@@ -1678,7 +1778,7 @@
       }
     },
     {
-      "id": 98,
+      "id": 99,
       "type": "timeseries",
       "title": "Loop rate by loop",
       "description": "Every watched loop's actual cadence. l2-gate should sit at 0.2/s, processor-liveness and queue-depth at 0.1/s.\n\n**This is what the liveness health checks cannot say.** A stale window is binary -- it fires at 15s or 30s and says nothing before that -- while a loop running at 0.12/s instead of 0.2/s is degrading and still green on every probe.\n\nZero means the loop is gone, and it is a READING rather than an absence: the counter is seeded with Add(0) per loop at startup, so the series exists from the first export whether or not the loop has ever run. An empty panel here is a process that is not reporting at all.",
@@ -1689,7 +1789,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
+        "x": 8,
         "y": 35
       },
       "targets": [
@@ -1765,7 +1865,7 @@
       }
     },
     {
-      "id": 99,
+      "id": 100,
       "type": "timeseries",
       "title": "Consumer duration by disposition",
       "description": "How long a delivery was held, on every path including the ones that never reached a handler. Split by disposition so a slow success and a slow refusal cannot average into a number describing neither.\n\n**Wider than the pipeline.process.duration it replaces**, which measured the author's transform alone and so was blank for every delivery that bounced off a shut gate -- exactly the deliveries worth timing during a store outage.\n\nA mean rather than a quantile, deliberately: quantiles off this ladder are interpolation between rung edges, and at the sample counts this board sees they flip between levels rather than moving.",
@@ -1776,7 +1876,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
+        "x": 16,
         "y": 35
       },
       "targets": [
@@ -1852,7 +1952,7 @@
       }
     },
     {
-      "id": 100,
+      "id": 101,
       "type": "timeseries",
       "title": "Queue wait by queue",
       "description": "Seconds a delivery sat in the broker between the publish and this service picking it up, per queue.\n\n**Neither produce duration nor consumer duration contains this term.** Produce duration ends at the broker's confirmation; consumer duration begins when the delivery reaches this process. The wait between them was unmeasured, which is how an end-to-end time could grow with every component still looking fast.\n\n**TWO SERIES BECAUSE THE RAW ONE IS WRONG.** The sent header is stamped before the publish, so the sender's own publisher confirm -- about 12 of ~13ms on this stack -- sits inside this number AND inside produce duration. The net series subtracts it and is the one to read; the raw series is here to show how much of it was never broker wait at all.\n\n**Net is directional, not exact.** It is a difference of two means taken over different populations -- different messages, different processes -- so do not read a millisecond off it. Near zero is the healthy reading. Growing is real queueing, and `Queue depth by queue` beside it says how deep while `Consumers attached by queue` says whether anything is still draining it.\n\n**Three parts of that expression are load-bearing and each fails to NO-DATA rather than to an error.** `label_replace` renames `destination` to `queue`: the two hold the same string under different label names, and no vector match joins them without it. `avg by (queue)` on BOTH sides, before the subtraction, because the halves come from different processes -- `instance` and `job` differ, so an unaggregated match is many-to-many, which returns nothing. And the produce side is filtered by destination rather than by service, because the sender is not this board's service. A blank net series with a drawn raw one means one of the three has been broken.\n\n**Recorded only when the message carried a send timestamp.** A message published by a build without the header has none, and during a rollout there are always some -- they are skipped rather than recorded as zero, which would bury the real distribution. The API's queue side stamps nothing at all.",
@@ -1863,8 +1963,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 35
+        "x": 0,
+        "y": 43
       },
       "targets": [
         {
@@ -1951,7 +2051,7 @@
       }
     },
     {
-      "id": 101,
+      "id": 102,
       "type": "timeseries",
       "title": "Exception rate",
       "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
@@ -1963,7 +2063,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "targets": [
         {
@@ -2039,7 +2139,7 @@
       }
     },
     {
-      "id": 102,
+      "id": 103,
       "type": "timeseries",
       "title": "Process restarts",
       "description": "A monotonic counter going backwards means the process is new. **The one signal that explains a simultaneous gap in every other series** -- and the one the hop gaps and `Replica fan-out` both tell you to go and check.\n\nA spike here beside a jump on any of those means the number there is a rollout artefact rather than lost work.",
@@ -2051,7 +2151,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 43
+        "y": 51
       },
       "targets": [
         {
@@ -2127,7 +2227,7 @@
       }
     },
     {
-      "id": 103,
+      "id": 104,
       "type": "row",
       "title": "4 - Runtime: is the process why?",
       "collapsed": true,
@@ -2135,11 +2235,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 58
       },
       "panels": [
         {
-          "id": 104,
+          "id": 105,
           "type": "timeseries",
           "title": "Thread-pool queue length",
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
@@ -2151,7 +2251,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 51
+            "y": 59
           },
           "targets": [
             {
@@ -2226,7 +2326,7 @@
           }
         },
         {
-          "id": 105,
+          "id": 106,
           "type": "timeseries",
           "title": "GC pause time",
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",
@@ -2238,7 +2338,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 51
+            "y": 59
           },
           "targets": [
             {

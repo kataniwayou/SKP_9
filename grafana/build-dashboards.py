@@ -2240,6 +2240,42 @@ def build_processor():
     panels.append(row(lay, "3 - Pipeline: what is broken?"))
     panels += pipeline_shared(lay, f)
     panels += [
+        timeseries(lay, "L2 gate and trips by replica",
+                   [(f'{live(f"pipeline_gate_open_ratio{{{f}}}")}',
+                     "gate {{service_instance_id}}"),
+                    (f'increase(pipeline_gate_trips_total{{{f}}}[1h])',
+                     "trips 1h {{service_instance_id}}")],
+                   desc="The gate's posture per replica, and how many times it has "
+                        "tripped in the last hour." + PARA +
+                        "**The two are paired because the gauge alone cannot see a fault "
+                        "that healed.** A trip that closed the gate and reopened it "
+                        "leaves the gauge back at 1 with nothing to show, and the verdict "
+                        "stat beside it green -- while the counter keeps the fact for an "
+                        "hour. A store that is flapping reads as a healthy store on every "
+                        "posture signal on this board except this line." + PARA +
+                        "**A trips series that is ABSENT means never tripped, not never "
+                        "measured.** `pipeline.gate.trips` is a .NET counter, created on "
+                        "first increment, so there is no series at all until the first "
+                        "trip -- unlike `pipeline.loop.iterations`, which is seeded. "
+                        "Checked against Prometheus at the time of writing: the name "
+                        "exists in the series index from an earlier trip, and carries no "
+                        "current samples. The gate line draws either way, so this panel "
+                        "is not empty when the counter is." + PARA +
+                        "Exported as `_total` with no `_ratio`, despite the instrument's "
+                        "`unit: \"1\"`. That suffix is applied to the GAUGES -- "
+                        "`pipeline_gate_open_ratio` on this very panel is one of them -- "
+                        "and not to counters. Verified against Prometheus's series index, "
+                        "because a wrong name here fails to no-data rather than to an "
+                        "error." + PARA +
+                        "**One axis, two magnitudes, on purpose.** The gate is 0 or 1 and "
+                        "the trips count is small, so they read together; in health every "
+                        "replica's gate sits at exactly 1 and the lines overlap into one, "
+                        "which is why the instantaneous answer belongs to the `L2 gate` "
+                        "verdict stat and the HISTORY belongs here." + PARA +
+                        "The window is a fixed hour rather than $__range, so the number "
+                        "does not change when the reader zooms.",
+                   minv=0, decimals=0,
+                   no_value="no gate reporting -- this replica is not exporting at all"),
         statetimeline(lay, "Identity ready by replica",
                    [(f'{live(f"pipeline_identity_ready_ratio{{{f}}}")}',
                      "{{service_instance_id}}")],
@@ -2354,6 +2390,11 @@ def build_processor():
         queue_wait_panel(lay, f, 'destination=~"processor-$processorId"'),
     ]
 
+    # The pipeline tier is 13 panels against a 3-across grid, so the last one sits
+    # alone. Break the line here rather than letting the causes pair wrap around it:
+    # exception rate and process restarts are read together, and the grid would
+    # otherwise put one beside a pipeline panel and the other a row below.
+    lay.newline()
     panels += causes_row(lay, f)
 
     rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
