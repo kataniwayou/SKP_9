@@ -42,11 +42,9 @@ const OUT = path.join(process.env.OUT_DIR || path.join(__dirname, '..', '.chaos-
 // panel list, so a fullPage capture re-renders while it scrolls and the board comes out
 // drawn twice. Every board fits inside 3200px; the surplus is black.
 const BOARDS = [
-  { uid: 'skp-flow', name: 'Flow' },
   { uid: 'skp-orchestrator', name: 'Orchestrator' },
   { uid: 'skp-processor', name: 'Processor' },
   { uid: 'skp-baseapi', name: 'BaseAPI' },
-  { uid: 'skp-runtime', name: 'Runtime' },
 ];
 
 // Read one board's panels the way a reader sees them: the rendered state, not the query.
