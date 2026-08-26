@@ -103,6 +103,16 @@ public sealed class IngressMetricsTests
         return Assert.Single(metrics.For("pipeline.messages.consumed"));
     }
 
+    /// <summary>
+    /// The <c>finally</c> in <c>OnReceivedAsync</c> records <c>pipeline.consumer.duration</c> on
+    /// every exit, so exactly one measurement must exist beside the one <c>pipeline.messages.
+    /// consumed</c> row -- same exactly-once shape as <see cref="TheOnlyConsumedMeasurement"/>.
+    /// </summary>
+    private static RecordedMeasurement TheOnlyConsumerDurationMeasurement(MetricCollector metrics)
+    {
+        return Assert.Single(metrics.For(IngressMetrics.ConsumerDurationInstrument));
+    }
+
     [Fact]
     public async Task ADeliveryArrivingWhileTheGateIsShutIsRequeuedAsGateClosed()
     {
@@ -119,6 +129,14 @@ public sealed class IngressMetricsTests
         Assert.Equal("gate_closed", m.Tags["reason"]);
         Assert.Equal(Queue, m.Tags["queue"]);
         Assert.Equal(Type, m.Tags["type"]);
+
+        // §5.3's "regardless of path" claim, proved on the path that never reaches the handler: a
+        // delivery bounced off a shut gate still cost this consumer time, and the finally that
+        // records pipeline.consumer.duration must have run for it same as any other exit.
+        var d = TheOnlyConsumerDurationMeasurement(metrics);
+        Assert.Equal("requeued", d.Tags["disposition"]);
+        Assert.Equal(Queue, d.Tags["queue"]);
+        Assert.Equal(Type, d.Tags["type"]);
     }
 
     [Fact]
@@ -180,6 +198,13 @@ public sealed class IngressMetricsTests
         var m = TheOnlyConsumedMeasurement(metrics);
         Assert.Equal("requeued", m.Tags["disposition"]);
         Assert.Equal("escaped", m.Tags["reason"]);
+
+        // §5.3's "regardless of path" claim again, on the other path with zero prior coverage: an
+        // escape still reaches the finally, and its disposition must agree with what
+        // pipeline.messages.consumed just recorded for the same delivery -- "requeued" on both,
+        // not the pre-fix "escaped" the duration side used to carry on its own.
+        var d = TheOnlyConsumerDurationMeasurement(metrics);
+        Assert.Equal("requeued", d.Tags["disposition"]);
     }
 
     [Fact]
