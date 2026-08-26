@@ -23,11 +23,18 @@
 - **A comment naming a removed instrument is a defect**, on the same footing as a broken reference.
 - **Rollback point:** tag `pre-metrics-rewrite`.
 
-## ⚠️ Scope fact discovered while planning — read before Task 9
+## Scope: the removals are fleet-wide — DECIDED 2026-08-26
 
 `IngressMetrics`, `QueueDepthMetrics`, `DeadLetterDepthMetrics` and `L2GateMetrics` live in **`BaseConsole.Core` and `Messaging.Transport`, which the Orchestrator also references.** Removing an instrument from them removes it from the orchestrator too, and any orchestrator or flow board panel reading that series goes to no-data.
 
-The spec's non-goals say "this design covers the processor", but a shared assembly cannot be changed for one consumer only. **This plan therefore treats the removals as fleet-wide** and includes cleaning the orchestrator and flow boards of panels reading removed series (Task 11). That is the honest reading; if the intent was to leave the orchestrator's series intact, Tasks 6, 7 and 9 need re-scoping before execution.
+The spec's non-goals say "this design covers the processor", but a shared assembly cannot be changed for one consumer only. **Decided: the removals apply fleet-wide.** This is settled — not an open question for an executor to re-litigate.
+
+What that means in practice:
+
+- Task 9 removes the instruments from the shared assemblies outright. No conditional compilation, no orchestrator-only shim, no keeping a series alive for one host.
+- Task 11 cleans the **flow and orchestrator** boards as well as the processor board. `pipeline_shared()`, `verdict_shared()`, `since_shared()` and `depth_panels()` are called by all of them, so a panel removed in a shared helper is removed everywhere — which is correct.
+- Expect the orchestrator and flow boards to lose panels. That is the intended outcome, not collateral damage.
+- Task 12, Step 5 checks the removed series are gone **from processor instances**. Orchestrator instances will also stop emitting them; that is expected and is not a regression.
 
 ## File Structure
 
@@ -1802,4 +1809,4 @@ MSG
 
 **Ordering constraint.** Task 5 must precede Task 6 (the `disposition` local it introduces is what Task 6's trimmed `Record` keeps) and Task 9 (whose `finally` collapse must not remove the duration recording). Task 3 must precede Task 8. Task 9 must precede Tasks 10 and 11.
 
-**Known open question:** the shared-assembly scope fact at the top of this plan. It is the one thing that could change task content rather than task order.
+**No open questions.** The shared-assembly scope fact was the one thing that could change task content rather than task order; it was decided fleet-wide on 2026-08-26 and the plan reflects that.
