@@ -183,8 +183,9 @@ data:
   skp-rules.yml: |
     # Every rule here fires on a signal the chaos suite has actually moved, with both its
     # healthy and its fault value measured. Nothing is asserted about a signal that has
-    # never been observed to change -- `landed="false"` has never occurred on this stack,
-    # so there is deliberately no ack-loss rule.
+    # never been observed to change -- `landed` is no longer a dimension at all since the
+    # 2026-08-26 metrics rewrite (it cannot occur, not merely hasn't), so there is
+    # deliberately no ack-loss rule keyed to it.
     #
     # THIS FILE IS MOUNTED subPath (k8s/21-prometheus.yaml, second volumeMount). A subPath
     # mount does NOT live-update when the ConfigMap changes: `kubectl apply` alone changes
