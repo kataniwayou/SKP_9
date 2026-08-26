@@ -10,23 +10,13 @@ namespace BaseProcessor.Core.Observability;
 public static class ProcessorPipelineMeter
 {
     public const string Name = "BaseProcessor.Core";
-
-    /// <summary>
-    /// The transform histogram's instrument name, public so <c>ProcessorHost</c> can name it when it
-    /// attaches bucket boundaries. A view whose name matches no instrument is silently ignored, so a
-    /// literal in two places would fail without an error.
-    /// </summary>
-    public const string ProcessDurationInstrument = "pipeline.process.duration";
 }
 
 /// <summary>
-/// The processor's duplicate-suppression counter.
+/// A static holder for the processor's pipeline meter.
 /// <para>
-/// A static holder because <see cref="RecordDuplicateSuppressed"/> is called from
-/// <c>ProcessDispatchHandler</c>, which is resolved per delivery (scoped) and cannot own an
-/// instrument's lifetime. The identity gauge needs something singleton to observe, which is
-/// <see cref="ProcessorPipelineMetricsHost"/> below — a counter needs no such registry, since a
-/// <c>Counter&lt;T&gt;</c> is created once and simply added to; there is nothing to leak.
+/// The identity gauge needs something singleton to observe, which is
+/// <see cref="ProcessorPipelineMetricsHost"/> below.
 /// </para>
 /// </summary>
 internal static class ProcessorPipelineMetrics
@@ -34,50 +24,6 @@ internal static class ProcessorPipelineMetrics
     internal const string MeterName = ProcessorPipelineMeter.Name;
 
     internal static readonly Meter Meter = new(MeterName);
-
-    private static readonly Counter<long> DuplicateSuppressed = Meter.CreateCounter<long>(
-        "pipeline.duplicate.suppressed",
-        unit: "{message}",
-        description: "Dispatches whose input key was already reclaimed, so the author was not re-run.");
-
-    private static readonly Histogram<double> ProcessDuration = Meter.CreateHistogram<double>(
-        ProcessorPipelineMeter.ProcessDurationInstrument,
-        unit: "s",
-        description: "Time inside the author's transform — the only span of a hop whose length is not fixed.");
-
-    /// <summary>
-    /// How long the author's own transform took.
-    /// <para>
-    /// <b>This measures the author, not the framework, and that is the whole point of the
-    /// instrument.</b> It used to be recorded around the message handler in the shared consumer,
-    /// which covers a fixed sequence of store reads and sends — a span that cannot meaningfully
-    /// vary, so a histogram of it answered no question anyone had. Everything either side of
-    /// <c>ExecuteAsync</c> is this framework's own constant cost; the transform is somebody's
-    /// implementation, and it is the part that gets slow.
-    /// </para>
-    /// <para>
-    /// <paramref name="returned"/> separates a slow success from a slow failure, which otherwise
-    /// average together into a number that describes neither. It says whether the author returned
-    /// normally, NOT what the step decided — a step that reports itself failed still returned, and
-    /// <c>StepResult</c> is deliberately absent from every instrument here.
-    /// </para>
-    /// </summary>
-    internal static void RecordProcessDuration(long startedTimestamp, bool returned) =>
-        ProcessDuration.Record(
-            Stopwatch.GetElapsedTime(startedTimestamp).TotalSeconds,
-            new KeyValuePair<string, object?>("outcome", returned ? "returned" : "faulted"));
-
-    /// <summary>
-    /// One dispatch acknowledged without running the author, because an earlier attempt had already
-    /// finished it and reclaimed the input key.
-    /// <para>
-    /// It is pipeline rather than business: the statement is about delivery semantics — a message
-    /// arrived that had already been handled — not about what the step computed. This is the primary
-    /// idempotence mechanism, and its rate is the only way to notice it firing more than rarely; it
-    /// is invisible under <c>disposition=acked</c> because that path acks having done no work.
-    /// </para>
-    /// </summary>
-    internal static void RecordDuplicateSuppressed() => DuplicateSuppressed.Add(1);
 }
 
 /// <summary>

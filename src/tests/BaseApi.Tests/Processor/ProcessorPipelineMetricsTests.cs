@@ -66,18 +66,4 @@ public sealed class ProcessorPipelineMetricsTests
         // and one reading IsHealthy throws out of the observable callback.
         Assert.Equal(whileWaiting + 1, ReadyCount());
     }
-
-    [Fact]
-    public void ADuplicateDeliverySuppressionIsCounted()
-    {
-        // That path acks having done no work, so it is invisible under disposition=acked. It is
-        // the primary idempotence mechanism, and its rate is the only way to notice the mechanism
-        // firing more than rarely.
-        using var metrics = new MetricCollector(ProcessorPipelineMeter.Name);
-
-        ProcessorPipelineMetrics.RecordDuplicateSuppressed();
-
-        var m = Assert.Single(metrics.For("pipeline.duplicate.suppressed"));
-        Assert.Equal(1, m.Value);
-    }
 }

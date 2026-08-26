@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Identity;
-using BaseProcessor.Core.Observability;
 using BaseProcessor.Core.Processing;
 using BaseApi.Tests.Support;
 using Messaging.Contracts;
@@ -535,57 +534,5 @@ public sealed class ProcessDispatchHandlerTests
 
         Assert.DoesNotContain(h.Log.Records, r => r.Message.Contains("topsecret", StringComparison.Ordinal));
         Assert.DoesNotContain(h.Log.Records, r => r.Message.Contains("payload-secret", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task TheAuthorsTransformIsTimedAndTaggedReturnedWhenItCompletes()
-    {
-        // The instrument measures the AUTHOR, not the framework. It used to sit around the message
-        // handler in the shared consumer, where every hop it covered was a fixed sequence of store
-        // reads and sends -- a span that cannot meaningfully vary. This is the only part of a hop
-        // whose length is somebody's implementation rather than this framework's constant cost.
-        var h = new Harness();
-        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        using var metrics = new MetricCollector(ProcessorPipelineMeter.Name);
-
-        await h.Build(new Probe((_, _) => Task.CompletedTask))
-            .HandleAsync(Body(Dispatch(E)), CancellationToken.None);
-
-        var m = Assert.Single(metrics.For("pipeline.process.duration"));
-        Assert.Equal("returned", m.Tags["outcome"]);
-        Assert.True(m.Value >= 0);
-    }
-
-    [Fact]
-    public async Task AnAuthorThatThrowsIsStillTimedAndTaggedFaulted()
-    {
-        // A slow failure and a slow success averaged together describe neither, and the failing
-        // path is the one an operator reaches for first. `outcome` says whether the author returned
-        // normally -- NOT what the step decided; StepResult is deliberately absent from every
-        // instrument in this design.
-        var h = new Harness();
-        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        using var metrics = new MetricCollector(ProcessorPipelineMeter.Name);
-
-        await h.Build(new Probe((_, _) => throw new InvalidOperationException("boom")))
-            .HandleAsync(Body(Dispatch(E)), CancellationToken.None);
-
-        var m = Assert.Single(metrics.For("pipeline.process.duration"));
-        Assert.Equal("faulted", m.Tags["outcome"]);
-    }
-
-    [Fact]
-    public async Task ADuplicateDeliveryIsNotTimedBecauseTheAuthorNeverRan()
-    {
-        // The author is skipped entirely here, so a near-zero sample would drag the histogram down
-        // and make every processor look faster than it is.
-        var h = new Harness();
-        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns(RedisValue.Null);
-        using var metrics = new MetricCollector(ProcessorPipelineMeter.Name);
-
-        await h.Build(new Probe((_, _) => Task.CompletedTask))
-            .HandleAsync(Body(Dispatch(E)), CancellationToken.None);
-
-        Assert.Empty(metrics.For("pipeline.process.duration"));
     }
 }
