@@ -224,6 +224,22 @@ public static class OrchestratorHost
         // is a property of the broker rather than of the replica asking. That redundancy is wanted:
         // the number survives any one replica going away, and a board reads it with min() or max()
         // rather than sum(), which would multiply the depth by the replica count.
+        //
+        // SEEDED HERE, SYNCHRONOUSLY, RATHER THAN LEFT FOR THE PROBE'S FIRST PASS. See
+        // DeadLetterDepthMetrics's own remarks: "zero is a report, not a silence" only holds once a
+        // report has happened. A failed first passive declare would otherwise leave these three
+        // series absent for up to five minutes with nothing consumed on them to raise
+        // DeadLetterReadSignal and shorten that window.
+        foreach (var deadQueue in new[]
+                 {
+                     OrchestratorQueues.ResultDead,
+                     OrchestratorQueues.ResultPostDead,
+                     OrchestratorQueues.ControlDead,
+                 })
+        {
+            DeadLetterDepthMetrics.Report(deadQueue, 0);
+        }
+
         builder.Services.AddHostedService(sp => new DeadLetterDepthProbe(
             sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             [
