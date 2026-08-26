@@ -291,6 +291,15 @@ public static class BaseProcessorServiceCollectionExtensions
         // DeadLetterReadSignal wakes this probe the moment something is parked; the interval is
         // only the backstop that notices an operator draining the queue by hand. Without that
         // backstop a drained queue would report a stale non-zero forever.
+        //
+        // SEEDED HERE, SYNCHRONOUSLY, RATHER THAN LEFT FOR THE PROBE'S FIRST PASS. The probe's own
+        // remarks insist "zero is a report, not a silence" -- but that only holds if a report has
+        // actually happened. A failed first passive declare (broker still coming up, a transient
+        // channel fault) would otherwise leave this series absent for up to five minutes, and
+        // nothing is being consumed on this queue to raise DeadLetterReadSignal and shorten that
+        // window. Seeding at registration means the gauge is 0, not absent, from the first export.
+        DeadLetterDepthMetrics.Report(ProcessorQueues.Dead(processorId), 0);
+
         services.AddHostedService(sp => new DeadLetterDepthProbe(
             sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             [ProcessorQueues.Dead(processorId)],
