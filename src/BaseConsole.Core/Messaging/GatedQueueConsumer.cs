@@ -282,8 +282,12 @@ public sealed class GatedQueueConsumer : BackgroundService
         var started = Stopwatch.GetTimestamp();
 
         // The value the outer catch's path carries. Every branch that calls Record overwrites it,
-        // so this is only ever read for a delivery that escaped classification entirely.
-        var disposition = "escaped";
+        // so this is only ever read for a delivery that escaped classification entirely. Seeded
+        // to "requeued" — not "escaped" — because that is the disposition the outer catch actually
+        // records via RecordConsumed below ("requeued", "escaped"); "escaped" is a reason, not a
+        // disposition, and pipeline.consumer.duration must agree with pipeline.messages.consumed
+        // about what happened to the same delivery.
+        var disposition = "requeued";
 
         // Every branch below calls this instead of IngressMetrics.RecordConsumed directly, so the
         // outer catch can tell whether one of them already recorded before it adds its own.
@@ -321,7 +325,9 @@ public sealed class GatedQueueConsumer : BackgroundService
             // here is what makes a pause clean rather than a burst of failures.
             if (!_gate.IsOpen)
             {
-                var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                // Result discarded: nothing downstream distinguishes a landed nack from a lost one
+                // on this path (unlike the park branch below, which logs on it).
+                _ = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
                 Record("requeued", "gate_closed");
                 return;
             }
@@ -375,7 +381,9 @@ public sealed class GatedQueueConsumer : BackgroundService
                         // only safe because gate subscribers signal rather than perform I/O — a subscriber
                         // that did broker work inside the notification would deadlock here.
                         await _gate.TripAsync().ConfigureAwait(false);
-                        var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                        // Result discarded: same reasoning as the gate-closed branch above — nothing
+                        // downstream distinguishes a landed nack from a lost one on this path.
+                        _ = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
                         Record("requeued", "store_unreachable");
                         break;
                     }
@@ -387,7 +395,9 @@ public sealed class GatedQueueConsumer : BackgroundService
                         _logger.LogWarning(
                             ex, "send failed while handling {Type} — returning message to {Queue}",
                             type, _options.Queue);
-                        var landed = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                        // Result discarded: same reasoning as the gate-closed branch above — nothing
+                        // downstream distinguishes a landed nack from a lost one on this path.
+                        _ = await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
                         Record("requeued", "send_failed");
                         break;
                     }
@@ -461,7 +471,8 @@ public sealed class GatedQueueConsumer : BackgroundService
             // purpose: if SafeAckAsync or Record itself throws here, it must reach the outer catch
             // rather than be reclassified by DeliveryClassifier as a handler failure — the message was
             // already handled, and re-nacking an already-acked delivery would be its own bug.
-            var ackedLanded = await SafeAckAsync(ea, epoch).ConfigureAwait(false);
+            // Result discarded: no downstream branch distinguishes a landed ack from a lost one.
+            _ = await SafeAckAsync(ea, epoch).ConfigureAwait(false);
             Record("acked", "handled");
         }
         catch (Exception)
@@ -477,7 +488,7 @@ public sealed class GatedQueueConsumer : BackgroundService
         finally
         {
             // Covers every exit, including a delivery bounced off a shut gate before the handler
-            // region below is ever entered. It still cost this consumer time, and a pause that is
+            // region above is ever entered. It still cost this consumer time, and a pause that is
             // slow to reject is a real thing to be able to see.
             IngressMetrics.RecordConsumerDuration(
                 _options.Queue, type, disposition,
