@@ -460,6 +460,13 @@ public sealed class GatedQueueConsumer : BackgroundService
                             }
 
                             Record("parked", "refused");
+
+                            // The depth gauge's cadence is five minutes; this is what makes the
+                            // number reflect this park now rather than at the next backstop pass.
+                            // Raised even when the nack did not land -- in that case the broker
+                            // redelivers rather than dead-letters, and a read that finds nothing
+                            // new costs one round trip.
+                            DeadLetterReadSignal.Request();
                             break;
                         }
                     }

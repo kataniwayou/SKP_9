@@ -219,7 +219,7 @@ public abstract class QueueStatsProbe : BackgroundService
 
             try
             {
-                await Task.Delay(_interval, stoppingToken).ConfigureAwait(false);
+                await WaitAsync(_interval, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -227,6 +227,13 @@ public abstract class QueueStatsProbe : BackgroundService
             }
         }
     }
+
+    /// <summary>
+    /// Waits until the next pass is due. Virtual so a subclass whose number changes on an event
+    /// rather than on a clock can wake early -- see <c>DeadLetterDepthProbe</c>.
+    /// </summary>
+    protected virtual Task WaitAsync(TimeSpan interval, CancellationToken ct) =>
+        Task.Delay(interval, ct);
 
     /// <summary>
     /// One passive declare on its own channel.

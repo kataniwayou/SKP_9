@@ -287,14 +287,14 @@ public static class BaseProcessorServiceCollectionExtensions
         // dead-letter queue and its name is derived from the id this method already takes, so there
         // is nothing to discover at run time and nothing to forget.
         //
-        // Thirty seconds against the depth probe's ten, matching the orchestrator's own
-        // dead-letter probe and for the reason DeadLetterDepthProbe gives: a dead-letter queue
-        // changes only when something is refused, which is rare and never urgent to the second.
-        // What matters is that the number is still there tomorrow.
+        // Five minutes, not thirty seconds, and the number is no longer what makes this timely.
+        // DeadLetterReadSignal wakes this probe the moment something is parked; the interval is
+        // only the backstop that notices an operator draining the queue by hand. Without that
+        // backstop a drained queue would report a stale non-zero forever.
         services.AddHostedService(sp => new DeadLetterDepthProbe(
             sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             [ProcessorQueues.Dead(processorId)],
-            TimeSpan.FromSeconds(30),
+            TimeSpan.FromMinutes(5),
             sp.GetRequiredService<ILogger<DeadLetterDepthProbe>>()));
 
         return services;
