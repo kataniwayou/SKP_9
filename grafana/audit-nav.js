@@ -7,7 +7,7 @@
 const { chromium } = require('playwright');
 
 const TARGET_URL = process.env.GRAFANA_URL || 'http://localhost:13000';
-const BOARDS = ['skp-flow', 'skp-baseapi', 'skp-orchestrator', 'skp-processor', 'skp-runtime'];
+const BOARDS = ['skp-baseapi', 'skp-orchestrator', 'skp-processor'];
 
 // Grafana marks a dashboard link with this on the ANCHOR itself, identically on 11.1.0 and
 // 12.3.9 -- only the container around it differs (`section[aria-label="Dashboard submenu"]`

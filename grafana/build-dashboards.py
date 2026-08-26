@@ -69,10 +69,9 @@ data:
 def write_configmap():
     """Inline every board in OUT into the ConfigMap the Grafana pod mounts.
 
-    Reads the directory rather than the four generated boards, for the same reason
-    normalize_imported() does: skp-runtime.json is authored elsewhere but is still one of
-    the boards an operator opens, and a provisioning set that silently omitted it would
-    leave exactly one board dying on every restart -- the one this script cannot rebuild.
+    Reads the directory rather than the list of generated boards, so a board added to
+    grafana/dashboards/ by any means is provisioned. Every board in the set is generated
+    here today -- skp-flow and skp-runtime, the two that were not, have been deleted.
     """
     parts = [CM_HEADER]
     for path in sorted(OUT.glob("*.json")):
@@ -108,23 +107,6 @@ T_EXACTLY_ONE = [{"color": "red", "value": None},
 # panels that answer "do the processes still exist" could not go red when they did not.
 T_NEUTRAL = [{"color": "text", "value": None}]
 
-# ---------------------------------------------------------------------------
-# expected steady state
-# ---------------------------------------------------------------------------
-#
-# THESE ARE MEASURED, AND THEY ARE THE MOST ENVIRONMENT-SPECIFIC NUMBERS ON THESE BOARDS.
-# Everything else here describes a shape that transfers; these describe this deployment's
-# workload. Re-derive them before trusting a green band on any other cluster or at any other
-# traffic level -- a band copied from here would report a healthy system as degraded, or the
-# reverse, which is the exact failure these boards exist to prevent.
-#
-# System flowing's steady state, measured over eighteen consecutive undisturbed minutes:
-# 1.383 - 1.392 req/s, a spread of 0.5%. The band below is deliberately far wider than that
-# jitter, because it must also survive the ~4 minute ramp after any restart -- the rate window
-# has to refill, and the stat legitimately passes through zero on the way.
-FLOW_WINDOW = "4m"
-FLOW_LOW = 0.9
-FLOW_HIGH = 2.0
 
 # Queue depth in messages. DEPLOYMENT-SPECIFIC, like the flow band, and measured rather than
 # chosen: over a clean four-minute window every orchestrator queue held a flat 0, while the
@@ -141,10 +123,6 @@ FLOW_HIGH = 2.0
 # seconds, because a stalled pipeline stops feeding itself. `Queues unconsumed` beside it is the
 # sharp signal for a total stop, and it moves within one liveness window.
 DEPTH_ORANGE = 5
-DEPTH_RED = 20
-T_DEPTH = [{"color": "green", "value": None},
-           {"color": "orange", "value": DEPTH_ORANGE},
-           {"color": "red", "value": DEPTH_RED}]
 
 # THE DOOR-TO-DOOR STEP THRESHOLDS ARE GONE, WITH THE INSTRUMENT THEY COLOURED.
 #
@@ -157,36 +135,6 @@ T_DEPTH = [{"color": "green", "value": None},
 # disposition` decompose the same interval per hop, but no panel now sums them end to end.
 # Recorded rather than quietly dropped, because the gap is real.
 
-# Live reporters expected on this deployment: 3 orchestrator replicas + 2 processor
-# replicas. DEPLOYMENT-SPECIFIC, like the band above, and re-derive it anywhere else.
-#
-# Adding it is a deliberate trade and worth stating. `Workers reporting` was built to
-# need no such number -- it reports how many are live, and `Workers missing (5m)` names
-# how many left, neither of which requires knowing how many there ought to be. But a
-# stat's colour follows its value, so a count-free expression cannot produce a colour;
-# it read grey at 5 and would have read grey at 0.
-#
-# The count-free detection is unchanged and still lives on `Workers missing (5m)`. This
-# constant buys the colour only. It fails conservatively: a deployment with more workers
-# than this reads green (the expectation is a floor), and one with fewer reads orange --
-# a false warning rather than a false all-clear.
-EXPECTED_WORKERS = 5
-
-# WHY THE WINDOW IS PINNED RATHER THAN $__rate_interval, which every other rate panel uses.
-# Traffic here is bursty -- one cron fire every 30s -- and a 60s window cannot smooth that.
-# Measured at one instant, sampling every 5s: rate[60s] swings 0.957 to 1.905, a factor of two,
-# while rate[4m] holds 1.344 to 1.524. A fixed band on the 60s form would flap continuously
-# through nothing but the burst phase.
-#
-# Beware of confirming this with a range query stepped at 30s: that samples a 30s-periodic
-# signal at exactly its own period, aliases the swing away, and reports a rock-steady value
-# that depends entirely on which phase you happened to land on. It read 0.961 that way, against
-# a true mean of 1.386.
-T_FLOW = [{"color": "red", "value": None},
-          {"color": "orange", "value": 0.0001},
-          {"color": "green", "value": FLOW_LOW},
-          {"color": "orange", "value": FLOW_HIGH}]
-
 
 def normal_upto(ceiling):
     """A reference line at the top of measured-normal: green below it, orange above.
@@ -198,45 +146,8 @@ def normal_upto(ceiling):
     """
     return [{"color": "green", "value": None}, {"color": "orange", "value": ceiling}]
 T_WARN = [{"color": "green", "value": None}, {"color": "orange", "value": 1}]
-# For a conservation gap counted in messages. Scrape boundaries put a handful of messages
-# on either side of zero even when nothing is lost, so the green band has to be wider than
-# one message -- see the Outbound hop gap description for the measurement behind these.
-#
-# SYMMETRIC, and that is the fix rather than the decoration. The gap and its return-hop
-# twin are the same quantity measured in opposite directions, so one physical event puts
-# +N on one and -N on the other. With steps only on the positive side the pair disagreed
-# about the same instant: measured across the chaos suite, one panel orange and its twin
-# green, every time.
-#
-# +/-25 for the green band, and the old +/-10 was simply too tight to survive a run.
-# Measured over a full suite with no restart anywhere in range -- the undisturbed baseline
-# included -- the start and stop transients reach 12-13 EVERY time, so the primary board
-# went orange on a healthy soak. With a replica restart inside the range the same panels
-# reach 20-46, which is what the orange band is for: not "messages were lost" but "check
-# Workers reporting before you read this number".
-T_GAP = [{"color": "red", "value": None},
-         {"color": "orange", "value": -50},
-         {"color": "green", "value": -25},
-         {"color": "orange", "value": 25},
-         {"color": "red", "value": 50}]
-# Share of deliveries that will be redone. Not red-at-any-non-zero: the counted form is
-# sticky for a range width, so one parked delivery during a broker outage kept this stat
-# red across the two scenarios that followed it, on the board an operator opens first.
-# A handful of redone messages in a fifteen-minute window is a thing to notice, not an
-# outage; a fifth of them being redone is an outage.
-T_REDONE = [{"color": "green", "value": None},
-            {"color": "orange", "value": 0.01},
-            {"color": "red", "value": 0.05}]
-# Seconds since the least-fresh service last exported. The effective resolution is 15s, so
-# this sawtooths 0-15 in health; anything above that means a service has stopped reporting.
-T_STALE = [{"color": "green", "value": None},
-           {"color": "orange", "value": 45},
-           {"color": "red", "value": 90}]
-# Live reporters. Nothing reporting is red; some but not all is orange; the full set is
-# green. See EXPECTED_WORKERS for why a presence count needs an expectation at all.
-T_WORKERS = [{"color": "red", "value": None},
-             {"color": "orange", "value": 1},
-             {"color": "green", "value": EXPECTED_WORKERS}]
+
+
 # Presence with no expected count: absent is red, present is green. Enough for a single
 # Deployment, and it needs no deployment-specific constant.
 T_PRESENT = [{"color": "red", "value": None}, {"color": "green", "value": 1}]
@@ -522,26 +433,11 @@ def timeseries(layout, title, exprs, desc="", unit="short", w=8, h=8,
     }
 
 
-# Value -> (label, colour) for the posture strips.
-#
-# The label is not decoration: a state timeline legends itself by DISTINCT VALUE, and
-# with colour driven off thresholds alone that legend reads "< 1" and "1+" -- which tells
-# a reader nothing about which end is the healthy one. Naming the states puts the answer
-# on the panel.
-#
-# The colour is carried here rather than by a threshold step because these gauges do not
-# all mean the same thing at 0. A follower replica is 0 on pipeline.leader and is working
-# exactly as designed; rendering it red -- which a red-below-1 threshold does, and did --
-# says the opposite of what the panel's own description says. Only the states that are
-# genuinely wrong are red.
-M_GATE = {"0": ("shut", "red"), "1": ("open", "green")}
 M_LEADER = {"0": ("follower", "semi-dark-blue"), "1": ("leader", "green")}
 M_ADMITTED = {"0": ("not admitted", "red"), "1": ("admitted", "green")}
 # Orange rather than red: a processor waiting for a matching processor row is the
 # designed two-stage boot, not a crash. It still is not doing work.
 M_READY = {"0": ("not ready", "orange"), "1": ("ready", "green")}
-M_POSTURE = {"0": ("down", "red"), "1": ("ok", "green")}
-
 
 def mapping(pairs):
     return [{"type": "value",
@@ -653,35 +549,6 @@ def table(layout, title, exprs, desc="", w=8, h=8, exclude=(), rename=None,
             "overrides": list(overrides),
         },
     }
-
-
-def binary_field(left, operator, right, alias):
-    """A column computed from two others, naming the operands as BARE FIELD NAMES.
-
-    This used to emit `{"matcher": {"id": "byName", "options": name}}` per operand, under
-    a docstring claiming Grafana 10+ requires matchers rather than bare names. Whatever
-    that was observed against, it is not true of the versions these boards have to run on,
-    and the matcher form is the narrower of the two:
-
-        Grafana 12.3.9  matcher form  ok        bare names  ok
-        Grafana 11.1.0  matcher form  BROKEN    bare names  ok
-
-    On 11.1.0 the matcher form throws `z.replace is not a function` -- 11.x calls
-    `.replace()` on the operand, which under that form is an object. The throw aborts the
-    WHOLE transformation chain, not just this step, so `Message flow matrix` lost its
-    merge and its renames too and rendered raw `Time / type / Value #A` columns behind an
-    error corner. One unsupported spelling took out every transform on the panel.
-
-    Bare names are accepted by both, so they are what this emits. Verified by importing
-    both spellings into both versions and reading the rendered panel, not by reading a
-    changelog.
-    """
-    return {"id": "calculateField", "options": {
-        "mode": "binary",
-        "binary": {"left": left, "operator": operator, "right": right},
-        "alias": alias,
-        "replaceFields": False,
-    }}
 
 
 def textpanel(layout, title, content, w=8, h=8):
@@ -830,21 +697,6 @@ def link(title, uid_tag):
 
 NAV = [link("SKP boards", "skp")]
 
-# Panel-level `noValue` text stamped onto boards this script does not generate, keyed by
-# panel title. Same reason as NAV: the wording an empty panel uses is a property of the
-# SET of boards, not of how any one of them was authored.
-#
-# `Exception rate` exists on all four worker-facing boards. The three generated ones say
-# "no exceptions in range"; the imported runtime board said "No data" for the identical
-# condition, so a reader moving between them was told two different things by the same
-# query. Worse, "No data" cannot distinguish *no exceptions were thrown* from *the
-# instrument is missing* -- which is exactly the ambiguity the generated boards spend a
-# noValue on avoiding, and the runtime board is where a reader goes to check the
-# instrument.
-IMPORTED_NO_VALUE = {
-    "Exception rate": "no exceptions in range",
-}
-
 
 # ---------------------------------------------------------------------------
 # shared panel sets
@@ -973,12 +825,7 @@ def since_shared(layout, f, restarts=True):
              desc="Work this service refused that **nobody has dealt with**. Should be "
                   "0. Anything else is a run that lost progress permanently and is still "
                   "sitting in a queue with no consumer." + PARA +
-                  "**This is the drill-down target for `Dead-lettered` on SKP Flow.** "
-                  "That stat existed only there: an operator who saw it non-zero and "
-                  "clicked through to a worker board found no dead-letter panel at all, "
-                  "and the only evidence was a `parked` series inside a five-series "
-                  "timeseries at a value indistinguishable from zero. The queue-by-queue "
-                  "breakdown is on the pipeline tier below." + PARA +
+                  "**The queue-by-queue breakdown is on the pipeline tier below.**" + PARA +
                   "`max by (queue)` before the sum is load-bearing: every replica probes "
                   "the same queues and reports the same depth, because a queue depth is "
                   "a property of the broker rather than of the replica asking." + PARA +
@@ -1071,7 +918,7 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                         "path and therefore a bug. Six real pairs exist, not three times "
                         "six." + PARA +
                         "The `type` dimension it used to carry is on `Message flow matrix` "
-                        "on SKP Flow, which is where a produced-against-consumed reading "
+                        "against a produced-against-consumed reading, which is "
                         "belongs; the queue names the hop here." + PARA +
                         "`landed` is gone from this instrument, so a redelivered message "
                         "increments this twice. Ingress exceeding the hop's egress is the "
@@ -1232,8 +1079,8 @@ def causes_row(layout, f, w=12, restarts=True):
     for EACH of the three orchestrator replicas over a three-hour range -- eighteen
     process starts -- while `Workers reporting` sat green at 5 and `Workers missing (5m)`
     at 0, because every restart had completed and been replaced. The only place that fact
-    appeared anywhere was the bottom of the SKP Runtime board, below fifteen GC panels,
-    behind a collapsed row on the boards an operator actually opens.
+    appeared anywhere was a collapsed row at the bottom of the boards an operator
+    actually opens.
 
     That is not a small omission. Restarts are the documented cause of the hop gaps
     reading +46/-47 and of a replica's series ending and restarting under a new identity.
@@ -1433,11 +1280,11 @@ def runtime_row(layout, f, full=False):
     Exception rate and process restarts used to be here and are on the visible tier now
     -- see causes_row.
 
-    `full` decides how much of the SKP Runtime board this row absorbs. Off, it is the
-    original pair whose only use is explaining a symptom you are already looking at.
-    On, it adds the six panels an operator would otherwise leave the board to find --
-    which is the point: SKP Runtime is going away, and a per-service board that sends
-    you elsewhere to answer "is it memory" has not answered the question.
+    `full` decides how many runtime panels this row carries. Off, it is the original
+    pair whose only use is explaining a symptom you are already looking at. On, it adds
+    six more -- which is now the only place they exist: the SKP Runtime board that used
+    to hold all fifteen has been deleted, and a per-service board that sends you
+    elsewhere to answer "is it memory" has nowhere to send you.
 
     ONLY SIX OF THE FIFTEEN, and the omissions are deliberate:
 
@@ -1451,8 +1298,9 @@ def runtime_row(layout, f, full=False):
     - Heap fragmentation, live object bytes, thread-pool completion rate, loaded
       assemblies, active timers and JIT methods/sec are diagnostics for a memory
       investigation that is already underway. They belong in a profiler session, not in
-      the row an operator opens while a queue is backing up. If SKP Runtime is retired
-      they are worth keeping SOMEWHERE, and that is a separate decision from this one.
+      the row an operator opens while a queue is backing up. SKP Runtime has since been
+      deleted, so they are not on any board -- recorded here as a known gap rather than
+      an oversight.
 
     Paired left-to-right so the two halves of each question sit together: queue beside
     threads, pause beside its cause, heap beside committed, allocation beside contention.
@@ -1575,509 +1423,6 @@ def runtime_row(layout, f, full=False):
 # board 1 -- flow
 # ---------------------------------------------------------------------------
 
-# Selectors the flow board names more than once.
-REDONE = 'pipeline_messages_consumed_total{disposition=~"requeued|parked"}'
-EGRESS_FAULT = ('pipeline_messages_produced_total'
-                '{outcome=~"transient|unroutable|refused"}')
-# present_over_time rather than last_over_time: this counts reporters, and the value a
-# reporter holds is irrelevant to whether it is still there.
-LIVE_WORKERS = ('count(count by (service_instance_id) '
-                f'(present_over_time(pipeline_gate_open_ratio[{LIVENESS}]))) or vector(0)')
-
-
-def build_flow():
-    lay = Layout()
-    panels = []
-
-    panels.append(row(lay, "1 - Verdict: is it broken right now?"))
-    panels += [
-        stat(lay, "System flowing",
-             [f'sum(rate(pipeline_messages_produced_total[{FLOW_WINDOW}])) or vector(0)'],
-             desc="Total egress across every worker. Zero during a run means the "
-                  "pipeline has stopped, whatever else reads green." + PARA +
-                  "**Slower than the fault you are chasing.** $__rate_interval is 60s on "
-                  "this stack -- the datasource declares a 15s timeInterval, matching the "
-                  "scrape, and Grafana floors the rate window at four times it. So this "
-                  "number averages the last minute and still cannot fall to zero inside a "
-                  "shorter outage." + PARA +
-                  "Measured at the OLD 60s export cadence, when timeInterval was 60s and "
-                  "$__rate_interval 240s: with the whole pipeline stopped this still read "
-                  "1.12 req/s a hundred seconds later, and through a sixty-second broker "
-                  "outage it only dipped 1.12 -> 0.92, never leaving green. Those are the "
-                  "numbers that bought the cadence change; a sixty-second fault now falls "
-                  "inside one rate window rather than a quarter of one, so the dilution is "
-                  "four times smaller -- not gone. Read the posture stats beside it for "
-                  "anything shorter than a minute; this one answers 'has throughput "
-                  "changed', not 'is it down'." + PARA +
-                  "**Green means the expected rate, not merely a non-zero one.** It used "
-                  "to go green above 0.0001 req/s, which made the colour answer 'is "
-                  "anything moving' while the text above claimed it answered 'has "
-                  "throughput changed'. A collapse from 1.39 to 0.001 req/s -- a "
-                  "thousandfold -- stayed green. Green is now " + str(FLOW_LOW) + " to "
-                  + str(FLOW_HIGH) + " req/s, orange outside it, red only at a standstill." + PARA +
-                  "**Measured, not chosen:** 1.383-1.392 req/s across eighteen "
-                  "consecutive undisturbed minutes, a spread of 0.5%. The band is far "
-                  "wider than that jitter because it must also survive the ~4 minute ramp "
-                  "after any restart, during which this legitimately reads orange and "
-                  "passes through zero." + PARA +
-                  "**The window is pinned at " + FLOW_WINDOW + " rather than "
-                  "$__rate_interval, and that is what makes a band possible at all.** "
-                  "Traffic is bursty -- one cron fire every 30s -- and a 60s window cannot "
-                  "smooth it: sampled every 5s, rate[60s] swings 0.957 to 1.905 while "
-                  "rate[4m] holds 1.344 to 1.524. A band on the 60s form would flap on "
-                  "burst phase alone." + PARA +
-                  "**This number is the most deployment-specific thing on these boards.** "
-                  "It describes this workload, not this architecture. Re-derive it "
-                  "anywhere else.",
-             thresholds=T_FLOW,
-             unit="reqps", decimals=2),
-        stat(lay, "L2 gate",
-             [f'min({live("pipeline_gate_open_ratio")}) or vector(0)'],
-             desc="0 means the gate is shut somewhere and deliveries are being "
-                  "requeued." + PARA +
-                  "**This is what separates a store fault from a broker fault**, and it "
-                  "is on this board for that reason. Without it a Redis outage and a "
-                  "RabbitMQ outage render identically here -- Consuming drops to 0 in "
-                  "both and every other stat stays green -- and telling them apart means "
-                  "opening a worker board. The gate goes with Redis and stays open for "
-                  "the broker, so 'Consuming 0, gate 0' and 'Consuming 0, gate 1' are two "
-                  "different call-outs.",
-             thresholds=T_POSTURE, decimals=0),
-        stat(lay, "Workers reporting",
-             [LIVE_WORKERS],
-             desc="Orchestrator replicas plus processor replicas that have exported "
-                  "inside the last " + LIVENESS + "." + PARA +
-                  "**Counts live reporters, not series.** The collector republishes a "
-                  "series after the process feeding it is gone, and Prometheus holds it "
-                  "for another five minutes, so the obvious count() counts the dead. "
-                  "Measured: with all three orchestrator replicas deleted for 58 seconds "
-                  "the old expression read a steady 5, and while two of five workers were "
-                  "being deleted it read 7 -- the dead counted alongside their "
-                  "replacements." + PARA +
-                  "**Green is " + str(EXPECTED_WORKERS) + " on this deployment**, orange "
-                  "below it, red at nothing reporting at all. That number is "
-                  "deployment-specific and is the one thing here that has to be "
-                  "re-derived elsewhere -- the count itself does not, and neither does "
-                  "`Workers missing (5m)` beside it, which names how many left without "
-                  "being told how many there ought to be. The expectation buys the "
-                  "colour and nothing else." + PARA +
-                  "This stat had no thresholds at all until now, which on a row where "
-                  "colour is what a reader scans first meant the panel that answers *do "
-                  "the workers still exist* rendered the same grey at 5 and at 0.",
-             thresholds=T_WORKERS, decimals=0),
-        stat(lay, "Deepest queue",
-             [f'max({live("pipeline_queue_depth")})'],
-             desc="The fullest queue anywhere in the deployment, in messages." + PARA +
-                  "**The one leading indicator in this row.** Everything else here reports a "
-                  "state that has already changed; this one moves while a consumer is merely "
-                  "slower than its producer, before any posture stat has anything to say." + PARA +
-                  "Green below " + str(DEPTH_ORANGE) + ", which clears the measured healthy "
-                  "maximum: every orchestrator queue holds a flat 0 and the processor work queue "
-                  "bursts to 3, because a cron fire dispatches a batch against a prefetch of 1. "
-                  "Red at " + str(DEPTH_RED) + ", roughly a minute of nothing being consumed at "
-                  "this workload's dispatch rate." + PARA +
-                  "**A poor outage signal, deliberately.** With the processor deployment scaled to "
-                  "zero this reached only 4 in ninety seconds, because a stalled pipeline stops "
-                  "feeding itself. `Queues unconsumed` beside it is the sharp signal for a total "
-                  "stop. Read this one for degradation, that one for absence." + PARA +
-                  "No `or vector(0)`: nothing probing and nothing queued are different facts, and "
-                  "a fallback would paint both green.",
-             thresholds=T_DEPTH, decimals=0,
-             no_value="no queue depth reported"),
-        stat(lay, "Queues unconsumed",
-             [f'count(max by (queue) ({live("pipeline_queue_consumers")}) == 0) '
-              f'or vector(0)'],
-             desc="How many queues the **broker** currently has no consumer on. Should be 0." + PARA +
-                  "**`max by (queue)` before the count, and the chaos suite is what caught "
-                  "its absence.** Every replica probes every queue, so this instrument "
-                  "carries one series per reporter per queue -- 17 series for the 7 queues "
-                  "this deployment has. Counting series rather than queues made the stat "
-                  "read **17** during the broker outage, and 3 and 5 during two others: a "
-                  "panel titled *queues* reporting more than twice as many as exist." + PARA +
-                  "It read 0 either way on a healthy stack, which is why it survived "
-                  "review, an expression check and a rendered-board audit. The number is "
-                  "only wrong when it is non-zero, and it is only non-zero during an "
-                  "outage." + PARA +
-                  "**The fastest signal on this board for a consumer that has gone away**, and the "
-                  "only one that does not depend on a process reporting on itself. It is also the "
-                  "only one left: `pipeline.consumer.consuming` was the process's own assertion "
-                  "about itself and is retired, because a departed replica's copy was held at 1 by "
-                  "the collector -- it read healthiest exactly when the replica was gone. Measured "
-                  "against a processor outage this reached 1 within one liveness window, while "
-                  "depth was still reading 1." + PARA +
-                  "It does not name the queue -- `Consumers attached by queue` on the worker boards "
-                  "does. And it cannot see a consumer that reattaches inside the 10s probe "
-                  "interval, which is what the S9 flapping-connection scenario produced.",
-             thresholds=T_WARN, decimals=0),
-        stat(lay, "Data freshness",
-             ['time() - min(max by (service_name) '
-              '(timestamp(pipeline_gate_open_ratio))) or vector(0)'],
-             desc="Seconds since the least-fresh service last exported anything." + PARA +
-                  "Every other panel on this board is downstream of this number. The "
-                  "export cadence is 10s against a 15s scrape, so the effective resolution "
-                  "is 15s and this sawtooths 0-15 in health. Orange at 45 -- three missed "
-                  "samples -- and red at 90. Sustained above green means a service has "
-                  "stopped reporting and its gauges are being held at whatever they last "
-                  "said." + PARA +
-                  "The TelemetryStale alert rule fires off the same 45, deliberately, so "
-                  "the alert and this panel change colour at the same instant.",
-             thresholds=T_STALE, unit="s", decimals=0),
-    ]
-
-    lay.newline()
-    # Titled by TENSE, not by window. It used to read "what happened in this range?",
-    # which contradicted the one stat in the row whose window is not the range: Workers
-    # missing (5m) was deliberately moved OFF $__range to a fixed five minutes so the
-    # number stops changing when the reader zooms. Naming the row by its window made the
-    # row label wrong for that stat; naming it by tense is true of all six.
-    panels.append(row(lay, "2 - Since: what has already happened?"))
-    panels += [
-        stat(lay, "Outbound hop gap",
-             ['(sum(increase(pipeline_messages_produced_total{type="process-dispatch",'
-              'outcome="accepted"}[$__range])) or vector(0)) '
-              '- (sum(increase(pipeline_messages_consumed_total{type="process-dispatch",'
-              'disposition="acked"}[$__range])) or vector(0))'],
-             desc="Dispatches the orchestrator confirmed, minus acks the processors "
-                  "issued, counted in MESSAGES over the visible range." + PARA +
-                  "**The `or vector(0)` is on each side, and that is load-bearing.** "
-                  "Written as `sum(A) - sum(B) or vector(0)` this panel read 0 -- green, "
-                  "the healthiest number it has -- whenever EITHER side had no series at "
-                  "all. `sum()` over an empty vector yields no sample, the subtraction "
-                  "propagates that emptiness, and the trailing fallback then substituted "
-                  "a perfect conservation for a total outage. Measured against this "
-                  "stack: with the producer selector matching nothing the old form read "
-                  "0 while the new one reads -3813; with the consumer selector matching "
-                  "nothing, 0 against +3821. An orchestrator that stops dispatching and a "
-                  "processor that stops acking are the two faults this panel exists to "
-                  "catch, and it was blind to both of them." + PARA +
-                  "Both sides absent still reads 0, and that is correct rather than "
-                  "overlooked: no traffic at all is `System flowing`'s question, not "
-                  "this one's." + PARA +
-                  "Counts rather than a difference of rates, and the distinction is what "
-                  "makes the panel usable. Two counters scraped independently give a rate "
-                  "difference that is noise centred on zero -- measured here over an hour: "
-                  "p50 +0.000, max +0.074 req/s, tripping any near-zero threshold 13% of "
-                  "the time on a perfectly healthy stack. The same hour in counts: 1311 "
-                  "produced, 1313 acked. A real leak grows with the range; jitter does not."
-                  + PARA +
-                  "**A restart inside the range puts tens of messages here and none of "
-                  "them are lost.** A replica that goes away and comes back gets a new "
-                  "series, and produced and consumed counters for the same messages live "
-                  "on different services that restart at different moments. Measured "
-                  "across the chaos suite: +46/-47, +48/-46, +43/-44, every one an "
-                  "artefact of a scale-to-zero and every one gone within a range width. "
-                  "Check the Workers reporting stat before believing a number here.",
-             thresholds=T_GAP, decimals=0),
-        stat(lay, "Return hop gap",
-             ['(sum(increase(pipeline_messages_produced_total{type="step-outcome",'
-              'outcome="accepted"}[$__range])) or vector(0)) '
-              '- (sum(increase(pipeline_messages_consumed_total{type="step-outcome",'
-              'disposition="acked"}[$__range])) or vector(0))'],
-             desc="The same conservation check on the way back, in messages over the "
-                  "visible range." + PARA +
-                  "Per-side `or vector(0)`, for the reason its outbound twin gives: with "
-                  "the fallback on the whole expression, one side having no series at all "
-                  "rendered as a flawless zero." + PARA +
-                  "The API also consumes step-outcome and that consumption is not "
-                  "instrumented, so a positive value here is the API's share before it is "
-                  "anything else." + PARA +
-                  "Thresholded symmetrically with its outbound twin. The two measure one "
-                  "quantity in opposite directions, so a restart that puts +46 on one puts "
-                  "-47 on the other; with steps on the positive side only, the pair used to "
-                  "render one orange and one green for the same instant.",
-             thresholds=T_GAP, decimals=0),
-        stat(lay, "Retry amplification",
-             [f'({recent(REDONE)}) '
-              f'/ (sum(increase(pipeline_messages_consumed_total[$__range])) > 0) '
-              f'or vector(0)'],
-             desc="Share of deliveries that will be redone, in MESSAGES over the visible "
-                  "range. Healthy is exactly zero." + PARA +
-                  "**Requeued and parked only.** It used to add a `landed=\"false\"` term "
-                  "for the ack the broker never heard; that dimension is retired, and a "
-                  "delivery whose ack was lost is now redelivered and counted again in the "
-                  "denominator as well as being invisible in the numerator. So this "
-                  "understates the redone share by whatever lost acks cost -- read it "
-                  "beside the two hop gaps, which count the same event as a conservation "
-                  "failure." + PARA +
-                  "Counted rather than rated, and that is what makes it able to fire at "
-                  "all. Measured at the old 60s export cadence: as a ratio of two 240s "
-                  "rates it read 0.0% through every scenario in the chaos suite, including "
-                  "the broker outage that parked a delivery, because one parked message "
-                  "against a 240s denominator was a rounding error. The rate window is 60s "
-                  "now, which would make that same event 4x larger and still a rounding "
-                  "error; one parked message in a fifteen-minute range is a number."
-                  + PARA +
-                  "Green below 1%. Counting rather than rating makes this stat sticky for a "
-                  "range width, and thresholded red-at-any-non-zero it stayed red through "
-                  "the two scenarios AFTER the one that parked a single delivery -- 0.2% of "
-                  "traffic, on the board an operator opens first. A few redone messages is "
-                  "something to notice; a twentieth of all deliveries being redone is the "
-                  "outage.",
-             thresholds=T_REDONE, unit="percentunit", decimals=1),
-        stat(lay, "Dead-lettered",
-             ['sum(max by (queue) (last_over_time(pipeline_deadletter_depth[2m])))'],
-             desc="Work this deployment refused and **nobody has dealt with**. Should "
-                  "be 0. Anything else is a run that lost progress permanently and is "
-                  "still sitting in a queue with no consumer." + PARA +
-                  "**The one stat here that reports a LEVEL rather than an event.** "
-                  "`Retry amplification` and the parked disposition beside it are "
-                  "counters: they rise when a message is refused, stay visible for a "
-                  "rate window, and scroll away. This keeps reporting for as long as the "
-                  "message is still there." + PARA +
-                  "**Measured, and it is why this exists.** Six parked step outcomes "
-                  "were found in `orchestrator-result.dead` from four incidents across "
-                  "two days -- each a workflow run that lost progress. Every board read "
-                  "green, all five alert rules stayed inactive, and they were found only "
-                  "by querying the broker by hand. The counter had done its job at the "
-                  "time and had nothing left to say two days later." + PARA +
-                  "`max by (queue)` before the sum is load-bearing: every orchestrator "
-                  "replica probes the same queues and reports the same depth, because a "
-                  "queue depth is a property of the broker rather than of the replica "
-                  "asking. `sum` alone would multiply it by the replica count." + PARA +
-                  "The window is 2m rather than the " + LIVENESS + " used elsewhere: the "
-                  "probe runs every 30s by design -- a dead-letter queue changes only "
-                  "when something is refused, which is rare and never urgent to the "
-                  "second -- so a liveness-width window would flap on the probe's own "
-                  "cadence rather than on anything real." + PARA +
-                  "**No `or vector(0)`:** no probe reporting and no messages dead-lettered "
-                  "are different facts, and a fallback to zero would paint both green. "
-                  "Only the orchestrator runs the probe, so this reads as text if it "
-                  "stops -- see `Dead-letter depth by queue` on the worker boards.",
-             thresholds=T_WARN, decimals=0,
-             no_value="no dead-letter probe reporting"),
-        stat(lay, "Egress faults",
-             [recent(EGRESS_FAULT)],
-             desc="Any send that did not reach the broker, anywhere in the stack, "
-                  "counted over the visible range.",
-             thresholds=T_WARN, decimals=0),
-        stat(lay, "Workers missing (5m)",
-             [f'(max_over_time(({LIVE_WORKERS})[5m:15s]) '
-              f'- min_over_time(({LIVE_WORKERS})[5m:15s])) or vector(0)'],
-             desc="The deepest dip in live worker count over the last five minutes. Names "
-                  "how many replicas went away, without having to be told how many there "
-                  "ought to be -- it reads 3 for a lost orchestrator StatefulSet and 2 for "
-                  "a lost processor pair." + PARA +
-                  "**Five minutes, not the visible range.** Peak-minus-trough over "
-                  "$__range makes the number change when the reader zooms, and made "
-                  "back-to-back scenarios report the earlier, deeper one: 3 during the "
-                  "processor scenario, whose own answer was 2. A stated window is worth "
-                  "more than a wider one." + PARA +
-                  "**Peak minus trough, not peak minus now.** The dip is narrow and a stat "
-                  "panel is a range query at the datasource step, so a subtraction against "
-                  "the current value lands on the wrong side of the dip about half the "
-                  "time -- measured at the old 60s step, where it missed an outage the "
-                  "same expression had caught an hour earlier. The step is 15s now, but "
-                  "the `[5m:15s]` subqueries pin the evaluation at 15s regardless of it, "
-                  "which is what keeps this independent of the panel's own step." + PARA +
-                  "**It cannot be prompt.** A replica is only missing once it has skipped "
-                  "its liveness window, so detection takes roughly the liveness window "
-                  "plus one export. Nothing queryable fixes the remainder: a fault shorter "
-                  "than the sampling period is not observable.",
-             thresholds=T_WARN, decimals=0),
-    ]
-
-    panels.append(row(lay, "3 - Flow: where is it leaking?"))
-    panels += [
-        timeseries(lay, "Outbound hop - orchestrator to processor",
-                   [('sum(rate(pipeline_messages_produced_total{type="process-dispatch",'
-                     'outcome="accepted"}[$__rate_interval]))', "dispatched"),
-                    ('sum(rate(pipeline_messages_consumed_total{type="process-dispatch",'
-                     'disposition="acked"}[$__rate_interval]))', "picked up")],
-                   desc="The two lines should track. A widening fork is backlog."
-                        + PARA +
-                        "Orchestrator and processor only. The API is not on this hop, "
-                        "but note that its own queue paths emit no metrics at all, so "
-                        "no panel on this board can see traffic the API publishes or "
-                        "consumes -- see the note panel on SKP BaseAPI.",
-                   unit="reqps", w=12),
-        timeseries(lay, "Return hop - processor to orchestrator",
-                   [('sum(rate(pipeline_messages_produced_total{type="step-outcome",'
-                     'outcome="accepted"}[$__rate_interval]))', "sent"),
-                    ('sum(rate(pipeline_messages_consumed_total{type="step-outcome",'
-                     'disposition="acked"}[$__rate_interval]))', "picked up")],
-                   desc="The same conservation check on the way back."
-                        + PARA +
-                        "The API also consumes step-outcome, and that consumption is "
-                        "NOT instrumented, so 'picked up' here counts the orchestrator "
-                        "alone. Read a shortfall as the API's share, not as loss.",
-                   unit="reqps", w=12),
-        timeseries(lay, "Per-processor dispatch",
-                   [('sum by (destination) (rate(pipeline_messages_produced_total'
-                     '{type="process-dispatch",destination=~"processor-$processor"}'
-                     '[$__rate_interval]))', "{{destination}}")],
-                   desc="One series per processor. A line at zero while the others "
-                        "flow is one processor being starved -- invisible in any "
-                        "aggregate.",
-                   unit="reqps"),
-        timeseries(lay, "Retry amplification over time",
-                   [('sum(rate(pipeline_messages_consumed_total'
-                     '{disposition=~"requeued|parked"}[$__rate_interval])) '
-                     '/ sum(rate(pipeline_messages_consumed_total[$__rate_interval])) '
-                     'or vector(0)', "redone")],
-                   desc="Flat zero is healthy and is drawn as a line, not as an "
-                        "empty panel." + PARA +
-                        "Requeued and parked only, for the reason the stat above gives: "
-                        "the `landed` dimension this used to add is retired.",
-                   unit="percentunit", minv=0, soft_max=0.1),
-        statetimeline(lay, "Posture - consumers, gate, leader, hydration, identity",
-                   [(f'clamp_max(min(max by (queue) '
-                     f'({live("pipeline_queue_consumers")})), 1)',
-                     "consumers attached"),
-                    (f'min by (service_name) ({live("pipeline_gate_open_ratio")})',
-                     "gate {{service_name}}"),
-                    (f'count({live("pipeline_leader_ratio")} == 1) or vector(0)',
-                     "leaders elected"),
-                    (f'min({live("pipeline_hydration_admitted_ratio")}) or vector(0)',
-                     "hydration"),
-                    (f'min({live("pipeline_identity_ready_ratio")}) or vector(0)',
-                     "identity")],
-                   desc="Why the pipeline stopped, in one panel. Every series should "
-                        "sit at 1 -- leaders elected included." + PARA +
-                        "**The first row is the one that actually moves**, and it is "
-                        "broker-side now. It used to be `pipeline.consumer.consuming` -- "
-                        "the only posture signal to change in the Redis, broker and "
-                        "both-down scenarios -- and that instrument is retired, because it "
-                        "was the process asserting its own health and a departed replica's "
-                        "copy was held at 1. `pipeline.queue.consumers` is the broker's own "
-                        "count, clamped to a posture: 0 when ANY queue in the deployment "
-                        "has nothing attached to it, 1 when they all do. `Queues "
-                        "unconsumed` above is the same fact as a number." + PARA +
-                        "Every series is restricted to replicas reporting inside " +
-                        LIVENESS + ", so a replica going away ends its row rather than "
-                        "freezing it at 1." + PARA +
-                        "**One row per signal.** As overlaid lines this was six booleans "
-                        "on one axis: they all sit at 1 in health, so they rendered as a "
-                        "single line and a dip could not be attributed to any of them. "
-                        "The panel that was supposed to say *why the pipeline stopped* "
-                        "could say only *something did*." + PARA +
-                        "`leaders elected` is a count rather than a posture and is the "
-                        "one row here that can legitimately exceed 1. Two is a split "
-                        "brain; the colour will not tell you so, the tooltip will.",
-                   mappings=M_POSTURE),
-        *depth_panels(lay, '', 'every queue in the deployment'),
-        queue_wait_panel(lay, '', ''),
-        table(lay, "Message flow matrix",
-              [('sum by (type) (rate(pipeline_messages_produced_total'
-                '[$__rate_interval]))', "produced"),
-               ('sum by (type) (rate(pipeline_messages_consumed_total'
-                '[$__rate_interval]))', "consumed")],
-              desc="Every message type, produced against consumed, with the difference. "
-                   "The quickest way to see a type that is produced and never consumed."
-                   + PARA +
-                   "**Grouped by type ALONE, and that is the whole point of the panel.** "
-                   "It used to group by `(service_name, type)` on both sides and merge "
-                   "them -- but the producer and the consumer of a type are DIFFERENT "
-                   "SERVICES, so the merge key never matched and the two halves of every "
-                   "hop landed on separate rows with the other column blank. Observed on "
-                   "this stack: `orchestrator / process-dispatch` produced 0.413 with "
-                   "consumed empty, and two rows below `sample-proc-v9 / "
-                   "process-dispatch` consumed 0.510 with produced empty. A reader had "
-                   "to do the join by eye, across non-adjacent rows, and a 23% "
-                   "discrepancy read as normal. A conservation table that cannot put the "
-                   "two sides of a conservation on one row is not one." + PARA +
-                   "Dropping `service_name` is what buys the pairing, and it costs the "
-                   "who: read that off `Produced by type and outcome` and `Consumed by "
-                   "type and disposition` on the worker boards, which are per-service by "
-                   "construction." + PARA +
-                   "**`gap /s` is produced minus consumed, so it should hover at zero.** "
-                   "It is a difference of two independently scraped rates, so expect "
-                   "jitter either side -- measured over an hour, p50 +0.000 and max "
-                   "+0.074 req/s. A gap that holds one sign and grows is the signal; the "
-                   "hop-gap stats above count the same thing in messages, where a real "
-                   "leak accumulates and jitter does not." + PARA +
-                   "`step-outcome` should bias POSITIVE **over a long enough range**, "
-                   "because the API consumes it too and the API's queue side emits no "
-                   "metrics at all -- so `consumed` undercounts that hop. Do not expect "
-                   "to see it at a one-minute rate window, where jitter is several times "
-                   "larger than the bias: measured at one instant, +0.015, and at "
-                   "another, -0.060.",
-              w=12,
-              exclude=("Time",),
-              rename={"Value #A": "produced /s", "Value #B": "consumed /s"},
-              extra_transforms=[
-                  binary_field("produced /s", "-", "consumed /s", "gap /s"),
-              ],
-              overrides=[
-                  # Three decimals on rates this small, or every cell reads 0.
-                  {"matcher": {"id": "byType", "options": "number"},
-                   "properties": [{"id": "decimals", "value": 3}]},
-                  # The gap is the column the panel exists for; colour it rather than
-                  # leaving the reader to subtract two numbers they can now see.
-                  {"matcher": {"id": "byName", "options": "gap /s"},
-                   "properties": [
-                       {"id": "custom.cellOptions",
-                        "value": {"type": "color-text"}},
-                       # A type present on ONE side only subtracts a number from an
-                       # absent cell, and the difference rendered `NaN` -- the one
-                       # rendering a reader cannot tell from a broken query, which is
-                       # what every other noValue on these boards exists to avoid.
-                       #
-                       # It is not a transient. `orchestration-started` is PRODUCED by
-                       # the API, whose queue side emits no metrics at all (the same
-                       # fact the paragraph above invokes to explain step-outcome's
-                       # positive bias), so its produced cell is permanently absent and
-                       # this row rendered NaN on every load, forever.
-                       #
-                       # Filling the missing side with zero was the alternative and is
-                       # worse: it would state a measured zero where nothing was
-                       # measured, and colour the resulting -1.9 red on a board whose
-                       # own description explains why that hop cannot balance. Naming
-                       # the condition keeps the blank cell beside it as the evidence
-                       # for WHICH side is missing.
-                       #
-                       # It takes a MAPPING, not noValue, and that is not a style
-                       # choice -- it is the only one of the two that fires. Verified
-                       # on the live board: with noValue alone the cell still read
-                       # `NaN`, because Grafana's display processor returns the
-                       # noValue text for null and undefined only, and a subtraction
-                       # against an absent operand yields a genuine NaN, which falls
-                       # through to the numeric formatter. The `nan` special mapping
-                       # is what catches it. noValue is kept for the neighbouring
-                       # shape -- a cell that is null rather than NaN.
-                       {"id": "noValue", "value": "one side only"},
-                       # `color: text` rather than a threshold colour: a structurally
-                       # one-sided type is a documented property of this stack, not a
-                       # fault, and the threshold steps below would otherwise paint it
-                       # red for being negative.
-                       {"id": "mappings", "value": [
-                           {"type": "special",
-                            "options": {"match": "nan",
-                                        "result": {"text": "one side only",
-                                                   "color": "text", "index": 0}}}]},
-                       {"id": "thresholds", "value": {"mode": "absolute", "steps": [
-                           {"color": "red", "value": None},
-                           {"color": "text", "value": -0.1},
-                           {"color": "orange", "value": 0.1},
-                           {"color": "red", "value": 0.3}]}},
-                   ]},
-              ]),
-    ]
-
-    return dashboard(
-        uid="skp-flow",
-        title="SKP Flow",
-        description=("Cross-service conservation for the SKP pipeline. The board to "
-                     "open first: it answers whether the system is broken and where, "
-                     "then links out to the source boards. The hop-gap panels span two "
-                     "services and belong to neither source board." + PARA +
-                     "The verdict tier is split by TENSE. Row 1 is the state right now. "
-                     "Row 2 is the worst thing that has already happened, and those stats "
-                     "stay non-zero after the event that caused them -- deliberately, so "
-                     "an operator arriving late is still told." + PARA +
-                     "Row 2's stats are scoped to the visible range, with ONE exception: "
-                     "`Workers missing (5m)` is fixed at five minutes regardless of the "
-                     "range, so its number does not change when you zoom. Its own "
-                     "description says why."),
-        variables=[
-            var_datasource(),
-            var_query("processor", "Processor",
-                      'label_values(pipeline_messages_produced_total{type="process-dispatch"}, destination)'),
-        ],
-        panels=panels,
-        links=NAV,
-        tags=["skp", "skp-flow", "pipeline"],
-    )
-
 
 # ---------------------------------------------------------------------------
 # board 2 -- baseapi
@@ -2149,7 +1494,7 @@ def build_baseapi():
              [f'count(count by (service_instance_id) '
               f'(process_runtime_dotnet_assemblies_count{{{f}}})) or vector(0)'],
              desc="API replicas exporting runtime metrics. Red at zero." + PARA +
-                  "No expected count, unlike `Workers reporting` on SKP Flow: this is a "
+                  "No expected count: this is a "
                   "single Deployment, and absent-versus-present is the whole question. "
                   "Scaled beyond one replica this cannot tell you that one of three is "
                   "gone -- it would need a constant to do that, and the honest fix then "
@@ -2983,8 +2328,8 @@ def build_processor():
     panels += causes_row(lay, f, restarts=False)
 
     # full=True: this board absorbs the runtime panels an operator would otherwise
-    # leave for SKP Runtime, which is being retired. The other boards keep the pair
-    # until the same decision is made for them.
+    # leave the board to find. SKP Runtime, which used to hold them, has been deleted.
+    # The baseapi board still carries only the original pair.
     rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
     rt["panels"] = runtime_row(lay, f, full=True)
     panels.append(rt)
@@ -3033,52 +2378,9 @@ def build_processor():
 
 # ---------------------------------------------------------------------------
 
-def normalize_imported():
-    """Stamp the shared nav onto boards in this directory that are not generated here.
-
-    skp-runtime.json is exported from the old provisioning ConfigMap rather than built by
-    this script, and it arrived carrying the `skp` tag but no `links`. The tag put it in
-    every other board's nav while the missing links left it with none of its own -- so
-    clicking through to it stranded the reader with no way back, and only there. Nav is a
-    property of the SET of boards, not of how any one of them was authored, so it is
-    applied to whatever is in the directory.
-
-    The same applies to the wording an empty panel uses -- see IMPORTED_NO_VALUE.
-    """
-    generated = {"skp-flow", "skp-baseapi", "skp-orchestrator", "skp-processor"}
-    for path in sorted(OUT.glob("*.json")):
-        if path.stem in generated:
-            continue
-        board = json.loads(path.read_text(encoding="utf-8"))
-        changed = []
-
-        if board.get("links") != NAV:
-            board["links"] = NAV
-            changed.append("nav")
-        if "skp" not in board.get("tags", []):
-            board.setdefault("tags", []).append("skp")
-            changed.append("tag")
-
-        for panel in board.get("panels", []):
-            text = IMPORTED_NO_VALUE.get(panel.get("title"))
-            if text is None:
-                continue
-            defaults = panel.setdefault("fieldConfig", {}).setdefault("defaults", {})
-            if defaults.get("noValue") != text:
-                defaults["noValue"] = text
-                changed.append(f"noValue:{panel['title']}")
-
-        if not changed:
-            continue
-        path.write_text(json.dumps(board, indent=2) + chr(10), encoding="utf-8")
-        print(f"{path.relative_to(OUT.parent.parent)}  "
-              f"stamped (imported board): {', '.join(changed)}")
-
-
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     boards = [
-        ("skp-flow.json", build_flow()),
         ("skp-baseapi.json", build_baseapi()),
         ("skp-orchestrator.json", build_orchestrator()),
         ("skp-processor.json", build_processor()),
@@ -3091,7 +2393,6 @@ def main():
         print(f"{path.relative_to(OUT.parent.parent)}  "
               f"{len(board['templating']['list'])} variables, {n} panels")
 
-    normalize_imported()
     write_configmap()
 
 

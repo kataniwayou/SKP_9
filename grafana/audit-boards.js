@@ -12,7 +12,6 @@ const TARGET_URL = process.env.GRAFANA_URL || 'http://localhost:13000';
 const OUT = process.env.OUT_DIR || 'C:\\Users\\UserL\\AppData\\Local\\Temp\\claude\\C--Users-UserL-source-repos-SK-P9\\8e2b26df-9d8c-4e55-980d-3d7009ffab18\\scratchpad';
 
 const BOARDS = [
-  { uid: 'skp-flow', slug: 'skp-flow', name: 'SKP Flow' },
   { uid: 'skp-baseapi', slug: 'skp-baseapi', name: 'SKP BaseAPI' },
   { uid: 'skp-orchestrator', slug: 'skp-orchestrator', name: 'SKP Orchestrator' },
   { uid: 'skp-processor', slug: 'skp-processor', name: 'SKP Processor' },

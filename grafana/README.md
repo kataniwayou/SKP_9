@@ -15,11 +15,9 @@ grafana/
   chaos-timeline.js        samples every board at intervals across a fault window
   chaos-probe.py           the same window from Prometheus, segmented before/during/after
   dashboards/
-    skp-flow.json          cross-service conservation — open this one first
     skp-baseapi.json       API HTTP ingress
     skp-orchestrator.json  orchestrator control plane
     skp-processor.json     processor replicas
-    skp-runtime.json       deep .NET runtime board, all three services
 ```
 
 ## Importing
@@ -39,7 +37,7 @@ Two properties make this work anywhere:
   the dashboards never reference it.
 - Each board carries an explicit stable `uid` and `"id": null`, so re-importing an
   updated file **updates the existing board** instead of creating a second copy. The
-  uids are `skp-flow`, `skp-baseapi`, `skp-orchestrator`, `skp-processor`, `skp-runtime`.
+  uids are `skp-baseapi`, `skp-orchestrator`, `skp-processor`.
 
 Folder is chosen at import time. Anything works; the boards link to each other by the
 `skp` tag, not by folder.
@@ -60,10 +58,11 @@ A UI "Save" is possible here — that is the cost of dropping provisioning, whic
 read-only. A UI edit is lost on the next import, so treat this directory as the source of
 truth by convention rather than by mechanism.
 
-`skp-runtime.json` is the one exception: it was exported from the old provisioning
-ConfigMap rather than generated. `build-dashboards.py` still stamps the shared nav onto it
-(`normalize_imported`), because nav is a property of the *set* of boards rather than of how
-any one was authored — see below for what happened when it was not.
+Every board here is generated. `skp-runtime.json` used to be the exception — exported from
+the old provisioning ConfigMap rather than built — and `build-dashboards.py` carried a
+`normalize_imported()` pass to stamp the shared nav onto it. Both the board and that pass
+have been deleted, along with `skp-flow`; the history below is kept because it is the
+reason nav is treated as a property of the *set* of boards.
 
 **The boards are provisioned from this repo again.** `build-dashboards.py` inlines every
 board in `grafana/dashboards/` into `k8s/24-grafana-dashboards.yaml`, which is the
@@ -752,10 +751,10 @@ Four tiers on the worker boards, in the order the questions actually get asked:
 2. **Since** — stat row. What has already **happened** in the visible range? The same
    instruments, `$__range` instead of 5m, plus dead-letter depth and process restarts.
 3. **Pipeline** — timeseries and state timelines. What is broken?
-4. **Runtime** — collapsed, two panels. Is the process why?
+4. **Runtime** — collapsed, eight panels. Is the process why?
 
-`skp-flow` has the same tense split (Verdict / Since / Flow) and has had since it was
-built; the worker boards had one row doing both jobs until the operator review below.
+The now-deleted `skp-flow` had the same tense split (Verdict / Since / Flow) from the
+start; the worker boards had one row doing both jobs until the operator review below.
 `skp-baseapi` has three tiers (Verdict / Ingress / Runtime) and no Since row -- it
 carries `DNS failures (range)` and `Process restarts` instead.
 
@@ -763,17 +762,25 @@ Live panel counts, all `provisioned=true` in folder `SKP`:
 
 | board | panels | rows |
 |---|---|---|
-| `skp-flow` | 28 | Verdict / Since / Flow |
 | `skp-baseapi` | 22 | Verdict / Ingress / Runtime |
-| `skp-orchestrator` | 38 | Verdict / Since / Pipeline / Runtime |
-| `skp-processor` | 36 | Verdict / Since / Pipeline / Runtime |
-| `skp-runtime` | 17 | (no rows) |
+| `skp-orchestrator` | 37 | Verdict / Since / Pipeline / Runtime |
+| `skp-processor` | 35 | Verdict / Since / Pipeline / Runtime |
 
-The collapsed Runtime tier carries **two** panels -- thread-pool queue and GC pause --
-because those only explain a symptom you are already looking at. Exception rate and
-process restarts used to be there and are on the visible tier now; the review section
-below has the measurement that moved them. The remaining thirteen runtime metrics answer
-memory-and-perf questions and live on `skp-runtime.json`.
+`skp-flow` (28 panels) and `skp-runtime` (17) were deleted. The two worker boards now
+mirror each other panel-for-panel, differing only where `pipeline.leader` stands in for
+`pipeline.identity.ready` and in the two `pipeline.hydration.admitted` panels the
+orchestrator adds.
+
+The collapsed Runtime tier carries **eight** panels on the two worker boards -- thread-pool
+queue and threads, GC pause and collections, heap and committed memory, allocation rate and
+lock contention -- paired so each question's two halves sit together. It carried two until
+`skp-runtime` was deleted; the six absorbed are the ones an operator would otherwise have
+left the board to find. `skp-baseapi` still carries only the original pair.
+
+Seven of the fifteen runtime metrics are now on no board at all: heap fragmentation, live
+object bytes, thread-pool completion rate, loaded assemblies, active timers, JIT methods per
+second, and the JIT-reset restart count. The first six are profiler-session diagnostics; the
+last cannot see a restart on this deployment at all. Recorded as a known gap.
 
 ### Why fault panels end in `or vector(0)` — and the three that must not
 
@@ -1376,10 +1383,11 @@ board cannot reach every other.
 ConfigMap so it could be edited like the other four left the board with an empty ACL rather
 than an inherited one, and anonymous viewers got `Failed to load dashboard — Forbidden`
 while an admin saw it fine. The generated boards each carry an explicit ACL granting Viewer
-and Editor; the orphaned one carried none. Fixed on this instance with:
+and Editor; the orphaned one carried none. Fixed at the time with (the board has since been deleted; the recipe is kept because it
+applies to any un-provisioned board that outlives its provider):
 
 ```bash
-curl -u admin:admin -X POST http://localhost:3000/api/dashboards/uid/skp-runtime/permissions   -H 'Content-Type: application/json'   -d '{"items":[{"role":"Viewer","permission":1},{"role":"Editor","permission":2}]}'
+curl -u admin:admin -X POST http://localhost:3000/api/dashboards/uid/<uid>/permissions   -H 'Content-Type: application/json'   -d '{"items":[{"role":"Viewer","permission":1},{"role":"Editor","permission":2}]}'
 ```
 
 This is an artefact of un-provisioning a board that already existed. A clean import onto a
