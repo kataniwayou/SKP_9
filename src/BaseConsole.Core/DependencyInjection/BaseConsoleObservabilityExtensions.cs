@@ -1,5 +1,6 @@
 using BaseConsole.Core.Configuration;
 using BaseConsole.Core.Gating;
+using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
@@ -140,6 +141,7 @@ public static class BaseConsoleObservabilityExtensions
                 // Queue depth and attached consumers. Its own meter because the types moved to
                 // the transport, where the API can reach them -- see QueueDepthMetrics.
                 .AddMeter(QueueDepthMetrics.MeterName)
+                .AddMeter(CountingLoopHeartbeat.MeterName)
                 // Bucket boundaries for the send-latency histogram, on the shared call so both roles
                 // inherit them. Without a view the SDK applies a default ladder built for
                 // milliseconds while the instrument records seconds, and every observation collapses
