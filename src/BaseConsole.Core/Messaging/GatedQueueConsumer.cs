@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BaseConsole.Core.Gating;
 using Messaging.Contracts;
 using Messaging.Transport;
@@ -285,12 +286,19 @@ public sealed class GatedQueueConsumer : BackgroundService
         var recorded = false;
         var type = "";
 
+        var started = Stopwatch.GetTimestamp();
+
+        // The value the outer catch's path carries. Every branch that calls Record overwrites it,
+        // so this is only ever read for a delivery that escaped classification entirely.
+        var disposition = "escaped";
+
         // Every branch below calls this instead of IngressMetrics.RecordConsumed directly, so the
         // outer catch can tell whether one of them already recorded before it adds its own.
-        void Record(string disposition, string reason, bool landed)
+        void Record(string d, string reason, bool landed)
         {
             recorded = true;
-            IngressMetrics.RecordConsumed(_options.Queue, type, disposition, reason, landed);
+            disposition = d;
+            IngressMetrics.RecordConsumed(_options.Queue, type, d, reason, landed);
         }
 
         try
@@ -480,6 +488,15 @@ public sealed class GatedQueueConsumer : BackgroundService
             }
 
             throw;
+        }
+        finally
+        {
+            // OUTSIDE the handler region's own finally, because a delivery bounced off a shut gate
+            // returns before that region is ever entered. It still cost this consumer time, and a
+            // pause that is slow to reject is a real thing to be able to see.
+            IngressMetrics.RecordConsumerDuration(
+                _options.Queue, type, disposition,
+                Stopwatch.GetElapsedTime(started).TotalSeconds);
         }
     }
 
