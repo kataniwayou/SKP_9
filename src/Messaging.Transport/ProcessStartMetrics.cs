@@ -1,6 +1,6 @@
 using System.Diagnostics.Metrics;
 
-namespace BaseConsole.Core.Observability;
+namespace Messaging.Transport;
 
 /// <summary>
 /// When this process started, as unix seconds, so restarts are countable.
@@ -30,7 +30,7 @@ public static class ProcessStartMetrics
     /// Must match the string passed to <c>AddMeter</c> in <c>AddBaseConsoleObservability</c>. A
     /// typo'd meter name produces no error and no metrics.
     /// </summary>
-    public const string MeterName = "BaseConsole.Core.Process";
+    public const string MeterName = "Messaging.Transport.Process";
 
     /// <summary>
     /// The name that dashboards and alert rules query.

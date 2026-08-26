@@ -97,7 +97,65 @@ public static class ObservabilityServiceCollectionExtensions
                 // publishing start and stop requests into it, which pile up there with nothing
                 // to take them. See QueueDepthMetrics.
                 .AddMeter(QueueDepthMetrics.MeterName)
+                // Egress. THE MEASUREMENTS WERE ALREADY BEING TAKEN AND THROWN AWAY: this host
+                // sends through the shared Messaging.Transport QueueSender, which wraps every
+                // publish in EgressMetrics.MeasureAsync, so pipeline.messages.produced and
+                // pipeline.produce.duration were recorded on every send and dropped at the
+                // provider because this meter was not registered. One line, two instruments, no
+                // new instrumentation anywhere.
+                //
+                // It matters here for a reason the worker boards do not cover: the API is the one
+                // process publishing start and stop requests into orchestrator-control, so an
+                // unroutable or transient outcome on this host is a control-plane command that
+                // never landed -- and until now nothing anywhere reported it.
+                .AddMeter(EgressMeter.Name)
+                // Bucket boundaries for the send-latency histogram. Without a view the SDK applies
+                // a default ladder built for milliseconds while the instrument records seconds, and
+                // every observation collapses into the first bucket. The console base installs the
+                // same view; this host is not a console and shares none of that wiring.
+                .AddView(
+                    EgressMeter.DurationInstrument,
+                    new ExplicitBucketHistogramConfiguration
+                    {
+                        Boundaries = EgressMeter.LatencySecondsBoundaries(),
+                    })
+                // Ingress. This host's GatedQueueConsumer is a deliberate copy of the console one
+                // and now records the same three instruments, so orchestrator-control is measured
+                // from the side that consumes it as well as the side that fills it.
+                .AddMeter(IngressMetrics.MeterName)
+                .AddView(
+                    IngressMetrics.QueueWaitInstrument,
+                    new ExplicitBucketHistogramConfiguration
+                    {
+                        Boundaries = IngressMetrics.ArrivalSecondsBoundaries(),
+                    })
+                .AddView(
+                    IngressMetrics.ConsumerDurationInstrument,
+                    new ExplicitBucketHistogramConfiguration
+                    {
+                        Boundaries = IngressMetrics.ArrivalSecondsBoundaries(),
+                    })
+                // Process start time. changes() over it is the restart count, and it works only
+                // because InstanceId resolves to POD_NAME -- a restart moves the value on an
+                // EXISTING series rather than creating a new one.
+                .AddMeter(ProcessStartMetrics.MeterName)
+                // Loop iterations. This host runs two watched loops -- the gate probe and the
+                // queue-depth probe -- and reported neither until now.
+                .AddMeter(LoopMetrics.MeterName)
+                // The projection-store gate: posture, trips, and probe latency. This host runs
+                // its own copy of the gate and reported none of the three until now.
+                .AddMeter(GateMetrics.MeterName)
+                .AddView(
+                    GateMetrics.ProbeDurationInstrument,
+                    new ExplicitBucketHistogramConfiguration
+                    {
+                        Boundaries = EgressMeter.LatencySecondsBoundaries(),
+                    })
                 .AddOtlpExporter());
+
+        // Stamped once, as early as the provider is built. Idempotent: the first call wins, so a
+        // value that moved twice can never inflate a restart count.
+        ProcessStartMetrics.Stamp(TimeProvider.System);
 
         return builder;
     }

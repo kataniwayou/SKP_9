@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using Messaging.Transport;
 using Microsoft.Extensions.Hosting;
 
 namespace BaseConsole.Core.Gating;
@@ -30,21 +31,14 @@ internal sealed class L2GateMetrics : IHostedService, IDisposable
     /// constant rather than a literal in two places, because a typo produces no error and no
     /// metrics.
     /// </summary>
-    internal const string MeterName = "BaseConsole.Core.Gating";
-
-    private static readonly Meter Meter = new(MeterName);
-
-    private static readonly Counter<long> Trips = Meter.CreateCounter<long>(
-        "pipeline.gate.trips",
-        unit: "1",
-        description: "Times the projection store went away and consumption was paused at the broker.");
+    internal const string MeterName = GateMetrics.MeterName;
 
     /// <summary>
     /// Must match the name the view in <c>AddBaseConsoleObservability</c> targets. A view whose
     /// instrument name matches nothing is silently ignored, so a typo here costs the histogram its
     /// bucket boundaries and nothing reports the mistake.
     /// </summary>
-    internal const string ProbeDurationInstrument = "pipeline.gate.probe.duration";
+    internal const string ProbeDurationInstrument = GateMetrics.ProbeDurationInstrument;
 
     /// <summary>
     /// How long the store took to answer the gate probe.
@@ -64,11 +58,6 @@ internal sealed class L2GateMetrics : IHostedService, IDisposable
     /// is when the latency question is most worth asking.
     /// </para>
     /// </summary>
-    private static readonly Histogram<double> ProbeDuration = Meter.CreateHistogram<double>(
-        ProbeDurationInstrument,
-        unit: "s",
-        description: "How long the projection store took to answer the gate probe.");
-
     /// <summary>
     /// Records one probe measurement.
     /// <para>
@@ -82,9 +71,7 @@ internal sealed class L2GateMetrics : IHostedService, IDisposable
     /// <param name="elapsed">Wall time from issuing the ping to learning its fate.</param>
     /// <param name="outcome">healthy, timeout, or failed.</param>
     internal static void RecordProbe(TimeSpan elapsed, string outcome) =>
-        ProbeDuration.Record(
-            elapsed.TotalSeconds,
-            new KeyValuePair<string, object?>("outcome", outcome));
+        GateMetrics.RecordProbe(elapsed, outcome);
 
     /// <summary>
     /// Every live owner's gate, keyed by the owner itself.
@@ -101,36 +88,20 @@ internal sealed class L2GateMetrics : IHostedService, IDisposable
     /// tearing down the instrument — which cannot be done short of disposing the Meter itself.
     /// </para>
     /// </summary>
-    private static readonly ConcurrentDictionary<L2GateMetrics, L2Gate> Live = new();
-
-    static L2GateMetrics()
-    {
-        // Registered once, in the static constructor, because an observable created more than once
-        // is the duplicate-stream hazard the registry above exists to avoid. The returned instrument
-        // is intentionally not stored: the Meter owns it and the callback keeps it alive.
-        Meter.CreateObservableGauge(
-            "pipeline.gate.open",
-            Observe,
-            unit: "1",
-            description: "1 while the projection store is usable and consumers may run, 0 while it is not.");
-    }
-
     private readonly L2Gate _gate;
+    private readonly IDisposable _registration;
 
     public L2GateMetrics(L2Gate gate)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
 
-        Live[this] = gate;
+        _registration = GateMetrics.Register(() => gate.IsOpen);
         _gate.StateChanged += OnStateChanged;
     }
 
     public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    private static IEnumerable<Measurement<int>> Observe() =>
-        Live.Select(entry => new Measurement<int>(entry.Value.IsOpen ? 1 : 0));
 
     /// <summary>
     /// The falling edge only. The gate raises this on transitions in both directions, and counting
@@ -141,7 +112,7 @@ internal sealed class L2GateMetrics : IHostedService, IDisposable
     {
         if (!open)
         {
-            Trips.Add(1);
+            GateMetrics.RecordTrip();
         }
     }
 
@@ -152,6 +123,6 @@ internal sealed class L2GateMetrics : IHostedService, IDisposable
     public void Dispose()
     {
         _gate.StateChanged -= OnStateChanged;
-        Live.TryRemove(this, out _);
+        _registration.Dispose();
     }
 }

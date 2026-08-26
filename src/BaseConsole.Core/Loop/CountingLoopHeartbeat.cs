@@ -1,3 +1,4 @@
+using Messaging.Transport;
 using System.Diagnostics.Metrics;
 
 namespace BaseConsole.Core.Loop;
@@ -26,24 +27,12 @@ public sealed class CountingLoopHeartbeat : ILoopHeartbeat
     /// constant rather than a literal in two places, because a typo produces no error and no
     /// metrics.
     /// </summary>
-    public const string MeterName = "BaseConsole.Core.Loop";
+    public const string MeterName = LoopMetrics.MeterName;
 
-    public const string IterationsInstrument = "pipeline.loop.iterations";
-
-    private static readonly Meter Meter = new(MeterName);
-
-    /// <summary>
-    /// Iterations completed, by loop. <c>{iteration}</c> rather than <c>"1"</c>: a unit of
-    /// <c>"1"</c> makes the Prometheus exporter append <c>_ratio</c>, which has already cost this
-    /// repository one panel that matched nothing and rendered a confident green zero.
-    /// </summary>
-    private static readonly Counter<long> Iterations = Meter.CreateCounter<long>(
-        IterationsInstrument,
-        unit: "{iteration}",
-        description: "Iterations completed by a named loop. Its rate is the loop's liveness.");
+    public const string IterationsInstrument = LoopMetrics.IterationsInstrument;
 
     private readonly ILoopHeartbeat _inner;
-    private readonly KeyValuePair<string, object?> _loop;
+    private readonly string _loopName;
 
     /// <param name="loop">
     /// The loop's key, matching the one its keyed <see cref="ILoopHeartbeat"/> registration and its
@@ -55,13 +44,13 @@ public sealed class CountingLoopHeartbeat : ILoopHeartbeat
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         ArgumentException.ThrowIfNullOrWhiteSpace(loop);
 
-        _loop = new KeyValuePair<string, object?>("loop", loop);
+        _loopName = loop;
 
         // SEEDED, AND THIS LINE IS LOAD-BEARING. A counter that has never been incremented
         // exports no series at all, so a loop that failed to start produces no data -- and a
         // panel comparing rate() against a threshold has nothing to compare. The exact failure
         // the metric exists to catch would be the one it could not express.
-        Iterations.Add(0, _loop);
+        LoopMetrics.Seed(loop);
     }
 
     /// <inheritdoc/>
@@ -75,7 +64,7 @@ public sealed class CountingLoopHeartbeat : ILoopHeartbeat
     {
         // Counted before delegating, so the count and the stamp cannot disagree about whether an
         // iteration happened. Both must land before any I/O -- see ILoopHeartbeat.Beat.
-        Iterations.Add(1, _loop);
+        LoopMetrics.Count(_loopName);
         _inner.Beat();
     }
 

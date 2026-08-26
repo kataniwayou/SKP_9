@@ -82,14 +82,34 @@ public static class MessagingServiceCollectionExtensions
     /// consumer, because its whole purpose is to be the one place several consumers agree about.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The <c>loop</c> label this host's gate probe reports under. The literal matches
+    /// <c>ConsoleRedisServiceCollectionExtensions.GateLoop</c> deliberately: all three services run
+    /// the same probe against the same store, so one value lets a single panel compare them. The
+    /// two libraries do not reference each other, which is why it is written twice.
+    /// </summary>
+    public const string GateLoop = "l2-gate";
+
     public static IServiceCollection AddBaseApiL2Gate(
         this IServiceCollection services, IConfiguration cfg)
     {
         services.Configure<L2GateOptions>(cfg.GetSection("L2Gate"));
 
         services.TryAddSingleton<L2Gate>();
-        services.TryAddSingleton<ILoopHeartbeat, LoopHeartbeat>();
+        // Wrapped, so the gate probe loop reports pipeline.loop.iterations as well as
+        // stamping the holder the readiness check reads. The loop key matches the console
+        // hosts' gate loop, so one panel compares all three services.
+        services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton<ILoopHeartbeat>(sp => new CountingLoopHeartbeat(
+            new LoopHeartbeat(
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<ILogger<LoopHeartbeat>>()),
+            GateLoop));
         services.AddHostedService<L2GateProbe>();
+
+        // Hosted purely so the container constructs it: it owns the gauge registration, and a
+        // singleton nothing resolves is an instrument that never publishes, silently.
+        services.AddHostedService<L2GateMetrics>();
 
         return services;
     }

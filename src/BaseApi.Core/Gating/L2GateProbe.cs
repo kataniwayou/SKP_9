@@ -1,3 +1,5 @@
+using Messaging.Transport;
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -140,6 +142,11 @@ public sealed class L2GateProbe : BackgroundService
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(_options.ProbeTimeout);
 
+        // Measured from here rather than from real store traffic: the probe ticks on a fixed
+        // interval whether or not anything is flowing, so this reports during idle periods too.
+        var started = Stopwatch.GetTimestamp();
+        TimeSpan Elapsed() => Stopwatch.GetElapsedTime(started);
+
         try
         {
             // The ping takes no cancellation token — it is governed by the multiplexer's own connect
@@ -162,15 +169,18 @@ public sealed class L2GateProbe : BackgroundService
                     TaskScheduler.Default);
 
                 _logger.LogDebug("probe exceeded {Timeout}", _options.ProbeTimeout);
+                GateMetrics.RecordProbe(Elapsed(), "timeout");
                 return false;
             }
 
             await ping.ConfigureAwait(false);   // surface a faulted ping
+            GateMetrics.RecordProbe(Elapsed(), "healthy");
             return true;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "probe failed");
+            GateMetrics.RecordProbe(Elapsed(), "failed");
             return false;
         }
     }
