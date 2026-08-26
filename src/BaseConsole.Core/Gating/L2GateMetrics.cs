@@ -91,8 +91,9 @@ internal sealed class L2GateMetrics : IHostedService, IDisposable
     /// <para>
     /// <b>This registry exists so there is ONE observable instrument rather than one per owner.</b>
     /// Only one <see cref="L2GateMetrics"/> exists per process today, but the same duplicate-stream
-    /// hazard that <c>IngressMetrics</c> documents for its consumer gauge applies to any observable
-    /// created outside a static constructor: a second construction — as every test in this class
+    /// hazard <c>QueueDepthMetrics</c> guards against — by registering its gauges exactly once, in its
+    /// own static constructor, rather than once per report — applies to any observable created outside
+    /// a static constructor: a second construction — as every test in this class
     /// performs, each with its own gate — would register a second callback on the same instrument
     /// name, and the OpenTelemetry SDK warns about and may drop the duplicate. Reading
     /// <see cref="L2Gate.IsOpen"/> through a registry keeps exactly one <c>CreateObservableGauge</c>

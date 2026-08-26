@@ -22,13 +22,15 @@ namespace Messaging.Transport;
 /// of most real degradations.
 /// </para>
 /// <para>
-/// <b>Consumers is broker-side truth, which nothing else here is.</b>
-/// <c>pipeline.consumer.consuming</c> is the process asserting its own health. That assertion is
-/// wrapped in a liveness window on every board precisely because a dead replica's copy of it was
-/// held at 1 by the collector and by Prometheus's lookback. This count comes from the broker's own
-/// reply to a passive declare, so it is 0 the moment a consumer detaches and needs no window at all.
-/// It is not a complete answer either: a consumer that reattaches inside one probe interval — which
-/// is exactly what the S9 scenario produced — is still invisible here.
+/// <b>Consumers is broker-side truth, which nothing else here is.</b> The pipeline used to also
+/// carry <c>pipeline.consumer.consuming</c>, the process asserting its own health. That assertion had
+/// to be wrapped in a liveness window on every board, because a dead replica's copy of it was held at
+/// 1 by the collector and by Prometheus's lookback. This count comes from the broker's own reply to a
+/// passive declare instead, so it is 0 the moment a consumer detaches and needs no window at all —
+/// which is why the self-asserted gauge was removed rather than kept alongside it: this one answers
+/// the same question without the window the other one required. It is not a complete answer either: a
+/// consumer that reattaches inside one probe interval — which is exactly what the S9 scenario
+/// produced — is still invisible here.
 /// </para>
 /// <para>
 /// <b>Depth counts messages READY, not unacked.</b> That is what a passive declare returns. It is

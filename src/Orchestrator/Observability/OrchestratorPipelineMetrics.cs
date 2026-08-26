@@ -50,8 +50,8 @@ internal sealed class OrchestratorPipelineMetrics : IHostedService, IDisposable
     /// owner.</b> There is exactly one <see cref="OrchestratorPipelineMetrics"/> per process in
     /// production, but every test in this class constructs its own — and a second
     /// <c>CreateObservableGauge</c> call on the same instrument name is the duplicate-stream hazard
-    /// <c>IngressMetrics</c> and <c>L2GateMetrics</c> both document: the OpenTelemetry SDK warns
-    /// about it and may drop the duplicate. Reading each owner's state through this registry keeps
+    /// <c>L2GateMetrics</c> documents: the OpenTelemetry SDK warns about it and may drop the
+    /// duplicate. Reading each owner's state through this registry keeps
     /// exactly one callback alive per gauge for the process's lifetime, with <see cref="Dispose"/>
     /// removing an owner's entry rather than tearing down the instrument — which cannot be done
     /// short of disposing the Meter itself.
