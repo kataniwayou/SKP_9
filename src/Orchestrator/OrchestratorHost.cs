@@ -231,10 +231,12 @@ public static class OrchestratorHost
                 OrchestratorQueues.ResultPostDead,
                 OrchestratorQueues.ControlDead,
             ],
-            // Slower than any pipeline loop on purpose. A dead-letter queue changes only when
-            // something is refused, which is rare and never urgent to the second -- what matters is
-            // that the number is still there tomorrow, not that it arrived within a scrape.
-            TimeSpan.FromSeconds(30),
+            // Five minutes, not thirty seconds, and the number is no longer what makes this timely.
+            // DeadLetterReadSignal wakes this probe the moment something is parked on any of this
+            // replica's three dead-letter queues; the interval is only the backstop that notices an
+            // operator draining one by hand. Without that backstop a drained queue would report a
+            // stale non-zero forever.
+            TimeSpan.FromMinutes(5),
             sp.GetRequiredService<ILogger<DeadLetterDepthProbe>>()));
 
         // How much work is WAITING, and whether the broker still has a consumer on each queue.
