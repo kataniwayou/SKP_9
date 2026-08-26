@@ -1,3 +1,4 @@
+using BaseConsole.Core.Loop;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 
@@ -39,8 +40,9 @@ public sealed class QueueDepthProbe : QueueStatsProbe
         RabbitMqConnection connection,
         IReadOnlyList<string> queues,
         TimeSpan interval,
-        ILogger<QueueDepthProbe> logger)
-        : base(connection, queues, interval, logger)
+        ILogger<QueueDepthProbe> logger,
+        ILoopHeartbeat? heartbeat = null)
+        : base(connection, queues, interval, logger, heartbeat)
     {
     }
 
@@ -53,8 +55,9 @@ public sealed class QueueDepthProbe : QueueStatsProbe
         Func<IReadOnlyList<string>> queues,
         TimeSpan interval,
         ILogger<QueueDepthProbe> logger,
-        Action<string, ProbeOutcome>? onResult = null)
-        : base(connection, queues, interval, logger, onResult)
+        Action<string, ProbeOutcome>? onResult = null,
+        ILoopHeartbeat? heartbeat = null)
+        : base(connection, queues, interval, logger, onResult, heartbeat)
     {
     }
 

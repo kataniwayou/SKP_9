@@ -44,6 +44,14 @@ public static class BaseProcessorServiceCollectionExtensions
     public const string LivenessLoop = "processor-liveness";
 
     /// <summary>
+    /// The depth probe's loop. Watched for the reason the gate loop is: nothing inside the process
+    /// can restart a loop that is gone, and a dead depth probe leaves its gauge reporting the last
+    /// value it saw -- a frozen number the process keeps exporting, indistinguishable from a
+    /// current one.
+    /// </summary>
+    public const string QueueDepthLoop = "queue-depth";
+
+    /// <summary>
     /// Multiples of a loop's own cadence before a missing beat reads as dead. Three leaves room for
     /// one slow iteration without reporting a healthy loop as gone.
     /// </summary>
@@ -182,7 +190,17 @@ public static class BaseProcessorServiceCollectionExtensions
                 "processor-identity-ready",
                 sp => new ProcessorIdentityReadyHealthCheck(sp.GetRequiredService<IProcessorContext>()),
                 HealthStatus.Unhealthy,
-                ["ready"]));
+                ["ready"]))
+            .Add(new HealthCheckRegistration(
+                QueueDepthLoop,
+                sp => new LoopLivenessHealthCheck(
+                    sp.GetRequiredKeyedService<ILoopHeartbeat>(QueueDepthLoop),
+                    // Interval x 3, matching the liveness loop: ten seconds, three passes.
+                    TimeSpan.FromSeconds(30),
+                    QueueDepthLoop,
+                    sp.GetRequiredService<TimeProvider>()),
+                HealthStatus.Unhealthy,
+                ["live"]));
     }
 
     /// <summary>
@@ -227,12 +245,17 @@ public static class BaseProcessorServiceCollectionExtensions
         // asymmetry was measured: with the orchestrator scaled to zero the number of queues observed
         // anywhere fell from 7 to 1 and `Queues unconsumed` read a confident 0, unable to tell "none
         // unconsumed" from "six unobservable".
+        services.AddKeyedSingleton<ILoopHeartbeat>(
+            QueueDepthLoop, (sp, _) => new CountingLoopHeartbeat(
+                new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()), QueueDepthLoop));
+
         services.AddHostedService(sp => new QueueDepthProbe(
             sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             () => [ProcessorQueues.Work(processorId), .. DispatchedQueues.Snapshot()],
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
-            DispatchedQueues.Note));
+            DispatchedQueues.Note,
+            sp.GetRequiredKeyedService<ILoopHeartbeat>(QueueDepthLoop)));
 
         // How much work this processor has REFUSED and nobody has dealt with.
         //
