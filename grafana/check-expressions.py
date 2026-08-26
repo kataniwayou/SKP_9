@@ -72,56 +72,15 @@ def query(expr):
 
 
 GEN = pathlib.Path(__file__).parent / "build-dashboards.py"
-RULES = pathlib.Path(__file__).parent.parent / "k8s" / "02-configmaps.yaml"
 
-
-def check_liveness_windows():
-    """Assert the alert rules' liveness windows equal LIVENESS in the generator.
-
-    The same decision is expressed twice -- once in build-dashboards.py, once in the
-    skp-rules.yml block of the ConfigMap -- because Prometheus cannot read the generator.
-    Two copies of a number drift, and this pair already did: the rules shipped with a
-    `for:` and a staleness threshold that no longer matched anything the generator said.
-    Enforced here rather than remembered in a comment.
-
-    One window in the rules is deliberately NOT the liveness window and is named here so
-    the check can tell drift from design: TelemetryStale masks with
-    `present_over_time(...[2m])` to drop a retired, version-stamped service_name, and 2m
-    is that rule's own floor (it must exceed the 45s threshold plus the 15s `for`). Any
-    window that is neither LIVENESS nor a named exception is drift and fails.
-    """
-    m = re.search(r'^LIVENESS\s*=\s*"([^"]+)"', GEN.read_text(encoding="utf-8"), re.M)
-    if not m:
-        print("\nLIVENESS coupling:\n   ERROR   no LIVENESS constant in build-dashboards.py")
-        return 1
-    liveness = m.group(1)
-    exceptions = {"2m": "TelemetryStale's retired-name mask"}
-
-    # Every window applied to a pipeline_* series inside a *_over_time() call in the
-    # rules block. `.split()[0]` drops a trailing `offset 5m`.
-    found = [w.split()[0] for w in re.findall(
-        r'(?:present|last)_over_time\(pipeline_\w+\[([^\]]+?)\]',
-        RULES.read_text(encoding="utf-8"))]
-
-    print(f"\nLIVENESS coupling: build-dashboards.py says {liveness}; "
-          f"{len(found)} *_over_time window(s) in k8s/02-configmaps.yaml")
-    if not found:
-        print("   ERROR   no windows found in the rules -- did the selector name change?")
-        return 1
-
-    bad = [w for w in found if w != liveness and w not in exceptions]
-    for w in sorted(set(bad)):
-        print(f"   ERROR   rules use [{w}]; generator's LIVENESS is [{liveness}] "
-              f"and [{w}] is not a named exception")
-    for w in sorted(set(found) & set(exceptions)):
-        print(f"   ok      [{w}] exempt -- {exceptions[w]}")
-    n = found.count(liveness)
-    if n:
-        print(f"   ok      {n} window(s) at [{liveness}] agree with the generator")
-    elif not bad:
-        print(f"   ERROR   no window uses LIVENESS [{liveness}] at all")
-        return 1
-    return 1 if bad else 0
+# THE LIVENESS-COUPLING CHECK IS GONE, WITH THE ALERT RULES IT CHECKED.
+#
+# It asserted that the `*_over_time` windows in the skp-rules.yml block of
+# k8s/02-configmaps.yaml equalled LIVENESS in build-dashboards.py -- the same decision
+# expressed twice, because Prometheus cannot read the generator. There is no second copy
+# any more: this project ships no alert rules and will not, because in production
+# Prometheus is ORG-OWNED and its rule set is not a lever available here. LIVENESS now
+# has exactly one home, so there is nothing left to drift against.
 
 
 def main():
@@ -165,9 +124,7 @@ def main():
             print(f"  {board} / {panel}")
             print(f"      {raw[:150]}")
 
-    coupling = check_liveness_windows()
-
-    return 1 if (parse_errors or coupling) else 0
+    return 1 if parse_errors else 0
 
 
 if __name__ == "__main__":
