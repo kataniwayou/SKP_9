@@ -459,3 +459,30 @@ as a broken reference.
    leanness this set was trimmed for, the instrument is restorable — it is one
    histogram and one `RecordArrival` argument, both recoverable from the
    `pre-metrics-rewrite` tag.
+
+---
+
+## 11. Corrections to §7's panel table, found during implementation
+
+**`by (instance)` is wrong wherever §7's table uses it — read `service_instance_id`.**
+
+Three rows of the §7 table group by `instance`. In this deployment `instance` is
+the **scrape target**, which every replica of a service shares; grouping by it
+collapses all replicas into one series and makes a per-replica panel silently
+useless — every legend renders the same label. The per-replica dimension is
+`service_instance_id`, which is what the generator's own variable and its
+existing panels use.
+
+This surfaced when the loop-rate panel's legend was implemented from §7
+literally and every replica's series came back with an identical label. The
+generator is correct; the spec's table was not.
+
+**§7 row 6 (Restarts) is implemented as an aggregate, not a per-replica
+breakdown.** `max(changes(pipeline_process_start_timestamp_seconds{…}[1h])) or
+vector(0)` answers "how many times did the worst-affected replica restart",
+which is the question a verdict-tier stat should ask. A per-replica breakdown
+remains available and is partly covered already by the pre-existing
+`Process restarts` panel, which groups by `service_instance_id` — though via
+runtime counter resets rather than this gauge. Recorded rather than changed: the
+aggregate is the right shape for the tier it sits on, and the spec's `(instance)`
+was wrong in any case.
