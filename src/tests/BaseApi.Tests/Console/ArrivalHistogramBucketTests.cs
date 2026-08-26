@@ -82,6 +82,40 @@ public sealed class ArrivalHistogramBucketTests
         }
     }
 
+    /// <summary>
+    /// Same guard as <see cref="TheQueueWaitHistogramCarriesTheArrivalLadder"/>, for the other
+    /// consumer of this ladder. <c>IngressMetrics.ConsumerDurationInstrument</c> documents exactly
+    /// this hazard at its declaration: "a view whose instrument name matches nothing is silently
+    /// ignored, so a typo here costs the histogram its bucket boundaries and nothing reports the
+    /// mistake." Asserting <c>AddView</c> was called would not catch that typo; reading the
+    /// boundaries off an exported metric point is the only check that does.
+    /// </summary>
+    [Fact]
+    public void TheConsumerDurationHistogramCarriesTheArrivalLadder()
+    {
+        var builder = BuilderWith();
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+
+        var exporter = new BoundaryCapturingExporter();
+        builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddReader(
+            new BaseExportingMetricReader(exporter)));
+
+        using var host = builder.Build();
+        var provider = host.Services.GetRequiredService<MeterProvider>();
+
+        // One real measurement through the production entry point -- same reasoning as Started()
+        // above: resolving the provider first is what subscribes the SDK, and recording is what
+        // gives the instrument a metric point to export.
+        IngressMetrics.RecordConsumerDuration("orchestrator-result", "T", "acked", 0.01);
+
+        provider.ForceFlush();
+
+        var bounds = exporter.BoundariesFor(IngressMetrics.ConsumerDurationInstrument);
+
+        Assert.NotNull(bounds);
+        Assert.Equal(IngressMetrics.ArrivalSecondsBoundaries(), bounds!);
+    }
+
     [Fact]
     public void TheArrivalLadderReachesMinutesRatherThanStoppingAtTenSeconds()
     {
