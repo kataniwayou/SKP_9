@@ -318,7 +318,62 @@ survives because `pipeline.identity.ready` hangs off it.
 | 8 | Consumers attached | `max by (queue) (pipeline_queue_consumers)` |
 | 9 | Dead-letter depth | `max by (queue) (pipeline_deadletter_depth)` |
 | 10 | Consumer paths | `rate(pipeline_messages_consumed_total[...])` by `(queue, disposition, reason)` |
-| 11 | Durations | means by `(queue, disposition)` and by `(destination)`; queue wait shown as `wait − produce` |
+| 11 | Queue wait | mean by `(queue)`, raw and net of produce — see below |
+| 12 | Consumer duration | mean by `(queue, disposition)` |
+| 13 | Produce duration | mean by `(destination)` |
+
+Thirteen panels, one instrument family each. Nothing is bundled: an earlier
+draft put queue wait, consumer duration and produce duration in a single
+"Durations" row, which left `pipeline.queue.wait` without a panel of its own and
+three unrelated questions sharing an axis.
+
+### 7.1 The queue-wait panel
+
+It carries **two series**, because the raw number is the one that is wrong and
+the corrected one is the one that is approximate.
+
+**Raw** — what the instrument records:
+
+```promql
+avg by (queue) (
+  rate(pipeline_queue_wait_seconds_sum[$__rate_interval])
+  / rate(pipeline_queue_wait_seconds_count[$__rate_interval])
+)
+```
+
+**Net of the publisher confirm** — the double count from 5.5 removed:
+
+```promql
+avg by (queue) (
+  rate(pipeline_queue_wait_seconds_sum[$__rate_interval])
+  / rate(pipeline_queue_wait_seconds_count[$__rate_interval])
+)
+- on(queue) group_left
+avg by (queue) (
+  label_replace(
+    rate(pipeline_produce_duration_seconds_sum[$__rate_interval])
+    / rate(pipeline_produce_duration_seconds_count[$__rate_interval]),
+    "queue", "$1", "destination", "(.*)")
+)
+```
+
+Three things about that expression are load-bearing and each fails silently if
+got wrong:
+
+- **`label_replace` is required.** Wait is labelled `queue`; produce is labelled
+  `destination`. They hold the same string and no vector match joins them
+  without the rename.
+- **`avg by (queue)` on both sides, before the subtraction.** The two halves are
+  emitted by *different processes* — the sender publishes to a queue the
+  consumer reads — so `instance` and `job` differ and an unaggregated match is
+  many-to-many, which returns nothing rather than erroring.
+- **The result is a difference of two means over different populations**, so it
+  is directional rather than exact. At these latencies the correction is roughly
+  12ms out of 13ms, so the net series is the one worth reading and the raw
+  series is there to show how much of it was never broker wait at all.
+
+A net value near zero is the normal, healthy reading. A net value that grows is
+real queueing.
 
 Standing rules for every panel in this set:
 
