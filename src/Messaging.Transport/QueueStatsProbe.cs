@@ -1,3 +1,4 @@
+using BaseConsole.Core.Loop;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
@@ -46,6 +47,16 @@ public abstract class QueueStatsProbe : BackgroundService
     private readonly TimeSpan _interval;
     private readonly ILogger _logger;
 
+    /// <summary>
+    /// This loop's heartbeat, or null for a probe nobody watches.
+    /// <para>
+    /// <b>Required rather than optional, and that is the point.</b> A default would let a probe be
+    /// registered unwatched by omission; a required parameter makes "nobody watches this one" a
+    /// decision written at the call site, next to the reason for it.
+    /// </para>
+    /// </summary>
+    private readonly ILoopHeartbeat? _heartbeat;
+
     /// <summary>Queues currently failing to read, so each episode warns once rather than per tick.</summary>
     private readonly HashSet<string> _failing = [];
 
@@ -56,8 +67,15 @@ public abstract class QueueStatsProbe : BackgroundService
         RabbitMqConnection connection,
         IReadOnlyList<string> queues,
         TimeSpan interval,
-        ILogger logger)
-        : this(connection, () => queues ?? throw new ArgumentNullException(nameof(queues)), interval, logger)
+        ILogger logger,
+        ILoopHeartbeat? heartbeat)
+        : this(
+            connection,
+            () => queues ?? throw new ArgumentNullException(nameof(queues)),
+            interval,
+            logger,
+            onResult: null,
+            heartbeat)
     {
         ArgumentNullException.ThrowIfNull(queues);
     }
@@ -77,7 +95,8 @@ public abstract class QueueStatsProbe : BackgroundService
         Func<IReadOnlyList<string>> queues,
         TimeSpan interval,
         ILogger logger,
-        Action<string, ProbeOutcome>? onResult = null)
+        Action<string, ProbeOutcome>? onResult,
+        ILoopHeartbeat? heartbeat)
     {
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _queues     = queues ?? throw new ArgumentNullException(nameof(queues));
@@ -86,6 +105,7 @@ public abstract class QueueStatsProbe : BackgroundService
             : throw new ArgumentOutOfRangeException(nameof(interval), interval, "must be positive");
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
         _onResult   = onResult;
+        _heartbeat  = heartbeat;
     }
 
     /// <summary>
@@ -131,6 +151,12 @@ public abstract class QueueStatsProbe : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            // FIRST, before the queue list is even resolved, and unconditionally. A pass whose
+            // declares all failed has still done its job and must count as alive -- stamping
+            // after the I/O, or only on success, turns a broker outage into a restart of the
+            // process observing it. Same position and same reasoning as L2GateProbe's.
+            _heartbeat?.Beat();
+
             var queues = _queues();
 
             // Prune first: a queue dropped from a dynamic registry must leave the announced
@@ -196,7 +222,17 @@ public abstract class QueueStatsProbe : BackgroundService
         }
     }
 
-    private async Task<QueueDeclareOk> DeclareAsync(string queue, CancellationToken ct)
+    /// <summary>
+    /// One passive declare on its own channel.
+    /// <para>
+    /// <b>Protected virtual for the reason <c>IRabbitMqConnectivityCheck</c> exists.</b>
+    /// <see cref="RabbitMqConnection"/> is sealed and its <c>GetAsync</c> is not virtual, so a test
+    /// holding one can only ever exercise the broker-is-up path -- there is no way to stand up a
+    /// connection that fails on demand. Overriding here is what lets the heartbeat's ordering
+    /// contract, which only matters when a pass measures NOTHING, be asserted at all.
+    /// </para>
+    /// </summary>
+    protected virtual async Task<QueueDeclareOk> DeclareAsync(string queue, CancellationToken ct)
     {
         var connection = await _connection.GetAsync(ct).ConfigureAwait(false);
         var channel = await connection.CreateChannelAsync(cancellationToken: ct).ConfigureAwait(false);

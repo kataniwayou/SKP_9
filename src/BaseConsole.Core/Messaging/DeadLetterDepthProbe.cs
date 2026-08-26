@@ -18,6 +18,13 @@ namespace BaseConsole.Core.Messaging;
 /// still there tomorrow, not that it arrived within a scrape — which is the opposite of the
 /// trade-off <see cref="QueueDepthProbe"/> makes.
 /// </para>
+/// <para>
+/// <b>Deliberately unwatched.</b> No heartbeat and no liveness check, unlike
+/// <see cref="QueueDepthProbe"/>. A dead-letter queue changes only when something is refused, so
+/// at this cadence a rate over the loop is noise rather than signal -- and a <c>live</c> check
+/// that can restart the pod for a low-consequence read is a bad trade. The park signal is what
+/// makes this number timely; the loop is only a backstop for a manual drain.
+/// </para>
 /// </summary>
 public sealed class DeadLetterDepthProbe : QueueStatsProbe
 {
@@ -26,7 +33,7 @@ public sealed class DeadLetterDepthProbe : QueueStatsProbe
         IReadOnlyList<string> queues,
         TimeSpan interval,
         ILogger<DeadLetterDepthProbe> logger)
-        : base(connection, queues, interval, logger)
+        : base(connection, queues, interval, logger, heartbeat: null)
     {
     }
 
