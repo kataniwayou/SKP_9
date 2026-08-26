@@ -273,19 +273,59 @@ data:
               description: "Least-fresh orchestrator/processor replica last exported {{ $value | humanizeDuration }} ago. A value in the decades means NOTHING matched the selector at all -- the vector(0) fallback subtracting from the Unix epoch -- which is a whole-stack telemetry outage, not a clock fault. baseapi is not watched by this rule; it does not export the selector. Every other alert is unreliable while this is firing."
 
           - alert: PipelineNotConsuming
-            # Measured 1 throughout the undisturbed baseline; 0 within ~40s of a Redis
-            # pause, a broker outage, both at once, and an L2 wipe.
+            # RE-SOURCED TO THE BROKER'S OWN COUNT. It read a liveness-wrapped min() over
+            # `pipeline_consumer_consuming_ratio`, and that instrument is retired by the
+            # 2026-08-26 metrics rewrite (section 6). The old expression is not quoted
+            # here in full on purpose: check-expressions.py greps this file for
+            # `*_over_time(pipeline_*[...])` to verify the rules' windows still match the
+            # generator's LIVENESS, and it cannot tell a live window from one quoted in a
+            # comment -- a citation would inflate that count by one.
             #
-            # The `or vector(0)` makes a total absence of consumers read as 0 rather than
-            # as silence. That also means a cold stack with nothing running yet fires this,
-            # which is correct: no replica is consuming.
-            expr: (min(last_over_time(pipeline_consumer_consuming_ratio[40s])) or vector(0)) == 0
+            # The retirement would have made this rule fire PERMANENTLY, not silently
+            # never, which is the worse of the two failures: `min()` over a selector that
+            # matches nothing is empty, `or vector(0)` substitutes 0, and `0 == 0` is true
+            # forever. A critical alert that is always on teaches an operator to ignore
+            # every alert.
+            #
+            # The question is unchanged -- does some queue have nothing consuming it --
+            # and `pipeline.queue.consumers` answers it BETTER, which is why `consuming`
+            # was retired in favour of it. That gauge is the broker's own reply to a
+            # passive `queue.declare`, so it reports 0 the moment a consumer detaches and
+            # cannot be fooled by a process asserting its own health. `consuming` was the
+            # assertion, and a departed replica's copy was held at 1 by the collector --
+            # it read healthiest exactly when the replica was gone.
+            #
+            # `max by (queue)` before the min, never `sum`: every replica probes the same
+            # queues and reports the same number, because a queue depth is a property of
+            # the broker rather than of the replica asking. `sum` would multiply the count
+            # by the replica count and this rule could never fire.
+            #
+            # THE LIVENESS WRAP IS KEPT, and for a NARROWER reason than the old rule had.
+            # The old one needed it because the VALUE went stale-true. This one needs it
+            # because the AGGREGATION is a max across several reporters of one broker
+            # fact, and a departed reporter's held sample can win that max. Measured, and
+            # recorded on `Consumers attached by queue` in grafana/build-dashboards.py:
+            # unwrapped, `max by (queue)` read a confident 2 against the broker's 0 for a
+            # whole processor outage, because it picked the departed pods' stale series
+            # over the orchestrator's fresh 0. Wrapped, it reads 0 within one window.
+            # Dropping the wrap would make this rule blind to the exact fault it exists
+            # to catch.
+            #
+            # The `or vector(0)` keeps the deliberate fail-open: a total absence of
+            # reporters reads as 0 rather than as silence, so a cold stack with nothing
+            # running yet does fire, which is correct -- nothing is consuming.
+            #
+            # Measured on the live stack at rewrite time: 1 on an undisturbed baseline
+            # (all 8 queues carry at least one consumer -- 3 on each shared orchestrator
+            # queue, 1 per control queue, 2 on the processor work queue), and the `== 0`
+            # comparison returns empty, so the rule does not fire.
+            expr: (min(max by (queue) (last_over_time(pipeline_queue_consumers[40s]))) or vector(0)) == 0
             for: 1m
             labels:
               severity: critical
             annotations:
               summary: "A queue has no consumer"
-              description: "At least one queue on a live replica is not consuming. Check L2GateShut to tell a store fault from a broker fault."
+              description: "The broker reports at least one queue with no consumer attached. Check L2GateShut to tell a store fault from a broker fault. A firing rule with TelemetryStale also firing means nothing is reporting queue counts at all, not that the broker has lost its consumers."
 
           - alert: L2GateShut
             # The discriminator: 0 for a Redis fault, 1 for a broker fault. Both close
