@@ -190,17 +190,12 @@ public static class BaseProcessorServiceCollectionExtensions
                 "processor-identity-ready",
                 sp => new ProcessorIdentityReadyHealthCheck(sp.GetRequiredService<IProcessorContext>()),
                 HealthStatus.Unhealthy,
-                ["ready"]))
-            .Add(new HealthCheckRegistration(
-                QueueDepthLoop,
-                sp => new LoopLivenessHealthCheck(
-                    sp.GetRequiredKeyedService<ILoopHeartbeat>(QueueDepthLoop),
-                    // Interval x 3, matching the liveness loop: ten seconds, three passes.
-                    TimeSpan.FromSeconds(30),
-                    QueueDepthLoop,
-                    sp.GetRequiredService<TimeProvider>()),
-                HealthStatus.Unhealthy,
-                ["live"]));
+                ["ready"]));
+
+        // The queue-depth loop's check is NOT here. It lives in AddProcessorExecution, beside the
+        // keyed holder it reads and the probe it watches, because that is the method that registers
+        // them -- and a check whose heartbeat is registered in a different overload's graph throws
+        // when it is finally resolved.
     }
 
     /// <summary>
@@ -248,6 +243,23 @@ public static class BaseProcessorServiceCollectionExtensions
         services.AddKeyedSingleton<ILoopHeartbeat>(
             QueueDepthLoop, (sp, _) => new CountingLoopHeartbeat(
                 new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()), QueueDepthLoop));
+
+        // Registered here, beside the holder above and the probe below, rather than alongside the
+        // other two liveness checks in AddProcessorHealthChecks: that method is reached from the
+        // 2-arg AddBaseProcessor(cfg), which never registers this loop's keyed heartbeat, so a check
+        // living there would throw the moment it was resolved on that graph. Everything about this
+        // loop -- the holder, the watch, and the loop being watched -- is declared in one place.
+        services.AddHealthChecks()
+            .Add(new HealthCheckRegistration(
+                QueueDepthLoop,
+                sp => new LoopLivenessHealthCheck(
+                    sp.GetRequiredKeyedService<ILoopHeartbeat>(QueueDepthLoop),
+                    // Interval x 3, matching the liveness loop: ten seconds, three passes.
+                    TimeSpan.FromSeconds(30),
+                    QueueDepthLoop,
+                    sp.GetRequiredService<TimeProvider>()),
+                HealthStatus.Unhealthy,
+                ["live"]));
 
         services.AddHostedService(sp => new QueueDepthProbe(
             sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),

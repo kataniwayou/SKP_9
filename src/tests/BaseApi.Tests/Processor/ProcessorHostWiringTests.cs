@@ -182,4 +182,41 @@ public sealed class ProcessorHostWiringTests
         Assert.Contains(names, r => r.Name == "processor-liveness-loop" && r.Tags.Contains("live"));
         Assert.Contains(names, r => r.Name == "processor-identity-ready" && r.Tags.Contains("ready"));
     }
+
+    [Fact]
+    public async Task TheQueueDepthLoopCheckIsRegisteredUnderLive()
+    {
+        // Stage-2 graph, deliberately: this check's factory reads the QueueDepthLoop-keyed
+        // heartbeat that only AddProcessorExecution registers. Asserting against Build() (the
+        // 1-arg graph) would prove nothing about the check that actually ships -- and would have
+        // hidden the InvalidOperationException a resolve on that graph used to throw.
+        await using var sp = BuildWithIdentity();
+
+        var names = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<HealthCheckServiceOptions>>()
+            .Value.Registrations;
+
+        Assert.Contains(
+            names,
+            r => r.Name == BaseProcessorServiceCollectionExtensions.QueueDepthLoop
+                 && r.Tags.Contains("live")
+                 && r.FailureStatus == HealthStatus.Unhealthy);
+    }
+
+    [Fact]
+    public async Task TheQueueDepthLoopGetsItsOwnHeartbeatHolderToo()
+    {
+        // Same invariant as EachLoopGetsItsOwnHeartbeatHolder, extended to the third loop: a holder
+        // shared with either of the other two would let a faster loop's beat mask this one's death.
+        await using var sp = BuildWithIdentity();
+
+        var startup = sp.GetRequiredKeyedService<ILoopHeartbeat>(
+            BaseProcessorServiceCollectionExtensions.StartupLoop);
+        var liveness = sp.GetRequiredKeyedService<ILoopHeartbeat>(
+            BaseProcessorServiceCollectionExtensions.LivenessLoop);
+        var queueDepth = sp.GetRequiredKeyedService<ILoopHeartbeat>(
+            BaseProcessorServiceCollectionExtensions.QueueDepthLoop);
+
+        Assert.NotSame(startup, queueDepth);
+        Assert.NotSame(liveness, queueDepth);
+    }
 }
