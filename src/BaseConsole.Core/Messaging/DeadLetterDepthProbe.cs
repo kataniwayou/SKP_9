@@ -33,7 +33,7 @@ public sealed class DeadLetterDepthProbe : QueueStatsProbe
         IReadOnlyList<string> queues,
         TimeSpan interval,
         ILogger<DeadLetterDepthProbe> logger)
-        : base(connection, queues, interval, logger, heartbeat: null)
+        : base(connection, queues, interval, logger, beat: null)
     {
     }
 

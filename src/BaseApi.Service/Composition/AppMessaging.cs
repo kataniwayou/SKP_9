@@ -63,7 +63,10 @@ internal static class AppMessaging
             DispatchedQueues.Snapshot,
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
-            DispatchedQueues.Note));
+            DispatchedQueues.Note,
+            // Unwatched: this host has no keyed heartbeat for the depth loop, and adding a live
+            // check here is out of scope for the processor's metric rewrite.
+            beat: null));
 
         // The gated control consumer, and the two handlers it dispatches to by message type.
         services.AddBaseApiGatedConsumer(OrchestratorQueues.Control);

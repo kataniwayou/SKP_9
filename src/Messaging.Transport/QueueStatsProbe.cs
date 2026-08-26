@@ -1,4 +1,3 @@
-using BaseConsole.Core.Loop;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
@@ -48,14 +47,21 @@ public abstract class QueueStatsProbe : BackgroundService
     private readonly ILogger _logger;
 
     /// <summary>
-    /// This loop's heartbeat, or null for a probe nobody watches.
+    /// Called at the top of every pass, or null for a probe nobody watches.
+    /// <para>
+    /// <b>A callback rather than <c>ILoopHeartbeat</c>, and that is a project-reference constraint
+    /// rather than a preference.</b> <c>BaseConsole.Core</c> references this assembly, so this
+    /// assembly cannot name a type from it. The registration side, which can see both, passes the
+    /// keyed heartbeat's <c>Beat</c> — so the stamp a liveness check reads and the counter a board
+    /// draws both still come from one holder.
+    /// </para>
     /// <para>
     /// <b>Required rather than optional, and that is the point.</b> A default would let a probe be
     /// registered unwatched by omission; a required parameter makes "nobody watches this one" a
     /// decision written at the call site, next to the reason for it.
     /// </para>
     /// </summary>
-    private readonly ILoopHeartbeat? _heartbeat;
+    private readonly Action? _beat;
 
     /// <summary>Queues currently failing to read, so each episode warns once rather than per tick.</summary>
     private readonly HashSet<string> _failing = [];
@@ -68,14 +74,14 @@ public abstract class QueueStatsProbe : BackgroundService
         IReadOnlyList<string> queues,
         TimeSpan interval,
         ILogger logger,
-        ILoopHeartbeat? heartbeat)
+        Action? beat)
         : this(
             connection,
             () => queues ?? throw new ArgumentNullException(nameof(queues)),
             interval,
             logger,
             onResult: null,
-            heartbeat)
+            beat)
     {
         ArgumentNullException.ThrowIfNull(queues);
     }
@@ -96,7 +102,7 @@ public abstract class QueueStatsProbe : BackgroundService
         TimeSpan interval,
         ILogger logger,
         Action<string, ProbeOutcome>? onResult,
-        ILoopHeartbeat? heartbeat)
+        Action? beat)
     {
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _queues     = queues ?? throw new ArgumentNullException(nameof(queues));
@@ -105,7 +111,7 @@ public abstract class QueueStatsProbe : BackgroundService
             : throw new ArgumentOutOfRangeException(nameof(interval), interval, "must be positive");
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
         _onResult   = onResult;
-        _heartbeat  = heartbeat;
+        _beat       = beat;
     }
 
     /// <summary>
@@ -155,7 +161,7 @@ public abstract class QueueStatsProbe : BackgroundService
             // declares all failed has still done its job and must count as alive -- stamping
             // after the I/O, or only on success, turns a broker outage into a restart of the
             // process observing it. Same position and same reasoning as L2GateProbe's.
-            _heartbeat?.Beat();
+            _beat?.Invoke();
 
             var queues = _queues();
 

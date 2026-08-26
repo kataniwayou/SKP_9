@@ -23,13 +23,13 @@ public sealed class QueueStatsProbeHeartbeatTests
     /// </summary>
     private sealed class AlwaysFailingProbe : QueueStatsProbe
     {
-        public AlwaysFailingProbe(RabbitMqConnection connection, ILoopHeartbeat heartbeat)
+        public AlwaysFailingProbe(RabbitMqConnection connection, Action beat)
             : base(
                 connection,
                 queues: ["q"],
                 interval: TimeSpan.FromMilliseconds(10),
                 logger: NullLogger.Instance,
-                heartbeat: heartbeat)
+                beat: beat)
         {
         }
 
@@ -55,7 +55,7 @@ public sealed class QueueStatsProbeHeartbeatTests
 
         // Any constructible connection will do -- the override below means it is never dialled.
         // Build it the way the existing transport tests build one.
-        var probe = new AlwaysFailingProbe(TestConnection(), heartbeat);
+        var probe = new AlwaysFailingProbe(TestConnection(), heartbeat.Beat);
 
         using var cts = new CancellationTokenSource();
 
