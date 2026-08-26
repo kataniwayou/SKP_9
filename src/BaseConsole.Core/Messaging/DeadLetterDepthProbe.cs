@@ -46,4 +46,25 @@ public sealed class DeadLetterDepthProbe : QueueStatsProbe
     /// </summary>
     protected override void Report(string queue, QueueDeclareOk ok) =>
         DeadLetterDepthMetrics.Report(queue, (long)ok.MessageCount);
+
+    /// <summary>
+    /// The interval, or a park -- whichever comes first. The interval is the backstop that notices
+    /// a manual drain; the signal is what makes a newly parked message visible without waiting for
+    /// it.
+    /// </summary>
+    protected override async Task WaitAsync(TimeSpan interval, CancellationToken ct)
+    {
+        var requested = DeadLetterReadSignal.Requested;
+
+        await Task.WhenAny(Task.Delay(interval, ct), requested).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+
+        // Re-armed only when the signal is what woke us. Resetting unconditionally would discard a
+        // park that arrived while the interval was elapsing, and that park is the one reading this
+        // probe exists to make timely.
+        if (requested.IsCompleted)
+        {
+            DeadLetterReadSignal.Reset();
+        }
+    }
 }
