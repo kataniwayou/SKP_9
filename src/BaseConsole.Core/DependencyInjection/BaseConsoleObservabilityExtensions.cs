@@ -2,6 +2,7 @@ using BaseConsole.Core.Configuration;
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
+using BaseConsole.Core.Observability;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -71,6 +72,10 @@ public static class BaseConsoleObservabilityExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
+
+        // Stamped here rather than in a hosted service, because this must be the process's start
+        // and a hosted service runs after everything else the host builds.
+        ProcessStartMetrics.Stamp(TimeProvider.System);
 
         // Configuration is the fallback, not the authority. A caller that resolved a real identity
         // knows something configuration cannot, so Require is consulted only when it did not.
@@ -142,6 +147,7 @@ public static class BaseConsoleObservabilityExtensions
                 // the transport, where the API can reach them -- see QueueDepthMetrics.
                 .AddMeter(QueueDepthMetrics.MeterName)
                 .AddMeter(CountingLoopHeartbeat.MeterName)
+                .AddMeter(ProcessStartMetrics.MeterName)
                 // Bucket boundaries for the send-latency histogram, on the shared call so both roles
                 // inherit them. Without a view the SDK applies a default ladder built for
                 // milliseconds while the instrument records seconds, and every observation collapses
