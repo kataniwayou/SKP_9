@@ -475,12 +475,19 @@ public sealed class QueueStatsProbeHeartbeatTests
     /// <summary>
     /// A probe whose declare always throws, so the test exercises the case that matters: the
     /// heartbeat must be stamped by an iteration that measured NOTHING.
+    /// <para>
+    /// It overrides <c>DeclareAsync</c> rather than passing a null connection, because the base
+    /// constructor guards that argument -- a null would throw before the loop ever ran. The
+    /// override is the same kind of seam <c>IRabbitMqConnectivityCheck</c> and
+    /// <c>ITopologyDeclarer</c> already exist for: <c>RabbitMqConnection</c> is sealed with
+    /// non-virtual methods, so there is no way to stand up one that fails on demand.
+    /// </para>
     /// </summary>
     private sealed class AlwaysFailingProbe : QueueStatsProbe
     {
-        public AlwaysFailingProbe(ILoopHeartbeat heartbeat)
+        public AlwaysFailingProbe(RabbitMqConnection connection, ILoopHeartbeat heartbeat)
             : base(
-                connection: null!,
+                connection,
                 queues: ["q"],
                 interval: TimeSpan.FromMilliseconds(10),
                 logger: NullLogger.Instance,
@@ -490,6 +497,9 @@ public sealed class QueueStatsProbeHeartbeatTests
 
         protected override string Purpose => "test";
 
+        protected override Task<QueueDeclareOk> DeclareAsync(string queue, CancellationToken ct) =>
+            throw new InvalidOperationException("the broker is unreachable in this test");
+
         protected override void Report(string queue, QueueDeclareOk ok) { }
     }
 
@@ -498,14 +508,16 @@ public sealed class QueueStatsProbeHeartbeatTests
     {
         var clock = new FakeTimeProvider();
         var heartbeat = new LoopHeartbeat(clock);
-        var probe = new AlwaysFailingProbe(heartbeat);
+
+        // Any constructible connection will do -- the override below means it is never dialled.
+        // Build it the way the existing transport tests build one.
+        var probe = new AlwaysFailingProbe(TestConnection(), heartbeat);
 
         using var cts = new CancellationTokenSource();
 
-        // The connection is null, so DeclareAsync throws on the first queue of the first pass --
-        // which is exactly the broker-outage shape. If Beat() were stamped after the I/O, or only
-        // on success, this stays null and an outage in a dependency becomes a restart of the
-        // process observing it.
+        // DeclareAsync throws on the first queue of the first pass -- which is exactly the
+        // broker-outage shape. If Beat() were stamped after the I/O, or only on success, this
+        // stays null and an outage in a dependency becomes a restart of the process observing it.
         var run = probe.StartAsync(cts.Token);
         await Task.Delay(200);
         await cts.CancelAsync();
@@ -516,13 +528,15 @@ public sealed class QueueStatsProbeHeartbeatTests
 }
 ```
 
+**`TestConnection()`**: build a `RabbitMqConnection` the same way the existing tests under `src/tests/BaseApi.Tests/Transport/` already do — grep that folder for `new RabbitMqConnection` and copy the construction verbatim. It is never dialled, because `DeclareAsync` is overridden above; it exists only to satisfy the base constructor's null guard.
+
 - [ ] **Step 2: Run and confirm it fails**
 
 ```bash
 dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
 ```
 
-Expected: **compile failure** — `QueueStatsProbe` has no `heartbeat` parameter.
+Expected: **compile failure** — `QueueStatsProbe` has no `heartbeat` parameter and `DeclareAsync` is not overridable.
 
 - [ ] **Step 3: Add the heartbeat to the shared loop**
 
@@ -555,6 +569,24 @@ Then, in `ExecuteAsync`, make the **first statement inside the `while` loop**:
 
             var queues = _queues();
 ```
+
+Also widen the declare so a test can make it fail on demand. Change `private async Task<QueueDeclareOk> DeclareAsync(...)` to:
+
+```csharp
+    /// <summary>
+    /// One passive declare on its own channel.
+    /// <para>
+    /// <b>Protected virtual for the reason <c>IRabbitMqConnectivityCheck</c> exists.</b>
+    /// <see cref="RabbitMqConnection"/> is sealed and its <c>GetAsync</c> is not virtual, so a test
+    /// holding one can only ever exercise the broker-is-up path -- there is no way to stand up a
+    /// connection that fails on demand. Overriding here is what lets the heartbeat's ordering
+    /// contract, which only matters when a pass measures NOTHING, be asserted at all.
+    /// </para>
+    /// </summary>
+    protected virtual async Task<QueueDeclareOk> DeclareAsync(string queue, CancellationToken ct)
+```
+
+Its body is unchanged.
 
 - [ ] **Step 4: Thread it through both subclasses**
 
@@ -1147,7 +1179,7 @@ Add to `src/tests/BaseApi.Tests/Console/IngressMetricsTests.cs`:
     {
         using var metrics = new MetricCollector(IngressMetrics.MeterName);
 
-        IngressMetrics.RecordArrival("q-wait", sentMs: MessageClock.NowMs() - 25);
+        IngressMetrics.RecordArrival("q-wait", sentMs: MessageClock.NowMilliseconds() - 25);
 
         var mine = metrics.For(IngressMetrics.QueueWaitInstrument)
             .Single(m => m.Tags["queue"] == "q-wait");
@@ -1172,7 +1204,6 @@ Add to `src/tests/BaseApi.Tests/Console/IngressMetricsTests.cs`:
     }
 ```
 
-If `MessageClock.NowMs()` is not public, substitute the expression the existing arrival tests already use to build a `sentMs` value.
 
 - [ ] **Step 2: Run and confirm it fails**
 
@@ -1734,9 +1765,9 @@ Then repoint the registered `SourceHash` to the new image's, as the deploy loop 
 Port-forwards are supervised and run on offset ports — never `netstat` the default ports to judge reachability. Query Prometheus through its forward:
 
 ```bash
-curl -s 'http://localhost:<prom-port>/api/v1/query?query=pipeline_loop_iterations_total' | python -m json.tool
-curl -s 'http://localhost:<prom-port>/api/v1/query?query=pipeline_process_start_timestamp_seconds' | python -m json.tool
-curl -s 'http://localhost:<prom-port>/api/v1/query?query=pipeline_consumer_duration_seconds_count' | python -m json.tool
+curl -s 'http://localhost:19090/api/v1/query?query=pipeline_loop_iterations_total' | python -m json.tool
+curl -s 'http://localhost:19090/api/v1/query?query=pipeline_process_start_timestamp_seconds' | python -m json.tool
+curl -s 'http://localhost:19090/api/v1/query?query=pipeline_consumer_duration_seconds_count' | python -m json.tool
 ```
 
 Expected: `pipeline_loop_iterations_total` carries **exactly three** `loop` values — `l2-gate`, `processor-liveness`, `queue-depth` — and no `processor-startup`.
@@ -1745,7 +1776,7 @@ Expected: `pipeline_loop_iterations_total` carries **exactly three** `loop` valu
 
 ```bash
 curl -s --data-urlencode 'query=rate(pipeline_loop_iterations_total[5m])' \
-     'http://localhost:<prom-port>/api/v1/query' | python -m json.tool
+     'http://localhost:19090/api/v1/query' | python -m json.tool
 ```
 
 Expected: ≈0.2 for `l2-gate`, ≈0.1 for `processor-liveness` and `queue-depth`. A value materially below these is a slow loop and is exactly what this instrument was added to show.
@@ -1757,7 +1788,7 @@ for m in pipeline_consumer_consuming pipeline_consumer_inflight \
          pipeline_consumer_channel_resets_total pipeline_process_duration_seconds_count \
          pipeline_duplicate_suppressed_total pipeline_step_elapsed_seconds_count; do
   echo "== $m"
-  curl -s "http://localhost:<prom-port>/api/v1/query?query=$m" | python -c 'import sys,json; print(len(json.load(sys.stdin)["data"]["result"]))'
+  curl -s "http://localhost:19090/api/v1/query?query=$m" | python -c 'import sys,json; print(len(json.load(sys.stdin)["data"]["result"]))'
 done
 ```
 
@@ -1781,7 +1812,7 @@ Park a message, then confirm `pipeline_deadletter_depth` moves well inside the f
 
 ```bash
 curl -s --data-urlencode 'query=pipeline_deadletter_depth' \
-     'http://localhost:<prom-port>/api/v1/query' | python -m json.tool
+     'http://localhost:19090/api/v1/query' | python -m json.tool
 ```
 
 Expected: the depth reflects the new park within roughly one export interval (~10s), not five minutes. If it takes the full interval, `DeadLetterReadSignal.Request()` is not reaching the probe.
