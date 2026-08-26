@@ -46,7 +46,6 @@ internal static class IngressMetrics
         description: "Times the delivery numbering was invalidated, by cause. This is why landed=false happens.");
 
     internal const string QueueWaitInstrument = "pipeline.queue.wait";
-    internal const string StepElapsedInstrument = "pipeline.step.elapsed";
 
     /// <summary>
     /// Must match the name the view in <c>AddBaseConsoleObservability</c> targets. A view whose
@@ -56,7 +55,8 @@ internal static class IngressMetrics
     internal const string ConsumerDurationInstrument = "pipeline.consumer.duration";
 
     /// <summary>
-    /// The bucket ladder for the two arrival histograms. **Deliberately not the transport's.**
+    /// The bucket ladder shared by <c>pipeline.queue.wait</c> and <c>pipeline.consumer.duration</c>.
+    /// **Deliberately not the transport's.**
     /// <para>
     /// <c>EgressMeter.LatencySecondsBoundaries</c> stops at 10s, which is right for a broker round
     /// trip and wrong here: the whole reason these instruments exist is a pipeline falling behind,
@@ -71,6 +71,11 @@ internal static class IngressMetrics
     /// </para>
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>The step-elapsed measurements below are history, not a live reader.</b> That instrument
+    /// was removed with the metric set of 2026-08-26; the rungs it forced stay, because they were
+    /// fitted to the same operating band <c>pipeline.consumer.duration</c> now occupies.
+    /// </para>
     /// <b>Six rungs were added on 2026-08-25, all of them ABOVE the 10ms floor.</b> The floor is the
     /// honesty limit the paragraph above states and it has not moved; what changed is that the rungs
     /// resting on it were wider than the system they measure, so the quantiles they fed were
@@ -122,16 +127,6 @@ internal static class IngressMetrics
         QueueWaitInstrument,
         unit: "s",
         description: "Seconds between a message being published and a consumer picking it up.");
-
-    /// <summary>
-    /// Seconds since the step that caused this message was dispatched. On a
-    /// <c>step-outcome</c> delivery at the orchestrator this is the whole door-to-door step time —
-    /// the only measurement here of what a workflow experiences rather than what a component does.
-    /// </summary>
-    private static readonly Histogram<double> StepElapsed = Meter.CreateHistogram<double>(
-        StepElapsedInstrument,
-        unit: "s",
-        description: "Seconds since the step that caused this message began.");
 
     /// <summary>
     /// How long a delivery was held, from arrival to whatever the consumer decided.
@@ -246,36 +241,34 @@ internal static class IngressMetrics
     }
 
     /// <summary>
-    /// Records how long this delivery waited in the broker, and how long the step that caused it has
-    /// been running.
+    /// Records how long this delivery waited in the broker.
     /// <para>
-    /// <b>Each is recorded ONLY if its header was present.</b> A message published by a build
-    /// without these instruments carries neither, and during any rollout there are always some.
-    /// Recording those as zero — or as an elapsed time since the epoch — would bury the real
-    /// distribution under a spike that means nothing. The two are independent: the API publishes
-    /// through a copy of the sender that stamps nothing, so a message can plausibly arrive with one
-    /// and not the other.
+    /// <b>Recorded ONLY if the header was present.</b> A message published by a build without this
+    /// instrument carries none, and during any rollout there are always some. Recording those as
+    /// zero -- or as an elapsed time since the epoch -- would bury the real distribution under a
+    /// spike that means nothing.
     /// </para>
     /// <para>
-    /// Recorded before the handler runs rather than after, deliberately: this measures the time the
-    /// message spent waiting to be picked up, and adding the handler's own duration would fold in
-    /// the number <c>pipeline.process.duration</c> already reports on its own.
+    /// <b>It double-counts the publisher confirm, and a panel must subtract it.</b> The header is
+    /// stamped before the publish, so the sender's own confirm -- roughly 12 of ~13ms on this stack
+    /// -- sits inside this number AND inside <c>pipeline.produce.duration</c>. True broker wait is
+    /// the difference. See section 7.1 of the metrics-rewrite spec for the query.
+    /// </para>
+    /// <para>
+    /// Labelled by queue alone, matching <c>pipeline.queue.depth</c>, so the two read side by side.
     /// </para>
     /// </summary>
-    internal static void RecordArrival(string queue, string type, long? sentMs, long? originMs)
+    internal static void RecordArrival(string queue, long? sentMs)
     {
-        var tags = new TagList { { "queue", queue }, { "type", type } };
+        if (sentMs is not { } sent)
+        {
+            return;
+        }
+
+        var tags = new TagList { { "queue", queue } };
         PipelineAmbientTag.AppendTo(ref tags);
 
-        if (sentMs is { } sent)
-        {
-            QueueWait.Record(MessageClock.ElapsedSeconds(sent), tags);
-        }
-
-        if (originMs is { } origin)
-        {
-            StepElapsed.Record(MessageClock.ElapsedSeconds(origin), tags);
-        }
+        QueueWait.Record(MessageClock.ElapsedSeconds(sent), tags);
     }
 
     /// <summary>Records one delivery's cost, on whichever path it ended.</summary>

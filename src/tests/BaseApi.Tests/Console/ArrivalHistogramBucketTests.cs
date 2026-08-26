@@ -12,7 +12,7 @@ using Xunit;
 namespace BaseApi.Tests.Console;
 
 /// <summary>
-/// The two arrival histograms must carry the WIDE ladder, not the transport's sub-second one.
+/// The queue-wait histogram must carry the WIDE ladder, not the transport's sub-second one.
 /// <para>
 /// Same class of guard as <see cref="LatencyHistogramBucketTests"/>, and for the same reason: a view
 /// whose instrument name matches nothing is silently ignored, so asserting that the wiring calls
@@ -21,7 +21,7 @@ namespace BaseApi.Tests.Console;
 /// </para>
 /// <para>
 /// <b>Why a different ladder matters here.</b> <c>EgressMeter.LatencySecondsBoundaries</c> stops at
-/// 10s, which is right for a broker round trip. These two instruments exist because a pipeline can
+/// 10s, which is right for a broker round trip. This instrument exists because a pipeline can
 /// fall behind, and a backlogged step is measured in minutes — everything past the last boundary
 /// lands in <c>+Inf</c>, where a quantile has nothing to interpolate between and reports the last
 /// edge. That is the millisecond-ladder defect from the other end, and it would be just as silent.
@@ -60,14 +60,10 @@ public sealed class ArrivalHistogramBucketTests
         // other way round.
         var provider = host.Services.GetRequiredService<MeterProvider>();
 
-        // One real measurement through the production entry point, so both instruments are created
-        // and have a metric point to export. Both headers present, because the point of the call is
-        // to create the streams rather than to check the values.
-        IngressMetrics.RecordArrival(
-            "orchestrator-result",
-            "step-outcome",
-            MessageClock.NowMilliseconds() - 100,
-            MessageClock.NowMilliseconds() - 5_000);
+        // One real measurement through the production entry point, so the instrument is created
+        // and has a metric point to export. The header is present, because the point of the call is
+        // to create the stream rather than to check the value.
+        IngressMetrics.RecordArrival("orchestrator-result", MessageClock.NowMilliseconds() - 100);
 
         provider.ForceFlush();
         return (exporter, host);
@@ -80,19 +76,6 @@ public sealed class ArrivalHistogramBucketTests
         using (host)
         {
             var bounds = exporter.BoundariesFor(IngressMetrics.QueueWaitInstrument);
-
-            Assert.NotNull(bounds);
-            Assert.Equal(IngressMetrics.ArrivalSecondsBoundaries(), bounds!);
-        }
-    }
-
-    [Fact]
-    public void TheStepElapsedHistogramCarriesTheArrivalLadder()
-    {
-        var (exporter, host) = Started();
-        using (host)
-        {
-            var bounds = exporter.BoundariesFor(IngressMetrics.StepElapsedInstrument);
 
             Assert.NotNull(bounds);
             Assert.Equal(IngressMetrics.ArrivalSecondsBoundaries(), bounds!);
