@@ -16,8 +16,9 @@ namespace BaseApi.Tests.Console;
 /// <para>
 /// <b>Why this instrument exists.</b> Measured on the live stack: Redis made 685x slower for the
 /// processor — 0.44 ms to 301 ms round trip, verified with <c>redis-cli --latency</c> — moved
-/// nothing on any board. Not the gate, not <c>consuming</c>, not <c>pipeline.process.duration</c>,
-/// which stayed flat at 0.024 s throughout. The gate answers "did the store reply inside 2
+/// nothing on any board. Not the gate, not <c>consuming</c> (<c>pipeline.consumer.consuming</c>,
+/// removed in the 2026-08-26 metrics rewrite), not <c>pipeline.process.duration</c> (also removed
+/// in that rewrite), which stayed flat at 0.024 s throughout. The gate answers "did the store reply inside 2
 /// seconds", which is a yes/no, so a store that is a thousand times slower and still inside the
 /// budget is indistinguishable from a healthy one. Past the budget it reads as a full outage.
 /// Two states, working and gone, with nothing in between — because nothing was timing the call.

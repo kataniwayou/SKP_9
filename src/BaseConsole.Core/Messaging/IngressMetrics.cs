@@ -137,9 +137,11 @@ internal static class IngressMetrics
     /// <para>
     /// <b>No duration here.</b> <c>pipeline.process.duration</c> used to be recorded alongside this
     /// and measured the framework handler, which is the part that cannot vary — every hop it covers
-    /// is a fixed sequence of store reads and sends. It now lives on the processor and measures the
-    /// author's transform, the only span whose length is a property of someone's implementation
-    /// rather than of this framework. One instrument, on the side that can actually be slow.
+    /// is a fixed sequence of store reads and sends. It was removed with the metric set of
+    /// 2026-08-26 and, while it lived, measured the author's transform on the processor — the only
+    /// span whose length is a property of someone's implementation rather than of this framework.
+    /// <c>pipeline.consumer.duration</c> is the one instrument left on the side that can actually be
+    /// slow, and unlike its predecessor it covers every terminal path rather than only the transform.
     /// </para>
     /// <para>
     /// <b><c>reason</c> is kept as its own tag rather than folded into <c>disposition</c>.</b>

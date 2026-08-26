@@ -311,8 +311,10 @@ public sealed class GatedQueueConsumer : BackgroundService
                     // which is below the level shipped to the log store.
                     //
                     // It matters more here than on the worker side, not less: this consumer emits no
-                    // ingress metrics at all, so unlike BaseConsole.Core's twin there is no `landed`
-                    // dimension on a counter to fall back on. This log line is the only artifact an
+                    // ingress metrics at all, so unlike BaseConsole.Core's twin there is no counter
+                    // to fall back on (and, since the metrics rewrite, that twin's counter no longer
+                    // carries a `landed` dimension either — the log line was always the only place
+                    // this fact was visible). This log line is the only artifact an
                     // orchestrator-control park leaves in this process.
                     var landed = await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
 
