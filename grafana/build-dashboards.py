@@ -1049,6 +1049,25 @@ def pipeline_shared(layout, f, role_f=""):
                         "trips.",
                    thresholds=normal_upto(0.05),
                    unit="s"),
+        timeseries(layout, "L2 BIT verdicts",
+                   [(f'sum by (outcome) (rate(pipeline_gate_probe_duration_seconds_count'
+                     f'{{{f}}}[$__rate_interval]))', "{{outcome}}")],
+                   desc="The verdict MIX behind every probe the loop ran, not just the "
+                        "duration of the ones that came back healthy." + PARA +
+                        "**`timeout` and `failed` call for opposite operator actions, and "
+                        "only this panel tells them apart.** A `timeout` is the store "
+                        "still alive but slower than the probe's 2s budget -- the "
+                        "degradation `Store probe latency` exists to catch early. A "
+                        "`failed` is the store not answering at all. The duration panel "
+                        "beside this one only ever plots `outcome=\"healthy\"`, so neither "
+                        "shows here without this one." + PARA +
+                        "**This is also the counter that justified retiring the sampled "
+                        "`bit.state` gauge.** At a 15s scrape a gauge sees roughly one "
+                        "verdict in three; a store that fails one BIT and recovers before "
+                        "the next scrape reads as healthy throughout. This is a rate over "
+                        "every probe the loop actually ran, with nothing between samples "
+                        "for a flapping store to hide in.",
+                   unit="reqps"),
         timeseries(layout, "Store probe latency p95 / p99",
                    [(f'histogram_quantile(0.95, sum by (le) '
                      f'(rate(pipeline_gate_probe_duration_seconds_bucket'
