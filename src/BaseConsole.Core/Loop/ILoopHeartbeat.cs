@@ -8,16 +8,6 @@ namespace BaseConsole.Core.Loop;
 /// loop's beat refreshes the stamp for both, so a dead loop stays invisible for as long as any
 /// sibling still ticks. Register these keyed, one per loop, each with its own check and window.
 /// </para>
-/// <para>
-/// <b>Lives in <c>Messaging.Contracts</c>, not <c>BaseConsole.Core</c>, despite the namespace.</b>
-/// <c>BaseConsole.Core</c> already references <c>Messaging.Transport</c> (for
-/// <c>QueueStatsProbe</c>), so once <c>QueueStatsProbe</c> itself needed to be watched, typing its
-/// heartbeat parameter as this interface would have required the opposite reference and formed a
-/// cycle. <c>Messaging.Contracts</c> is this repository's dependency-free leaf — every other
-/// project may already reach it without creating one — so the interface sits there instead. The
-/// namespace stays <c>BaseConsole.Core.Loop</c> so every existing <c>using</c> keeps resolving
-/// unchanged; only the physical file moved.
-/// </para>
 /// </summary>
 public interface ILoopHeartbeat
 {

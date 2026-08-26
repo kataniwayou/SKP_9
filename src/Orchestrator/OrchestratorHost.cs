@@ -272,7 +272,10 @@ public static class OrchestratorHost
             () => [.. own, .. DispatchedQueues.Snapshot()],
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
-            DispatchedQueues.Note));
+            DispatchedQueues.Note,
+            // Unwatched: this host has no keyed heartbeat for the depth loop, and adding a live
+            // check here is out of scope for the processor's metric rewrite.
+            beat: null));
 
         // Loop 2 and its admission latch. The position of the next two lines is the point of them
         // being here at all: AddBaseConsoleGating below TryAdds AlwaysOpenAdmission as the default

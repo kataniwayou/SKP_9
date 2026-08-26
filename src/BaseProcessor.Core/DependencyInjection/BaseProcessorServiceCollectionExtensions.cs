@@ -255,7 +255,7 @@ public static class BaseProcessorServiceCollectionExtensions
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
             DispatchedQueues.Note,
-            sp.GetRequiredKeyedService<ILoopHeartbeat>(QueueDepthLoop)));
+            sp.GetRequiredKeyedService<ILoopHeartbeat>(QueueDepthLoop).Beat));
 
         // How much work this processor has REFUSED and nobody has dealt with.
         //
