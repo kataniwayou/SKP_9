@@ -24,19 +24,19 @@ const BOARD = process.env.BOARD || 'skp-processor';
 // generator gives them. A row whose title resolves to nothing is reported as MISSING rather than
 // skipped -- an absent panel is exactly the kind of gap this probe exists to surface.
 const WANTED = [
-  { row:  1, want: 'Loop rate',          title: 'Loop rate by loop' },
-  { row:  2, want: 'L2 BIT verdicts',    title: 'L2 BIT verdicts' },
-  { row:  3, want: 'L2 BIT duration',    title: 'Store probe latency p95 / p99' },
-  { row:  4, want: 'L2 gate',            title: 'L2 gate and trips by replica' },
+  { row:  1, want: 'Loop iterations',    title: 'Loop iterations by loop' },
+  { row:  2, want: 'Gate probe outcomes', title: 'Gate probe outcomes' },
+  { row:  3, want: 'Gate probe duration', title: 'Gate probe duration' },
+  { row:  4, want: 'Gate open',          title: 'Gate open and trips by replica' },
   { row:  5, want: 'Identity ready',     title: 'Identity ready by replica' },
-  { row:  6, want: 'Restarts',           title: 'Restarts (1h)' },
+  { row:  6, want: 'Restarts',           title: 'Restarts' },
   { row:  7, want: 'Queue depth',        title: 'Queue depth by queue' },
   { row:  8, want: 'Consumers attached', title: 'Consumers attached by queue' },
   { row:  9, want: 'Dead-letter depth',  title: 'Dead-letter depth by queue' },
-  { row: 10, want: 'Consumer paths',     title: 'Consumer paths' },
+  { row: 10, want: 'Messages consumed',  title: 'Messages consumed by disposition' },
   { row: 11, want: 'Queue wait',         title: 'Queue wait by queue' },
   { row: 12, want: 'Consumer duration',  title: 'Consumer duration by disposition' },
-  { row: 13, want: 'Produce duration',   title: 'Produce duration p95 / p99' },
+  { row: 13, want: 'Produce duration',   title: 'Produce duration' },
 ];
 
 const board = JSON.parse(fs.readFileSync(path.join(__dirname, 'dashboards', `${BOARD}.json`), 'utf8'));
