@@ -1,8 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using Messaging.Transport;
 
-namespace BaseConsole.Core.Messaging;
+namespace Messaging.Transport;
 
 /// <summary>
 /// Pipeline metrics for the ingress half: one measurement per delivery, whatever the consumer
@@ -18,14 +17,14 @@ namespace BaseConsole.Core.Messaging;
 /// <c>pipeline.deadletter.depth</c> instead.
 /// </para>
 /// </summary>
-internal static class IngressMetrics
+public static class IngressMetrics
 {
     /// <summary>
     /// Must match the string passed to <c>AddMeter</c> in <c>AddBaseConsoleObservability</c>. A
     /// constant rather than a literal in two places, because a typo produces no error and no
     /// metrics.
     /// </summary>
-    internal const string MeterName = "BaseConsole.Core.Messaging";
+    public const string MeterName = "Messaging.Transport.Ingress";
 
     private static readonly Meter Meter = new(MeterName);
 
@@ -34,14 +33,14 @@ internal static class IngressMetrics
         unit: "{message}",
         description: "Deliveries handled, by queue, type, and what was decided.");
 
-    internal const string QueueWaitInstrument = "pipeline.queue.wait";
+    public const string QueueWaitInstrument = "pipeline.queue.wait";
 
     /// <summary>
     /// Must match the name the view in <c>AddBaseConsoleObservability</c> targets. A view whose
     /// instrument name matches nothing is silently ignored, so a typo here costs the histogram its
     /// bucket boundaries and nothing reports the mistake.
     /// </summary>
-    internal const string ConsumerDurationInstrument = "pipeline.consumer.duration";
+    public const string ConsumerDurationInstrument = "pipeline.consumer.duration";
 
     /// <summary>
     /// The bucket ladder shared by <c>pipeline.queue.wait</c> and <c>pipeline.consumer.duration</c>.
@@ -158,7 +157,7 @@ internal static class IngressMetrics
     /// <c>pipeline.deadletter.depth</c>: a park that did not land never arrives there.
     /// </para>
     /// </summary>
-    internal static void RecordConsumed(
+    public static void RecordConsumed(
         string queue, string type, string disposition, string reason)
     {
         var tags = new TagList
@@ -195,7 +194,7 @@ internal static class IngressMetrics
     /// Labelled by queue alone, matching <c>pipeline.queue.depth</c>, so the two read side by side.
     /// </para>
     /// </summary>
-    internal static void RecordArrival(string queue, long? sentMs)
+    public static void RecordArrival(string queue, long? sentMs)
     {
         if (sentMs is not { } sent)
         {
@@ -209,7 +208,7 @@ internal static class IngressMetrics
     }
 
     /// <summary>Records one delivery's cost, on whichever path it ended.</summary>
-    internal static void RecordConsumerDuration(
+    public static void RecordConsumerDuration(
         string queue, string type, string disposition, double seconds)
     {
         var tags = new TagList

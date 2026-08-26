@@ -2,7 +2,7 @@ using BaseConsole.Core.Configuration;
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
-using BaseConsole.Core.Observability;
+
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

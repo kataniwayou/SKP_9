@@ -1,3 +1,4 @@
+using Messaging.Transport;
 using BaseApi.Tests.Support;
 using BaseConsole.Core.Messaging;
 using Xunit;

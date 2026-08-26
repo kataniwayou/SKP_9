@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BaseApi.Core.Gating;
 using Messaging.Contracts;
 using Messaging.Transport;
@@ -232,126 +233,163 @@ public sealed class GatedQueueConsumer : BackgroundService
     private async Task OnReceivedAsync(object sender, BasicDeliverEventArgs ea)
     {
         var epoch = Interlocked.Read(ref _epoch);
+        var started = Stopwatch.GetTimestamp();
+        var type = ea.BasicProperties.Type ?? "";
 
-        // The gate can close between the broker handing this message over and it arriving here, and
-        // messages already in flight when the subscription was cancelled still arrive. Re-checking
-        // here is what makes a pause clean rather than a burst of failures.
-        if (!_gate.IsOpen)
+        // Defaults to `requeued` for the same reason BaseConsole.Core's twin does: every path that
+        // leaves without recording is one that nacked with requeue, including the ones that throw
+        // out of this method entirely.
+        var disposition = "requeued";
+
+        void Record(string d, string reason)
         {
-            await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
-            return;
+            disposition = d;
+            IngressMetrics.RecordConsumed(_options.Queue, type, d, reason);
         }
-
-        // Copy out of the transport buffer, which is pooled and valid only for this callback.
-        var body = ea.Body.ToArray();
-        var type = ea.BasicProperties.Type;
 
         try
         {
-            if (string.IsNullOrWhiteSpace(type))
+            // The gate can close between the broker handing this message over and it arriving here, and
+            // messages already in flight when the subscription was cancelled still arrive. Re-checking
+            // here is what makes a pause clean rather than a burst of failures.
+            if (!_gate.IsOpen)
             {
-                throw new InvalidOperationException("message carries no type header");
+                Record("requeued", "gate_closed");
+                await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                return;
             }
 
-            await using var scope = _scopes.CreateAsyncScope();
-            var handler = scope.ServiceProvider
-                .GetServices<IQueueMessageHandler>()
-                .SingleOrDefault(h => h.MessageType == type);
+            // How long this delivery sat in the broker. Recorded ONLY if the sender stamped the
+            // header -- a message published by a build without it carries none, and recording those
+            // as an elapsed time since the epoch would bury the real distribution.
+            IngressMetrics.RecordArrival(
+                _options.Queue,
+                MessageClock.ReadHeader(ea.BasicProperties.Headers, MessageClock.SentHeader));
 
-            if (handler is null)
+            // Copy out of the transport buffer, which is pooled and valid only for this callback.
+            var body = ea.Body.ToArray();
+
+            try
             {
-                // Unknown type. Retrying cannot help — no redeploy of this process grows a handler
-                // for it — so park it, where it survives for inspection.
-                throw new InvalidOperationException("no handler is registered for this message type");
-            }
-
-            // Deliberately not the delivery's own token: cancelling mid-handler would abandon a
-            // partially applied write with the message already claimed. Shutdown lets in-flight work
-            // finish and leaves unacknowledged deliveries to be redelivered.
-            await handler.HandleAsync(body, CancellationToken.None).ConfigureAwait(false);
-
-            await SafeAckAsync(ea, epoch).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            switch (DeliveryClassifier.Classify(ex))
-            {
-                case DeliveryDisposition.RequeueAndTrip:
-                    _logger.LogWarning(
-                        ex, "projection store unreachable — returning message to {Queue}", _options.Queue);
-
-                    // Awaited rather than fired and forgotten: closing the gate before the message goes
-                    // back means the redelivery finds it already closed instead of racing it. That is
-                    // only safe because gate subscribers signal rather than perform I/O — a subscriber
-                    // that did broker work inside the notification would deadlock here.
-                    await _gate.TripAsync().ConfigureAwait(false);
-                    await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
-                    break;
-
-                case DeliveryDisposition.Requeue:
-                    // The projection store said nothing about itself, so the gate stays open and this
-                    // consumer keeps working. Only this delivery goes back.
-                    _logger.LogWarning(
-                        ex, "send failed while handling {Type} — returning message to {Queue}",
-                        type, _options.Queue);
-                    await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
-                    break;
-
-                default:
+                if (string.IsNullOrWhiteSpace(type))
                 {
-                    // Taken as a property of the message rather than of the environment. A parked
-                    // message can be recovered by hand; a message requeued forever is an outage that
-                    // never resolves, so the ambiguous case is deliberately resolved toward parking.
-                    //
-                    // LOGGED AFTER THE NACK RATHER THAN BEFORE IT, AND THAT ORDER IS THE POINT. A
-                    // rejection is a park only if the broker was actually told, and SafeNackAsync
-                    // returns false when the channel died in between -- in which case the broker
-                    // REQUEUES the delivery instead of dead-lettering it. Logged first, the line
-                    // asserted a park that had not happened, and the only correction went to Debug,
-                    // which is below the level shipped to the log store.
-                    //
-                    // It matters more here than on the worker side, not less: this consumer emits no
-                    // ingress metrics at all, so unlike BaseConsole.Core's twin there is no counter
-                    // to fall back on (and, since the metrics rewrite, that twin's counter no longer
-                    // carries a `landed` dimension either — the log line was always the only place
-                    // this fact was visible). This log line is the only artifact an
-                    // orchestrator-control park leaves in this process.
-                    var landed = await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
-
-                    // The ids, lifted off the delivery's own headers rather than the body. The
-                    // handler opened a scope over these too, but it opened it INSIDE HandleAsync, so
-                    // the exception that got us here disposed it on the way out -- which is why a
-                    // park record carried no ids at all until the sender began stamping them. Read
-                    // here rather than at the top of the delivery because, unlike its BaseConsole
-                    // twin, this consumer has no other use for the header table. Keyed to the same
-                    // fields the handler's scope uses. See MessageIdHeaders.
-                    using var ids = _logger.BeginScope(
-                        MessageIdHeaders.ReadScope(ea.BasicProperties.Headers));
-
-                    if (landed)
-                    {
-                        _logger.LogError(
-                            ex, "refusing message of type {Type} on {Queue} — parked",
-                            type, _options.Queue);
-                    }
-                    else
-                    {
-                        // Not a park. Said in full rather than as a flag, because the operator reading
-                        // this is deciding whether to go looking in the dead-letter queue, and there
-                        // will be nothing there.
-                        _logger.LogError(
-                            ex,
-                            "refusing message of type {Type} on {Queue} — NOT parked: the channel was "
-                            + "gone before the broker was told, so it will be redelivered rather than "
-                            + "dead-lettered",
-                            type, _options.Queue);
-                    }
-
-                    break;
+                    throw new InvalidOperationException("message carries no type header");
                 }
+
+                await using var scope = _scopes.CreateAsyncScope();
+                var handler = scope.ServiceProvider
+                    .GetServices<IQueueMessageHandler>()
+                    .SingleOrDefault(h => h.MessageType == type);
+
+                if (handler is null)
+                {
+                    // Unknown type. Retrying cannot help — no redeploy of this process grows a handler
+                    // for it — so park it, where it survives for inspection.
+                    throw new InvalidOperationException("no handler is registered for this message type");
+                }
+
+                // Deliberately not the delivery's own token: cancelling mid-handler would abandon a
+                // partially applied write with the message already claimed. Shutdown lets in-flight work
+                // finish and leaves unacknowledged deliveries to be redelivered.
+                await handler.HandleAsync(body, CancellationToken.None).ConfigureAwait(false);
+
+                Record("acked", "handled");
+                await SafeAckAsync(ea, epoch).ConfigureAwait(false);
             }
+            catch (Exception ex)
+            {
+                switch (DeliveryClassifier.Classify(ex))
+                {
+                    case DeliveryDisposition.RequeueAndTrip:
+                        _logger.LogWarning(
+                            ex, "projection store unreachable — returning message to {Queue}", _options.Queue);
+
+                        // Awaited rather than fired and forgotten: closing the gate before the message goes
+                        // back means the redelivery finds it already closed instead of racing it. That is
+                        // only safe because gate subscribers signal rather than perform I/O — a subscriber
+                        // that did broker work inside the notification would deadlock here.
+                        await _gate.TripAsync().ConfigureAwait(false);
+                        Record("requeued", "store_unreachable");
+                        await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                        break;
+
+                    case DeliveryDisposition.Requeue:
+                        // The projection store said nothing about itself, so the gate stays open and this
+                        // consumer keeps working. Only this delivery goes back.
+                        _logger.LogWarning(
+                            ex, "send failed while handling {Type} — returning message to {Queue}",
+                            type, _options.Queue);
+                        Record("requeued", "send_failed");
+                        await SafeNackAsync(ea, requeue: true, epoch).ConfigureAwait(false);
+                        break;
+
+                    default:
+                    {
+                        // Taken as a property of the message rather than of the environment. A parked
+                        // message can be recovered by hand; a message requeued forever is an outage that
+                        // never resolves, so the ambiguous case is deliberately resolved toward parking.
+                        //
+                        // LOGGED AFTER THE NACK RATHER THAN BEFORE IT, AND THAT ORDER IS THE POINT. A
+                        // rejection is a park only if the broker was actually told, and SafeNackAsync
+                        // returns false when the channel died in between -- in which case the broker
+                        // REQUEUES the delivery instead of dead-lettering it. Logged first, the line
+                        // asserted a park that had not happened, and the only correction went to Debug,
+                        // which is below the level shipped to the log store.
+                        //
+                        // This log line is still the only place the DISTINCTION is visible. The
+                        // consumer now records pipeline.messages.consumed like its BaseConsole.Core
+                        // twin, but that counter carries no `landed` dimension -- it was removed in
+                        // the 2026-08-26 metrics rewrite because it cannot be known at record time --
+                        // so a park the broker was never told about counts as `parked/refused` there
+                        // exactly like one that landed. `Dead-letter depth by queue` is the check:
+                        // a park that did not land never arrives in the dead-letter queue.
+                        Record("parked", "refused");
+                        var landed = await SafeNackAsync(ea, requeue: false, epoch).ConfigureAwait(false);
+
+                        // The ids, lifted off the delivery's own headers rather than the body. The
+                        // handler opened a scope over these too, but it opened it INSIDE HandleAsync, so
+                        // the exception that got us here disposed it on the way out -- which is why a
+                        // park record carried no ids at all until the sender began stamping them. Read
+                        // here rather than at the top of the delivery because, unlike its BaseConsole
+                        // twin, this consumer has no other use for the header table. Keyed to the same
+                        // fields the handler's scope uses. See MessageIdHeaders.
+                        using var ids = _logger.BeginScope(
+                            MessageIdHeaders.ReadScope(ea.BasicProperties.Headers));
+
+                        if (landed)
+                        {
+                            _logger.LogError(
+                                ex, "refusing message of type {Type} on {Queue} — parked",
+                                type, _options.Queue);
+                        }
+                        else
+                        {
+                            // Not a park. Said in full rather than as a flag, because the operator reading
+                            // this is deciding whether to go looking in the dead-letter queue, and there
+                            // will be nothing there.
+                            _logger.LogError(
+                                ex,
+                                "refusing message of type {Type} on {Queue} — NOT parked: the channel was "
+                                + "gone before the broker was told, so it will be redelivered rather than "
+                                + "dead-lettered",
+                                type, _options.Queue);
+                        }
+
+                        break;
+                    }
+                }
+            }        }
+        finally
+        {
+            // One measurement per delivery, on whichever path it ended -- including the gate-closed
+            // bounce above, which never reaches a handler and which nothing else in this process
+            // times. Recorded after the ack or nack completes, matching the twin.
+            IngressMetrics.RecordConsumerDuration(
+                _options.Queue, type, disposition,
+                Stopwatch.GetElapsedTime(started).TotalSeconds);
         }
     }
+
 
     /// <summary>
     /// Whether an acknowledgement for a delivery received in <paramref name="epoch"/> still means

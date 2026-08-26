@@ -31,6 +31,12 @@ namespace BaseApi.Service.Composition;
 /// </summary>
 internal static class AppMessaging
 {
+    /// <summary>
+    /// The <c>loop</c> label this host's queue-depth probe reports under. Matches the literal the
+    /// processor and orchestrator use, so one panel compares the same loop across all three.
+    /// </summary>
+    private const string QueueDepthLoop = "queue-depth";
+
     public static IServiceCollection AddAppMessaging(
         this IServiceCollection services, IConfiguration cfg)
     {
@@ -64,9 +70,15 @@ internal static class AppMessaging
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
             DispatchedQueues.Note,
-            // Unwatched: this host has no keyed heartbeat for the depth loop, and adding a live
-            // check here is out of scope for the processor's metric rewrite.
-            beat: null));
+            // COUNTED, but deliberately not held. The other hosts hand this probe an ILoopHeartbeat
+            // because something reads its stamp; nothing on this host does, so a holder would exist
+            // only to be wrapped. The counter is what a panel can draw, and it is reported directly.
+            //
+            // Seeded beside it, so a depth loop that never starts reads as a flat zero rather than
+            // as no data -- see LoopMetrics.Seed.
+            beat: () => LoopMetrics.Count(QueueDepthLoop)));
+
+        LoopMetrics.Seed(QueueDepthLoop);
 
         // The gated control consumer, and the two handlers it dispatches to by message type.
         services.AddBaseApiGatedConsumer(OrchestratorQueues.Control);
