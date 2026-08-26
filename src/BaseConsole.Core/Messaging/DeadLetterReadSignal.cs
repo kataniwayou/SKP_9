@@ -15,6 +15,14 @@ namespace BaseConsole.Core.Messaging;
 /// waiter holding the completed task must not be re-armed out from under itself.
 /// </para>
 /// <para>
+/// <b>There is a bounded, self-healing TOCTOU between a completed <see cref="Requested"/> and the
+/// reader's <see cref="Reset"/>.</b> A park that calls <see cref="Request"/> after the current task
+/// has already completed, but before <see cref="Reset"/> swaps in a fresh one, sets a result on a
+/// task nobody is waiting on any more -- that request is lost, same as <c>L2Gate.Tripped</c>'s
+/// identical window. The five-minute backstop poll is what makes this safe to leave open rather
+/// than close with a lock: the missed park is still read on the next pass.
+/// </para>
+/// <para>
 /// A static, like <see cref="Messaging.Transport.DispatchedQueues"/>, because the raiser and the
 /// reader are in different assemblies and threading a seam between them would buy nothing -- there
 /// is one dead-letter probe per process.
