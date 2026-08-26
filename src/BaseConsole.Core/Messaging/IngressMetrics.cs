@@ -9,11 +9,14 @@ namespace BaseConsole.Core.Messaging;
 /// Pipeline metrics for the ingress half: one measurement per delivery, whatever the consumer
 /// decided to do with it.
 /// <para>
-/// <b><c>disposition</c> and <c>reason</c> say what the consumer decided, nothing more.</b>
-/// Whether the broker was actually told the delivery was done with is not on this metric at all —
-/// it survives in the consumer's own log line, where the operator deciding whether to search the
-/// dead-letter queue reads it, and on a board it is answered by <c>pipeline.deadletter.depth</c>
-/// instead.
+/// <b><c>disposition</c> and <c>reason</c> are the two attributes that carry the decision, and each
+/// answers a different question.</b> <c>disposition</c> says what happened to the delivery —
+/// <c>acked</c>, <c>requeued</c>, or <c>parked</c> — the outcome an operator scans for first.
+/// <c>reason</c> says why, which is what keeps the several causes behind one <c>disposition</c>
+/// from averaging into a number nobody can triage. Whether the broker was actually told is not on
+/// this metric at all: that survives in the consumer's own log line, where the operator deciding
+/// whether to search the dead-letter queue reads it, and on a board it is answered by
+/// <c>pipeline.deadletter.depth</c> instead.
 /// </para>
 /// </summary>
 internal static class IngressMetrics
@@ -207,6 +210,14 @@ internal static class IngressMetrics
     /// is a fixed sequence of store reads and sends. It now lives on the processor and measures the
     /// author's transform, the only span whose length is a property of someone's implementation
     /// rather than of this framework. One instrument, on the side that can actually be slow.
+    /// </para>
+    /// <para>
+    /// <b><c>reason</c> is kept as its own tag rather than folded into <c>disposition</c>.</b>
+    /// Without it, the several causes behind one <c>disposition</c> would collapse into a single
+    /// number — and for <c>requeued</c> that is worse than it sounds: during any store outage every
+    /// in-flight delivery bounces off the shut gate, and that benign flood would bury
+    /// <c>send_failed</c> (a broker fault inside a handler) and <c>escaped</c> (an unhandled
+    /// path — a bug) under it, leaving a requeue spike an operator can see but not triage.
     /// </para>
     /// <para>
     /// <b>There is no <c>landed</c> tag.</b> Whether the broker was actually told survives in the
