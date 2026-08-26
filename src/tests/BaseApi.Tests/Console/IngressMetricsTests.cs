@@ -338,4 +338,33 @@ public sealed class IngressMetricsTests
         Assert.Equal("shutdown", m.Tags["reason"]);
         Assert.Equal(Queue, m.Tags["queue"]);
     }
+
+    [Fact]
+    public void QueueWaitIsLabelledLikeQueueDepth()
+    {
+        using var metrics = new MetricCollector(IngressMetrics.MeterName);
+
+        IngressMetrics.RecordArrival("q-wait", sentMs: MessageClock.NowMilliseconds() - 25);
+
+        var mine = metrics.For(IngressMetrics.QueueWaitInstrument)
+            .Single(m => m.Tags["queue"] == "q-wait");
+
+        // One dimension, matching pipeline.queue.depth, so the two can be read side by side on a
+        // board without one of them fanning out into a dimension the other does not have.
+        Assert.False(mine.Tags.ContainsKey("type"));
+    }
+
+    [Fact]
+    public void AMessageWithNoSentHeaderContributesNothingRatherThanZero()
+    {
+        using var metrics = new MetricCollector(IngressMetrics.MeterName);
+
+        IngressMetrics.RecordArrival("q-noheader", sentMs: null);
+
+        // A build without the instrument stamps no header, and there are always some during a
+        // rollout. Recording those as zero would bury the real distribution under a spike that
+        // means nothing.
+        Assert.DoesNotContain(
+            metrics.For(IngressMetrics.QueueWaitInstrument), m => m.Tags["queue"] == "q-noheader");
+    }
 }

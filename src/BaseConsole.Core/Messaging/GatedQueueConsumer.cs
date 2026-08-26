@@ -312,7 +312,7 @@ public sealed class GatedQueueConsumer : BackgroundService
             var sentMs   = MessageClock.ReadHeader(headers, MessageClock.SentHeader);
             var originMs = MessageClock.ReadHeader(headers, MessageClock.OriginHeader);
 
-            IngressMetrics.RecordArrival(_options.Queue, type, sentMs, originMs);
+            IngressMetrics.RecordArrival(_options.Queue, sentMs);
 
             // Adopt this delivery's chain for everything the handler goes on to do. The ambient
             // flows into the handler's sends, so a message caused by this one carries the ORIGINAL

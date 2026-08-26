@@ -171,20 +171,14 @@ public static class BaseConsoleObservabilityExtensions
                     {
                         Boundaries = EgressMeter.LatencySecondsBoundaries(),
                     })
-                // The two arrival histograms, on a WIDER ladder than the two above. A broker round
-                // trip and a store probe are sub-second; queue wait and step elapsed are the
-                // instruments that exist because a pipeline can fall behind, and a backlogged step
-                // is measured in minutes. Sharing the sub-second ladder would put every interesting
-                // observation in +Inf, where a quantile reports the last bucket edge rather than a
-                // latency -- the same defect as the millisecond ladder, from the other end.
+                // Queue wait, on a WIDER ladder than the two above. A broker round trip and a store
+                // probe are sub-second; queue wait is the instrument that exists because a pipeline
+                // can fall behind, and a backlogged step is measured in minutes. Sharing the
+                // sub-second ladder would put every interesting observation in +Inf, where a
+                // quantile reports the last bucket edge rather than a latency -- the same defect as
+                // the millisecond ladder, from the other end.
                 .AddView(
                     IngressMetrics.QueueWaitInstrument,
-                    new ExplicitBucketHistogramConfiguration
-                    {
-                        Boundaries = IngressMetrics.ArrivalSecondsBoundaries(),
-                    })
-                .AddView(
-                    IngressMetrics.StepElapsedInstrument,
                     new ExplicitBucketHistogramConfiguration
                     {
                         Boundaries = IngressMetrics.ArrivalSecondsBoundaries(),
