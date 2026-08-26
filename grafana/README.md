@@ -281,6 +281,16 @@ the fault was a stat sparkline three centimetres wide. Consuming is on the panel
 
 ### What the second run through the suite showed
 
+**History, not a live reference.** This subsection — the table below, and the S9/S10/S11
+write-ups after it — is the measured record from before the 2026-08-26 processor metrics
+rewrite. Several names it cites no longer exist: `Consuming`
+(`pipeline.consumer.consuming`), `Channel resets` (`pipeline_consumer_channel_resets_total`),
+`process p95`/`process mean` (`pipeline.process.duration`), and `pipeline.step.elapsed`
+were all removed (see the rewrite spec §6). The findings stand as history — S9 in
+particular is the reason the current `pipeline.queue.consumers` still carries a "cannot
+see a reattach inside one probe interval" caveat — but a query built from the names below
+will match nothing today.
+
 The whole suite was run again against the rebuilt boards. Six of the fixes fired on the
 faults that had been invisible to them:
 
@@ -366,12 +376,17 @@ what a restart inside the range does to them.
 ### Three gaps that are still open
 
 - **The wipe is indistinguishable from the pause.** Scaling Redis to zero destroys L2;
-  pausing it does not. Both render identically on every board -- gate 0, consuming 0. The
-  instrument that could separate them is `pipeline.duplicate.suppressed`, whose whole
-  description is "the entry was already absent", and it has **no series at all**, before
-  or after a deliberate wipe. That is an instrumentation gap, not a panel one.
-- **`landed="false"` still has no series**, so `Ack lost` remains unexercised by anything
-  the suite can inject.
+  pausing it does not. Both used to render identically on every board -- gate 0,
+  consuming 0 -- and `consuming` (`pipeline.consumer.consuming`) is itself gone since the
+  2026-08-26 metrics rewrite, so today it is just gate 0 either way. The instrument that
+  could have separated them, `pipeline.duplicate.suppressed`, whose whole description was
+  "the entry was already absent," is removed rather than merely empty (spec §6): the
+  acked count now mixes real transform runs with skipped duplicates, with only a log line
+  left to tell them apart. Still an instrumentation gap, and a wider one than before.
+- **`landed` is no longer a dimension at all**, not merely a value that has never
+  occurred (spec §5.7) — so `Ack lost` remains unexercised by anything the suite can
+  inject, and no query can ever make it occur. `pipeline.deadletter.depth` is the check
+  that stands in for it: a park that did not land never appears there.
 - **Nothing consumes the alerts.** The five rules in `k8s/02-configmaps.yaml` are real --
   they evaluate, they reach `firing`, and `ALERTS` records it -- but `prometheus.yml` has
   no `alerting:` stanza and `/api/v1/alertmanagers` returns empty. **A firing alert is
@@ -765,8 +780,13 @@ memory-and-perf questions and live on `skp-runtime.json`.
 A counter that has never incremented exports no series, so a fault expression written
 plainly renders **No data** — visually identical to a broken query, a bad variable, or a
 dead scrape. On a healthy stack that is most of them: measured on this cluster, only one
-of six `disposition`/`reason` pairs exists, `landed="false"` has never occurred, and
-`pipeline_duplicate_suppressed_total` has zero series.
+of six `disposition`/`reason` pairs exists. (Two more examples lived here before the
+2026-08-26 metrics rewrite: `landed="false"` had never occurred, and
+`pipeline_duplicate_suppressed_total` had zero series. Both are gone now rather than
+merely empty — `landed` is no longer a dimension at all, and `duplicate.suppressed` is
+removed outright, see spec §6 — so neither is even a candidate for this trick any more.
+`pipeline_gate_trips_total` is today's example of the same shape: absent until the first
+trip.)
 
 Most fault stats therefore end `or vector(0)` and are thresholded green-at-zero, so
 healthy reads as an explicit green `0`. Breakdown-by-label panels that cannot use that
@@ -805,9 +825,10 @@ waiting for its identity row is orange, and only genuinely-wrong states are red.
 
 **The orchestrator's Role filter reaches four panels, not the board.** `role` is an
 attribute on three instruments only — `pipeline.messages.produced`,
-`pipeline.messages.consumed`, `pipeline.produce.duration`. The gauges and
-`consumer.channel.resets` carry no `role`, and a `role=~"leader"` matcher does not match
-a series that has no `role` label, so applying the variable board-wide would empty them.
+`pipeline.messages.consumed`, `pipeline.produce.duration`. The gauges carry no `role`
+(and, before the 2026-08-26 rewrite removed it, neither did `consumer.channel.resets`),
+and a `role=~"leader"` matcher does not match a series that has no `role` label, so
+applying the variable board-wide would empty them.
 The verdict tier is left unfiltered too: it answers *is anything wrong anywhere*, and a
 role selection there would let a follower fault hide behind a leader view. There is a
 note panel on the board saying so.
@@ -1001,6 +1022,11 @@ calls `RecordDuplicateSuppressed()`, so this is an untriggered path rather than 
 code, and deleting all of it would drop coverage of a real idempotence signal the moment
 it first fires. The graph goes; the stat stays, moved to the Since tier.
 
+**Superseded, 2026-08-26.** The metrics rewrite removed `pipeline.duplicate.suppressed`
+outright (spec §6) — that path returns normally and the delivery is ACKed, so it is
+counted there instead. Both the stat this section kept and the graph it cut are gone;
+the untriggered path's only remaining coverage is a log line.
+
 ### What this pass did not close
 
 Unchanged, and still the largest gaps for an operator:
@@ -1035,8 +1061,9 @@ producer, which is the shape of most real degradations.
 the mechanism `DeadLetterDepthProbe` already used, and for the same reason: the broker and
 Prometheus are org-owned in production, so no scrape target, no plugin, no broker-wide
 metrics. `QueueDeclareOk` returns the consumer count alongside the message count, which is
-the only **broker-side** signal on these boards. `pipeline.consumer.consuming` is the
-process asserting its own health.
+the only **broker-side** signal on these boards. `pipeline.consumer.consuming` — removed
+in the 2026-08-26 metrics rewrite — was the process asserting its own health; this reads
+the broker instead, and needs no liveness window to be believed.
 
 ### The first design was blind to the outage it exists to catch
 
@@ -1116,6 +1143,16 @@ replicas drain it one at a time. Green below 5 clears that; red at 20.
 - **Nothing alerts on it**, like everything else here.
 
 ## Step latency, and the fault that finally moved a panel
+
+**History, not a live reference — `pipeline.step.elapsed` no longer exists.** The
+2026-08-26 metrics rewrite removed it from the instrument set (spec §6); its panel came
+off **SKP Flow**, the only board it was ever on, not off any board this section otherwise
+describes. The removal stands, and the cost is real: this was the only door-to-door
+measurement of what a workflow *step* experiences, and nothing in the current set
+replaces it. See the rewrite spec §10.4 for the full accounting, and if the flow board's
+question turns out to matter more than the leanness this cut was made for, the
+instrument is restorable from the `pre-metrics-rewrite` tag. What follows is kept as the
+measured record of why it was added.
 
 `pipeline.step.elapsed` and `pipeline.queue.wait` close the last measurement gap the
 operator review left open: how long a workflow *step* takes, and how much of that was
@@ -1204,6 +1241,13 @@ export was empty, and the assertion failed exactly as it would for a genuinely m
 ## Two defects found while building these boards
 
 ### The duration histograms could not answer quantiles (fixed)
+
+**History for the `pipeline.process.duration` half.** That instrument is gone since the
+2026-08-26 metrics rewrite, replaced by `pipeline.consumer.duration`, which reuses
+`IngressMetrics.ArrivalSecondsBoundaries()` — not the `EgressMeter.LatencySecondsBoundaries()`
+ladder this section describes — because it now shares a bucket ladder with `queue.wait`
+instead of with `produce.duration`. The `pipeline.produce.duration` half of this section
+is still live. The measured numbers below are kept as the record of the original defect.
 
 `pipeline.produce.duration` and `pipeline.process.duration` record
 `Stopwatch.GetElapsedTime(...).TotalSeconds` and declare `unit: "s"`, but originally
