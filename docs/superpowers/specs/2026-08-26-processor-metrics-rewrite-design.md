@@ -57,11 +57,25 @@ Concretely: counters are seeded with `Add(0)` so a loop that never started reads
 a flat zero rather than no-data; `identity.ready` reports 0 before anything
 resolves; the three broker-side gauges report 0 rather than going absent.
 
-The payoff is on the alerting side. `pipeline_identity_ready_ratio == 0 for 5m`
-fires for a replica stuck in boot only because the series exists while it is
-stuck. `rate(pipeline_loop_iterations_total{loop="l2-gate"}[5m]) < 0.1` fires
-for a loop that died *or never started* only because of the seed. Both are rules
-that would look correct on review and quietly never fire without it.
+The payoff was argued on the alerting side: `pipeline_identity_ready_ratio == 0
+for 5m` fires for a replica stuck in boot only because the series exists while it
+is stuck, and `rate(pipeline_loop_iterations_total{loop="l2-gate"}[5m]) < 0.1`
+fires for a loop that died *or never started* only because of the seed. Both are
+rules that would look correct on review and quietly never fire without it.
+
+**Self-correction, 2026-08-26 (sixth). That payoff is void, and the seeding is
+still right.** This project ships no alert rules and never will: in production
+Prometheus is ORG-OWNED, so its rule set is not a lever available here — the same
+constraint `k8s/02-configmaps.yaml` already recorded for scrape config and label
+surgery. The five rules that did exist have been deleted along with their mount,
+and the two named above were never built.
+
+The argument survives its example. Seeding is what separates *zero* from *no
+data*, and a dashboard reads that distinction exactly as an alert rule would: an
+absent series renders as an empty panel or, worse, as a confident green zero —
+which is the failure this repository has now shipped twice. Every verdict the
+rules were meant to carry is a panel on the worker boards instead, and those
+panels depend on the seed for the same reason the rules would have.
 
 **A corollary used repeatedly below: counters and levels are not substitutes.**
 A gauge is sampled at export; an event that happens and reverses between two
@@ -315,19 +329,34 @@ survives because `pipeline.identity.ready` hangs off it.
 
 | # | Panel | Query |
 | --- | --- | --- |
-| 1 | Loop rate | `rate(pipeline_loop_iterations_total[$__rate_interval])` by `(loop, instance)` |
-| 2 | L2 BIT verdicts | `rate(pipeline_gate_probe_duration_seconds_count[...])` by `(outcome)` |
-| 3 | L2 BIT duration | `rate(_sum{outcome="healthy"}) / rate(_count{outcome="healthy"})` |
-| 4 | L2 gate | `pipeline_gate_open_ratio` by `(instance)`, with `increase(pipeline_gate_trips_total[1h])` |
-| 5 | Identity ready | `pipeline_identity_ready_ratio` by `(instance)` |
-| 6 | Restarts | `changes(pipeline_process_start_timestamp_seconds[1h])` by `(instance)` |
+| 1 | Loop iterations | `rate(pipeline_loop_iterations_total[$__rate_interval])` by `(loop, service_instance_id)` |
+| 2 | Gate probe outcomes | `rate(pipeline_gate_probe_duration_seconds_count[...])` by `(outcome)` |
+| 3 | Gate probe duration | `rate(_sum{outcome="healthy"}) / rate(_count{outcome="healthy"})` |
+| 4 | Gate open | `pipeline_gate_open_ratio` by `(service_instance_id)`, with `increase(pipeline_gate_trips_total[$__range])` |
+| 5 | Identity ready | `pipeline_identity_ready_ratio` by `(service_instance_id)` |
+| 6 | Restarts | `changes(pipeline_process_start_timestamp_seconds[$__range])` by `(service_instance_id)` |
 | 7 | Queue depth | `max by (queue) (pipeline_queue_depth)` |
 | 8 | Consumers attached | `max by (queue) (pipeline_queue_consumers)` |
 | 9 | Dead-letter depth | `max by (queue) (pipeline_deadletter_depth)` |
-| 10 | Consumer paths | `rate(pipeline_messages_consumed_total[...])` by `(queue, disposition, reason)` |
+| 10 | Messages consumed | `rate(pipeline_messages_consumed_total[...])` by `(queue, disposition, reason)` |
 | 11 | Queue wait | mean by `(queue)`, raw and net of produce — see below |
 | 12 | Consumer duration | mean by `(queue, disposition)` |
 | 13 | Produce duration | mean by `(destination)` |
+
+**Self-correction, 2026-08-26 (fifth).** Panels 1, 2, 3, 4 and 10 were renamed after
+the board shipped, and this table is the amendment rather than a record of it: the
+original names — `Loop rate`, `L2 BIT verdicts`, `L2 BIT duration`, `L2 gate`,
+`Consumer paths` — named a concept rather than the instrument the panel reads, and
+`L2 BIT duration` / `Store probe latency` were two vocabularies for one instrument.
+`BIT` in particular survives in the prose of section 6 as the name for a single probe
+attempt, which is correct there and misleading on a panel that plots their RATE.
+
+Two window changes are folded in here as well. Panels 4 and 6 specified a fixed `1h`;
+both now follow `$__range`, so every panel on the Since tier answers in one tense.
+
+`instance` is corrected to `service_instance_id` throughout. Measured: every replica
+shares one `instance` value — it labels the scrape target, not the process — so a
+per-replica panel written against it collapses to a single series.
 
 Thirteen panels, one instrument family each. Nothing is bundled: an earlier
 draft put queue wait, consumer duration and produce duration in a single
