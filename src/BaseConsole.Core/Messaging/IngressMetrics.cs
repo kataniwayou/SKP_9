@@ -45,6 +45,13 @@ internal static class IngressMetrics
     internal const string StepElapsedInstrument = "pipeline.step.elapsed";
 
     /// <summary>
+    /// Must match the name the view in <c>AddBaseConsoleObservability</c> targets. A view whose
+    /// instrument name matches nothing is silently ignored, so a typo here costs the histogram its
+    /// bucket boundaries and nothing reports the mistake.
+    /// </summary>
+    internal const string ConsumerDurationInstrument = "pipeline.consumer.duration";
+
+    /// <summary>
     /// The bucket ladder for the two arrival histograms. **Deliberately not the transport's.**
     /// <para>
     /// <c>EgressMeter.LatencySecondsBoundaries</c> stops at 10s, which is right for a broker round
@@ -121,6 +128,21 @@ internal static class IngressMetrics
         StepElapsedInstrument,
         unit: "s",
         description: "Seconds since the step that caused this message began.");
+
+    /// <summary>
+    /// How long a delivery was held, from arrival to whatever the consumer decided.
+    /// <para>
+    /// <b>Recorded on every terminal path, which is what its predecessor could not do.</b>
+    /// <c>pipeline.process.duration</c> measured only the author's transform, so a delivery parked
+    /// for lacking a handler, or bounced off a shut gate, cost nothing that any instrument reported.
+    /// The <c>disposition</c> tag is what keeps a slow success and a slow refusal from averaging
+    /// into a number describing neither.
+    /// </para>
+    /// </summary>
+    private static readonly Histogram<double> ConsumerDuration = Meter.CreateHistogram<double>(
+        ConsumerDurationInstrument,
+        unit: "s",
+        description: "Seconds a delivery was held, whatever the consumer decided to do with it.");
 
     /// <summary>
     /// Every live consumer's subscription state, keyed by the queue it reads.
@@ -239,5 +261,21 @@ internal static class IngressMetrics
         {
             StepElapsed.Record(MessageClock.ElapsedSeconds(origin), tags);
         }
+    }
+
+    /// <summary>Records one delivery's cost, on whichever path it ended.</summary>
+    internal static void RecordConsumerDuration(
+        string queue, string type, string disposition, double seconds)
+    {
+        var tags = new TagList
+        {
+            { "queue", queue },
+            { "type", type },
+            { "disposition", disposition },
+        };
+
+        PipelineAmbientTag.AppendTo(ref tags);
+
+        ConsumerDuration.Record(seconds, tags);
     }
 }

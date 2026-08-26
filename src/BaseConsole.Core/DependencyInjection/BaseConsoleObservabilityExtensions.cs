@@ -189,6 +189,16 @@ public static class BaseConsoleObservabilityExtensions
                     {
                         Boundaries = IngressMetrics.ArrivalSecondsBoundaries(),
                     })
+                // The arrival ladder rather than the transport's. Handler time sits in the same
+                // band as arrival time -- tens of milliseconds with a tail -- and the transport's
+                // boundaries stop at 10s, which would put a backlogged handler in +Inf where a
+                // quantile has nothing to interpolate between.
+                .AddView(
+                    IngressMetrics.ConsumerDurationInstrument,
+                    new ExplicitBucketHistogramConfiguration
+                    {
+                        Boundaries = IngressMetrics.ArrivalSecondsBoundaries(),
+                    })
                 // No ASP.NET Core or HttpClient instrumentation: a worker's only inbound surface is
                 // its own health probes, so those would measure nothing but the probing.
                 .AddRuntimeInstrumentation()
