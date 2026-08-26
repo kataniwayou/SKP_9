@@ -32,7 +32,7 @@ public sealed class PipelineAmbientTagTests
 
         await EgressMetrics.MeasureAsync(
             EgressMetrics.RouteQueue, "q", "step-outcome", () => Task.CompletedTask);
-        IngressMetrics.RecordConsumed("q", "step-outcome", "acked", "handled", landed: true);
+        IngressMetrics.RecordConsumed("q", "step-outcome", "acked", "handled");
 
         Assert.All(metrics.For("pipeline.messages.produced"), m => Assert.Null(RoleOf(m)));
         Assert.All(metrics.For("pipeline.messages.consumed"), m => Assert.Null(RoleOf(m)));
@@ -50,7 +50,7 @@ public sealed class PipelineAmbientTagTests
 
             await EgressMetrics.MeasureAsync(
                 EgressMetrics.RouteQueue, "q", "step-outcome", () => Task.CompletedTask);
-            IngressMetrics.RecordConsumed("q", "step-outcome", "acked", "handled", landed: true);
+            IngressMetrics.RecordConsumed("q", "step-outcome", "acked", "handled");
 
             Assert.Equal("follower", RoleOf(Assert.Single(metrics.For("pipeline.messages.produced"))));
             Assert.Equal("follower", RoleOf(Assert.Single(metrics.For("pipeline.messages.consumed"))));
