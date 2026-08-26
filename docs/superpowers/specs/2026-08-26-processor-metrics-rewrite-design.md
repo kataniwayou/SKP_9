@@ -202,6 +202,13 @@ transform. What is lost is the transform-versus-framework split; with prefetch
 fixed at 1 and the framework path a fixed sequence of store reads and sends, the
 transform dominates the variance anyway.
 
+A second split is lost alongside it and is not the same one: `pipeline.process.
+duration` carried an `outcome` tag that separated a slow success from a slow
+failure inside the transform. A faulted transform still ACKs the delivery — the
+outcome leaves as a message, per §9's ACK-split non-goal — so both now land on
+`disposition="acked"` with nothing to tell them apart by duration. A slow
+success and a slow failure read identically on `pipeline.consumer.duration`.
+
 ### 5.4 `pipeline.deadletter.depth` — now event-driven
 
 The value changes on exactly two occasions: something is parked, or an operator
@@ -296,7 +303,7 @@ is the check: parks that do not appear there did not land.
 | --- | --- |
 | `pipeline.consumer.consuming` | The process asserting its own health, which is why every board wraps it in a liveness window. `pipeline.queue.consumers` is broker-side, reads 0 the instant a consumer detaches, needs no window, and survives the replica going away. |
 | `pipeline.consumer.inflight` | Designed to be read against `PrefetchCount` for saturation. Prefetch is 1, so it is 0 or 1 and says nothing. |
-| `pipeline.consumer.channel.resets` | Existed to explain `landed=false`, which is dropped. A lost ack now shows as an extra `consumed` increment. |
+| `pipeline.consumer.channel.resets` | **Correction, 2026-08-26:** the original reason given — "existed to explain `landed=false`, which is dropped" — is true of the instrument's origin and false of what it was doing on this branch's own boards at the time it was cut. The panel this branch deleted is the one that caught S9: one of two replicas had its broker connection closed and re-closed for a minute, the counter went 1→10 on that replica and stayed 1 on its peer, while `Consuming` read 1 throughout because recovery restored the consumer inside one export interval. The removal stands; the reason given for it did not. See §10.5. |
 | `pipeline.process.duration` | Subsumed by `pipeline.consumer.duration` (5.3). Its `AddView` in `ProcessorHost.Create` goes with it. |
 | `pipeline.step.elapsed` | Removed from the set by decision, with its cost on the table at the time. **Correction, 2026-08-26:** an earlier draft of this row said "out of scope for the processor board", which was factually wrong — it was never on the processor board. It lived on **SKP Flow**, so removing it takes the only door-to-door measure of what a workflow experiences off a board this rewrite does not otherwise touch. The removal stands; the reason given for it did not. See §10.4. |
 | `pipeline.duplicate.suppressed` | That path returns normally and the delivery is ACKed, so it is counted there. **Consequence:** the acked count now mixes real transform runs with skipped duplicates, and the "entry absent" condition — which `ProcessDispatchHandler` documents as possibly a *silent loss* rather than a safe duplicate — has only its log line left. |
@@ -459,6 +466,32 @@ as a broken reference.
    leanness this set was trimmed for, the instrument is restorable — it is one
    histogram and one `RecordArrival` argument, both recoverable from the
    `pre-metrics-rewrite` tag.
+5. **A flapping broker connection that heals inside one probe interval is now
+   unobservable.** Recorded here because §6's original justification for
+   removing `pipeline.consumer.channel.resets` was wrong, and a wrong reason
+   outlives a right decision.
+
+   The fault class this closes off: a replica's broker connection closing and
+   re-closing repeatedly, healing each time before the next scrape — S9
+   produced exactly this, once a minute, on one of two replicas. No instrument
+   in the new set moves during that window. `pipeline.consumer.consuming` is
+   gone, and while it lived it read 1 throughout the original incident anyway
+   — recovery restored the consumer inside one export interval, which is
+   precisely the case a self-asserted gauge cannot see. Its nominated
+   replacement, `pipeline.queue.consumers`, is broker-side truth and needs no
+   liveness window, but its own description in `QueueDepthMetrics` says
+   outright that it "cannot see a consumer that reattaches inside one probe
+   interval — which is exactly what the S9 scenario produced." Nothing counts
+   the reconnect itself.
+
+   The removal stands: `channel.resets` existed to explain a `landed` value
+   this rewrite also drops, and keeping it only for that reason would be
+   keeping dead machinery. What is lost is coverage of the S9 fault class, not
+   the original justification for cutting it. Restoring that coverage would
+   take a counter wired to the connection's own recovery event — the same
+   shape `channel.resets` had, one `Counter<long>` incremented on reconnect —
+   recoverable from the `pre-metrics-rewrite` tag, the same tag §10.4 points
+   to for `step.elapsed`.
 
 ---
 
