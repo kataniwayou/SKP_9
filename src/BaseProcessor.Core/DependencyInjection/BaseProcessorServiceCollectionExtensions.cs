@@ -126,10 +126,16 @@ public static class BaseProcessorServiceCollectionExtensions
 
         // A holder per loop. Sharing one would let either loop's beat mask the other's death, which
         // is worse than not watching at all — it looks like coverage.
+        //
+        // The startup loop is deliberately NOT wrapped in CountingLoopHeartbeat. It retires the
+        // moment Loop B resolves the last schema, so a rate over it would read zero for the life
+        // of the process: a permanently flat line that says nothing about a loop that is
+        // supposed to have finished.
         services.AddKeyedSingleton<ILoopHeartbeat>(
             StartupLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
         services.AddKeyedSingleton<ILoopHeartbeat>(
-            LivenessLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
+            LivenessLoop, (sp, _) => new CountingLoopHeartbeat(
+                new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()), LivenessLoop));
 
         services.AddHostedService(sp => ActivatorUtilities.CreateInstance<ProcessorStartupOrchestrator>(
             sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(StartupLoop)));
