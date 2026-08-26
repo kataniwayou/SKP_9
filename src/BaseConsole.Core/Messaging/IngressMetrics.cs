@@ -9,10 +9,11 @@ namespace BaseConsole.Core.Messaging;
 /// Pipeline metrics for the ingress half: one measurement per delivery, whatever the consumer
 /// decided to do with it.
 /// <para>
-/// <b>Intent and landing are separate attributes.</b> <c>disposition</c> and <c>reason</c> say what
-/// the consumer decided; <c>landed</c> says whether the broker was ever told. Collapsing them would
-/// make a gate pause during a broker blip report as a channel fault, because only one of the two
-/// facts could win the slot.
+/// <b><c>disposition</c> and <c>reason</c> say what the consumer decided, nothing more.</b>
+/// Whether the broker was actually told the delivery was done with is not on this metric at all —
+/// it survives in the consumer's own log line, where the operator deciding whether to search the
+/// dead-letter queue reads it, and on a board it is answered by <c>pipeline.deadletter.depth</c>
+/// instead.
 /// </para>
 /// </summary>
 internal static class IngressMetrics
@@ -29,7 +30,7 @@ internal static class IngressMetrics
     private static readonly Counter<long> Consumed = Meter.CreateCounter<long>(
         "pipeline.messages.consumed",
         unit: "{message}",
-        description: "Deliveries handled, by queue, type, what was decided, and whether the broker was told.");
+        description: "Deliveries handled, by queue, type, and what was decided.");
 
     private static readonly UpDownCounter<long> Inflight = Meter.CreateUpDownCounter<long>(
         "pipeline.consumer.inflight",
@@ -207,9 +208,15 @@ internal static class IngressMetrics
     /// author's transform, the only span whose length is a property of someone's implementation
     /// rather than of this framework. One instrument, on the side that can actually be slow.
     /// </para>
+    /// <para>
+    /// <b>There is no <c>landed</c> tag.</b> Whether the broker was actually told survives in the
+    /// consumer's own log line, where the operator deciding whether to search the dead-letter queue
+    /// reads it. On a board the same question is answered by
+    /// <c>pipeline.deadletter.depth</c>: a park that did not land never arrives there.
+    /// </para>
     /// </summary>
     internal static void RecordConsumed(
-        string queue, string type, string disposition, string reason, bool landed)
+        string queue, string type, string disposition, string reason)
     {
         var tags = new TagList
         {
@@ -217,9 +224,6 @@ internal static class IngressMetrics
             { "type", type },
             { "disposition", disposition },
             { "reason", reason },
-            // Lower-case literals rather than a bool: an exporter is free to render a boolean tag
-            // as "True", and a dashboard written against "true" would then match nothing.
-            { "landed", landed ? "true" : "false" },
         };
 
         // The host's process-wide tag, if it installed one: role=leader|follower on the

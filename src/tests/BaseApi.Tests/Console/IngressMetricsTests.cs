@@ -19,9 +19,11 @@ namespace BaseApi.Tests.Console;
 /// broker behind it.
 /// <para>
 /// That works because <c>disposition</c> and <c>reason</c> are decided before any channel is
-/// touched, and <c>landed</c> — which is the only part that needs one — is asserted false
-/// throughout. Splitting the two facts apart is what bought this coverage; while a lost
-/// acknowledgement was a sixth disposition value, none of these rows were reachable hermetically.
+/// touched. Whether the broker was actually told — the fact <c>landed</c> used to carry on this
+/// metric — no longer needs asserting here at all: it survives only in the consumer's own log
+/// line, which is not this class's concern. Splitting the two facts apart is what bought this
+/// coverage; while a lost acknowledgement was a sixth disposition value, none of these rows were
+/// reachable hermetically.
 /// </para>
 /// </summary>
 public sealed class IngressMetricsTests
@@ -178,7 +180,6 @@ public sealed class IngressMetricsTests
         var m = TheOnlyConsumedMeasurement(metrics);
         Assert.Equal("requeued", m.Tags["disposition"]);
         Assert.Equal("escaped", m.Tags["reason"]);
-        Assert.Equal("false", m.Tags["landed"]);
     }
 
     [Fact]
@@ -245,35 +246,24 @@ public sealed class IngressMetricsTests
     }
 
     [Fact]
-    public async Task AnAckedRowReportsLandedFalseWhenThereIsNoChannel()
+    public void ADeliveryCarriesExactlyFourTagsPlusAnyAmbientOne()
     {
-        // The other half of the split. With no channel the acknowledgement cannot be issued, so
-        // the broker will redeliver -- which is exactly the silent retry amplification `landed`
-        // exists to expose. A row that reported landed=true here would be lying.
-        using var metrics = new MetricCollector(IngressMetrics.MeterName);
-        var consumer = BuildConsumer(
-            await GateAsync(open: true), new Handler(() => Task.CompletedTask));
-
-        await consumer.OnReceivedAsync(this, Delivery());
-
-        Assert.Equal("false", TheOnlyConsumedMeasurement(metrics).Tags["landed"]);
-    }
-
-    [Fact]
-    public void LandedRendersAsTheLowerCaseStringTrueNotABooleanTrue()
-    {
-        // The half of `landed` that a hermetic test CAN reach: a live broker is needed to make
-        // SafeAckAsync/SafeNackAsync actually return true, but the string-rendering rule -- lower
-        // case literals, never a bool an exporter could print as "True" -- needs no broker at all.
         using var metrics = new MetricCollector(IngressMetrics.MeterName);
 
-        IngressMetrics.RecordConsumed(
-            Queue, Type, "acked", "handled", landed: true);
+        IngressMetrics.RecordConsumed("q-tags", "T", "parked", "refused");
 
-        var m = TheOnlyConsumedMeasurement(metrics);
-        Assert.Equal("true", m.Tags["landed"]);
+        var mine = metrics.For("pipeline.messages.consumed")
+            .Single(m => m.Tags["queue"] == "q-tags");
+
+        Assert.Equal("T", mine.Tags["type"]);
+        Assert.Equal("parked", mine.Tags["disposition"]);
+        Assert.Equal("refused", mine.Tags["reason"]);
+
+        // landed is gone. A park that the broker was never told about is now indistinguishable
+        // here from one it was -- the check is pipeline.deadletter.depth, where a park that did
+        // not land never appears.
+        Assert.False(mine.Tags.ContainsKey("landed"));
     }
-
 
     [Fact]
     public void TheConsumingGaugeReportsOneSeriesPerQueueFromASingleInstrument()
