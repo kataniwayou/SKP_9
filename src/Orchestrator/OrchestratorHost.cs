@@ -252,8 +252,8 @@ public static class OrchestratorHost
         // exactly one consumer -- this replica -- so a wedge there is invisible to every aggregate
         // on every board.
         //
-        // Ten seconds, against the dead-letter probe's thirty. See QueueDepthProbe for why the two
-        // intervals differ and what the shorter one costs.
+        // Ten seconds, against the dead-letter probe's five minutes. See QueueDepthProbe for why the
+        // two intervals differ and what the shorter one costs.
         //
         // THE PROCESSOR WORK QUEUES ARE ON THIS LIST, AND THAT IS THE POINT. The processor probes
         // its own queue too, but a probe cannot report the consequence of its own host being gone:

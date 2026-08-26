@@ -22,8 +22,8 @@ namespace Messaging.Transport;
 /// <para>
 /// <b>What it costs.</b> One channel open and close per queue per pass — the blast-radius trade
 /// <see cref="QueueStatsProbe"/> explains. At four queues on a ten-second interval that is 0.4
-/// channels a second per replica, against 0.1 for the dead-letter probe's three queues at thirty.
-/// Trivial for a broker, and worth stating because it is the price of the resolution above.
+/// channels a second per replica, against 0.01 for the dead-letter probe's three queues at five
+/// minutes. Trivial for a broker, and worth stating because it is the price of the resolution above.
 /// </para>
 /// <para>
 /// <b>Every replica reports the same numbers for a shared queue, and that redundancy is wanted.</b>

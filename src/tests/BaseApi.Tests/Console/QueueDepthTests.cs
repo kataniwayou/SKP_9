@@ -20,10 +20,11 @@ namespace BaseApi.Tests.Console;
 /// SLOWER than its producer is not broken by any of their definitions.
 /// </para>
 /// <para>
-/// <b>Consumers is broker-side truth, which nothing else here is.</b> <c>pipeline.consumer.consuming</c>
-/// is the process asserting its own health; a dead replica's copy was held at 1 by the collector
-/// until liveness windows were wrapped around every read of it. This count comes from the broker's
-/// own reply to a passive declare, so it needs no such window.
+/// <b>Consumers is broker-side truth, which nothing else here is.</b> The pipeline used to also carry
+/// <c>pipeline.consumer.consuming</c>, the process asserting its own health; a dead replica's copy was
+/// held at 1 by the collector until liveness windows were wrapped around every read of it. This count
+/// comes from the broker's own reply to a passive declare instead, so it needs no such window — which
+/// is why the self-asserted gauge was removed rather than kept alongside it.
 /// </para>
 /// </summary>
 public sealed class QueueDepthTests : IDisposable

@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using BaseProcessor.Core.Identity;
 using Microsoft.Extensions.Hosting;
@@ -56,9 +55,9 @@ internal sealed class ProcessorPipelineMetricsHost : IHostedService, IDisposable
     /// <b>This registry exists so there is ONE observable instrument rather than one per owner.</b>
     /// There is exactly one <see cref="ProcessorPipelineMetricsHost"/> per process in production, but
     /// every test in this class constructs its own — and a second <c>CreateObservableGauge</c> call
-    /// on the same instrument name is the duplicate-stream hazard <c>IngressMetrics</c> and
-    /// <c>L2GateMetrics</c> both document: the OpenTelemetry SDK warns about it and may drop the
-    /// duplicate. Reading each owner's context through this registry keeps exactly one callback alive
+    /// on the same instrument name is the duplicate-stream hazard <c>L2GateMetrics</c> documents: the
+    /// OpenTelemetry SDK warns about it and may drop the duplicate. Reading each owner's context
+    /// through this registry keeps exactly one callback alive
     /// for the process's lifetime, with <see cref="Dispose"/> removing an owner's entry rather than
     /// tearing down the instrument — which cannot be done short of disposing the Meter itself.
     /// </para>

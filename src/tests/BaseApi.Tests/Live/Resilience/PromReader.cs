@@ -25,12 +25,9 @@ internal sealed class PromReader
         {
             ["gate trips"] = "sum(pipeline_gate_trips_total)",
             ["gate open"] = "min(pipeline_gate_open_ratio)",
-            ["channel resets"] = "sum(pipeline_consumer_channel_resets_total)",
-            ["consumers consuming"] = "min(pipeline_consumer_consuming_ratio)",
             ["transient sends"] = "sum(pipeline_messages_produced_total{outcome=\"transient\"})",
             ["requeued or parked"] =
                 "sum(pipeline_messages_consumed_total{disposition=~\"requeued|parked\"})",
-            ["inflight"] = "sum(pipeline_consumer_inflight)",
         };
 
     private readonly HttpClient _http;
