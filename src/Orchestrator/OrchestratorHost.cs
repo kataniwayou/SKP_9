@@ -81,6 +81,21 @@ public static class OrchestratorHost
     public const string ReapLoop = L1ReapService.LoopName;
 
     /// <summary>
+    /// Heartbeat key for this host's queue-depth probe loop, and the <c>loop</c> label its
+    /// iterations counter carries.
+    /// <para>
+    /// <b>The literal is duplicated from <c>BaseProcessorServiceCollectionExtensions.QueueDepthLoop</c>
+    /// on purpose, and the two must not drift.</b> Both hosts run the same probe on the same cadence,
+    /// so one label value lets a single panel compare them; the alternative was moving the constant
+    /// into the transport beside <c>QueueDepthProbe</c>, which would edit <c>BaseProcessor.Core</c> and
+    /// therefore move <c>Processor.Sample</c>'s SourceHash — forcing a processor image rebuild and a
+    /// database row repoint for a rename that changes no behaviour. A five-word comment is cheaper
+    /// than that, so this is the comment.
+    /// </para>
+    /// </summary>
+    public const string QueueDepthLoop = "queue-depth";
+
+    /// <summary>
     /// The production entry point: builds the host, starts it, and returns it running.
     /// </summary>
     public static async Task<IHost> StartAsync(
@@ -291,9 +306,16 @@ public static class OrchestratorHost
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
             DispatchedQueues.Note,
-            // Unwatched: this host has no keyed heartbeat for the depth loop, and adding a live
-            // check here is out of scope for the processor's metric rewrite.
-            beat: null));
+            // COUNTED, not merely stamped. The holder exists only so this loop reports
+            // pipeline.loop.iterations{loop="queue-depth"} like the processor's does; nothing reads
+            // its stamp. A LoopLivenessHealthCheck over it is deliberately NOT registered -- that
+            // would give this host a new way to go NotReady, which is a readiness decision rather
+            // than a metrics one, and it is not the change being made here.
+            sp.GetRequiredKeyedService<ILoopHeartbeat>(QueueDepthLoop).Beat));
+
+        builder.Services.AddKeyedSingleton<ILoopHeartbeat>(
+            QueueDepthLoop, (sp, _) => new CountingLoopHeartbeat(
+                new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()), QueueDepthLoop));
 
         // Loop 2 and its admission latch. The position of the next two lines is the point of them
         // being here at all: AddBaseConsoleGating below TryAdds AlwaysOpenAdmission as the default
@@ -311,14 +333,23 @@ public static class OrchestratorHost
         // Hosted purely so the container constructs it; see the type's own remarks.
         builder.Services.AddHostedService<OrchestratorPipelineMetrics>();
 
+        // Wrapped, so this loop reports pipeline.loop.iterations as well as stamping the holder the
+        // liveness check reads. Registering a heartbeat without the wrapper is the visible omission
+        // CountingLoopHeartbeat documents, and this host carried it on all three of its loops.
+        //
+        // Retirement survives the wrapper: CountingLoopHeartbeat delegates Retire() and IsRetired to
+        // the inner holder, which matters here and nowhere else -- hydration is the one loop in the
+        // stack that finishes and retires rather than running for the life of the process.
         builder.Services.AddKeyedSingleton<ILoopHeartbeat>(
-            HydrationLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
+            HydrationLoop, (sp, _) => new CountingLoopHeartbeat(
+                new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()), HydrationLoop));
 
         // Loop 3 and its own heartbeat holder. Not leader-gated: L1 is per-replica in-memory state, so
         // each replica marked its own stopped workflows and each has to prune its own. Gating this on
         // leadership would leave every follower's marks permanent.
         builder.Services.AddKeyedSingleton<ILoopHeartbeat>(
-            ReapLoop, (sp, _) => new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()));
+            ReapLoop, (sp, _) => new CountingLoopHeartbeat(
+                new LoopHeartbeat(sp.GetRequiredService<TimeProvider>()), ReapLoop));
 
         builder.Services.AddHostedService<L1ReapService>();
 
