@@ -1,3 +1,4 @@
+using BaseApi.Tests.Support;
 using BaseConsole.Core.DependencyInjection;
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Loop;
@@ -16,6 +17,7 @@ namespace BaseApi.Tests.Console;
 /// it, a probe loop that stopped iterating leaves the gate shut, the consumer paused, the work queue
 /// filling — and every health probe green.
 /// </summary>
+[Collection(EnvironmentCollection.Name)]
 public sealed class ConsoleGatingWiringTests
 {
     private static ServiceProvider Build(FakeTimeProvider? clock = null)
