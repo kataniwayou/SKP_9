@@ -150,7 +150,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])) or vector(0)",
+          "expr": "min by (service_instance_id)(last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -217,7 +217,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(last_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])) or vector(0)",
+          "expr": "min by (service_instance_id) (last_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -284,7 +284,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[5m])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m) or vector(0)), 0))",
+          "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[5m]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -351,7 +351,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[5m])) or vector(0)) > (clamp_min((sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m) or vector(0)), 0))",
+          "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[5m]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -418,7 +418,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range) or vector(0)), 0))",
+          "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[$__range]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -485,7 +485,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range) or vector(0)), 0))",
+          "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[$__range]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -620,7 +620,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(changes(pipeline_process_start_timestamp_seconds{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) or vector(0)",
+          "expr": "max by (service_instance_id) (changes(pipeline_process_start_timestamp_seconds{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range]))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -700,8 +700,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (queue,disposition) (rate(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
-          "legendFormat": "{{queue}} {{disposition}}",
+          "expr": "(sum by (queue,disposition,service_instance_id) (rate(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
+          "legendFormat": "{{queue}} {{disposition}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -787,8 +787,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (type,outcome) (rate(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
-          "legendFormat": "{{type}} / {{outcome}}",
+          "expr": "sum by (type,outcome,service_instance_id) (rate(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "legendFormat": "{{type}} / {{outcome}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -855,7 +855,7 @@
     {
       "id": 85,
       "type": "timeseries",
-      "title": "Messages consumed by replica",
+      "title": "Consumption balance",
       "description": "Measures the rate of acked `pipeline.messages.consumed` per replica. Replicas share one queue and the broker round-robins, so a replica near zero beside working peers is consuming nothing while still looking healthy.\n\nGated on identity liveness, so a departed replica's line ENDS at its true last rate instead of decaying with the range.",
       "datasource": {
         "type": "prometheus",
@@ -961,8 +961,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
-          "legendFormat": "mean {{queue}} {{disposition}}",
+          "expr": "(sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
+          "legendFormat": "mean {{queue}} {{disposition}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1048,8 +1048,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le,destination) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
-          "legendFormat": "p95 {{destination}}",
+          "expr": "histogram_quantile(0.95, sum by (le,destination,service_instance_id) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{destination}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         },
@@ -1059,8 +1059,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le,destination) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
-          "legendFormat": "p99 {{destination}}",
+          "expr": "histogram_quantile(0.99, sum by (le,destination,service_instance_id) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{destination}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         },
@@ -1070,8 +1070,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (destination) (rate(pipeline_produce_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (destination) (rate(pipeline_produce_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
-          "legendFormat": "mean {{destination}}",
+          "expr": "sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "legendFormat": "mean {{destination}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1273,8 +1273,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(max by (queue) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId\"}[40s]))) or (group by (queue) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId\"}[$__range])) * 0)",
-          "legendFormat": "{{queue}}",
+          "expr": "(max by (queue,service_instance_id) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))) or (group by (queue,service_instance_id) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
+          "legendFormat": "{{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1365,8 +1365,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (queue) (last_over_time(pipeline_queue_consumers{queue=~\"processor-$processorId\"}[40s]))",
-          "legendFormat": "{{queue}}",
+          "expr": "max by (queue,service_instance_id) (last_over_time(pipeline_queue_consumers{queue=~\"processor-$processorId\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
+          "legendFormat": "{{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1457,8 +1457,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (queue) (last_over_time(pipeline_deadletter_depth{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[2m]))",
-          "legendFormat": "{{queue}}",
+          "expr": "max by (queue,service_instance_id) (last_over_time(pipeline_deadletter_depth{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[2m]))",
+          "legendFormat": "{{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1661,8 +1661,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (outcome) (rate(pipeline_gate_probe_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
-          "legendFormat": "{{outcome}}",
+          "expr": "sum by (outcome,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1748,7 +1748,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
           "legendFormat": "p95",
           "range": true,
           "editorMode": "code"
@@ -1759,7 +1759,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "range": true,
           "editorMode": "code"

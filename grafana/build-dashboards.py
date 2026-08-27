@@ -191,7 +191,13 @@ def live(series):
 VERDICT_WINDOW = "5m"
 
 
-def recent(series, window="$__range"):
+def by(labels):
+    """A `by (...)` clause, or nothing. Keeps the call sites readable where a grouping is
+    conditional -- `min{by(by_)}(...)` reads as the expression it produces."""
+    return f" by ({labels})" if labels else ""
+
+
+def recent(series, window="$__range", by_="", carrier=""):
     """A fault counter read as growth over a window -- correct at series birth AND
     correct across a process restart, and NOT sticky for the life of the process.
 
@@ -232,10 +238,21 @@ def recent(series, window="$__range"):
     `counted()` 1, `recent("3h")` 0. A verdict row that warns at rest trains an operator
     to ignore the colour, which costs more than the stale fact was worth.
     """
-    grew = f"sum(increase({series}[{window}])) or vector(0)"
-    born = (f"clamp_min((sum({series}) or vector(0)) "
-            f"- (sum({series} offset {window}) or vector(0)), 0)")
-    return f"(({grew}) > ({born})) or ({born})"
+    # `by_` splits the count per replica, so a verdict stat renders one tile each rather
+    # than one number for the fleet. Empty keeps the original fleet-wide form, which is
+    # what every board outside the worker pair still wants.
+    # `or vector(0)` is what keeps a fault counter reporting a green ZERO instead of
+    # "No data" -- zero is a report, not a silence. Split per replica it cannot do that
+    # job: a labelless zero matches no replica, so it is appended forever as a stray
+    # tile. `carrier` replaces it with one zero PER REPLICA, derived from a gauge every
+    # replica always emits, so absence still renders as zero and nothing is invented.
+    agg  = f"sum by ({by_})" if by_ else "sum"
+    zero = "" if by_ else " or vector(0)"
+    grew = f"{agg}(increase({series}[{window}])){zero}"
+    born = (f"clamp_min(({agg}({series}){zero}) "
+            f"- ({agg}({series} offset {window}){zero}), 0)")
+    expr = f"(({grew}) > ({born})) or ({born})"
+    return f"({expr}) or ({carrier} * 0)" if (by_ and carrier) else expr
 
 
 def seeded(expr, carrier, tag_sets):
@@ -709,7 +726,7 @@ WORKER_F = ('service_name=~"$service_name",service_version=~"$service_version",'
             'service_instance_id=~"$service_instance_id"')
 
 
-def verdict_shared(layout, f, window=VERDICT_WINDOW):
+def verdict_shared(layout, f, window=VERDICT_WINDOW, by_=""):
     """The three verdict stats both worker roles carry.
 
     `window` is the fault-counter lookback, defaulting to the module constant. It reaches
@@ -746,15 +763,19 @@ def verdict_shared(layout, f, window=VERDICT_WINDOW):
     role-specific posture stats between the two halves -- v[:1] and v[1:] -- so
     anything added here changes those indices.
     """
+    seed = (f'group by ({by_}) (last_over_time(pipeline_gate_open_ratio{{{f}}}[$__range]))'
+            if by_ else "")
+
     return [
         stat(layout, "L2 gate",
-             [f'min({live(f"pipeline_gate_open_ratio{{{f}}}")}) or vector(0)'],
+             [f'min{by(by_)}({live(f"pipeline_gate_open_ratio{{{f}}}")})'
+              f'{"" if by_ else " or vector(0)"}'],
              desc="The single best answer to 'why did the pipeline stop'. 0 means "
                   "the gate is shut and deliveries are being requeued.",
              thresholds=T_POSTURE, decimals=0),
         stat(layout, f"Not acked ({window})",
              [recent(f'pipeline_messages_consumed_total{{{f},'
-                     f'disposition=~"requeued|parked"}}', window)],
+                     f'disposition=~"requeued|parked"}}', window, by_, seed)],
              desc="Deliveries the consumer refused or sent back **in the last "
                   + window + "**. Drill into 'reason' on the pipeline tier for "
                   "why, and read the Since tier for the same count over the range."
@@ -776,7 +797,7 @@ def verdict_shared(layout, f, window=VERDICT_WINDOW):
              thresholds=T_WARN, decimals=0),
         stat(layout, f"Egress faults ({window})",
              [recent(f'pipeline_messages_produced_total{{{f},'
-                     f'outcome=~"transient|unroutable|refused"}}', window)],
+                     f'outcome=~"transient|unroutable|refused"}}', window, by_, seed)],
              desc="unroutable = the queue is not declared. transient = the broker "
                   "is unreachable. Opposite remedies; this is the only signal that "
                   "separates them." + PARA +
@@ -788,7 +809,7 @@ def verdict_shared(layout, f, window=VERDICT_WINDOW):
     ]
 
 
-def since_shared(layout, f, restarts=True):
+def since_shared(layout, f, restarts=True, by_=""):
     """The same fault counters over the visible range, for the Since tier.
 
     `restarts` drops the JIT-reset restart stat for a caller that measures restarts
@@ -808,15 +829,18 @@ def since_shared(layout, f, restarts=True):
     both jobs, and the sticky half won: every one of these read non-zero on a healthy
     stack.
     """
+    seed = (f'group by ({by_}) (last_over_time(pipeline_gate_open_ratio{{{f}}}[$__range]))'
+            if by_ else "")
+
     panels = [
         stat(layout, "Not acked",
              [recent(f'pipeline_messages_consumed_total{{{f},'
-                     f'disposition=~"requeued|parked"}}')],
+                     f'disposition=~"requeued|parked"}}', by_=by_, carrier=seed)],
              desc="Deliveries refused or sent back over the visible range.",
              thresholds=T_WARN, decimals=0),
         stat(layout, "Egress faults",
              [recent(f'pipeline_messages_produced_total{{{f},'
-                     f'outcome=~"transient|unroutable|refused"}}')],
+                     f'outcome=~"transient|unroutable|refused"}}', by_=by_, carrier=seed)],
              desc="Any send that did not reach the broker, over the visible range.",
              thresholds=T_WARN, decimals=0),
         stat(layout, "Dead-lettered",
@@ -894,18 +918,18 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
     rf = role_f
     return [
         timeseries(layout, "Produced by type and outcome",
-                   [(f'sum by (type,outcome) (rate(pipeline_messages_produced_total'
-                     f'{{{f}{rf}}}[$__rate_interval]))', "{{type}} / {{outcome}}")],
+                   [(f'sum by (type,outcome,service_instance_id) (rate(pipeline_messages_produced_total'
+                     f'{{{f}{rf}}}[$__rate_interval]))', "{{type}} / {{outcome}} {{service_instance_id}}")],
                    desc="Egress. outcome != accepted is a fault.",
                    unit="reqps"),
         timeseries(layout, "Consumer paths",
-                   [(seeded(f'sum by (queue,disposition) '
+                   [(seeded(f'sum by (queue,disposition,service_instance_id) '
                             f'(rate(pipeline_messages_consumed_total'
                             f'{{{f}{rf}}}[$__rate_interval]))',
-                            f'group by (queue) (last_over_time('
+                            f'group by (queue,service_instance_id) (last_over_time('
                             f'pipeline_messages_consumed_total{{{f}{rf}}}[$__range]))',
                             consumed_seed or []),
-                     "{{queue}} {{disposition}}")],
+                     "{{queue}} {{disposition}} {{service_instance_id}}")],
                    desc="Ingress, split by which exit the delivery took. Exactly one "
                         "increment per delivery, on every exit path of the consumer."
                         + PARA +
@@ -925,16 +949,16 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                         "shape a lost ack now makes.",
                    unit="reqps"),
         timeseries(layout, "Produce duration p95 / p99",
-                   [(f'histogram_quantile(0.95, sum by (le,destination) '
+                   [(f'histogram_quantile(0.95, sum by (le,destination,service_instance_id) '
                      f'(rate(pipeline_produce_duration_seconds_bucket{{{f}{rf}}}'
-                     f'[$__rate_interval])))', "p95 {{destination}}"),
-                    (f'histogram_quantile(0.99, sum by (le,destination) '
+                     f'[$__rate_interval])))', "p95 {{destination}} {{service_instance_id}}"),
+                    (f'histogram_quantile(0.99, sum by (le,destination,service_instance_id) '
                      f'(rate(pipeline_produce_duration_seconds_bucket{{{f}{rf}}}'
-                     f'[$__rate_interval])))', "p99 {{destination}}"),
-                    (f'sum by (destination) (rate(pipeline_produce_duration_seconds_sum'
+                     f'[$__rate_interval])))', "p99 {{destination}} {{service_instance_id}}"),
+                    (f'sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_sum'
                      f'{{{f}{rf}}}[$__rate_interval])) '
-                     f'/ sum by (destination) (rate(pipeline_produce_duration_seconds_count'
-                     f'{{{f}{rf}}}[$__rate_interval]))', "mean {{destination}}")],
+                     f'/ sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_count'
+                     f'{{{f}{rf}}}[$__rate_interval]))', "mean {{destination}} {{service_instance_id}}")],
                    desc="A real broker round-trip to publisher confirmation, not the "
                         "time to write a frame." + PARA + "The mean rides alongside the "
                         "quantiles deliberately. It comes from sum/count and so is "
@@ -949,8 +973,8 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                    thresholds=normal_upto(0.05),
                    unit="s"),
         timeseries(layout, "L2 BIT verdicts",
-                   [(f'sum by (outcome) (rate(pipeline_gate_probe_duration_seconds_count'
-                     f'{{{f}}}[$__rate_interval]))', "{{outcome}}")],
+                   [(f'sum by (outcome,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_count'
+                     f'{{{f}}}[$__rate_interval]))', "{{outcome}} {{service_instance_id}}")],
                    desc="The verdict MIX behind every probe the loop ran, not just the "
                         "duration of the ones that came back healthy." + PARA +
                         "**`timeout` and `failed` call for opposite operator actions, and "
@@ -968,10 +992,10 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                         "for a flapping store to hide in.",
                    unit="reqps"),
         timeseries(layout, "Store probe latency p95 / p99",
-                   [(f'histogram_quantile(0.95, sum by (le) '
+                   [(f'histogram_quantile(0.95, sum by (le,service_instance_id) '
                      f'(rate(pipeline_gate_probe_duration_seconds_bucket'
                      f'{{{f},outcome="healthy"}}[$__rate_interval])))', "p95"),
-                    (f'histogram_quantile(0.99, sum by (le) '
+                    (f'histogram_quantile(0.99, sum by (le,service_instance_id) '
                      f'(rate(pipeline_gate_probe_duration_seconds_bucket'
                      f'{{{f},outcome="healthy"}}[$__rate_interval])))', "p99"),
                     (f'sum(rate(pipeline_gate_probe_duration_seconds_sum'
@@ -1013,8 +1037,8 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                    thresholds=normal_upto(0.005),
                    unit="s"),
         timeseries(layout, "Dead-letter depth by queue",
-                   [(f'max by (queue) (last_over_time('
-                     f'pipeline_deadletter_depth{{{f}}}[2m]))', "{{queue}}")],
+                   [(f'max by (queue,service_instance_id) (last_over_time('
+                     f'pipeline_deadletter_depth{{{f}}}[2m]))', "{{queue}} {{service_instance_id}}")],
                    desc="How many refused messages are sitting in each dead-letter "
                         "queue, right now. Should be flat at zero; a step up is a "
                         "workflow run that lost progress permanently." + PARA +
@@ -1120,8 +1144,16 @@ def causes_row(layout, f, w=12, restarts=True):
     return panels
 
 
-def depth_panels(layout, queue_filter, who, enumerate_names=False):
+def depth_panels(layout, queue_filter, who, enumerate_names=False, service_f=""):
     """Queue depth and attached consumers, filtered BY QUEUE rather than by service.
+
+    `service_f` appends the board's own selector, so the Processor id and Replica
+    dropdowns reach these two panels like every other. IT NARROWS WHAT THEY CAN SEE, and
+    that is the trade: `service_name` on these instruments labels the process doing the
+    PROBING, not the queue's owner, and the orchestrator probes the processor's queues
+    precisely so a queue stays observable when its own consumer is gone. Filtered to one
+    processor, these panels go empty in that case rather than showing the orchestrator's
+    view of the backlog -- which is on the orchestrator board.
 
     `enumerate_names` keeps a queue's legend entry when it has gone quiet inside the
     liveness window, by unioning the live max with a zero-valued series per queue seen
@@ -1143,11 +1175,11 @@ def depth_panels(layout, queue_filter, who, enumerate_names=False):
     return [
         timeseries(layout, "Queue depth by queue",
                    [(seeded(
-                       f'max by (queue) ({live(f"pipeline_queue_depth{{{queue_filter}}}")})',
-                       f'group by (queue) (last_over_time('
-                       f'pipeline_queue_depth{{{queue_filter}}}[$__range]))',
+                       f'max by (queue,service_instance_id) ({live(f"pipeline_queue_depth{{{queue_filter}{service_f}}}")})',
+                       f'group by (queue,service_instance_id) (last_over_time('
+                       f'pipeline_queue_depth{{{queue_filter}{service_f}}}[$__range]))',
                        [{}] if enumerate_names else []),
-                     "{{queue}}")],
+                     "{{queue}} {{service_instance_id}}")],
                    desc="Messages waiting in each of " + who + ", right now." + PARA +
                         "**The only leading indicator on these boards.** Every verdict stat is "
                         "coincident or lagging -- consuming drops once a consumer has already "
@@ -1174,8 +1206,8 @@ def depth_panels(layout, queue_filter, who, enumerate_names=False):
                    unit="short", minv=0, decimals=0, fill=15,
                    no_value="no queue depth reported -- nothing is probing these queues"),
         timeseries(layout, "Consumers attached by queue",
-                   [(f'max by (queue) ({live(f"pipeline_queue_consumers{{{queue_filter}}}")})',
-                     "{{queue}}")],
+                   [(f'max by (queue,service_instance_id) ({live(f"pipeline_queue_consumers{{{queue_filter}{service_f}}}")})',
+                     "{{queue}} {{service_instance_id}}")],
                    desc="How many consumers **the broker** has on each queue. Zero means nothing "
                         "is listening." + PARA +
                         "**This is now the ONLY signal that anything is listening, and that is "
@@ -1663,7 +1695,7 @@ def build_orchestrator():
     panels = []
 
     panels.append(row(lay, "1 - Verdict: is the orchestrator broken?"))
-    v = verdict_shared(lay, f)
+    v = verdict_shared(lay, f, by_="service_instance_id")
     panels += v[:1]
     panels += [
         stat(lay, "Leader",
@@ -1679,7 +1711,8 @@ def build_orchestrator():
                   "reaches 0; a replica killed outright leaves it held at 1.",
              thresholds=T_EXACTLY_ONE, decimals=0),
         stat(lay, "Hydration admitted",
-             [f'min({live(f"pipeline_hydration_admitted_ratio{{{f}}}")}) or vector(0)'],
+             [f'min by (service_instance_id) '
+              f'({live(f"pipeline_hydration_admitted_ratio{{{f}}}")})'],
              desc="Measures `pipeline.hydration.admitted`, minimum across replicas. 1 "
                   "once every replica's first hydration pass has finished and "
                   "consumption was admitted." + PARA +
@@ -1693,11 +1726,11 @@ def build_orchestrator():
 
     lay.newline()
     panels.append(row(lay, "2 - Since: what has already happened?"))
-    panels += since_shared(lay, f, restarts=False)
+    panels += since_shared(lay, f, restarts=False, by_="service_instance_id")
     panels += [
         stat(lay, "Restarts",
-             [f'max(changes(pipeline_process_start_timestamp_seconds{{{f}}}[$__range])) '
-              f'or vector(0)'],
+             [f'max by (service_instance_id) (changes('
+              f'pipeline_process_start_timestamp_seconds{{{f}}}[$__range]))'],
              desc="",
              thresholds=T_WARN, decimals=0),
     ]
@@ -1731,7 +1764,7 @@ def build_orchestrator():
                            "for the same reason: that loop retires once this turns green.",
                       mappings=M_ADMITTED),
         *depth_panels(lay, 'queue=~"orchestrator-.*"', "the orchestrator's queues",
-                      enumerate_names=True),
+                      enumerate_names=True, service_f="," + f),
         timeseries(lay, "Replica fan-out",
                    [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
                      f'{{{f},disposition="acked"}}[$__rate_interval])) '
@@ -1753,10 +1786,10 @@ def build_orchestrator():
                             f'/ sum by (queue,disposition) '
                             f'(rate(pipeline_consumer_duration_seconds_count{{{f}}}'
                             f'[$__rate_interval]))',
-                            f'group by (queue) (last_over_time('
+                            f'group by (queue,service_instance_id) (last_over_time('
                             f'pipeline_consumer_duration_seconds_count{{{f}}}[$__range]))',
                             DISPOSITIONS),
-                     "mean {{queue}} {{disposition}}")],
+                     "mean {{queue}} {{disposition}} {{service_instance_id}}")],
                    desc="", unit="s"),
         # The produce side is filtered by DESTINATION, not by this board's service filter:
         # the orchestrator's queues are published to by the processors and the API, so a
@@ -1967,7 +2000,7 @@ def worker_plan(posture_stats, posture_timelines):
         ("Messages", [
             "Messages consumed by disposition",
             "Produced by type and outcome",
-            "Messages consumed by replica",
+            "Consumption balance",
             "Consumer duration by disposition",
             "Produce duration",
             "Queue wait by queue",
@@ -2105,7 +2138,7 @@ PIPELINE_PANELS = {
         "The counter is seeded with Add(0) per loop at startup, so 0 means the loop "
         "stopped. An EMPTY panel means the process is not reporting at all."),
     "Replica fan-out": (
-        "Messages consumed by replica",
+        "Consumption balance",
         "Measures the rate of acked `pipeline.messages.consumed` per replica. Replicas "
         "share one queue and the broker round-robins, so a replica near zero beside "
         "working peers is consuming nothing while still looking healthy." + PARA +
@@ -2228,13 +2261,14 @@ def build_processor():
     panels = []
 
     panels.append(row(lay, "1 - Verdict: is the processor broken?"))
-    v = verdict_shared(lay, f)
+    v = verdict_shared(lay, f, by_="service_instance_id")
     # v[:1] is the posture half (L2 gate) and v[1:] the fault counters. It was v[:2] /
     # v[2:] while `Consuming` led the list; that stat is gone with its instrument.
     panels += v[:1]
     panels += [
         stat(lay, "Identity ready",
-             [f'min({live(f"pipeline_identity_ready_ratio{{{f}}}")}) or vector(0)'],
+             [f'min by (service_instance_id) '
+              f'({live(f"pipeline_identity_ready_ratio{{{f}}}")})'],
              desc="0 means the pod is up and waiting for a processor row whose "
                   "SourceHash matches its image. Running / NotReady with 0 restarts is "
                   "the designed behaviour, not a crash loop -- this is the metric that "
@@ -2245,11 +2279,11 @@ def build_processor():
 
     lay.newline()
     panels.append(row(lay, "2 - Since: what has already happened?"))
-    panels += since_shared(lay, f, restarts=False)
+    panels += since_shared(lay, f, restarts=False, by_="service_instance_id")
     panels += [
         stat(lay, "Restarts",
-             [f'max(changes(pipeline_process_start_timestamp_seconds{{{f}}}[$__range])) '
-              f'or vector(0)'],
+             [f'max by (service_instance_id) (changes('
+              f'pipeline_process_start_timestamp_seconds{{{f}}}[$__range]))'],
              desc="How many times any replica restarted, over the visible range. The gauge holds "
                   "the process start time and moves exactly once per process, so "
                   "changes() over a window is the restart count." + PARA +
@@ -2352,7 +2386,7 @@ def build_processor():
         # measures more rather than less: the transform plus everything around it, on every
         # exit path including the ones that never reached a handler at all.
         *depth_panels(lay, 'queue=~"processor-$processorId"', "this processor's work queue",
-                      enumerate_names=True),
+                      enumerate_names=True, service_f="," + f),
         timeseries(lay, "Replica fan-out",
                    [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
                      f'{{{f},disposition="acked"}}[$__rate_interval])) '
@@ -2412,10 +2446,10 @@ def build_processor():
                             f'/ sum by (queue,disposition) '
                             f'(rate(pipeline_consumer_duration_seconds_count{{{f}}}'
                             f'[$__rate_interval]))',
-                            f'group by (queue) (last_over_time('
+                            f'group by (queue,service_instance_id) (last_over_time('
                             f'pipeline_consumer_duration_seconds_count{{{f}}}[$__range]))',
                             DISPOSITIONS),
-                     "mean {{queue}} {{disposition}}")],
+                     "mean {{queue}} {{disposition}} {{service_instance_id}}")],
                    desc="How long a delivery was held, on every path including the ones "
                         "that never reached a handler. Split by disposition so a slow "
                         "success and a slow refusal cannot average into a number "
