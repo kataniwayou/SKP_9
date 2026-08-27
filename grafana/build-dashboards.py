@@ -1764,11 +1764,11 @@ def build_orchestrator():
         queue_wait_panel(lay, f, 'destination=~"orchestrator-.*"'),
     ]
 
-    lay.newline()
-    panels += causes_row(lay, f, restarts=False)
-
     rt = row(lay, "Runtime", collapsed=True)
-    rt["panels"] = runtime_row(lay, f, full=True)
+    # Exception rate leads the runtime panels rather than sitting on a visible row. It was
+    # on the visible tier because a rising exception rate is a cause an operator should not
+    # have to expand a row to find -- that argument is overridden here deliberately.
+    rt["panels"] = causes_row(lay, f, w=8, restarts=False) + runtime_row(lay, f, full=True)
     panels.append(rt)
 
     # Titles aligned to the instruments. See ORCHESTRATOR_PANELS.
@@ -1971,12 +1971,6 @@ def worker_plan(posture_stats, posture_timelines):
             "Consumer duration by disposition",
             "Produce duration",
             "Queue wait by queue",
-            # Exception rate belongs here rather than in the collapsed Runtime row: its
-            # own description says it correlates with rising parked and refused
-            # dispositions, which are the panels it now sits beside -- and burying it
-            # behind a collapsed row is what hid eighteen process restarts while every
-            # verdict stat read green. See causes_row.
-            "Exception rate",
         ]),
         ("Queues", [
             "Queue depth by queue",
@@ -2222,7 +2216,15 @@ ORCHESTRATOR_PANELS = {
 
 def build_processor():
     lay = Layout()
-    f = WORKER_F + ',processorId=~"$processorId"'
+    # PROCESSOR ID AND REPLICA ONLY -- service_name and service_version are no longer
+    # selectors, so they are no longer filters either.
+    #
+    # `processorId!=""` is what keeps the board to processors. A bare
+    # `processorId=~"$processorId"` does NOT: with All resolving to `.*`, an empty label
+    # matches, so every orchestrator and API series would satisfy it -- the same trap the
+    # old `all_value=None` on service_name existed to avoid, one label along.
+    f = ('processorId=~"$processorId",processorId!="",'
+         'service_instance_id=~"$service_instance_id"')
     panels = []
 
     panels.append(row(lay, "1 - Verdict: is the processor broken?"))
@@ -2447,14 +2449,15 @@ def build_processor():
     # alone. Break the line here rather than letting the causes pair wrap around it:
     # exception rate and process restarts are read together, and the grid would
     # otherwise put one beside a pipeline panel and the other a row below.
-    lay.newline()
-    panels += causes_row(lay, f, restarts=False)
 
     # full=True: this board absorbs the runtime panels an operator would otherwise
     # leave the board to find. SKP Runtime, which used to hold them, has been deleted.
     # The baseapi board still carries only the original pair.
     rt = row(lay, "Runtime", collapsed=True)
-    rt["panels"] = runtime_row(lay, f, full=True)
+    # Exception rate leads the runtime panels rather than sitting on a visible row. It was
+    # on the visible tier because a rising exception rate is a cause an operator should not
+    # have to expand a row to find -- that argument is overridden here deliberately.
+    rt["panels"] = causes_row(lay, f, w=8, restarts=False) + runtime_row(lay, f, full=True)
     panels.append(rt)
 
     # Titles aligned to the instruments. See PIPELINE_PANELS.
@@ -2473,25 +2476,23 @@ def build_processor():
     return dashboard(
         uid="skp-processor",
         title="SKP Processor",
-        description=("Processor replicas. service_name is a real multi-select here: a "
-                     "processor takes its name and version from its database row via "
-                     "the two-stage boot, so different images carry different "
-                     "identities."),
+        description=("Processor replicas, selected by processor id and replica. Name and "
+                     "version come from the database row via the two-stage boot, so they "
+                     "are properties of the processor id rather than axes of their own."),
         variables=[
             var_datasource(),
             # all_value=None is load-bearing here. This is the only board whose
             # service_name is a real selector rather than a constant, and with ".*" the
             # All option matched the orchestrator too -- the board rendered
             # next-step-handoff and process-dispatch, which no processor ever produces.
-            var_query("service_name", "Processor image",
-                      'label_values(pipeline_identity_ready_ratio, service_name)',
-                      all_value=None),
-            var_query("service_version", "Version",
-                      'label_values(pipeline_identity_ready_ratio{service_name=~"$service_name"}, service_version)'),
-            var_query("service_instance_id", "Replica",
-                      'label_values(pipeline_identity_ready_ratio{service_name=~"$service_name"}, service_instance_id)'),
+            # Two selectors, not four. `Processor image` and `Version` are gone: a
+            # processor takes both from its database row, so they are properties of the
+            # processor id rather than independent axes, and selecting one combination
+            # that never existed produced an empty board.
             var_query("processorId", "Processor id",
-                      'label_values(pipeline_identity_ready_ratio{service_name=~"$service_name"}, processorId)'),
+                      'label_values(pipeline_identity_ready_ratio, processorId)'),
+            var_query("service_instance_id", "Replica",
+                      'label_values(pipeline_identity_ready_ratio{processorId=~"$processorId"}, service_instance_id)'),
             # The verdict tier's lookback, chosen by the reader instead of compiled in.
             # It feeds both the query and the panel title, so the two cannot disagree.
             # Single-select: a multi-select All would interpolate to `.*`, which is not

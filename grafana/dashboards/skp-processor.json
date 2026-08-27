@@ -2,7 +2,7 @@
   "id": null,
   "uid": "skp-processor",
   "title": "SKP Processor",
-  "description": "Processor replicas. service_name is a real multi-select here: a processor takes its name and version from its database row via the two-stage boot, so different images carry different identities.",
+  "description": "Processor replicas, selected by processor id and replica. Name and version come from the database row via the two-stage boot, so they are properties of the processor id rather than axes of their own.",
   "tags": [
     "skp",
     "skp-processor",
@@ -48,49 +48,18 @@
         "options": []
       },
       {
-        "name": "service_name",
-        "label": "Processor image",
+        "name": "processorId",
+        "label": "Processor id",
         "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(pipeline_identity_ready_ratio, service_name)",
+        "definition": "label_values(pipeline_identity_ready_ratio, processorId)",
         "query": {
           "qryType": 1,
-          "query": "label_values(pipeline_identity_ready_ratio, service_name)",
-          "refId": "var-service_name"
-        },
-        "refresh": 2,
-        "sort": 1,
-        "multi": true,
-        "includeAll": true,
-        "allValue": null,
-        "hide": 0,
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "options": []
-      },
-      {
-        "name": "service_version",
-        "label": "Version",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "definition": "label_values(pipeline_identity_ready_ratio{service_name=~\"$service_name\"}, service_version)",
-        "query": {
-          "qryType": 1,
-          "query": "label_values(pipeline_identity_ready_ratio{service_name=~\"$service_name\"}, service_version)",
-          "refId": "var-service_version"
+          "query": "label_values(pipeline_identity_ready_ratio, processorId)",
+          "refId": "var-processorId"
         },
         "refresh": 2,
         "sort": 1,
@@ -117,42 +86,11 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(pipeline_identity_ready_ratio{service_name=~\"$service_name\"}, service_instance_id)",
+        "definition": "label_values(pipeline_identity_ready_ratio{processorId=~\"$processorId\"}, service_instance_id)",
         "query": {
           "qryType": 1,
-          "query": "label_values(pipeline_identity_ready_ratio{service_name=~\"$service_name\"}, service_instance_id)",
+          "query": "label_values(pipeline_identity_ready_ratio{processorId=~\"$processorId\"}, service_instance_id)",
           "refId": "var-service_instance_id"
-        },
-        "refresh": 2,
-        "sort": 1,
-        "multi": true,
-        "includeAll": true,
-        "allValue": ".*",
-        "hide": 0,
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "options": []
-      },
-      {
-        "name": "processorId",
-        "label": "Processor id",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "definition": "label_values(pipeline_identity_ready_ratio{service_name=~\"$service_name\"}, processorId)",
-        "query": {
-          "qryType": 1,
-          "query": "label_values(pipeline_identity_ready_ratio{service_name=~\"$service_name\"}, processorId)",
-          "refId": "var-processorId"
         },
         "refresh": 2,
         "sort": 1,
@@ -212,7 +150,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[40s])) or vector(0)",
+          "expr": "min(last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -279,7 +217,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(last_over_time(pipeline_identity_ready_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[40s])) or vector(0)",
+          "expr": "min(last_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -346,7 +284,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}[5m])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"} offset 5m) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"} offset 5m) or vector(0)), 0))",
+          "expr": "((sum(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[5m])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -413,7 +351,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}[5m])) or vector(0)) > (clamp_min((sum(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"} offset 5m) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"} offset 5m) or vector(0)), 0))",
+          "expr": "((sum(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[5m])) or vector(0)) > (clamp_min((sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -480,7 +418,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=~\"requeued|parked\"} offset $__range) or vector(0)), 0))",
+          "expr": "((sum(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}) or vector(0)) - (sum(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -547,7 +485,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=~\"transient|unroutable|refused\"} offset $__range) or vector(0)), 0))",
+          "expr": "((sum(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[$__range])) or vector(0)) > (clamp_min((sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}) or vector(0)) - (sum(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -614,7 +552,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(max by (queue) (last_over_time(pipeline_deadletter_depth{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[2m])))",
+          "expr": "sum(max by (queue) (last_over_time(pipeline_deadletter_depth{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[2m])))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -682,7 +620,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(changes(pipeline_process_start_timestamp_seconds{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])) or vector(0)",
+          "expr": "max(changes(pipeline_process_start_timestamp_seconds{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -762,7 +700,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (queue,disposition) (rate(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
+          "expr": "(sum by (queue,disposition) (rate(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
           "legendFormat": "{{queue}} {{disposition}}",
           "range": true,
           "editorMode": "code"
@@ -849,7 +787,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (type,outcome) (rate(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
+          "expr": "sum by (type,outcome) (rate(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{type}} / {{outcome}}",
           "range": true,
           "editorMode": "code"
@@ -936,7 +874,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service_instance_id) (rate(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",disposition=\"acked\"}[$__rate_interval])) and on(service_instance_id) present_over_time(pipeline_identity_ready_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[40s])",
+          "expr": "sum by (service_instance_id) (rate(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=\"acked\"}[$__rate_interval])) and on(service_instance_id) present_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])",
           "legendFormat": "{{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1023,7 +961,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_sum{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval])) / sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
+          "expr": "(sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
           "legendFormat": "mean {{queue}} {{disposition}}",
           "range": true,
           "editorMode": "code"
@@ -1110,7 +1048,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le,destination) (rate(pipeline_produce_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le,destination) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
           "legendFormat": "p95 {{destination}}",
           "range": true,
           "editorMode": "code"
@@ -1121,7 +1059,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le,destination) (rate(pipeline_produce_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le,destination) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{destination}}",
           "range": true,
           "editorMode": "code"
@@ -1132,7 +1070,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (destination) (rate(pipeline_produce_duration_seconds_sum{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval])) / sum by (destination) (rate(pipeline_produce_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
+          "expr": "sum by (destination) (rate(pipeline_produce_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (destination) (rate(pipeline_produce_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "mean {{destination}}",
           "range": true,
           "editorMode": "code"
@@ -1223,7 +1161,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg by (queue) (rate(pipeline_queue_wait_seconds_sum{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
+          "expr": "avg by (queue) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "raw {{queue}}",
           "range": true,
           "editorMode": "code"
@@ -1234,7 +1172,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg by (queue) (rate(pipeline_queue_wait_seconds_sum{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval])) - on(queue) group_left avg by (queue) (label_replace(rate(pipeline_produce_duration_seconds_sum{destination=~\"processor-$processorId\"}[$__rate_interval]) / rate(pipeline_produce_duration_seconds_count{destination=~\"processor-$processorId\"}[$__rate_interval]), \"queue\", \"$1\", \"destination\", \"(.*)\"))",
+          "expr": "avg by (queue) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) - on(queue) group_left avg by (queue) (label_replace(rate(pipeline_produce_duration_seconds_sum{destination=~\"processor-$processorId\"}[$__rate_interval]) / rate(pipeline_produce_duration_seconds_count{destination=~\"processor-$processorId\"}[$__rate_interval]), \"queue\", \"$1\", \"destination\", \"(.*)\"))",
           "legendFormat": "net {{queue}}",
           "range": true,
           "editorMode": "code"
@@ -1301,94 +1239,6 @@
       }
     },
     {
-      "id": 89,
-      "type": "timeseries",
-      "title": "Exception rate",
-      "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 22
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
-          "legendFormat": "{{service_instance_id}}",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "decimals": null,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "gradientMode": "opacity",
-            "spanNulls": false,
-            "showPoints": "never",
-            "pointSize": 4,
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "color": {
-            "mode": "palette-classic"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "noValue": "no exceptions in range"
-        },
-        "overrides": []
-      }
-    },
-    {
       "id": 101,
       "type": "row",
       "title": "Queues",
@@ -1397,7 +1247,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 22
       },
       "panels": []
     },
@@ -1414,7 +1264,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 30
+        "y": 23
       },
       "targets": [
         {
@@ -1506,7 +1356,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 30
+        "y": 23
       },
       "targets": [
         {
@@ -1598,7 +1448,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 30
+        "y": 23
       },
       "targets": [
         {
@@ -1607,7 +1457,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (queue) (last_over_time(pipeline_deadletter_depth{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[2m]))",
+          "expr": "max by (queue) (last_over_time(pipeline_deadletter_depth{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[2m]))",
           "legendFormat": "{{queue}}",
           "range": true,
           "editorMode": "code"
@@ -1686,7 +1536,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 31
       },
       "panels": []
     },
@@ -1703,7 +1553,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 39
+        "y": 32
       },
       "targets": [
         {
@@ -1712,7 +1562,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[40s])",
+          "expr": "last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])",
           "legendFormat": "gate {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1723,7 +1573,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(pipeline_gate_trips_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__range])",
+          "expr": "increase(pipeline_gate_trips_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])",
           "legendFormat": "trips {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1802,7 +1652,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 39
+        "y": 32
       },
       "targets": [
         {
@@ -1811,7 +1661,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (outcome) (rate(pipeline_gate_probe_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
+          "expr": "sum by (outcome) (rate(pipeline_gate_probe_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}",
           "range": true,
           "editorMode": "code"
@@ -1889,7 +1739,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 39
+        "y": 32
       },
       "targets": [
         {
@@ -1898,7 +1748,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(pipeline_gate_probe_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=\"healthy\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
           "legendFormat": "p95",
           "range": true,
           "editorMode": "code"
@@ -1909,7 +1759,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(pipeline_gate_probe_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=\"healthy\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "range": true,
           "editorMode": "code"
@@ -1920,7 +1770,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pipeline_gate_probe_duration_seconds_sum{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=\"healthy\"}[$__rate_interval])) / sum(rate(pipeline_gate_probe_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\",outcome=\"healthy\"}[$__rate_interval]))",
+          "expr": "sum(rate(pipeline_gate_probe_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])) / sum(rate(pipeline_gate_probe_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval]))",
           "legendFormat": "mean",
           "range": true,
           "editorMode": "code"
@@ -2002,7 +1852,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 47
+        "y": 40
       },
       "targets": [
         {
@@ -2011,7 +1861,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(pipeline_loop_iterations_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval])",
+          "expr": "rate(pipeline_loop_iterations_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])",
           "legendFormat": "{{loop}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -2089,7 +1939,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 47
+        "y": 40
       },
       "targets": [
         {
@@ -2098,7 +1948,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "last_over_time(pipeline_identity_ready_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[40s])",
+          "expr": "last_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])",
           "legendFormat": "{{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -2168,7 +2018,7 @@
       }
     },
     {
-      "id": 90,
+      "id": 89,
       "type": "row",
       "title": "Runtime",
       "collapsed": true,
@@ -2176,9 +2026,97 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 48
       },
       "panels": [
+        {
+          "id": 90,
+          "type": "timeseries",
+          "title": "Exception rate",
+          "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 49
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+              "legendFormat": "{{service_instance_id}}",
+              "range": true,
+              "editorMode": "code"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "decimals": null,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "gradientMode": "opacity",
+                "spanNulls": false,
+                "showPoints": "never",
+                "pointSize": 4,
+                "axisPlacement": "auto",
+                "axisLabel": "",
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "noValue": "no exceptions in range"
+            },
+            "overrides": []
+          }
+        },
         {
           "id": 91,
           "type": "timeseries",
@@ -2191,8 +2129,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 56
+            "x": 8,
+            "y": 49
           },
           "targets": [
             {
@@ -2201,7 +2139,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (service_instance_id) (process_runtime_dotnet_thread_pool_queue_length{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"})",
+              "expr": "max by (service_instance_id) (process_runtime_dotnet_thread_pool_queue_length{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
@@ -2278,7 +2216,7 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 56
           },
           "targets": [
@@ -2288,7 +2226,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (service_instance_id) (process_runtime_dotnet_thread_pool_threads_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"})",
+              "expr": "max by (service_instance_id) (process_runtime_dotnet_thread_pool_threads_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
@@ -2365,8 +2303,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 63
+            "x": 12,
+            "y": 56
           },
           "targets": [
             {
@@ -2375,7 +2313,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_gc_duration_nanoseconds_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval])) / 1e9",
+              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_gc_duration_nanoseconds_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / 1e9",
               "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
@@ -2452,7 +2390,7 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 63
           },
           "targets": [
@@ -2462,7 +2400,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (service_instance_id, generation) (rate(process_runtime_dotnet_gc_collections_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
+              "expr": "sum by (service_instance_id, generation) (rate(process_runtime_dotnet_gc_collections_count_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
               "legendFormat": "{{service_instance_id}} / {{generation}}",
               "range": true,
               "editorMode": "code"
@@ -2539,8 +2477,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 70
+            "x": 12,
+            "y": 63
           },
           "targets": [
             {
@@ -2549,7 +2487,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (service_instance_id, generation) (process_runtime_dotnet_gc_heap_size_bytes{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"})",
+              "expr": "sum by (service_instance_id, generation) (process_runtime_dotnet_gc_heap_size_bytes{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}} / {{generation}}",
               "range": true,
               "editorMode": "code"
@@ -2626,7 +2564,7 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 70
           },
           "targets": [
@@ -2636,7 +2574,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (service_instance_id) (process_runtime_dotnet_gc_committed_memory_size_bytes{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"})",
+              "expr": "sum by (service_instance_id) (process_runtime_dotnet_gc_committed_memory_size_bytes{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
@@ -2713,8 +2651,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 77
+            "x": 12,
+            "y": 70
           },
           "targets": [
             {
@@ -2723,7 +2661,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_gc_allocations_size_bytes_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
+              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_gc_allocations_size_bytes_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
               "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
@@ -2800,7 +2738,7 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 77
           },
           "targets": [
@@ -2810,7 +2748,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_monitor_lock_contention_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",processorId=~\"$processorId\"}[$__rate_interval]))",
+              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_monitor_lock_contention_count_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
               "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
