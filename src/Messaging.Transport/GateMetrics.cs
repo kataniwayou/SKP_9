@@ -27,6 +27,10 @@ public static class GateMetrics
 
     public const string ProbeDurationInstrument = "pipeline.gate.probe.duration";
 
+    public const string TripsInstrument = "pipeline.gate.trips";
+
+    public const string OpenInstrument = "pipeline.gate.open";
+
     private static readonly Meter Meter = new(MeterName);
 
     /// <summary>
@@ -40,10 +44,12 @@ public static class GateMetrics
     /// </summary>
     private static readonly ConcurrentDictionary<object, Func<bool>> Gates = new();
 
-    private static readonly Counter<long> Trips = Meter.CreateCounter<long>(
-        "pipeline.gate.trips",
-        unit: "1",
-        description: "Times the projection store went away and consumption was paused at the broker.");
+    /// <summary>
+    /// Trips so far, process-wide. A field behind an observable rather than a
+    /// <see cref="Counter{T}"/>, and that is the whole fix for an orphaned instrument -- see the
+    /// observable's registration in the static constructor.
+    /// </summary>
+    private static long _trips;
 
     /// <summary>
     /// How long the store took to answer the gate probe.
@@ -62,21 +68,51 @@ public static class GateMetrics
     static GateMetrics()
     {
         Meter.CreateObservableGauge(
-            "pipeline.gate.open",
+            OpenInstrument,
             Observe,
             unit: "1",
             description: "1 while the projection store is usable and consumers may run, 0 while it is not.");
+
+        // OBSERVABLE, NOT A COUNTER, AND THAT IS THE LOAD-BEARING PART.
+        //
+        // A pushed measurement reaches only the readers subscribed at the instant it is taken, and
+        // the seed is taken during Register -- which every host reaches from a hosted service's
+        // CONSTRUCTOR. The host materialises every IHostedService before it starts any of them, and
+        // the OpenTelemetry hosted service is the one that builds the MeterProvider. So the seed
+        // landed with no reader attached, the metric point was never created, and a counter that
+        // then never tripped exported nothing at all. Verified on the live stack: every host
+        // reported pipeline_gate_open_ratio=1, proving Register ran, and not one exported
+        // pipeline_gate_trips_total.
+        //
+        // An observable is immune to that ordering because it is polled rather than pushed: the
+        // provider asks at collection time, long after it exists. The gauge above survived the same
+        // constructor for exactly this reason, which is what made the two instruments' fates
+        // diverge and what pointed at the cause.
+        //
+        // Reporting is still gated on a registration, so this is a seed and not a constant zero: a
+        // host that owns no gate must stay silent rather than claim a healthy one.
+        Meter.CreateObservableCounter(
+            TripsInstrument,
+            ObserveTrips,
+            unit: "1",
+            description: "Times the projection store went away and consumption was paused at the broker.");
     }
 
     /// <summary>
     /// Publishes <paramref name="isOpen"/> as a gauge until the returned token is disposed.
     /// </summary>
     /// <remarks>
-    /// SEEDS THE TRIP COUNTER AT ZERO, and that is not incidental. A counter never incremented
-    /// exports no series, so "this gate has never tripped" and "nothing is measuring this gate" were
-    /// the same absence -- checked against Prometheus, the name existed from an earlier trip and
-    /// carried no current samples, so a panel keyed to it drew nothing and said nothing. Registering
-    /// a gate is exactly the moment its trip count becomes a meaningful zero.
+    /// STARTS THE TRIP COUNTER AT A MEANINGFUL ZERO, and that is not incidental. An instrument that
+    /// has reported nothing exports no series, so "this gate has never tripped" and "nothing is
+    /// measuring this gate" would be the same absence, and a panel keyed to it would draw nothing
+    /// and say nothing. Registering a gate is exactly the moment its trip count becomes a
+    /// meaningful zero.
+    /// <para>
+    /// The zero is published by the observable in the static constructor, which reports as soon as
+    /// this registry is non-empty. It is deliberately NOT a pushed <c>Add(0)</c> here: this method
+    /// runs from a hosted service's constructor, before any MeterProvider exists, and a pushed
+    /// measurement taken then reaches nobody. That is the defect this shape replaces.
+    /// </para>
     /// </remarks>
     public static IDisposable Register(Func<bool> isOpen)
     {
@@ -84,7 +120,6 @@ public static class GateMetrics
 
         var token = new Registration();
         Gates[token] = isOpen;
-        Trips.Add(0);
         return token;
     }
 
@@ -93,7 +128,7 @@ public static class GateMetrics
     /// directions, and counting both would make the number mean "changes" rather than "outages" --
     /// half of it would be the recoveries.
     /// </summary>
-    public static void RecordTrip() => Trips.Add(1);
+    public static void RecordTrip() => Interlocked.Increment(ref _trips);
 
     /// <summary>
     /// Records one probe measurement.
@@ -113,6 +148,15 @@ public static class GateMetrics
 
     private static IEnumerable<Measurement<int>> Observe() =>
         Gates.Values.Select(open => new Measurement<int>(open() ? 1 : 0));
+
+    /// <summary>
+    /// The trip total, but only once a gate is registered -- a host that owns no gate reports no
+    /// series rather than a zero indistinguishable from a gate that has never tripped.
+    /// </summary>
+    private static IEnumerable<Measurement<long>> ObserveTrips() =>
+        Gates.IsEmpty
+            ? []
+            : [new Measurement<long>(Interlocked.Read(ref _trips))];
 
     private sealed class Registration : IDisposable
     {

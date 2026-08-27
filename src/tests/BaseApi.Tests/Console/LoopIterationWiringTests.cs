@@ -15,8 +15,34 @@ namespace BaseApi.Tests.Console;
 public sealed class LoopIterationWiringTests
 {
     /// <summary>
-    /// Builds a container through the production gate registration. A collector created
-    /// before resolution catches the heartbeat's construction-time seed.
+    /// The running iteration total for one loop, as one poll sees it.
+    /// <para>
+    /// <b>A fresh collector per call, and a delta rather than a set.</b> These are the production
+    /// loop names, the registry behind them is process-wide, and other tests in this assembly beat
+    /// the same names -- so no absolute reading is attributable to this test. The count is an
+    /// observable, so a reused collector would also fold every earlier poll into the list.
+    /// </para>
+    /// </summary>
+    private static double IterationsFor(string loop)
+    {
+        using var metrics = new MetricCollector(CountingLoopHeartbeat.MeterName);
+        metrics.Collect();
+        return metrics.For(CountingLoopHeartbeat.IterationsInstrument)
+            .Where(m => m.Tags["loop"] == loop)
+            .Sum(m => m.Value);
+    }
+
+    /// <summary>Whether any measurement is reported for <paramref name="loop"/> at all.</summary>
+    private static bool IsReported(string loop)
+    {
+        using var metrics = new MetricCollector(CountingLoopHeartbeat.MeterName);
+        metrics.Collect();
+        return metrics.For(CountingLoopHeartbeat.IterationsInstrument)
+            .Any(m => m.Tags["loop"] == loop);
+    }
+
+    /// <summary>
+    /// Builds a container through the production gate registration.
     /// </summary>
     private static ServiceProvider BuildGateContainer()
     {
@@ -31,8 +57,7 @@ public sealed class LoopIterationWiringTests
     }
 
     /// <summary>
-    /// Builds a container through the production processor registration. A collector created
-    /// before resolution catches each heartbeat's construction-time seed.
+    /// Builds a container through the production processor registration.
     /// </summary>
     private static ServiceProvider BuildProcessorContainer()
     {
@@ -58,45 +83,37 @@ public sealed class LoopIterationWiringTests
     [Fact]
     public void TheGateLoopsBeatIsCounted()
     {
-        // Create the collector BEFORE resolving, so the heartbeat's construction-time seed is caught.
-        using var metrics = new MetricCollector(CountingLoopHeartbeat.MeterName);
-
         using var sp = BuildGateContainer();
         var heartbeat = sp.GetRequiredKeyedService<ILoopHeartbeat>(
             ConsoleRedisServiceCollectionExtensions.GateLoop);
 
+        // Constructing the heartbeat seeded the name, so it reports before a single beat. The key
+        // must be the same string the LoopLivenessHealthCheck uses, or a rate panel and a failing
+        // probe name two different loops.
+        Assert.True(IsReported("l2-gate"));
+
+        var before = IterationsFor("l2-gate");
+
         heartbeat.Beat();
 
-        var mine = metrics.For(CountingLoopHeartbeat.IterationsInstrument)
-            .Where(m => m.Tags["loop"] == "l2-gate")
-            .Select(m => m.Value)
-            .ToList();
-
-        // The seed at construction, then the beat. The key on the counter must be the same
-        // string the LoopLivenessHealthCheck uses, or a rate panel and a failing probe name
-        // two different loops.
-        Assert.Equal([0d, 1d], mine);
+        Assert.Equal(before + 1, IterationsFor("l2-gate"));
     }
 
     [Fact]
     public void TheLivenessLoopsBeatIsCounted()
     {
-        // Create the collector BEFORE resolving, so the heartbeat's construction-time seed is caught.
-        using var metrics = new MetricCollector(CountingLoopHeartbeat.MeterName);
-
         using var sp = BuildProcessorContainer();
         var heartbeat = sp.GetRequiredKeyedService<ILoopHeartbeat>(
             BaseProcessorServiceCollectionExtensions.LivenessLoop);
 
+        // Seeded at construction, then one per beat.
+        Assert.True(IsReported("processor-liveness"));
+
+        var before = IterationsFor("processor-liveness");
+
         heartbeat.Beat();
 
-        var mine = metrics.For(CountingLoopHeartbeat.IterationsInstrument)
-            .Where(m => m.Tags["loop"] == "processor-liveness")
-            .Select(m => m.Value)
-            .ToList();
-
-        // The seed at construction, then the beat.
-        Assert.Equal([0d, 1d], mine);
+        Assert.Equal(before + 1, IterationsFor("processor-liveness"));
     }
 
     [Fact]
@@ -107,21 +124,16 @@ public sealed class LoopIterationWiringTests
         // flat line on the loop-rate panel, which is one more thing teaching an operator that
         // the panel is always the same.
         //
-        // Create the collector BEFORE resolving, so we catch any wrongly-wrapped heartbeat's seed.
-        using var metrics = new MetricCollector(CountingLoopHeartbeat.MeterName);
-
         using var sp = BuildProcessorContainer();
         var heartbeat = sp.GetRequiredKeyedService<ILoopHeartbeat>(
             BaseProcessorServiceCollectionExtensions.StartupLoop);
 
         heartbeat.Beat();
 
-        var mine = metrics.For(CountingLoopHeartbeat.IterationsInstrument)
-            .Where(m => m.Tags["loop"] == "processor-startup")
-            .ToList();
-
-        // No measurements tagged with this loop. If the startup loop were wrapped, its
-        // construction would seed a 0 measurement, and this assertion would fail.
-        Assert.Empty(mine);
+        // Nothing reported for this loop at all. If the startup loop were wrapped, its construction
+        // would seed the name and a poll would report it, so this assertion would fail. The poll is
+        // what makes that true: an observable publishes nothing until asked, and a reading taken
+        // without one is empty no matter how the wiring is built.
+        Assert.False(IsReported("processor-startup"));
     }
 }
