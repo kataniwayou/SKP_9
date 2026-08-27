@@ -132,7 +132,7 @@
       "id": 65,
       "type": "stat",
       "title": "Gate open",
-      "description": "Measures `pipeline.gate.open`, minimum across replicas. 1 = the projection store is usable and consumers may run; 0 = the gate is shut and every delivery is being requeued.",
+      "description": "Measures `pipeline.gate.open`, minimum across replicas. 1 = the projection store is usable and consumers may run; 0 = the gate is shut and every delivery is being requeued.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -199,7 +199,7 @@
       "id": 68,
       "type": "stat",
       "title": "Identity ready",
-      "description": "0 means the pod is up and waiting for a processor row whose SourceHash matches its image. Running / NotReady with 0 restarts is the designed behaviour, not a crash loop -- this is the metric that makes that legible.",
+      "description": "0 means the pod is up and waiting for a processor row whose SourceHash matches its image. Running / NotReady with 0 restarts is the designed behaviour, not a crash loop -- this is the metric that makes that legible.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -266,7 +266,7 @@
       "id": 66,
       "type": "stat",
       "title": "Not acked",
-      "description": "Measures `pipeline.messages.consumed` with disposition requeued or parked, over the last 5m. Split by `reason` on `Messages consumed by disposition`.\n\nA redelivery counts twice, by design: a delivery whose ack the broker never heard comes back and increments again.",
+      "description": "Measures `pipeline.messages.consumed` with disposition requeued or parked, over the last 5m. Split by `reason` on `Messages consumed by disposition`.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -333,7 +333,7 @@
       "id": 67,
       "type": "stat",
       "title": "Produce faults",
-      "description": "Measures `pipeline.messages.produced` with outcome transient, unroutable or refused, over the last 5m.\n\nunroutable = the queue is not declared. transient = the broker is unreachable. Opposite remedies, which is why the outcome is a tag.",
+      "description": "Measures `pipeline.messages.produced` with outcome transient, unroutable or refused, over the last 5m.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -400,7 +400,7 @@
       "id": 70,
       "type": "stat",
       "title": "Not acked (range)",
-      "description": "Measures `pipeline.messages.consumed` with disposition requeued or parked, over the visible range.\n\nThe Verdict tier's `Not acked` is the same instrument over the last 5m.",
+      "description": "Measures `pipeline.messages.consumed` with disposition requeued or parked, over the visible range.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -467,7 +467,7 @@
       "id": 71,
       "type": "stat",
       "title": "Produce faults (range)",
-      "description": "Measures `pipeline.messages.produced` with a non-accepted outcome, over the visible range.\n\n`(range)` is what separates it from the Verdict tier's `Produce faults`, which reads the same instrument over the last 5m. Same question, two tenses -- without the qualifier the board carries two panels under one title.",
+      "description": "Measures `pipeline.messages.produced` with a non-accepted outcome, over the visible range.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -534,7 +534,7 @@
       "id": 72,
       "type": "stat",
       "title": "Dead-letter depth (all queues)",
-      "description": "Measures `pipeline.deadletter.depth`, summed across this service's dead-letter queues, right now.\n\nA level, not a count of events: it falls when someone drains the queue. Should be 0; anything else is work that lost progress permanently.",
+      "description": "Measures `pipeline.deadletter.depth`, summed across this service's dead-letter queues, right now.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -602,7 +602,7 @@
       "id": 73,
       "type": "stat",
       "title": "Restarts",
-      "description": "Measures `changes(pipeline.process.start.timestamp)` across replicas over the visible range. The gauge holds the process start time and moves exactly once per process.\n\n`max`, not `sum`: this answers *did anything restart*. It sees an in-place container restart, because InstanceId is the pod name and the value moves on an existing series; a rollout that REPLACES the pod starts a new series instead.",
+      "description": "Measures `changes(pipeline.process.start.timestamp)` across replicas over the visible range. The gauge holds the process start time and moves exactly once per process.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -682,7 +682,7 @@
       "id": 76,
       "type": "timeseries",
       "title": "Messages consumed by disposition",
-      "description": "Measures the rate of `pipeline.messages.consumed` by queue and disposition. Exactly one increment per delivery, on every exit path.\n\n**Grouped exactly like `Consumer duration by disposition` so the two read together** -- same keys, same legend order, one panel giving the rate of each path and the other its cost. They were split differently before, which made a single collapsed line here look like twice the volume of a neighbour that split the same total across more series.\n\nAll three dispositions are seeded, so a path flat at zero is a quiet path rather than an unmeasured one. **`reason` is no longer a dimension here**, and that is a real loss: it is what separated the four causes behind `requeued`, and during a store outage `gate_closed` floods the same line that `send_failed` and `escaped` arrive on. Split by `reason` in Explore when triaging a requeue spike.",
+      "description": "Measures the rate of `pipeline.messages.consumed` by queue and disposition. Exactly one increment per delivery, on every exit path.\n\nLegend: `{{queue}} {{disposition}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -769,7 +769,7 @@
       "id": 75,
       "type": "timeseries",
       "title": "Produced by type and outcome",
-      "description": "Egress. outcome != accepted is a fault.",
+      "description": "Egress. outcome != accepted is a fault.\n\nLegend: `{{type}} / {{outcome}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -856,7 +856,7 @@
       "id": 85,
       "type": "timeseries",
       "title": "Consumption balance",
-      "description": "Measures the rate of acked `pipeline.messages.consumed` per replica. Replicas share one queue and the broker round-robins, so a replica near zero beside working peers is consuming nothing while still looking healthy.\n\nGated on identity liveness, so a departed replica's line ENDS at its true last rate instead of decaying with the range.",
+      "description": "Measures the rate of acked `pipeline.messages.consumed` per replica. Replicas share one queue and the broker round-robins, so a replica near zero beside working peers is consuming nothing while still looking healthy.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -943,7 +943,7 @@
       "id": 87,
       "type": "timeseries",
       "title": "Consumer duration by disposition",
-      "description": "Measures `pipeline.consumer.duration` \u2014 how long a delivery was held, on every exit path including the ones that never reached a handler.\n\nAll three dispositions are seeded, so a flat zero is a path nothing took, not a fast one; `Messages consumed by disposition` tells them apart. A mean rather than a quantile, because at this sample rate quantiles interpolate.",
+      "description": "Measures `pipeline.consumer.duration` \u2014 how long a delivery was held, on every exit path including the ones that never reached a handler.\n\nLegend: `mean {{queue}} {{disposition}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -961,7 +961,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (queue,disposition) (rate(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
+          "expr": "(sum by (queue,disposition,service_instance_id) (rate(pipeline_consumer_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (queue,disposition,service_instance_id) (rate(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
           "legendFormat": "mean {{queue}} {{disposition}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1030,7 +1030,7 @@
       "id": 77,
       "type": "timeseries",
       "title": "Produce duration",
-      "description": "Measures `pipeline.produce.duration` by destination \u2014 from the start of a send until the broker confirmed or refused it, publisher confirm included. p95, p99 and mean.\n\nRead the mean: at this sample rate the quantiles interpolate between bucket edges and flip between rungs rather than moving.",
+      "description": "Measures `pipeline.produce.duration` by queue \u2014 from the start of a send until the broker confirmed or refused it, publisher confirm included. p95, p99 and mean.\n\nLegend: `p95|p99|mean {{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1048,8 +1048,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le,destination,service_instance_id) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
-          "legendFormat": "p95 {{destination}} {{service_instance_id}}",
+          "expr": "label_replace(histogram_quantile(0.95, sum by (le,destination,service_instance_id) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))), \"queue\", \"$1\", \"destination\", \"(.*)\")",
+          "legendFormat": "p95 {{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         },
@@ -1059,8 +1059,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le,destination,service_instance_id) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
-          "legendFormat": "p99 {{destination}} {{service_instance_id}}",
+          "expr": "label_replace(histogram_quantile(0.99, sum by (le,destination,service_instance_id) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))), \"queue\", \"$1\", \"destination\", \"(.*)\")",
+          "legendFormat": "p99 {{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         },
@@ -1070,8 +1070,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
-          "legendFormat": "mean {{destination}} {{service_instance_id}}",
+          "expr": "label_replace(sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])), \"queue\", \"$1\", \"destination\", \"(.*)\")",
+          "legendFormat": "mean {{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1143,7 +1143,7 @@
       "id": 88,
       "type": "timeseries",
       "title": "Queue wait by queue",
-      "description": "Measures `pipeline.queue.wait` \u2014 seconds between a message being published and a consumer picking it up, as a mean by queue.\n\n`raw` double-counts the sender's own publisher confirm: the header is stamped before the publish, so ~12 of ~13ms sits in both this and `pipeline.produce.duration`. `net` subtracts the produce mean for the same destination and is the true broker wait.",
+      "description": "Measures `pipeline.queue.wait` \u2014 seconds between a message being published and a consumer picking it up, as a mean per queue and replica.\n\nLegend: `raw|net {{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1161,8 +1161,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg by (queue) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
-          "legendFormat": "raw {{queue}}",
+          "expr": "avg by (queue,service_instance_id) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "legendFormat": "raw {{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         },
@@ -1172,8 +1172,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg by (queue) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) - on(queue) group_left avg by (queue) (label_replace(rate(pipeline_produce_duration_seconds_sum{destination=~\"processor-$processorId\"}[$__rate_interval]) / rate(pipeline_produce_duration_seconds_count{destination=~\"processor-$processorId\"}[$__rate_interval]), \"queue\", \"$1\", \"destination\", \"(.*)\"))",
-          "legendFormat": "net {{queue}}",
+          "expr": "avg by (queue,service_instance_id) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) - on(queue) group_left avg by (queue) (label_replace(rate(pipeline_produce_duration_seconds_sum{destination=~\"processor-$processorId\"}[$__rate_interval]) / rate(pipeline_produce_duration_seconds_count{destination=~\"processor-$processorId\"}[$__rate_interval]), \"queue\", \"$1\", \"destination\", \"(.*)\"))",
+          "legendFormat": "net {{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1255,7 +1255,7 @@
       "id": 83,
       "type": "timeseries",
       "title": "Queue depth by queue",
-      "description": "Measures `pipeline.queue.depth` per queue \u2014 messages ready and not yet taken, from the broker's own passive declare.\n\nThe only leading indicator on this board: a queue fills as soon as a consumer is merely SLOWER than its producer. Healthy here is 0 on orchestrator queues and mean 0.65 / max 3 on the work queue, where prefetch 1 drains a cron batch one message at a time.",
+      "description": "Measures `pipeline.queue.depth` per queue \u2014 messages ready and not yet taken, from the broker's own passive declare.\n\nLegend: `{{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1347,7 +1347,7 @@
       "id": 84,
       "type": "timeseries",
       "title": "Consumers attached by queue",
-      "description": "Measures `pipeline.queue.consumers` per queue \u2014 how many consumers THE BROKER has attached. 0 means nothing is listening.\n\nExpect 2 on the processor work queue. Wrapped in a 40s liveness window: unwrapped, a departed pod's stale series read a confident 2 against the broker's 0 for a whole outage.",
+      "description": "Measures `pipeline.queue.consumers` per queue \u2014 how many consumers THE BROKER has attached. 0 means nothing is listening.\n\nLegend: `{{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1439,7 +1439,7 @@
       "id": 80,
       "type": "timeseries",
       "title": "Dead-letter depth by queue",
-      "description": "Measures `pipeline.deadletter.depth` per queue \u2014 refused messages nobody has dealt with yet.\n\nA level, not a rate: it steps up on a park and falls only when someone drains the queue. Read on the park event rather than waiting for the 5-minute poll.",
+      "description": "Measures `pipeline.deadletter.depth` per queue \u2014 refused messages nobody has dealt with yet.\n\nLegend: `{{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1544,7 +1544,7 @@
       "id": 81,
       "type": "timeseries",
       "title": "Gate open and trips by replica",
-      "description": "Measures `pipeline.gate.open` per replica, with `increase(pipeline.gate.trips)` over the range beside it.\n\nThe counter is what sees a fault that HEALED: a trip that shut the gate and reopened it leaves the gauge back at 1 with nothing to show. An absent trips series means never tripped \u2014 that counter is unseeded, so it has no series until the first trip.",
+      "description": "Measures `pipeline.gate.open` per replica, with `increase(pipeline.gate.trips)` over the range beside it.\n\nLegend: `gate|trips {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1643,7 +1643,7 @@
       "id": 78,
       "type": "timeseries",
       "title": "Gate probe outcomes",
-      "description": "Measures the RATE of `pipeline.gate.probe.duration` observations, split by outcome \u2014 healthy, timeout or failed.\n\nProbe attempts per second, not gate state. The gate's own posture is `Gate open`; this is what the probe found each time it asked.",
+      "description": "Measures the RATE of `pipeline.gate.probe.duration` observations, split by outcome \u2014 healthy, timeout or failed.\n\nLegend: `{{outcome}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1730,7 +1730,7 @@
       "id": 79,
       "type": "timeseries",
       "title": "Gate probe duration",
-      "description": "Measures `pipeline.gate.probe.duration` \u2014 how long the projection store took to answer the gate probe. p95, p99 and mean.\n\nAll three read `outcome=\"healthy\"` only. A timed-out probe records the ceiling rather than a latency and would pin p99 at exactly the probe timeout; those are counted on `Gate probe outcomes` instead.",
+      "description": "Measures `pipeline.gate.probe.duration` \u2014 how long the projection store took to answer the gate probe. p95, p99 and mean.\n\nLegend: `p95|p99|mean {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1770,8 +1770,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(pipeline_gate_probe_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])) / sum(rate(pipeline_gate_probe_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval]))",
-          "legendFormat": "mean",
+          "expr": "sum by (service_instance_id) (rate(pipeline_gate_probe_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])) / sum by (service_instance_id) (rate(pipeline_gate_probe_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval]))",
+          "legendFormat": "mean {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
         }
@@ -1843,7 +1843,7 @@
       "id": 86,
       "type": "timeseries",
       "title": "Loop iterations by loop",
-      "description": "Measures the rate of `pipeline.loop.iterations` by loop. Expected: l2-gate 0.2/s, processor-liveness and queue-depth 0.1/s.\n\nThe counter is seeded with Add(0) per loop at startup, so 0 means the loop stopped. An EMPTY panel means the process is not reporting at all.",
+      "description": "Measures the rate of `pipeline.loop.iterations` by loop. Expected: l2-gate 0.2/s, processor-liveness and queue-depth 0.1/s.\n\nLegend: `{{loop}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1930,7 +1930,7 @@
       "id": 82,
       "type": "state-timeline",
       "title": "Identity ready by replica",
-      "description": "Measures `pipeline.identity.ready` per replica. Red is a pod that is up and waiting for a processor row matching its SourceHash \u2014 the designed behaviour, not a crash loop.\n\nA row that ENDS is a replica that left. Departed replicas linger for one liveness window, which is why this is a state timeline and not a filled area.",
+      "description": "Measures `pipeline.identity.ready` per replica. Red is a pod that is up and waiting for a processor row matching its SourceHash \u2014 the designed behaviour, not a crash loop.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -2033,7 +2033,7 @@
           "id": 90,
           "type": "timeseries",
           "title": "Exception rate",
-          "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
+          "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2121,7 +2121,7 @@
           "id": 91,
           "type": "timeseries",
           "title": "Thread-pool queue length",
-          "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.",
+          "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2208,7 +2208,7 @@
           "id": 92,
           "type": "timeseries",
           "title": "Thread-pool threads",
-          "description": "Measures `process_runtime_dotnet_thread_pool_threads_count` per replica.\n\nRead beside the queue length: a queue rising while this stays FLAT is starvation; rising while this CLIMBS is the pool injecting and merely lagging arrivals. At prefetch 1, one blocked callback is one idle replica.",
+          "description": "Measures `process_runtime_dotnet_thread_pool_threads_count` per replica.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2295,7 +2295,7 @@
           "id": 93,
           "type": "timeseries",
           "title": "GC pause time",
-          "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.",
+          "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2382,7 +2382,7 @@
           "id": 94,
           "type": "timeseries",
           "title": "GC collections / sec by generation",
-          "description": "**The cause behind the pause time to its left.** Pause seconds answer *how much*, this answers *why*: gen0 is cheap and constant, and a gen2 rate that is anything but near-flat is the collection that actually costs you.\n\nSplit by generation rather than summed, because a summed collection rate is dominated by gen0 and moves for reasons that never cost a millisecond.",
+          "description": "**The cause behind the pause time to its left.** Pause seconds answer *how much*, this answers *why*: gen0 is cheap and constant, and a gen2 rate that is anything but near-flat is the collection that actually costs you.\n\nLegend: `{{service_instance_id}} / {{generation}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2469,7 +2469,7 @@
           "id": 95,
           "type": "timeseries",
           "title": "GC heap size by generation",
-          "description": "Managed heap, by generation. **The leak signal**: a gen2 or LOH line that steps up and never comes back down across several collections is retention, and it ends in an OOMKill that every pipeline panel will report as a restart with no cause.\n\nBy generation rather than a single total, because a rising total is normal between collections and says nothing; a rising gen2 FLOOR is the part that does not come back.",
+          "description": "Managed heap, by generation. **The leak signal**: a gen2 or LOH line that steps up and never comes back down across several collections is retention, and it ends in an OOMKill that every pipeline panel will report as a restart with no cause.\n\nLegend: `{{service_instance_id}} / {{generation}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2556,7 +2556,7 @@
           "id": 96,
           "type": "timeseries",
           "title": "GC committed memory",
-          "description": "What the GC has committed from the OS -- **the number the container limit is compared against**, not the managed heap beside it. The two diverge, and the gap is why a pod can be OOMKilled while its heap looks healthy: committed memory is returned to the OS lazily, so it tracks the high-water mark rather than the live set.\n\nRead this against the pod's memory limit; read the heap panel for whether the growth is real retention.",
+          "description": "What the GC has committed from the OS -- **the number the container limit is compared against**, not the managed heap beside it. The two diverge, and the gap is why a pod can be OOMKilled while its heap looks healthy: committed memory is returned to the OS lazily, so it tracks the high-water mark rather than the live set.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2643,7 +2643,7 @@
           "id": 97,
           "type": "timeseries",
           "title": "Allocation rate",
-          "description": "Bytes allocated per second -- **upstream of every other panel in this row.** Collections, pause time and committed memory are all consequences of this number; it is the one that moves first when a transform starts allocating per message.\n\nExpect it to track the consumed rate. Allocation climbing while `Consumer paths` stays flat means the cost per message grew, which is a code change rather than a load change.",
+          "description": "Bytes allocated per second -- **upstream of every other panel in this row.** Collections, pause time and committed memory are all consequences of this number; it is the one that moves first when a transform starts allocating per message.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2730,7 +2730,7 @@
           "id": 98,
           "type": "timeseries",
           "title": "Lock contention rate",
-          "description": "Monitor contentions per second: threads that had to WAIT for a lock rather than take it. **The stall with no external cause** -- gate open, broker healthy, store fast, and throughput down anyway.\n\nIt earns a place on a processor board specifically because the concrete processor is a SINGLETON with per-dispatch state in plain fields, safe only because prefetch is 1. Contention here is the first sign that an author's transform introduced sharing the seam's design does not expect.",
+          "description": "Monitor contentions per second: threads that had to WAIT for a lock rather than take it. **The stall with no external cause** -- gate open, broker healthy, store fast, and throughput down anyway.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"

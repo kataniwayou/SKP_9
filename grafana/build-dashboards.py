@@ -968,16 +968,27 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                         "shape a lost ack now makes.",
                    unit="reqps"),
         timeseries(layout, "Produce duration p95 / p99",
-                   [(f'histogram_quantile(0.95, sum by (le,destination,service_instance_id) '
+                   # `destination` IS a queue, and every other queue-shaped panel on these
+                   # boards calls it `queue`. One instrument naming the same broker queue
+                   # differently from its neighbours is a reader's problem, not a data
+                   # one, so it is renamed in the query -- a legend can only print labels
+                   # the series actually carries.
+                   [(f'label_replace(histogram_quantile(0.95, '
+                     f'sum by (le,destination,service_instance_id) '
                      f'(rate(pipeline_produce_duration_seconds_bucket{{{f}{rf}}}'
-                     f'[$__rate_interval])))', "p95 {{destination}} {{service_instance_id}}"),
-                    (f'histogram_quantile(0.99, sum by (le,destination,service_instance_id) '
+                     f'[$__rate_interval]))), "queue", "$1", "destination", "(.*)")',
+                     "p95 {{queue}} {{service_instance_id}}"),
+                    (f'label_replace(histogram_quantile(0.99, '
+                     f'sum by (le,destination,service_instance_id) '
                      f'(rate(pipeline_produce_duration_seconds_bucket{{{f}{rf}}}'
-                     f'[$__rate_interval])))', "p99 {{destination}} {{service_instance_id}}"),
-                    (f'sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_sum'
+                     f'[$__rate_interval]))), "queue", "$1", "destination", "(.*)")',
+                     "p99 {{queue}} {{service_instance_id}}"),
+                    (f'label_replace('
+                     f'sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_sum'
                      f'{{{f}{rf}}}[$__rate_interval])) '
                      f'/ sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_count'
-                     f'{{{f}{rf}}}[$__rate_interval]))', "mean {{destination}} {{service_instance_id}}")],
+                     f'{{{f}{rf}}}[$__rate_interval])), "queue", "$1", "destination", "(.*)")',
+                     "mean {{queue}} {{service_instance_id}}")],
                    desc="A real broker round-trip to publisher confirmation, not the "
                         "time to write a frame." + PARA + "The mean rides alongside the "
                         "quantiles deliberately. It comes from sum/count and so is "
@@ -1027,10 +1038,13 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                      f'(rate(pipeline_gate_probe_duration_seconds_bucket'
                      f'{{{f},outcome="healthy"}}[$__rate_interval])))',
                      "p99 {{service_instance_id}}"),
-                    (f'sum(rate(pipeline_gate_probe_duration_seconds_sum'
+                    (f'sum by (service_instance_id) (rate('
+                     f'pipeline_gate_probe_duration_seconds_sum'
                      f'{{{f},outcome="healthy"}}[$__rate_interval])) '
-                     f'/ sum(rate(pipeline_gate_probe_duration_seconds_count'
-                     f'{{{f},outcome="healthy"}}[$__rate_interval]))', "mean")],
+                     f'/ sum by (service_instance_id) (rate('
+                     f'pipeline_gate_probe_duration_seconds_count'
+                     f'{{{f},outcome="healthy"}}[$__rate_interval]))',
+                     "mean {{service_instance_id}}")],
                    desc="How long the projection store takes to answer the gate probe. "
                         "**This is the only panel that can show a store that is slow "
                         "rather than absent.**" + PARA +
@@ -1281,7 +1295,7 @@ def queue_wait_panel(layout, wait_f, dest_f, w=8, h=8):
     Both halves are means. Quantiles off this ladder are interpolation between rung
     edges, and at ~20 samples a window they flip between two rungs rather than moving.
     """
-    wait_mean = (f'avg by (queue) ('
+    wait_mean = (f'avg by (queue,service_instance_id) ('
                  f'rate(pipeline_queue_wait_seconds_sum{{{wait_f}}}[$__rate_interval]) '
                  f'/ rate(pipeline_queue_wait_seconds_count{{{wait_f}}}[$__rate_interval]))')
     produce_mean = (f'avg by (queue) (label_replace('
@@ -1290,10 +1304,17 @@ def queue_wait_panel(layout, wait_f, dest_f, w=8, h=8):
                     f'/ rate(pipeline_produce_duration_seconds_count{{{dest_f}}}'
                     f'[$__rate_interval]), '
                     f'"queue", "$1", "destination", "(.*)"))')
+    # THE JOIN STAYS ON `queue` ALONE. The subtrahend is the SENDER's produce time and
+    # the sender is a different service, so its service_instance_id can never match this
+    # one's -- joining on it would match nothing and the `net` series would vanish.
+    # Plain `group_left` with NO label list: the list copies labels from the RIGHT side,
+    # which has none to give. The left side's replica label is kept automatically, so the
+    # panel reads "this replica's wait, less the fleet's produce time" -- the only form
+    # the two sides support.
     return timeseries(layout, "Queue wait by queue",
-                      [(wait_mean, "raw {{queue}}"),
+                      [(wait_mean, "raw {{queue}} {{service_instance_id}}"),
                        (f'{wait_mean} - on(queue) group_left {produce_mean}',
-                        "net {{queue}}")],
+                        "net {{queue}} {{service_instance_id}}")],
                       desc="Seconds a delivery sat in the broker between the publish and "
                            "this service picking it up, per queue." + PARA +
                            "**Neither produce duration nor consumer duration contains "
@@ -1577,21 +1598,26 @@ def build_baseapi():
     panels.append(row(lay, "Ingress"))
     panels += [
         timeseries(lay, "Request rate by route",
-                   [(f'sum by (http_route) (rate(http_server_request_duration_seconds_count'
-                     f'{{{f}}}[$__rate_interval]))', "{{http_route}}")],
+                   [(f'sum by (http_route,service_instance_id) '
+                     f'(rate(http_server_request_duration_seconds_count'
+                     f'{{{f}}}[$__rate_interval]))',
+                     "{{http_route}} {{service_instance_id}}")],
                    unit="reqps"),
         timeseries(lay, "p95 / p99 by route",
-                   [(f'histogram_quantile(0.95, sum by (le,http_route) '
+                   [(f'histogram_quantile(0.95, sum by (le,http_route,service_instance_id) '
                      f'(rate(http_server_request_duration_seconds_bucket{{{f}}}'
-                     f'[$__rate_interval])))', "p95 {{http_route}}"),
-                    (f'histogram_quantile(0.99, sum by (le,http_route) '
+                     f'[$__rate_interval])))',
+                     "p95 {{http_route}} {{service_instance_id}}"),
+                    (f'histogram_quantile(0.99, sum by (le,http_route,service_instance_id) '
                      f'(rate(http_server_request_duration_seconds_bucket{{{f}}}'
-                     f'[$__rate_interval])))', "p99 {{http_route}}")],
+                     f'[$__rate_interval])))',
+                     "p99 {{http_route}} {{service_instance_id}}")],
                    unit="s"),
         timeseries(lay, "Status-code mix",
-                   [(f'sum by (http_response_status_code) '
+                   [(f'sum by (http_response_status_code,service_instance_id) '
                      f'(rate(http_server_request_duration_seconds_count{{{f}}}'
-                     f'[$__rate_interval]))', "{{http_response_status_code}}")],
+                     f'[$__rate_interval]))',
+                     "{{http_response_status_code}} {{service_instance_id}}")],
                    desc="202 is the orchestration verbs; they accept and queue rather "
                         "than finishing the work.",
                    unit="reqps", stack=True, fill=40),
@@ -1604,18 +1630,20 @@ def build_baseapi():
                      "queued {{service_instance_id}}")],
                    minv=0),
         timeseries(lay, "Dependency name resolution",
-                   [(f'sum by (dns_question_name,error_type) '
+                   [(f'sum by (dns_question_name,error_type,service_instance_id) '
                      f'(rate(dns_lookup_duration_seconds_count{{{f},error_type!=""}}'
-                     f'[$__rate_interval]))', "{{dns_question_name}} / {{error_type}}")],
+                     f'[$__rate_interval]))',
+                     "{{dns_question_name}} / {{error_type}} {{service_instance_id}}")],
                    desc="host_not_found means the service object is gone. try_again "
                         "means the resolver timed out. Different faults, different "
                         "remedies.",
                    unit="reqps",
                    no_value="no resolution failures in range"),
         timeseries(lay, "Route matching by status",
-                   [(f'sum by (aspnetcore_routing_match_status) '
+                   [(f'sum by (aspnetcore_routing_match_status,service_instance_id) '
                      f'(rate(aspnetcore_routing_match_attempts_total{{{f}}}'
-                     f'[$__rate_interval]))', "{{aspnetcore_routing_match_status}}")],
+                     f'[$__rate_interval]))',
+                     "{{aspnetcore_routing_match_status}} {{service_instance_id}}")],
                    desc="Split by match status. A `failure` series is a caller using the "
                         "wrong URL -- the singular-vs-plural controller mistake returns a "
                         "bare 404 with no body and looks like the API being down." + PARA +
@@ -1811,10 +1839,14 @@ def build_orchestrator():
                      "{{loop}} {{service_instance_id}}")],
                    desc="", unit="reqps", decimals=3),
         timeseries(lay, "Consumer duration by disposition",
-                   [(seeded(f'sum by (queue,disposition) '
+                   # GROUPED BY REPLICA LIKE ITS OWN SEEDS. This was
+                   # `sum by (queue,disposition)` while the zero-seeds beside it carried
+                   # service_instance_id, so the one line with real data was the one line
+                   # that named no replica.
+                   [(seeded(f'sum by (queue,disposition,service_instance_id) '
                             f'(rate(pipeline_consumer_duration_seconds_sum{{{f}}}'
                             f'[$__rate_interval])) '
-                            f'/ sum by (queue,disposition) '
+                            f'/ sum by (queue,disposition,service_instance_id) '
                             f'(rate(pipeline_consumer_duration_seconds_count{{{f}}}'
                             f'[$__rate_interval]))',
                             f'group by (queue,service_instance_id) (last_over_time('
@@ -2135,7 +2167,7 @@ PIPELINE_PANELS = {
         "counted on `Gate probe outcomes` instead."),
     "Produce duration p95 / p99": (
         "Produce duration",
-        "Measures `pipeline.produce.duration` by destination — from the start of a send "
+        "Measures `pipeline.produce.duration` by queue — from the start of a send "
         "until the broker confirmed or refused it, publisher confirm included. p95, p99 "
         "and mean." + PARA +
         "Read the mean: at this sample rate the quantiles interpolate between bucket "
@@ -2224,7 +2256,7 @@ PIPELINE_PANELS = {
     "Queue wait by queue": (
         "Queue wait by queue",
         "Measures `pipeline.queue.wait` — seconds between a message being published and "
-        "a consumer picking it up, as a mean by queue." + PARA +
+        "a consumer picking it up, as a mean per queue and replica." + PARA +
         "`raw` double-counts the sender's own publisher confirm: the header is stamped "
         "before the publish, so ~12 of ~13ms sits in both this and "
         "`pipeline.produce.duration`. `net` subtracts the produce mean for the same "
@@ -2473,10 +2505,14 @@ def build_processor():
                    unit="reqps", decimals=2),
 
         timeseries(lay, "Consumer duration by disposition",
-                   [(seeded(f'sum by (queue,disposition) '
+                   # GROUPED BY REPLICA LIKE ITS OWN SEEDS. This was
+                   # `sum by (queue,disposition)` while the zero-seeds beside it carried
+                   # service_instance_id, so the one line with real data was the one line
+                   # that named no replica.
+                   [(seeded(f'sum by (queue,disposition,service_instance_id) '
                             f'(rate(pipeline_consumer_duration_seconds_sum{{{f}}}'
                             f'[$__rate_interval])) '
-                            f'/ sum by (queue,disposition) '
+                            f'/ sum by (queue,disposition,service_instance_id) '
                             f'(rate(pipeline_consumer_duration_seconds_count{{{f}}}'
                             f'[$__rate_interval]))',
                             f'group by (queue,service_instance_id) (last_over_time('
@@ -2573,12 +2609,71 @@ def build_processor():
 
 # ---------------------------------------------------------------------------
 
+def legend_convention(panel):
+    """The panel's legend shape, derived from its own targets so it cannot drift.
+
+    Formats differing only in a leading stat word collapse to one line --
+    `p95|p99|mean {{queue}} {{service_instance_id}}` is the convention, where three
+    near-copies of it would just be the legend printed twice.
+    """
+    fmts = []
+    for t in panel.get("targets", []):
+        lf = (t.get("legendFormat") or "").strip()
+        if lf and lf not in fmts:
+            fmts.append(lf)
+    if not fmts:
+        return None
+    if len(fmts) == 1:
+        return fmts[0]
+
+    heads, tails = [], set()
+    for lf in fmts:
+        head, _, tail = lf.partition(" ")
+        heads.append(head)
+        tails.add(tail)
+    # Only collapse when the leading words are literal prefixes (p95, raw, gate) rather
+    # than labels; two formats that differ in a {{label}} are genuinely two shapes.
+    if len(tails) == 1 and all(not h.startswith("{{") for h in heads):
+        return f"{'|'.join(heads)} {tails.pop()}".strip()
+    return " / ".join(fmts)
+
+
+def brief(board):
+    """Trim every panel description to its first paragraph and state its legend under it.
+
+    A POST-PASS RATHER THAN SHORTER `desc=` STRINGS, and that is the whole point. The long
+    form stays in this file, where whoever changes a panel reads it; only the tooltip is
+    shortened. Deleting the rationale to shorten a tooltip would throw away the
+    measurements that justify half of these panels -- the bucket ladders, the `_ratio`
+    suffix that rendered a confident green zero, the sticky verdict tier -- and leave the
+    panels looking arbitrary to the next person.
+
+    THE LEGEND LINE IS THE CONVENTION, NOT DECORATION. Every series legend on these boards
+    ends with the replica, and the fields before it name the dimensions the query groups
+    by. A reader who knows the shape can tell at a glance whether a legend entry is
+    missing a field -- which is exactly how `Consumer duration by disposition` hid a real
+    series that named no replica among twelve seeded ones that did.
+    """
+    def walk(panels):
+        for p in panels:
+            walk(p.get("panels") or [])
+            if p.get("type") == "row":
+                continue
+            desc = (p.get("description") or "").split(PARA)[0].strip()
+            legend = legend_convention(p)
+            if legend:
+                desc = (desc + PARA if desc else "") + f"Legend: `{legend}`"
+            p["description"] = desc
+    walk(board["panels"])
+    return board
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     boards = [
-        ("skp-baseapi.json", build_baseapi()),
-        ("skp-orchestrator.json", build_orchestrator()),
-        ("skp-processor.json", build_processor()),
+        ("skp-baseapi.json", brief(build_baseapi())),
+        ("skp-orchestrator.json", brief(build_orchestrator())),
+        ("skp-processor.json", brief(build_processor())),
     ]
     for name, board in boards:
         path = OUT / name
