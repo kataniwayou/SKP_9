@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using Messaging.Transport;
 
 namespace BaseConsole.Core.Messaging;
 
@@ -34,7 +35,14 @@ public static class DeadLetterDepthMetrics
     /// gating meter is reused rather than a new one introduced: a typo'd meter name produces no
     /// error and no metrics, and every extra name is another chance to make that mistake.
     /// </summary>
-    internal const string MeterName = "BaseConsole.Core.Gating";
+    // POINTED AT THE CONSTANT, NEVER RESTATED AS A LITERAL. This gauge deliberately rides the
+    // gate's meter rather than introducing another name, and for a while both spelled that name
+    // out separately. When the gate's instruments moved into the transport and its constant was
+    // repointed, this literal stayed behind: the meter it names stopped being registered by any
+    // host, and pipeline.deadletter.depth silently vanished from every board -- an observable
+    // gauge with nobody listening reports nothing and errors nowhere. Sharing the constant is
+    // what makes that impossible to repeat.
+    internal const string MeterName = GateMetrics.MeterName;
 
     internal const string DepthInstrument = "pipeline.deadletter.depth";
 

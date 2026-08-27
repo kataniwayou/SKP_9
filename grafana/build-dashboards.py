@@ -899,13 +899,13 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                    desc="Egress. outcome != accepted is a fault.",
                    unit="reqps"),
         timeseries(layout, "Consumer paths",
-                   [(seeded(f'sum by (queue,disposition,reason) '
+                   [(seeded(f'sum by (queue,disposition) '
                             f'(rate(pipeline_messages_consumed_total'
                             f'{{{f}{rf}}}[$__rate_interval]))',
                             f'group by (queue) (last_over_time('
                             f'pipeline_messages_consumed_total{{{f}{rf}}}[$__range]))',
                             consumed_seed or []),
-                     "{{queue}} / {{disposition}} / {{reason}}")],
+                     "{{queue}} {{disposition}}")],
                    desc="Ingress, split by which exit the delivery took. Exactly one "
                         "increment per delivery, on every exit path of the consumer."
                         + PARA +
@@ -1625,19 +1625,6 @@ def build_baseapi():
 # board 3 -- orchestrator
 # ---------------------------------------------------------------------------
 
-# The six disposition/reason pairs GatedQueueConsumer can record, and no others: the cross
-# product would invent `acked/refused`, which no path produces. Seeding these keeps
-# `requeued` and `parked` on the legend at zero, so a healthy pipeline is visibly a
-# pipeline whose failure paths are quiet rather than one whose failure paths are
-# unmeasured. Module scope because BOTH worker boards run the same consumer.
-CONSUMER_PATHS = [
-    {"disposition": "acked",    "reason": "handled"},
-    {"disposition": "parked",   "reason": "refused"},
-    {"disposition": "requeued", "reason": "gate_closed"},
-    {"disposition": "requeued", "reason": "store_unreachable"},
-    {"disposition": "requeued", "reason": "send_failed"},
-    {"disposition": "requeued", "reason": "escaped"},
-]
 DISPOSITIONS = [{"disposition": d} for d in ("acked", "requeued", "parked")]
 
 
@@ -1716,7 +1703,7 @@ def build_orchestrator():
     ]
 
     panels.append(row(lay, "3 - Pipeline: what is broken?"))
-    panels += pipeline_shared(lay, f, role_f=rf, consumed_seed=CONSUMER_PATHS,
+    panels += pipeline_shared(lay, f, role_f=rf, consumed_seed=DISPOSITIONS,
                               enumerate_names=True)
     panels += [
         timeseries(lay, "L2 gate and trips by replica",
@@ -1973,10 +1960,18 @@ PIPELINE_PANELS = {
         "edges and flip between rungs rather than moving."),
     "Consumer paths": (
         "Messages consumed by disposition",
-        "Measures the rate of `pipeline.messages.consumed` by queue, disposition and "
-        "reason. Exactly one increment per delivery, on every exit path." + PARA +
-        "All six disposition/reason pairs are seeded, so a path flat at zero is a quiet "
-        "path rather than an unmeasured one."),
+        "Measures the rate of `pipeline.messages.consumed` by queue and disposition. "
+        "Exactly one increment per delivery, on every exit path." + PARA +
+        "**Grouped exactly like `Consumer duration by disposition` so the two read "
+        "together** -- same keys, same legend order, one panel giving the rate of each "
+        "path and the other its cost. They were split differently before, which made a "
+        "single collapsed line here look like twice the volume of a neighbour that split "
+        "the same total across more series." + PARA +
+        "All three dispositions are seeded, so a path flat at zero is a quiet path rather "
+        "than an unmeasured one. **`reason` is no longer a dimension here**, and that is a "
+        "real loss: it is what separated the four causes behind `requeued`, and during a "
+        "store outage `gate_closed` floods the same line that `send_failed` and `escaped` "
+        "arrive on. Split by `reason` in Explore when triaging a requeue spike."),
     "L2 gate and trips by replica": (
         "Gate open and trips by replica",
         "Measures `pipeline.gate.open` per replica, with `increase(pipeline.gate.trips)` "
@@ -2156,7 +2151,7 @@ def build_processor():
     ]
 
     panels.append(row(lay, "3 - Pipeline: what is broken?"))
-    panels += pipeline_shared(lay, f, consumed_seed=CONSUMER_PATHS,
+    panels += pipeline_shared(lay, f, consumed_seed=DISPOSITIONS,
                               enumerate_names=True)
     panels += [
         timeseries(lay, "L2 gate and trips by replica",
