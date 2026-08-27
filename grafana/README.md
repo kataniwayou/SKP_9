@@ -10,6 +10,7 @@ what lets any other Grafana import them by hand.
 grafana/
   build-dashboards.py      generator — edit this, not the JSON
   check-expressions.py     runs every panel expression against a live Prometheus
+  audit-instruments.py     proves every pipeline.* instrument has a live series
   audit-boards.js          opens every board in a browser and reports what rendered
   audit-nav.js             checks every board can reach every other board
   chaos-timeline.js        samples every board at intervals across a fault window
@@ -100,6 +101,42 @@ provider re-reads them (30s), so a board updates in place within about 90s.
 files above its own kustomization directory (`../grafana/dashboards/*.json`) without
 `--load-restrictor LoadRestrictionsNone`, which would have to be remembered at every apply.
 Generating the ConfigMap keeps one source of truth and needs no flags.
+
+## Instruments that export nothing
+
+Every check above starts from a panel and asks whether it drew. None of them start from
+the *code* and ask whether an instrument it declares reached Prometheus at all -- and an
+instrument that exports nothing is invisible to all of them, because a panel missing one
+of its series still renders perfectly.
+
+```bash
+python grafana/audit-instruments.py http://localhost:19090
+```
+
+It scans `src/` for every `pipeline.*` instrument name, matches each against the metric
+names Prometheus actually holds, and fails if any has no series carrying current samples.
+
+**Two orphans got past everything else this week.** `pipeline.deadletter.depth` was
+orphaned when its meter moved and a host's `AddMeter` list did not follow.
+`pipeline.gate.trips` was seeded with `Add(0)` from a hosted service's *constructor* --
+which runs before the OpenTelemetry hosted service builds the MeterProvider, so the
+measurement reached no reader, the metric point was never created, and a counter that
+then never tripped exported nothing at all. Neither is a compile error. Neither is a test
+failure: the suite reads metrics through a `MeterListener` it constructs *first*, so it
+sees pushed measurements the real provider never gets. And "Gate open and trips by
+replica" drew three healthy gate lines the whole time, so no render probe complained
+either -- a two-series panel missing one series looks exactly like a working panel.
+
+**Name present is not the same as live.** `pipeline_gate_trips_total` existed in
+Prometheus, left over from an older trip, carrying no current samples. The audit uses
+instant queries, which return only series with a sample inside the staleness window, so a
+name that has gone quiet reads as absent -- which is what the operator sees.
+
+The suffix mapping is discovered rather than predicted: the exported name is the
+instrument name with dots swapped for underscores plus whatever the collector appends for
+unit and type (`_total`, `_seconds`, and `_ratio` for a gauge whose unit is `"1"`).
+Hardcoding those rules here would invent orphans, so the script matches by prefix against
+the names Prometheus reports.
 
 ## Watching a fault, not a moment
 
