@@ -1353,94 +1353,6 @@
       }
     },
     {
-      "id": 50,
-      "type": "timeseries",
-      "title": "Exception rate",
-      "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 26
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
-          "legendFormat": "{{service_instance_id}}",
-          "range": true,
-          "editorMode": "code"
-        }
-      ],
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "decimals": null,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "gradientMode": "opacity",
-            "spanNulls": false,
-            "showPoints": "never",
-            "pointSize": 4,
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "color": {
-            "mode": "palette-classic"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "noValue": "no exceptions in range"
-        },
-        "overrides": []
-      }
-    },
-    {
       "id": 62,
       "type": "row",
       "title": "Queues",
@@ -1449,7 +1361,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 26
       },
       "panels": []
     },
@@ -1466,7 +1378,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 34
+        "y": 27
       },
       "targets": [
         {
@@ -1558,7 +1470,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 34
+        "y": 27
       },
       "targets": [
         {
@@ -1650,7 +1562,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 34
+        "y": 27
       },
       "targets": [
         {
@@ -1738,7 +1650,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 35
       },
       "panels": []
     },
@@ -1755,7 +1667,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 43
+        "y": 36
       },
       "targets": [
         {
@@ -1854,7 +1766,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 43
+        "y": 36
       },
       "targets": [
         {
@@ -1941,7 +1853,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 43
+        "y": 36
       },
       "targets": [
         {
@@ -2054,7 +1966,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 44
       },
       "targets": [
         {
@@ -2141,7 +2053,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 51
+        "y": 44
       },
       "targets": [
         {
@@ -2232,7 +2144,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 51
+        "y": 44
       },
       "targets": [
         {
@@ -2311,7 +2223,7 @@
       }
     },
     {
-      "id": 51,
+      "id": 50,
       "type": "row",
       "title": "Runtime",
       "collapsed": true,
@@ -2319,9 +2231,97 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 52
       },
       "panels": [
+        {
+          "id": 51,
+          "type": "timeseries",
+          "title": "Exception rate",
+          "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 53
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+              "legendFormat": "{{service_instance_id}}",
+              "range": true,
+              "editorMode": "code"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "decimals": null,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 8,
+                "gradientMode": "opacity",
+                "spanNulls": false,
+                "showPoints": "never",
+                "pointSize": 4,
+                "axisPlacement": "auto",
+                "axisLabel": "",
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "noValue": "no exceptions in range"
+            },
+            "overrides": []
+          }
+        },
         {
           "id": 52,
           "type": "timeseries",
@@ -2334,8 +2334,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 60
+            "x": 8,
+            "y": 53
           },
           "targets": [
             {
@@ -2421,7 +2421,7 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 60
           },
           "targets": [
@@ -2508,8 +2508,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 67
+            "x": 12,
+            "y": 60
           },
           "targets": [
             {
@@ -2595,7 +2595,7 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 67
           },
           "targets": [
@@ -2682,8 +2682,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 74
+            "x": 12,
+            "y": 67
           },
           "targets": [
             {
@@ -2769,7 +2769,7 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 74
           },
           "targets": [
@@ -2856,8 +2856,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 81
+            "x": 12,
+            "y": 74
           },
           "targets": [
             {
@@ -2943,7 +2943,7 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
+            "x": 0,
             "y": 81
           },
           "targets": [
