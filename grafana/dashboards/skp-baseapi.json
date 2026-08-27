@@ -129,7 +129,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "1 - Verdict: is the API broken?",
+      "title": "Verdict",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -604,7 +604,7 @@
     {
       "id": 9,
       "type": "row",
-      "title": "2 - Ingress: what is broken?",
+      "title": "Ingress",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1434,7 +1434,7 @@
     {
       "id": 20,
       "type": "row",
-      "title": "3 - Runtime: is the process why?",
+      "title": "Runtime",
       "collapsed": true,
       "gridPos": {
         "h": 1,
