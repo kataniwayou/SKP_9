@@ -59,37 +59,6 @@
         "skipUrlSync": false
       },
       {
-        "name": "service_version",
-        "label": "Version",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "definition": "label_values(http_server_active_requests{service_name=\"baseapi\"}, service_version)",
-        "query": {
-          "qryType": 1,
-          "query": "label_values(http_server_active_requests{service_name=\"baseapi\"}, service_version)",
-          "refId": "var-service_version"
-        },
-        "refresh": 2,
-        "sort": 1,
-        "multi": true,
-        "includeAll": true,
-        "allValue": ".*",
-        "hide": 0,
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "options": []
-      },
-      {
         "name": "service_instance_id",
         "label": "Replica",
         "type": "query",
@@ -161,7 +130,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(http_server_request_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",http_response_status_code=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_request_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) or vector(0)",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",http_response_status_code=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_request_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -228,7 +197,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or vector(0)",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -292,7 +261,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(http_server_active_requests{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}) or vector(0)",
+          "expr": "sum(http_server_active_requests{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -355,7 +324,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kestrel_queued_connections{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}) or vector(0)",
+          "expr": "sum(kestrel_queued_connections{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -422,7 +391,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}[5m])) or vector(0)) > (clamp_min((sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}) or vector(0)) - (sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"} offset 5m) or vector(0)), 0))) or (clamp_min((sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}) or vector(0)) - (sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"} offset 5m) or vector(0)), 0))",
+          "expr": "((sum(increase(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}[5m])) or vector(0)) > (clamp_min((sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}) or vector(0)) - (sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"} offset 5m) or vector(0)), 0))) or (clamp_min((sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}) or vector(0)) - (sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"} offset 5m) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -489,7 +458,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count(count by (service_instance_id) (process_runtime_dotnet_assemblies_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"})) or vector(0)",
+          "expr": "count(count by (service_instance_id) (process_runtime_dotnet_assemblies_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"})) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -556,7 +525,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(resets(process_runtime_dotnet_jit_methods_compiled_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__range])) or vector(0)",
+          "expr": "sum(resets(process_runtime_dotnet_jit_methods_compiled_count_total{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__range])) or vector(0)",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -636,7 +605,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (http_route,service_instance_id) (rate(http_server_request_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "expr": "sum by (http_route,service_instance_id) (rate(http_server_request_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{http_route}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -723,7 +692,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le,http_route,service_instance_id) (rate(http_server_request_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le,http_route,service_instance_id) (rate(http_server_request_duration_seconds_bucket{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
           "legendFormat": "p95 {{http_route}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -734,7 +703,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le,http_route,service_instance_id) (rate(http_server_request_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le,http_route,service_instance_id) (rate(http_server_request_duration_seconds_bucket{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{http_route}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -821,7 +790,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (http_response_status_code,service_instance_id) (rate(http_server_request_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "expr": "sum by (http_response_status_code,service_instance_id) (rate(http_server_request_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{http_response_status_code}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -908,7 +877,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service_instance_id) (http_server_active_requests{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"})",
+          "expr": "sum by (service_instance_id) (http_server_active_requests{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"})",
           "legendFormat": "in-flight {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -919,7 +888,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service_instance_id) (kestrel_active_connections{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"})",
+          "expr": "sum by (service_instance_id) (kestrel_active_connections{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"})",
           "legendFormat": "connections {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -930,7 +899,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service_instance_id) (kestrel_queued_connections{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"})",
+          "expr": "sum by (service_instance_id) (kestrel_queued_connections{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"})",
           "legendFormat": "queued {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1018,7 +987,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (dns_question_name,error_type,service_instance_id) (rate(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}[$__rate_interval]))",
+          "expr": "sum by (dns_question_name,error_type,service_instance_id) (rate(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}[$__rate_interval]))",
           "legendFormat": "{{dns_question_name}} / {{error_type}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1106,7 +1075,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (aspnetcore_routing_match_status,service_instance_id) (rate(aspnetcore_routing_match_attempts_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "expr": "sum by (aspnetcore_routing_match_status,service_instance_id) (rate(aspnetcore_routing_match_attempts_total{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{aspnetcore_routing_match_status}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1211,7 +1180,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((sum(increase(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}[$__range])) or vector(0)) > (clamp_min((sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}) or vector(0)) - (sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}) or vector(0)) - (sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"} offset $__range) or vector(0)), 0))",
+          "expr": "((sum(increase(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}[$__range])) or vector(0)) > (clamp_min((sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}) or vector(0)) - (sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"} offset $__range) or vector(0)), 0))) or (clamp_min((sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"}) or vector(0)) - (sum(dns_lookup_duration_seconds_count{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\",error_type!=\"\"} offset $__range) or vector(0)), 0))",
           "legendFormat": "",
           "range": true,
           "editorMode": "code"
@@ -1278,7 +1247,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1366,7 +1335,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service_instance_id) (resets(process_runtime_dotnet_jit_methods_compiled_count_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
+          "expr": "sum by (service_instance_id) (resets(process_runtime_dotnet_jit_methods_compiled_count_total{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1466,7 +1435,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "max by (service_instance_id) (process_runtime_dotnet_thread_pool_queue_length{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"})",
+              "expr": "max by (service_instance_id) (process_runtime_dotnet_thread_pool_queue_length{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
@@ -1553,7 +1522,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_gc_duration_nanoseconds_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / 1e9",
+              "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_gc_duration_nanoseconds_total{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / 1e9",
               "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
