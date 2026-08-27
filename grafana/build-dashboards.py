@@ -1068,8 +1068,8 @@ def causes_row(layout, f, w=12, restarts=True):
     """Exception rate and process restarts, on the VISIBLE tier.
 
     `restarts` drops the restart timeseries for a board that measures restarts with the
-    start-timestamp gauge instead. The remaining panel widens to fill the row rather than
-    leaving half of it empty.
+    start-timestamp gauge instead. The remaining panel keeps its caller's width: it is no
+    longer alone on a row of its own, it sits with the message panels it correlates with.
 
     These two were in the collapsed Runtime row with the memory panels, and they do not
     belong with them: they are not "is the process why", they are events an operator
@@ -1097,7 +1097,7 @@ def causes_row(layout, f, w=12, restarts=True):
                         "faulted process outcomes. On the visible tier because a rising "
                         "exception rate is a cause an operator should not have to expand "
                         "a row to find.",
-                   unit="reqps", w=w if restarts else 24, h=7,
+                   unit="reqps", w=w, h=7,
                    no_value="no exceptions in range"),
     ]
 
@@ -1437,7 +1437,7 @@ def build_baseapi():
     f = API_F
     panels = []
 
-    panels.append(row(lay, "1 - Verdict: is the API broken?"))
+    panels.append(row(lay, "Verdict"))
     panels += [
         stat(lay, "5xx ratio",
              [f'sum(rate(http_server_request_duration_seconds_count{{{f},'
@@ -1513,7 +1513,7 @@ def build_baseapi():
              thresholds=T_WARN, decimals=0),
     ]
 
-    panels.append(row(lay, "2 - Ingress: what is broken?"))
+    panels.append(row(lay, "Ingress"))
     panels += [
         timeseries(lay, "Request rate by route",
                    [(f'sum by (http_route) (rate(http_server_request_duration_seconds_count'
@@ -1597,7 +1597,7 @@ def build_baseapi():
 
     panels += causes_row(lay, f)
 
-    rt = row(lay, "3 - Runtime: is the process why?", collapsed=True)
+    rt = row(lay, "Runtime", collapsed=True)
     rt["panels"] = runtime_row(lay, f)
     panels.append(rt)
 
@@ -1767,12 +1767,16 @@ def build_orchestrator():
     lay.newline()
     panels += causes_row(lay, f, restarts=False)
 
-    rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
+    rt = row(lay, "Runtime", collapsed=True)
     rt["panels"] = runtime_row(lay, f, full=True)
     panels.append(rt)
 
     # Titles aligned to the instruments. See ORCHESTRATOR_PANELS.
     relabel(panels, ORCHESTRATOR_PANELS)
+
+    # Subject rows, then positions from the final order. Both are post-passes:
+    # see regroup() and relayout().
+    panels = relayout(regroup(panels, worker_plan(["Leader", "Hydration admitted"], ["Leader by replica", "Hydration admitted by replica"])))
 
     for title in grafana11_axis_fix(panels):
         print(f"  grafana11 axis fix: dropped decimals on {title}")
@@ -1868,6 +1872,126 @@ def grafana11_axis_fix(panels):
 
     walk(panels)
     return fixed
+
+
+def relayout(panels):
+    """Recompute every gridPos from the FINAL panel order.
+
+    Layout assigns positions as panels are CREATED, which is fine while creation order
+    and display order are the same thing. They stopped being the same when the boards
+    were regrouped by subject: `pipeline_shared` builds six panels that now belong to
+    three different rows, and splitting the helper three ways to preserve creation order
+    would have coupled it to one board's layout.
+
+    So position is decided last, from the list as assembled. Expanded rows carry their
+    children as siblings and collapsed rows carry them nested; both are walked, because
+    a collapsed row's children still need absolute y positions continuing below the
+    header -- see row().
+    """
+    lay = Layout()
+
+    def place(panel):
+        pos = panel["gridPos"]
+        panel["gridPos"] = lay.place(pos["w"], pos["h"])
+
+    for panel in panels:
+        if panel.get("type") == "row":
+            lay.newline()
+            panel["gridPos"] = lay.place(24, 1)
+            for child in panel.get("panels", []):
+                place(child)
+            continue
+        place(panel)
+
+    return panels
+
+
+
+def regroup(panels, plan):
+    """Re-sort a built board into subject rows, by panel title.
+
+    The rows used to split by TENSE at the top (Verdict / Since, the same instruments
+    twice) and then lump fifteen panels under one question. This groups by subject
+    instead -- what is flowing, what is waiting, whether the replica can work -- so a
+    row header predicts its contents.
+
+    Applied as a post-pass rather than by restructuring the helpers, for the reason
+    relayout() exists: `pipeline_shared` builds six panels that now land in three
+    different rows, and no helper should have to know one board's row plan.
+
+    RAISES on any panel the plan does not name, and on any name matching no panel. A
+    regroup that silently drops a panel is how a board loses one without anybody
+    noticing, and this file has already shipped that failure twice.
+    """
+    lay = Layout()
+    flat, collapsed = {}, {}
+    for panel in panels:
+        if panel.get("type") == "row":
+            collapsed[panel["title"]] = panel
+            continue
+        flat[panel["title"]] = panel
+
+    out, used = [], set()
+    for row_title, titles in plan:
+        if titles is None:                      # an existing row, carried over whole
+            out.append(collapsed[row_title])
+            continue
+        out.append(row(lay, row_title))
+        for title in titles:
+            if title not in flat:
+                raise SystemExit(f"regroup: no panel titled {title!r}")
+            out.append(flat[title])
+            used.add(title)
+
+    orphans = sorted(set(flat) - used)
+    if orphans:
+        raise SystemExit(f"regroup: these panels are in no row: {orphans}")
+    return out
+
+
+
+def worker_plan(posture_stats, posture_timelines):
+    """The five subject rows both worker boards use.
+
+    `posture_stats` and `posture_timelines` are the only difference between them: the
+    processor resolves an identity row, the orchestrator holds a lease and admits
+    hydration, and neither instrument exists on the other host.
+    """
+    return [
+        ("Verdict", [
+            "Gate open", *posture_stats,
+            "Not acked", "Produce faults",
+            "Not acked (range)", "Produce faults (range)",
+            "Dead-letter depth (all queues)", "Restarts",
+        ]),
+        ("Messages", [
+            "Messages consumed by disposition",
+            "Produced by type and outcome",
+            "Messages consumed by replica",
+            "Consumer duration by disposition",
+            "Produce duration",
+            "Queue wait by queue",
+            # Exception rate belongs here rather than in the collapsed Runtime row: its
+            # own description says it correlates with rising parked and refused
+            # dispositions, which are the panels it now sits beside -- and burying it
+            # behind a collapsed row is what hid eighteen process restarts while every
+            # verdict stat read green. See causes_row.
+            "Exception rate",
+        ]),
+        ("Queues", [
+            "Queue depth by queue",
+            "Consumers attached by queue",
+            "Dead-letter depth by queue",
+        ]),
+        ("Gate and loops", [
+            "Gate open and trips by replica",
+            "Gate probe outcomes",
+            "Gate probe duration",
+            "Loop iterations by loop",
+            *posture_timelines,
+        ]),
+        ("Runtime", None),
+    ]
 
 
 def relabel(panels, table):
@@ -2329,12 +2453,16 @@ def build_processor():
     # full=True: this board absorbs the runtime panels an operator would otherwise
     # leave the board to find. SKP Runtime, which used to hold them, has been deleted.
     # The baseapi board still carries only the original pair.
-    rt = row(lay, "4 - Runtime: is the process why?", collapsed=True)
+    rt = row(lay, "Runtime", collapsed=True)
     rt["panels"] = runtime_row(lay, f, full=True)
     panels.append(rt)
 
     # Titles aligned to the instruments. See PIPELINE_PANELS.
     relabel(panels, PROCESSOR_PANELS)
+
+    # Subject rows, then positions from the final order. Both are post-passes:
+    # see regroup() and relayout().
+    panels = relayout(regroup(panels, worker_plan(["Identity ready"], ["Identity ready by replica"])))
 
     # Grafana 11.1 axis compatibility. Applied to THIS board only, matching the standing
     # scope; the orchestrator and flow boards carry the same latent defect through
