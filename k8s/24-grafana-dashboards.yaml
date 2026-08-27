@@ -1858,7 +1858,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "min by (service_instance_id)(last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s]))",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -1996,7 +1996,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "min by (service_instance_id) (last_over_time(pipeline_hydration_admitted_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[40s]))",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -2063,7 +2063,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[5m]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -2130,7 +2130,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[5m]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -2197,7 +2197,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[$__range]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -2264,7 +2264,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[$__range]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -2399,7 +2399,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "max by (service_instance_id) (changes(pipeline_process_start_timestamp_seconds{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\"}[$__range]))",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -3527,7 +3527,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "histogram_quantile(0.95, sum by (le,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
-              "legendFormat": "p95",
+              "legendFormat": "p95 {{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             },
@@ -3538,7 +3538,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "histogram_quantile(0.99, sum by (le,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_bucket{service_name=~\"$service_name\",service_version=~\"$service_version\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
-              "legendFormat": "p99",
+              "legendFormat": "p99 {{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             },
@@ -4840,7 +4840,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "min by (service_instance_id)(last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -4907,7 +4907,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "min by (service_instance_id) (last_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -4974,7 +4974,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[5m]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -5041,7 +5041,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[5m]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -5108,7 +5108,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[$__range]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -5175,7 +5175,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[$__range]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -5310,7 +5310,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "max by (service_instance_id) (changes(pipeline_process_start_timestamp_seconds{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range]))",
-              "legendFormat": "",
+              "legendFormat": "{{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             }
@@ -6438,7 +6438,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "histogram_quantile(0.95, sum by (le,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
-              "legendFormat": "p95",
+              "legendFormat": "p95 {{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             },
@@ -6449,7 +6449,7 @@ data:
                 "uid": "${datasource}"
               },
               "expr": "histogram_quantile(0.99, sum by (le,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
-              "legendFormat": "p99",
+              "legendFormat": "p99 {{service_instance_id}}",
               "range": true,
               "editorMode": "code"
             },

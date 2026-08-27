@@ -197,6 +197,22 @@ def by(labels):
     return f" by ({labels})" if labels else ""
 
 
+def per(by_):
+    """The legend for a stat split by `by_`, or none when it is not split.
+
+    AN EMPTY legendFormat OVER A GROUPED QUERY IS NOT NEUTRAL. Grafana falls back to raw
+    label-set syntax, so a per-replica stat tile renders as
+    `{service_instance_id="processor-sample-55f445fd4-d2wc2"}` instead of the pod name --
+    the identity is carried, in the one form an operator cannot read at a glance.
+
+    It must stay empty when `by_` is, and that is the reason this is a helper rather than
+    a literal at each call site: a fleet-wide stat produces a series with no such label,
+    and naming one anyway renders the literal `{{service_instance_id}}` on the tile.
+    Every board outside the worker pair takes that branch.
+    """
+    return "{{" + by_ + "}}" if by_ else ""
+
+
 def recent(series, window="$__range", by_="", carrier=""):
     """A fault counter read as growth over a window -- correct at series birth AND
     correct across a process restart, and NOT sticky for the life of the process.
@@ -768,14 +784,14 @@ def verdict_shared(layout, f, window=VERDICT_WINDOW, by_=""):
 
     return [
         stat(layout, "L2 gate",
-             [f'min{by(by_)}({live(f"pipeline_gate_open_ratio{{{f}}}")})'
-              f'{"" if by_ else " or vector(0)"}'],
+             [(f'min{by(by_)}({live(f"pipeline_gate_open_ratio{{{f}}}")})'
+               f'{"" if by_ else " or vector(0)"}', per(by_))],
              desc="The single best answer to 'why did the pipeline stop'. 0 means "
                   "the gate is shut and deliveries are being requeued.",
              thresholds=T_POSTURE, decimals=0),
         stat(layout, f"Not acked ({window})",
-             [recent(f'pipeline_messages_consumed_total{{{f},'
-                     f'disposition=~"requeued|parked"}}', window, by_, seed)],
+             [(recent(f'pipeline_messages_consumed_total{{{f},'
+                      f'disposition=~"requeued|parked"}}', window, by_, seed), per(by_))],
              desc="Deliveries the consumer refused or sent back **in the last "
                   + window + "**. Drill into 'reason' on the pipeline tier for "
                   "why, and read the Since tier for the same count over the range."
@@ -796,8 +812,9 @@ def verdict_shared(layout, f, window=VERDICT_WINDOW, by_=""):
                   "than dead-lettered, so it never arrives there.",
              thresholds=T_WARN, decimals=0),
         stat(layout, f"Egress faults ({window})",
-             [recent(f'pipeline_messages_produced_total{{{f},'
-                     f'outcome=~"transient|unroutable|refused"}}', window, by_, seed)],
+             [(recent(f'pipeline_messages_produced_total{{{f},'
+                      f'outcome=~"transient|unroutable|refused"}}', window, by_, seed),
+               per(by_))],
              desc="unroutable = the queue is not declared. transient = the broker "
                   "is unreachable. Opposite remedies; this is the only signal that "
                   "separates them." + PARA +
@@ -834,13 +851,15 @@ def since_shared(layout, f, restarts=True, by_=""):
 
     panels = [
         stat(layout, "Not acked",
-             [recent(f'pipeline_messages_consumed_total{{{f},'
-                     f'disposition=~"requeued|parked"}}', by_=by_, carrier=seed)],
+             [(recent(f'pipeline_messages_consumed_total{{{f},'
+                      f'disposition=~"requeued|parked"}}', by_=by_, carrier=seed),
+               per(by_))],
              desc="Deliveries refused or sent back over the visible range.",
              thresholds=T_WARN, decimals=0),
         stat(layout, "Egress faults",
-             [recent(f'pipeline_messages_produced_total{{{f},'
-                     f'outcome=~"transient|unroutable|refused"}}', by_=by_, carrier=seed)],
+             [(recent(f'pipeline_messages_produced_total{{{f},'
+                      f'outcome=~"transient|unroutable|refused"}}', by_=by_, carrier=seed),
+               per(by_))],
              desc="Any send that did not reach the broker, over the visible range.",
              thresholds=T_WARN, decimals=0),
         stat(layout, "Dead-lettered",
@@ -992,12 +1011,22 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                         "for a flapping store to hide in.",
                    unit="reqps"),
         timeseries(layout, "Store probe latency p95 / p99",
+                   # THE QUANTILES CARRY THE REPLICA AND THE MEAN CANNOT. Both quantiles
+                   # group `by (le,service_instance_id)`, so they emit one series per
+                   # replica -- and while the legend read a bare "p95" the board drew
+                   # `p95 p95 p95 p95 p99 p99 p99 p99 mean`, four indistinguishable lines
+                   # per quantile with no way to tell which replica was the slow one. The
+                   # mean below is `sum(...) / sum(...)` with no grouping at all, so it is
+                   # genuinely one fleet-wide series and naming a replica on it would
+                   # print the literal placeholder.
                    [(f'histogram_quantile(0.95, sum by (le,service_instance_id) '
                      f'(rate(pipeline_gate_probe_duration_seconds_bucket'
-                     f'{{{f},outcome="healthy"}}[$__rate_interval])))', "p95"),
+                     f'{{{f},outcome="healthy"}}[$__rate_interval])))',
+                     "p95 {{service_instance_id}}"),
                     (f'histogram_quantile(0.99, sum by (le,service_instance_id) '
                      f'(rate(pipeline_gate_probe_duration_seconds_bucket'
-                     f'{{{f},outcome="healthy"}}[$__rate_interval])))', "p99"),
+                     f'{{{f},outcome="healthy"}}[$__rate_interval])))',
+                     "p99 {{service_instance_id}}"),
                     (f'sum(rate(pipeline_gate_probe_duration_seconds_sum'
                      f'{{{f},outcome="healthy"}}[$__rate_interval])) '
                      f'/ sum(rate(pipeline_gate_probe_duration_seconds_count'
@@ -1711,8 +1740,9 @@ def build_orchestrator():
                   "reaches 0; a replica killed outright leaves it held at 1.",
              thresholds=T_EXACTLY_ONE, decimals=0),
         stat(lay, "Hydration admitted",
-             [f'min by (service_instance_id) '
-              f'({live(f"pipeline_hydration_admitted_ratio{{{f}}}")})'],
+             [(f'min by (service_instance_id) '
+               f'({live(f"pipeline_hydration_admitted_ratio{{{f}}}")})',
+               per("service_instance_id"))],
              desc="Measures `pipeline.hydration.admitted`, minimum across replicas. 1 "
                   "once every replica's first hydration pass has finished and "
                   "consumption was admitted." + PARA +
@@ -1729,8 +1759,9 @@ def build_orchestrator():
     panels += since_shared(lay, f, restarts=False, by_="service_instance_id")
     panels += [
         stat(lay, "Restarts",
-             [f'max by (service_instance_id) (changes('
-              f'pipeline_process_start_timestamp_seconds{{{f}}}[$__range]))'],
+             [(f'max by (service_instance_id) (changes('
+               f'pipeline_process_start_timestamp_seconds{{{f}}}[$__range]))',
+               per("service_instance_id"))],
              desc="",
              thresholds=T_WARN, decimals=0),
     ]
@@ -2267,8 +2298,9 @@ def build_processor():
     panels += v[:1]
     panels += [
         stat(lay, "Identity ready",
-             [f'min by (service_instance_id) '
-              f'({live(f"pipeline_identity_ready_ratio{{{f}}}")})'],
+             [(f'min by (service_instance_id) '
+               f'({live(f"pipeline_identity_ready_ratio{{{f}}}")})',
+               per("service_instance_id"))],
              desc="0 means the pod is up and waiting for a processor row whose "
                   "SourceHash matches its image. Running / NotReady with 0 restarts is "
                   "the designed behaviour, not a crash loop -- this is the metric that "
@@ -2282,8 +2314,9 @@ def build_processor():
     panels += since_shared(lay, f, restarts=False, by_="service_instance_id")
     panels += [
         stat(lay, "Restarts",
-             [f'max by (service_instance_id) (changes('
-              f'pipeline_process_start_timestamp_seconds{{{f}}}[$__range]))'],
+             [(f'max by (service_instance_id) (changes('
+               f'pipeline_process_start_timestamp_seconds{{{f}}}[$__range]))',
+               per("service_instance_id"))],
              desc="How many times any replica restarted, over the visible range. The gauge holds "
                   "the process start time and moves exactly once per process, so "
                   "changes() over a window is the restart count." + PARA +
