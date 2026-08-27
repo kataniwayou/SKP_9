@@ -713,13 +713,29 @@ def dashboard(uid, title, description, variables, panels, links, tags):
 
 
 def link(title, uid_tag):
-    """Dashboard-level link that carries the time range and variables across."""
+    """Dashboard-level link that carries the time range across, and NOT the variables.
+
+    `includeVars` IS OFF DELIBERATELY. All three boards name their replica variable
+    `service_instance_id`, because it is the label it selects on -- so with variables
+    included, picking one replica on SKP Processor and following the nav link pinned
+    `var-service_instance_id=processor-sample-...` onto SKP Orchestrator, where no such
+    replica exists. Measured: 12 of 15 panels went "No data", and the board looked broken
+    rather than filtered. Every variable these boards carry is an identity belonging to
+    one service, so there is none worth propagating.
+
+    The time range still crosses, via `keepTime` -- a window is the one piece of state
+    that means the same thing on every board, and it is the whole reason an operator
+    follows one of these links mid-incident.
+
+    The cost is the datasource selection no longer crossing either; it falls back to each
+    board's default, which is the only Prometheus this cluster has.
+    """
     return {
         "title": title,
         "type": "dashboards",
         "tags": [uid_tag],
         "asDropdown": False,
-        "includeVars": True,
+        "includeVars": False,
         "keepTime": True,
         "targetBlank": False,
         "icon": "external link",

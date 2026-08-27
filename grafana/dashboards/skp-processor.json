@@ -27,7 +27,7 @@
         "skp"
       ],
       "asDropdown": false,
-      "includeVars": true,
+      "includeVars": false,
       "keepTime": true,
       "targetBlank": false,
       "icon": "external link",
