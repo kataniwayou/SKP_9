@@ -1562,24 +1562,28 @@ def build_baseapi():
                         "that distinguishes 'no failures' from 'no traffic at all'.",
                    unit="reqps",
                    no_value="no routing attempts in range"),
-        textpanel(lay, "The queue side is not instrumented",
-                  "This board covers the API's **HTTP surface only**.\n\n"
-                  "`BaseApi.Core/Messaging/GatedQueueConsumer.cs` is a separate copy of "
-                  "the consumer with its own observability wiring, and the API host does "
-                  "not register the `Messaging.Transport` meter. So the API's "
-                  "`start-orchestration` publish and its `step-outcome` consumption emit "
-                  "**no metrics at all**.\n\n"
-                  "Absence on the Flow board is therefore not evidence of zero traffic "
-                  "through the API's queues, and any produced-vs-consumed comparison "
-                  "that crosses into the API will not balance." + PARA +
-                  "Deliberate, not an oversight. The reasoning is in section 10, "
-                  "'Out of scope', of "
-                  "`docs/superpowers/specs/2026-08-22-pipeline-metrics-design.md` "
-                  "in the SK_P repository, which also names the second dark path: "
-                  "`QueueFanoutPublisher` IS instrumented, but its only callers are "
-                  "the API's start and stop handlers, whose host never registers the "
-                  "`Messaging.Transport` meter -- so the instrument exists and emits "
-                  "nothing."),
+        textpanel(lay, "The queue side is instrumented now",
+                  "**This board still covers the API's HTTP surface only, and that is now a "
+                  "gap in the BOARD rather than in the instruments.**\n\n"
+                  "As of 2026-08-27 this host reports eleven pipeline instruments, not two: "
+                  "`messages.produced`, `produce.duration`, `messages.consumed`, "
+                  "`consumer.duration`, `queue.wait`, `loop.iterations`, `gate.open`, "
+                  "`gate.probe.duration`, `process.start.timestamp`, and the queue-depth and "
+                  "attached-consumer gauges it always had.\n\n"
+                  "Two do not apply: `identity.ready`, because a control-plane host resolves no "
+                  "identity row, and `deadletter.depth`, because this host owns no dead-letter "
+                  "queue. `gate.trips` is registered and seeded but exports no series on ANY "
+                  "host -- an open question, not an API-specific gap." + PARA +
+                  "**What this panel used to say was that the API's publishes and its "
+                  "consumption emitted nothing at all.** That held until the recorders moved "
+                  "into `Messaging.Transport`, below both base libraries, so the API's own "
+                  "copies of the gate and the gated consumer could reach them. The egress pair "
+                  "needed no new instrumentation whatsoever -- `QueueSender` had been measuring "
+                  "every publish and dropping it for want of one `AddMeter`." + PARA +
+                  "So a produced-vs-consumed comparison that crosses into the API now balances, "
+                  "and absence here is evidence of zero traffic rather than of zero measurement. "
+                  "The panels that read these instruments are on SKP Processor and SKP "
+                  "Orchestrator; this board has not been rebuilt around them yet."),
         stat(lay, "DNS failures (range)",
              [recent(f'dns_lookup_duration_seconds_count{{{f},error_type!=""}}')],
              desc="Resolution failures over the visible range -- the tense the verdict "
