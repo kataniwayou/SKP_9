@@ -754,7 +754,7 @@ NAV = [link("SKP boards", "skp")]
 # Filter applied to every worker panel. service_name is a hidden constant on the
 # orchestrator board and a real multi-select on the processor board; the expression
 # text is identical either way.
-WORKER_F = ('service_name=~"$service_name",service_version=~"$service_version",'
+WORKER_F = ('service_name=~"$service_name",'
             'service_instance_id=~"$service_instance_id"')
 
 
@@ -1526,7 +1526,11 @@ def runtime_row(layout, f, full=False):
 # board 2 -- baseapi
 # ---------------------------------------------------------------------------
 
-API_F = ('service_name=~"$service_name",service_version=~"$service_version",'
+# No service_version term, and none is missing. The Version dropdown it read is gone,
+# so the variable could only ever resolve to All -- and `service_version=~".*"` selects
+# every series including any that carry no such label, which is precisely what leaving
+# the term out does. A control that cannot narrow anything is not a filter.
+API_F = ('service_name=~"$service_name",'
          'service_instance_id=~"$service_instance_id"')
 
 
@@ -1715,8 +1719,6 @@ def build_baseapi():
         variables=[
             var_datasource(),
             var_constant("service_name", "baseapi"),
-            var_query("service_version", "Version",
-                      'label_values(http_server_active_requests{service_name="baseapi"}, service_version)'),
             var_query("service_instance_id", "Replica",
                       'label_values(http_server_active_requests{service_name="baseapi"}, service_instance_id)'),
         ],
@@ -1904,8 +1906,6 @@ def build_orchestrator():
         variables=[
             var_datasource(),
             var_constant("service_name", "orchestrator"),
-            var_query("service_version", "Version",
-                      'label_values(pipeline_gate_open_ratio{service_name="orchestrator"}, service_version)'),
             var_query("service_instance_id", "Replica",
                       'label_values(pipeline_gate_open_ratio{service_name="orchestrator"}, service_instance_id)'),
             var_custom("role", "Role", ["leader", "follower"],
