@@ -1,0 +1,98 @@
+{
+  "rabbitmq.processor.IdentityQuery": {
+    "intents": ["observe", "investigate"],
+    "answers": "the queue name processor identity-resolution requests (RPC) are sent to at startup",
+    "never_for": "the processor's own identity value — that is row data in postgres.Processors; this is only the RPC channel name",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.processor.SchemaQuery": {
+    "intents": ["observe", "investigate"],
+    "answers": "the queue name schema-definition lookups are sent to at processor startup",
+    "never_for": "the schema document itself — that is postgres.Schemas; this is only the RPC channel name",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.processor.Work": {
+    "intents": ["observe", "investigate"],
+    "answers": "the per-processor work queue, named processor-{processorId}; carries both dispatches and processed-data branches, routed by the type header",
+    "never_for": "identifying a processor — never for that. The queue name embeds the id, but a rebuilt processor keeps the same id, so the queue existing says nothing about whether the current binary matches the registered SourceHash",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.processor.Dead": {
+    "intents": ["investigate", "remediate"],
+    "answers": "where processor-{id}'s Work queue parks a message it could not read",
+    "never_for": "assuming a parked message is inspectable at rest — reading one requires consuming it off this queue, which mutates the queue under investigation",
+    "write_authority": "gated",
+    "cost": "cheap",
+    "verb": "skp investigate parked"
+  },
+  "rabbitmq.processor.DeadLetterExchange": {
+    "intents": ["investigate", "verify"],
+    "answers": "the exchange processor-{id}'s Work queue names in its x-dead-letter-exchange argument; must exist before Work is declared or parked messages are silently discarded",
+    "never_for": "assuming a queue pointing at it is safe by default — the argument is not validated at declare time, so a queue naming a missing exchange is accepted anyway",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp verify topology"
+  },
+  "rabbitmq.orchestrator.Control": {
+    "intents": ["observe", "investigate"],
+    "answers": "the single durable queue carrying both start and stop commands, one at a time, in order — the ordering guarantee that a stop can never be handled before the start it follows",
+    "never_for": "isolating start traffic from stop traffic — they share one queue by design, so depth and consumer counts here are the combined total of both",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.orchestrator.ControlDead": {
+    "intents": ["investigate", "remediate"],
+    "answers": "where Control parks a start or stop message it refused",
+    "never_for": "assuming it is readable without consuming it, which mutates the queue under investigation",
+    "write_authority": "gated",
+    "cost": "cheap",
+    "verb": "skp investigate parked"
+  },
+  "rabbitmq.orchestrator.DeadLetterExchange": {
+    "intents": ["investigate", "verify"],
+    "answers": "the exchange Control's x-dead-letter-exchange argument names; must be declared before Control or a parked message discards silently",
+    "never_for": "assuming a queue pointing at it is safe by default — the argument is not validated at declare time",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp verify topology"
+  },
+  "rabbitmq.orchestrator.Result": {
+    "intents": ["observe", "investigate", "analyze"],
+    "answers": "the shared, competing-consumer queue every processor's StepOutcome lands on — deliberately not leader-gated, since a result is caused work rather than initiated work",
+    "never_for": "attributing backlog here to the leader replica specifically — every replica, leader or follower, consumes this queue",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.orchestrator.ResultDead": {
+    "intents": ["investigate", "remediate"],
+    "answers": "where Result parks a StepOutcome it refused",
+    "never_for": "assuming it is readable without consuming it, which mutates the queue under investigation",
+    "write_authority": "gated",
+    "cost": "cheap",
+    "verb": "skp investigate parked"
+  },
+  "rabbitmq.orchestrator.ResultPost": {
+    "intents": ["observe", "investigate"],
+    "answers": "the pre-to-post fan-out hop — one NextStepHandoff per matched successor, so a partial multi-successor fan-out is visible here rather than as three inline sends that could half-happen",
+    "never_for": "the terminal record of a hand-off — this is an intermediate hop; the post consumer still has to write the successor's input key and dispatch it",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.orchestrator.ResultPostDead": {
+    "intents": ["investigate", "remediate"],
+    "answers": "where ResultPost parks a NextStepHandoff it refused",
+    "never_for": "assuming it is readable without consuming it, which mutates the queue under investigation",
+    "write_authority": "gated",
+    "cost": "cheap",
+    "verb": "skp investigate parked"
+  }
+}

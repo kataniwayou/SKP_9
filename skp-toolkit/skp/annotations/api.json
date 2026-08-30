@@ -1,0 +1,226 @@
+{
+  "api.workflows.get": {
+    "intents": ["design", "observe"],
+    "answers": "which workflows are defined, with their entry steps and cron",
+    "never_for": "whether a workflow is currently running — that is Redis L2",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author list"
+  },
+  "api.workflows.get_id": {
+    "intents": ["design", "observe"],
+    "answers": "one workflow's cron expression, entry steps and assignments by id",
+    "never_for": "whether it is currently projected — L2 legitimately lags a PUT until the next start",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author get --entity workflows"
+  },
+  "api.workflows.post": {
+    "intents": ["design"],
+    "answers": "creates a workflow and its junction rows in one transaction: one WorkflowEntrySteps row per required entry-step id and one WorkflowAssignments row per assignment id",
+    "never_for": "starting the workflow — creating the definition and projecting it into L2 are different actions; only orchestration/start does the latter",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author create --entity workflows"
+  },
+  "api.workflows.put_id": {
+    "intents": ["design"],
+    "answers": "updates a workflow's cron expression and replaces both junctions' rows for it — remove-and-replace, so the client submits the desired final entry-step and assignment sets",
+    "never_for": "updating a running projection — L2 only re-syncs on the next start, so a PUT alone does not move it",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author update --entity workflows"
+  },
+  "api.workflows.delete_id": {
+    "intents": ["design"],
+    "answers": "deletes a workflow, cascading its own junction rows; blocked if a step or assignment it points at still exists, which raises SQLSTATE 23001 and a 422",
+    "never_for": "removing it from L2 — that is stop, not delete; deleting the definition while it is still projected leaves L2 pointing at a definition that no longer exists",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author delete --entity workflows"
+  },
+  "api.orchestration.post_start": {
+    "intents": ["control"],
+    "answers": "accepting one workflow for projection, after five synchronous gates",
+    "never_for": "confirming the workflow is projected — 202 means accepted, not applied",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp operate start"
+  },
+  "api.orchestration.post_stop": {
+    "intents": ["control"],
+    "answers": "validates the workflow id and queues its removal from L2, returning 202",
+    "never_for": "confirming L2 no longer holds the projection — 202 means the stop was queued and accepted, not applied",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp operate stop"
+  },
+  "api.steps.get": {
+    "intents": ["design", "observe"],
+    "answers": "every step: its processor binding and entry condition",
+    "never_for": "the step's own successors — those live in the StepNextSteps junction, not on this row",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author list --entity steps"
+  },
+  "api.steps.get_id": {
+    "intents": ["design", "observe"],
+    "answers": "one step's processor id and entry condition by id",
+    "never_for": "its outgoing edges — StepNextSteps, not this row",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author get --entity steps"
+  },
+  "api.steps.post": {
+    "intents": ["design"],
+    "answers": "creates a step — a processor id (restrict FK) and an entry condition — and syncs its next-step set into StepNextSteps",
+    "never_for": "a ProcessorId naming nothing — that raises SQLSTATE 23503, surfaced through the exception mapper",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author create --entity steps"
+  },
+  "api.steps.put_id": {
+    "intents": ["design"],
+    "answers": "updates a step's processor binding, entry condition, or next-step set",
+    "never_for": "a partial edit to the successor set — PUT replaces the whole StepNextSteps set for this step, it does not merge",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author update --entity steps"
+  },
+  "api.steps.delete_id": {
+    "intents": ["design"],
+    "answers": "deletes a step; blocked while an assignment, a StepNextSteps edge, or a WorkflowEntrySteps row still references it",
+    "never_for": "deleting a step still referenced elsewhere — restrict FK, surfaced as 422",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author delete --entity steps"
+  },
+  "api.schemas.get": {
+    "intents": ["design", "observe"],
+    "answers": "every schema: its JSON Schema draft 2020-12 document, stored as jsonb",
+    "never_for": "whether a given definition is still editable — a schema referenced by any processor is frozen, and this listing does not say which",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author list --entity schemas"
+  },
+  "api.schemas.get_id": {
+    "intents": ["design", "observe"],
+    "answers": "one schema's Definition document by id",
+    "never_for": "whether it is frozen — check for a referencing processor, or read the 409 a PUT would raise; this response does not carry that flag",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author get --entity schemas"
+  },
+  "api.schemas.post": {
+    "intents": ["design"],
+    "answers": "creates a schema; the document is parsed and validated against the draft 2020-12 meta-schema before it is persisted",
+    "never_for": "accepting a document that merely parses as JSON — it must additionally validate as a JSON Schema",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author create --entity schemas"
+  },
+  "api.schemas.put_id": {
+    "intents": ["design"],
+    "answers": "updates a schema's Definition",
+    "never_for": "mutating a definition already referenced by a processor — that raises SchemaDefinitionFrozenException, surfaced as 409, and it never unfreezes",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author update --entity schemas"
+  },
+  "api.schemas.delete_id": {
+    "intents": ["design"],
+    "answers": "deletes a schema; blocked while any processor references it as input, output, or config",
+    "never_for": "deleting one a processor references — restrict FK, surfaced as 422",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author delete --entity schemas"
+  },
+  "api.processors.get": {
+    "intents": ["design", "observe"],
+    "answers": "every registered processor: its SourceHash and its optional input/output/config schema ids",
+    "never_for": "whether a processor's replicas are alive right now — that is redis.PerInstance / redis.InstanceIndex",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author list --entity processors"
+  },
+  "api.processors.get_id": {
+    "intents": ["design", "observe"],
+    "answers": "one processor's registration by id",
+    "never_for": "its live replica count — that is redis.InstanceIndex",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author get --entity processors"
+  },
+  "api.processors.post": {
+    "intents": ["design"],
+    "answers": "registers a processor: SourceHash plus optional schema ids; a duplicate hash is SQLSTATE 23505, surfaced as 409",
+    "never_for": "confirming the registration is reachable by a running deployment — a row existing and a processor binary being live are different facts",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author create --entity processors"
+  },
+  "api.processors.put_id": {
+    "intents": ["design"],
+    "answers": "updates a processor's schema references or SourceHash",
+    "never_for": "confirming a changed SourceHash matches a rebuilt, redeployed binary — this only stores the value the API was told",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author update --entity processors"
+  },
+  "api.processors.delete_id": {
+    "intents": ["design"],
+    "answers": "deletes a processor; blocked while a step still references it",
+    "never_for": "deleting one a step references — SQLSTATE 23001, surfaced as 422",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author delete --entity processors"
+  },
+  "api.processors.get_by_source_hash_sourcehash": {
+    "intents": ["design", "verify"],
+    "answers": "the single processor row whose SourceHash matches the supplied route segment, by exact byte comparison",
+    "never_for": "a mixed-case or uppercase hash — matching is case-sensitive against the lowercase 64-hex value the create validator enforces, so an uppercase variant 404s past a row that exists",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author lookup-by-hash"
+  },
+  "api.assignments.get": {
+    "intents": ["design", "observe"],
+    "answers": "every assignment: a step id and its jsonb payload",
+    "never_for": "which workflow includes it — only the WorkflowAssignments junction says that, not this row",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author list --entity assignments"
+  },
+  "api.assignments.get_id": {
+    "intents": ["design", "observe"],
+    "answers": "one assignment's step binding and payload by id",
+    "never_for": "which workflow(s) include it — the WorkflowAssignments junction, not a column here",
+    "write_authority": "read",
+    "cost": "cheap",
+    "verb": "skp author get --entity assignments"
+  },
+  "api.assignments.post": {
+    "intents": ["design"],
+    "answers": "creates an assignment: a step id plus a jsonb payload, validated for syntax and length only",
+    "never_for": "payload validation against a schema — the assignment carries no schema reference, so none is possible at this layer",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author create --entity assignments"
+  },
+  "api.assignments.put_id": {
+    "intents": ["design"],
+    "answers": "updates an assignment's step binding or payload",
+    "never_for": "changing which workflow includes it — that is WorkflowAssignments, synced only through the workflow's own PUT",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author update --entity assignments"
+  },
+  "api.assignments.delete_id": {
+    "intents": ["design"],
+    "answers": "deletes an assignment, 204 on success or 404 if absent",
+    "never_for": "deleting one still referenced by a workflow's WorkflowAssignments row — the restrict FK raises SQLSTATE 23001, surfaced as 422",
+    "write_authority": "baseapi",
+    "cost": "cheap",
+    "verb": "skp author delete --entity assignments"
+  }
+}
