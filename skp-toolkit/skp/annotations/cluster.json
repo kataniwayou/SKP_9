@@ -1,0 +1,58 @@
+{
+  "cluster.get_pods": {
+    "intents": ["observe", "investigate"],
+    "answers": "which pods exist for a workload right now, and their names for a follow-up logs/exec call",
+    "never_for": "replica liveness by the toolkit's own definition — that is redis.PerInstance/InstanceIndex; a pod can be Running with an unregistered app",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe pods"
+  },
+  "cluster.logs": {
+    "intents": ["investigate", "verify"],
+    "answers": "a pod's stdout/stderr, including its startup window",
+    "never_for": "aggregated run history across replicas or time — that is Elasticsearch",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate logs"
+  },
+  "cluster.rollout_status": {
+    "intents": ["observe", "verify"],
+    "answers": "whether a deployment/statefulset rollout has finished and how many replicas are ready",
+    "never_for": "whether a ready replica has actually registered against the app — Running/Ready is a kubelet fact, not an application one",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe rollout"
+  },
+  "cluster.get_json": {
+    "intents": ["observe", "investigate"],
+    "answers": "a resource's full manifest — image, env, resource limits, owner references",
+    "never_for": "the resource's runtime health — a manifest is the desired/last-applied state, not a probe result",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe manifest"
+  },
+  "api.health.ready": {
+    "intents": ["observe", "verify"],
+    "answers": "whether this replica is currently admitted to serve/consume — the one probe allowed to sit red on a dependency outage",
+    "never_for": "concluding a processor crashed from Running/NotReady with 0 restarts alone — that is expected while it waits for registration, not a fault; check the deploy log window before treating it as one",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe readiness"
+  },
+  "api.health.live": {
+    "intents": ["observe"],
+    "answers": "whether the process itself is alive, independent of any dependency's health",
+    "never_for": "readiness — a live-but-not-ready replica is normal and expected, not a fault",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe liveness"
+  },
+  "api.health.startup": {
+    "intents": ["observe", "verify"],
+    "answers": "whether host initialization has completed, including migrations — the probe with a finite budget",
+    "never_for": "an ongoing dependency outage after startup — that moved to /health/ready, which has no budget to exhaust",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe startup"
+  }
+}

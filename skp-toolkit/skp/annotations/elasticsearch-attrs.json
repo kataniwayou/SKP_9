@@ -1,0 +1,202 @@
+{
+  "elasticsearch.attr.WorkflowId": {
+    "intents": ["investigate"],
+    "answers": "the run a dispatch-scoped record belongs to -- ExecutionLogScope.BuildScope, rides every record ProcessDispatchHandler writes for the hop whether or not that record's own template names it. Renders \"D\" (hyphenated), matching the L2 key format",
+    "never_for": "formatting it like CorrelationId (\"N\", no dashes) -- this id renders \"D\" (hyphenated); CorrelationId is the only id in this scope family that renders differently, and the two must never be pasted into each other's queries",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.StepId": {
+    "intents": ["investigate"],
+    "answers": "the step's position in the graph for a dispatch-scoped record -- ExecutionLogScope.BuildScope, rides every record the hop writes. Renders \"D\" (hyphenated)",
+    "never_for": "formatting it like CorrelationId (\"N\", no dashes) -- this id renders \"D\" (hyphenated)",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.ProcessorId": {
+    "intents": ["investigate"],
+    "answers": "which processor ran a dispatch-scoped record -- ExecutionLogScope.BuildScope, rides every record the hop writes. Renders \"D\" (hyphenated). Not the same field as the Prometheus resource label of a similar name: that one is camelCase processorId and present only on a processor host's metrics",
+    "never_for": "formatting it like CorrelationId (\"N\", no dashes) -- this id renders \"D\" (hyphenated)",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.ExecutionId": {
+    "intents": ["investigate"],
+    "answers": "the execution a dispatch-scoped record belongs to -- ExecutionLogScope.BuildScope, omitted (not zeroed) on an entry dispatch, which has none. Renders \"D\" (hyphenated)",
+    "never_for": "formatting it like CorrelationId (\"N\", no dashes) -- this id renders \"D\" (hyphenated); also never assume its absence means the field was lost -- an entry dispatch genuinely has no execution id",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.EntryId": {
+    "intents": ["investigate"],
+    "answers": "the L2 key a dispatch-scoped record reads (on a dispatch) or writes (on a processed-data branch) -- ExecutionLogScope.BuildScope, omitted for a source step, which has none. Renders \"D\" (hyphenated)",
+    "never_for": "formatting it like CorrelationId (\"N\", no dashes) -- this id renders \"D\" (hyphenated); also never compare an EntryId from a dispatch record to one from a processed-data record as if they meant the same direction -- one is the key read, the other the key written",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.CorrelationId": {
+    "intents": ["investigate"],
+    "answers": "the cross-boundary correlation id echoed to HTTP clients in X-Correlation-Id and carried onto every bus record the request caused -- CorrelationKeys.Render. Renders \"N\": 32 lowercase hex characters, no dashes",
+    "never_for": "formatting it like a WorkflowId/StepId/ProcessorId/ExecutionId/EntryId (\"D\", hyphenated) -- this is the one id in the whole log schema that renders differently. A query using the hyphenated form returns zero hits and reads as \"no records for this run\", not as a format mismatch",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.ElapsedMs": {
+    "intents": ["analyze", "investigate"],
+    "answers": "a per-event elapsed-time figure logged by HandoffDispatched, StepReturned, BranchCompleted and AdvancedSuccessors -- worth trusting over an interpolated histogram quantile at coarse resolution, since it is the exact value rather than a bucket edge",
+    "never_for": "current state -- ES is history, and this is only present on the specific templates that name {ElapsedMs}, not on every record",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp analyze latency"
+  },
+  "elasticsearch.attr.SuccessorCount": {
+    "intents": ["analyze", "investigate"],
+    "answers": "the fan-out width on AdvancedSuccessors -- how many successors one branch advanced, paired with {ElapsedMs} on the same record for the width and its cost together",
+    "never_for": "current state -- ES is history, and this is only present on AdvancedSuccessors records",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp analyze backlog"
+  },
+  "elasticsearch.attr.Result": {
+    "intents": ["investigate", "verify"],
+    "answers": "a step's verdict, on EntryStepCompleted and TerminalCompleted -- what an investigation reads to learn whether a step succeeded, without substring-matching the rendered body text for a weaker second spelling of the same fact",
+    "never_for": "current state -- ES is history; and never for a step whose template does not carry {Result} -- StepReturned and BranchCompleted report elapsed time only, not an outcome",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp verify run-completed"
+  },
+  "elasticsearch.attr.Label": {
+    "intents": ["investigate"],
+    "answers": "one of the two config values AuthorConfig logs a step as having actually run with",
+    "never_for": "the config schema itself -- that is the processor's ConfigSchemaId in Postgres, not this record",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.Number": {
+    "intents": ["investigate"],
+    "answers": "the other of the two config values AuthorConfig logs a step as having actually run with",
+    "never_for": "the config schema itself -- that is the processor's ConfigSchemaId in Postgres, not this record",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.NextStepId": {
+    "intents": ["investigate"],
+    "answers": "one hand-off's destination step, on HandedOff",
+    "never_for": "current state -- ES is history, only a record of one past hand-off",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.NextProcessorId": {
+    "intents": ["investigate"],
+    "answers": "one hand-off's destination processor, on HandedOff",
+    "never_for": "current state -- ES is history, only a record of one past hand-off",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.NextEntryId": {
+    "intents": ["investigate"],
+    "answers": "one hand-off's destination L2 entry key, on HandedOff",
+    "never_for": "current state -- ES is history, only a record of one past hand-off",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.Queue": {
+    "intents": ["investigate"],
+    "answers": "which queue a fault-window record names -- StoreUnreachable, RefusingAndParking, RefusingNotParked, SendFailedReturning, ConsumptionPaused and ConsumptionAdmitted all carry it",
+    "never_for": "attributing a StoreUnreachable/RefusingAndParking/RefusingNotParked/SendFailedReturning record to one run -- at that point in the code the ids are still undecoded bytes; only the queue name is known",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.attr.Type": {
+    "intents": ["investigate"],
+    "answers": "the message type on a fault-window record -- RefusingAndParking, RefusingNotParked and SendFailedReturning all carry it",
+    "never_for": "attributing the record to one run -- at that point in the code the ids are still undecoded bytes",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.attr.Reason": {
+    "intents": ["investigate"],
+    "answers": "why the AMQP channel shut down, on ChannelShutDown",
+    "never_for": "current state -- the channel may already have reopened by the time this is read",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.attr.WorkflowCount": {
+    "intents": ["verify", "investigate"],
+    "answers": "how many workflows the orchestrator hydrated from L2 before admitting its consumer, on OrchestratorHydrated",
+    "never_for": "any other role's startup -- this template, and this attribute, is orchestrator-unique",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp verify restart"
+  },
+  "elasticsearch.attr.timestamp": {
+    "intents": ["investigate"],
+    "answers": "@timestamp: when the record was written, arriving as either an ISO-8601 string or epoch milliseconds with a fractional part -- both map to the same date field",
+    "never_for": "assuming only one wire shape -- handling just one form works until a build that writes the other one ships",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.body_text": {
+    "intents": ["investigate"],
+    "answers": "body.text: the rendered message text, with every placeholder substituted -- one bucket per distinct rendering, unlike attributes.{OriginalFormat} which is one bucket per template",
+    "never_for": "counting occurrences of a message shape -- rendered text varies per event (a duration, an id); group by attributes.{OriginalFormat} instead",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.original_format": {
+    "intents": ["investigate"],
+    "answers": "attributes.{OriginalFormat}: the unsubstituted template text -- what every elasticsearch.<TemplateName> surface in this catalog searches by, and the field templates() catalogues one value per",
+    "never_for": "reading the rendered values out of it -- it is the template shape, not the substituted text; that is body.text",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.service_name": {
+    "intents": ["investigate"],
+    "answers": "resource.attributes.service.name: which role wrote the record -- filtering on a template alone is not enough for a template every service writes, such as HostShuttingDown",
+    "never_for": "picking out one replica of a role -- every replica of the same role shares one service.name; use resource.attributes.service.instance.id for that",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.service_instance_id": {
+    "intents": ["investigate"],
+    "answers": "resource.attributes.service.instance.id: the replica identity on the log resource -- InstanceId.Resolve(), the same identity a replica's liveness key and reply queue use. This is the field a per-replica question must group on; resource.attributes.service.name alone cannot distinguish two replicas of the same role",
+    "never_for": "expecting it to vary per record within one process -- it is a resource attribute, materialised once when the log provider is built, so it is constant across every record this process writes",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.source": {
+    "intents": ["investigate"],
+    "answers": "resource.attributes.Source: the application type stamped on the resource -- worker or webapi (AddBaseConsoleObservability/AddBaseApiObservability's source parameter). Deliberately coarser than service.name: it says what shape of process wrote the record, not which role it played",
+    "never_for": "distinguishing which role emitted a record -- that is resource.attributes.service.name; every processor, orchestrator, and keeper alike reports Source=worker",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.scope_name": {
+    "intents": ["investigate"],
+    "answers": "scope.name: the .NET logger category name the record was written through",
+    "never_for": "identifying which role wrote the record -- that is resource.attributes.service.name; the logger category is a code-location detail, not a deployment identity",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  }
+}

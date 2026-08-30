@@ -192,10 +192,20 @@ the three `/health/*` paths, whose meanings differ per workload.
 edges and bindings, since the entities deliberately do not carry them and the read
 DTOs are enriched after mapping. Read-only.
 
-**Redis -- authoritative for what is projected and what is in flight.** The six
+**Redis -- authoritative for what is projected and what is in flight.** The seven
 key families: `skp:`, `skp:{workflowId}`, `skp:{workflowId}:{stepId}`,
 `skp:proc:{processorId}`, `skp:proc:{processorId}:{instanceId}`,
-`skp:data:{guid}`. With two semantics nobody infers: a liveness entry is **stale
+`skp:data:{guid}`, `skp:keeper:probe:{h}`.
+
+> This section said **six** until the generated extractor was first run against
+> `L2ProjectionKeys.cs` and returned a seventh: `KeeperProbe`, the gate probe's
+> scratch key, written then deleted with a short TTL as the net for a crash
+> between the two. It was declared in the source the whole time and missing from
+> this document, which is the argument for a generated catalog stated as
+> evidence rather than as intent -- a hand-written one would have shipped with
+> six entries and nothing would ever have contradicted it.
+
+With two semantics nobody infers: a liveness entry is **stale
 at 2x its interval but present until 4x**, so absent and unhealthy are different
 answers; and `skp:data:*` has **no TTL**, so a lingering blob is a real leak worth
 reporting, not garbage awaiting collection.
