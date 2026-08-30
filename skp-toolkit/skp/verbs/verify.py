@@ -82,11 +82,32 @@ exists:
 Without the flag, every write claim stays NOT_APPLICABLE, its reason now
 naming the remedy (``rerun with --probe-writes``) rather than just stating
 the limitation.
+
+**``--probe-runs`` is the other opt-in write**, narrower than
+``--probe-writes``: it only ever touches the one ``redis.ExecutionData``
+claim (``skp:data:*``), and only when it is otherwise empty (nothing in
+flight -- the normal idle-system case). It starts exactly one *existing*
+workflow through ``orchestration/start`` (never creates one) and polls for
+the key family to appear, then reports what it did either way. Off by
+default for the same reason ``--probe-writes`` is: starting a workflow is a
+write, even though -- unlike ``--probe-writes``'s deliberately-rejected
+probes -- this one is a real, accepted start. See ``apply_probe_runs``.
+
+Every claim's own message states, in place of a bare skip, *why* it was not
+confirmed -- and increasingly, that reason distinguishes two different
+things: **could not be checked** (UNVERIFIABLE: the store did not answer)
+versus **cannot be checked, structurally, by design** (a
+``PERMANENT EXCLUSION`` marker in the message -- e.g. ``redis.KeeperProbe``,
+whose write path has no call site anywhere in the current build). The
+ratio line in ``render_report`` reads that marker to report an honest
+achievable ceiling alongside the raw percentage, rather than implying 100%
+is reachable when it structurally is not.
 """
 import argparse
 import json
 import pathlib
 import re
+import time
 import uuid
 from collections import Counter, namedtuple
 
@@ -168,7 +189,69 @@ def check_postgres(entries: list[dict], client) -> list[Claim]:
 # rabbitmq
 # ---------------------------------------------------------------------
 
-def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None = None) -> list[Claim]:
+_PROCESSOR_QUEUE = re.compile(
+    r"^processor-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\.dead)?$")
+
+
+def _orphaned_processor_queues(live: set[str], processor_ids: list[str]) -> tuple[list[str], list[str]]:
+    """The other half of the same drift ``check_rabbitmq``'s per-template loop
+    already reports from the catalog side (a registered processor with no
+    matching queue): live queues shaped like a per-processor queue
+    (``processor-<guid>`` or its ``.dead`` sibling) whose guid matches no row
+    currently in ``processors``. Read-only, from the ``queues()`` call
+    already made -- no extra broker round-trip.
+    """
+    known = {pid.lower() for pid in processor_ids}
+    work, dead = [], []
+    for name in sorted(live):
+        match = _PROCESSOR_QUEUE.match(name)
+        if not match or match.group(1) in known:
+            continue
+        (dead if match.group(2) else work).append(name)
+    return work, dead
+
+
+def _orphan_note(live: set[str], processor_ids: list[str]) -> str:
+    work, dead = _orphaned_processor_queues(live, processor_ids)
+    if not work and not dead:
+        return ""
+    parts = []
+    if work:
+        parts.append(f"{len(work)} live work queue(s) matching no processors row: "
+                     f"{', '.join(work)}")
+    if dead:
+        parts.append(f"{len(dead)} .dead queue(s) matching no processors row: {', '.join(dead)}")
+    return (" | broker-side orphan(s) (queue exists, no processors row -- clean up by deleting "
+            "the queue, or by restoring the processors row if this is drift, not decommission): "
+            + "; ".join(parts))
+
+
+def _processor_deployment_status(processor_id: str, redis_client) -> str:
+    """Distinguishes "never deployed" from "deployed, then its queue was
+    removed" for one processor id with a missing queue -- read-only, via the
+    ``redis.InstanceIndex`` SET key (``skp:proc:<id>``), which by its own
+    catalogued semantics "outlives a dead replica's entry key": its mere
+    existence means at least one replica registered at some point, whether
+    or not any is alive right now. Absence means no replica has ever
+    registered, which is a materially different remedy (deploy it, versus
+    investigate why a live processor's queue disappeared).
+    """
+    if redis_client is None:
+        return "deployment status unknown -- redis unreachable, could not check skp:proc:<id>"
+    try:
+        keys = redis_client.keys(f"skp:proc:{processor_id}")
+    except Unreachable:
+        return "deployment status unknown -- redis unreachable, could not check skp:proc:<id>"
+    if keys:
+        return ("has registered at least one replica in the past (skp:proc:" + processor_id +
+                " exists) -- its queue existed and was removed; clean up on the broker/registry "
+                "side, not by deploying")
+    return ("has never registered a replica (no skp:proc:" + processor_id + " key) -- likely "
+            "never deployed; clean up by deploying it, or by removing the stale processors row")
+
+
+def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None = None,
+                   redis_client=None) -> list[Claim]:
     """A queue name's own ``detail`` is the value ``queues()`` extracted from
     source -- concrete (``orchestrator-control``) or templated
     (``processor-{processorId}``, still carrying its ``{`` placeholder since
@@ -190,6 +273,16 @@ def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None 
     ``rabbitmq.orchestrator.DeadLetterExchange``) are not queues at all --
     ``rabbitmqctl list_queues`` will never list them -- so they are checked
     against ``list_exchanges`` instead, read-only exactly like ``queues()``.
+
+    A REFUTED templated claim is made actionable, not just flagged: its
+    message names which processor id(s) are missing a queue, and --
+    read-only, via ``redis_client``/``_processor_deployment_status`` -- for
+    each one, whether it has ever registered a live replica (its queue was
+    removed after the fact) or never has (likely never deployed). It also
+    carries ``_orphan_note``: the reverse drift, live broker queues shaped
+    like a per-processor queue that match no row in ``processors`` at all --
+    both halves of the same bidirectional defect, named explicitly enough to
+    act on rather than just diagnosed as broken.
     """
     try:
         live = {q["name"] for q in client.queues()}
@@ -234,16 +327,21 @@ def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None 
                               f"to resolve it against"))
             else:
                 resolved = [_fill(name, processorId=pid) for pid in processor_ids]
+                missing_pids = [pid for pid, r in zip(processor_ids, resolved) if r not in live]
                 missing = [r for r in resolved if r not in live]
+                orphan_note = _orphan_note(live, processor_ids)
                 if missing:
+                    status = "; ".join(
+                        f"{pid}: {_processor_deployment_status(pid, redis_client)}"
+                        for pid in missing_pids)
                     claims.append(Claim("rabbitmq", entry["id"], REFUTED,
                                   f"catalog claims {name!r} resolves to a live queue "
                                   f"for every registered processor -- missing: "
-                                  f"{', '.join(missing)}"))
+                                  f"{', '.join(missing)}. {status}{orphan_note}"))
                 else:
                     claims.append(Claim("rabbitmq", entry["id"], CONFIRMED,
                                   f"{name!r} resolved and present for all "
-                                  f"{len(resolved)} registered processor(s)"))
+                                  f"{len(resolved)} registered processor(s){orphan_note}"))
         elif name in live:
             claims.append(Claim("rabbitmq", entry["id"], CONFIRMED, f"queue {name!r} present"))
         else:
@@ -260,52 +358,39 @@ def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None 
 _ES_PATH = re.compile(r"^(?:search by|read) (.+)$")
 
 
-def _flatten_paths(obj, prefix: str = "") -> set[str]:
-    """Every dotted path reachable in a (possibly nested) dict, built by
-    joining container keys with ``.`` at each level -- which reconstructs a
-    catalogued path like ``resource.attributes.service.instance.id``
-    whether the document actually nests four objects deep, or nests two
-    (``resource`` -> ``attributes``) and then holds a flat key that itself
-    contains dots (``service.instance.id``). Either shape produces the same
-    joined string, so this does not need to know which one the live mapping
-    uses.
-    """
-    paths: set[str] = set()
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            path = f"{prefix}.{key}" if prefix else key
-            paths.add(path)
-            paths |= _flatten_paths(value, path)
-    return paths
+RETENTION_NOTE = "~17 days of retention"  # see skp.clients.es.Elastic
 
 
-def check_elasticsearch(entries: list[dict], client, sample_size: int = 200) -> list[Claim]:
+def check_elasticsearch(entries: list[dict], client) -> list[Claim]:
     """The index/data stream is checked for existence (a plain bounded GET,
-    never an aggregation); every ``elasticsearch.attr.*`` claim is sought in
-    one bounded recent sample, sorted newest-first and capped at
-    ``sample_size`` -- never an unbounded scan of a ~10M-document stream.
-    Absent from the sample is NOT_OBSERVED, never REFUTED: four templates
-    are fault-path records that do not fire on a healthy system, and their
-    attributes (``Queue``, ``Reason``, ``Type``, ``WorkflowCount``)
-    legitimately appear nowhere else.
+    never an aggregation); every ``elasticsearch.<Template>`` and
+    ``elasticsearch.attr.*`` claim gets its own bounded existence query
+    (``Elastic.exists`` -- ``size=0``, ``track_total_hits`` capped at 1)
+    across the *entire* data stream, not a recent sample.
 
-    Message templates (``elasticsearch.<TemplateName>``) ARE checkable, and
-    are checked -- each one's own ``detail`` (the raw template text, e.g.
-    ``"entry step {StepId} dispatched"``) is exactly what
-    ``attributes.{OriginalFormat}`` carries verbatim on a real record, so a
-    bounded term (or, for the handful whose template contains an em dash
-    mangled by the OTel pipeline, prefix -- ``investigate._original_format_filter``,
-    reused rather than re-solved here) query against that one field answers
-    the claim directly. It is bounded by ``size=1``, not a time range: a term
-    lookup on an indexed field costs the same whether the stream holds ten
-    documents or ten million, so a result-count cap is what "bounded" means
-    here (the sibling attribute check below bounds by time instead, because
-    ``present in a recent sample`` is a different question than ``was this
-    template ever emitted``). A template that never appears is NOT_OBSERVED,
-    not REFUTED -- some are fault-path records that legitimately do not fire
-    on a healthy system, and this check cannot tell "never happens" apart
-    from "did not happen in a snapshot" any more than the attribute check
-    below can.
+    **This replaced a shared 200-document newest-first sample that hid
+    genuine matches.** Seven fault-path claims (three templates --
+    ``RefusingAndParking``, ``StoreUnreachable``, ... -- plus the attributes
+    ``Queue``, ``Reason``, ``Type``, ``WorkflowCount``) were reported
+    NOT_OBSERVED under the old sample even though the stream holds ~17 days
+    of retention including past chaos-scenario runs that emit exactly these
+    records: the sample simply never happened to land on one. A per-claim
+    ``size=0``/``track_total_hits=1`` query costs the same whether the true
+    count is 0 or 10 million (Elasticsearch can stop at the first match), so
+    checking the *whole* stream per claim is no more expensive than the old
+    shared sample, and it does not miss history the sample could not see.
+
+    Message templates (``elasticsearch.<TemplateName>``) match on
+    ``attributes.{OriginalFormat}`` -- each one's own ``detail`` is the raw
+    template text, exactly what that field carries verbatim on a real
+    record. A handful carry an em dash the OTel pipeline mangles in transit;
+    ``investigate._original_format_filter`` (reused, not re-solved here)
+    switches those to a prefix match up to the dash.
+
+    A claim that still returns zero hits after searching the full retention
+    is a *meaningful* NOT_OBSERVED now -- not "the sample missed it", but "no
+    document in ~17 days of retention has this", which the message states
+    explicitly.
     """
     claims = []
     index_entries = [e for e in entries if e["id"] == "elasticsearch.index"]
@@ -316,20 +401,20 @@ def check_elasticsearch(entries: list[dict], client, sample_size: int = 200) -> 
 
     for entry in template_entries:
         template = entry["detail"]
-        query = {"size": 1, "query": {"bool": {"filter": [_original_format_filter(template)]}}}
         try:
-            hits = client.search(query)
+            found = client.exists([_original_format_filter(template)])
         except Unreachable as exc:
             claims.append(Claim("elasticsearch", entry["id"], UNVERIFIABLE,
-                          f"template query failed -- {exc.detail}"))
+                          f"existence query failed -- {exc.detail}"))
             continue
-        if hits:
+        if found:
             claims.append(Claim("elasticsearch", entry["id"], CONFIRMED,
-                          "attributes.{OriginalFormat} matches this template at least once"))
+                          f"attributes.{{OriginalFormat}} matches this template at least once "
+                          f"(existence check across {RETENTION_NOTE})"))
         else:
             claims.append(Claim("elasticsearch", entry["id"], NOT_OBSERVED,
-                          "attributes.{OriginalFormat} never matches this template -- "
-                          "likely a fault-path record that does not fire on a healthy system"))
+                          f"no document in {RETENTION_NOTE} has attributes.{{OriginalFormat}} "
+                          f"matching this template -- a genuine absence, not a sampling artifact"))
 
     for entry in index_entries:
         claimed = entry["operation"].split(": ", 1)[-1]
@@ -347,30 +432,23 @@ def check_elasticsearch(entries: list[dict], client, sample_size: int = 200) -> 
             claims.append(Claim("elasticsearch", entry["id"], CONFIRMED,
                           f"data stream {claimed!r} exists"))
 
-    if not attr_entries:
-        return claims
-
-    try:
-        hits = client.search({"size": sample_size, "sort": [{"@timestamp": {"order": "desc"}}]})
-    except Unreachable as exc:
-        claims += [Claim("elasticsearch", e["id"], UNVERIFIABLE,
-                         f"bounded sample query failed -- {exc.detail}") for e in attr_entries]
-        return claims
-
-    observed: set[str] = set()
-    for hit in hits:
-        observed |= _flatten_paths(hit)
-
     for entry in attr_entries:
         match = _ES_PATH.match(entry["operation"])
         path = match.group(1) if match else entry["operation"]
-        if path in observed:
+        try:
+            found = client.exists([{"exists": {"field": path}}])
+        except Unreachable as exc:
+            claims.append(Claim("elasticsearch", entry["id"], UNVERIFIABLE,
+                          f"existence query failed -- {exc.detail}"))
+            continue
+        if found:
             claims.append(Claim("elasticsearch", entry["id"], CONFIRMED,
-                          f"{path} present in a {len(hits)}-document sample"))
+                          f"{path} present on at least one document (existence check across "
+                          f"{RETENTION_NOTE})"))
         else:
             claims.append(Claim("elasticsearch", entry["id"], NOT_OBSERVED,
-                          f"{path} not seen in a {len(hits)}-document recent sample "
-                          f"-- may be a fault-path field or simply not recently written"))
+                          f"no document in {RETENTION_NOTE} has {path} -- a genuine absence, "
+                          f"not a sampling artifact"))
     return claims
 
 
@@ -752,6 +830,34 @@ def check_api(entries: list[dict], client, probe_writes: bool = False) -> list[C
 
 _PLACEHOLDER = re.compile(r"\{[^}]*\}")
 
+# BaseConsole.Core.Gating.L2GateOptions.Interval default -- the probe loop
+# that (per L2ProjectionKeys.KeeperProbe's own doc comment) would write and
+# delete this key inside one tick, if anything actually called it.
+_KEEPER_PROBE_ID = "redis.KeeperProbe"
+_KEEPER_PROBE_WINDOW_S = 5.0
+_KEEPER_PROBE_POLL_S = 0.25
+
+_DATA_FAMILY_ID = "redis.ExecutionData"
+_ORCH_START_ID = "api.orchestration.post_start"
+_PROBE_RUN_ATTEMPTS = 20
+_PROBE_RUN_POLL_S = 0.5
+
+
+def _tight_scan(client, pattern: str, window_s: float, poll_s: float) -> list[str]:
+    """Re-issues ``SCAN MATCH pattern`` every ``poll_s`` for up to ``window_s``
+    -- one gate-probe interval -- trying to catch a key that is written and
+    deleted inside a single tick. Still read-only, still bounded: worst case
+    is ``window_s`` seconds of cheap SCANs, not an unbounded wait.
+    """
+    deadline = time.monotonic() + window_s
+    while True:
+        keys = client.keys(pattern)
+        if keys:
+            return keys
+        if time.monotonic() >= deadline:
+            return []
+        time.sleep(poll_s)
+
 
 def check_redis(entries: list[dict], client) -> list[Claim]:
     """Every ``{placeholder}`` in a catalogued key pattern becomes ``*`` for
@@ -759,6 +865,20 @@ def check_redis(entries: list[dict], client) -> list[Claim]:
     family that is empty because nothing is mid-flight (``skp:data:*`` on
     an idle system) is normal, not wrong -- there is no live-system fact
     that contradicts "this key pattern exists in the schema".
+
+    ``redis.KeeperProbe`` (``skp:keeper:probe:*``) gets one extra, still
+    read-only step when the plain SCAN above finds nothing: a tight
+    re-SCAN loop across one full gate-probe interval (``_tight_scan``),
+    trying to catch a key that is written and deleted inside a single tick.
+    If that also finds nothing, the message states a **permanent,
+    reasoned exclusion**, not a generic skip: a grep across every
+    production ``.cs`` file in this build finds ``KeeperProbe(`` only in
+    its own definition (``L2ProjectionKeys.cs``) -- no call site anywhere
+    writes this key today, so no external observation window can exist for
+    it, independent of timing. ``skp verify``'s own ratio line (see
+    ``render_report``) reads the ``PERMANENT EXCLUSION`` marker in this
+    message to lower the achievable ceiling instead of counting this
+    against the toolkit.
     """
     claims = []
     for entry in entries:
@@ -769,12 +889,108 @@ def check_redis(entries: list[dict], client) -> list[Claim]:
             claims.append(Claim("redis", entry["id"], UNVERIFIABLE,
                           f"SCAN {pattern} failed -- {exc.detail}"))
             continue
+
+        if not keys and entry["id"] == _KEEPER_PROBE_ID:
+            try:
+                keys = _tight_scan(client, pattern, _KEEPER_PROBE_WINDOW_S, _KEEPER_PROBE_POLL_S)
+            except Unreachable as exc:
+                claims.append(Claim("redis", entry["id"], UNVERIFIABLE,
+                              f"tight SCAN {pattern} failed -- {exc.detail}"))
+                continue
+
         if keys:
             claims.append(Claim("redis", entry["id"], CONFIRMED,
                           f"{len(keys)} key(s) matching {pattern}"))
+        elif entry["id"] == _KEEPER_PROBE_ID:
+            claims.append(Claim("redis", entry["id"], NOT_OBSERVED,
+                          f"no key matching {pattern} across a tight SCAN loop spanning "
+                          f"{_KEEPER_PROBE_WINDOW_S:.0f}s (one gate-probe interval) -- "
+                          f"PERMANENT EXCLUSION: L2ProjectionKeys.KeeperProbe(...) has no call "
+                          f"site anywhere in production source (grepped across src/**/*.cs; only "
+                          f"its own definition matches) -- nothing in this build ever writes "
+                          f"this key, so no external observer can ever catch it. Structurally "
+                          f"unobservable, not merely hard to time."))
         else:
             claims.append(Claim("redis", entry["id"], NOT_OBSERVED,
                           f"no live keys matching {pattern}"))
+    return claims
+
+
+def _resolve_operation_path(entries: list[dict], surface_id: str) -> str | None:
+    for entry in entries:
+        if entry["id"] == surface_id:
+            return entry["operation"].split(" ", 1)[1]
+    return None
+
+
+def start_workflow_for_probe(entries: list[dict], clients: dict) -> tuple[str | None, str]:
+    """Starts exactly one real workflow through BaseAPI so ``skp:data:*`` can
+    be caught genuinely in flight -- see ``--probe-runs`` in the module
+    docstring. **Uses an existing workflow id from the live system; never
+    creates one.** Returns ``(workflow_id, note)``; ``workflow_id`` is
+    ``None`` when nothing could be started, and ``note`` says why (or, on
+    success, what was started and through which route) -- either way this
+    is folded into the claim's message, never silently dropped.
+
+    ``orchestration/start`` binds a bare ``Guid`` from the body (see the
+    module docstring's ``--probe-writes`` section on the same controller) --
+    the body sent here is the real workflow id, JSON-encoded as a bare
+    string, which is exactly what a real client sends to actually start it.
+    """
+    try:
+        workflows = clients["baseapi"].list("workflows")
+    except Unreachable as exc:
+        return None, f"could not list workflows to find one to start -- {exc.detail}"
+    workflow_id = _first_field(workflows, "id")
+    if workflow_id is None:
+        return None, "no workflow registered on the live system to start"
+    path = _resolve_operation_path(entries, _ORCH_START_ID)
+    if path is None:
+        return None, f"{_ORCH_START_ID} route not found in the catalog"
+    try:
+        clients["baseapi"].http.post_json(path, str(workflow_id))
+    except Unreachable as exc:
+        return None, f"POST {path} with workflow id {workflow_id} failed -- {exc.detail}"
+    return str(workflow_id), f"started workflow {workflow_id} via POST {path}"
+
+
+def apply_probe_runs(claims: list[Claim], entries: list[dict], clients: dict,
+                     reachable: dict[str, bool]) -> list[Claim]:
+    """``--probe-runs`` opt-in: only touches the one ``redis.ExecutionData``
+    claim (``skp:data:*``), and only when the plain read-only check above
+    already found it empty. Starts exactly one workflow (never more), polls
+    ``skp:data:*`` for up to ``_PROBE_RUN_ATTEMPTS * _PROBE_RUN_POLL_S``
+    seconds, and folds the outcome into that one claim -- a caught key
+    upgrades it to CONFIRMED; anything else appends the reason to its
+    existing NOT_OBSERVED message rather than replacing it, so the ordinary
+    "nothing in flight" fact is not lost.
+    """
+    idx = next((i for i, c in enumerate(claims)
+               if c.surface_id == _DATA_FAMILY_ID and c.verdict == NOT_OBSERVED), None)
+    if idx is None:
+        return claims
+    if not reachable.get("baseapi"):
+        claims[idx] = claims[idx]._replace(
+            message=claims[idx].message + " -- --probe-runs could not start a workflow: "
+                                           "baseapi unreachable")
+        return claims
+
+    workflow_id, note = start_workflow_for_probe(entries, clients)
+    if workflow_id is None:
+        claims[idx] = claims[idx]._replace(message=claims[idx].message + f" -- --probe-runs: {note}")
+        return claims
+
+    keys = _tight_scan(clients["redis"], "skp:data:*",
+                       _PROBE_RUN_ATTEMPTS * _PROBE_RUN_POLL_S, _PROBE_RUN_POLL_S)
+    if keys:
+        claims[idx] = Claim("redis", _DATA_FAMILY_ID, CONFIRMED,
+                            f"{len(keys)} key(s) matching skp:data:* -- caught in flight after "
+                            f"{note} (--probe-runs)")
+    else:
+        claims[idx] = claims[idx]._replace(
+            message=claims[idx].message + f" -- --probe-runs: {note}, but skp:data:* never "
+                                           f"appeared within {_PROBE_RUN_ATTEMPTS * _PROBE_RUN_POLL_S:.0f}s "
+                                           f"of polling")
     return claims
 
 
@@ -877,7 +1093,7 @@ def _resolve_processor_ids(clients: dict, reachable: dict[str, bool]) -> list[st
 
 
 def verify_all(entries: list[dict], clients: dict, component: str | None = None,
-               probe_writes: bool = False) -> list[Claim]:
+               probe_writes: bool = False, probe_runs: bool = False) -> list[Claim]:
     """Gate on reachability once, per component, the same way ``skp doctor``
     does -- reusing ``init.probe()`` rather than a second probing
     implementation. A component that does not answer gets every one of its
@@ -886,7 +1102,11 @@ def verify_all(entries: list[dict], clients: dict, component: str | None = None,
     trying and getting a confusing half-answer.
 
     ``probe_writes`` only ever affects the ``api`` component -- see
-    ``check_api``/``_probe_write`` and the module docstring.
+    ``check_api``/``_probe_write`` and the module docstring. ``probe_runs``
+    only ever affects the one ``redis.ExecutionData`` claim -- see
+    ``apply_probe_runs`` -- and needs the *full* catalog (not just the redis
+    component's own entries) to find the ``orchestration/start`` route, so it
+    is applied here rather than inside ``check_redis``.
     """
     rows = probe(clients)
     reachable = {name: ok for name, ok, _ in rows}
@@ -906,10 +1126,15 @@ def verify_all(entries: list[dict], clients: dict, component: str | None = None,
         if comp == "postgres":
             claims += check_postgres(comp_entries, clients["postgres"])
         elif comp == "redis":
-            claims += check_redis(comp_entries, clients["redis"])
+            redis_claims = check_redis(comp_entries, clients["redis"])
+            if probe_runs:
+                redis_claims = apply_probe_runs(redis_claims, entries, clients, reachable)
+            claims += redis_claims
         elif comp == "rabbitmq":
             processor_ids = _resolve_processor_ids(clients, reachable)
-            claims += check_rabbitmq(comp_entries, clients["rabbitmq"], processor_ids)
+            redis_for_status = clients.get("redis") if reachable.get("redis") else None
+            claims += check_rabbitmq(comp_entries, clients["rabbitmq"], processor_ids,
+                                     redis_for_status)
         elif comp == "elasticsearch":
             claims += check_elasticsearch(comp_entries, clients["elasticsearch"])
         elif comp == "prometheus":
@@ -922,7 +1147,8 @@ def verify_all(entries: list[dict], clients: dict, component: str | None = None,
 
 
 def render_report(claims: list[Claim], component: str | None = None,
-                  show_skips: bool = False, probe_writes: bool = False) -> list[str]:
+                  show_skips: bool = False, probe_writes: bool = False,
+                  probe_runs: bool = False) -> list[str]:
     """A skip nobody can enumerate is indistinguishable from a claim that was
     never true (module docstring). So every NOT_OBSERVED/NOT_APPLICABLE claim
     is either listed here by id with its one-line reason (``--skips``), or --
@@ -932,7 +1158,8 @@ def render_report(claims: list[Claim], component: str | None = None,
     gap in what was confirmed is never invisible even in the terse form.
     """
     header = ("skp verify" + (f" --component {component}" if component else "")
-              + (" --probe-writes" if probe_writes else ""))
+              + (" --probe-writes" if probe_writes else "")
+              + (" --probe-runs" if probe_runs else ""))
     lines = [header, ""]
 
     mutation = [c for c in claims if c.message.startswith("MUTATION WARNING")]
@@ -959,8 +1186,20 @@ def render_report(claims: list[Claim], component: str | None = None,
 
     total = len(claims)
     confirmed = sum(1 for c in claims if c.verdict == CONFIRMED)
+    refuted_n = sum(1 for c in claims if c.verdict == REFUTED)
+    permanent = [c for c in claims if "PERMANENT EXCLUSION" in c.message]
     pct = round(100 * confirmed / total) if total else 0
-    lines.append(f"confirmed {confirmed}/{total} ({pct}%)")
+    ratio = f"confirmed {confirmed}/{total} ({pct}%)"
+    if refuted_n or permanent:
+        ceiling = total - refuted_n - len(permanent)
+        notes = []
+        if refuted_n:
+            notes.append(f"{refuted_n} refuted (system defect, not a toolkit gap)")
+        if permanent:
+            notes.append(f"{len(permanent)} permanently excluded (structurally unobservable -- "
+                         f"see below)")
+        ratio += " -- " + "; ".join(notes) + f"; maximum achievable {ceiling}/{total}"
+    lines.append(ratio)
     lines.append("")
 
     refuted = [c for c in claims if c.verdict == REFUTED]
@@ -997,9 +1236,12 @@ def render_report(claims: list[Claim], component: str | None = None,
 
 
 def run_with(entries: list[dict], clients: dict, component: str | None = None,
-            show_skips: bool = False, probe_writes: bool = False) -> Result:
-    claims = verify_all(entries, clients, component=component, probe_writes=probe_writes)
-    lines = render_report(claims, component, show_skips=show_skips, probe_writes=probe_writes)
+            show_skips: bool = False, probe_writes: bool = False,
+            probe_runs: bool = False) -> Result:
+    claims = verify_all(entries, clients, component=component, probe_writes=probe_writes,
+                        probe_runs=probe_runs)
+    lines = render_report(claims, component, show_skips=show_skips, probe_writes=probe_writes,
+                          probe_runs=probe_runs)
 
     if any(c.verdict == REFUTED for c in claims):
         return Result(EXIT_VERDICT, lines, next_command="skp doctor")
@@ -1023,6 +1265,13 @@ def run(argv: list[str]) -> Result:
                              "reported REFUTED with a loud MUTATION WARNING instead of a "
                              "pass. Off by default so skp verify stays strictly read-only "
                              "unless asked otherwise.")
+    parser.add_argument("--probe-runs", action="store_true",
+                        help="opt-in: when skp:data:* is empty (nothing in flight), start "
+                             "exactly one existing workflow through BaseAPI and poll for the "
+                             "key family to appear, to confirm it while genuinely in flight. "
+                             "Starting a workflow is a write (though it creates no rows -- see "
+                             "the module docstring), so this is off by default like "
+                             "--probe-writes.")
     ns = parser.parse_args(argv)
 
     home = pathlib.Path(ns.home)
@@ -1036,4 +1285,5 @@ def run(argv: list[str]) -> Result:
         return not_compiled(home)
 
     return run_with(entries, build_clients(profile), component=ns.component,
-                    show_skips=ns.skips, probe_writes=ns.probe_writes)
+                    show_skips=ns.skips, probe_writes=ns.probe_writes,
+                    probe_runs=ns.probe_runs)
