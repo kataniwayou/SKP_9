@@ -60,12 +60,19 @@ exists:
   one path that could actually delete or overwrite something; a guid this
   process just generated cannot collide with a real row.
 - 400/405/422 confirms the route: wired, and the request was rejected
-  before the action ran. 404 on a route with **no** id placeholder
-  (``POST``) means the path itself did not match anything -- the catalogued
-  route does not exist, a real refutation. 404 on a route **with** an id
-  placeholder is the not-found handler doing exactly its job for a guid
-  guaranteed not to exist -- proof the route ran and rejected the request,
-  not proof it is missing -- so it is treated the same as 400/405/422.
+  before the action ran. **404 is decided by the response body, not by
+  whether the route happens to carry an ``{id}`` placeholder** -- a
+  catalogue-side fact the server never sees and which would make the check
+  unable to fail on the very thing it claims to prove. ASP.NET's own
+  ``NotFoundExceptionHandler`` writes a ProblemDetails body (``title``,
+  ``status``, ...) when routing matched and the action actually ran and
+  then found nothing; a 404 that never reached a controller -- the path
+  itself matched no route -- comes back with an empty body, straight from
+  routing. So a 404 with a ProblemDetails body is CONFIRMED (proof the
+  route is wired); a 404 with an empty or non-ProblemDetails body is
+  REFUTED (the catalogued route does not exist). One rule, applied
+  identically whether or not the route has an id placeholder --
+  ``_looks_like_problem_details``.
   **Any 2xx is REFUTED, loudly**, flagged with a ``MUTATION WARNING`` in its
   message: it would mean model-state validation did not short-circuit the
   way this whole probe assumes, and the request may actually have written
@@ -77,6 +84,7 @@ naming the remedy (``rerun with --probe-writes``) rather than just stating
 the limitation.
 """
 import argparse
+import json
 import pathlib
 import re
 import uuid
@@ -576,21 +584,48 @@ def _check_get(claims: list[Claim], entry: dict, client, path: str, note: str = 
 _WRITE_CONFIRM_STATUSES = (400, 405, 422)
 
 
-def _classify_write_status(status: int, has_id: bool) -> tuple[str, str, bool]:
-    """Maps one ``--probe-writes`` HTTP status to ``(verdict, reason,
-    is_mutation_warning)`` -- see the module docstring for the full
-    rationale. Split out from ``_probe_write`` so the mapping itself (the
-    part the assumption actually lives in) is unit-testable against bare
-    status codes, with no HTTP client involved at all.
+def _looks_like_problem_details(body: str) -> bool:
+    """Does ``body`` carry the RFC 9110 ProblemDetails shape ASP.NET's
+    exception-handler chain writes (``title``, ``status``, ...)?
+
+    This is the fact that actually distinguishes the two things a 404 can
+    mean here, observed live against both: ``DELETE`` on a real (but
+    id-absent) route returns a *body-bearing* 404 -- routing matched, the
+    action ran, ``NotFoundExceptionHandler`` produced this -- while
+    ``DELETE`` on a path that matches no route at all returns a bare,
+    *empty* 404 straight from routing, before any controller runs. Whether
+    the catalogued route happens to have an ``{id}`` placeholder is a fact
+    about the catalog, not the server, and using it instead of this would
+    let the check confirm a route that had actually been removed -- see the
+    module docstring.
+    """
+    if not body or not body.strip():
+        return False
+    try:
+        parsed = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(parsed, dict) and "title" in parsed and "status" in parsed
+
+
+def _classify_write_status(status: int, body: str) -> tuple[str, str, bool]:
+    """Maps one ``--probe-writes`` HTTP status (and its response body) to
+    ``(verdict, reason, is_mutation_warning)`` -- see the module docstring
+    for the full rationale. Split out from ``_probe_write`` so the mapping
+    itself (the part the assumption actually lives in) is unit-testable
+    against bare status/body pairs, with no HTTP client involved at all.
     """
     if status in _WRITE_CONFIRM_STATUSES:
         return CONFIRMED, "route wired, request rejected before the action ran", False
     if status == 404:
-        if has_id:
+        if _looks_like_problem_details(body):
             return (CONFIRMED,
-                    "route wired -- 404 via the not-found handler for a guid guaranteed "
-                    "not to exist", False)
-        return REFUTED, "catalogued route does not exist", False
+                    "route wired -- 404 carries a ProblemDetails body, proof routing "
+                    "matched and the not-found handler ran for a guid guaranteed not "
+                    "to exist", False)
+        return (REFUTED,
+                "catalogued route does not exist -- 404 with no ProblemDetails body, "
+                "proof routing itself never matched", False)
     if 200 <= status < 300:
         return (REFUTED,
                 "expected the request to be rejected before the action ran; a 2xx means "
@@ -605,22 +640,21 @@ def _probe_write(entry: dict, client) -> Claim:
     """
     method, path = entry["operation"].split(" ", 1)
     placeholders = _API_PLACEHOLDER.findall(path)
-    has_id = bool(placeholders)
     note = ""
-    if has_id:
+    if placeholders:
         guid = str(uuid.uuid4())
         for placeholder in placeholders:
             path = path.replace("{" + placeholder + "}", guid)
         note = f" (id={guid}, freshly generated -- cannot exist)"
 
     try:
-        status = client.http.probe_status(method, path, {})
+        status, body = client.http.probe_status(method, path, {})
     except Unreachable as exc:
         return Claim("api", entry["id"], UNVERIFIABLE,
                     f"{method} {path} with an empty body{note} -- transport failure, "
                     f"not a response: {exc.detail}")
 
-    verdict, why, is_mutation = _classify_write_status(status, has_id)
+    verdict, why, is_mutation = _classify_write_status(status, body)
     tag = "MUTATION WARNING: " if is_mutation else ""
     return Claim("api", entry["id"], verdict,
                 f"{tag}{method} {path} with an empty body{note} -> HTTP {status} -- {why}")

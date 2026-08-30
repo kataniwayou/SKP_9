@@ -83,21 +83,37 @@ class ProbeStatusTests(unittest.TestCase):
 
     def test_a_2xx_is_returned_not_raised(self):
         client = HttpClient("http://api:8080", opener=lambda req, timeout=None: _FakeResponse(202))
-        self.assertEqual(client.probe_status("POST", "/api/v1.0/orchestration/start", {}), 202)
+        self.assertEqual(client.probe_status("POST", "/api/v1.0/orchestration/start", {}),
+                         (202, ""))
 
     def test_a_4xx_from_http_error_is_returned_not_raised(self):
         def boom(request, timeout=None):
             raise urllib.error.HTTPError("http://api:8080/x", 400, "Bad Request", {}, io.BytesIO(b""))
 
         client = HttpClient("http://api:8080", opener=boom)
-        self.assertEqual(client.probe_status("POST", "/api/v1.0/workflows", {}), 400)
+        self.assertEqual(client.probe_status("POST", "/api/v1.0/workflows", {}), (400, ""))
 
     def test_a_5xx_from_http_error_is_also_returned_not_raised(self):
         def boom(request, timeout=None):
             raise urllib.error.HTTPError("http://api:8080/x", 500, "Boom", {}, io.BytesIO(b""))
 
         client = HttpClient("http://api:8080", opener=boom)
-        self.assertEqual(client.probe_status("DELETE", "/api/v1.0/workflows/x", {}), 500)
+        self.assertEqual(client.probe_status("DELETE", "/api/v1.0/workflows/x", {}), (500, ""))
+
+    def test_a_404_body_travels_back_alongside_the_status(self):
+        """skp verify --probe-writes tells a wired route's not-found 404
+        apart from a genuinely absent route by the response body -- so the
+        body has to actually make it back to the caller, not just the
+        status code."""
+        problem = b'{"type":"...","title":"Not Found","status":404,"detail":"WorkflowEntity w..."}'
+
+        def boom(request, timeout=None):
+            raise urllib.error.HTTPError("http://api:8080/x", 404, "Not Found", {}, io.BytesIO(problem))
+
+        client = HttpClient("http://api:8080", opener=boom)
+        status, body = client.probe_status("DELETE", "/api/v1.0/workflows/deadbeef", {})
+        self.assertEqual(status, 404)
+        self.assertEqual(body, problem.decode("utf-8"))
 
     def test_a_transport_failure_still_raises_Unreachable(self):
         def boom(request, timeout=None):
