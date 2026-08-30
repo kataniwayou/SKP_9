@@ -8,7 +8,12 @@ class Elastic:
     documents on a shared cluster and an unbounded aggregation looks like a hang.
     """
 
-    def __init__(self, http, index: str = "logs-generic-default"):
+    # C2: the real live data stream is "logs-generic.otel-default" (a dot before
+    # "otel", not a hyphen) -- "logs-generic-default" 404s on the live cluster.
+    # ~10.08M documents as of 2026-08-30 and growing; see
+    # skp.compile.driver.elasticsearch_index(), which catalogues this same
+    # default as a surface rather than leaving it something only this file says.
+    def __init__(self, http, index: str = "logs-generic.otel-default"):
         self.http = http
         self.index = index
 

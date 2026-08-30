@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import pathlib
 
 from skp.clients.api import BaseApi
@@ -21,6 +22,14 @@ DEFAULT_ENDPOINTS = {
     "baseapi": "http://baseapi-service:8080",
     "prometheus": "http://prometheus:9090",
     "elasticsearch": "http://elasticsearch:9200",
+    # C2: the index/data stream is overridable through the same --endpoint
+    # mechanism as the three URLs above -- not a URL itself, but the
+    # mechanism only ever stores and hands back a string, so reusing it here
+    # is cheap and keeps every profile override in one place instead of
+    # inventing a second flag. Defaults to Elastic's own default rather than
+    # a second hardcoded literal, for the same reason
+    # driver.elasticsearch_index() does.
+    "elasticsearch-index": inspect.signature(Elastic.__init__).parameters["index"].default,
 }
 
 ANNOTATIONS_DIR = pathlib.Path(__file__).resolve().parent.parent / "annotations"
@@ -75,7 +84,8 @@ def build_clients(profile: Profile) -> dict:
         "postgres": Postgres(cluster),
         "redis": Redis(cluster),
         "rabbitmq": Rabbit(cluster),
-        "elasticsearch": Elastic(HttpClient(endpoints["elasticsearch"])),
+        "elasticsearch": Elastic(HttpClient(endpoints["elasticsearch"]),
+                                 index=endpoints["elasticsearch-index"]),
         "prometheus": Prometheus(HttpClient(endpoints["prometheus"])),
         "baseapi": BaseApi(HttpClient(endpoints["baseapi"], token=token)),
     }

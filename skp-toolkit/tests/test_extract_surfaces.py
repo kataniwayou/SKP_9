@@ -46,6 +46,12 @@ DBCONTEXT = '''
     public DbSet<StepNextSteps> StepNextSteps => Set<StepNextSteps>();
 '''
 
+# C1: pg_tables() only trusts pascal_to_snake() once it has confirmed the
+# naming convention that makes the transform correct is actually wired.
+PERSISTENCE_EXT_WITH_CONVENTION = "opts.UseNpgsql(...).UseSnakeCaseNamingConvention()"
+BASE_DB_CONTEXT_WITH_CONVENTION = "optionsBuilder.UseSnakeCaseNamingConvention();"
+PERSISTENCE_EXT_WITHOUT_CONVENTION = "opts.UseNpgsql(...)"
+
 
 class MetricTests(unittest.TestCase):
     def test_instruments_are_found_across_files_and_declaration_shapes(self):
@@ -124,7 +130,32 @@ class RestTests(unittest.TestCase):
 
 
 class PgTests(unittest.TestCase):
-    def test_entity_and_junction_tables_are_both_surfaces(self):
-        by_id = {s.id: s for s in pg_tables(DBCONTEXT)}
-        self.assertEqual(sorted(by_id), ["postgres.Schemas", "postgres.StepNextSteps"])
-        self.assertEqual(by_id["postgres.Schemas"].operation, 'SELECT ... FROM "Schemas"')
+    def test_entity_and_junction_tables_are_both_surfaces_and_snake_cased(self):
+        # C1: the real Postgres table names are snake_case (EFCore.NamingConventions'
+        # UseSnakeCaseNamingConvention), not the PascalCase DbSet property name --
+        # "Assignments" fails live with `relation "Assignments" does not exist`.
+        by_id = {s.id: s for s in pg_tables(
+            DBCONTEXT, PERSISTENCE_EXT_WITH_CONVENTION, BASE_DB_CONTEXT_WITH_CONVENTION)}
+        self.assertEqual(sorted(by_id), ["postgres.schemas", "postgres.step_next_steps"])
+        self.assertEqual(by_id["postgres.schemas"].operation, "SELECT ... FROM schemas")
+
+    def test_the_operation_text_is_unquoted_lowercase_not_a_quoted_pascal_identifier(self):
+        by_id = {s.id: s for s in pg_tables(
+            DBCONTEXT, PERSISTENCE_EXT_WITH_CONVENTION, BASE_DB_CONTEXT_WITH_CONVENTION)}
+        self.assertNotIn('"', by_id["postgres.step_next_steps"].operation)
+        self.assertEqual(by_id["postgres.step_next_steps"].operation,
+                         "SELECT ... FROM step_next_steps")
+
+    def test_a_column_casing_note_rides_the_table_detail(self):
+        by_id = {s.id: s for s in pg_tables(
+            DBCONTEXT, PERSISTENCE_EXT_WITH_CONVENTION, BASE_DB_CONTEXT_WITH_CONVENTION)}
+        self.assertIn("source_hash", by_id["postgres.schemas"].detail.lower())
+
+    def test_the_convention_is_detected_not_assumed(self):
+        # If a future edit drops UseSnakeCaseNamingConvention() from the
+        # composition root, pg_tables must raise rather than keep silently
+        # emitting snake_case ids the running schema may no longer have.
+        with self.assertRaises(CatalogError) as caught:
+            pg_tables(DBCONTEXT, PERSISTENCE_EXT_WITHOUT_CONVENTION,
+                     BASE_DB_CONTEXT_WITH_CONVENTION)
+        self.assertIn("UseSnakeCaseNamingConvention", str(caught.exception))

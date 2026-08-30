@@ -206,5 +206,13 @@
     "write_authority": "none",
     "cost": "bounded",
     "verb": "skp verify restart"
+  },
+  "elasticsearch.index": {
+    "intents": ["observe", "analyze", "investigate"],
+    "answers": "which data stream every other elasticsearch.* surface and elasticsearch.attr.* field is actually read from -- logs-generic.otel-default, ~10.08 million documents as of 2026-08-30 and growing continuously on a shared cluster",
+    "never_for": "an unbounded query -- always bound on time and workflow (see the Elastic class docstring); this is not a small lookup table, it is the whole run history",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
   }
 }
