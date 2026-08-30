@@ -36,8 +36,31 @@ class ClusterProbe:
             return False
 
 
+class MissingBinary:
+    """Stands in for the cluster client when neither oc nor kubectl is installed.
+
+    A table with four rows missing is harder to act on than one with four named
+    red rows, so the absence is reported per target rather than raised.
+    """
+
+    def __init__(self, detail: str):
+        self.detail = detail
+
+    def ping(self) -> bool:
+        return False
+
+    def exec(self, workload: str, argv: list[str]) -> str:
+        raise Unreachable(workload, self.detail)
+
+    def run(self, argv: list[str], target: str = "cluster") -> str:
+        raise Unreachable(target, self.detail)
+
+
 def build_clients(profile: Profile) -> dict:
-    cluster = ClusterClient(profile.project, binary=detect_binary())
+    try:
+        cluster = ClusterClient(profile.project, binary=detect_binary())
+    except Unreachable as exc:
+        cluster = MissingBinary(exc.detail)
     token = profile.token
     endpoints = {**DEFAULT_ENDPOINTS, **profile.endpoints}
     return {
@@ -60,8 +83,10 @@ def probe(clients: dict) -> list[tuple[str, bool, str]]:
     rows: list[tuple[str, bool, str]] = []
     for name in PROBE_ORDER:
         client = clients[name]
-        check = getattr(client, "ping", None) or getattr(client, "ready")
         try:
+            check = getattr(client, "ping", None) or getattr(client, "ready", None)
+            if check is None:
+                raise AttributeError(f"{name} client exposes neither ping() nor ready()")
             ok, detail = bool(check()), ""
         except Exception as exc:  # a probe reports; it does not propagate
             ok, detail = False, str(exc)
