@@ -1,5 +1,6 @@
 import unittest
 
+from skp.compile.catalog import CatalogError
 from skp.compile.extract import metrics, pg_tables, rest_endpoints
 
 METRICS_A = 'internal const string DepthInstrument = "pipeline.queue.depth";'
@@ -83,6 +84,23 @@ class RestTests(unittest.TestCase):
         self.assertEqual(operations, {"POST /api/v1.0/orchestration/start",
                                       "POST /api/v1.0/orchestration/stop"})
 
+
+    def test_zero_controller_classes_in_a_file_raises(self):
+        # Merge-blocking minor: `finditer` (looping over every match) is the
+        # wrong fix for "what if there's more than one" -- _INHERITS_BASE is
+        # tested per file, so two classes would each get the five inherited
+        # verbs and one would get five fabricated endpoints. Raising is the
+        # fix; this covers the "found none" half of "exactly one".
+        with self.assertRaises(CatalogError) as caught:
+            rest_endpoints({"NotAController.cs": "public sealed class Plain { }"})
+        self.assertIn("NotAController.cs", str(caught.exception))
+
+    def test_two_controller_classes_in_one_file_raises_rather_than_fabricating(self):
+        text = ("public sealed class FooController : BaseController<A, B, C, D> { } "
+                "public sealed class BarController : BaseController<A, B, C, D> { }")
+        with self.assertRaises(CatalogError) as caught:
+            rest_endpoints({"TwoControllers.cs": text})
+        self.assertIn("TwoControllers.cs", str(caught.exception))
 
     def test_a_bare_attribute_on_a_non_inheriting_controller_is_a_surface(self):
         # I8: `if not tail: continue` used to apply to every controller, but is
