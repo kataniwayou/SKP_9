@@ -76,25 +76,45 @@ def templates(text: str) -> list[Surface]:
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_]\w*)\}")
 _TOSTRING_FORMAT = re.compile(r'\.ToString\(\s*"(\w)"\s*\)')
 
+_LOG_RECORD_CS = "LogRecord.cs (FromSource)"
+_BASE_CONSOLE_OBS_EXT_CS = "BaseConsoleObservabilityExtensions.cs (AddBaseConsoleObservability)"
+
 ELASTICSEARCH_ENVELOPE = [
     ("timestamp", "@timestamp",
-     "record time; arrives as either an ISO-8601 string or epoch milliseconds with a fractional part"),
-    ("body_text", "body.text", "the rendered message text"),
+     "record time; arrives as either an ISO-8601 string or epoch milliseconds with a fractional part",
+     _LOG_RECORD_CS),
+    ("body_text", "body.text", "the rendered message text", _LOG_RECORD_CS),
     ("original_format", "attributes.{OriginalFormat}",
-     "the unsubstituted template -- what templates() catalogues one surface per"),
-    ("service_name", "resource.attributes.service.name", "which role emitted the record"),
-    ("scope_name", "scope.name", "the .NET logger category name"),
+     "the unsubstituted template -- what templates() catalogues one surface per", _LOG_RECORD_CS),
+    ("service_name", "resource.attributes.service.name", "which role emitted the record",
+     _LOG_RECORD_CS),
+    ("service_instance_id", "resource.attributes.service.instance.id",
+     "the replica identity -- the field a per-replica query must group on instead of "
+     "resource.attributes.service.name, which every replica of a role shares",
+     _BASE_CONSOLE_OBS_EXT_CS),
+    ("source", "resource.attributes.Source",
+     "the application type stamped on the resource -- worker/webapi; coarser than "
+     "service.name and not a substitute for it (AddBaseConsoleObservability/"
+     "AddBaseApiObservability)", _BASE_CONSOLE_OBS_EXT_CS),
+    ("scope_name", "scope.name", "the .NET logger category name", _LOG_RECORD_CS),
 ]
-"""Hand-listed, not extracted: none of this is C#. The authority is
-``tests/BaseApi.Tests/Live/Resilience/LogRecord.cs`` (``FromSource``) -- the
-actual field-by-field reader an existing verifier trusts, so drift here would
-mean the catalog and that oracle disagree about the document shape."""
+"""Hand-listed, not extracted: none of this is C#. Each entry names its own
+authority (fourth tuple element) rather than assuming ``LogRecord.cs`` for
+all of them: that reader (``FromSource``) is cut down to the fields *it*
+queries, not a schema, and it does not read ``service.instance.id`` or
+``Source`` at all. Those two are verified instead against
+``BaseConsoleObservabilityExtensions.cs``, where the log resource's
+attributes are actually assembled -- stating the wrong authority for a field
+neither oracle reads would be exactly the kind of unverifiable claim this
+wave exists to remove."""
 
 
 def log_attributes(templates_text: str, scope_text: str, correlation_text: str) -> list[Surface]:
-    """Every field an Elasticsearch log record can be queried by, across the
-    three C# sources plus the one hand-listed envelope (see
-    ``ELASTICSEARCH_ENVELOPE``).
+    """Every field this catalog can attribute to an Elasticsearch log record:
+    placeholder-derived, dispatch-scope, correlation, and the hand-listed
+    envelope (see ``ELASTICSEARCH_ENVELOPE``) -- not a claim that this is
+    every field a raw document holds, since the envelope's own authority is
+    itself a cut-down consumer rather than a schema.
 
     **Message-scoped.** Every ``{Placeholder}`` in a log template becomes
     ``attributes.<Placeholder>`` -- mechanical, since ``templates()`` already
@@ -152,11 +172,11 @@ def log_attributes(templates_text: str, scope_text: str, correlation_text: str) 
             f'"{correlation_format}" (32 lowercase hex, no dashes) -- DIFFERENT from every '
             f'ExecutionLogScope id, which renders "{scope_format}" (hyphenated)'))
 
-    for name, path, note in ELASTICSEARCH_ENVELOPE:
+    for name, path, note, authority in ELASTICSEARCH_ENVELOPE:
         out.append(_surface(
             "elasticsearch", f"attr.{name}",
             f"read {path}",
-            f"{path} -- fixed envelope field, hand-listed from LogRecord.cs (not extracted): {note}"))
+            f"{path} -- fixed envelope field, hand-listed from {authority} (not extracted): {note}"))
 
     return sorted(out, key=lambda s: s.id)
 
@@ -178,34 +198,36 @@ _OBSERVABLE_CALL = re.compile(
     re.DOTALL)
 
 
+_STRING_SPAN = re.compile(r'@"(?:[^"]|"")*"|\'(?:[^\'\\]|\\.)*\'|"(?:[^"\\]|\\.)*"')
+
+
 def _match_brace(text: str, open_idx: int) -> int:
     """Index of the ``}`` matching the ``{`` at ``open_idx``.
 
-    Braces inside string literals are ignored, so a unit string like
-    ``"{message}"`` cannot desynchronise the count.
+    Braces inside a string or char literal are ignored, so a unit string like
+    ``"{message}"`` cannot desynchronise the count. Whole spans are matched
+    and skipped with ``_STRING_SPAN`` -- the same verbatim-string and char-
+    literal alternatives ``_strip_comments`` uses -- rather than a hand-rolled
+    quote/escape toggle, so a bare ``"`` inside a char literal (``'"'``) or a
+    verbatim string's trailing backslash (``@"C:\\dir\\"``) cannot
+    desynchronise this scan the way it used to desynchronise comment
+    stripping (I2): the same failure mode, guarded the same way.
     """
     depth = 0
     i = open_idx
-    in_string = False
-    escape = False
-    while i < len(text):
+    n = len(text)
+    while i < n:
+        m = _STRING_SPAN.match(text, i)
+        if m:
+            i = m.end()
+            continue
         c = text[i]
-        if in_string:
-            if escape:
-                escape = False
-            elif c == "\\":
-                escape = True
-            elif c == '"':
-                in_string = False
-        else:
-            if c == '"':
-                in_string = True
-            elif c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    return i
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i
         i += 1
     raise CatalogError("unbalanced braces while scanning a method body for tags")
 
@@ -218,6 +240,13 @@ def _method_bodies(text: str) -> dict[str, str]:
     expression-bodied. That is good enough for the small, uniformly
     formatted ``*Metrics.cs`` files this feeds: see ``metric_labels``'s
     method-scope association rule.
+
+    **Raises on a genuine duplicate method name** -- two bodies that would
+    collapse onto the same dict key, last one silently winning and hiding
+    whichever call site the label scan needed. A field declaration the
+    regex mis-parses as a zero-arg method named ``new`` (``= new(...)``,
+    common in this codebase) does not count: it never resolves to a ``{``
+    or ``=>`` body, so it never reaches the dict at all and cannot collide.
     """
     bodies: dict[str, str] = {}
     for m in _METHOD_START.finditer(text):
@@ -225,12 +254,20 @@ def _method_bodies(text: str) -> dict[str, str]:
         i = m.end()
         while i < len(text) and text[i].isspace():
             i += 1
+        body = None
         if i < len(text) and text[i] == "{":
-            bodies[name] = text[i + 1:_match_brace(text, i)]
+            body = text[i + 1:_match_brace(text, i)]
         elif text[i:i + 2] == "=>":
             end = text.find(";", i + 2)
             if end != -1:
-                bodies[name] = text[i + 2:end]
+                body = text[i + 2:end]
+        if body is not None:
+            if name in bodies:
+                raise CatalogError(
+                    f"duplicate method name {name!r} found scanning method bodies "
+                    f"(overload?) -- last-one-wins would silently drop the other body "
+                    f"a label scan might need")
+            bodies[name] = body
     return bodies
 
 
@@ -240,6 +277,30 @@ def _tag_keys(text: str) -> set[str]:
     ``new KeyValuePair<string, object?>("outcome", outcome)``."""
     return ({m.group(1) for m in _TAGLIST_ENTRY.finditer(text)} |
             {m.group(1) for m in _KVP_ENTRY.finditer(text)})
+
+
+_AMBIENT_TAG_APPEND = re.compile(r"PipelineAmbientTag\.AppendTo\s*\(\s*ref\s+tags\s*\)")
+
+
+def _method_labels(body: str) -> set[str]:
+    """A method body's tag keys (``_tag_keys``), plus ``role`` when the body
+    calls ``PipelineAmbientTag.AppendTo(ref tags)``.
+
+    ``role`` carries no string literal of its own -- it is appended by a
+    runtime provider (``leader``/``follower``, installed only on the
+    orchestrator) -- so no literal scan can see it; this recognises the one
+    call site that adds it by name instead. Deliberately narrow: only a
+    method body that itself makes this exact call gains ``role``, so this
+    cannot leak the tag onto an instrument that never carries it the way
+    widening to file scope would (see ``_file_dimensions``). It is not
+    generalised into ``_tag_keys`` itself for the same reason -- the file-
+    scope fallback calls ``_tag_keys`` directly on the whole file text, and
+    that path must never see this pattern.
+    """
+    keys = _tag_keys(body)
+    if _AMBIENT_TAG_APPEND.search(body):
+        keys.add("role")
+    return keys
 
 
 def _resolve_token(token: str, consts: dict[str, str]) -> str:
@@ -283,11 +344,13 @@ def _label_domains(labels: set[str], consts: dict[str, str]) -> dict[str, list[s
     return domains
 
 
-_COMMENT_OR_STRING = re.compile(r'"(?:[^"\\]|\\.)*"|//[^\n]*|/\*.*?\*/', re.DOTALL)
+_COMMENT_OR_STRING = re.compile(
+    r'@"(?:[^"]|"")*"|\'(?:[^\'\\]|\\.)*\'|"(?:[^"\\]|\\.)*"|//[^\n]*|/\*.*?\*/', re.DOTALL)
 
 
 def _strip_comments(text: str) -> str:
-    """Blank out ``//`` and ``/* */`` comments, leaving string literals untouched.
+    """Blank out ``//`` and ``/* */`` comments, leaving string and char literals
+    untouched.
 
     Without this, a comment sitting between two call arguments -- exactly
     the house style in this codebase, e.g. the multi-line rationale between
@@ -295,11 +358,29 @@ def _strip_comments(text: str) -> str:
     regex expecting only whitespace there, and the call is silently not
     matched at all rather than matched wrong. Newlines in a stripped comment
     are kept so line-oriented reasoning elsewhere is unaffected.
+
+    **Verbatim strings and char literals are matched first, and matter even
+    though this codebase has none today.** A plain ``"(?:[^"\\]|\\.)*"``
+    cannot see ``@"...\"`` -- the trailing backslash in a Windows path is not
+    an escape inside a verbatim string, so the regex reads past the real
+    closing quote looking for one, and everything up to the NEXT quote
+    (commonly the start of the next string literal in the file) is treated
+    as being inside that string and left untouched, desynchronising quote
+    parity for the rest of the file. A char literal has the same failure
+    mode: ``'"'`` flips the string-tracking parity a bare double-quote
+    pattern assumes, so a later real ``//`` inside actual code gets matched
+    as a comment and blanked -- a confident false negative from the function
+    added to prevent confident false negatives. This function runs before
+    every structural regex in this module, so an unguarded quote-parity bug
+    here has the widest blast radius in the extractor.
     """
 
     def _replace(m: re.Match) -> str:
         matched = m.group(0)
-        return matched if matched.startswith('"') else "\n" * matched.count("\n")
+        # Any string-shaped match -- regular, verbatim (@"..."), or char ('...')
+        # -- is left untouched; only the two comment alternatives are blanked.
+        is_string = matched.startswith('"') or matched.startswith("@\"") or matched.startswith("'")
+        return matched if is_string else "\n" * matched.count("\n")
 
     return _COMMENT_OR_STRING.sub(_replace, text)
 
@@ -319,6 +400,14 @@ def _file_dimensions(text: str) -> dict[str, dict]:
     instrument declared in the file carries the union of every tag key
     found anywhere in it. Which rule fired is recorded on the surface
     rather than blurred.
+
+    **Exactly one call site, or fail loudly.** Picking the first method that
+    touches an instrument's field would silently choose one of two ``TagList``
+    shapes if a second call site existed, reporting one method's labels as
+    if they were the whole truth. Not hypothetical guesswork about a future
+    file -- a genuine second call site is exactly the shape ``.Add(``/
+    ``.Record(`` on the wrong field would produce, so this raises rather than
+    picking.
     """
     text = _strip_comments(text)
     consts = const_strings(text)
@@ -327,10 +416,15 @@ def _file_dimensions(text: str) -> dict[str, dict]:
 
     for field, token in _FIELD_INSTRUMENT.findall(text):
         name = _resolve_token(token, consts)
-        body = next((b for b in bodies.values()
-                     if f"{field}.Add(" in b or f"{field}.Record(" in b), None)
-        if body is not None:
-            labels, scope = _tag_keys(body), "method"
+        matches = [b for b in bodies.values()
+                   if f"{field}.Add(" in b or f"{field}.Record(" in b]
+        if len(matches) > 1:
+            raise CatalogError(
+                f"{name}: {len(matches)} method bodies call .Add(/.Record( on "
+                f"{field!r} -- cannot resolve labels to a single method scope "
+                f"without arbitrarily picking one")
+        if matches:
+            labels, scope = _method_labels(matches[0]), "method"
         else:
             labels, scope = _tag_keys(text), "file"
         dims[name] = {"labels": sorted(labels), "scope": scope,
@@ -340,13 +434,35 @@ def _file_dimensions(text: str) -> dict[str, dict]:
         name = _resolve_token(token, consts)
         callback = callback.strip()
         if re.fullmatch(r"\w+", callback) and callback in bodies:
-            labels, scope = _tag_keys(bodies[callback]), "method"
+            labels, scope = _method_labels(bodies[callback]), "method"
         else:
             labels, scope = _tag_keys(text), "file"
         dims[name] = {"labels": sorted(labels), "scope": scope,
                       "domains": _label_domains(labels, consts)}
 
     return dims
+
+
+def _merge_dims(dims: dict[str, dict], file_dims: dict[str, dict]) -> None:
+    """Merge one file's ``_file_dimensions`` result into the running map,
+    raising on a conflicting redefinition rather than letting the later
+    file's labels silently win.
+
+    A plain ``dict.update`` here would let two files declaring the same
+    instrument name disagree and still produce a clean map -- and ``names``
+    (built separately, as a set union) has no way to notice, so the
+    completeness guard could not catch it either. Not idle: this codebase
+    already has two same-named ``L2GateMetrics.cs`` files aliasing
+    ``GateMetrics``' constants, which is exactly the shape a future real
+    collision would take.
+    """
+    for name, dim in file_dims.items():
+        if name in dims and dims[name] != dim:
+            raise CatalogError(
+                f"{name}: instrument redeclared with conflicting labels in "
+                f"another file ({dims[name]} vs {dim}) -- dict.update would "
+                f"silently let the later file win")
+        dims[name] = dim
 
 
 def metric_labels(texts: dict[str, str]) -> dict[str, list[str]]:
@@ -357,19 +473,29 @@ def metric_labels(texts: dict[str, str]) -> dict[str, list[str]]:
     """
     dims: dict[str, dict] = {}
     for text in texts.values():
-        dims.update(_file_dimensions(text))
+        _merge_dims(dims, _file_dimensions(text))
     return {name: dim["labels"] for name, dim in dims.items()}
 
 
 def _metric_detail(name: str, dim: dict | None) -> str:
-    if not dim or not dim["labels"]:
-        scope = dim["scope"] if dim else "method"
-        return f"{name} | no labels ({scope} scope -- this instrument carries no tags)"
+    if dim is None:
+        # A call site was never found for this name -- a parse miss, not a
+        # determination that the instrument carries no tags. Inventing a
+        # scope here (the old behaviour: always "method scope") would claim
+        # a precision this branch never earned.
+        return f"{name} | no call site found -- labels not determined"
+    if not dim["labels"]:
+        return f"{name} | no labels ({dim['scope']} scope -- this instrument carries no tags)"
     parts = []
     for label in dim["labels"]:
         domain = dim["domains"].get(label)
         parts.append(f"{label}={{{'|'.join(domain)}}}" if domain else label)
-    return f"{name} | labels: {', '.join(parts)} ({dim['scope']} scope)"
+    if dim["scope"] == "file":
+        scope_note = ("file scope -- the union of every tag key in this "
+                      "instrument's file; it may not carry all of them")
+    else:
+        scope_note = "method scope"
+    return f"{name} | labels: {', '.join(parts)} ({scope_note})"
 
 
 def metrics(texts: list[str]) -> list[Surface]:
@@ -388,12 +514,36 @@ def metrics(texts: list[str]) -> list[Surface]:
     dims: dict[str, dict] = {}
     for text in texts:
         names.update(literals_matching(text, "pipeline."))
-        dims.update(_file_dimensions(text))
+        _merge_dims(dims, _file_dimensions(text))
     return sorted(
         (Surface("prometheus", f"prometheus.{name.replace('.', '_')}",
                  f"instant query on {name}", _metric_detail(name, dims.get(name)))
          for name in names),
         key=lambda s: s.id)
+
+
+def metric_label_gaps(texts: list[str]) -> list[str]:
+    """Every ``pipeline.*`` instrument name found by ``literals_matching`` but
+    absent from the merged dimension map -- a parse miss the label scan could
+    not resolve to any declaration shape, as opposed to a genuine absence of
+    tags (which resolves to an entry with an empty label list, not a missing
+    entry).
+
+    Promoted from a unit-test-only assertion
+    (``test_no_instrument_is_silently_missing_from_the_dimension_map``) into a
+    function ``collect_surfaces`` calls, so a future parse miss fails
+    ``skp doctor`` as a named compile problem rather than staying invisible
+    outside ``unittest``.
+    """
+    names: set[str] = set()
+    dims: dict[str, dict] = {}
+    for text in texts:
+        names.update(literals_matching(text, "pipeline."))
+        _merge_dims(dims, _file_dimensions(text))
+    missing = sorted(names - set(dims))
+    return [f"prometheus.{name.replace('.', '_')}: instrument name found but no "
+            f"label scan resolved it (parse miss, not a genuine absence of tags)"
+            for name in missing]
 
 
 RESOURCE_LABELS = [
