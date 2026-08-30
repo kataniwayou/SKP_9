@@ -23,6 +23,16 @@ class Rabbit:
         ])
         return json.loads(out) if out else []
 
+    def exchanges(self) -> list[dict]:
+        """The catalogued dead-letter surfaces (``DeadLetterExchange``) name
+        exchanges, not queues -- ``list_queues`` will never list them and that
+        absence is not a defect. Read-only, same as ``queues()``."""
+        out = self.cluster.exec(self.workload, [
+            "rabbitmqctl", "list_exchanges", "name",
+            "--formatter=json",
+        ])
+        return json.loads(out) if out else []
+
     def ping(self) -> bool:
         try:
             self.cluster.exec(self.workload, ["rabbitmqctl", "status", "--formatter=json"])
