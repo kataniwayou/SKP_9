@@ -1,7 +1,7 @@
 import pathlib
 import unittest
 
-from skp.compile.extract import queues, redis_keys, templates
+from skp.compile.extract import metrics, pg_tables, queues, redis_keys, rest_endpoints, templates
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
 
@@ -52,3 +52,31 @@ class RealSourceTests(unittest.TestCase):
         ids = [s.id for s in surfaces]
         duplicates = sorted({i for i in ids if ids.count(i) > 1})
         self.assertEqual(duplicates, [], f"ids must be unique; collided: {duplicates}")
+
+
+@unittest.skipUnless(SRC.exists(), "run from inside the repo")
+class RealSurfaceTests(unittest.TestCase):
+    def test_the_five_entity_tables_and_three_junctions_are_found(self):
+        found = {s.id for s in pg_tables(read("BaseApi.Service/AppDbContext.cs"))}
+        self.assertEqual(found, {
+            "postgres.Schemas", "postgres.Processors", "postgres.Steps",
+            "postgres.Assignments", "postgres.Workflows",
+            "postgres.StepNextSteps", "postgres.WorkflowEntrySteps",
+            "postgres.WorkflowAssignments",
+        })
+
+    def test_documented_instruments_are_all_present(self):
+        texts = [p.read_text(encoding="utf-8") for p in SRC.rglob("*Metrics.cs")
+                 if "obj" not in p.parts and "bin" not in p.parts]
+        found = {s.detail for s in metrics(texts)}
+        for name in ("pipeline.queue.depth", "pipeline.deadletter.depth",
+                     "pipeline.messages.produced", "pipeline.gate.open"):
+            self.assertIn(name, found)
+
+    def test_the_five_entity_controllers_and_orchestration_are_routed(self):
+        texts = {p.name: p.read_text(encoding="utf-8")
+                 for p in (SRC / "BaseApi.Service" / "Features").rglob("*Controller.cs")}
+        operations = {s.operation for s in rest_endpoints(texts)}
+        self.assertIn("GET /api/v1.0/workflows", operations)
+        self.assertIn("POST /api/v1.0/orchestration/start", operations)
+        self.assertIn("GET /api/v1.0/processors/by-source-hash/{sourceHash}", operations)
