@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 
+from skp.compile.catalog import CatalogError
 from skp.compile.csharp import const_strings, expression_bodies, literals_matching
 
 _DBSET = re.compile(r"DbSet<\w+>\s+(\w+)\s*=>")
@@ -95,11 +96,19 @@ def _route_token(class_name: str) -> str:
 
 def rest_endpoints(controller_texts: dict[str, str]) -> list[Surface]:
     out: list[Surface] = []
-    for text in controller_texts.values():
-        match = _CONTROLLER_CLASS.search(text)
-        if not match:
-            continue
-        token = _route_token(match.group(1))
+    for filename, text in controller_texts.items():
+        # Merge-blocking minor: raise on anything other than exactly one
+        # controller class in the file. `finditer` looks like the fix for "what
+        # if there are two", but `_INHERITS_BASE` is tested per *file*, so both
+        # classes would receive the five inherited CRUD verbs and one of them
+        # would get five fabricated endpoints -- fabricating a route is worse
+        # than dropping one, so this fails loudly instead.
+        matches = _CONTROLLER_CLASS.findall(text)
+        if len(matches) != 1:
+            raise CatalogError(
+                f"{filename}: expected exactly one controller class, found "
+                f"{len(matches)} ({', '.join(matches) if matches else 'none'})")
+        token = _route_token(matches[0])
         base = f"{API_PREFIX}/{token}"
         inherits = bool(_INHERITS_BASE.search(text))
 

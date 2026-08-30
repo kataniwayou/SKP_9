@@ -1,6 +1,5 @@
 import io
 import unittest
-import unittest as _unittest
 
 from skp.clients.api import API_PREFIX, BaseApi
 from skp.clients.es import Elastic
@@ -58,7 +57,7 @@ class PrometheusTests(unittest.TestCase):
         self.assertEqual(Prometheus(FakeHttp({"status": "error"})).query("bad{"), [])
 
 
-class PlainTextProbeTests(_unittest.TestCase):
+class PlainTextProbeTests(unittest.TestCase):
     def test_a_plain_text_body_does_not_crash_the_probe(self):
         def opener(request, timeout=None):
             return io.BytesIO(b"Prometheus Server is Healthy.\n")
