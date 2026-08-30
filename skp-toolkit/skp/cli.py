@@ -1,8 +1,9 @@
 import argparse
 
 from skp.result import EXIT_USAGE, Result
+from skp.verbs import init as init_verb
 
-GROUPS: dict[str, object] = {}
+GROUPS = {"init": init_verb.run}
 """Group name -> callable(args: list[str]) -> Result. Populated by later tasks."""
 
 
