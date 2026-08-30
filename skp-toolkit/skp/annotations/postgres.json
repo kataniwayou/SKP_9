@@ -1,5 +1,5 @@
 {
-  "postgres.Schemas": {
+  "postgres.schemas": {
     "intents": ["design", "observe"],
     "answers": "every schema row: its jsonb Definition document, the root of the entity foreign-key graph",
     "never_for": "whether a workflow using it is running now — that is Redis L2, which legitimately lags a PUT until the next start",
@@ -7,7 +7,7 @@
     "cost": "cheap",
     "verb": "skp author list --entity schemas"
   },
-  "postgres.Processors": {
+  "postgres.processors": {
     "intents": ["design", "observe"],
     "answers": "every processor row: its SourceHash and optional input/output/config schema ids",
     "never_for": "whether this processor is running now — Postgres holds the registration, Redis liveness keys hold the fact",
@@ -15,7 +15,7 @@
     "cost": "cheap",
     "verb": "skp author list --entity processors"
   },
-  "postgres.Steps": {
+  "postgres.steps": {
     "intents": ["design", "observe"],
     "answers": "every step row: its ProcessorId binding and EntryCondition",
     "never_for": "the step's own successors — those live in the StepNextSteps junction, not on this row; and whether the workflow that owns it is running — that is Redis L2",
@@ -23,7 +23,7 @@
     "cost": "cheap",
     "verb": "skp author list --entity steps"
   },
-  "postgres.Assignments": {
+  "postgres.assignments": {
     "intents": ["design", "observe"],
     "answers": "every assignment row: its StepId binding and jsonb Payload",
     "never_for": "which workflow includes it — that is the WorkflowAssignments junction, not a column here",
@@ -31,7 +31,7 @@
     "cost": "cheap",
     "verb": "skp author list --entity assignments"
   },
-  "postgres.Workflows": {
+  "postgres.workflows": {
     "intents": ["design", "observe"],
     "answers": "every workflow row: its optional CronExpression; entry steps and assignments live in the two junctions, not here",
     "never_for": "whether it is running now — L2 legitimately lags a PUT until the next start",
@@ -39,7 +39,7 @@
     "cost": "cheap",
     "verb": "skp author list --entity workflows"
   },
-  "postgres.StepNextSteps": {
+  "postgres.step_next_steps": {
     "intents": ["design", "observe", "verify"],
     "answers": "the workflow graph's edges — which StepId may flow into which NextStepId; the source of truth for successors, since StepEntity carries neither the collection nor a navigation property",
     "never_for": "whether the workflow built from these edges is running — that is Redis L2, not this table",
@@ -47,7 +47,7 @@
     "cost": "cheap",
     "verb": "skp author get --entity steps"
   },
-  "postgres.WorkflowEntrySteps": {
+  "postgres.workflow_entry_steps": {
     "intents": ["design", "observe"],
     "answers": "which steps a workflow enters at — the source of truth for entry steps, since WorkflowEntity carries no collection or navigation property",
     "never_for": "whether that workflow is currently projected — L2, which lags a PUT until the next start",
@@ -55,7 +55,7 @@
     "cost": "cheap",
     "verb": "skp author get --entity workflows"
   },
-  "postgres.WorkflowAssignments": {
+  "postgres.workflow_assignments": {
     "intents": ["design", "observe"],
     "answers": "which assignments (processor payload bindings) a workflow includes — the source of truth, since neither WorkflowEntity nor AssignmentEntity carries the link",
     "never_for": "whether that workflow is currently projected — L2, which lags a PUT until the next start",
