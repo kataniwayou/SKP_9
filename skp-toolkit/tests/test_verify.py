@@ -22,13 +22,16 @@ class FakePostgres:
         return True
 
     def rows(self, sql):
+        # Matched on the quoted identifier deliberately: verify.check_postgres
+        # must emit `FROM "table"`, not `FROM table` -- unquoted, Postgres
+        # folds to lowercase and a PascalCase regression would silently pass.
         for table, err in self.errors.items():
-            if f"FROM {table}" in sql:
+            if f'"{table}"' in sql:
                 raise Unreachable("postgres", err)
         for table, count in self.table_counts.items():
-            if f"FROM {table}" in sql:
+            if f'"{table}"' in sql:
                 return [[str(count)]]
-        raise Unreachable("postgres", f'ERROR:  relation "?" does not exist\n{sql}')
+        raise Unreachable("postgres", f'ERROR:  relation "?" does not exist' + chr(10) + sql)
 
 
 class FakeRabbit:
@@ -199,6 +202,35 @@ class PostgresChecksTests(unittest.TestCase):
         client = FakePostgres(errors={"steps": "ERROR:  permission denied for table steps"})
         claims = verify.check_postgres([self.entry("steps")], client)
         self.assertEqual(claims[0].verdict, verify.UNVERIFIABLE)
+
+    def test_a_pascalcase_regression_is_refuted_not_confirmed(self):
+        """The C1 defect this verb exists to catch: if the catalog ever
+        regressed to the PascalCase DbSet property name, an unquoted query
+        would have Postgres fold it to lowercase and silently CONFIRM the
+        wrong claim. FakePostgres mirrors real Postgres's own case-sensitive
+        quoted-identifier behaviour: it only recognises "assignments"
+        (lowercase, the real table), never "Assignments" -- so this table
+        counts as absent, and a quoted query for "Assignments" must be
+        REFUTED, not CONFIRMED via a case-insensitive fold."""
+        client = FakePostgres(table_counts={"assignments": 23})
+        claims = verify.check_postgres([self.entry("Assignments")], client)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+
+    def test_the_emitted_sql_quotes_the_identifier(self):
+        """Pins the fix itself: a future edit that drops the quoting and
+        restores the blind spot must fail this test even if every fake
+        happens to still pass."""
+        captured = []
+
+        class RecordingPostgres:
+            def rows(self, sql):
+                captured.append(sql)
+                return [["1"]]
+
+        verify.check_postgres([self.entry("workflows")], RecordingPostgres())
+        self.assertEqual(len(captured), 1)
+        self.assertIn('"workflows"', captured[0])
+        self.assertNotIn("FROM workflows", captured[0])
 
 
 # ---------------------------------------------------------------------

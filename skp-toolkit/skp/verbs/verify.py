@@ -80,17 +80,22 @@ _RELATION_MISSING = re.compile(r"does not exist", re.IGNORECASE)
 def check_postgres(entries: list[dict], client) -> list[Claim]:
     """Each catalogued table's id already *is* the real (snake_case) table
     name (``pg_tables`` builds ``postgres.<table>``), so no parsing is
-    needed to recover it. ``relation ... does not exist`` is the one
-    Postgres error this defect actually produces (see the C1 fix note in
-    ``extract.pg_tables``) -- anything else is a query that failed for some
-    other reason, which is a claim skp verify could not check, not one it
-    disproved.
+    needed to recover it. The identifier is double-quoted in the query --
+    unquoted, Postgres folds it to lowercase before matching, so a
+    regression back to the PascalCase ``DbSet`` property name (the C1
+    defect this verb exists to catch) would fold to the real lowercase
+    table and silently pass. Quoted, the comparison is exact: the catalog
+    claims one specific spelling, and only that spelling confirms it.
+    ``relation ... does not exist`` is the one Postgres error this defect
+    actually produces (see the C1 fix note in ``extract.pg_tables``) --
+    anything else is a query that failed for some other reason, which is a
+    claim skp verify could not check, not one it disproved.
     """
     claims = []
     for entry in entries:
         table = entry["id"].split(".", 1)[1]
         try:
-            rows = client.rows(f"SELECT count(*) FROM {table}")
+            rows = client.rows(f'SELECT count(*) FROM "{table}"')
         except Unreachable as exc:
             if _RELATION_MISSING.search(exc.detail):
                 claims.append(Claim("postgres", entry["id"], REFUTED,
@@ -98,7 +103,7 @@ def check_postgres(entries: list[dict], client) -> list[Claim]:
                               f"{exc.detail.strip().splitlines()[0]}"))
             else:
                 claims.append(Claim("postgres", entry["id"], UNVERIFIABLE,
-                              f"SELECT count(*) FROM {table} failed -- {exc.detail}"))
+                              f'SELECT count(*) FROM "{table}" failed -- {exc.detail}'))
             continue
         count = rows[0][0] if rows and rows[0] else "0"
         claims.append(Claim("postgres", entry["id"], CONFIRMED, f"table {table}: {count} row(s)"))
