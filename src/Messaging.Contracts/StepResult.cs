@@ -12,8 +12,10 @@ namespace Messaging.Contracts;
 /// <para>
 /// <b><c>PreviousProcessing</c> (0) has no member here, deliberately.</b> Nothing in this system emits
 /// a "still processing" result — a step reaches exactly one of the three terminals below — so a
-/// successor wired to condition 0 can never be entered. That is a validation rule the API owes its
-/// callers, not a result this enum should invent a member for.
+/// successor wired to condition 0 can never be entered. That is a validation rule rather than
+/// a result this enum should invent a member for, and the API now enforces it: both step validators
+/// reject <c>PreviousProcessing</c>. Rows written before that rule existed can still hold 0, and they
+/// behave as they always did — no successor ever matches them.
 /// </para>
 /// </summary>
 public enum StepResult
