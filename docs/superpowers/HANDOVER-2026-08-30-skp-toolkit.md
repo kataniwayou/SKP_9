@@ -73,29 +73,34 @@ python -m skp verify --home <same> --probe-writes
   `term` matching finds zero. Use a prefix match (`investigate._original_format_filter`).
 - **Liveness `interval` is whole seconds** on the wire, not milliseconds.
 
-## Verification status: ~125/136 (92%)
+## Verification status: 130/136 (96%), ceiling 133/136
 
-`skp verify --probe-writes`, live. The ratio is **not deterministic** — it moves
-a point or two because the Elasticsearch sample is bounded.
+`skp verify --probe-writes --probe-runs`, live. Without flags: 112/136 (82%).
+The ratio is **not deterministic** — `redis.ExecutionData` is a genuine race
+(it confirms only if the scan lands while a run is in flight).
 
-The remaining 11, and how to close each:
+The verb prints its own ceiling:
+`confirmed 130/136 (96%) — 2 refuted (system defect, not a toolkit gap);
+1 permanently excluded (structurally unobservable); maximum achievable 133/136`
 
-1. **7 Elasticsearch fault-path claims** (3 templates + 4 attributes:
-   `RefusingAndParking`, `StoreUnreachable`, `Queue`, `Reason`, `Type`,
-   `WorkflowCount`). **Currently believed unobservable on a healthy system —
-   this is probably wrong.** The check samples only the newest 200 documents;
-   the index holds 17 days including past chaos runs, so these records very
-   likely exist in history. **Fix: per-claim bounded existence query across
-   retention instead of a recent sample.** Expected to close most or all 7.
-2. **2 Redis families.** `skp:data:*` is empty when nothing is in flight —
-   confirmable by verifying during an in-flight run (needs an opt-in flag, since
-   starting a workflow is a write). `skp:keeper:probe:*` is written and deleted
-   inside one gate probe — catchable only by a tight SCAN across a probe
-   interval, or genuinely unobservable; decide and document which.
-3. **2 REFUTED — a real defect in the system, not the toolkit.** Two of three
-   registered processors have no broker queues; thirteen orphaned `.dead` queues
-   and two live work queues belong to no `processors` row. Bidirectional drift
-   between the registry and RabbitMQ. Cleaning it makes these confirm.
+What remains, and why:
+
+1. **3 Elasticsearch templates** — `ConnectionRecovered`, `EntryAbsentDuplicate`,
+   `SendFailedReturning`. Confirmed absent across the **full ~17-day retention**,
+   not merely a recent sample. A meaningful NOT_OBSERVED: these records have
+   genuinely never been written in the retained window. Closing them requires
+   fault injection (the repo's S1–S7 chaos scenarios produce them).
+2. **`redis.KeeperProbe` — permanent exclusion.** `L2ProjectionKeys.KeeperProbe`
+   has **zero call sites** in all of `src/` (grep confirms one hit: its own
+   declaration). Nothing writes the key, so no external observer can ever catch
+   it. **This is dead code in the C#** — worth removing there, at which point the
+   catalog entry disappears with it.
+3. **2 REFUTED — a real defect in the running system.** Processors `9e034ca0…`
+   and `5fed54d3…` are registered but **confirmed not deployed** (no
+   `skp:proc:<id>` liveness key has ever existed), so the remedy is
+   deploy-or-delete-the-row, not "investigate a broker loss". Separately, 12
+   orphaned `.dead` queues and 2 orphaned live work queues match no `processors`
+   row and are named in the output for cleanup.
 
 ## How this build actually went — read this before trusting anything
 
