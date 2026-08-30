@@ -41,13 +41,19 @@ class Profile:
 
     # ---- persistence -------------------------------------------------
 
-    def save(self, token: str) -> None:
+    def save(self, token: str | None = None) -> None:
         """Write the profile and, separately, the token.
 
         The token lives in its own file so that ``profile.json`` can be read,
         pasted and diffed freely. ``chmod`` is best-effort: on Windows it only
         toggles the read-only bit, so the separation — not the mode — is what
         carries the guarantee.
+
+        ``token`` is written only when it is not ``None``. A caller that has
+        nothing new to say about the token (e.g. ``skp init --refresh`` with
+        no ``--token``) must not overwrite the stored credential with an
+        empty string — that is the C1 failure this signature exists to
+        prevent.
         """
         self.home.mkdir(parents=True, exist_ok=True)
         for sub in ("model", "state", "cases"):
@@ -58,12 +64,13 @@ class Profile:
         (self.home / "profile.json").write_text(
             json.dumps(body, indent=2, sort_keys=True), encoding="utf-8")
 
-        token_path = self.home / "token"
-        token_path.write_text(token, encoding="utf-8")
-        try:
-            os.chmod(token_path, 0o600)
-        except OSError:
-            pass
+        if token is not None:
+            token_path = self.home / "token"
+            token_path.write_text(token, encoding="utf-8")
+            try:
+                os.chmod(token_path, 0o600)
+            except OSError:
+                pass
 
     @classmethod
     def load(cls, home: pathlib.Path | None = None) -> "Profile":

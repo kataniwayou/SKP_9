@@ -11,8 +11,8 @@ from skp.clients.rabbit import Rabbit
 from skp.clients.redis import Redis
 from skp.compile.catalog import CatalogError
 from skp.compile.driver import compile_catalog
-from skp.profile import Profile, default_home
-from skp.result import EXIT_DRIFT, EXIT_OK, EXIT_UNREACHABLE, Result
+from skp.profile import Profile, ProfileMissing, default_home, not_initialised
+from skp.result import EXIT_DRIFT, EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE, Result
 
 PROBE_ORDER = ["cluster", "postgres", "redis", "rabbitmq",
                "elasticsearch", "prometheus", "baseapi"]
@@ -111,32 +111,63 @@ def render_table(rows: list[tuple[str, bool, str]]) -> str:
 def run(argv: list[str]) -> Result:
     parser = argparse.ArgumentParser(prog="skp init")
     parser.add_argument("--home", default=str(default_home()))
-    parser.add_argument("--source-root", required=True)
-    parser.add_argument("--cluster-url", required=True)
-    parser.add_argument("--project", required=True)
-    parser.add_argument("--token", default="")
+    parser.add_argument("--source-root")
+    parser.add_argument("--cluster-url")
+    parser.add_argument("--project")
+    parser.add_argument("--token", default=None)
     parser.add_argument("--endpoint", action="append", default=[],
                         metavar="NAME=URL", help="override a derived endpoint")
     parser.add_argument("--refresh", action="store_true")
     ns = parser.parse_args(argv)
 
+    home = pathlib.Path(ns.home)
+
+    stored: Profile | None = None
+    if ns.refresh:
+        try:
+            stored = Profile.load(home)
+        except ProfileMissing:
+            return not_initialised()
+
+        source_root = ns.source_root if ns.source_root is not None else stored.source_root
+        cluster_url = ns.cluster_url if ns.cluster_url is not None else stored.cluster_url
+        project = ns.project if ns.project is not None else stored.project
+    else:
+        missing = [flag for flag, value in
+                   (("--source-root", ns.source_root),
+                    ("--cluster-url", ns.cluster_url),
+                    ("--project", ns.project)) if value is None]
+        if missing:
+            return Result(EXIT_USAGE,
+                          [f"missing required flag(s): {', '.join(missing)}"],
+                          next_command="skp init --source-root <path> "
+                                       "--cluster-url <url> --project <name>")
+        source_root = ns.source_root
+        cluster_url = ns.cluster_url
+        project = ns.project
+
+    # Endpoint resolution layers, in order: the built-in defaults, then a
+    # stored profile's overrides (--refresh only — there is nothing stored on
+    # a fresh init), then --endpoint flags actually passed on this call.
     endpoints = dict(DEFAULT_ENDPOINTS)
+    if stored is not None:
+        endpoints.update(stored.endpoints)
     for pair in ns.endpoint:
         name, _, url = pair.partition("=")
         endpoints[name] = url
 
     profile = Profile(
-        home=pathlib.Path(ns.home),
-        source_root=ns.source_root,
-        cluster_url=ns.cluster_url,
-        project=ns.project,
+        home=home,
+        source_root=source_root,
+        cluster_url=cluster_url,
+        project=project,
         endpoints=endpoints,
     )
     profile.save(token=ns.token)
 
     try:
         entries, problems = compile_catalog(
-            pathlib.Path(ns.source_root), ANNOTATIONS_DIR, profile.home / "model")
+            pathlib.Path(source_root), ANNOTATIONS_DIR, profile.home / "model")
     except CatalogError as exc:
         return Result(EXIT_DRIFT,
                       [f"memory folder: {profile.home}",
@@ -146,7 +177,7 @@ def run(argv: list[str]) -> Result:
 
     rows = probe(build_clients(profile))
     lines = [f"memory folder: {profile.home}",
-             f"catalogued {len(entries)} capabilities from {ns.source_root}",
+             f"catalogued {len(entries)} capabilities from {source_root}",
              "", render_table(rows)]
 
     dead = [name for name, ok, _ in rows if not ok]

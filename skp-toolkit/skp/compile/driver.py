@@ -23,11 +23,26 @@ def _read(root: pathlib.Path, rel: str) -> str:
 
 
 def _source_paths(source_root: pathlib.Path) -> list[pathlib.Path]:
+    """Every source path the lock should track.
+
+    The ``SOURCE_MAP`` fixed paths are kept even when missing -- ``hash_file``
+    records them as ``MISSING`` rather than dropping them, so a rename shows
+    up as drift instead of quietly disappearing from the lock (see C2). Only
+    the glob-derived paths are filtered by existence, since a glob can only
+    ever return paths that exist.
+    """
     paths = [source_root / rel for rel in SOURCE_MAP.values()]
     paths += sorted(source_root.glob(CONTROLLER_GLOB))
     paths += [p for p in sorted(source_root.glob(METRICS_GLOB))
               if "obj" not in p.parts and "bin" not in p.parts]
-    return [p for p in paths if p.exists()]
+    return paths
+
+
+def _missing_fixed_path_problems(source_root: pathlib.Path) -> list[str]:
+    """SOURCE_MAP paths are mandatory: a missing one is a named compile
+    problem, not an empty string quietly fed to an extractor."""
+    return [f"SOURCE_MAP path missing: {rel} (component data extracted from it is lost)"
+            for rel in SOURCE_MAP.values() if not (source_root / rel).exists()]
 
 
 def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
@@ -57,7 +72,7 @@ def compile_catalog(source_root: pathlib.Path, annotations_dir: pathlib.Path,
     surfaces = collect_surfaces(source_root)
     annotations = load_annotations(annotations_dir)
     entries = build(surfaces, annotations)
-    problems = check(entries, surfaces, annotations)
+    problems = check(entries, surfaces, annotations) + _missing_fixed_path_problems(source_root)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     catalog_path = out_dir / "catalog.json"

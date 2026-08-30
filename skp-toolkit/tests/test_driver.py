@@ -5,6 +5,7 @@ import unittest
 import unittest.mock as mock
 
 from skp.compile.driver import collect_surfaces, compile_catalog
+from skp.compile.lock import MISSING
 from skp.result import EXIT_DRIFT
 from skp.verbs.init import run as init_run
 
@@ -119,3 +120,62 @@ class CatalogErrorTests(unittest.TestCase):
         self.assertEqual(result.next_command, "skp doctor")
         self.assertTrue(any("redis.Root" in line for line in result.lines))
         self.assertTrue(any("a.json" in line for line in result.lines))
+
+
+_ALL_FIXTURE_IDS = [
+    "redis.Root", "rabbitmq.processor.IdentityQuery", "rabbitmq.orchestrator.Control",
+    "elasticsearch.RunningTheStep", "postgres.Schemas", "prometheus.pipeline_queue_depth",
+    "api.workflows.get", "api.workflows.get_id", "api.workflows.post",
+    "api.workflows.put_id", "api.workflows.delete_id",
+]
+_NOTE = {"intents": ["observe"], "answers": "x", "never_for": "y",
+         "write_authority": "none", "cost": "cheap", "verb": "skp map"}
+
+
+class RenameDriftTests(unittest.TestCase):
+    """C2: renaming a source file must not make its component vanish quietly."""
+
+    def test_renaming_a_source_file_orphans_its_annotations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "all.json").write_text(
+                json.dumps({i: _NOTE for i in _ALL_FIXTURE_IDS}), encoding="utf-8")
+            out = root / "model"
+
+            _, problems_before = compile_catalog(src, notes, out)
+            self.assertFalse(
+                any("RunningTheStep" in p for p in problems_before), problems_before)
+
+            templates_path = src / "tests/BaseApi.Tests/Live/Resilience/Templates.cs"
+            templates_path.rename(templates_path.with_name("LogTemplates.cs"))
+
+            _, problems_after = compile_catalog(src, notes, out)
+            self.assertTrue(
+                any("elasticsearch.RunningTheStep" in p
+                    and "annotated but not discovered" in p
+                    for p in problems_after), problems_after)
+
+
+class MissingFixedPathTests(unittest.TestCase):
+    """C2: a missing SOURCE_MAP path is a named compile problem and a MISSING
+    lock entry, not an empty string quietly fed to an extractor."""
+
+    def test_a_missing_source_map_path_is_reported_by_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            (src / "BaseApi.Service" / "AppDbContext.cs").unlink()
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+
+            _, problems = compile_catalog(src, notes, out)
+            self.assertTrue(
+                any("BaseApi.Service/AppDbContext.cs" in p for p in problems), problems)
+
+            lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
+            self.assertEqual(lock["sources"]["BaseApi.Service/AppDbContext.cs"], MISSING)
