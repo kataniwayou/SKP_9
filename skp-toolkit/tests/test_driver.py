@@ -5,7 +5,7 @@ import unittest
 import unittest.mock as mock
 
 from skp.compile.driver import collect_surfaces, compile_catalog
-from skp.compile.lock import MISSING
+from skp.compile.lock import MISSING, stale_sources
 from skp.result import EXIT_DRIFT
 from skp.verbs.init import run as init_run
 
@@ -93,6 +93,33 @@ class CompileTests(unittest.TestCase):
             lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
             self.assertIn("Messaging.Contracts/ProcessorQueues.cs", lock["sources"])
             self.assertIn("catalog.json", lock["generated"])
+
+
+class NewFileDriftTests(unittest.TestCase):
+    """I8: stale_sources used to walk only paths the lock already knew, so a
+    newly *added* controller (or *Metrics.cs) file was undetectable -- the
+    catalog lacks its surfaces and doctor reports "in step with source"."""
+
+    def test_adding_a_controller_file_registers_as_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+            compile_catalog(src, notes, out)
+            lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
+
+            self.assertEqual(stale_sources(lock, src), [])
+
+            new_controller = src / "BaseApi.Service" / "Features" / "Extra" / "ExtraController.cs"
+            new_controller.parent.mkdir(parents=True, exist_ok=True)
+            new_controller.write_text(
+                "public sealed class ExtraController : ControllerBase { }",
+                encoding="utf-8")
+
+            self.assertNotEqual(stale_sources(lock, src), [])
 
 
 class CatalogErrorTests(unittest.TestCase):

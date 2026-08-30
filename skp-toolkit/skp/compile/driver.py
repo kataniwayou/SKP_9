@@ -81,7 +81,8 @@ def compile_catalog(source_root: pathlib.Path, annotations_dir: pathlib.Path,
         encoding="utf-8")
 
     lock = build_lock_two_roots(_source_paths(source_root), source_root,
-                                [catalog_path], out_dir)
+                                [catalog_path], out_dir,
+                                manifest_globs=[CONTROLLER_GLOB, METRICS_GLOB])
     (out_dir / "compile.lock").write_text(
         json.dumps(lock, indent=2, sort_keys=True), encoding="utf-8")
     return entries, problems

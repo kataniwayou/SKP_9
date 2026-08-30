@@ -32,6 +32,14 @@ public sealed class OrchestrationController : ControllerBase
 }
 '''
 
+BARE_ATTR_NON_INHERITING_CONTROLLER = '''
+public sealed class StatusController : ControllerBase
+{
+    [HttpGet]
+    public async Task<IActionResult> Get() => null;
+}
+'''
+
 DBCONTEXT = '''
     public DbSet<SchemaEntity> Schemas => Set<SchemaEntity>();
     public DbSet<StepNextSteps> StepNextSteps => Set<StepNextSteps>();
@@ -74,6 +82,17 @@ class RestTests(unittest.TestCase):
                       rest_endpoints({"OrchestrationController.cs": ORCHESTRATION_CONTROLLER})}
         self.assertEqual(operations, {"POST /api/v1.0/orchestration/start",
                                       "POST /api/v1.0/orchestration/stop"})
+
+
+    def test_a_bare_attribute_on_a_non_inheriting_controller_is_a_surface(self):
+        # I8: `if not tail: continue` used to apply to every controller, but is
+        # only correct for BaseController<...> subclasses (where the bare
+        # attribute is the already-covered inherited route). A controller that
+        # does NOT inherit -- OrchestrationController's real shape -- must not
+        # silently drop a bare [HttpGet].
+        surfaces = rest_endpoints(
+            {"StatusController.cs": BARE_ATTR_NON_INHERITING_CONTROLLER})
+        self.assertEqual([s.operation for s in surfaces], ["GET /api/v1.0/status"])
 
 
 class PgTests(unittest.TestCase):

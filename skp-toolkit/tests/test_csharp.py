@@ -1,6 +1,7 @@
 import pathlib
 import unittest
 
+from skp.compile.catalog import CatalogError
 from skp.compile.csharp import const_strings, expression_bodies, literals_matching, unescape
 
 TEMPLATES = '''
@@ -80,6 +81,27 @@ class ExpressionBodyTests(unittest.TestCase):
     def test_a_semicolon_inside_an_expression_body_does_not_truncate_it(self):
         text = 'public static string K(Guid id) => $"a;b:{id:D}";'
         self.assertEqual(expression_bodies(text)["K"], "a;b:{id}")
+
+    def test_two_concatenated_literals_in_an_expression_body_keep_their_tail(self):
+        # I8: expression_bodies used `_LITERAL.search(rhs)` -- the first literal
+        # only -- while const_strings already joined every literal. A body built
+        # from two concatenated literals lost everything past the first.
+        text = ('public static string K(Guid id) => "a-" + $"{id:D}" + "-done";')
+        self.assertEqual(expression_bodies(text)["K"], "a-{id}-done")
+
+    def test_a_duplicate_expression_bodied_member_name_raises(self):
+        text = 'public static string K() => "one"; public static string K() => "two";'
+        with self.assertRaises(CatalogError) as caught:
+            expression_bodies(text)
+        self.assertIn("K", str(caught.exception))
+
+
+class DuplicateMemberTests(unittest.TestCase):
+    def test_a_duplicate_const_string_member_name_raises(self):
+        text = 'public const string Prefix = "a"; public const string Prefix = "b";'
+        with self.assertRaises(CatalogError) as caught:
+            const_strings(text)
+        self.assertIn("Prefix", str(caught.exception))
 
 
 class LiteralScanTests(unittest.TestCase):
