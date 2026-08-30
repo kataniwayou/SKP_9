@@ -45,6 +45,41 @@ def _missing_fixed_path_problems(source_root: pathlib.Path) -> list[str]:
             for rel in SOURCE_MAP.values() if not (source_root / rel).exists()]
 
 
+CLUSTER_OPERATIONS = [
+    ("get_pods", "kubectl/oc get pods -o name", "list pod names in the project"),
+    ("logs", "kubectl/oc logs <pod>", "read a pod's stdout/stderr log output"),
+    ("rollout_status", "kubectl/oc rollout status <resource>",
+     "wait for / observe a rollout's progress"),
+    ("get_json", "kubectl/oc get <resource> -o json", "read a resource's full JSON manifest"),
+]
+
+API_HEALTH_PATHS = [
+    ("ready", "GET /health/ready", "readiness probe"),
+    ("live", "GET /health/live", "liveness probe"),
+    ("startup", "GET /health/startup", "startup probe"),
+]
+
+
+def cluster_operations() -> list[extract.Surface]:
+    """I6: the ``cluster`` component and the three ``/health/*`` probe paths,
+    as annotation-only surfaces.
+
+    Spec §6.3 lists Cluster (``oc``/``kubectl``) among the seven components,
+    and §6.5 names "cluster operations" among what the compiler enumerates --
+    but there is no C# to extract this from; these are operations the
+    toolkit itself performs (``ClusterClient``/``ClusterProbe``) and paths
+    the processors/API expose (``BaseProcessor.Core/Boot/BootProbeListener
+    .cs``, ``BaseApi.Core/DependencyInjection/BaseApiApplicationBuilder
+    Extensions.cs``). Independent of ``source_root``: unlike every other
+    producer here, these do not read a file.
+    """
+    surfaces = [extract.Surface("cluster", f"cluster.{name}", op, detail)
+                for name, op, detail in CLUSTER_OPERATIONS]
+    surfaces += [extract.Surface("api", f"api.health.{name}", op, detail)
+                 for name, op, detail in API_HEALTH_PATHS]
+    return sorted(surfaces, key=lambda s: s.id)
+
+
 def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
     surfaces: list[extract.Surface] = []
     surfaces += extract.redis_keys(_read(source_root, SOURCE_MAP["l2_keys"]))
@@ -58,6 +93,7 @@ def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
     surfaces += extract.rest_endpoints({
         p.name: p.read_text(encoding="utf-8")
         for p in sorted(source_root.glob(CONTROLLER_GLOB))})
+    surfaces += cluster_operations()
     return sorted(surfaces, key=lambda s: s.id)
 
 
