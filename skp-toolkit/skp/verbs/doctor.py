@@ -4,7 +4,7 @@ import pathlib
 
 from skp.compile.lock import edited_generated, stale_sources
 from skp.profile import Profile, ProfileMissing, default_home, not_initialised
-from skp.result import EXIT_DRIFT, EXIT_OK, Result
+from skp.result import EXIT_DRIFT, EXIT_OK, EXIT_UNREACHABLE, Result
 from skp.verbs.init import build_clients, probe
 from skp.verbs.map import load_catalog
 
@@ -25,6 +25,14 @@ def _read_lock(lock_path: pathlib.Path):
         return json.loads(lock_path.read_text(encoding="utf-8")), None
     except (OSError, json.JSONDecodeError) as exc:
         return None, str(exc)
+
+
+def _target_name(check_name: str) -> str:
+    """``reachability: redis`` -> ``redis``. Falls back to the whole name for
+    a future check that does not carry the ``reachability: `` prefix, rather
+    than raising ``IndexError`` on ``name.split(": ", 1)[1]``."""
+    parts = check_name.split(": ", 1)
+    return parts[1] if len(parts) > 1 else check_name
 
 
 def diagnose(profile: Profile, clients: dict) -> list[tuple[str, bool, str]]:
@@ -96,13 +104,17 @@ def run_with(profile: Profile, clients: dict) -> Result:
                           next_command=toolkit_fix)
         # Only reachability failed: the toolkit is in step with its source and its
         # generated files are intact. Recompiling cannot help a store that is down,
-        # and saying so is the distinction this command exists to draw.
-        unreachable = [name.split(": ", 1)[1] for name in failed]
-        return Result(EXIT_DRIFT,
+        # and saying so is the distinction this command exists to draw. I10: this is
+        # EXIT_UNREACHABLE, not EXIT_DRIFT -- the prose says "this is the system, not
+        # the toolkit" and the exit code has to agree, the same way init.py already
+        # does for the identical condition. NEXT: does not loop back into the doctor
+        # run that just reported this; it advances to what still works.
+        unreachable = [_target_name(name) for name in failed]
+        return Result(EXIT_UNREACHABLE,
                       [*lines, "",
                        "the toolkit checks pass — this is the system, not the toolkit",
                        f"not answering: {', '.join(unreachable)}"],
-                      next_command="skp doctor")
+                      next_command="skp map --intent observe")
     return Result(EXIT_OK, lines)
 
 
