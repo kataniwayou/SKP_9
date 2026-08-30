@@ -28,10 +28,12 @@ class CompletenessTests(unittest.TestCase):
             {e.component for e in entries},
             {"api", "cluster", "postgres", "redis", "rabbitmq", "elasticsearch", "prometheus"})
 
-    def test_the_surface_count_reflects_the_added_cluster_component(self):
-        # 97 catalogued surfaces + 7 cluster/api.health surfaces = 104. This
-        # is the one fix in the wave that legitimately changes the baseline
-        # count, and it should fail loudly if that count ever drifts again.
+    def test_the_surface_count_reflects_the_added_dimensions(self):
+        # 104 baseline + 3 prometheus.label.* resource surfaces = 107 so far in
+        # this wave. The 16 existing prometheus.pipeline_* ids are unchanged --
+        # this wave adds labels to their `detail`, not new surfaces. The
+        # elasticsearch.attr.* half (and the annotations that cover both
+        # halves) land in the next two commits.
         with tempfile.TemporaryDirectory() as tmp:
             entries, _ = compile_catalog(SRC, ANNOTATIONS, pathlib.Path(tmp))
-        self.assertEqual(len(entries), 104)
+        self.assertEqual(len(entries), 107)

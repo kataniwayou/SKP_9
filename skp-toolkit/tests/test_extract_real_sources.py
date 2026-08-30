@@ -1,13 +1,19 @@
 import pathlib
 import unittest
 
-from skp.compile.extract import metrics, pg_tables, queues, redis_keys, rest_endpoints, templates
+from skp.compile.extract import (metric_labels, metrics, pg_tables, queues,
+                                 redis_keys, rest_endpoints, templates)
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
 
 
 def read(rel: str) -> str:
     return (SRC / rel).read_text(encoding="utf-8")
+
+
+def _metrics_texts() -> dict[str, str]:
+    return {p.name: p.read_text(encoding="utf-8") for p in SRC.rglob("*Metrics.cs")
+            if "obj" not in p.parts and "bin" not in p.parts}
 
 
 @unittest.skipUnless(SRC.exists(), "run from inside the repo")
@@ -68,10 +74,10 @@ class RealSurfaceTests(unittest.TestCase):
     def test_documented_instruments_are_all_present(self):
         texts = [p.read_text(encoding="utf-8") for p in SRC.rglob("*Metrics.cs")
                  if "obj" not in p.parts and "bin" not in p.parts]
-        found = {s.detail for s in metrics(texts)}
+        found = {s.id for s in metrics(texts)}
         for name in ("pipeline.queue.depth", "pipeline.deadletter.depth",
                      "pipeline.messages.produced", "pipeline.gate.open"):
-            self.assertIn(name, found)
+            self.assertIn(f"prometheus.{name.replace('.', '_')}", found)
 
     def test_the_five_entity_controllers_and_orchestration_are_routed(self):
         texts = {p.name: p.read_text(encoding="utf-8")
@@ -80,3 +86,59 @@ class RealSurfaceTests(unittest.TestCase):
         self.assertIn("GET /api/v1.0/workflows", operations)
         self.assertIn("POST /api/v1.0/orchestration/start", operations)
         self.assertIn("GET /api/v1.0/processors/by-source-hash/{sourceHash}", operations)
+
+
+@unittest.skipUnless(SRC.exists(), "run from inside the repo")
+class MetricLabelRealSourceTests(unittest.TestCase):
+    """Pins the brief's Part 1 real-source assertions against the actual
+    ``*Metrics.cs`` files, not a fixture standing in for them."""
+
+    def test_pipeline_queue_depth_carries_queue(self):
+        labels = metric_labels(_metrics_texts())
+        self.assertIn("queue", labels["pipeline.queue.depth"])
+
+    def test_pipeline_messages_consumed_carries_at_least_queue(self):
+        labels = metric_labels(_metrics_texts())
+        self.assertIn("queue", labels["pipeline.messages.consumed"])
+
+    def test_every_label_key_the_brief_names_is_attached_to_some_instrument(self):
+        # queue, type, outcome, disposition, route, reason, loop, destination -- the
+        # vocabulary the brief gives as a cross-check on the scan, not the list to
+        # hardcode. Every one of them must land on at least one real instrument, or
+        # the extractor dropped something the grep found.
+        labels = metric_labels(_metrics_texts())
+        attached = {label for labels_ in labels.values() for label in labels_}
+        for expected in ("queue", "type", "outcome", "disposition",
+                         "route", "reason", "loop", "destination"):
+            self.assertIn(expected, attached)
+
+    def test_a_genuinely_label_less_instrument_is_distinguishable_from_a_missed_one(self):
+        # pipeline.leader and pipeline.gate.open carry nothing by design (single
+        # process-wide/host-wide gauges); metric_labels must say so explicitly rather
+        # than merely omitting them from the dict.
+        labels = metric_labels(_metrics_texts())
+        for name in ("pipeline.leader", "pipeline.gate.open", "pipeline.gate.trips",
+                     "pipeline.hydration.admitted", "pipeline.identity.ready",
+                     "pipeline.process.start.timestamp"):
+            self.assertIn(name, labels)
+            self.assertEqual(labels[name], [])
+
+    def test_no_instrument_is_silently_missing_from_the_dimension_map(self):
+        # All 16 documented pipeline.* instruments must resolve to a dimension entry,
+        # empty or not -- a name present in metrics() but absent from metric_labels()
+        # would be a surface whose detail silently fell back to "no labels" for the
+        # wrong reason (lookup miss, not a real absence of tags).
+        texts = _metrics_texts()
+        names = set()
+        for text in texts.values():
+            from skp.compile.csharp import literals_matching
+            names.update(literals_matching(text, "pipeline."))
+        labels = metric_labels(texts)
+        self.assertEqual(names, set(labels))
+
+    def test_route_domain_is_exactly_queue_and_fanout(self):
+        by_id = {s.id: s for s in metrics(list(_metrics_texts().values()))}
+        detail = by_id["prometheus.pipeline_messages_produced"].detail
+        self.assertIn("route={fanout|queue}", detail)
+
+

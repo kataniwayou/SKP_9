@@ -49,13 +49,21 @@ DBCONTEXT = '''
 
 class MetricTests(unittest.TestCase):
     def test_instruments_are_found_across_files_and_declaration_shapes(self):
-        found = {s.detail for s in metrics([METRICS_A, METRICS_B])}
-        self.assertEqual(found, {"pipeline.queue.depth", "pipeline.messages.consumed"})
+        found = {s.id for s in metrics([METRICS_A, METRICS_B])}
+        self.assertEqual(found, {"prometheus.pipeline_queue_depth",
+                                 "prometheus.pipeline_messages_consumed"})
 
     def test_the_id_is_derived_from_the_instrument_name(self):
-        by_detail = {s.detail: s for s in metrics([METRICS_A])}
-        self.assertEqual(by_detail["pipeline.queue.depth"].id,
-                         "prometheus.pipeline_queue_depth")
+        surfaces = metrics([METRICS_A])
+        self.assertEqual(surfaces[0].id, "prometheus.pipeline_queue_depth")
+
+    def test_an_instrument_with_no_recognisable_call_site_still_reports_a_detail(self):
+        # METRICS_A is just a const declaration -- no Meter.Create* call at all -- so
+        # _file_dimensions finds nothing for it. That must read as "no labels", not
+        # crash or silently omit the labels half of detail.
+        surfaces = metrics([METRICS_A])
+        self.assertIn("pipeline.queue.depth", surfaces[0].detail)
+        self.assertIn("no labels", surfaces[0].detail)
 
     def test_non_pipeline_literals_are_ignored(self):
         self.assertEqual(metrics(['x("http.server.duration");']), [])

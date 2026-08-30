@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 from skp.compile.catalog import CatalogError
-from skp.compile.csharp import const_strings, expression_bodies, literals_matching
+from skp.compile.csharp import const_strings, expression_bodies, literals_matching, unescape
 
 _DBSET = re.compile(r"DbSet<\w+>\s+(\w+)\s*=>")
 _CONTROLLER_CLASS = re.compile(r"class\s+(\w+)Controller\b")
@@ -73,19 +73,277 @@ def templates(text: str) -> list[Surface]:
         key=lambda s: s.id)
 
 
+_METHOD_START = re.compile(
+    r'(?:public|internal|private)\s+(?:static\s+)?(?:async\s+)?'
+    r'[^{};(]+?\s(\w+)\s*\([^)]*\)\s*')
+
+_TAGLIST_ENTRY = re.compile(r'\{\s*"(\w+)"\s*,\s*[^{}]+?\}')
+_KVP_ENTRY = re.compile(r'KeyValuePair<[^>]*>\(\s*"(\w+)"\s*,')
+
+_FIELD_INSTRUMENT = re.compile(
+    r'(?:Counter|Histogram)<[\w,\s]+>\s+(\w+)\s*=\s*Meter\.Create(?:Counter|Histogram)<[\w,\s]+>\(\s*'
+    r'([\w.]+|"(?:[^"\\]|\\.)*")')
+
+_OBSERVABLE_CALL = re.compile(
+    r'Meter\.CreateObservable(?:Gauge|Counter)(?:<[\w,\s]*>)?\(\s*'
+    r'([\w.]+|"(?:[^"\\]|\\.)*")\s*,\s*(.+?)\s*,\s*unit\s*:',
+    re.DOTALL)
+
+
+def _match_brace(text: str, open_idx: int) -> int:
+    """Index of the ``}`` matching the ``{`` at ``open_idx``.
+
+    Braces inside string literals are ignored, so a unit string like
+    ``"{message}"`` cannot desynchronise the count.
+    """
+    depth = 0
+    i = open_idx
+    in_string = False
+    escape = False
+    while i < len(text):
+        c = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_string = False
+        else:
+            if c == '"':
+                in_string = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return i
+        i += 1
+    raise CatalogError("unbalanced braces while scanning a method body for tags")
+
+
+def _method_bodies(text: str) -> dict[str, str]:
+    """Every method's own body text, keyed by method name.
+
+    Coarse rather than a real parser -- a "method" is whatever follows an
+    access modifier and looks like ``Name(params)``, block- or
+    expression-bodied. That is good enough for the small, uniformly
+    formatted ``*Metrics.cs`` files this feeds: see ``metric_labels``'s
+    method-scope association rule.
+    """
+    bodies: dict[str, str] = {}
+    for m in _METHOD_START.finditer(text):
+        name = m.group(1)
+        i = m.end()
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i < len(text) and text[i] == "{":
+            bodies[name] = text[i + 1:_match_brace(text, i)]
+        elif text[i:i + 2] == "=>":
+            end = text.find(";", i + 2)
+            if end != -1:
+                bodies[name] = text[i + 2:end]
+    return bodies
+
+
+def _tag_keys(text: str) -> set[str]:
+    """Every tag key literally present in ``text``, from either shape the
+    source uses: ``{ "queue", queue }`` inside a ``TagList`` initialiser, or
+    ``new KeyValuePair<string, object?>("outcome", outcome)``."""
+    return ({m.group(1) for m in _TAGLIST_ENTRY.finditer(text)} |
+            {m.group(1) for m in _KVP_ENTRY.finditer(text)})
+
+
+def _resolve_token(token: str, consts: dict[str, str]) -> str:
+    """A ``Create*``/``CreateObservable*`` call's name argument: a string
+    literal, or an identifier -- possibly dotted, as in
+    ``EgressMeter.DurationInstrument`` -- naming a const declared somewhere
+    in the same file. ``const_strings`` scans the whole file regardless of
+    which class holds the declaration, so the dotted prefix only needs
+    stripping, not resolving."""
+    token = token.strip()
+    if token.startswith('"'):
+        return unescape(token[1:-1])
+    return consts.get(token.rsplit(".", 1)[-1], token)
+
+
+def _label_domains(labels: set[str], consts: dict[str, str]) -> dict[str, list[str]]:
+    """A label's value domain, where -- and only where -- the values
+    themselves are const-declared in the same file.
+
+    The one pattern found in this codebase is ``RouteQueue = "queue"`` /
+    ``RouteFanout = "fanout"``, naming the complete domain of the ``route``
+    tag. Detected generically here -- a const whose name starts with the
+    label's Title-cased form, has more after that prefix, and whose value is
+    not itself a ``pipeline.*`` instrument name (which would just be the
+    ``XxxInstrument`` const family colliding on the same prefix, e.g.
+    ``QueueWaitInstrument`` for label ``queue``) -- rather than hardcoding
+    "route": a label whose values are inline literals or runtime data
+    (every other tag here) matches no const and gets no domain, which is the
+    honest answer -- an incomplete domain presented as complete is worse
+    than none.
+    """
+    domains: dict[str, list[str]] = {}
+    for label in labels:
+        prefix = label[:1].upper() + label[1:]
+        values = sorted(
+            value for name, value in consts.items()
+            if name.startswith(prefix) and len(name) > len(prefix)
+            and not value.startswith("pipeline."))
+        if values:
+            domains[label] = values
+    return domains
+
+
+_COMMENT_OR_STRING = re.compile(r'"(?:[^"\\]|\\.)*"|//[^\n]*|/\*.*?\*/', re.DOTALL)
+
+
+def _strip_comments(text: str) -> str:
+    """Blank out ``//`` and ``/* */`` comments, leaving string literals untouched.
+
+    Without this, a comment sitting between two call arguments -- exactly
+    the house style in this codebase, e.g. the multi-line rationale between
+    ``Observe,`` and ``unit:`` in ``DeadLetterDepthMetrics.cs`` -- breaks a
+    regex expecting only whitespace there, and the call is silently not
+    matched at all rather than matched wrong. Newlines in a stripped comment
+    are kept so line-oriented reasoning elsewhere is unaffected.
+    """
+
+    def _replace(m: re.Match) -> str:
+        matched = m.group(0)
+        return matched if matched.startswith('"') else "\n" * matched.count("\n")
+
+    return _COMMENT_OR_STRING.sub(_replace, text)
+
+
+def _file_dimensions(text: str) -> dict[str, dict]:
+    """Every instrument declared in one file, mapped to its labels, the
+    association rule that found them, and any const-declared value domain.
+
+    **Association rule.** Labels are associated with an instrument by
+    *method scope* where derivable: the method whose body contains the
+    ``<field>.Add(``/``.Record(`` call, for a pushed counter or histogram;
+    the callback method itself, for an observable gauge/counter registered
+    with a bare method-group reference. Where the callback is instead a
+    lambda that delegates to a third method (``() => Snapshot(...)`` in
+    ``QueueDepthMetrics``, built in the static initialiser) no single
+    method scope can be named, so this falls back to *file scope*: every
+    instrument declared in the file carries the union of every tag key
+    found anywhere in it. Which rule fired is recorded on the surface
+    rather than blurred.
+    """
+    text = _strip_comments(text)
+    consts = const_strings(text)
+    bodies = _method_bodies(text)
+    dims: dict[str, dict] = {}
+
+    for field, token in _FIELD_INSTRUMENT.findall(text):
+        name = _resolve_token(token, consts)
+        body = next((b for b in bodies.values()
+                     if f"{field}.Add(" in b or f"{field}.Record(" in b), None)
+        if body is not None:
+            labels, scope = _tag_keys(body), "method"
+        else:
+            labels, scope = _tag_keys(text), "file"
+        dims[name] = {"labels": sorted(labels), "scope": scope,
+                      "domains": _label_domains(labels, consts)}
+
+    for token, callback in _OBSERVABLE_CALL.findall(text):
+        name = _resolve_token(token, consts)
+        callback = callback.strip()
+        if re.fullmatch(r"\w+", callback) and callback in bodies:
+            labels, scope = _tag_keys(bodies[callback]), "method"
+        else:
+            labels, scope = _tag_keys(text), "file"
+        dims[name] = {"labels": sorted(labels), "scope": scope,
+                      "domains": _label_domains(labels, consts)}
+
+    return dims
+
+
+def metric_labels(texts: dict[str, str]) -> dict[str, list[str]]:
+    """Every ``pipeline.*`` instrument name mapped to its sorted label names.
+
+    One entry per file is merged in; see ``_file_dimensions`` for how an
+    instrument's labels are found and which association rule governs.
+    """
+    dims: dict[str, dict] = {}
+    for text in texts.values():
+        dims.update(_file_dimensions(text))
+    return {name: dim["labels"] for name, dim in dims.items()}
+
+
+def _metric_detail(name: str, dim: dict | None) -> str:
+    if not dim or not dim["labels"]:
+        scope = dim["scope"] if dim else "method"
+        return f"{name} | no labels ({scope} scope -- this instrument carries no tags)"
+    parts = []
+    for label in dim["labels"]:
+        domain = dim["domains"].get(label)
+        parts.append(f"{label}={{{'|'.join(domain)}}}" if domain else label)
+    return f"{name} | labels: {', '.join(parts)} ({dim['scope']} scope)"
+
+
 def metrics(texts: list[str]) -> list[Surface]:
-    """Every ``pipeline.*`` instrument, across every declaration shape.
+    """Every ``pipeline.*`` instrument, across every declaration shape, its
+    ``detail`` now carrying its labels (see ``metric_labels``) alongside its
+    name.
 
     Matching the declaration syntax would mean tracking four Meter.Create* forms
     plus the ``const string ...Instrument`` convention. The value's prefix is
-    uniform where the syntax is not, so the scan is on the value.
+    uniform where the syntax is not, so the name scan is on the value; the
+    label scan (``_file_dimensions``) does track the declaration shapes,
+    because a label lives on the call site, not in a literal with a
+    recognisable prefix.
     """
     names: set[str] = set()
+    dims: dict[str, dict] = {}
     for text in texts:
         names.update(literals_matching(text, "pipeline."))
+        dims.update(_file_dimensions(text))
     return sorted(
         (Surface("prometheus", f"prometheus.{name.replace('.', '_')}",
-                 f"instant query on {name}", name) for name in names),
+                 f"instant query on {name}", _metric_detail(name, dims.get(name)))
+         for name in names),
+        key=lambda s: s.id)
+
+
+RESOURCE_LABELS = [
+    ("service_name", "service.name",
+     "the role name (processor/orchestrator/keeper/webapi) -- ResourceBuilder.AddService(serviceName:), "
+     "same call on both signals; the Prometheus exporter also derives exported_job from it"),
+    ("service_instance_id", "service.instance.id",
+     "the replica identity -- InstanceId.Resolve(), added via ResourceBuilder.AddAttributes on the "
+     "metrics resource in AddBaseConsoleObservability/AddBaseApiObservability"),
+    ("processorId", "processorId (MetricKey; the log-side LogKey is the differently-cased 'ProcessorId')",
+     "set only on a processor host, via ResourceAttribute(\"ProcessorId\", \"processorId\", identity.Id) "
+     "passed to AddBaseConsoleObservability -- absent on every other role"),
+]
+"""Hand-listed, not extracted: these three resource attributes are assembled
+by ``ResourceBuilder.AddService``/``.AddAttributes`` calls in
+``BaseApi.Core/DependencyInjection/ObservabilityServiceCollectionExtensions.cs``
+and ``BaseConsole.Core/DependencyInjection/BaseConsoleObservabilityExtensions.cs``
+-- neither file matches ``METRICS_GLOB``, and ``service.name`` specifically is
+never written as a string literal anywhere in this source at all; it is the
+OpenTelemetry semantic convention ``AddService()`` guarantees. Same shape as
+``driver.cluster_operations()``: a fact about the shipped system that has no
+single regex to read it from, recorded here instead of invented at query
+time. See ``ResourceAttribute`` (``BaseConsole.Core/DependencyInjection/
+ResourceAttribute.cs``) for the LogKey/MetricKey split behind the third
+entry.
+"""
+
+
+def resource_labels() -> list[Surface]:
+    """The resource-level attributes every Prometheus series carries --
+    not instrument labels, but the model needs them to group correctly.
+    Independent of ``source_root``, like ``cluster_operations()``: nothing
+    here is read from a glob.
+    """
+    return sorted(
+        (_surface("prometheus", f"label.{name}",
+                  f"resource attribute {rendered}", note)
+         for name, rendered, note in RESOURCE_LABELS),
         key=lambda s: s.id)
 
 
