@@ -22,5 +22,29 @@
     "write_authority": "none",
     "cost": "cheap",
     "verb": "skp investigate trace"
+  },
+  "prometheus.label.service_version": {
+    "intents": ["observe", "investigate"],
+    "answers": "the running build's version, on every series -- ResourceBuilder.AddService(serviceVersion:), the same call that stamps service_name",
+    "never_for": "deriving exported_job -- the Prometheus exporter derives that from service_name alone, not this",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe metric"
+  },
+  "prometheus.label.source": {
+    "intents": ["observe", "investigate"],
+    "answers": "the application type stamped on every series -- worker/webapi; metric-side casing is lowercase source, the log-side attribute is the PascalCase Source already catalogued as elasticsearch.attr.source. Coarser than service_name and not a substitute for it",
+    "never_for": "picking out a role -- source only distinguishes worker from webapi, not processor from orchestrator from keeper; use service_name for that",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe metric"
+  },
+  "prometheus.label.le": {
+    "intents": ["observe", "analyze", "investigate"],
+    "answers": "the bucket upper bound on every histogram series (pipeline.queue.wait, pipeline.consumer.duration, pipeline.produce.duration, pipeline.gate.probe.duration) -- required to compute histogram_quantile(0.95, sum(rate(...[5m])) by (le))",
+    "never_for": "a grouping key on its own -- grouping by le alone collapses every real series into its buckets; le is structural to the histogram type, not a TagList entry, so it carries none of the instrument's own tags unless they are also in the by(...) clause",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp analyze latency"
   }
 }

@@ -62,14 +62,28 @@ class RealSourceTests(unittest.TestCase):
 
 @unittest.skipUnless(SRC.exists(), "run from inside the repo")
 class RealSurfaceTests(unittest.TestCase):
-    def test_the_five_entity_tables_and_three_junctions_are_found(self):
-        found = {s.id for s in pg_tables(read("BaseApi.Service/AppDbContext.cs"))}
+    def test_the_five_entity_tables_and_three_junctions_are_found_snake_cased(self):
+        # C1: real Postgres identifiers are snake_case (EFCore.NamingConventions),
+        # confirmed live -- "Assignments" 404s, "assignments" is the real table.
+        found = {s.id for s in pg_tables(
+            read("BaseApi.Service/AppDbContext.cs"),
+            read("BaseApi.Core/DependencyInjection/PersistenceServiceCollectionExtensions.cs"),
+            read("BaseApi.Core/Persistence/BaseDbContext.cs"))}
         self.assertEqual(found, {
-            "postgres.Schemas", "postgres.Processors", "postgres.Steps",
-            "postgres.Assignments", "postgres.Workflows",
-            "postgres.StepNextSteps", "postgres.WorkflowEntrySteps",
-            "postgres.WorkflowAssignments",
+            "postgres.schemas", "postgres.processors", "postgres.steps",
+            "postgres.assignments", "postgres.workflows",
+            "postgres.step_next_steps", "postgres.workflow_entry_steps",
+            "postgres.workflow_assignments",
         })
+
+    def test_the_naming_convention_is_really_wired_in_both_files(self):
+        # C1: pg_tables() must find the real call, not a stub -- guards against
+        # this test suite quietly drifting from what src/ actually does.
+        persistence_ext = read(
+            "BaseApi.Core/DependencyInjection/PersistenceServiceCollectionExtensions.cs")
+        base_db_context = read("BaseApi.Core/Persistence/BaseDbContext.cs")
+        self.assertIn("UseSnakeCaseNamingConvention", persistence_ext)
+        self.assertIn("UseSnakeCaseNamingConvention", base_db_context)
 
     def test_documented_instruments_are_all_present(self):
         texts = [p.read_text(encoding="utf-8") for p in SRC.rglob("*Metrics.cs")

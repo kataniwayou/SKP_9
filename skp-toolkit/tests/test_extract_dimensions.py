@@ -454,16 +454,37 @@ class MetricLabelGapTests(unittest.TestCase):
 
 
 class ResourceLabelsTests(unittest.TestCase):
-    def test_the_three_resource_attributes_are_hand_listed_surfaces(self):
+    def test_the_six_resource_and_structural_labels_are_hand_listed_surfaces(self):
+        # I1: le, service_version and source were live labels missing from the
+        # catalog -- le on every histogram, service_version/source as resource
+        # attributes alongside the three already catalogued.
         ids = {s.id for s in resource_labels()}
         self.assertEqual(ids, {"prometheus.label.service_name",
                                "prometheus.label.service_instance_id",
-                               "prometheus.label.processorId"})
+                               "prometheus.label.processorId",
+                               "prometheus.label.service_version",
+                               "prometheus.label.source",
+                               "prometheus.label.le"})
 
     def test_the_instance_vs_replica_trap_is_on_service_instance_id(self):
         by_id = {s.id: s for s in resource_labels()}
         detail = by_id["prometheus.label.service_instance_id"].detail
         self.assertIn("replica", detail.lower())
+
+    def test_le_is_annotated_as_a_bucket_boundary_required_for_quantiles(self):
+        # I1: le is structural to the histogram type, not a TagList entry --
+        # the detail must say so, name histogram_quantile, and warn it is not
+        # a useful grouping key.
+        by_id = {s.id: s for s in resource_labels()}
+        detail = by_id["prometheus.label.le"].detail.lower()
+        self.assertIn("bucket", detail)
+        self.assertIn("histogram_quantile", detail)
+        self.assertIn("grouping key", detail)
+
+    def test_service_version_and_source_cite_the_same_addservice_call(self):
+        by_id = {s.id: s for s in resource_labels()}
+        self.assertIn("service.version", by_id["prometheus.label.service_version"].operation)
+        self.assertIn("elasticsearch.attr.source", by_id["prometheus.label.source"].detail)
 
 
 # ---- log_attributes ----------------------------------------------------------------

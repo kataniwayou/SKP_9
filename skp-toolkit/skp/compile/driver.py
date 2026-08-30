@@ -1,6 +1,8 @@
+import inspect
 import json
 import pathlib
 
+from skp.clients.es import Elastic
 from skp.compile import extract
 from skp.compile.catalog import Entry, build, check, load_annotations
 from skp.compile.lock import build_lock_two_roots
@@ -31,6 +33,15 @@ SOURCE_MAP = {
     "base_console_observability_extensions":
         "BaseConsole.Core/DependencyInjection/BaseConsoleObservabilityExtensions.cs",
     "resource_attribute": "BaseConsole.Core/DependencyInjection/ResourceAttribute.cs",
+    # C1: pg_tables() trusts pascal_to_snake() only after confirming the naming
+    # convention that makes it correct is actually wired -- these are the two
+    # files it scans for UseSnakeCaseNamingConvention(). Neither previously
+    # matched SOURCE_MAP, CONTROLLER_GLOB, or METRICS_GLOB, so a future edit
+    # dropping the convention from either wiring point would have left the
+    # catalog silently confident about table names EFCore no longer produces.
+    "persistence_service_collection_extensions":
+        "BaseApi.Core/DependencyInjection/PersistenceServiceCollectionExtensions.cs",
+    "base_db_context": "BaseApi.Core/Persistence/BaseDbContext.cs",
 }
 
 CONTROLLER_GLOB = "BaseApi.Service/Features/**/*Controller.cs"
@@ -105,6 +116,29 @@ def cluster_operations() -> list[extract.Surface]:
     return sorted(surfaces, key=lambda s: s.id)
 
 
+ELASTICSEARCH_INDEX_NOTE = (
+    "the data stream skp queries by default; holds roughly 10.08 million documents as of "
+    "2026-08-30 and grows continuously on a shared cluster -- every query must be bounded on "
+    "time and workflow or an unbounded aggregation looks like a hang (see Elastic's own class "
+    "docstring, which states the same rule)")
+
+
+def elasticsearch_index() -> extract.Surface:
+    """C2: the single most important fact for querying Elasticsearch -- which index/data stream
+    actually holds the data -- catalogued as a surface instead of living nowhere a model can look
+    it up. Read from ``Elastic.__init__``'s own default rather than a second hardcoded literal:
+    the C2 defect was exactly two copies of this name disagreeing (the toolkit's default one
+    string, the live cluster a different one), so this derives from the toolkit's own source of
+    truth instead of adding a third copy that could itself drift.
+
+    Independent of ``source_root``, like ``cluster_operations()`` and ``resource_labels()``: this
+    is a fact about the toolkit itself, not something extracted from ``src/``.
+    """
+    index = inspect.signature(Elastic.__init__).parameters["index"].default
+    return extract.Surface("elasticsearch", "elasticsearch.index",
+                           f"default data stream: {index}", ELASTICSEARCH_INDEX_NOTE)
+
+
 def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
     surfaces: list[extract.Surface] = []
     surfaces += extract.redis_keys(_read(source_root, SOURCE_MAP["l2_keys"]))
@@ -115,13 +149,17 @@ def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
         _read(source_root, SOURCE_MAP["templates"]),
         _read(source_root, SOURCE_MAP["execution_log_scope"]),
         _read(source_root, SOURCE_MAP["correlation_keys"]))
-    surfaces += extract.pg_tables(_read(source_root, SOURCE_MAP["dbcontext"]))
+    surfaces += extract.pg_tables(
+        _read(source_root, SOURCE_MAP["dbcontext"]),
+        _read(source_root, SOURCE_MAP["persistence_service_collection_extensions"]),
+        _read(source_root, SOURCE_MAP["base_db_context"]))
     surfaces += extract.metrics(_metrics_texts(source_root))
     surfaces += extract.resource_labels()
     surfaces += extract.rest_endpoints({
         p.name: p.read_text(encoding="utf-8")
         for p in sorted(source_root.glob(CONTROLLER_GLOB))})
     surfaces += cluster_operations()
+    surfaces += [elasticsearch_index()]
     return sorted(surfaces, key=lambda s: s.id)
 
 

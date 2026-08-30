@@ -2,7 +2,8 @@ import re
 from dataclasses import dataclass
 
 from skp.compile.catalog import CatalogError
-from skp.compile.csharp import const_strings, expression_bodies, literals_matching, unescape
+from skp.compile.csharp import (const_strings, expression_bodies, literals_matching,
+                                pascal_to_snake, unescape)
 
 _DBSET = re.compile(r"DbSet<\w+>\s+(\w+)\s*=>")
 _CONTROLLER_CLASS = re.compile(r"class\s+(\w+)Controller\b")
@@ -556,8 +557,17 @@ RESOURCE_LABELS = [
     ("processorId", "processorId (MetricKey; the log-side LogKey is the differently-cased 'ProcessorId')",
      "set only on a processor host, via ResourceAttribute(\"ProcessorId\", \"processorId\", identity.Id) "
      "passed to AddBaseConsoleObservability -- absent on every other role"),
+    ("service_version", "service.version",
+     "the running build's version -- ResourceBuilder.AddService(serviceVersion:), same call on both "
+     "signals as service_name; the Prometheus exporter derives exported_job from service.name only, "
+     "not from this"),
+    ("source", "source (metric-side casing; the log-side attribute is the PascalCase 'Source')",
+     "the application type stamped on the resource -- worker/webapi -- via the metricAttrs "
+     "KeyValuePair(\"source\", source) built alongside logAttrs' \"Source\" in "
+     "AddBaseConsoleObservability/AddBaseApiObservability; already catalogued on the Elasticsearch "
+     "side as elasticsearch.attr.source -- this is the same fact on the Prometheus side"),
 ]
-"""Hand-listed, not extracted: these three resource attributes are assembled
+"""Hand-listed, not extracted: these five resource attributes are assembled
 by ``ResourceBuilder.AddService``/``.AddAttributes`` calls in
 ``BaseApi.Core/DependencyInjection/ObservabilityServiceCollectionExtensions.cs``
 and ``BaseConsole.Core/DependencyInjection/BaseConsoleObservabilityExtensions.cs``
@@ -567,22 +577,41 @@ OpenTelemetry semantic convention ``AddService()`` guarantees. Same shape as
 ``driver.cluster_operations()``: a fact about the shipped system that has no
 single regex to read it from, recorded here instead of invented at query
 time. See ``ResourceAttribute`` (``BaseConsole.Core/DependencyInjection/
-ResourceAttribute.cs``) for the LogKey/MetricKey split behind the third
+ResourceAttribute.cs``) for the LogKey/MetricKey split behind the ``processorId``
 entry.
+"""
+
+HISTOGRAM_LABELS = [
+    ("le", "le",
+     "the bucket upper bound on every histogram series (pipeline.queue.wait, "
+     "pipeline.consumer.duration, pipeline.produce.duration, pipeline.gate.probe.duration) -- "
+     "required for histogram_quantile(); never a useful grouping key on its own (grouping by le "
+     "alone collapses every real series into its buckets)"),
+]
+"""Hand-listed like ``RESOURCE_LABELS``, but a genuinely different kind of fact: ``le`` is not a
+resource attribute assembled by ``ResourceBuilder`` and it names no ``TagList``/``KeyValuePair``
+call site either -- it is added by the histogram type itself, structurally, wherever a
+``Histogram<T>`` instrument is exported to Prometheus. There is no C# source naming it, so unlike
+``pg_tables`` (I1's sibling fix) there is nothing to derive this from; it is recorded here for the
+same reason ``RESOURCE_LABELS`` is -- a true fact about the shipped system with no regex that reads
+it.
 """
 
 
 def resource_labels() -> list[Surface]:
-    """The resource-level attributes every Prometheus series carries --
-    not instrument labels, but the model needs them to group correctly.
-    Independent of ``source_root``, like ``cluster_operations()``: nothing
-    here is read from a glob.
+    """The resource-level attributes every Prometheus series carries, plus the one
+    structural histogram-only label (``le``) -- not instrument labels, but the
+    model needs all of them to group and query correctly. Independent of
+    ``source_root``, like ``cluster_operations()``: nothing here is read from a
+    glob.
     """
-    return sorted(
-        (_surface("prometheus", f"label.{name}",
-                  f"resource attribute {rendered}", note)
-         for name, rendered, note in RESOURCE_LABELS),
-        key=lambda s: s.id)
+    surfaces = [_surface("prometheus", f"label.{name}",
+                         f"resource attribute {rendered}", note)
+               for name, rendered, note in RESOURCE_LABELS]
+    surfaces += [_surface("prometheus", f"label.{name}",
+                          f"histogram bucket-boundary label {rendered}", note)
+                for name, rendered, note in HISTOGRAM_LABELS]
+    return sorted(surfaces, key=lambda s: s.id)
 
 
 def _route_token(class_name: str) -> str:
@@ -633,8 +662,42 @@ def rest_endpoints(controller_texts: dict[str, str]) -> list[Surface]:
     return sorted(out, key=lambda s: s.id)
 
 
-def pg_tables(dbcontext_text: str) -> list[Surface]:
+_SNAKE_CASE_MARKER = "UseSnakeCaseNamingConvention"
+
+
+def pg_tables(dbcontext_text: str, persistence_ext_text: str,
+             base_dbcontext_text: str) -> list[Surface]:
+    """C1: every ``DbSet<T>`` property in ``AppDbContext.cs``, as the real
+    Postgres table name -- snake_case, not the PascalCase CLR property name
+    the old version catalogued (``Assignments``, ``StepNextSteps``, ...),
+    every one of which fails live with ``relation "Assignments" does not
+    exist``.
+
+    **Detected, not assumed.** ``EFCore.NamingConventions``'
+    ``UseSnakeCaseNamingConvention()`` is what actually performs this
+    transform, wired in two places -- the composition root
+    (``PersistenceServiceCollectionExtensions.cs``) and the base context's
+    own ``OnConfiguring`` (``BaseDbContext.cs``), the latter deliberately
+    defence-in-depth per that file's own remarks. Both texts are scanned
+    for the literal call name before ``pascal_to_snake`` is trusted at all:
+    if a future edit drops the convention from either wiring point, this
+    raises instead of silently continuing to snake-case identifiers that
+    would then be PascalCase again -- the same confident-wrong-answer shape
+    this whole defect is.
+    """
+    for label, text in (("PersistenceServiceCollectionExtensions.cs", persistence_ext_text),
+                        ("BaseDbContext.cs", base_dbcontext_text)):
+        if _SNAKE_CASE_MARKER not in text:
+            raise CatalogError(
+                f"{label} no longer calls {_SNAKE_CASE_MARKER}() -- pg_tables assumes every "
+                f"Postgres identifier is snake_case because of this call; without it the real "
+                f"table names may be PascalCase again and this extractor would be guessing")
     return sorted(
-        (_surface("postgres", name, f'SELECT ... FROM "{name}"', name)
+        (_surface("postgres", pascal_to_snake(name),
+                  f"SELECT ... FROM {pascal_to_snake(name)}",
+                  f"table {pascal_to_snake(name)} (DbSet<T> property {name}); columns follow the "
+                  f"same snake_case convention as the table name (SourceHash -> source_hash, "
+                  f"CreatedAt -> created_at) -- EFCore.NamingConventions applies "
+                  f"UseSnakeCaseNamingConvention() to both")
          for name in _DBSET.findall(dbcontext_text)),
         key=lambda s: s.id)
