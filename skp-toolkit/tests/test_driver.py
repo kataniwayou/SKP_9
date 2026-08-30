@@ -181,7 +181,7 @@ class NewFileDriftTests(unittest.TestCase):
             self.assertNotEqual(stale_sources(lock, src), [])
 
 
-class RenameDriftTests(unittest.TestCase):
+class RenameDriftLockTests(unittest.TestCase):
     """C2: renaming a SOURCE_MAP fixed path left both the stored and the
     current hash as MISSING, so ``_changed`` saw them as equal and
     ``stale_sources`` reported [] -- doctor's "source drift" row read "in
@@ -253,7 +253,7 @@ _NOTE = {"intents": ["observe"], "answers": "x", "never_for": "y",
          "write_authority": "none", "cost": "cheap", "verb": "skp map"}
 
 
-class RenameDriftTests(unittest.TestCase):
+class RenameOrphanAnnotationTests(unittest.TestCase):
     """C2: renaming a source file must not make its component vanish quietly."""
 
     def test_renaming_a_source_file_orphans_its_annotations(self):
