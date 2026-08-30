@@ -3,8 +3,9 @@ import pathlib
 import tempfile
 import unittest
 
-from skp.result import EXIT_VERDICT
+from skp.result import EXIT_NOT_INITIALISED, EXIT_VERDICT
 from skp.verbs.map import by_component, by_intent, by_question, load_catalog, render
+from skp.verbs.map import run as map_run
 
 ENTRIES = [
     {"id": "redis.Root", "component": "redis", "operation": "read key",
@@ -61,3 +62,30 @@ class LoadTests(unittest.TestCase):
             (home / "model" / "catalog.json").write_text(
                 json.dumps(ENTRIES), encoding="utf-8")
             self.assertEqual(len(load_catalog(home)), 3)
+
+
+class RunModeTests(unittest.TestCase):
+    """The three query modes (--component/--intent/--answers) are mutually
+    exclusive, and a missing memory folder is reported differently from a
+    present-but-uncompiled one."""
+
+    def test_component_and_intent_together_is_a_usage_error(self):
+        with self.assertRaises(SystemExit):
+            map_run(["--component", "redis", "--intent", "observe"])
+
+    def test_a_missing_memory_folder_says_not_initialised(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp) / ".skp"
+            result = map_run(["--home", str(home)])
+        self.assertEqual(result.code, EXIT_NOT_INITIALISED)
+        self.assertIn("not been initialised", result.lines[0])
+
+    def test_a_present_folder_missing_its_catalog_says_so_distinctly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp) / ".skp"
+            home.mkdir()
+            (home / "profile.json").write_text("{}", encoding="utf-8")
+            result = map_run(["--home", str(home)])
+        self.assertEqual(result.code, EXIT_NOT_INITIALISED)
+        self.assertNotIn("not been initialised", result.lines[0])
+        self.assertIn(str(home), result.lines[0])
