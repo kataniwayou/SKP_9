@@ -25,6 +25,8 @@ CTL = '''
 public sealed class WorkflowsController :
     BaseController<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto> { }
 '''
+SCOPE = 'public static class ExecutionLogScope { public const string WorkflowId = "WorkflowId"; }'
+CORR = 'public static class CorrelationKeys { public const string LogScope = "CorrelationId"; }'
 
 
 def fake_source_root(root: pathlib.Path) -> pathlib.Path:
@@ -34,6 +36,8 @@ def fake_source_root(root: pathlib.Path) -> pathlib.Path:
         "Messaging.Contracts/ProcessorQueues.cs": PQ,
         "Messaging.Contracts/OrchestratorQueues.cs": OQ,
         "tests/BaseApi.Tests/Live/Resilience/Templates.cs": TPL,
+        "Messaging.Contracts/ExecutionLogScope.cs": SCOPE,
+        "Messaging.Contracts/CorrelationKeys.cs": CORR,
         "BaseApi.Service/AppDbContext.cs": DBC,
         "Messaging.Transport/QueueDepthMetrics.cs": MET,
         "BaseApi.Service/Features/Workflow/WorkflowController.cs": CTL,

@@ -1,7 +1,7 @@
 import pathlib
 import unittest
 
-from skp.compile.extract import (metric_labels, metrics, pg_tables, queues,
+from skp.compile.extract import (log_attributes, metric_labels, metrics, pg_tables, queues,
                                  redis_keys, rest_endpoints, templates)
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
@@ -142,3 +142,44 @@ class MetricLabelRealSourceTests(unittest.TestCase):
         self.assertIn("route={fanout|queue}", detail)
 
 
+@unittest.skipUnless(SRC.exists(), "run from inside the repo")
+class LogAttributeRealSourceTests(unittest.TestCase):
+    """Pins the brief's Part 2 real-source assertions."""
+
+    def _surfaces(self):
+        return log_attributes(
+            read("tests/BaseApi.Tests/Live/Resilience/Templates.cs"),
+            read("Messaging.Contracts/ExecutionLogScope.cs"),
+            read("Messaging.Contracts/CorrelationKeys.cs"))
+
+    def test_all_five_execution_log_scope_ids_are_present(self):
+        ids = {s.id for s in self._surfaces()}
+        for name in ("WorkflowId", "StepId", "ProcessorId", "ExecutionId", "EntryId"):
+            self.assertIn(f"elasticsearch.attr.{name}", ids)
+
+    def test_correlation_id_is_present_with_the_non_hyphenated_format(self):
+        by_id = {s.id: s for s in self._surfaces()}
+        self.assertIn("elasticsearch.attr.CorrelationId", by_id)
+        self.assertIn('"N"', by_id["elasticsearch.attr.CorrelationId"].detail)
+
+    def test_correlation_id_format_is_distinct_from_workflow_id_format(self):
+        # The single most valuable fact this wave adds, verified against the real
+        # ToString() calls rather than trusted from the brief's prose.
+        by_id = {s.id: s for s in self._surfaces()}
+        self.assertIn('"D"', by_id["elasticsearch.attr.WorkflowId"].detail)
+        self.assertIn('"N"', by_id["elasticsearch.attr.CorrelationId"].detail)
+
+    def test_result_is_present(self):
+        ids = {s.id for s in self._surfaces()}
+        self.assertIn("elasticsearch.attr.Result", ids)
+
+    def test_placeholder_derived_attributes_include_elapsedms_and_successorcount(self):
+        ids = {s.id for s in self._surfaces()}
+        self.assertIn("elasticsearch.attr.ElapsedMs", ids)
+        self.assertIn("elasticsearch.attr.SuccessorCount", ids)
+
+    def test_no_two_surfaces_share_an_id_across_placeholders_scope_and_envelope(self):
+        surfaces = self._surfaces()
+        ids = [s.id for s in surfaces]
+        duplicates = sorted({i for i in ids if ids.count(i) > 1})
+        self.assertEqual(duplicates, [], f"ids must be unique; collided: {duplicates}")

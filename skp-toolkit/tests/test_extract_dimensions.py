@@ -1,6 +1,6 @@
 import unittest
 
-from skp.compile.extract import metric_labels, metrics, resource_labels
+from skp.compile.extract import log_attributes, metric_labels, metrics, resource_labels
 
 # ---- metric_labels / metrics() label extraction -----------------------------------
 
@@ -204,6 +204,87 @@ class ResourceLabelsTests(unittest.TestCase):
         self.assertIn("replica", detail.lower())
 
 
+# ---- log_attributes ----------------------------------------------------------------
+
+TEMPLATES = '''
+internal static class Templates
+{
+    public const string StepReturned = "the step returned after {ElapsedMs}ms";
+    public const string EntryStepCompleted = "the entry step completed with {Result}";
+    public const string AdvancedSuccessors = "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms";
+    public const string HostShuttingDown = "Application is shutting down...";
+}
+'''
+
+SCOPE = '''
+public static class ExecutionLogScope
+{
+    public const string WorkflowId  = "WorkflowId";
+    public const string StepId      = "StepId";
+
+    public static void BuildScope(Guid workflowId, Guid stepId)
+    {
+        state[WorkflowId] = workflowId.ToString("D");
+        state[StepId]     = stepId.ToString("D");
+    }
+}
+'''
+
+CORRELATION = '''
+public static class CorrelationKeys
+{
+    public const string LogScope = "CorrelationId";
+    public static string Render(Guid correlationId) => correlationId.ToString("N");
+}
+'''
+
+
+class LogAttributesTests(unittest.TestCase):
+    def test_every_placeholder_becomes_its_own_attribute_surface(self):
+        surfaces = log_attributes(TEMPLATES, "", "")
+        ids = {s.id for s in surfaces}
+        self.assertIn("elasticsearch.attr.ElapsedMs", ids)
+        self.assertIn("elasticsearch.attr.Result", ids)
+        self.assertIn("elasticsearch.attr.SuccessorCount", ids)
+
+    def test_a_template_with_no_placeholders_contributes_no_attribute(self):
+        surfaces = log_attributes(TEMPLATES, "", "")
+        ids = {s.id for s in surfaces}
+        # HostShuttingDown has no {Placeholder}; nothing named after it should appear.
+        self.assertFalse(any("HostShuttingDown" in i for i in ids))
+
+    def test_scope_ids_are_keyed_by_value_not_by_member_name(self):
+        surfaces = log_attributes("", SCOPE, "")
+        ids = {s.id for s in surfaces}
+        self.assertIn("elasticsearch.attr.WorkflowId", ids)
+        self.assertIn("elasticsearch.attr.StepId", ids)
+
+    def test_correlation_id_is_keyed_by_its_value_not_the_logscope_member_name(self):
+        surfaces = log_attributes("", "", CORRELATION)
+        ids = {s.id for s in surfaces}
+        self.assertIn("elasticsearch.attr.CorrelationId", ids)
+        self.assertNotIn("elasticsearch.attr.LogScope", ids)
+
+    def test_the_n_versus_d_format_trap_is_recorded_as_data_on_both_sides(self):
+        by_id = {s.id: s for s in log_attributes("", SCOPE, CORRELATION)}
+        workflow_detail = by_id["elasticsearch.attr.WorkflowId"].detail
+        correlation_detail = by_id["elasticsearch.attr.CorrelationId"].detail
+        self.assertIn('"D"', workflow_detail)
+        self.assertIn('"N"', correlation_detail)
+        # And each one names the other's different format, not just its own.
+        self.assertIn("CorrelationId", workflow_detail)
+        self.assertIn("ExecutionLogScope", correlation_detail)
+
+    def test_the_envelope_is_always_present_regardless_of_input(self):
+        surfaces = log_attributes("", "", "")
+        ids = {s.id for s in surfaces}
+        self.assertEqual(ids, {
+            "elasticsearch.attr.timestamp", "elasticsearch.attr.body_text",
+            "elasticsearch.attr.original_format", "elasticsearch.attr.service_name",
+            "elasticsearch.attr.scope_name",
+        })
+        for surface in surfaces:
+            self.assertIn("hand-listed", surface.detail)
 
 
 if __name__ == "__main__":

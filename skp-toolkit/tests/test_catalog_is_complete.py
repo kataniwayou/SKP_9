@@ -29,11 +29,12 @@ class CompletenessTests(unittest.TestCase):
             {"api", "cluster", "postgres", "redis", "rabbitmq", "elasticsearch", "prometheus"})
 
     def test_the_surface_count_reflects_the_added_dimensions(self):
-        # 104 baseline + 3 prometheus.label.* resource surfaces = 107 so far in
-        # this wave. The 16 existing prometheus.pipeline_* ids are unchanged --
-        # this wave adds labels to their `detail`, not new surfaces. The
-        # elasticsearch.attr.* half (and the annotations that cover both
-        # halves) land in the next two commits.
+        # 104 baseline + 3 prometheus.label.* resource surfaces + 23
+        # elasticsearch.attr.* surfaces (12 message-scoped placeholders, 5
+        # ExecutionLogScope dispatch-scope ids, 1 CorrelationId, 5 hand-listed
+        # envelope fields) = 130. The 16 existing prometheus.pipeline_* ids
+        # are unchanged -- this wave adds labels to their `detail`, not new
+        # surfaces -- so the count grows by exactly the new ids.
         with tempfile.TemporaryDirectory() as tmp:
             entries, _ = compile_catalog(SRC, ANNOTATIONS, pathlib.Path(tmp))
-        self.assertEqual(len(entries), 107)
+        self.assertEqual(len(entries), 130)
