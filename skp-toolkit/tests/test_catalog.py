@@ -3,7 +3,7 @@ import pathlib
 import tempfile
 import unittest
 
-from skp.compile.catalog import INTENTS, build, check, load_annotations
+from skp.compile.catalog import CatalogError, INTENTS, build, check, load_annotations
 from skp.compile.extract import Surface
 
 SURFACES = [
@@ -90,6 +90,32 @@ class LoadTests(unittest.TestCase):
             (root / "redis.json").write_text(json.dumps({"redis.Root": ANNOTATIONS["redis.Root"]}),
                                              encoding="utf-8")
             (root / "extra.json").write_text(
+                json.dumps({"redis.ExecutionData": ANNOTATIONS["redis.ExecutionData"]}),
+                encoding="utf-8")
+            self.assertEqual(sorted(load_annotations(root)),
+                             ["redis.ExecutionData", "redis.Root"])
+
+    def test_the_same_id_in_two_annotation_files_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "a.json").write_text(
+                json.dumps({"redis.Root": ANNOTATIONS["redis.Root"]}), encoding="utf-8")
+            (root / "b.json").write_text(
+                json.dumps({"redis.Root": ANNOTATIONS["redis.ExecutionData"]}),
+                encoding="utf-8")
+            with self.assertRaises(CatalogError) as caught:
+                load_annotations(root)
+        message = str(caught.exception)
+        self.assertIn("redis.Root", message)
+        self.assertIn("a.json", message)
+        self.assertIn("b.json", message)
+
+    def test_distinct_ids_across_files_still_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "a.json").write_text(
+                json.dumps({"redis.Root": ANNOTATIONS["redis.Root"]}), encoding="utf-8")
+            (root / "b.json").write_text(
                 json.dumps({"redis.ExecutionData": ANNOTATIONS["redis.ExecutionData"]}),
                 encoding="utf-8")
             self.assertEqual(sorted(load_annotations(root)),
