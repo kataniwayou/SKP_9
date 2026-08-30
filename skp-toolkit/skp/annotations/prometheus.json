@@ -1,7 +1,7 @@
 {
   "prometheus.pipeline_consumer_duration": {
     "intents": ["observe", "analyze", "investigate"],
-    "answers": "seconds a delivery was held end-to-end, tagged by queue/type/disposition/reason — every terminal path, not only a successful transform",
+    "answers": "seconds a delivery was held end-to-end, tagged by queue/type/disposition — every terminal path, not only a successful transform. disposition is exactly one of acked | requeued | parked; reason is NOT carried here, only on pipeline.messages.consumed. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all",
     "never_for": "grouping on instance for a per-replica question — instance is the scrape target, not the replica; use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
@@ -73,7 +73,7 @@
   },
   "prometheus.pipeline_messages_consumed": {
     "intents": ["observe", "analyze"],
-    "answers": "deliveries handled, by queue, type, disposition (acked/requeued/parked) and reason",
+    "answers": "deliveries handled, by queue, type, disposition (acked/requeued/parked) and reason. The (disposition, reason) pair is exactly one of six closed by GatedQueueConsumer: acked/handled, parked/refused, requeued/gate_closed, requeued/store_unreachable, requeued/send_failed, requeued/escaped — hand-listed here because the values are inline literals, not consts, so the extractor correctly declines to claim this domain in the catalogued detail. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all, so \"leaders versus followers\" is answerable here only on an orchestrator's own series",
     "never_for": "whether a parked delivery actually landed in a dead-letter queue — there is no landed tag here by design; that is on the consumer's own log line or pipeline.deadletter.depth. Never group on instance — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
@@ -81,7 +81,7 @@
   },
   "prometheus.pipeline_messages_produced": {
     "intents": ["observe", "analyze"],
-    "answers": "messages handed to the broker, by route, destination, type and outcome",
+    "answers": "messages handed to the broker, by route, destination, type and outcome. outcome is exactly one of accepted | unroutable | transient | refused (EgressMetrics.Classify) — hand-listed here because the values are inline literals, not consts, so the extractor correctly declines to claim this domain in the catalogued detail. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all",
     "never_for": "grouping on instance for a per-replica question — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
@@ -97,7 +97,7 @@
   },
   "prometheus.pipeline_produce_duration": {
     "intents": ["observe", "analyze"],
-    "answers": "time from starting a send until the broker confirmed or refused it",
+    "answers": "time from starting a send until the broker confirmed or refused it. outcome is exactly one of accepted | unroutable | transient | refused (EgressMetrics.Classify) — hand-listed here because the values are inline literals, not consts, so the extractor correctly declines to claim this domain in the catalogued detail. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all",
     "never_for": "grouping on instance for a per-replica question — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
@@ -121,7 +121,7 @@
   },
   "prometheus.pipeline_queue_wait": {
     "intents": ["observe", "analyze", "investigate"],
-    "answers": "seconds between a message being published and a consumer picking it up, labelled by queue",
+    "answers": "seconds between a message being published and a consumer picking it up, labelled by queue. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all",
     "never_for": "the broker wait alone — the timestamp is stamped before publish, so this double-counts the sender's own confirm (roughly 12 of ~13ms on this stack); subtract pipeline.produce.duration for the true wait. Never group on instance — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",

@@ -170,7 +170,23 @@
   "elasticsearch.attr.service_name": {
     "intents": ["investigate"],
     "answers": "resource.attributes.service.name: which role wrote the record -- filtering on a template alone is not enough for a template every service writes, such as HostShuttingDown",
-    "never_for": "picking out one replica of a role -- every replica of the same role shares one service.name",
+    "never_for": "picking out one replica of a role -- every replica of the same role shares one service.name; use resource.attributes.service.instance.id for that",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.service_instance_id": {
+    "intents": ["investigate"],
+    "answers": "resource.attributes.service.instance.id: the replica identity on the log resource -- InstanceId.Resolve(), the same identity a replica's liveness key and reply queue use. This is the field a per-replica question must group on; resource.attributes.service.name alone cannot distinguish two replicas of the same role",
+    "never_for": "expecting it to vary per record within one process -- it is a resource attribute, materialised once when the log provider is built, so it is constant across every record this process writes",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.attr.source": {
+    "intents": ["investigate"],
+    "answers": "resource.attributes.Source: the application type stamped on the resource -- worker or webapi (AddBaseConsoleObservability/AddBaseApiObservability's source parameter). Deliberately coarser than service.name: it says what shape of process wrote the record, not which role it played",
+    "never_for": "distinguishing which role emitted a record -- that is resource.attributes.service.name; every processor, orchestrator, and keeper alike reports Source=worker",
     "write_authority": "none",
     "cost": "bounded",
     "verb": "skp investigate trace"
