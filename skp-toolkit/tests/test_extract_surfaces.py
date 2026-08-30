@@ -59,11 +59,13 @@ class MetricTests(unittest.TestCase):
 
     def test_an_instrument_with_no_recognisable_call_site_still_reports_a_detail(self):
         # METRICS_A is just a const declaration -- no Meter.Create* call at all -- so
-        # _file_dimensions finds nothing for it. That must read as "no labels", not
-        # crash or silently omit the labels half of detail.
+        # _file_dimensions finds nothing for it. That must read as "no call site
+        # found", not crash, not silently omit the labels half of detail, and not
+        # invent a scope ("method scope") it never actually determined -- the
+        # wording this minor fix corrected.
         surfaces = metrics([METRICS_A])
         self.assertIn("pipeline.queue.depth", surfaces[0].detail)
-        self.assertIn("no labels", surfaces[0].detail)
+        self.assertIn("no call site found", surfaces[0].detail)
 
     def test_non_pipeline_literals_are_ignored(self):
         self.assertEqual(metrics(['x("http.server.duration");']), [])
