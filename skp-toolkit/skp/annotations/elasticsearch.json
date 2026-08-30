@@ -1,0 +1,210 @@
+{
+  "elasticsearch.EntryDispatched": {
+    "intents": ["investigate"],
+    "answers": "confirms an entry step was dispatched — the first record in a run's ledger",
+    "never_for": "current state — ES is history; and identifying a run by WorkflowId alone — the control plane's own start/stop log lines carry WorkflowId too, so filter on this template as well",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.HandoffDispatched": {
+    "intents": ["investigate", "analyze"],
+    "answers": "confirms a hand-off was dispatched, with its elapsed ms",
+    "never_for": "current state — ES is history; a WorkflowId filter alone cannot identify a run, because the control-plane endpoints log it too",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.RunningTheStep": {
+    "intents": ["investigate"],
+    "answers": "confirms a step began running",
+    "never_for": "current state — ES is history; a WorkflowId filter alone cannot identify a run, because the control-plane endpoints log it too",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.AuthorConfig": {
+    "intents": ["investigate"],
+    "answers": "the config values (Label, Number) a step actually ran with, as logged at execution time",
+    "never_for": "current state — ES is history; and the config schema itself — that is the processor's ConfigSchemaId in Postgres, not this record",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.StepReturned": {
+    "intents": ["investigate", "analyze"],
+    "answers": "confirms a step returned, with elapsed ms — a per-event figure worth trusting over an interpolated histogram quantile at coarse resolution",
+    "never_for": "current state — ES is history; a WorkflowId filter alone cannot identify a run, because the control-plane endpoints log it too",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.BranchCompleted": {
+    "intents": ["investigate", "analyze"],
+    "answers": "confirms a branch completed, with elapsed ms",
+    "never_for": "current state — ES is history; a WorkflowId filter alone cannot identify a run, because the control-plane endpoints log it too",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.EntryStepCompleted": {
+    "intents": ["investigate"],
+    "answers": "confirms the entry step completed, carrying its Result",
+    "never_for": "current state — ES is history; a WorkflowId filter alone cannot identify a run, because the control-plane endpoints log it too",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.HandedOff": {
+    "intents": ["investigate"],
+    "answers": "one hand-off's NextStepId, NextProcessorId and NextEntryId",
+    "never_for": "current state — ES is history; a WorkflowId filter alone cannot identify a run, because the control-plane endpoints log it too",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.AdvancedSuccessors": {
+    "intents": ["investigate", "analyze"],
+    "answers": "confirms N successors were advanced, with elapsed ms — the fan-out width and its cost",
+    "never_for": "current state — ES is history; a WorkflowId filter alone cannot identify a run, because the control-plane endpoints log it too",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.TerminalCompleted": {
+    "intents": ["investigate", "verify"],
+    "answers": "confirms a run reached a terminal step with no successor — the ledger's last record, used to confirm a run actually finished",
+    "never_for": "current state — ES is history; a WorkflowId filter alone cannot identify a run, because the control-plane endpoints log it too",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp verify run-completed"
+  },
+  "elasticsearch.EntryAbsentDuplicate": {
+    "intents": ["investigate"],
+    "answers": "explains a short ledger as a benign duplicate delivery of the entry step rather than a lost step",
+    "never_for": "evidence that something is broken — this is the legitimate excuse for why nothing else in the ledger was logged",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.EntryDispatchSendFailed": {
+    "intents": ["investigate", "remediate"],
+    "answers": "the entry-step dispatch failed to send, but the handler continued rather than crash",
+    "never_for": "assuming the run proceeded unaffected — the dispatch genuinely failed to send",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate trace"
+  },
+  "elasticsearch.StoreUnreachable": {
+    "intents": ["investigate"],
+    "answers": "the projection store was unreachable and the message was returned to its queue — logged above the deserialization boundary",
+    "never_for": "attributing this to one run by WorkflowId — at this point in the code the ids are still undecoded bytes; it only witnesses the fault window, not a specific run",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.RefusingAndParking": {
+    "intents": ["investigate", "remediate"],
+    "answers": "a message was rejected and the broker confirmed the park — it is now recoverable from the queue's Dead sibling",
+    "never_for": "attributing this to one run by WorkflowId — the ids are still undecoded bytes at this point in the code",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.RefusingNotParked": {
+    "intents": ["investigate"],
+    "answers": "a message was rejected but the channel died before the broker heard it — it will be REDELIVERED, not dead-lettered",
+    "never_for": "looking for this message in a dead-letter queue — it is not there, and the rabbitmq.*Dead surfaces will not show it",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.SendFailedReturning": {
+    "intents": ["investigate"],
+    "answers": "a send failed while handling a message and it was returned to its queue",
+    "never_for": "attributing this to one run by WorkflowId — the ids are still undecoded bytes at this point in the code",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.GateClosed": {
+    "intents": ["investigate", "analyze"],
+    "answers": "the L2 gate closed on this host — projection store unusable, consumers paused; pair with GateOpen to measure one outage's duration",
+    "never_for": "the gate's live state — that is prometheus.pipeline_gate_open; this is only a historical transition record",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.GateOpen": {
+    "intents": ["investigate", "analyze"],
+    "answers": "the L2 gate reopened — projection store healthy again; pair with GateClosed to measure one outage's duration",
+    "never_for": "the gate's live state — that is prometheus.pipeline_gate_open; this is only a historical transition record",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.ChannelShutDown": {
+    "intents": ["investigate"],
+    "answers": "the AMQP channel shut down for a stated reason and will reopen",
+    "never_for": "current state — ES is history; the channel may already have reopened by the time this is read",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.ConnectionRecovered": {
+    "intents": ["investigate", "verify"],
+    "answers": "the AMQP connection recovered; delivery tags issued before this point are invalid",
+    "never_for": "current state — ES is history, this only confirms a past recovery happened",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp verify recovery"
+  },
+  "elasticsearch.ConsumptionPaused": {
+    "intents": ["investigate"],
+    "answers": "consumption stopped, naming the queue, because it is no longer admitted or the store is unhealthy",
+    "never_for": "current consuming state — that is pipeline.queue.consumers in Prometheus; this is a historical transition",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate fault-window"
+  },
+  "elasticsearch.ConsumptionAdmitted": {
+    "intents": ["investigate", "verify"],
+    "answers": "consumption resumed, naming the queue, because it is admitted and the store is healthy",
+    "never_for": "current consuming state — that is pipeline.queue.consumers in Prometheus; this only confirms a past resumption happened",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp verify recovery"
+  },
+  "elasticsearch.HostShuttingDown": {
+    "intents": ["investigate"],
+    "answers": "a host is shutting down — emitted by Microsoft.Hosting.Lifetime, so every service in the deployment writes this exact line",
+    "never_for": "identifying which role shut down from this template alone — every service writes it; filter on the service name too, or use a role-unique template instead",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate restart"
+  },
+  "elasticsearch.ProcessorLoopsRetired": {
+    "intents": ["investigate", "verify"],
+    "answers": "this processor's startup loops stood down because it is now healthy and serving — processor-unique",
+    "never_for": "any other role's startup — this template is written only by a processor",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp verify restart"
+  },
+  "elasticsearch.SchedulerShuttingDown": {
+    "intents": ["investigate"],
+    "answers": "the Quartz scheduler is shutting down — orchestrator-unique, Quartz runs nowhere else in this deployment",
+    "never_for": "any other role's shutdown — this template names the scheduler, which only the orchestrator runs",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp investigate restart"
+  },
+  "elasticsearch.OrchestratorHydrated": {
+    "intents": ["investigate", "verify"],
+    "answers": "the orchestrator finished hydrating WorkflowCount workflows from L2 and is admitting its consumer — orchestrator-unique, no other role writes it",
+    "never_for": "a processor's own readiness — that is elasticsearch.ProcessorLoopsRetired or prometheus.pipeline_identity_ready",
+    "write_authority": "none",
+    "cost": "bounded",
+    "verb": "skp verify restart"
+  }
+}

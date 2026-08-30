@@ -1,0 +1,26 @@
+{
+  "prometheus.label.service_name": {
+    "intents": ["observe", "investigate"],
+    "answers": "the role that emitted a series -- processor/orchestrator/keeper/webapi; ResourceBuilder.AddService(serviceName:) on both the logs and metrics resources. The Prometheus exporter also derives exported_job from it",
+    "never_for": "picking out one replica -- every replica of the same role shares one service_name; use service_instance_id for that",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe metric"
+  },
+  "prometheus.label.service_instance_id": {
+    "intents": ["observe", "investigate", "verify"],
+    "answers": "the replica identity carried by every Prometheus series -- InstanceId.Resolve(), the same identity that names a replica's liveness key and reply queue",
+    "never_for": "grouping on instance for a per-replica question -- instance is the scrape target address, and every replica behind one scrape config can share it; service_instance_id is the label that is actually unique per replica. This is the one trap that applies to almost every prometheus.pipeline_* surface in this catalog",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe metric"
+  },
+  "prometheus.label.processorId": {
+    "intents": ["investigate"],
+    "answers": "the processor's database identity, present on a processor host's metrics resource only -- ResourceAttribute(\"ProcessorId\", \"processorId\", identity.Id) passed to AddBaseConsoleObservability. The metric-side key is the camelCase processorId (MetricKey); the differently-cased ProcessorId is only the log-side key (LogKey), used on log records instead",
+    "never_for": "expecting this label on an orchestrator, keeper, or webapi series -- it is stamped only on a processor host's resource, since name and version alone cannot distinguish two builds of the same processor row",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp investigate trace"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "redis.ParentIndex": {
+    "intents": ["observe"],
+    "answers": "which workflows are projected at all",
+    "never_for": "the set of workflows that exist — that is Postgres",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe projected"
+  },
+  "redis.Root": {
+    "intents": ["observe", "investigate", "verify"],
+    "answers": "whether one workflow is projected right now",
+    "never_for": "the workflow's definition — L2 is a projection and legitimately lags a PUT until the next start",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe projected"
+  },
+  "redis.Step": {
+    "intents": ["observe", "investigate"],
+    "answers": "the projected shape of one step inside a running workflow",
+    "never_for": "the step's edges — those live in the StepNextSteps junction",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe projected"
+  },
+  "redis.PerInstance": {
+    "intents": ["observe", "investigate", "verify"],
+    "answers": "one replica's liveness, with its status and interval",
+    "never_for": "deciding a replica is gone — stale at 2x the interval but present until 4x, so absent and unhealthy are different answers",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe liveness"
+  },
+  "redis.InstanceIndex": {
+    "intents": ["observe", "analyze"],
+    "answers": "how many replicas of a processor have ever registered",
+    "never_for": "a live replica count — membership outlives a dead replica's entry key",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe liveness"
+  },
+  "redis.ExecutionData": {
+    "intents": ["investigate", "remediate"],
+    "answers": "whether a step's output blob landed under its entry id",
+    "never_for": "throughput — these keys carry no TTL, so a lingering blob is a leak to report, not garbage awaiting collection",
+    "write_authority": "gated",
+    "cost": "cheap",
+    "verb": "skp investigate blob"
+  },
+  "redis.KeeperProbe": {
+    "intents": ["observe", "investigate"],
+    "answers": "whether the L2 gate probe is mid-flight for a given holder",
+    "never_for": "gate state — the gate's own open/closed reading is pipeline.gate.open in Prometheus; this key is only the probe's scratch space and is absent almost always",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe gate"
+  }
+}
