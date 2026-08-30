@@ -1,6 +1,5 @@
 import json
 import pathlib
-from collections import Counter
 from dataclasses import dataclass, field
 
 INTENTS = ("design", "control", "observe", "analyze",
@@ -36,9 +35,28 @@ class Entry:
 
 
 def load_annotations(directory: pathlib.Path) -> dict[str, dict]:
+    """Merge every annotation file in the directory.
+
+    A duplicate id across two files is corruption rather than an incomplete
+    state -- we cannot tell which entry was meant -- so it raises instead of
+    joining check()'s reported problems. dict.update alone would let the later
+    file win silently and leave the catalog claiming full coverage.
+    """
     merged: dict[str, dict] = {}
+    origin: dict[str, str] = {}
+    collisions: list[str] = []
+
     for path in sorted(directory.glob("*.json")):
-        merged.update(json.loads(path.read_text(encoding="utf-8")))
+        for key, value in json.loads(path.read_text(encoding="utf-8")).items():
+            if key in merged:
+                collisions.append(
+                    f"{key}: annotated in both {origin[key]} and {path.name}")
+            merged[key] = value
+            origin[key] = path.name
+
+    if collisions:
+        raise CatalogError(
+            "duplicate annotation ids:\n  " + "\n  ".join(sorted(collisions)))
     return merged
 
 
@@ -71,12 +89,15 @@ def check(entries: list[Entry], surfaces, annotations: dict[str, dict]) -> list[
                 f"{surface.id}: discovered in source but has no annotation "
                 f"(add it to skp/annotations/)")
 
-    id_counts = Counter(surface.id for surface in surfaces)
-    for surface_id, count in sorted(id_counts.items()):
-        if count > 1:
+    by_id: dict[str, list] = {}
+    for surface in surfaces:
+        by_id.setdefault(surface.id, []).append(surface)
+    for surface_id, claimants in sorted(by_id.items()):
+        if len(claimants) > 1:
+            where = ", ".join(f"{s.component}/{s.operation}" for s in claimants)
             problems.append(
-                f"{surface_id}: duplicate id — {count} surfaces claim it "
-                f"(a collapsed id silently discards the others; ids must be unique)")
+                f"{surface_id}: duplicate id claimed by {len(claimants)} surfaces "
+                f"({where})")
 
     for entry in entries:
         if not entry.intents:
