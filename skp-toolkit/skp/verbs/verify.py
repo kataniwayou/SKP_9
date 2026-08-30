@@ -23,24 +23,63 @@ render the same, so this drives a different exit code (EXIT_UNREACHABLE)
 than a genuine refutation (EXIT_VERDICT).
 
 NOT_APPLICABLE claims -- a write verb this read-only command must never
-exercise, or a route with more path parameters than this file has a rule to
-resolve -- are reported for transparency (each with a reason stating *why*
-it cannot be checked, not merely that it was skipped) but never affect the
-exit code. A templated queue name and a message template are NOT applicable
-skips: both are resolved and actually checked (see ``check_rabbitmq`` and
-``check_elasticsearch``).
+exercise by default, or a route with more path parameters than this file
+has a rule to resolve -- are reported for transparency (each with a reason
+stating *why* it cannot be checked, not merely that it was skipped) but
+never affect the exit code. A templated queue name and a message template
+are NOT applicable skips: both are resolved and actually checked (see
+``check_rabbitmq`` and ``check_elasticsearch``).
 
-This module never writes to or consumes from any store: every check below
-is a read (SELECT count, list_queues, an instant query, a bounded search, a
-GET, a bounded SCAN). It reuses ``skp init``'s ``build_clients``/``probe``
-and ``skp map``'s ``load_catalog``/``by_component`` rather than inventing a
-second probing implementation -- ``probe()`` answers "is it reachable",
-which is a different question from the one this file answers: "is the
-claim true".
+By default this module never writes to or consumes from any store: every
+check is a read (SELECT count, list_queues, an instant query, a bounded
+search, a GET, a bounded SCAN). It reuses ``skp init``'s
+``build_clients``/``probe`` and ``skp map``'s ``load_catalog``/``by_component``
+rather than inventing a second probing implementation -- ``probe()``
+answers "is it reachable", which is a different question from the one this
+file answers: "is the claim true".
+
+**``--probe-writes`` is the one opt-in exception**, and it bends the
+strictly-read-only guarantee on purpose rather than by accident -- which is
+exactly why it must be asked for, not discovered. ``BaseApi.Service``
+controllers carry ``[ApiController]``, so ASP.NET's model-state validation
+short-circuits a malformed request to HTTP 400 *before the action body ever
+runs* -- ``CreateAsync``/``UpdateAsync``/``DeleteAsync`` are never entered,
+so nothing is created, updated or deleted. That gives a route-existence
+proof this file can extract without ever performing the write it is proving
+exists:
+
+- Every catalogued write route (17 of them: ``POST``/``PUT``/``DELETE`` on
+  the five entity controllers, plus ``POST orchestration/start`` and
+  ``POST orchestration/stop``) is sent an empty JSON object (``{}``) as its
+  body -- a positional record with any required field fails to bind against
+  ``{}``, and ``orchestration/start``/``stop`` bind a bare ``Guid`` from the
+  body, which ``{}`` cannot satisfy either.
+- A route with an ``{id}`` placeholder (every ``PUT``/``DELETE``) gets a
+  freshly generated ``uuid4`` in that placeholder -- never an id read from
+  the live system. A real id plus some unexpected server behaviour is the
+  one path that could actually delete or overwrite something; a guid this
+  process just generated cannot collide with a real row.
+- 400/405/422 confirms the route: wired, and the request was rejected
+  before the action ran. 404 on a route with **no** id placeholder
+  (``POST``) means the path itself did not match anything -- the catalogued
+  route does not exist, a real refutation. 404 on a route **with** an id
+  placeholder is the not-found handler doing exactly its job for a guid
+  guaranteed not to exist -- proof the route ran and rejected the request,
+  not proof it is missing -- so it is treated the same as 400/405/422.
+  **Any 2xx is REFUTED, loudly**, flagged with a ``MUTATION WARNING`` in its
+  message: it would mean model-state validation did not short-circuit the
+  way this whole probe assumes, and the request may actually have written
+  something. 5xx and transport failures are UNVERIFIABLE -- a probe that
+  could not get a clean answer either way.
+
+Without the flag, every write claim stays NOT_APPLICABLE, its reason now
+naming the remedy (``rerun with --probe-writes``) rather than just stating
+the limitation.
 """
 import argparse
 import pathlib
 import re
+import uuid
 from collections import Counter, namedtuple
 
 from skp.clients.http import Unreachable
@@ -534,23 +573,79 @@ def _check_get(claims: list[Claim], entry: dict, client, path: str, note: str = 
         claims.append(Claim("api", entry["id"], CONFIRMED, f"GET {path} -> 2xx{note}"))
 
 
-def check_api(entries: list[dict], client) -> list[Claim]:
-    """Only a ``GET`` route is exercised -- every other verb is a write this
-    read-only command must never perform, reported NOT_APPLICABLE with the
-    verb itself as the reason, not a bare "skipped".
+_WRITE_CONFIRM_STATUSES = (400, 405, 422)
 
-    A single ``{id}`` (or ``{sourceHash}``) placeholder is resolved, not
-    waved through: the entity's own list route (``entry["detail"]``,
-    already confirmed or refuted by its own catalog entry) is fetched once
-    per entity and cached, and the first row's matching field fills the
-    placeholder -- ``{sourceHash}`` lowercased first, since matching is
-    byte-exact against a stored lowercase hex string (the catalogued trap).
-    Zero rows to resolve from is NOT_OBSERVED (nothing exists to check
-    against, not a defect); the list route itself failing is UNVERIFIABLE
-    (a gap in what this run could check). A route with more than one
-    placeholder, or one this file has no field-matching rule for, stays
-    NOT_APPLICABLE -- an honest "cannot safely resolve this", not a claim
-    of write-avoidance it no longer needs.
+
+def _classify_write_status(status: int, has_id: bool) -> tuple[str, str, bool]:
+    """Maps one ``--probe-writes`` HTTP status to ``(verdict, reason,
+    is_mutation_warning)`` -- see the module docstring for the full
+    rationale. Split out from ``_probe_write`` so the mapping itself (the
+    part the assumption actually lives in) is unit-testable against bare
+    status codes, with no HTTP client involved at all.
+    """
+    if status in _WRITE_CONFIRM_STATUSES:
+        return CONFIRMED, "route wired, request rejected before the action ran", False
+    if status == 404:
+        if has_id:
+            return (CONFIRMED,
+                    "route wired -- 404 via the not-found handler for a guid guaranteed "
+                    "not to exist", False)
+        return REFUTED, "catalogued route does not exist", False
+    if 200 <= status < 300:
+        return (REFUTED,
+                "expected the request to be rejected before the action ran; a 2xx means "
+                "that did not happen, and this request may have mutated state", True)
+    return UNVERIFIABLE, f"unexpected status {status} -- neither a rejection nor a 2xx", False
+
+
+def _probe_write(entry: dict, client) -> Claim:
+    """Sends the one deliberately-invalid probe for a single catalogued
+    write route and returns its verdict. See the module docstring for what
+    is sent and why nothing can be written.
+    """
+    method, path = entry["operation"].split(" ", 1)
+    placeholders = _API_PLACEHOLDER.findall(path)
+    has_id = bool(placeholders)
+    note = ""
+    if has_id:
+        guid = str(uuid.uuid4())
+        for placeholder in placeholders:
+            path = path.replace("{" + placeholder + "}", guid)
+        note = f" (id={guid}, freshly generated -- cannot exist)"
+
+    try:
+        status = client.http.probe_status(method, path, {})
+    except Unreachable as exc:
+        return Claim("api", entry["id"], UNVERIFIABLE,
+                    f"{method} {path} with an empty body{note} -- transport failure, "
+                    f"not a response: {exc.detail}")
+
+    verdict, why, is_mutation = _classify_write_status(status, has_id)
+    tag = "MUTATION WARNING: " if is_mutation else ""
+    return Claim("api", entry["id"], verdict,
+                f"{tag}{method} {path} with an empty body{note} -> HTTP {status} -- {why}")
+
+
+def check_api(entries: list[dict], client, probe_writes: bool = False) -> list[Claim]:
+    """Only a ``GET`` route is exercised by default -- every other verb is a
+    write, reported NOT_APPLICABLE naming the remedy (``--probe-writes``),
+    not a bare "skipped". With ``probe_writes=True`` every write route is
+    instead sent through ``_probe_write`` (see the module docstring).
+
+    A single ``{id}`` (or ``{sourceHash}``) placeholder on a ``GET`` route is
+    resolved, not waved through: the entity's own list route
+    (``entry["detail"]``, already confirmed or refuted by its own catalog
+    entry) is fetched once per entity and cached, and the first row's
+    matching field fills the placeholder -- ``{sourceHash}`` lowercased
+    first, since matching is byte-exact against a stored lowercase hex
+    string (the catalogued trap). Zero rows to resolve from is NOT_OBSERVED
+    (nothing exists to check against, not a defect); the list route itself
+    failing is UNVERIFIABLE (a gap in what this run could check). A ``GET``
+    route with more than one placeholder, or one this file has no
+    field-matching rule for, stays NOT_APPLICABLE -- an honest "cannot
+    safely resolve this". (A write route's ``{id}`` never goes through this
+    resolution at all -- ``_probe_write`` always fills it with a freshly
+    generated guid instead, by design.)
 
     An ``Unreachable`` whose detail starts with an HTTP status is the server
     actually answering with something other than 2xx (REFUTED); anything
@@ -573,9 +668,15 @@ def check_api(entries: list[dict], client) -> list[Claim]:
         operation = entry["operation"]
         entity = entry["detail"]
         if not operation.startswith("GET "):
-            verb = operation.split(" ", 1)[0]
-            claims.append(Claim("api", entry["id"], NOT_APPLICABLE,
-                          f"{verb} -- write verb, cannot be exercised read-only"))
+            if probe_writes:
+                claims.append(_probe_write(entry, client))
+            else:
+                verb = operation.split(" ", 1)[0]
+                claims.append(Claim("api", entry["id"], NOT_APPLICABLE,
+                              f"{verb} -- write verb, not exercised read-only by default "
+                              f"-- rerun with --probe-writes to confirm the route is wired "
+                              f"(a deliberately invalid body proves it without writing "
+                              f"anything)"))
             continue
 
         path = operation[len("GET "):]
@@ -741,13 +842,17 @@ def _resolve_processor_ids(clients: dict, reachable: dict[str, bool]) -> list[st
     return None
 
 
-def verify_all(entries: list[dict], clients: dict, component: str | None = None) -> list[Claim]:
+def verify_all(entries: list[dict], clients: dict, component: str | None = None,
+               probe_writes: bool = False) -> list[Claim]:
     """Gate on reachability once, per component, the same way ``skp doctor``
     does -- reusing ``init.probe()`` rather than a second probing
     implementation. A component that does not answer gets every one of its
     claims marked UNVERIFIABLE without a single query being attempted
     against it: "I could not check" must never be produced by actually
     trying and getting a confusing half-answer.
+
+    ``probe_writes`` only ever affects the ``api`` component -- see
+    ``check_api``/``_probe_write`` and the module docstring.
     """
     rows = probe(clients)
     reachable = {name: ok for name, ok, _ in rows}
@@ -776,14 +881,14 @@ def verify_all(entries: list[dict], clients: dict, component: str | None = None)
         elif comp == "prometheus":
             claims += check_prometheus(comp_entries, clients["prometheus"])
         elif comp == "api":
-            claims += check_api(comp_entries, clients["baseapi"])
+            claims += check_api(comp_entries, clients["baseapi"], probe_writes=probe_writes)
         elif comp == "cluster":
             claims += check_cluster(comp_entries, clients["cluster"].cluster)
     return claims
 
 
 def render_report(claims: list[Claim], component: str | None = None,
-                  show_skips: bool = False) -> list[str]:
+                  show_skips: bool = False, probe_writes: bool = False) -> list[str]:
     """A skip nobody can enumerate is indistinguishable from a claim that was
     never true (module docstring). So every NOT_OBSERVED/NOT_APPLICABLE claim
     is either listed here by id with its one-line reason (``--skips``), or --
@@ -792,8 +897,20 @@ def render_report(claims: list[Claim], component: str | None = None,
     prints when skips exist; only the enumeration itself is gated, so the
     gap in what was confirmed is never invisible even in the terse form.
     """
-    header = "skp verify" + (f" --component {component}" if component else "")
+    header = ("skp verify" + (f" --component {component}" if component else "")
+              + (" --probe-writes" if probe_writes else ""))
     lines = [header, ""]
+
+    mutation = [c for c in claims if c.message.startswith("MUTATION WARNING")]
+    if mutation:
+        lines.append(f"*** MUTATION WARNING ({len(mutation)}) -- a write-route probe got "
+                     f"2xx instead of a rejection; the request may have mutated state. "
+                     f"This means the probe's core assumption -- that [ApiController] "
+                     f"model-state validation always short-circuits before the action runs "
+                     f"-- did not hold for these routes: ***")
+        for c in mutation:
+            lines.append(f"  {c.surface_id}: {c.message}")
+        lines.append("")
 
     by_comp: dict[str, list[Claim]] = {}
     for claim in claims:
@@ -846,9 +963,9 @@ def render_report(claims: list[Claim], component: str | None = None,
 
 
 def run_with(entries: list[dict], clients: dict, component: str | None = None,
-            show_skips: bool = False) -> Result:
-    claims = verify_all(entries, clients, component=component)
-    lines = render_report(claims, component, show_skips=show_skips)
+            show_skips: bool = False, probe_writes: bool = False) -> Result:
+    claims = verify_all(entries, clients, component=component, probe_writes=probe_writes)
+    lines = render_report(claims, component, show_skips=show_skips, probe_writes=probe_writes)
 
     if any(c.verdict == REFUTED for c in claims):
         return Result(EXIT_VERDICT, lines, next_command="skp doctor")
@@ -863,6 +980,15 @@ def run(argv: list[str]) -> Result:
     parser.add_argument("--component", choices=sorted(COMPONENT_CLIENT_KEY))
     parser.add_argument("--skips", action="store_true",
                         help="list every NOT_OBSERVED/NOT_APPLICABLE claim by id")
+    parser.add_argument("--probe-writes", action="store_true",
+                        help="opt-in: send a deliberately invalid body to every catalogued "
+                             "POST/PUT/DELETE route (a fresh random guid for {id} routes, "
+                             "never a real one) to confirm it is wired. [ApiController] "
+                             "model-state validation rejects the request before the action "
+                             "runs, so nothing is created, updated or deleted -- a 2xx is "
+                             "reported REFUTED with a loud MUTATION WARNING instead of a "
+                             "pass. Off by default so skp verify stays strictly read-only "
+                             "unless asked otherwise.")
     ns = parser.parse_args(argv)
 
     home = pathlib.Path(ns.home)
@@ -875,4 +1001,5 @@ def run(argv: list[str]) -> Result:
     except ProfileMissing:
         return not_compiled(home)
 
-    return run_with(entries, build_clients(profile), component=ns.component, show_skips=ns.skips)
+    return run_with(entries, build_clients(profile), component=ns.component,
+                    show_skips=ns.skips, probe_writes=ns.probe_writes)
