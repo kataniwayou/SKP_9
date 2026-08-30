@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import tempfile
 import unittest
 
@@ -35,9 +36,11 @@ class FakePostgres:
 
 
 class FakeRabbit:
-    def __init__(self, queue_names=(), fail=None):
+    def __init__(self, queue_names=(), exchange_names=(), fail=None, exchanges_fail=None):
         self._names = list(queue_names)
+        self._exchange_names = list(exchange_names)
         self._fail = fail
+        self._exchanges_fail = exchanges_fail
 
     def ping(self):
         return True
@@ -46,6 +49,11 @@ class FakeRabbit:
         if self._fail:
             raise Unreachable("rabbitmq", self._fail)
         return [{"name": n, "messages": 0, "consumers": 1} for n in self._names]
+
+    def exchanges(self):
+        if self._exchanges_fail:
+            raise Unreachable("rabbitmq", self._exchanges_fail)
+        return [{"name": n} for n in self._exchange_names]
 
 
 class FakeHttp:
@@ -74,17 +82,69 @@ class FakeElastic:
 
 
 class FakePrometheus:
-    def __init__(self, series_by_prefix=None):
+    def __init__(self, series_by_prefix=None, range_series_by_prefix=None):
         self._series_by_prefix = series_by_prefix or {}
+        # Answered only by a count_over_time(...) query -- the range existence
+        # fallback check_prometheus makes when the instant query above finds
+        # nothing, so a test can tell "never observed" apart from "not at
+        # this instant" without hand-parsing the expr.
+        self._range_series_by_prefix = range_series_by_prefix or {}
 
     def ready(self):
         return True
 
     def query(self, expr):
-        for prefix, series in self._series_by_prefix.items():
+        table = self._range_series_by_prefix if expr.startswith("count_over_time(") \
+            else self._series_by_prefix
+        for prefix, series in table.items():
             if prefix in expr:
                 return series
         return []
+
+
+class RegexAwarePrometheus:
+    """Answers a query by actually running its ``__name__=~"..."`` selector
+    as a regex against a fixed table of live series names, rather than a
+    substring match on the raw expr text -- the only fake faithful enough to
+    pin the OTel unit-suffix regression (a real Prometheus series name like
+    ``pipeline_consumer_duration_seconds_bucket`` was invisible to a query
+    that only alternated the Prometheus type suffix)."""
+
+    def __init__(self, series_by_name: dict[str, list[dict]]):
+        self._series_by_name = series_by_name
+
+    def ready(self):
+        return True
+
+    def query(self, expr):
+        match = re.search(r'__name__=~"([^"]+)"', expr)
+        if not match:
+            return []
+        # A real Prometheus server unescapes the PromQL string literal (Go
+        # string rules) before handing the result to the regex engine, so a
+        # literal single-backslash \w for the regex has to arrive doubled on
+        # the wire (\\w) -- collapse that the same way here, or this fake
+        # would accept a query real Prometheus 400s on (confirmed live,
+        # 2026-08-30: an un-doubled \w in the query text is a parse error,
+        # not a working-but-different regex).
+        pattern = re.compile(match.group(1).replace("\\\\", "\\"))
+        result = []
+        for name, label_sets in self._series_by_name.items():
+            if pattern.match(name):
+                for labels in label_sets:
+                    result.append({"metric": {"__name__": name, **labels}})
+        return result
+
+
+class RangeOnlyPrometheus(RegexAwarePrometheus):
+    """Like RegexAwarePrometheus, but only for a count_over_time(...) query --
+    every plain instant query finds nothing, pinning the range-existence
+    fallback itself rather than the regex fix."""
+
+    def query(self, expr):
+        if not expr.startswith("count_over_time("):
+            return []
+        return super().query(expr)
 
 
 class FakeRedis:
@@ -146,7 +206,7 @@ def make_clients(**overrides):
         "rabbitmq": FakeRabbit(),
         "elasticsearch": FakeElastic(FakeHttp()),
         "prometheus": FakePrometheus(),
-        "baseapi": FakeElastic(FakeHttp()),  # placeholder swapped by tests that need it
+        "baseapi": FakeBaseApi(FakeHttp()),  # placeholder swapped by tests that need it
     }
     base.update(overrides)
     return base
@@ -252,15 +312,51 @@ class RabbitChecksTests(unittest.TestCase):
         claims = verify.check_rabbitmq(entries, FakeRabbit(queue_names=[]))
         self.assertEqual(claims[0].verdict, verify.REFUTED)
 
-    def test_a_templated_name_is_skipped_as_not_applicable(self):
+    def test_a_templated_name_with_no_resolvable_ids_is_unverifiable(self):
+        """processor_ids=None means the caller (verify_all) could not resolve
+        any real id at all -- both the API and Postgres were unreachable.
+        That is a gap in what this run could check, not a skip."""
         entries = [self.entry("Work", "processor-{processorId}")]
-        claims = verify.check_rabbitmq(entries, FakeRabbit(queue_names=[]))
-        self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
+        claims = verify.check_rabbitmq(entries, FakeRabbit(queue_names=[]), processor_ids=None)
+        self.assertEqual(claims[0].verdict, verify.UNVERIFIABLE)
 
-    def test_a_dead_letter_exchange_is_skipped_as_not_applicable(self):
+    def test_a_templated_name_with_zero_registered_processors_is_not_observed(self):
+        entries = [self.entry("Work", "processor-{processorId}")]
+        claims = verify.check_rabbitmq(entries, FakeRabbit(queue_names=[]), processor_ids=[])
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+
+    def test_a_resolved_templated_name_present_for_every_processor_is_confirmed(self):
+        entries = [self.entry("Work", "processor-{processorId}")]
+        rabbit = FakeRabbit(queue_names=["processor-abc", "processor-def"])
+        claims = verify.check_rabbitmq(entries, rabbit, processor_ids=["abc", "def"])
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_a_resolved_templated_name_genuinely_absent_is_refuted_not_a_skip(self):
+        """The whole point of resolving a template: once it names a real,
+        concrete queue, an absent one is a real defect, not NOT_APPLICABLE."""
+        entries = [self.entry("Work", "processor-{processorId}")]
+        rabbit = FakeRabbit(queue_names=["processor-abc"])  # "def" never registered
+        claims = verify.check_rabbitmq(entries, rabbit, processor_ids=["abc", "def"])
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+        self.assertIn("processor-def", claims[0].message)
+
+    def test_a_live_dead_letter_exchange_is_confirmed(self):
         entries = [self.entry("DeadLetterExchange", "orchestrator-dlx")]
-        claims = verify.check_rabbitmq(entries, FakeRabbit(queue_names=[]))
-        self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
+        rabbit = FakeRabbit(queue_names=[], exchange_names=["orchestrator-dlx"])
+        claims = verify.check_rabbitmq(entries, rabbit)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_a_missing_dead_letter_exchange_is_refuted(self):
+        entries = [self.entry("DeadLetterExchange", "orchestrator-dlx")]
+        rabbit = FakeRabbit(queue_names=[], exchange_names=[])
+        claims = verify.check_rabbitmq(entries, rabbit)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+
+    def test_list_exchanges_failing_is_unverifiable_not_refuted(self):
+        entries = [self.entry("DeadLetterExchange", "orchestrator-dlx")]
+        rabbit = FakeRabbit(queue_names=[], exchanges_fail="permission denied")
+        claims = verify.check_rabbitmq(entries, rabbit)
+        self.assertEqual(claims[0].verdict, verify.UNVERIFIABLE)
 
 
 # ---------------------------------------------------------------------
@@ -296,13 +392,58 @@ class ElasticsearchChecksTests(unittest.TestCase):
         claims = verify.check_elasticsearch(entries, client)
         self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
 
-    def test_a_message_template_is_not_applicable(self):
+    def test_a_message_template_seen_at_least_once_is_confirmed(self):
         entries = [{"id": "elasticsearch.EntryDispatched", "component": "elasticsearch",
                    "operation": "search by attributes.{OriginalFormat}",
                    "detail": "entry step {StepId} dispatched"}]
+        client = FakeElastic(FakeHttp(), hits=[{"attributes": {"StepId": "s1"}}])
+        claims = verify.check_elasticsearch(entries, client)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_a_message_template_never_seen_is_not_observed_not_applicable(self):
+        """22 of 26 templates fire on a healthy system; a handful (fault-path
+        records like RefusingAndParking) legitimately never do -- absence is
+        a fact worth reporting, not a reason to skip the check."""
+        entries = [{"id": "elasticsearch.RefusingAndParking", "component": "elasticsearch",
+                   "operation": "search by attributes.{OriginalFormat}",
+                   "detail": "refusing and parking {EntryId}"}]
         client = FakeElastic(FakeHttp(), hits=[])
         claims = verify.check_elasticsearch(entries, client)
-        self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+
+    def test_an_em_dash_template_is_queried_with_a_prefix_not_an_exact_term(self):
+        """Pins the reuse of investigate._original_format_filter: TerminalCompleted's
+        em dash arrives mangled through the OTel pipeline, so an exact term match
+        silently finds nothing even though the record is right there."""
+        captured = []
+
+        class RecordingElastic:
+            def search(self, body):
+                captured.append(body)
+                return []
+
+        entries = [{"id": "elasticsearch.TerminalCompleted", "component": "elasticsearch",
+                   "operation": "search by attributes.{OriginalFormat}",
+                   "detail": "the workflow terminated — completed"}]
+        verify.check_elasticsearch(entries, RecordingElastic())
+        self.assertEqual(len(captured), 1)
+        query = captured[0]["query"]["bool"]["filter"][0]
+        self.assertIn("prefix", query)
+        self.assertEqual(query["prefix"]["attributes.{OriginalFormat}"], "the workflow terminated ")
+
+    def test_message_template_query_is_bounded_by_size(self):
+        captured = []
+
+        class RecordingElastic:
+            def search(self, body):
+                captured.append(body)
+                return []
+
+        entries = [{"id": "elasticsearch.EntryDispatched", "component": "elasticsearch",
+                   "operation": "search by attributes.{OriginalFormat}",
+                   "detail": "entry step {StepId} dispatched"}]
+        verify.check_elasticsearch(entries, RecordingElastic())
+        self.assertEqual(captured[0]["size"], 1)
 
     def test_a_nested_resource_attribute_path_is_resolved(self):
         entries = [{"id": "elasticsearch.attr.service_instance_id", "component": "elasticsearch",
@@ -368,6 +509,51 @@ class PrometheusChecksTests(unittest.TestCase):
         claims = verify.check_prometheus(entries, client)
         self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
 
+    def test_an_otel_unit_suffixed_series_name_is_matched(self):
+        """Pins the regression this file exists to catch: the OTel Prometheus
+        exporter inserts a unit segment (unit 's' -> '_seconds') between the
+        base name and the type suffix, e.g. pipeline.consumer.duration really
+        exports as pipeline_consumer_duration_seconds_bucket -- a regex that
+        only alternates the type suffix never matches it, and 9 of 16
+        instruments were misreported NOT_OBSERVED for exactly this reason."""
+        entries = [{"id": "prometheus.pipeline_consumer_duration", "component": "prometheus",
+                   "operation": "instant query on pipeline.consumer.duration",
+                   "detail": "pipeline.consumer.duration | labels: queue, le (method scope)"}]
+        client = RegexAwarePrometheus({
+            "pipeline_consumer_duration_seconds_bucket": [{"queue": "q", "le": "0.1"}],
+        })
+        claims = verify.check_prometheus(entries, client)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_a_ratio_unit_suffixed_series_name_is_matched(self):
+        entries = [{"id": "prometheus.pipeline_gate_open", "component": "prometheus",
+                   "operation": "instant query on pipeline.gate.open",
+                   "detail": "pipeline.gate.open | no labels (method scope -- this instrument carries no tags)"}]
+        client = RegexAwarePrometheus({"pipeline_gate_open_ratio": [{}]})
+        claims = verify.check_prometheus(entries, client)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_no_sample_at_the_instant_but_present_in_a_1h_range_is_confirmed(self):
+        """An instant query only sees a series with a sample inside
+        Prometheus's own 5-minute lookback window -- an instrument that
+        fires less often than that is invisible to it even though it truly
+        exists. The 1h range existence check tells the two cases apart."""
+        entries = [{"id": "prometheus.pipeline_leader", "component": "prometheus",
+                   "operation": "instant query on pipeline.leader",
+                   "detail": "pipeline.leader | no labels (method scope -- this instrument carries no tags)"}]
+        client = RangeOnlyPrometheus({"pipeline_leader_ratio": [{}]})
+        claims = verify.check_prometheus(entries, client)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertIn("range existence check", claims[0].message)
+
+    def test_absent_from_both_instant_and_range_is_not_observed(self):
+        entries = [{"id": "prometheus.pipeline_leader", "component": "prometheus",
+                   "operation": "instant query on pipeline.leader",
+                   "detail": "pipeline.leader | no labels (method scope -- this instrument carries no tags)"}]
+        client = RangeOnlyPrometheus({})
+        claims = verify.check_prometheus(entries, client)
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+
 
 # ---------------------------------------------------------------------
 # api
@@ -380,35 +566,98 @@ class ApiChecksTests(unittest.TestCase):
 
     def test_a_200_get_is_confirmed(self):
         entries = [self.entry("workflows", "get", "GET /api/v1.0/workflows")]
-        api_client = _ApiFake(FakeHttp(ok_paths={"/api/v1.0/workflows"}))
+        api_client = FakeBaseApi(FakeHttp(ok_paths={"/api/v1.0/workflows"}))
         claims = verify.check_api(entries, api_client)
         self.assertEqual(claims[0].verdict, verify.CONFIRMED)
 
     def test_a_404_get_is_refuted(self):
         entries = [self.entry("workflows", "get", "GET /api/v1.0/workflows")]
-        api_client = _ApiFake(FakeHttp(status_by_path={"/api/v1.0/workflows": 404}))
+        api_client = FakeBaseApi(FakeHttp(status_by_path={"/api/v1.0/workflows": 404}))
         claims = verify.check_api(entries, api_client)
         self.assertEqual(claims[0].verdict, verify.REFUTED)
 
-    def test_a_get_with_a_path_parameter_is_not_applicable(self):
-        entries = [self.entry("workflows", "get_id", "GET /api/v1.0/workflows/{id}")]
-        api_client = _ApiFake(FakeHttp())
-        claims = verify.check_api(entries, api_client)
-        self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
-
-    def test_a_post_route_is_not_applicable(self):
+    def test_a_post_route_is_not_applicable_and_names_the_write_verb(self):
         entries = [self.entry("workflows", "post", "POST /api/v1.0/workflows")]
-        api_client = _ApiFake(FakeHttp())
+        api_client = FakeBaseApi(FakeHttp())
+        claims = verify.check_api(entries, api_client)
+        self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
+        self.assertIn("write verb", claims[0].message)
+        self.assertIn("POST", claims[0].message)
+
+    def test_a_put_route_is_not_applicable(self):
+        entries = [self.entry("workflows", "put_id", "PUT /api/v1.0/workflows/{id}")]
+        api_client = FakeBaseApi(FakeHttp())
+        claims = verify.check_api(entries, api_client)
+        self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
+
+    def test_a_delete_route_is_not_applicable(self):
+        entries = [self.entry("workflows", "delete_id", "DELETE /api/v1.0/workflows/{id}")]
+        api_client = FakeBaseApi(FakeHttp())
+        claims = verify.check_api(entries, api_client)
+        self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
+
+    def test_get_id_resolves_the_first_real_id_from_the_list_route_and_confirms(self):
+        entries = [self.entry("workflows", "get_id", "GET /api/v1.0/workflows/{id}")]
+        api_client = FakeBaseApi(
+            FakeHttp(ok_paths={"/api/v1.0/workflows/wf-1"}),
+            items_by_entity={"workflows": [{"id": "wf-1"}, {"id": "wf-2"}]})
+        claims = verify.check_api(entries, api_client)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertIn("wf-1", claims[0].message)
+
+    def test_get_id_resolved_to_a_404_is_refuted(self):
+        entries = [self.entry("workflows", "get_id", "GET /api/v1.0/workflows/{id}")]
+        api_client = FakeBaseApi(
+            FakeHttp(status_by_path={"/api/v1.0/workflows/wf-1": 404}),
+            items_by_entity={"workflows": [{"id": "wf-1"}]})
+        claims = verify.check_api(entries, api_client)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+
+    def test_get_id_with_zero_rows_to_resolve_from_is_not_observed(self):
+        entries = [self.entry("workflows", "get_id", "GET /api/v1.0/workflows/{id}")]
+        api_client = FakeBaseApi(FakeHttp(), items_by_entity={"workflows": []})
+        claims = verify.check_api(entries, api_client)
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+
+    def test_get_id_when_the_list_route_itself_fails_is_unverifiable(self):
+        entries = [self.entry("workflows", "get_id", "GET /api/v1.0/workflows/{id}")]
+        api_client = FakeBaseApi(
+            FakeHttp(), items_by_entity={"workflows": Unreachable("http", "connection refused")})
+        claims = verify.check_api(entries, api_client)
+        self.assertEqual(claims[0].verdict, verify.UNVERIFIABLE)
+
+    def test_source_hash_placeholder_is_lowercased_before_substitution(self):
+        """The catalogued trap: matching is byte-exact against a stored
+        lowercase hex string."""
+        entries = [self.entry("processors", "get_by_source_hash_sourcehash",
+                              "GET /api/v1.0/processors/by-source-hash/{sourceHash}")]
+        api_client = FakeBaseApi(
+            FakeHttp(ok_paths={"/api/v1.0/processors/by-source-hash/abcdef"}),
+            items_by_entity={"processors": [{"id": "p1", "sourceHash": "ABCDEF"}]})
+        claims = verify.check_api(entries, api_client)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertIn("abcdef", claims[0].message)
+
+    def test_more_than_one_path_parameter_stays_not_applicable(self):
+        entries = [self.entry("widgets", "get_ab", "GET /api/v1.0/widgets/{a}/{b}")]
+        api_client = FakeBaseApi(FakeHttp())
         claims = verify.check_api(entries, api_client)
         self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
 
 
-class _ApiFake:
-    def __init__(self, http):
+class FakeBaseApi:
+    def __init__(self, http, items_by_entity=None):
         self.http = http
+        self._items_by_entity = items_by_entity or {}
 
     def ready(self):
         return True
+
+    def list(self, entity):
+        items = self._items_by_entity.get(entity, [])
+        if isinstance(items, Unreachable):
+            raise items
+        return items
 
 
 # ---------------------------------------------------------------------
@@ -499,6 +748,46 @@ class VerifyAllTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------
+# render_report -- every skip enumerable (Part 2)
+# ---------------------------------------------------------------------
+
+class RenderReportTests(unittest.TestCase):
+    CLAIMS = [
+        verify.Claim("postgres", "postgres.workflows", verify.CONFIRMED, "table workflows: 3 row(s)"),
+        verify.Claim("redis", "redis.Root", verify.CONFIRMED, "1 key(s) matching skp:*"),
+        verify.Claim("redis", "redis.ExecutionData", verify.NOT_OBSERVED, "no live keys matching skp:data:*"),
+        verify.Claim("api", "api.workflows.post", verify.NOT_APPLICABLE,
+                    "POST -- write verb, cannot be exercised read-only"),
+    ]
+
+    def test_the_confirmation_ratio_is_printed_explicitly(self):
+        lines = verify.render_report(self.CLAIMS)
+        self.assertIn("confirmed 2/4 (50%)", lines)
+
+    def test_skips_are_hidden_by_default_behind_a_pointer(self):
+        lines = verify.render_report(self.CLAIMS)
+        text = "\n".join(lines)
+        self.assertNotIn("redis.ExecutionData", text)
+        self.assertNotIn("api.workflows.post", text)
+        self.assertIn("2 claim(s) not confirmed", text)
+        self.assertIn("--skips", text)
+
+    def test_skips_flag_enumerates_every_one_by_id_with_its_reason(self):
+        lines = verify.render_report(self.CLAIMS, show_skips=True)
+        text = "\n".join(lines)
+        self.assertIn("redis.ExecutionData", text)
+        self.assertIn("no live keys matching skp:data:*", text)
+        self.assertIn("api.workflows.post", text)
+        self.assertIn("write verb, cannot be exercised read-only", text)
+
+    def test_no_skips_at_all_prints_no_pointer(self):
+        lines = verify.render_report(self.CLAIMS[:2])
+        text = "\n".join(lines)
+        self.assertNotIn("--skips", text)
+        self.assertIn("confirmed 2/2 (100%)", text)
+
+
+# ---------------------------------------------------------------------
 # run_with -- the exit-code contract
 # ---------------------------------------------------------------------
 
@@ -561,6 +850,15 @@ class RunTests(unittest.TestCase):
             Profile(home=home, source_root="/src", cluster_url="https://c",
                     project="skp", endpoints={}).save(token="")
             result = verify.run(["--home", str(home)])
+        from skp.result import EXIT_NOT_INITIALISED
+        self.assertEqual(result.code, EXIT_NOT_INITIALISED)
+
+    def test_skips_flag_is_a_recognised_argument(self):
+        # No profile.json here -- run() returns not_initialised() before ever
+        # touching build_clients()/the network, so this pins only that
+        # argparse accepts --skips without raising SystemExit, cheaply.
+        with tempfile.TemporaryDirectory() as tmp:
+            result = verify.run(["--home", str(pathlib.Path(tmp) / ".skp"), "--skips"])
         from skp.result import EXIT_NOT_INITIALISED
         self.assertEqual(result.code, EXIT_NOT_INITIALISED)
 
