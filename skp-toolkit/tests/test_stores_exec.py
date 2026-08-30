@@ -1,6 +1,7 @@
 import json
 import unittest
 
+from skp.clients.http import Unreachable
 from skp.clients.pg import Postgres
 from skp.clients.rabbit import Rabbit
 from skp.clients.redis import Redis
@@ -14,6 +15,17 @@ class FakeCluster:
     def exec(self, workload, argv):
         self.calls.append((workload, argv))
         return self.stdout
+
+
+class FailingCluster:
+    """exec() always raises Unreachable, carrying a detail a ping() must
+    not discard (Important 1)."""
+
+    def __init__(self, detail: str):
+        self.detail = detail
+
+    def exec(self, workload, argv):
+        raise Unreachable(workload, self.detail)
 
 
 class PagedFakeCluster:
@@ -63,6 +75,11 @@ class PostgresTests(unittest.TestCase):
         self.assertEqual(argv[4], 'SELECT "Name" FROM "Workflows"')
         self.assertNotIn("Workflows", argv[2])
 
+    def test_ping_records_the_unreachable_detail_as_last_error(self):
+        pg = Postgres(FailingCluster("pod not found"))
+        self.assertFalse(pg.ping())
+        self.assertEqual(pg.last_error, "pod not found")
+
 
 class RedisTests(unittest.TestCase):
     def test_keys_returns_one_entry_per_line(self):
@@ -96,6 +113,11 @@ class RedisTests(unittest.TestCase):
         self.assertTrue(Redis(FakeCluster("PONG")).ping())
         self.assertFalse(Redis(FakeCluster("")).ping())
 
+    def test_ping_records_the_unreachable_detail_as_last_error(self):
+        redis = Redis(FailingCluster("connection refused"))
+        self.assertFalse(redis.ping())
+        self.assertEqual(redis.last_error, "connection refused")
+
 
 class RabbitTests(unittest.TestCase):
     def test_queues_are_read_as_json_not_scraped_from_columns(self):
@@ -115,3 +137,8 @@ class RabbitTests(unittest.TestCase):
         flat = " ".join(cluster.calls[0][1])
         self.assertNotIn("15672", flat)
         self.assertNotIn("/api/queues", flat)
+
+    def test_ping_records_the_unreachable_detail_as_last_error(self):
+        rabbit = Rabbit(FailingCluster("node down"))
+        self.assertFalse(rabbit.ping())
+        self.assertEqual(rabbit.last_error, "node down")

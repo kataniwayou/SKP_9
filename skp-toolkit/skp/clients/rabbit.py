@@ -14,6 +14,7 @@ class Rabbit:
     def __init__(self, cluster, workload: str = "sts/rabbitmq"):
         self.cluster = cluster
         self.workload = workload
+        self.last_error = ""
 
     def queues(self) -> list[dict]:
         out = self.cluster.exec(self.workload, [
@@ -26,5 +27,6 @@ class Rabbit:
         try:
             self.cluster.exec(self.workload, ["rabbitmqctl", "status", "--formatter=json"])
             return True
-        except Unreachable:
+        except Unreachable as exc:
+            self.last_error = exc.detail
             return False

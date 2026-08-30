@@ -7,6 +7,7 @@ class Redis:
     def __init__(self, cluster, workload: str = "sts/redis"):
         self.cluster = cluster
         self.workload = workload
+        self.last_error = ""
 
     def _cli(self, *argv: str) -> str:
         return self.cluster.exec(self.workload, ["redis-cli", *argv])
@@ -46,5 +47,6 @@ class Redis:
     def ping(self) -> bool:
         try:
             return self._cli("PING") == "PONG"
-        except Unreachable:
+        except Unreachable as exc:
+            self.last_error = exc.detail
             return False

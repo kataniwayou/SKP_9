@@ -2,7 +2,8 @@ import pathlib
 import tempfile
 import unittest
 
-from skp.compile.lock import build_lock, build_lock_two_roots, edited_generated, stale_sources
+from skp.compile.lock import (MISSING, build_lock, build_lock_two_roots,
+                              edited_generated, stale_sources)
 
 
 class LockTests(unittest.TestCase):
@@ -38,6 +39,19 @@ class LockTests(unittest.TestCase):
 
     def test_paths_are_recorded_relative_to_the_root(self):
         self.assertEqual(sorted(self.lock["sources"]), ["Queues.cs"])
+
+    def test_a_source_stored_as_MISSING_is_stale_even_when_still_missing(self):
+        # C2: a rename leaves both the stored and the current hash as
+        # MISSING -- _changed sees them as equal and stale_sources used to
+        # report []. A stored MISSING is drift by definition regardless of
+        # what the filesystem currently shows for that path.
+        lock = {"sources": {"Gone.cs": MISSING}}
+        self.assertEqual(stale_sources(lock, self.root), ["Gone.cs"])
+
+    def test_a_source_stored_as_MISSING_is_stale_even_if_a_file_now_exists_there(self):
+        lock = {"sources": {"Reappeared.cs": MISSING}}
+        (self.root / "Reappeared.cs").write_text("new", encoding="utf-8")
+        self.assertEqual(stale_sources(lock, self.root), ["Reappeared.cs"])
 
 
 class ManifestGlobTests(unittest.TestCase):

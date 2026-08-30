@@ -73,8 +73,17 @@ def _changed(section: dict, root: pathlib.Path) -> list[str]:
 
 
 def stale_sources(lock: dict, root: pathlib.Path) -> list[str]:
-    """The C# moved and nobody recompiled. Fix: skp init --refresh."""
-    stale = _changed(lock.get("sources", {}), root)
+    """The C# moved and nobody recompiled. Fix: skp init --refresh.
+
+    A source recorded as ``MISSING`` in the lock is drift by definition: the
+    path was tracked (SOURCE_MAP paths are kept even when absent -- see
+    ``_source_paths``) and is not there now. Comparing it against a *current*
+    hash that is also ``MISSING`` -- the normal state after a rename -- would
+    make ``_changed`` see them as equal and hide the drift, so a stored
+    ``MISSING`` is reported unconditionally rather than routed through that
+    comparison."""
+    stale = sorted(rel for rel, digest in lock.get("sources", {}).items()
+                    if digest == MISSING or hash_file(root / rel) != digest)
     for pattern, digest in lock.get("manifests", {}).items():
         if manifest_hash(root, pattern) != digest:
             stale.append(f"file set changed for {pattern}")

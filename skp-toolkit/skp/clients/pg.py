@@ -14,6 +14,7 @@ class Postgres:
     def __init__(self, cluster, workload: str = "sts/postgres"):
         self.cluster = cluster
         self.workload = workload
+        self.last_error = ""
 
     def rows(self, sql: str) -> list[list[str]]:
         # I9: `-tAc` with the default `|` separator, split on "|", silently
@@ -32,5 +33,6 @@ class Postgres:
         try:
             self.cluster.exec(self.workload, ["pg_isready"])
             return True
-        except Unreachable:
+        except Unreachable as exc:
+            self.last_error = exc.detail
             return False
