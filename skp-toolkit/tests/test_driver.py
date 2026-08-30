@@ -50,9 +50,19 @@ class CollectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             src = fake_source_root(pathlib.Path(tmp))
             components = {s.component for s in collect_surfaces(src)}
+            # I6: "cluster" is always present -- cluster_operations() does not
+            # read source_root at all, so it appears even for this fixture tree.
             self.assertEqual(components,
                              {"redis", "rabbitmq", "elasticsearch",
-                              "postgres", "prometheus", "api"})
+                              "postgres", "prometheus", "api", "cluster"})
+
+    def test_cluster_operations_do_not_depend_on_source_root(self):
+        from skp.compile.driver import cluster_operations
+        ids = {s.id for s in cluster_operations()}
+        self.assertEqual(ids, {
+            "cluster.get_pods", "cluster.logs", "cluster.rollout_status",
+            "cluster.get_json", "api.health.ready", "api.health.live",
+            "api.health.startup"})
 
 
 class CompileTests(unittest.TestCase):

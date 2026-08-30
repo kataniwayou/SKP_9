@@ -17,8 +17,21 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(problems, [], "\n".join(problems))
 
     def test_every_component_is_represented(self):
+        # I6: all seven components from spec §6.3, including "cluster" --
+        # annotation-only, since there is no C# to extract it from (see
+        # driver.cluster_operations()). This assertion used to pin the
+        # six-component set as if cluster's absence were correct; it was the
+        # one test positioned to catch that gap, and it was ratifying it.
         with tempfile.TemporaryDirectory() as tmp:
             entries, _ = compile_catalog(SRC, ANNOTATIONS, pathlib.Path(tmp))
         self.assertEqual(
             {e.component for e in entries},
-            {"api", "postgres", "redis", "rabbitmq", "elasticsearch", "prometheus"})
+            {"api", "cluster", "postgres", "redis", "rabbitmq", "elasticsearch", "prometheus"})
+
+    def test_the_surface_count_reflects_the_added_cluster_component(self):
+        # 97 catalogued surfaces + 7 cluster/api.health surfaces = 104. This
+        # is the one fix in the wave that legitimately changes the baseline
+        # count, and it should fail loudly if that count ever drifts again.
+        with tempfile.TemporaryDirectory() as tmp:
+            entries, _ = compile_catalog(SRC, ANNOTATIONS, pathlib.Path(tmp))
+        self.assertEqual(len(entries), 104)
