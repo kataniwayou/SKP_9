@@ -39,10 +39,18 @@ class CompletenessTests(unittest.TestCase):
         # Fix round (I5) adds two more hand-listed envelope fields --
         # elasticsearch.attr.service_instance_id and .source -- closing the
         # per-replica gap attr.service_name's own never_for pointed at with no
-        # surface to land on. 130 + 2 = 132. The role fix (C1) is not a count
-        # change: PipelineAmbientTag.AppendTo adds a label to five existing
-        # prometheus.pipeline_* surfaces' `detail`, the same shape as the
-        # original wave's label additions, not a new id.
+        # surface to land on. 130 + 2 = 132. The role fix (C1, orchestrator
+        # wave) is not a count change: PipelineAmbientTag.AppendTo adds a
+        # label to five existing prometheus.pipeline_* surfaces' `detail`,
+        # the same shape as the original wave's label additions, not a new
+        # id.
+        #
+        # Live-fixes round: I1 adds three more hand-listed prometheus.label.*
+        # surfaces -- le, service_version, source -- 132 + 3 = 135. C2
+        # catalogues the Elasticsearch index name itself as a new surface,
+        # elasticsearch.index -- 135 + 1 = 136. C1 (the snake_case fix) is
+        # not a count change: it corrects the eight existing postgres.* ids'
+        # casing, it does not add or remove any.
         with tempfile.TemporaryDirectory() as tmp:
             entries, _ = compile_catalog(SRC, ANNOTATIONS, pathlib.Path(tmp))
-        self.assertEqual(len(entries), 132)
+        self.assertEqual(len(entries), 136)
