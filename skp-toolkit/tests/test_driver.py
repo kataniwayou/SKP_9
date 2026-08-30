@@ -2,8 +2,11 @@ import json
 import pathlib
 import tempfile
 import unittest
+import unittest.mock as mock
 
 from skp.compile.driver import collect_surfaces, compile_catalog
+from skp.result import EXIT_DRIFT
+from skp.verbs.init import run as init_run
 
 L2 = '''
 public static class L2ProjectionKeys
@@ -89,3 +92,30 @@ class CompileTests(unittest.TestCase):
             lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
             self.assertIn("Messaging.Contracts/ProcessorQueues.cs", lock["sources"])
             self.assertIn("catalog.json", lock["generated"])
+
+
+class CatalogErrorTests(unittest.TestCase):
+    def test_contradictory_annotations_return_a_result_not_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            notes = root / "annotations"
+            notes.mkdir()
+            entry = {"intents": ["observe"], "answers": "x", "never_for": "y",
+                     "write_authority": "none", "cost": "cheap", "verb": "skp map"}
+            (notes / "a.json").write_text(json.dumps({"redis.Root": entry}), encoding="utf-8")
+            (notes / "b.json").write_text(json.dumps({"redis.Root": entry}), encoding="utf-8")
+
+            home = root / ".skp"
+            with mock.patch("skp.verbs.init.ANNOTATIONS_DIR", notes):
+                result = init_run([
+                    "--home", str(home),
+                    "--source-root", str(src),
+                    "--cluster-url", "https://cluster.invalid",
+                    "--project", "skp",
+                ])
+
+        self.assertEqual(result.code, EXIT_DRIFT)
+        self.assertEqual(result.next_command, "skp doctor")
+        self.assertTrue(any("redis.Root" in line for line in result.lines))
+        self.assertTrue(any("a.json" in line for line in result.lines))
