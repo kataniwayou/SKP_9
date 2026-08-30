@@ -662,13 +662,14 @@ class FakeBaseApi:
 
 class FakeProbeHttp:
     """Backs ``--probe-writes`` tests. ``responses`` is one entry per
-    expected ``probe_status`` call, in order -- either a raw HTTP status
-    (int) or an exception instance to raise (mirroring ``probe_status``'s
-    real contract: 2xx through 5xx are all returned as plain ints, never
-    raised; only a transport failure raises). Every call actually made is
-    recorded in ``calls`` so a test can assert on the generated path (e.g.
-    that an ``{id}`` placeholder was replaced with a well-formed, freshly
-    generated guid) and the body (always ``{}``).
+    expected ``probe_status`` call, in order -- an ``(status, body)`` tuple,
+    a bare status (body defaults to ``""``), or an exception instance to
+    raise (mirroring ``probe_status``'s real contract: 2xx through 5xx are
+    all returned as data, never raised; only a transport failure raises).
+    Every call actually made is recorded in ``calls`` so a test can assert
+    on the generated path (e.g. that an ``{id}`` placeholder was replaced
+    with a well-formed, freshly generated guid) and the body (always
+    ``{}``).
     """
 
     def __init__(self, responses):
@@ -680,65 +681,107 @@ class FakeProbeHttp:
         response = self._responses.pop(0)
         if isinstance(response, Exception):
             raise response
-        return response
+        if isinstance(response, tuple):
+            return response
+        return response, ""  # bare status, convenience for the empty-body cases
 
 
 _UUID4 = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE)
 
 
+_PROBLEM_DETAILS_BODY = ('{"type":"https://tools.ietf.org/html/rfc9110","title":"Not Found",'
+                         '"status":404,"detail":"WorkflowEntity w..."}')
+
+
+class ProblemDetailsBodyTests(unittest.TestCase):
+    """``_looks_like_problem_details`` is what tells the two 404s apart --
+    pinned directly against bodies shaped like what was actually observed
+    live."""
+
+    def test_a_problem_details_body_is_recognised(self):
+        self.assertTrue(verify._looks_like_problem_details(_PROBLEM_DETAILS_BODY))
+
+    def test_an_empty_body_is_not(self):
+        self.assertFalse(verify._looks_like_problem_details(""))
+
+    def test_whitespace_only_is_not(self):
+        self.assertFalse(verify._looks_like_problem_details("   " + chr(10) + "  "))
+
+    def test_non_json_text_is_not(self):
+        self.assertFalse(verify._looks_like_problem_details("Not Found"))
+
+    def test_json_missing_title_or_status_is_not(self):
+        self.assertFalse(verify._looks_like_problem_details('{"detail": "nope"}'))
+
+    def test_a_json_array_is_not_a_problem_details_object(self):
+        self.assertFalse(verify._looks_like_problem_details('["title", "status"]'))
+
+
 class WriteStatusClassificationTests(unittest.TestCase):
     """``_classify_write_status`` is the whole assumption this probe rests
-    on, reduced to a pure function of (status, has_id) -- no HTTP client
-    needed to pin it down.
+    on, reduced to a pure function of (status, body) -- no HTTP client
+    needed to pin it down. The body, not any fact from the catalog (like
+    whether the route has an ``{id}`` placeholder), is what a 404 is
+    classified by -- see ``test_404_with_no_id_and_a_problem_details_body_...``
+    below for why the id-placeholder heuristic this used to use was wrong.
     """
 
     def test_400_is_confirmed(self):
-        verdict, _, mutation = verify._classify_write_status(400, has_id=False)
+        verdict, _, mutation = verify._classify_write_status(400, "")
         self.assertEqual(verdict, verify.CONFIRMED)
         self.assertFalse(mutation)
 
     def test_405_is_confirmed(self):
-        verdict, _, _ = verify._classify_write_status(405, has_id=True)
+        verdict, _, _ = verify._classify_write_status(405, "")
         self.assertEqual(verdict, verify.CONFIRMED)
 
     def test_422_is_confirmed(self):
-        verdict, _, _ = verify._classify_write_status(422, has_id=False)
+        verdict, _, _ = verify._classify_write_status(422, "")
         self.assertEqual(verdict, verify.CONFIRMED)
 
-    def test_404_with_no_id_placeholder_is_refuted(self):
-        """No ``{id}`` in the route -- a 404 has nothing else to mean but
-        "this path does not match a real route"."""
-        verdict, reason, mutation = verify._classify_write_status(404, has_id=False)
+    def test_404_with_a_problem_details_body_is_confirmed(self):
+        """The important case: proof routing matched and the action ran --
+        the route is wired, even though this particular id was never
+        going to be found."""
+        verdict, reason, mutation = verify._classify_write_status(404, _PROBLEM_DETAILS_BODY)
+        self.assertEqual(verdict, verify.CONFIRMED)
+        self.assertFalse(mutation)
+        self.assertIn("ProblemDetails", reason)
+
+    def test_404_with_an_empty_body_is_refuted(self):
+        """The other important case, and the one that would have failed
+        under the old id-placeholder heuristic: an id-bearing route that
+        was actually removed from the API also 404s, and an empty body is
+        exactly what routing itself returns when nothing matched -- this
+        must not be waved through as CONFIRMED just because the catalogued
+        route happens to carry an {id}."""
+        verdict, reason, mutation = verify._classify_write_status(404, "")
         self.assertEqual(verdict, verify.REFUTED)
         self.assertFalse(mutation)
         self.assertIn("does not exist", reason)
 
-    def test_404_with_an_id_placeholder_is_confirmed_not_refuted(self):
-        """A freshly generated guid is guaranteed absent, so a 404 here is
-        the not-found handler proving the route ran -- not proof it is
-        missing."""
-        verdict, reason, mutation = verify._classify_write_status(404, has_id=True)
-        self.assertEqual(verdict, verify.CONFIRMED)
+    def test_404_with_a_non_problem_details_body_is_also_refuted(self):
+        verdict, reason, mutation = verify._classify_write_status(404, "plain text, not JSON")
+        self.assertEqual(verdict, verify.REFUTED)
         self.assertFalse(mutation)
-        self.assertIn("not-found handler", reason)
 
     def test_a_2xx_is_refuted_with_the_mutation_flag_set(self):
         """The important case: this is the one signal that the probe's own
         assumption -- model-state validation always short-circuits before
         the action runs -- did not hold."""
-        verdict, reason, mutation = verify._classify_write_status(202, has_id=False)
+        verdict, reason, mutation = verify._classify_write_status(202, "")
         self.assertEqual(verdict, verify.REFUTED)
         self.assertTrue(mutation)
         self.assertIn("mutated state", reason)
 
-    def test_a_2xx_with_an_id_is_also_refuted_with_the_mutation_flag_set(self):
-        verdict, reason, mutation = verify._classify_write_status(200, has_id=True)
+    def test_a_2xx_with_a_body_is_also_refuted_with_the_mutation_flag_set(self):
+        verdict, reason, mutation = verify._classify_write_status(200, '{"id": "abc"}')
         self.assertEqual(verdict, verify.REFUTED)
         self.assertTrue(mutation)
 
     def test_a_5xx_is_unverifiable(self):
-        verdict, _, mutation = verify._classify_write_status(500, has_id=False)
+        verdict, _, mutation = verify._classify_write_status(500, "")
         self.assertEqual(verdict, verify.UNVERIFIABLE)
         self.assertFalse(mutation)
 
@@ -767,15 +810,28 @@ class ProbeWritesTests(unittest.TestCase):
         claims = verify.check_api(entries, FakeBaseApi(FakeProbeHttp([404])), probe_writes=True)
         self.assertEqual(claims[0].verdict, verify.REFUTED)
 
-    def test_a_404_on_a_put_id_route_is_confirmed_not_refuted(self):
+    def test_a_404_on_a_put_id_route_with_a_problem_details_body_is_confirmed(self):
         entries = [self.entry("workflows", "put_id", "PUT /api/v1.0/workflows/{id}")]
-        claims = verify.check_api(entries, FakeBaseApi(FakeProbeHttp([404])), probe_writes=True)
+        http = FakeProbeHttp([(404, _PROBLEM_DETAILS_BODY)])
+        claims = verify.check_api(entries, FakeBaseApi(http), probe_writes=True)
         self.assertEqual(claims[0].verdict, verify.CONFIRMED)
 
-    def test_a_404_on_a_delete_id_route_is_confirmed_not_refuted(self):
+    def test_a_404_on_a_delete_id_route_with_a_problem_details_body_is_confirmed(self):
         entries = [self.entry("workflows", "delete_id", "DELETE /api/v1.0/workflows/{id}")]
-        claims = verify.check_api(entries, FakeBaseApi(FakeProbeHttp([404])), probe_writes=True)
+        http = FakeProbeHttp([(404, _PROBLEM_DETAILS_BODY)])
+        claims = verify.check_api(entries, FakeBaseApi(http), probe_writes=True)
         self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_a_404_on_an_id_route_with_an_empty_body_is_refuted_not_confirmed(self):
+        """The regression this whole fix exists for: an id-bearing route
+        that was actually removed from the API also 404s. Classifying by
+        "does the catalogued route have an {id} placeholder" instead of by
+        the response body would confirm a route that no longer exists --
+        this must REFUTE instead."""
+        entries = [self.entry("workflows", "delete_id", "DELETE /api/v1.0/workflows/{id}")]
+        http = FakeProbeHttp([(404, "")])
+        claims = verify.check_api(entries, FakeBaseApi(http), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
 
     def test_a_2xx_is_refuted_with_a_mutation_warning_in_the_message(self):
         entries = [self.entry("workflows", "post", "POST /api/v1.0/workflows")]

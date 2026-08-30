@@ -51,9 +51,10 @@ class HttpClient:
     def post_json(self, path: str, body):
         return self._request(path, None, json.dumps(body).encode("utf-8"))
 
-    def probe_status(self, method: str, path: str, body) -> int:
-        """Send ``body`` via an explicit HTTP verb and return the raw status
-        code -- 2xx included, never raised as :class:`Unreachable`.
+    def probe_status(self, method: str, path: str, body) -> tuple[int, str]:
+        """Send ``body`` via an explicit HTTP verb and return ``(status,
+        response_text)`` -- 2xx included, never raised as
+        :class:`Unreachable`.
 
         Used only by ``skp verify --probe-writes``. Every other method on
         this client treats a non-2xx response as a failure (``Unreachable``,
@@ -67,6 +68,12 @@ class HttpClient:
         value, and leaves the verdict (CONFIRMED/REFUTED/UNVERIFIABLE) to
         the caller. Only a genuine transport failure -- no response at all --
         still raises ``Unreachable``.
+
+        The body travels alongside the status because a 404 alone is
+        ambiguous on an id-bearing route: the caller needs it to tell
+        "routing never matched" (empty body) apart from "routing matched
+        and the not-found handler ran" (a ProblemDetails body) -- see
+        ``skp.verbs.verify._looks_like_problem_details``.
         """
         url = self.base + path
         data = json.dumps(body).encode("utf-8")
@@ -76,9 +83,10 @@ class HttpClient:
         request.add_header("Content-Type", "application/json")
         try:
             with self._open(request, timeout=self.timeout) as response:
-                response.read()
-                return response.status
+                raw = response.read()
+                return response.status, raw.decode("utf-8", errors="replace")
         except urllib.error.HTTPError as exc:
-            return exc.code
+            raw = exc.read()
+            return exc.code, raw.decode("utf-8", errors="replace") if raw else ""
         except (urllib.error.URLError, OSError) as exc:
             raise Unreachable(self.base, str(getattr(exc, "reason", exc))) from exc
