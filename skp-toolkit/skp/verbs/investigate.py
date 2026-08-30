@@ -57,14 +57,35 @@ QUESTIONS = {
 # Canned meanings for the boundaries spec section 7 names explicitly. Any
 # boundary not listed here falls through to the generic report -- "I have
 # no rule for this" is the honest answer, not a guess dressed as one.
+def _interpret_3_4(rung3: "Rung") -> str | None:
+    """Only the zero-consumers reading of a 3/4 boundary is a rule this
+    toolkit actually has. A queue *with* live consumers that still never
+    picked the message up is not "no ready replica" -- claiming that from
+    a rung whose own evidence shows consumers > 0 is exactly the
+    invented-cause failure spec section 7 warns against (confirmed live,
+    2026-08-30: a 3/4 boundary with 4 live consumers on the queue, because
+    rung 2 -- with no --correlation given -- had grabbed the OLDEST
+    matching dispatch in the window rather than the current one).
+    """
+    if "zero consumers" not in rung3.evidence:
+        return None
+    return ("present at 3 (the queue is reachable) with zero consumers: no ready "
+           "replica is consuming this processor's queue -- check the deployed pod's "
+           "registered SourceHash")
+
+
+# Canned meanings for the boundaries spec section 7 names explicitly, each a
+# ``(rung_before_the_boundary) -> str | None`` guard: returning ``None``
+# declines the canned reading and falls through to the generic report. Any
+# boundary not listed here does the same -- "I have no rule for this" is the
+# honest answer, not a guess dressed as one.
 INTERPRETATIONS = {
-    (3, 4): "present at 3 (the queue is reachable) but rung 4 never fired: no ready "
-            "replica consumed it. Check the queue's own consumer count above -- zero "
-            "consumers loops back to the processor's registered SourceHash.",
-    (5, 6): "present at 5, absent at 6: the author's transform returned without sending. "
-            "Legal if this step is a sink; a bug if it was meant to hand off to a successor.",
-    (6, 7): "present at 6, absent at 7: the branch's output landed but its outcome never "
-            "reached the orchestrator -- a lost outcome.",
+    (3, 4): _interpret_3_4,
+    (5, 6): lambda rung5: ("present at 5, absent at 6: the author's transform returned "
+                           "without sending. Legal if this step is a sink; a bug if it "
+                           "was meant to hand off to a successor."),
+    (6, 7): lambda rung6: ("present at 6, absent at 7: the branch's output landed but "
+                           "its outcome never reached the orchestrator -- a lost outcome."),
 }
 
 
@@ -115,26 +136,47 @@ class CaseFile:
         self.path.write_text(json.dumps(self.data, indent=2, default=str), encoding="utf-8")
 
 
+def _original_format_filter(template: str) -> dict:
+    """A handful of log templates (``TerminalCompleted``, the fault-path
+    ``*Refusing*``/``Store*`` excuses) carry a literal U+2014 em dash. On
+    the live cluster that byte sequence arrives at Elasticsearch mangled --
+    UTF-8 bytes reinterpreted as Latin-1 -- so an exact ``term`` match built
+    from the catalog's properly-decoded template silently matches nothing,
+    even though the record is right there (confirmed against a real
+    terminal record on the live cluster, 2026-08-30). The corruption starts
+    exactly at the em dash and nowhere before it, so a ``prefix`` match on
+    everything up to it is exact where it matters and immune to the
+    encoding defect past that point.
+    """
+    if "—" in template:
+        prefix = template.split("—", 1)[0]
+        return {"prefix": {"attributes.{OriginalFormat}": prefix}}
+    return {"term": {"attributes.{OriginalFormat}": template}}
+
+
 def _es_search(es, template: str, window: str, workflow_id: str | None,
-               correlation_id: str | None, extra: list[dict] | None = None, size: int = 25):
+               correlation_id: str | None, extra: list[dict] | None = None, size: int = 25,
+               order: str = "asc"):
     """Every ES lookup the ladder makes: bounded on time (spec section 15's
     own named risk -- ~10M documents on a shared cluster) and on identity.
     Prefer ``CorrelationId`` once known -- ``WorkflowId`` alone cannot
-    identify a run, since the control-plane's own start/stop endpoints log
-    it too (the same trap ``Templates.RunScoped`` in the C# Live tests
-    exists to avoid).
+    identify a run, since a recurring workflow fires more than once and the
+    control-plane's own start/stop endpoints log the id too (the same trap
+    ``Templates.RunScoped`` in the C# Live tests exists to avoid).
+    ``order="desc"`` is for rung 2's own discovery query when no correlation
+    id is known yet: ascending would hand it the *oldest* matching dispatch
+    in the window, not the current one, on any workflow fired more than once
+    -- confirmed against the live cluster, 2026-08-30.
     """
-    filters = [
-        {"term": {"attributes.{OriginalFormat}": template}},
-        {"range": {"@timestamp": {"gte": f"now-{window}"}}},
-    ]
+    filters = [_original_format_filter(template),
+              {"range": {"@timestamp": {"gte": f"now-{window}"}}}]
     if correlation_id:
         filters.append({"term": {"attributes.CorrelationId": correlation_id}})
     elif workflow_id:
         filters.append({"term": {"attributes.WorkflowId": workflow_id}})
     if extra:
         filters.extend(extra)
-    body = {"size": size, "sort": [{"@timestamp": {"order": "asc"}}],
+    body = {"size": size, "sort": [{"@timestamp": {"order": order}}],
             "query": {"bool": {"filter": filters}}}
     return es.search(body)
 
@@ -171,8 +213,14 @@ def run_ladder(entries: list[dict], clients: dict, workflow_id: str, window: str
     # -- 2: did a fire happen? (ES "dispatched an entry step") --
     step_id = entry_id = processor_id = None
     entry_dispatched = by_id["elasticsearch.EntryDispatched"]["detail"]
+    # Newest first when the caller has not already pinned a run down by
+    # CorrelationId: a recurring workflow fires more than once inside any
+    # window worth searching, and "the oldest matching dispatch" is a real
+    # answer to a different, uninteresting question.
+    fire_order = "asc" if correlation_id else "desc"
     try:
-        hits = _es_search(es, entry_dispatched, window, workflow_id, correlation_id)
+        hits = _es_search(es, entry_dispatched, window, workflow_id, correlation_id,
+                          order=fire_order)
     except Unreachable as exc:
         emit(2, UNKNOWN, f"elasticsearch unreachable -- {exc.detail}")
     else:
@@ -183,8 +231,8 @@ def run_ladder(entries: list[dict], clients: dict, workflow_id: str, window: str
             entry_id = attrs.get("EntryId")
             processor_id = attrs.get("ProcessorId")
             emit(2, PASS,
-                 f"{len(hits)} dispatch record(s); correlation={correlation_id} "
-                 f"step={step_id} processor={processor_id}")
+                 f"{len(hits)} dispatch record(s) in the window; most recent: "
+                 f"correlation={correlation_id} step={step_id} processor={processor_id}")
         else:
             emit(2, FAIL, f"no {entry_dispatched!r} record for this workflow "
                           f"in the last {window}")
@@ -240,27 +288,37 @@ def run_ladder(entries: list[dict], clients: dict, workflow_id: str, window: str
         emit(5, UNKNOWN, "cannot determine -- no StepId (rung 2 produced none)")
 
     # -- 6: did the branch's output land? (ES "branch completed"; Redis blob) --
-    if entry_id:
+    # Filtered on StepId, not EntryId: EntryId is the dispatch's *input* key,
+    # which is null for the entry step (it has no input -- confirmed against
+    # a live "dispatched an entry step" record, 2026-08-30). "branch
+    # completed" instead carries the *output* EntryId it just minted -- one
+    # per branch, two for an entry step that opens two lineages -- so this
+    # rung reads those back off the hits rather than requiring one in first.
+    if step_id:
         branch_tpl = by_id["elasticsearch.BranchCompleted"]["detail"]
         try:
             hits = _es_search(es, branch_tpl, window, workflow_id, correlation_id,
-                              extra=[{"term": {"attributes.EntryId": entry_id}}])
+                              extra=[{"term": {"attributes.StepId": step_id}}])
         except Unreachable as exc:
             emit(6, UNKNOWN, f"elasticsearch unreachable -- {exc.detail}")
         else:
-            data_key = _fill(by_id["redis.ExecutionData"]["detail"], entryId=entry_id)
-            try:
-                blob_present = bool(redis.keys(data_key))
-                blob_note = f"; blob {'present' if blob_present else 'absent'} at {data_key}"
-            except Unreachable as exc:
-                blob_note = f"; redis unreachable for blob check -- {exc.detail}"
+            landed_entry_ids = sorted({h.get("attributes", {}).get("EntryId") for h in hits
+                                       if h.get("attributes", {}).get("EntryId")})
+            blob_notes = []
+            for eid in landed_entry_ids:
+                data_key = _fill(by_id["redis.ExecutionData"]["detail"], entryId=eid)
+                try:
+                    blob_notes.append(f"{data_key}: "
+                                      f"{'present' if redis.keys(data_key) else 'absent'}")
+                except Unreachable as exc:
+                    blob_notes.append(f"{data_key}: redis unreachable -- {exc.detail}")
+            blob_txt = f"; blobs: {'; '.join(blob_notes)}" if blob_notes else ""
             emit(6, PASS if hits else FAIL,
-                 (f"{len(hits)} 'branch completed' record(s) for entry {entry_id}{blob_note}"
+                 (f"{len(hits)} 'branch completed' record(s) for step {step_id}{blob_txt}"
                   if hits else
-                  f"no 'branch completed' record for entry {entry_id} in the last "
-                  f"{window}{blob_note}"))
+                  f"no 'branch completed' record for step {step_id} in the last {window}"))
     else:
-        emit(6, UNKNOWN, "cannot determine -- no EntryId (rung 2 produced none)")
+        emit(6, UNKNOWN, "cannot determine -- no StepId (rung 2 produced none)")
 
     # -- 7: did the outcome reach the orchestrator? (Result queue; ES completed) --
     result_queue = by_id["rabbitmq.orchestrator.Result"]["detail"]
@@ -326,7 +384,8 @@ def boundary_and_verdict(rungs: list[Rung]) -> tuple[tuple[int | None, int] | No
                    f"{first_bad.evidence}")
         return pair, message, EXIT_UNREACHABLE
 
-    canned = INTERPRETATIONS.get(pair)
+    guard = INTERPRETATIONS.get(pair)
+    canned = guard(last_good) if guard and last_good else None
     if canned:
         return pair, canned, EXIT_VERDICT
 

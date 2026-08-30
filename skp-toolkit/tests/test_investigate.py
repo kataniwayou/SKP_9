@@ -103,6 +103,24 @@ ENTRIES = load_real_entries()
 # ---------------------------------------------------------------------
 
 
+class OriginalFormatFilterTests(unittest.TestCase):
+    """The live cluster mangles the em dash in a handful of templates
+    (TerminalCompleted among them) past Elasticsearch's own ingestion --
+    an exact ``term`` match built from the catalog's clean template text
+    would silently match nothing on a real terminal record."""
+
+    def test_a_template_without_an_em_dash_is_an_exact_term(self):
+        f = investigate._original_format_filter("running the step")
+        self.assertEqual(f, {"term": {"attributes.{OriginalFormat}": "running the step"}})
+
+    def test_a_template_with_an_em_dash_is_a_prefix_up_to_it(self):
+        template = ("the terminal step completed with {Result} — no successor "
+                    "accepts it, the run ends here")
+        f = investigate._original_format_filter(template)
+        self.assertEqual(f, {"prefix": {"attributes.{OriginalFormat}":
+                                        "the terminal step completed with {Result} "}})
+
+
 class LadderCompletionTests(unittest.TestCase):
     def test_a_run_that_passes_every_rung_has_no_boundary(self):
         wf, corr, step, entry, proc = "wf-1", "corr1", "step-1", "entry-1", "proc-1"
@@ -111,7 +129,7 @@ class LadderCompletionTests(unittest.TestCase):
                 StepId=step, EntryId=entry, ProcessorId=proc),
             rec("running the step", CorrelationId=corr, StepId=step),
             rec("the step returned after {ElapsedMs}ms", CorrelationId=corr, StepId=step),
-            rec("branch completed in {ElapsedMs}ms", CorrelationId=corr, EntryId=entry),
+            rec("branch completed in {ElapsedMs}ms", CorrelationId=corr, StepId=step, EntryId=entry),
             rec("the entry step completed with {Result}", CorrelationId=corr),
             rec("advanced {SuccessorCount} successor(s) in {ElapsedMs}ms", CorrelationId=corr),
             rec("the terminal step completed with {Result} — no successor accepts it, "

@@ -134,12 +134,16 @@ def liveness(entries: list[dict], redis, processor_id: str, now: float):
         except json.JSONDecodeError:
             lines.append(f"  {instance_id}: unparseable liveness value: {raw[:120]}")
             continue
-        interval_ms = record.get("interval", 0) or 0
+        # ProcessorLivenessOptions.IntervalSeconds -> ProcessorLivenessEntry.Interval:
+        # this field is already whole seconds, not milliseconds (see
+        # BaseProcessor.Core/Configuration/ProcessorLivenessOptions.cs -- the
+        # [ConfigurationKeyName("Interval")] on an *Seconds-suffixed property).
+        interval_s = record.get("interval", 0) or 0
         age_s = _age_seconds(record.get("timestamp"), now)
-        rule = liveness_rule(age_s, interval_ms / 1000.0)
+        rule = liveness_rule(age_s, interval_s)
         age_txt = f"{age_s:.1f}s" if age_s is not None else "?"
         lines.append(f"  {instance_id}: status={record.get('status', '?')} "
-                     f"interval={interval_ms}ms age={age_txt} -- {rule}")
+                     f"interval={interval_s}s age={age_txt} -- {rule}")
     return EXIT_OK, lines
 
 
@@ -186,8 +190,14 @@ def queues(entries: list[dict], rabbit, processor_id: str | None = None):
 # ---------------------------------------------------------------------
 
 def gate(prom):
+    # The catalog's own instrument name is "pipeline.gate.open" -- OTel dots
+    # become underscores -- but the live exporter renders a 0/1 gauge with a
+    # "_ratio" suffix that neither this catalog nor skp verify's own suffix
+    # vocabulary (_total/_bucket/_sum/_count) names. Try the bare name first,
+    # the observed live rendering second, rather than hardcoding only the one
+    # that happens to work today.
     try:
-        series = prom.query("pipeline_gate_open")
+        series = prom.query("pipeline_gate_open") or prom.query("pipeline_gate_open_ratio")
     except Exception as exc:  # pragma: no cover -- defensive, mirrors skp verify
         return EXIT_UNREACHABLE, [f"prometheus unreachable -- {exc}"]
     if not series:
