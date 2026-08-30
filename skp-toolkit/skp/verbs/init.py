@@ -31,12 +31,14 @@ class ClusterProbe:
 
     def __init__(self, cluster):
         self.cluster = cluster
+        self.last_error = ""
 
     def ping(self) -> bool:
         try:
             self.cluster.run(["get", "pods", "-o", "name"])
             return True
-        except Unreachable:
+        except Unreachable as exc:
+            self.last_error = exc.detail
             return False
 
 
@@ -93,6 +95,13 @@ def probe(clients: dict) -> list[tuple[str, bool, str]]:
             if check is None:
                 raise AttributeError(f"{name} client exposes neither ping() nor ready()")
             ok, detail = bool(check()), ""
+            if not ok:
+                # A clean `False` (no exception) can still carry a reason: a
+                # ping() that caught its own Unreachable records *why* on the
+                # instance (see ClusterProbe/Postgres/Redis/Rabbit) rather
+                # than discarding it -- without this, a cluster_url mismatch
+                # renders as an unexplained dead row (Important 1).
+                detail = getattr(client, "last_error", "") or ""
         except Exception as exc:  # a probe reports; it does not propagate
             ok, detail = False, str(exc)
         rows.append((name, ok, detail))

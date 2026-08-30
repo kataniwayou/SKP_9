@@ -1,11 +1,14 @@
 import pathlib
+import subprocess
 import tempfile
 import unittest
 import unittest.mock
 
+from skp.clients.cluster import ClusterClient
 from skp.clients.http import Unreachable
+from skp.clients.pg import Postgres
 from skp.profile import Profile
-from skp.verbs.init import build_clients, probe, render_table
+from skp.verbs.init import ClusterProbe, build_clients, probe, render_table
 from skp.verbs.init import run as init_run
 
 
@@ -77,6 +80,59 @@ class MissingBinaryTests(unittest.TestCase):
         self.assertEqual(len(clients), 7)
         self.assertFalse(clients["postgres"].ping())
         self.assertFalse(clients["cluster"].ping())
+
+
+class ScriptedRunner:
+    """Returns `config_result` for the `config view` call ClusterClient uses
+    to verify the active kube context, and `result` for everything else."""
+
+    def __init__(self, server, stdout="ok", returncode=0, stderr=""):
+        self.calls: list[list[str]] = []
+        self.result = subprocess.CompletedProcess([], returncode, stdout, stderr)
+        self.config_result = subprocess.CompletedProcess([], 0, server, "")
+
+    def __call__(self, argv, capture_output=True, text=True, timeout=None):
+        self.calls.append(argv)
+        if "config" in argv and "view" in argv:
+            return self.config_result
+        return self.result
+
+
+class ClusterMismatchDetailTests(unittest.TestCase):
+    """Important 1: ClusterClient raises Unreachable("cluster", "profile
+    names <X>; the active context is <Y>") on a server mismatch, but every
+    cluster-backed ping() caught that and returned a bare False -- so
+    `probe` recorded detail="" and the operator never saw the sentence the
+    cluster_url work exists to produce."""
+
+    def clients(self, **overrides):
+        base = {name: Probeable(True) for name in
+                ("cluster", "postgres", "redis", "rabbitmq", "elasticsearch",
+                 "prometheus", "baseapi")}
+        base.update(overrides)
+        return base
+
+    def test_a_mismatch_names_both_servers_on_the_cluster_row(self):
+        runner = ScriptedRunner(server="https://other.example:6443")
+        cluster = ClusterClient("skp", binary="oc", runner=runner,
+                                expected_server="https://cluster.example:6443")
+        rows = {name: (ok, detail) for name, ok, detail in
+                probe(self.clients(cluster=ClusterProbe(cluster)))}
+        ok, detail = rows["cluster"]
+        self.assertFalse(ok)
+        self.assertIn("cluster.example", detail)
+        self.assertIn("other.example", detail)
+
+    def test_the_same_mismatch_makes_the_postgres_row_non_blank(self):
+        runner = ScriptedRunner(server="https://other.example:6443")
+        cluster = ClusterClient("skp", binary="oc", runner=runner,
+                                expected_server="https://cluster.example:6443")
+        rows = {name: (ok, detail) for name, ok, detail in
+                probe(self.clients(cluster=ClusterProbe(cluster),
+                                   postgres=Postgres(cluster)))}
+        ok, detail = rows["postgres"]
+        self.assertFalse(ok)
+        self.assertNotEqual(detail, "")
 
 
 class _AlwaysOk:

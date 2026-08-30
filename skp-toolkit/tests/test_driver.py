@@ -142,6 +142,13 @@ class NewFileDriftTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             src = fake_source_root(root)
+            # fake_source_root omits BaseController.cs (see ApiVersionTrackingTests);
+            # create it so the lock's SOURCE_MAP entries are all present, and the
+            # "fresh lock reports nothing" assertion below tests a genuinely clean
+            # state rather than tripping over an unrelated MISSING fixed path (C2).
+            api_version_path = src / "BaseApi.Core" / "Controllers" / "BaseController.cs"
+            api_version_path.parent.mkdir(parents=True, exist_ok=True)
+            api_version_path.write_text('[ApiVersion("1.0")]', encoding="utf-8")
             notes = root / "annotations"
             notes.mkdir()
             (notes / "empty.json").write_text("{}", encoding="utf-8")
@@ -158,6 +165,41 @@ class NewFileDriftTests(unittest.TestCase):
                 encoding="utf-8")
 
             self.assertNotEqual(stale_sources(lock, src), [])
+
+
+class RenameDriftTests(unittest.TestCase):
+    """C2: renaming a SOURCE_MAP fixed path left both the stored and the
+    current hash as MISSING, so ``_changed`` saw them as equal and
+    ``stale_sources`` reported [] -- doctor's "source drift" row read "in
+    step with source" while the catalog was missing everything that file's
+    extractor produced."""
+
+    def test_a_renamed_source_is_drift_after_recompile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            api_version_path = src / "BaseApi.Core" / "Controllers" / "BaseController.cs"
+            api_version_path.parent.mkdir(parents=True, exist_ok=True)
+            api_version_path.write_text('[ApiVersion("1.0")]', encoding="utf-8")
+
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+
+            compile_catalog(src, notes, out)
+
+            templates_path = (src / "tests" / "BaseApi.Tests" / "Live" /
+                              "Resilience" / "Templates.cs")
+            templates_path.rename(templates_path.parent / "TemplatesRenamed.cs")
+
+            # Recompile against the renamed tree: the new lock records MISSING
+            # for the old SOURCE_MAP path, same as the filesystem now shows.
+            compile_catalog(src, notes, out)
+            lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
+
+            stale = stale_sources(lock, src)
+            self.assertIn("tests/BaseApi.Tests/Live/Resilience/Templates.cs", stale)
 
 
 class CatalogErrorTests(unittest.TestCase):
