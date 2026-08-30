@@ -79,6 +79,33 @@ def diagnose(profile: Profile, clients: dict) -> list[tuple[str, bool, str]]:
     return rows
 
 
+def run_with(profile: Profile, clients: dict) -> Result:
+    """The testable core of ``run()``: everything after the profile is loaded
+    and the clients are built. ``run()`` delegates here so tests can inject a
+    profile and a fake client table without touching disk or the network."""
+    rows = diagnose(profile, clients)
+    width = max(len(name) for name, _, _ in rows)
+    lines = [f"  {name.ljust(width)}  {'ok' if ok else 'FAIL'}  {detail}".rstrip()
+             for name, ok, detail in rows]
+
+    failed = [name for name, ok, _ in rows if not ok]
+    if failed:
+        toolkit_fix = next((FIXES[name] for name in failed if name in FIXES), None)
+        if toolkit_fix:
+            return Result(EXIT_DRIFT, [*lines, "", f"{len(failed)} check(s) failed"],
+                          next_command=toolkit_fix)
+        # Only reachability failed: the toolkit is in step with its source and its
+        # generated files are intact. Recompiling cannot help a store that is down,
+        # and saying so is the distinction this command exists to draw.
+        unreachable = [name.split(": ", 1)[1] for name in failed]
+        return Result(EXIT_DRIFT,
+                      [*lines, "",
+                       "the toolkit checks pass — this is the system, not the toolkit",
+                       f"not answering: {', '.join(unreachable)}"],
+                      next_command="skp doctor")
+    return Result(EXIT_OK, lines)
+
+
 def run(argv: list[str]) -> Result:
     parser = argparse.ArgumentParser(prog="skp doctor")
     parser.add_argument("--home", default=str(default_home()))
@@ -89,14 +116,4 @@ def run(argv: list[str]) -> Result:
     except ProfileMissing:
         return not_initialised()
 
-    rows = diagnose(profile, build_clients(profile))
-    width = max(len(name) for name, _, _ in rows)
-    lines = [f"  {name.ljust(width)}  {'ok' if ok else 'FAIL'}  {detail}".rstrip()
-             for name, ok, detail in rows]
-
-    failed = [name for name, ok, _ in rows if not ok]
-    if failed:
-        first_fix = next((FIXES[name] for name in failed if name in FIXES), "skp init --refresh")
-        return Result(EXIT_DRIFT, [*lines, "", f"{len(failed)} check(s) failed"],
-                      next_command=first_fix)
-    return Result(EXIT_OK, lines)
+    return run_with(profile, build_clients(profile))
