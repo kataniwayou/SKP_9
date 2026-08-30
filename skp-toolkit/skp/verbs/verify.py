@@ -22,8 +22,13 @@ was checked. "I could not check" and "the catalog is wrong" must never
 render the same, so this drives a different exit code (EXIT_UNREACHABLE)
 than a genuine refutation (EXIT_VERDICT).
 
-NOT_APPLICABLE claims (a templated queue name, a POST route, a message
-template) are reported for transparency but never affect the exit code.
+NOT_APPLICABLE claims -- a write verb this read-only command must never
+exercise, or a route with more path parameters than this file has a rule to
+resolve -- are reported for transparency (each with a reason stating *why*
+it cannot be checked, not merely that it was skipped) but never affect the
+exit code. A templated queue name and a message template are NOT applicable
+skips: both are resolved and actually checked (see ``check_rabbitmq`` and
+``check_elasticsearch``).
 
 This module never writes to or consumes from any store: every check below
 is a read (SELECT count, list_queues, an instant query, a bounded search, a
@@ -42,7 +47,9 @@ from skp.clients.http import Unreachable
 from skp.profile import Profile, ProfileMissing, default_home, not_compiled, not_initialised
 from skp.result import EXIT_OK, EXIT_UNREACHABLE, EXIT_VERDICT, Result
 from skp.verbs.init import build_clients, probe
+from skp.verbs.investigate import _original_format_filter
 from skp.verbs.map import by_component, load_catalog
+from skp.verbs.observe import _fill
 
 CONFIRMED = "CONFIRMED"
 REFUTED = "REFUTED"
@@ -114,15 +121,28 @@ def check_postgres(entries: list[dict], client) -> list[Claim]:
 # rabbitmq
 # ---------------------------------------------------------------------
 
-def check_rabbitmq(entries: list[dict], client) -> list[Claim]:
+def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None = None) -> list[Claim]:
     """A queue name's own ``detail`` is the value ``queues()`` extracted from
     source -- concrete (``orchestrator-control``) or templated
     (``processor-{processorId}``, still carrying its ``{`` placeholder since
-    ``expression_bodies`` preserves it). Templated names and the two
-    dead-letter *exchanges* (``rabbitmq.processor.DeadLetterExchange``,
+    ``expression_bodies`` preserves it).
+
+    A templated name is resolved, not skipped: every id in ``processor_ids``
+    (the caller's job -- ``verify_all`` resolves them from the ``processors``
+    table or the BaseAPI list, since this function only owns the rabbitmq
+    client) fills the placeholder via ``_fill``, and each concrete name is
+    checked against ``list_queues`` the same as a literal one. This is the
+    whole point of resolving a template: a resolved name that is genuinely
+    absent is REFUTED, not waved through as NOT_APPLICABLE. ``processor_ids
+    is None`` means the caller could not resolve any -- both API and
+    Postgres were unreachable -- which is UNVERIFIABLE (a gap in what this
+    run could check), distinct from ``[]`` (resolution worked and found zero
+    processors registered, a fact worth NOT_OBSERVED, not a failure).
+
+    The two dead-letter *exchanges* (``rabbitmq.processor.DeadLetterExchange``,
     ``rabbitmq.orchestrator.DeadLetterExchange``) are not queues at all --
-    ``rabbitmqctl list_queues`` will never list them, and that absence is
-    not a defect.
+    ``rabbitmqctl list_queues`` will never list them -- so they are checked
+    against ``list_exchanges`` instead, read-only exactly like ``queues()``.
     """
     try:
         live = {q["name"] for q in client.queues()}
@@ -130,16 +150,53 @@ def check_rabbitmq(entries: list[dict], client) -> list[Claim]:
         return [Claim("rabbitmq", e["id"], UNVERIFIABLE, f"list_queues failed -- {exc.detail}")
                 for e in entries]
 
+    exchanges_ok = True
+    exchanges_err = ""
+    live_exchanges: set[str] = set()
+    if any(e["id"].rsplit(".", 1)[-1] == "DeadLetterExchange" for e in entries):
+        try:
+            live_exchanges = {x["name"] for x in client.exchanges()}
+        except Unreachable as exc:
+            exchanges_ok = False
+            exchanges_err = exc.detail
+
     claims = []
     for entry in entries:
         name = entry["detail"]
         local = entry["id"].rsplit(".", 1)[-1]
-        if "{" in name:
-            claims.append(Claim("rabbitmq", entry["id"], NOT_APPLICABLE,
-                          f"templated name, not a concrete queue: {name}"))
-        elif local == "DeadLetterExchange":
-            claims.append(Claim("rabbitmq", entry["id"], NOT_APPLICABLE,
-                          f"exchange, not a queue: {name}"))
+        if local == "DeadLetterExchange":
+            if not exchanges_ok:
+                claims.append(Claim("rabbitmq", entry["id"], UNVERIFIABLE,
+                              f"list_exchanges failed -- {exchanges_err}"))
+            elif name in live_exchanges:
+                claims.append(Claim("rabbitmq", entry["id"], CONFIRMED,
+                              f"exchange {name!r} present"))
+            else:
+                claims.append(Claim("rabbitmq", entry["id"], REFUTED,
+                              f"catalog claims exchange {name!r} exists -- absent from "
+                              f"rabbitmqctl list_exchanges"))
+        elif "{" in name:
+            if processor_ids is None:
+                claims.append(Claim("rabbitmq", entry["id"], UNVERIFIABLE,
+                              f"templated name {name!r} -- could not resolve real "
+                              f"processor ids (both the processors API and Postgres "
+                              f"were unreachable)"))
+            elif not processor_ids:
+                claims.append(Claim("rabbitmq", entry["id"], NOT_OBSERVED,
+                              f"templated name {name!r} -- no processors registered "
+                              f"to resolve it against"))
+            else:
+                resolved = [_fill(name, processorId=pid) for pid in processor_ids]
+                missing = [r for r in resolved if r not in live]
+                if missing:
+                    claims.append(Claim("rabbitmq", entry["id"], REFUTED,
+                                  f"catalog claims {name!r} resolves to a live queue "
+                                  f"for every registered processor -- missing: "
+                                  f"{', '.join(missing)}"))
+                else:
+                    claims.append(Claim("rabbitmq", entry["id"], CONFIRMED,
+                                  f"{name!r} resolved and present for all "
+                                  f"{len(resolved)} registered processor(s)"))
         elif name in live:
             claims.append(Claim("rabbitmq", entry["id"], CONFIRMED, f"queue {name!r} present"))
         else:
@@ -183,24 +240,49 @@ def check_elasticsearch(entries: list[dict], client, sample_size: int = 200) -> 
     Absent from the sample is NOT_OBSERVED, never REFUTED: four templates
     are fault-path records that do not fire on a healthy system, and their
     attributes (``Queue``, ``Reason``, ``Type``, ``WorkflowCount``)
-    legitimately appear nowhere else. Message templates themselves
-    (``elasticsearch.<TemplateName>``) are not attribute claims -- every one
-    shares the literal operation text ``search by attributes.{OriginalFormat}``,
-    so running the same attribute-path check on them would silently collide
-    with the real ``original_format`` envelope field; they are reported
-    NOT_APPLICABLE instead.
+    legitimately appear nowhere else.
+
+    Message templates (``elasticsearch.<TemplateName>``) ARE checkable, and
+    are checked -- each one's own ``detail`` (the raw template text, e.g.
+    ``"entry step {StepId} dispatched"``) is exactly what
+    ``attributes.{OriginalFormat}`` carries verbatim on a real record, so a
+    bounded term (or, for the handful whose template contains an em dash
+    mangled by the OTel pipeline, prefix -- ``investigate._original_format_filter``,
+    reused rather than re-solved here) query against that one field answers
+    the claim directly. It is bounded by ``size=1``, not a time range: a term
+    lookup on an indexed field costs the same whether the stream holds ten
+    documents or ten million, so a result-count cap is what "bounded" means
+    here (the sibling attribute check below bounds by time instead, because
+    ``present in a recent sample`` is a different question than ``was this
+    template ever emitted``). A template that never appears is NOT_OBSERVED,
+    not REFUTED -- some are fault-path records that legitimately do not fire
+    on a healthy system, and this check cannot tell "never happens" apart
+    from "did not happen in a snapshot" any more than the attribute check
+    below can.
     """
     claims = []
     index_entries = [e for e in entries if e["id"] == "elasticsearch.index"]
     attr_entries = [e for e in entries if e["id"].startswith("elasticsearch.attr.")]
-    other_entries = [e for e in entries
-                     if e["id"] != "elasticsearch.index"
-                     and not e["id"].startswith("elasticsearch.attr.")]
+    template_entries = [e for e in entries
+                        if e["id"] != "elasticsearch.index"
+                        and not e["id"].startswith("elasticsearch.attr.")]
 
-    for entry in other_entries:
-        claims.append(Claim("elasticsearch", entry["id"], NOT_APPLICABLE,
-                      "message template -- skp verify checks the index and "
-                      "catalogued attributes only, not template text"))
+    for entry in template_entries:
+        template = entry["detail"]
+        query = {"size": 1, "query": {"bool": {"filter": [_original_format_filter(template)]}}}
+        try:
+            hits = client.search(query)
+        except Unreachable as exc:
+            claims.append(Claim("elasticsearch", entry["id"], UNVERIFIABLE,
+                          f"template query failed -- {exc.detail}"))
+            continue
+        if hits:
+            claims.append(Claim("elasticsearch", entry["id"], CONFIRMED,
+                          "attributes.{OriginalFormat} matches this template at least once"))
+        else:
+            claims.append(Claim("elasticsearch", entry["id"], NOT_OBSERVED,
+                          "attributes.{OriginalFormat} never matches this template -- "
+                          "likely a fault-path record that does not fire on a healthy system"))
 
     for entry in index_entries:
         claimed = entry["operation"].split(": ", 1)[-1]
@@ -292,15 +374,35 @@ def check_prometheus(entries: list[dict], client) -> list[Claim]:
     first observed.
 
     ``prometheus.pipeline_*`` claims one instrument each: resolve the real
-    series name (OTel dots -> underscores; a counter gains ``_total``, a
-    histogram ``_bucket``/``_sum``/``_count`` -- queried as one alternation
-    rather than assumed, since the catalog does not record which shape an
-    instrument is) and confirm every claimed label is actually a key on a
-    live series. A claimed-but-absent label is REFUTED -- this is the C3
-    defect class. A present-but-uncatalogued label is noted, never failed:
-    scrape plumbing legitimately is not ours. Zero live series at all is
-    NOT_OBSERVED, not REFUTED -- an instrument that has not fired recently
-    is not proof the catalog is wrong.
+    series name and confirm every claimed label is actually a key on a live
+    series. A claimed-but-absent label is REFUTED -- this is the C3 defect
+    class. A present-but-uncatalogued label is noted, never failed: scrape
+    plumbing legitimately is not ours.
+
+    **Name resolution is one optional trailing segment, not an enumerated
+    list.** OTel dots become underscores, and the exporter appends the
+    Prometheus type suffix (``_total``, ``_bucket``/``_sum``/``_count``) --
+    but first, when the instrument was created with a non-empty ``unit:``,
+    an OTel-derived unit segment (``_seconds`` for unit ``s``, ``_ratio``
+    for unit ``1``, ...). A regression here is exactly how 9 of these 16
+    instruments were originally found NOT_OBSERVED though a live series
+    existed for every one of them: e.g. ``pipeline.consumer.duration`` (unit
+    ``s``) is really named ``pipeline_consumer_duration_seconds_bucket``,
+    and a query for ``pipeline_consumer_duration(_total|_bucket|_sum|_count)?``
+    matches nothing. Rather than hand-list every OTel unit string this
+    codebase happens to use today, the regex accepts any single trailing
+    ``_word`` segment (``(_\\w+)?``) after the base name -- exactly as
+    already-generic as the sibling attribute-path check.
+
+    Zero live series at the query instant is not immediately NOT_OBSERVED: a
+    plain instant query only sees a series with a sample inside Prometheus's
+    own 5-minute lookback window, and an instrument that legitimately fires
+    less often than that would otherwise be misreported as absent. A second,
+    still-bounded probe -- ``count_over_time(...[1h])``, one more read, no
+    aggregation beyond a per-series count -- answers "did this exist at all
+    recently" before giving up. Zero series on *both* probes is NOT_OBSERVED,
+    not REFUTED -- an instrument that truly has not fired is not proof the
+    catalog is wrong.
 
     ``prometheus.label.*`` claims a resource- or histogram-level label
     (``service_instance_id``, ``le``, ...) that is not tied to one
@@ -321,15 +423,33 @@ def check_prometheus(entries: list[dict], client) -> list[Claim]:
                           "could not parse an instrument name out of the catalog detail"))
             continue
         base = name.replace(".", "_")
+        # PromQL string literals interpret backslash escapes themselves (Go string
+        # rules), so a literal single-backslash \w for the regex engine underneath
+        # has to be written as \\w on the wire -- one Python-level escape to get
+        # each backslash character into the string, doubled again for PromQL's own
+        # unescaping. Confirmed against the live cluster: a single \w 400s with
+        # "unknown escape sequence" before ever reaching the regex engine.
+        expr = f'{{__name__=~"^{base}(_\\\\w+)?$"}}'
         try:
-            series = client.query(f'{{__name__=~"^{base}(_total|_bucket|_sum|_count)?$"}}')
+            series = client.query(expr)
         except Exception as exc:  # pragma: no cover -- Prometheus.query() itself never raises
             claims.append(Claim("prometheus", entry["id"], UNVERIFIABLE, f"query failed -- {exc}"))
             continue
 
+        range_note = ""
+        if not series:
+            try:
+                series = client.query(f'count_over_time({expr}[1h])')
+            except Exception as exc:  # pragma: no cover -- Prometheus.query() itself never raises
+                claims.append(Claim("prometheus", entry["id"], UNVERIFIABLE, f"query failed -- {exc}"))
+                continue
+            if series:
+                range_note = " (no sample at the query instant -- found via a 1h range existence check)"
+
         if not series:
             claims.append(Claim("prometheus", entry["id"], NOT_OBSERVED,
-                          f"no live series matching {base}* -- instrument may not have "
+                          f"no live series matching {base}* -- neither an instant query nor a "
+                          f"1h range existence check found one; the instrument may not have "
                           f"fired recently"))
             continue
 
@@ -351,9 +471,10 @@ def check_prometheus(entries: list[dict], client) -> list[Claim]:
                           f"{', '.join(sorted(observed)) or '(none)'}"))
         else:
             extra = sorted(label for label in observed - set(labels) if not _is_plumbing(label))
-            note = f"; uncatalogued live label(s): {', '.join(extra)}" if extra else ""
+            extra_note = f"; uncatalogued live label(s): {', '.join(extra)}" if extra else ""
             claims.append(Claim("prometheus", entry["id"], CONFIRMED,
-                          f"{len(series)} live series, every claimed label present{note}"))
+                          f"{len(series)} live series, every claimed label present"
+                          f"{extra_note}{range_note}"))
 
     for entry in label_entries:
         label = entry["id"].rsplit(".", 1)[-1]
@@ -374,42 +495,119 @@ def check_prometheus(entries: list[dict], client) -> list[Claim]:
 # ---------------------------------------------------------------------
 
 _HTTP_STATUS = re.compile(r"^HTTP (\d+)")
+_API_PLACEHOLDER = re.compile(r"\{(\w+)\}")
+
+
+def _field_values(items: list, field_lower: str) -> list:
+    """Every value, in order, of the key on each dict in ``items`` whose
+    lowercased name matches ``field_lower`` -- case-insensitive because the
+    live API's JSON casing (camelCase, e.g. ``sourceHash``) is a fact about
+    the running system, not something this file should assume."""
+    out = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for key, value in item.items():
+            if key.lower() == field_lower:
+                out.append(value)
+                break
+    return out
+
+
+def _first_field(items: list, field_lower: str):
+    values = _field_values(items, field_lower)
+    return values[0] if values else None
+
+
+def _check_get(claims: list[Claim], entry: dict, client, path: str, note: str = "") -> None:
+    try:
+        client.http.get_json(path)
+    except Unreachable as exc:
+        status = _HTTP_STATUS.match(exc.detail)
+        if status:
+            claims.append(Claim("api", entry["id"], REFUTED,
+                          f"catalog claims GET {path} -> 2xx{note} -- live: HTTP {status.group(1)}"))
+        else:
+            claims.append(Claim("api", entry["id"], UNVERIFIABLE,
+                          f"GET {path} failed -- {exc.detail}"))
+    else:
+        claims.append(Claim("api", entry["id"], CONFIRMED, f"GET {path} -> 2xx{note}"))
 
 
 def check_api(entries: list[dict], client) -> list[Claim]:
-    """Only a catalogued ``GET`` route with no path parameter is checked --
-    a route needing an id has nothing safe to substitute, and every other
-    verb is a write this read-only command must never perform. An
-    ``Unreachable`` whose detail starts with an HTTP status is the server
+    """Only a ``GET`` route is exercised -- every other verb is a write this
+    read-only command must never perform, reported NOT_APPLICABLE with the
+    verb itself as the reason, not a bare "skipped".
+
+    A single ``{id}`` (or ``{sourceHash}``) placeholder is resolved, not
+    waved through: the entity's own list route (``entry["detail"]``,
+    already confirmed or refuted by its own catalog entry) is fetched once
+    per entity and cached, and the first row's matching field fills the
+    placeholder -- ``{sourceHash}`` lowercased first, since matching is
+    byte-exact against a stored lowercase hex string (the catalogued trap).
+    Zero rows to resolve from is NOT_OBSERVED (nothing exists to check
+    against, not a defect); the list route itself failing is UNVERIFIABLE
+    (a gap in what this run could check). A route with more than one
+    placeholder, or one this file has no field-matching rule for, stays
+    NOT_APPLICABLE -- an honest "cannot safely resolve this", not a claim
+    of write-avoidance it no longer needs.
+
+    An ``Unreachable`` whose detail starts with an HTTP status is the server
     actually answering with something other than 2xx (REFUTED); anything
     else is a connection-level failure this specific request hit despite
     the overall reachability probe passing, which is a claim skp verify
     could not check rather than one it disproved.
     """
-    claims = []
+    claims: list[Claim] = []
+    list_cache: dict[str, list | Unreachable] = {}
+
+    def fetch_list(entity: str):
+        if entity not in list_cache:
+            try:
+                list_cache[entity] = client.list(entity)
+            except Unreachable as exc:
+                list_cache[entity] = exc
+        return list_cache[entity]
+
     for entry in entries:
         operation = entry["operation"]
+        entity = entry["detail"]
         if not operation.startswith("GET "):
+            verb = operation.split(" ", 1)[0]
             claims.append(Claim("api", entry["id"], NOT_APPLICABLE,
-                          f"not a read: {operation}"))
+                          f"{verb} -- write verb, cannot be exercised read-only"))
             continue
+
         path = operation[len("GET "):]
-        if "{" in path:
-            claims.append(Claim("api", entry["id"], NOT_APPLICABLE,
-                          f"requires a path parameter: {operation}"))
+        placeholders = _API_PLACEHOLDER.findall(path)
+        if not placeholders:
+            _check_get(claims, entry, client, path)
             continue
-        try:
-            client.http.get_json(path)
-        except Unreachable as exc:
-            status = _HTTP_STATUS.match(exc.detail)
-            if status:
-                claims.append(Claim("api", entry["id"], REFUTED,
-                              f"catalog claims GET {path} -> 2xx -- live: HTTP {status.group(1)}"))
-            else:
-                claims.append(Claim("api", entry["id"], UNVERIFIABLE,
-                              f"GET {path} failed -- {exc.detail}"))
-        else:
-            claims.append(Claim("api", entry["id"], CONFIRMED, f"GET {path} -> 2xx"))
+        if len(placeholders) > 1:
+            claims.append(Claim("api", entry["id"], NOT_APPLICABLE,
+                          f"{len(placeholders)} path parameters -- nothing safe to "
+                          f"resolve them from: {operation}"))
+            continue
+
+        placeholder = placeholders[0]
+        items = fetch_list(entity)
+        if isinstance(items, Unreachable):
+            claims.append(Claim("api", entry["id"], UNVERIFIABLE,
+                          f"could not resolve a real {{{placeholder}}} -- GET /{entity} "
+                          f"failed: {items.detail}"))
+            continue
+
+        value = _first_field(items, placeholder.lower())
+        if value is None:
+            claims.append(Claim("api", entry["id"], NOT_OBSERVED,
+                          f"no {entity} row to resolve {{{placeholder}}} from -- "
+                          f"GET /{entity} returned 0 item(s)"))
+            continue
+
+        resolved = str(value).lower() if "hash" in placeholder.lower() else str(value)
+        resolved_path = path.replace("{" + placeholder + "}", resolved)
+        _check_get(claims, entry, client, resolved_path,
+                  note=f" (resolved {{{placeholder}}}={resolved})")
     return claims
 
 
@@ -518,6 +716,31 @@ def check_cluster(entries: list[dict], raw_cluster) -> list[Claim]:
 # orchestration
 # ---------------------------------------------------------------------
 
+def _resolve_processor_ids(clients: dict, reachable: dict[str, bool]) -> list[str] | None:
+    """Real processor ids for ``check_rabbitmq`` to fill ``processor-{processorId}``
+    with -- the BaseAPI list preferred (the same route ``check_api`` already
+    exercises), Postgres as a fallback when the API is the one that is down.
+    ``None`` means neither source could be reached this run (a gap, reported
+    UNVERIFIABLE per templated entry); ``[]`` means a source answered and
+    genuinely found zero processors registered (NOT_OBSERVED, not a gap).
+    """
+    if reachable.get("baseapi"):
+        try:
+            items = clients["baseapi"].list("processors")
+        except Unreachable:
+            items = None
+        if items is not None:
+            return [str(v) for v in _field_values(items, "id")]
+    if reachable.get("postgres"):
+        try:
+            rows = clients["postgres"].rows('SELECT id FROM "processors"')
+        except Unreachable:
+            rows = None
+        if rows is not None:
+            return [str(row[0]) for row in rows if row]
+    return None
+
+
 def verify_all(entries: list[dict], clients: dict, component: str | None = None) -> list[Claim]:
     """Gate on reachability once, per component, the same way ``skp doctor``
     does -- reusing ``init.probe()`` rather than a second probing
@@ -546,7 +769,8 @@ def verify_all(entries: list[dict], clients: dict, component: str | None = None)
         elif comp == "redis":
             claims += check_redis(comp_entries, clients["redis"])
         elif comp == "rabbitmq":
-            claims += check_rabbitmq(comp_entries, clients["rabbitmq"])
+            processor_ids = _resolve_processor_ids(clients, reachable)
+            claims += check_rabbitmq(comp_entries, clients["rabbitmq"], processor_ids)
         elif comp == "elasticsearch":
             claims += check_elasticsearch(comp_entries, clients["elasticsearch"])
         elif comp == "prometheus":
@@ -558,7 +782,16 @@ def verify_all(entries: list[dict], clients: dict, component: str | None = None)
     return claims
 
 
-def render_report(claims: list[Claim], component: str | None = None) -> list[str]:
+def render_report(claims: list[Claim], component: str | None = None,
+                  show_skips: bool = False) -> list[str]:
+    """A skip nobody can enumerate is indistinguishable from a claim that was
+    never true (module docstring). So every NOT_OBSERVED/NOT_APPLICABLE claim
+    is either listed here by id with its one-line reason (``--skips``), or --
+    when the caller has not asked for the full list -- a pointer that says
+    exactly how many there are and how to see them. The pointer always
+    prints when skips exist; only the enumeration itself is gated, so the
+    gap in what was confirmed is never invisible even in the terse form.
+    """
     header = "skp verify" + (f" --component {component}" if component else "")
     lines = [header, ""]
 
@@ -571,6 +804,12 @@ def render_report(claims: list[Claim], component: str | None = None) -> list[str
         counts = Counter(c.verdict for c in comp_claims)
         summary = ", ".join(f"{counts[v]} {v.lower()}" for v in VERDICTS if counts[v])
         lines.append(f"  {comp}: {summary}  ({len(comp_claims)} catalogued)")
+    lines.append("")
+
+    total = len(claims)
+    confirmed = sum(1 for c in claims if c.verdict == CONFIRMED)
+    pct = round(100 * confirmed / total) if total else 0
+    lines.append(f"confirmed {confirmed}/{total} ({pct}%)")
     lines.append("")
 
     refuted = [c for c in claims if c.verdict == REFUTED]
@@ -587,6 +826,18 @@ def render_report(claims: list[Claim], component: str | None = None) -> list[str
                      f"disproved: {', '.join(comps)}")
         lines.append("")
 
+    skipped = [c for c in claims if c.verdict in (NOT_OBSERVED, NOT_APPLICABLE)]
+    if skipped:
+        if show_skips:
+            lines.append(f"SKIPPED ({len(skipped)}) -- not confirmed, not refuted; every one, "
+                         f"by id:")
+            for c in skipped:
+                lines.append(f"  {c.surface_id} [{c.verdict}]: {c.message}")
+        else:
+            lines.append(f"{len(skipped)} claim(s) not confirmed (not_observed / "
+                         f"not_applicable) -- rerun with --skips to list every one by id")
+        lines.append("")
+
     if not refuted and not unverifiable:
         lines.append("no refutations -- every checkable claim is confirmed or legitimately "
                      "not observed")
@@ -594,9 +845,10 @@ def render_report(claims: list[Claim], component: str | None = None) -> list[str
     return lines
 
 
-def run_with(entries: list[dict], clients: dict, component: str | None = None) -> Result:
+def run_with(entries: list[dict], clients: dict, component: str | None = None,
+            show_skips: bool = False) -> Result:
     claims = verify_all(entries, clients, component=component)
-    lines = render_report(claims, component)
+    lines = render_report(claims, component, show_skips=show_skips)
 
     if any(c.verdict == REFUTED for c in claims):
         return Result(EXIT_VERDICT, lines, next_command="skp doctor")
@@ -609,6 +861,8 @@ def run(argv: list[str]) -> Result:
     parser = argparse.ArgumentParser(prog="skp verify")
     parser.add_argument("--home", default=str(default_home()))
     parser.add_argument("--component", choices=sorted(COMPONENT_CLIENT_KEY))
+    parser.add_argument("--skips", action="store_true",
+                        help="list every NOT_OBSERVED/NOT_APPLICABLE claim by id")
     ns = parser.parse_args(argv)
 
     home = pathlib.Path(ns.home)
@@ -621,4 +875,4 @@ def run(argv: list[str]) -> Result:
     except ProfileMissing:
         return not_compiled(home)
 
-    return run_with(entries, build_clients(profile), component=ns.component)
+    return run_with(entries, build_clients(profile), component=ns.component, show_skips=ns.skips)
