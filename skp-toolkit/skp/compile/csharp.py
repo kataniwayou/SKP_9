@@ -1,24 +1,34 @@
 import re
 
+_RHS = r'((?:"(?:[^"\\]|\\.)*"|[^;"])*)'
+
 _CONST = re.compile(
-    r"(?:public|internal|private)\s+const\s+string\s+(\w+)\s*=\s*(.*?);",
-    re.DOTALL)
+    r'(?:public|internal|private)\s+const\s+string\s+(\w+)\s*=\s*' + _RHS + r';')
 _EXPR = re.compile(
-    r"public\s+static\s+string\s+(\w+)\s*\([^)]*\)\s*=>\s*(.*?);",
-    re.DOTALL)
+    r'public\s+static\s+string\s+(\w+)\s*\([^)]*\)\s*=>\s*' + _RHS + r';')
 _LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
 _SPECIFIER = re.compile(r"\{(\w+):[^}]*\}")
 _BARE_IDENTIFIER = re.compile(r"^\w+$")
+_ESCAPE = re.compile(r"\\(u[0-9a-fA-F]{4}|.)", re.DOTALL)
+_SIMPLE = {"n": "\n", "t": "\t", "r": "\r", "0": "\0",
+           "a": "\a", "b": "\b", "f": "\f", "v": "\v"}
 
 
 def unescape(raw: str) -> str:
-    """Decode the escapes C# source uses, without touching anything else.
+    """Decode the escapes C# source uses, in one left-to-right pass.
 
-    ``codecs.decode(..., 'unicode_escape')`` would corrupt any non-ASCII byte
-    already present, so the substitutions are explicit and ordered.
+    A single scan rather than ordered global substitutions: each escape consumes
+    its own backslash, so `\\\\u1234` is a literal backslash followed by the text
+    `u1234`, not a unicode escape. No substitution order can express that.
     """
-    out = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), raw)
-    return out.replace('\\"', '"').replace("\\\\", "\\")
+
+    def _replace(match: re.Match) -> str:
+        token = match.group(1)
+        if len(token) == 5 and token[0] == "u":
+            return chr(int(token[1:], 16))
+        return _SIMPLE.get(token, token)
+
+    return _ESCAPE.sub(_replace, raw)
 
 
 def _joined_literals(rhs: str) -> str:

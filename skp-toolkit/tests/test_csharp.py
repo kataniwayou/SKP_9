@@ -1,3 +1,4 @@
+import pathlib
 import unittest
 
 from skp.compile.csharp import const_strings, expression_bodies, literals_matching, unescape
@@ -54,6 +55,12 @@ class ConstStringTests(unittest.TestCase):
             sorted(const_strings(TEMPLATES)),
             ["EntryDispatched", "HandedOff", "RefusingNotParked", "TerminalCompleted"])
 
+    def test_a_semicolon_inside_a_value_does_not_truncate_it(self):
+        text = 'public const string A = "send; continuing";\npublic const string B = "next";'
+        found = const_strings(text)
+        self.assertEqual(found["A"], "send; continuing")
+        self.assertEqual(found["B"], "next")
+
 
 class ExpressionBodyTests(unittest.TestCase):
     def test_interpolated_body_keeps_its_placeholders(self):
@@ -70,6 +77,10 @@ class ExpressionBodyTests(unittest.TestCase):
         bodies = expression_bodies(KEYS, const_strings(KEYS))
         self.assertEqual(bodies["ParentIndex"], "skp:")
 
+    def test_a_semicolon_inside_an_expression_body_does_not_truncate_it(self):
+        text = 'public static string K(Guid id) => $"a;b:{id:D}";'
+        self.assertEqual(expression_bodies(text)["K"], "a;b:{id}")
+
 
 class LiteralScanTests(unittest.TestCase):
     def test_prefix_scan_finds_instrument_names_and_dedupes(self):
@@ -80,6 +91,26 @@ class LiteralScanTests(unittest.TestCase):
 class UnescapeTests(unittest.TestCase):
     def test_escaped_quote_and_backslash(self):
         self.assertEqual(unescape('a \\"b\\" c'), 'a "b" c')
+
+    def test_an_escaped_backslash_before_u_hex_is_not_a_unicode_escape(self):
+        self.assertEqual(unescape(r"C:\\u1234path"), r"C:\u1234path")
+
+    def test_escaped_quote_and_unicode_still_decode(self):
+        self.assertEqual(unescape(r'say \"hi\" \u2014 ok'), 'say "hi" — ok')
+
+
+class RealTemplateTests(unittest.TestCase):
+    SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
+
+    @unittest.skipUnless(SRC.exists(), "run from inside the repo")
+    def test_templates_carrying_semicolons_extract_their_full_text(self):
+        text = (self.SRC / "tests/BaseApi.Tests/Live/Resilience/Templates.cs").read_text(
+            encoding="utf-8")
+        found = const_strings(text)
+        self.assertEqual(found["EntryDispatchSendFailed"],
+                         "the entry-step dispatch failed to send; continuing")
+        self.assertEqual(found["ProcessorLoopsRetired"],
+                         "processor healthy; startup loops retired")
 
 
 if __name__ == "__main__":
