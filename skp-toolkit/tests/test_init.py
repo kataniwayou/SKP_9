@@ -1,10 +1,12 @@
 import pathlib
+import tempfile
 import unittest
 import unittest.mock
 
 from skp.clients.http import Unreachable
 from skp.profile import Profile
 from skp.verbs.init import build_clients, probe, render_table
+from skp.verbs.init import run as init_run
 
 
 class Probeable:
@@ -75,3 +77,79 @@ class MissingBinaryTests(unittest.TestCase):
         self.assertEqual(len(clients), 7)
         self.assertFalse(clients["postgres"].ping())
         self.assertFalse(clients["cluster"].ping())
+
+
+class _AlwaysOk:
+    """Stands in for every reachability probe so refresh tests never touch
+    the network or a real cluster."""
+
+    def ping(self):
+        return True
+
+    ready = ping
+
+
+def _fake_build_clients(profile):
+    return {name: _AlwaysOk() for name in
+            ("cluster", "postgres", "redis", "rabbitmq",
+             "elasticsearch", "prometheus", "baseapi")}
+
+
+class RefreshTests(unittest.TestCase):
+    """C1: `skp init --refresh` must not destroy the token or endpoint
+    overrides it did not receive on the command line."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = pathlib.Path(self.tmp.name) / ".skp"
+        self.src = pathlib.Path(self.tmp.name) / "src"
+        self.src.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, argv):
+        with unittest.mock.patch("skp.verbs.init.build_clients",
+                                 side_effect=_fake_build_clients):
+            return init_run(argv)
+
+    def _first_init(self, **extra):
+        argv = ["--home", str(self.home), "--source-root", str(self.src),
+                "--cluster-url", "https://c", "--project", "skp"]
+        for flag, value in extra.items():
+            argv += [f"--{flag.replace('_', '-')}", value]
+        self._run(argv)
+
+    def test_a_refresh_with_no_token_preserves_the_stored_token(self):
+        self._first_init(token="sha256~ORIGINAL")
+        self._run(["--home", str(self.home), "--refresh"])
+        self.assertEqual(Profile.load(self.home).token, "sha256~ORIGINAL")
+
+    def test_a_refresh_preserves_a_stored_endpoint_override(self):
+        self._run(["--home", str(self.home), "--source-root", str(self.src),
+                    "--cluster-url", "https://c", "--project", "skp",
+                    "--endpoint", "prometheus=http://custom-prom:9090"])
+        self._run(["--home", str(self.home), "--refresh"])
+        self.assertEqual(Profile.load(self.home).endpoints["prometheus"],
+                         "http://custom-prom:9090")
+
+    def test_a_refresh_with_an_explicit_token_replaces_it(self):
+        self._first_init(token="sha256~ORIGINAL")
+        self._run(["--home", str(self.home), "--refresh", "--token", "sha256~NEW"])
+        self.assertEqual(Profile.load(self.home).token, "sha256~NEW")
+
+    def test_refresh_with_no_memory_folder_routes_to_skp_init(self):
+        result = self._run(["--home", str(self.home), "--refresh"])
+        self.assertEqual(result.next_command, "skp init")
+
+    def test_refresh_preserves_source_root_and_project_when_omitted(self):
+        self._first_init()
+        self._run(["--home", str(self.home), "--refresh"])
+        profile = Profile.load(self.home)
+        self.assertEqual(profile.source_root, str(self.src))
+        self.assertEqual(profile.project, "skp")
+
+    def test_a_fresh_init_missing_a_required_flag_fails_with_NEXT(self):
+        result = self._run(["--home", str(self.home), "--source-root", str(self.src)])
+        self.assertNotEqual(result.code, 0)
+        self.assertIsNotNone(result.next_command)

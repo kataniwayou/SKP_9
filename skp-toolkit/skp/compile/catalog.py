@@ -89,6 +89,13 @@ def check(entries: list[Entry], surfaces, annotations: dict[str, dict]) -> list[
                 f"{surface.id}: discovered in source but has no annotation "
                 f"(add it to skp/annotations/)")
 
+    discovered = {s.id for s in surfaces}
+    for key in sorted(annotations):
+        if key not in discovered:
+            problems.append(
+                f"{key}: annotated but not discovered in source — the extractor lost "
+                f"a surface, or the annotation is stale")
+
     by_id: dict[str, list] = {}
     for surface in surfaces:
         by_id.setdefault(surface.id, []).append(surface)
