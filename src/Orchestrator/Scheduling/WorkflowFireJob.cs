@@ -52,6 +52,21 @@ public sealed class WorkflowFireJob(
     LeaderState leaderState,
     ILogger<WorkflowFireJob> logger) : IJob
 {
+    /// <summary>
+    /// <c>Never</c> from the API's <c>StepEntryCondition</c>, as an int — the same reach-across
+    /// <see cref="Dispatch.StepAdvancement"/> makes for <c>Always</c>, and for the same reason: the
+    /// orchestrator references only <c>Messaging.Contracts</c>, so the enum itself is out of scope.
+    /// <para>
+    /// <b>That <see cref="Dispatch.StepAdvancement"/> deliberately has no such constant is not a
+    /// contradiction of this one.</b> There, <c>Never</c> is not a case — it is every value the
+    /// advancement predicate declines, and naming it would invite a branch that treats an absence as
+    /// a case. Here it is the opposite: an entry step has no predecessor, so no condition is being
+    /// evaluated against anything, and <c>Never</c> is the single value the fire tests for. The two
+    /// paths ask different questions of the same field, which is why one names it and one must not.
+    /// </para>
+    /// </summary>
+    private const int Never = 5;
+
     /// <inheritdoc />
     public async Task Execute(IJobExecutionContext context)
     {
@@ -147,7 +162,10 @@ public sealed class WorkflowFireJob(
     }
 
     /// <summary>
-    /// Sends one dispatch per entry step, under one correlation id.
+    /// Sends one dispatch per entry step, under one correlation id — except for entry steps frozen
+    /// with the <c>Never</c> entry condition, which are skipped. See the guard below: that is the
+    /// only entry condition an entry step's dispatch consults, because it is the only one that says
+    /// anything about a step with no predecessor.
     /// <para>
     /// <paramref name="workflowId"/> comes from the job-data map rather than from
     /// <see cref="WorkflowL1.WorkflowId"/>, which holds the same value: the id this fire logs under
@@ -171,6 +189,33 @@ public sealed class WorkflowFireJob(
                 logger.LogWarning(
                     "entry step {StepId} is not in the workflow's step set; skipping it",
                     entryStepId.ToString("D"));
+                continue;
+            }
+
+            // A FROZEN ENTRY STEP, and the only entry condition this path reads at all.
+            //
+            // An entry step has no predecessor, so the outcome-shaped conditions — PreviousCompleted,
+            // PreviousFailed, PreviousCancelled — have nothing to be evaluated against and are simply
+            // not consulted here; nor is Always, which is what they all collapse to when there is no
+            // predecessor. Never is different in kind: it is not a claim about an outcome, it is a
+            // claim about the step, and it is the same claim on both paths — this step does not run.
+            // Honouring it here is what makes that one reading true everywhere rather than only on
+            // edges.
+            //
+            // This is the operator's per-entry-step freeze. A stop halts the whole workflow, which is
+            // the wrong instrument when a workflow has several entry steps and only one of them needs
+            // to stand down: the others would go quiet with it. Setting this one to Never and
+            // re-issuing start leaves the schedule armed and its siblings firing, and takes this step
+            // out. The freeze is not live — L1 is a projection, so it lands on the next start, which
+            // is idempotent and does not require a stop first.
+            //
+            // Continue, not return: a frozen step suppresses itself and nothing else, and the
+            // reschedule at the call site is untouched either way.
+            if (step.EntryCondition == Never)
+            {
+                logger.LogInformation(
+                    "entry step {StepId} is frozen — its entry condition is Never; skipping it",
+                    step.StepId.ToString("D"));
                 continue;
             }
 

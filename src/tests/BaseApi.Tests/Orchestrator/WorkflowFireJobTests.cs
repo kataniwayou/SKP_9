@@ -34,6 +34,11 @@ public sealed class WorkflowFireJobTests
     private const string EveryHour = "0 * * * *";
     private const string Config    = "{\"setting\":1}";
 
+    // The API's StepEntryCondition as ints, because the orchestrator's contracts carry the field as
+    // one. PreviousCompleted is what an ordinary step holds; Never is the operator's freeze.
+    private const int PreviousCompleted = 1;
+    private const int Never             = 5;
+
     private sealed class Harness
     {
         private WorkflowL1 _definition = new(W, [], EveryHour, []);
@@ -69,13 +74,24 @@ public sealed class WorkflowFireJobTests
         /// step of the graph, carrying a payload, and the whole thing is held under
         /// <see cref="JobId"/>.
         /// </summary>
-        public Harness WithWorkflow(Guid workflowId, (Guid StepId, Guid ProcessorId)[] entries)
+        public Harness WithWorkflow(Guid workflowId, (Guid StepId, Guid ProcessorId)[] entries) =>
+            WithGatedWorkflow(
+                workflowId,
+                entries.Select(e => (e.StepId, e.ProcessorId, PreviousCompleted)).ToArray());
+
+        /// <summary>
+        /// As <see cref="WithWorkflow"/>, but each entry step carries the entry condition given
+        /// rather than the ordinary one — for the cases that turn on the value of that field.
+        /// </summary>
+        public Harness WithGatedWorkflow(
+            Guid workflowId, (Guid StepId, Guid ProcessorId, int EntryCondition)[] entries)
         {
             _definition = new WorkflowL1(
                 workflowId,
                 entries.Select(e => e.StepId).ToList(),
                 EveryHour,
-                entries.Select(e => new StepL1(e.StepId, 0, e.ProcessorId, Config, [])).ToList());
+                entries.Select(e => new StepL1(
+                    e.StepId, e.EntryCondition, e.ProcessorId, Config, [])).ToList());
 
             Store.Set(workflowId, _definition, JobId);
             return this;
@@ -152,6 +168,55 @@ public sealed class WorkflowFireJobTests
             Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
         await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P2), MessageTypes.ProcessDispatch,
             Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task AnEntryStepFrozenWithNeverIsNotDispatchedWhileItsSiblingsStillAre()
+    {
+        // The whole point of the freeze: one entry step stands down and the workflow keeps running.
+        // A stop would have taken S2 with it, which is the instrument this exists to avoid.
+        var h = new Harness().AsLeader().WithGatedWorkflow(
+            W, entries: [(S1, P1, Never), (S2, P2, PreviousCompleted)]);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await h.Sender.DidNotReceive().SendAsync(ProcessorQueues.Work(P1), Arg.Any<string>(),
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+        await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P2), MessageTypes.ProcessDispatch,
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task AWorkflowWhoseEntryStepsAreAllFrozenDispatchesNothingButStillReschedules()
+    {
+        // Frozen is not stopped. The schedule stays armed, so unfreezing is a start rather than a
+        // start plus whatever it would take to rebuild a job that had been allowed to lapse.
+        var h = new Harness().AsLeader().WithGatedWorkflow(
+            W, entries: [(S1, P1, Never), (S2, P2, Never)]);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+        Assert.Equal(1, h.Scheduler.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task TheOutcomeShapedEntryConditionsDoNotSuppressAnEntryStep()
+    {
+        // Never is the only value this path reads. An entry step has no predecessor, so a condition
+        // that talks about one has nothing to be evaluated against and must not be read as a gate --
+        // treating PreviousFailed as "only fire on failure" would silence a step that is meant to run
+        // every fire.
+        foreach (var condition in new[] { 0, 1, 2, 3, 4 })
+        {
+            var h = new Harness().AsLeader().WithGatedWorkflow(W, entries: [(S1, P1, condition)]);
+
+            await h.Build().Execute(h.Context(W, h.JobId));
+
+            await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P1), MessageTypes.ProcessDispatch,
+                Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+        }
     }
 
     [Fact]

@@ -30,7 +30,12 @@ public sealed class StepCreateDtoValidator : AbstractValidator<StepCreateDto>
             .WithMessage("NextStepIds must not contain Guid.Empty.");
 
         RuleFor(x => x.EntryCondition)
-            .IsInEnum();
+            .IsInEnum()
+            .NotEqual(StepEntryCondition.PreviousProcessing)
+            .WithMessage(
+                "EntryCondition must not be PreviousProcessing: no step ever reports that result, " +
+                "so a successor gated on it can never be entered. Send an explicit value — omitting " +
+                "the field binds it to this one.");
     }
 }
 
@@ -59,6 +64,11 @@ public sealed class StepUpdateDtoValidator : AbstractValidator<StepUpdateDto>
             .WithMessage("NextStepIds must not contain Guid.Empty.");
 
         RuleFor(x => x.EntryCondition)
-            .IsInEnum();
+            .IsInEnum()
+            .NotEqual(StepEntryCondition.PreviousProcessing)
+            .WithMessage(
+                "EntryCondition must not be PreviousProcessing: no step ever reports that result, " +
+                "so a successor gated on it can never be entered. Send an explicit value — omitting " +
+                "the field binds it to this one.");
     }
 }
