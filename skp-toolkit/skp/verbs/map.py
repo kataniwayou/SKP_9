@@ -22,6 +22,15 @@ def by_component(entries: list[dict], name: str) -> list[dict]:
     return [e for e in entries if e["component"] == name]
 
 
+def index_by_id(entries: list[dict]) -> dict[str, dict]:
+    """Every entry keyed by its catalog id -- the lookup ``skp observe`` and
+    ``skp investigate`` use to turn a capability id into the concrete key
+    pattern, queue name, or log template ``extract.py`` read from source.
+    This is the one join point: neither verb ever spells a Redis key,
+    queue name or ES template as a literal string of its own."""
+    return {e["id"]: e for e in entries}
+
+
 def by_intent(entries: list[dict], intent: str) -> list[dict]:
     return [e for e in entries if intent in e.get("intents", [])]
 
