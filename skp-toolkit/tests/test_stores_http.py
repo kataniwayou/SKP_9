@@ -46,6 +46,28 @@ class ElasticTests(unittest.TestCase):
     def test_an_empty_result_set_is_an_empty_list(self):
         self.assertEqual(Elastic(FakeHttp({"hits": {"hits": []}})).search({}), [])
 
+    def test_exists_is_true_on_a_nonzero_total(self):
+        http = FakeHttp({"hits": {"total": {"value": 1}, "hits": []}})
+        self.assertTrue(Elastic(http).exists([{"term": {"a": "b"}}]))
+
+    def test_exists_is_false_on_a_zero_total(self):
+        http = FakeHttp({"hits": {"total": {"value": 0}, "hits": []}})
+        self.assertFalse(Elastic(http).exists([{"term": {"a": "b"}}]))
+
+    def test_exists_is_bounded_size_zero_and_capped_track_total_hits(self):
+        """skp verify's whole per-claim, full-retention existence strategy
+        (see verify.check_elasticsearch) only stays cheap if this never asks
+        Elasticsearch for more than "does at least one match exist" --
+        size=0 fetches no document bodies, and track_total_hits=1 lets the
+        query stop at the first match instead of counting every one across
+        ~10M documents."""
+        http = FakeHttp({"hits": {"total": {"value": 1}, "hits": []}})
+        Elastic(http).exists([{"exists": {"field": "attributes.Queue"}}])
+        path, body = http.posts[0]
+        self.assertEqual(body["size"], 0)
+        self.assertEqual(body["track_total_hits"], 1)
+        self.assertEqual(body["query"]["bool"]["filter"], [{"exists": {"field": "attributes.Queue"}}])
+
 
 class PrometheusTests(unittest.TestCase):
     def test_query_returns_the_result_array(self):
