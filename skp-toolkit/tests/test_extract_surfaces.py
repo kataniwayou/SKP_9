@@ -1,0 +1,83 @@
+import unittest
+
+from skp.compile.extract import metrics, pg_tables, rest_endpoints
+
+METRICS_A = 'internal const string DepthInstrument = "pipeline.queue.depth";'
+METRICS_B = 'Meter.CreateCounter<long>(\n  "pipeline.messages.consumed", "{message}");'
+
+WORKFLOW_CONTROLLER = '''
+public sealed class WorkflowsController :
+    BaseController<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto>
+{
+}
+'''
+
+PROCESSOR_CONTROLLER = '''
+public sealed class ProcessorsController :
+    BaseController<ProcessorEntity, ProcessorCreateDto, ProcessorUpdateDto, ProcessorReadDto>
+{
+    [HttpGet("by-source-hash/{sourceHash}")]
+    public async Task<ActionResult<ProcessorReadDto>> GetBySourceHash(string sourceHash) => null;
+}
+'''
+
+ORCHESTRATION_CONTROLLER = '''
+public sealed class OrchestrationController : ControllerBase
+{
+    [HttpPost("start")]
+    public async Task<IActionResult> Start() => null;
+
+    [HttpPost("stop")]
+    public async Task<IActionResult> Stop() => null;
+}
+'''
+
+DBCONTEXT = '''
+    public DbSet<SchemaEntity> Schemas => Set<SchemaEntity>();
+    public DbSet<StepNextSteps> StepNextSteps => Set<StepNextSteps>();
+'''
+
+
+class MetricTests(unittest.TestCase):
+    def test_instruments_are_found_across_files_and_declaration_shapes(self):
+        found = {s.detail for s in metrics([METRICS_A, METRICS_B])}
+        self.assertEqual(found, {"pipeline.queue.depth", "pipeline.messages.consumed"})
+
+    def test_the_id_is_derived_from_the_instrument_name(self):
+        by_detail = {s.detail: s for s in metrics([METRICS_A])}
+        self.assertEqual(by_detail["pipeline.queue.depth"].id,
+                         "prometheus.pipeline_queue_depth")
+
+    def test_non_pipeline_literals_are_ignored(self):
+        self.assertEqual(metrics(['x("http.server.duration");']), [])
+
+
+class RestTests(unittest.TestCase):
+    def test_an_entity_controller_yields_the_five_inherited_verbs(self):
+        surfaces = rest_endpoints({"WorkflowController.cs": WORKFLOW_CONTROLLER})
+        self.assertEqual(
+            sorted(s.operation for s in surfaces),
+            ["DELETE /api/v1.0/workflows/{id}",
+             "GET /api/v1.0/workflows",
+             "GET /api/v1.0/workflows/{id}",
+             "POST /api/v1.0/workflows",
+             "PUT /api/v1.0/workflows/{id}"])
+
+    def test_a_declared_route_is_added_to_the_inherited_five(self):
+        operations = {s.operation for s in
+                      rest_endpoints({"ProcessorController.cs": PROCESSOR_CONTROLLER})}
+        self.assertIn("GET /api/v1.0/processors/by-source-hash/{sourceHash}", operations)
+        self.assertEqual(len(operations), 6)
+
+    def test_a_plain_controller_yields_only_its_declared_routes(self):
+        operations = {s.operation for s in
+                      rest_endpoints({"OrchestrationController.cs": ORCHESTRATION_CONTROLLER})}
+        self.assertEqual(operations, {"POST /api/v1.0/orchestration/start",
+                                      "POST /api/v1.0/orchestration/stop"})
+
+
+class PgTests(unittest.TestCase):
+    def test_entity_and_junction_tables_are_both_surfaces(self):
+        by_id = {s.id: s for s in pg_tables(DBCONTEXT)}
+        self.assertEqual(sorted(by_id), ["postgres.Schemas", "postgres.StepNextSteps"])
+        self.assertEqual(by_id["postgres.Schemas"].operation, 'SELECT ... FROM "Schemas"')
