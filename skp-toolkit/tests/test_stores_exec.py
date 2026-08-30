@@ -32,7 +32,14 @@ class PostgresTests(unittest.TestCase):
         self.assertEqual(workload, "sts/postgres")
         self.assertEqual(argv[0], "sh")
         self.assertIn('psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc', argv[2])
-        self.assertIn("SELECT 1", argv[2])
+        self.assertEqual(argv[4], "SELECT 1")
+
+    def test_a_double_quoted_identifier_survives_intact(self):
+        cluster = FakeCluster("x")
+        Postgres(cluster).rows('SELECT "Name" FROM "Workflows"')
+        argv = cluster.calls[0][1]
+        self.assertEqual(argv[4], 'SELECT "Name" FROM "Workflows"')
+        self.assertNotIn("Workflows", argv[2])
 
 
 class RedisTests(unittest.TestCase):

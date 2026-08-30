@@ -13,8 +13,8 @@ class Postgres:
         self.workload = workload
 
     def rows(self, sql: str) -> list[list[str]]:
-        script = f'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "{sql}"'
-        out = self.cluster.exec(self.workload, ["sh", "-c", script])
+        script = 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "$1"'
+        out = self.cluster.exec(self.workload, ["sh", "-c", script, "sh", sql])
         return [line.split("|") for line in out.splitlines() if line.strip()]
 
     def ping(self) -> bool:
