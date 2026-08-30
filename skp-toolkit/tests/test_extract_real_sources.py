@@ -101,6 +101,28 @@ class MetricLabelRealSourceTests(unittest.TestCase):
         labels = metric_labels(_metrics_texts())
         self.assertIn("queue", labels["pipeline.messages.consumed"])
 
+    def test_the_five_ambient_role_instruments_carry_role(self):
+        # C1: PipelineAmbientTag.AppendTo(ref tags) is called at the end of exactly
+        # five method bodies (EgressMetrics.Record; IngressMetrics.RecordConsumed,
+        # RecordArrival, RecordConsumerDuration -- the last of those two instruments
+        # by way of two different methods). Pinned against the real source, not a
+        # fixture, because this is the finding no prior assertion caught.
+        labels = metric_labels(_metrics_texts())
+        for name in ("pipeline.messages.produced", "pipeline.produce.duration",
+                     "pipeline.messages.consumed", "pipeline.queue.wait",
+                     "pipeline.consumer.duration"):
+            self.assertIn("role", labels[name], f"{name} is missing role")
+
+    def test_role_does_not_leak_onto_instruments_that_never_call_appendto(self):
+        # The precision the reviewer verified: gate.open and gate.trips carry no
+        # labels at all, gate.probe.duration carries only outcome. None of GateMetrics
+        # calls PipelineAmbientTag.AppendTo, so widening to file scope would have been
+        # visible here first.
+        labels = metric_labels(_metrics_texts())
+        self.assertNotIn("role", labels["pipeline.gate.open"])
+        self.assertNotIn("role", labels["pipeline.gate.trips"])
+        self.assertEqual(labels["pipeline.gate.probe.duration"], ["outcome"])
+
     def test_every_label_key_the_brief_names_is_attached_to_some_instrument(self):
         # queue, type, outcome, disposition, route, reason, loop, destination -- the
         # vocabulary the brief gives as a cross-check on the scan, not the list to

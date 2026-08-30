@@ -27,6 +27,12 @@ public sealed class WorkflowsController :
 '''
 SCOPE = 'public static class ExecutionLogScope { public const string WorkflowId = "WorkflowId"; }'
 CORR = 'public static class CorrelationKeys { public const string LogScope = "CorrelationId"; }'
+# I4: stub content for the four hand-listed authority files added to SOURCE_MAP so
+# no extractor reads them -- they only need to exist for the fixed-path/lock checks.
+LOG_RECORD = "internal sealed record LogRecord;"
+OBS_SVC_EXT = "public static class ObservabilityServiceCollectionExtensions { }"
+BASE_CONSOLE_OBS_EXT = "public static class BaseConsoleObservabilityExtensions { }"
+RESOURCE_ATTRIBUTE = "public sealed record ResourceAttribute(string LogKey, string MetricKey, object Value);"
 
 
 def fake_source_root(root: pathlib.Path) -> pathlib.Path:
@@ -41,6 +47,10 @@ def fake_source_root(root: pathlib.Path) -> pathlib.Path:
         "BaseApi.Service/AppDbContext.cs": DBC,
         "Messaging.Transport/QueueDepthMetrics.cs": MET,
         "BaseApi.Service/Features/Workflow/WorkflowController.cs": CTL,
+        "tests/BaseApi.Tests/Live/Resilience/LogRecord.cs": LOG_RECORD,
+        "BaseApi.Core/DependencyInjection/ObservabilityServiceCollectionExtensions.cs": OBS_SVC_EXT,
+        "BaseConsole.Core/DependencyInjection/BaseConsoleObservabilityExtensions.cs": BASE_CONSOLE_OBS_EXT,
+        "BaseConsole.Core/DependencyInjection/ResourceAttribute.cs": RESOURCE_ATTRIBUTE,
     }
     for rel, text in files.items():
         path = src / rel
@@ -290,3 +300,59 @@ class MissingFixedPathTests(unittest.TestCase):
 
             lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
             self.assertEqual(lock["sources"]["BaseApi.Service/AppDbContext.cs"], MISSING)
+
+
+class HandListedAuthorityTrackingTests(unittest.TestCase):
+    """I4: ELASTICSEARCH_ENVELOPE and RESOURCE_LABELS name four hand-listed
+    authority files (LogRecord.cs; ObservabilityServiceCollectionExtensions.cs,
+    BaseConsoleObservabilityExtensions.cs, ResourceAttribute.cs) that matched
+    none of SOURCE_MAP, CONTROLLER_GLOB, or METRICS_GLOB -- so editing or
+    renaming any of them left the catalog stale with zero drift signal. Now
+    tracked in SOURCE_MAP, the same shape as the existing api_version entry."""
+
+    def test_all_four_authority_files_are_tracked_in_the_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+            compile_catalog(src, notes, out)
+            lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
+            for rel in (
+                "tests/BaseApi.Tests/Live/Resilience/LogRecord.cs",
+                "BaseApi.Core/DependencyInjection/ObservabilityServiceCollectionExtensions.cs",
+                "BaseConsole.Core/DependencyInjection/BaseConsoleObservabilityExtensions.cs",
+                "BaseConsole.Core/DependencyInjection/ResourceAttribute.cs",
+            ):
+                self.assertIn(rel, lock["sources"], rel)
+                self.assertNotEqual(lock["sources"][rel], MISSING, rel)
+
+    def test_editing_resource_attribute_cs_registers_as_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            # fake_source_root omits BaseController.cs (see ApiVersionTrackingTests);
+            # create it so the "fresh lock reports nothing" assertion below tests a
+            # genuinely clean state rather than tripping over that unrelated gap.
+            api_version_path = src / "BaseApi.Core" / "Controllers" / "BaseController.cs"
+            api_version_path.parent.mkdir(parents=True, exist_ok=True)
+            api_version_path.write_text('[ApiVersion("1.0")]', encoding="utf-8")
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+            compile_catalog(src, notes, out)
+            lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
+            self.assertEqual(stale_sources(lock, src), [])
+
+            resource_attribute_path = (
+                src / "BaseConsole.Core" / "DependencyInjection" / "ResourceAttribute.cs")
+            resource_attribute_path.write_text(
+                resource_attribute_path.read_text(encoding="utf-8") + "\n// edited",
+                encoding="utf-8")
+
+            self.assertIn(
+                "BaseConsole.Core/DependencyInjection/ResourceAttribute.cs",
+                stale_sources(lock, src))

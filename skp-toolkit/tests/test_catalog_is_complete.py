@@ -33,8 +33,16 @@ class CompletenessTests(unittest.TestCase):
         # elasticsearch.attr.* surfaces (12 message-scoped placeholders, 5
         # ExecutionLogScope dispatch-scope ids, 1 CorrelationId, 5 hand-listed
         # envelope fields) = 130. The 16 existing prometheus.pipeline_* ids
-        # are unchanged -- this wave adds labels to their `detail`, not new
-        # surfaces -- so the count grows by exactly the new ids.
+        # are unchanged by the dimensions wave -- it adds labels to their
+        # `detail`, not new surfaces.
+        #
+        # Fix round (I5) adds two more hand-listed envelope fields --
+        # elasticsearch.attr.service_instance_id and .source -- closing the
+        # per-replica gap attr.service_name's own never_for pointed at with no
+        # surface to land on. 130 + 2 = 132. The role fix (C1) is not a count
+        # change: PipelineAmbientTag.AppendTo adds a label to five existing
+        # prometheus.pipeline_* surfaces' `detail`, the same shape as the
+        # original wave's label additions, not a new id.
         with tempfile.TemporaryDirectory() as tmp:
             entries, _ = compile_catalog(SRC, ANNOTATIONS, pathlib.Path(tmp))
-        self.assertEqual(len(entries), 130)
+        self.assertEqual(len(entries), 132)
