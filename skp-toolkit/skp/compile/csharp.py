@@ -93,6 +93,29 @@ def expression_bodies(text: str, consts: dict[str, str] | None = None) -> dict[s
     return found
 
 
+_SNAKE_ACRONYM_BOUNDARY = re.compile(r"(.)([A-Z][a-z]+)")
+_SNAKE_LOWER_UPPER_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
+
+
+def pascal_to_snake(name: str) -> str:
+    """The transform ``EFCore.NamingConventions``' ``UseSnakeCaseNamingConvention``
+    applies to a CLR member name when it derives a Postgres identifier:
+    ``StepNextSteps`` -> ``step_next_steps``, ``SourceHash`` -> ``source_hash``.
+
+    Two passes, the same shape widely used for this conversion: the first
+    inserts a boundary before a capital that starts a new lowercase run (so
+    a run of capitals -- an acronym -- is not split letter by letter), the
+    second catches a capital immediately following a lowercase letter or
+    digit that the first pass's lookahead-free pattern cannot see on its
+    own (adjacent capitals, e.g. ``ID``, still collapse to one boundary).
+    Exists so C1's fix is a named, independently testable function rather
+    than an inline string transform buried in ``pg_tables``.
+    """
+    step1 = _SNAKE_ACRONYM_BOUNDARY.sub(r"\1_\2", name)
+    step2 = _SNAKE_LOWER_UPPER_BOUNDARY.sub(r"\1_\2", step1)
+    return step2.lower()
+
+
 def literals_matching(text: str, prefix: str) -> list[str]:
     """Every distinct string literal starting with ``prefix``, sorted.
 
