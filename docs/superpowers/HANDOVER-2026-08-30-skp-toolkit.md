@@ -1,7 +1,7 @@
 # Handover: the SKP toolkit (phases 1–3 partial)
 
 Date: 2026-08-30
-Branch: `orchestrator-board-parity` (64 commits merged; working tree clean)
+Branch: `orchestrator-board-parity` (69 commits merged; working tree clean)
 Spec: `docs/superpowers/specs/2026-08-30-skp-skill-bundle-design.md`
 Plan: `docs/superpowers/plans/2026-08-30-skp-toolkit-ground-and-compile.md`
 
@@ -14,7 +14,7 @@ not recall**, because a small model's characteristic failure is confabulation �
 asked something it does not know, it invents a plausible answer and reports it
 confidently.
 
-**372 tests.** `python -m unittest discover -s tests -t .` from `skp-toolkit/`.
+**398 tests.** `python -m unittest discover -s tests -t .` from `skp-toolkit/`.
 
 ## Commands that exist
 
@@ -23,7 +23,7 @@ confidently.
 | `skp init` | Resolves givens, writes the memory folder, compiles the catalog, probes seven targets |
 | `skp map` | Two-axis lookup: `--component`, `--intent`, `--answers` |
 | `skp doctor` | Source drift / hand-edited generated files / reachability — each with its own remedy |
-| `skp verify` | Takes the catalog's claims to the running system. `--component`, `--skips`, `--probe-writes` |
+| `skp verify` | Takes the catalog's claims to the running system. `--component`, `--skips`, `--probe-writes`, `--probe-runs` |
 | `skp observe` | Current state and windowed quantities |
 | `skp investigate` | The nine-rung cut-point ladder + case files |
 
@@ -47,7 +47,7 @@ python -m skp init --home <TEMP OUTSIDE THE REPO> --source-root ../src --project
   --endpoint baseapi=http://localhost:18080 \
   --endpoint prometheus=http://localhost:19090 \
   --endpoint elasticsearch=http://localhost:19200
-python -m skp verify --home <same> --probe-writes
+python -m skp verify --home <same> --probe-writes --probe-runs
 ```
 
 **Never write a memory folder inside the repo** — `.gitignore` does not cover it.
