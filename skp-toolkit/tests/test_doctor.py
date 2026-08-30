@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from skp.profile import Profile
-from skp.verbs.doctor import diagnose
+from skp.verbs.doctor import diagnose, run_with
 
 CATALOG = [{"id": "redis.Root", "component": "redis", "operation": "read key",
             "detail": "skp:{workflowId}", "intents": ["observe"],
@@ -82,3 +82,32 @@ class DoctorTests(unittest.TestCase):
         rows = {name: (ok, detail) for name, ok, detail
                 in diagnose(self.profile, clients(redis=Probeable(False)))}
         self.assertFalse(rows["reachability: redis"][0])
+
+    def test_malformed_lock_json_is_a_named_failure_not_a_crash(self):
+        (self.home / "model" / "compile.lock").write_text("{not json", encoding="utf-8")
+        rows = {name: (ok, detail) for name, ok, detail in diagnose(self.profile, clients())}
+        self.assertFalse(rows["source drift"][0])
+        self.assertFalse(rows["generated files"][0])
+
+    def test_malformed_catalog_json_is_a_named_failure_not_a_crash(self):
+        (self.home / "model" / "catalog.json").write_text("[{", encoding="utf-8")
+        rows = {name: (ok, detail) for name, ok, detail in diagnose(self.profile, clients())}
+        self.assertFalse(rows["catalog present"][0])
+
+    def test_a_catalog_that_is_not_a_list_of_dicts_is_a_named_failure(self):
+        (self.home / "model" / "catalog.json").write_text('"a string"', encoding="utf-8")
+        rows = {name: (ok, detail) for name, ok, detail in diagnose(self.profile, clients())}
+        self.assertFalse(rows["catalog present"][0])
+
+    def test_a_vanished_source_root_reports_drift_rather_than_raising(self):
+        self.source.unlink()
+        rows = {name: (ok, detail) for name, ok, detail in diagnose(self.profile, clients())}
+        self.assertFalse(rows["source drift"][0])
+        self.assertIn("Queues.cs", rows["source drift"][1])
+
+    def test_only_unreachable_stores_does_not_advise_recompiling(self):
+        result = run_with(self.profile, clients(redis=Probeable(False)))
+        self.assertNotEqual(result.next_command, "skp init --refresh")
+        self.assertTrue(any("this is the system, not the toolkit" in line
+                            for line in result.lines))
+        self.assertTrue(any("redis" in line for line in result.lines))
