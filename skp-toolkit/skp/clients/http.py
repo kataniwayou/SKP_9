@@ -50,3 +50,43 @@ class HttpClient:
 
     def post_json(self, path: str, body):
         return self._request(path, None, json.dumps(body).encode("utf-8"))
+
+    def probe_status(self, method: str, path: str, body) -> tuple[int, str]:
+        """Send ``body`` via an explicit HTTP verb and return ``(status,
+        response_text)`` -- 2xx included, never raised as
+        :class:`Unreachable`.
+
+        Used only by ``skp verify --probe-writes``. Every other method on
+        this client treats a non-2xx response as a failure (``Unreachable``,
+        carrying ``HTTP <code>`` in its detail) because a read that gets
+        anything but 2xx genuinely failed. A write probe is different: 400,
+        404 and 405 are its *expected*, successful outcomes (proof the route
+        rejected a deliberately invalid request before doing anything), and
+        the one status this probe must not silently swallow is 2xx -- the
+        one outcome that would mean the request actually went through. So
+        this method surfaces every status the same way, as a plain return
+        value, and leaves the verdict (CONFIRMED/REFUTED/UNVERIFIABLE) to
+        the caller. Only a genuine transport failure -- no response at all --
+        still raises ``Unreachable``.
+
+        The body travels alongside the status because a 404 alone is
+        ambiguous on an id-bearing route: the caller needs it to tell
+        "routing never matched" (empty body) apart from "routing matched
+        and the not-found handler ran" (a ProblemDetails body) -- see
+        ``skp.verbs.verify._looks_like_problem_details``.
+        """
+        url = self.base + path
+        data = json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(url, data=data, method=method)
+        if self.token:
+            request.add_header("Authorization", f"Bearer {self.token}")
+        request.add_header("Content-Type", "application/json")
+        try:
+            with self._open(request, timeout=self.timeout) as response:
+                raw = response.read()
+                return response.status, raw.decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            return exc.code, raw.decode("utf-8", errors="replace") if raw else ""
+        except (urllib.error.URLError, OSError) as exc:
+            raise Unreachable(self.base, str(getattr(exc, "reason", exc))) from exc
