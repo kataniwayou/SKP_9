@@ -3,7 +3,7 @@ import json
 import pathlib
 import re
 
-from skp.profile import ProfileMissing, default_home, not_initialised
+from skp.profile import ProfileMissing, default_home, not_compiled, not_initialised
 from skp.result import EXIT_OK, EXIT_VERDICT, Result
 
 STOPWORDS = {"a", "an", "the", "did", "do", "does", "is", "are", "was", "were",
@@ -66,16 +66,23 @@ def render(entries: list[dict]) -> str:
 def run(argv: list[str]) -> Result:
     parser = argparse.ArgumentParser(prog="skp map")
     parser.add_argument("--home", default=str(default_home()))
-    parser.add_argument("--component")
-    parser.add_argument("--intent")
-    parser.add_argument("--answers")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--component")
+    mode.add_argument("--intent")
+    mode.add_argument("--answers")
     ns = parser.parse_args(argv)
 
     home = pathlib.Path(ns.home)
+    # A missing catalog.json raises the same ProfileMissing whether or not
+    # the memory folder itself exists. Distinguish the two: "not initialised"
+    # is wrong once the folder plainly exists (see the map.py/doctor.py
+    # minor in the final fix brief).
+    if not (home / "profile.json").exists():
+        return not_initialised()
     try:
         entries = load_catalog(home)
     except ProfileMissing:
-        return not_initialised()
+        return not_compiled(home)
 
     if ns.component:
         found, what = by_component(entries, ns.component), f"component {ns.component!r}"
