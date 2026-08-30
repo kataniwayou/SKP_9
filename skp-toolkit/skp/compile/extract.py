@@ -101,8 +101,9 @@ def rest_endpoints(controller_texts: dict[str, str]) -> list[Surface]:
             continue
         token = _route_token(match.group(1))
         base = f"{API_PREFIX}/{token}"
+        inherits = bool(_INHERITS_BASE.search(text))
 
-        if _INHERITS_BASE.search(text):
+        if inherits:
             for verb, tail in INHERITED_VERBS:
                 path = f"{base}/{tail}" if tail else base
                 out.append(Surface("api", f"api.{token}.{verb.lower()}{'_id' if tail else ''}",
@@ -110,11 +111,20 @@ def rest_endpoints(controller_texts: dict[str, str]) -> list[Surface]:
 
         for verb, tail in _HTTP_ATTR.findall(text):
             if not tail:
-                continue  # an undecorated attribute on a BaseController subclass is inherited
-            path = f"{base}/{tail}"
-            slug = re.sub(r"[^a-z0-9]+", "_", tail.lower()).strip("_")
-            out.append(Surface("api", f"api.{token}.{verb.lower()}_{slug}",
-                               f"{verb.upper()} {path}", token))
+                # A bare, undecorated attribute is the inherited route on a
+                # BaseController<...> subclass and is already covered above.
+                # On a controller that does NOT inherit (OrchestrationController
+                # is the real one today), the same bare attribute is a real,
+                # undocumented route -- I8: it must be a surface, not dropped.
+                if inherits:
+                    continue
+                path = base
+                surface_id = f"api.{token}.{verb.lower()}"
+            else:
+                path = f"{base}/{tail}"
+                slug = re.sub(r"[^a-z0-9]+", "_", tail.lower()).strip("_")
+                surface_id = f"api.{token}.{verb.lower()}_{slug}"
+            out.append(Surface("api", surface_id, f"{verb.upper()} {path}", token))
     return sorted(out, key=lambda s: s.id)
 
 

@@ -1,5 +1,7 @@
 import re
 
+from skp.compile.catalog import CatalogError
+
 _RHS = r'((?:"(?:[^"\\]|\\.)*"|[^;"])*)'
 
 _CONST = re.compile(
@@ -40,8 +42,26 @@ def _joined_literals(rhs: str) -> str:
     return "".join(unescape(m.group(1)) for m in _LITERAL.finditer(rhs))
 
 
+def _check_no_duplicate_names(names, kind: str) -> None:
+    """Two members with the same name in one file -- nested classes are the
+    realistic cause -- used to collide in the dict comprehension these
+    functions build, last one silently winning. That is corruption, not an
+    incomplete state, so it raises the same way `load_annotations` does for
+    a duplicated annotation id."""
+    seen: set[str] = set()
+    for name in names:
+        if name in seen:
+            raise CatalogError(
+                f"duplicate {kind} member name {name!r} declared twice in one file "
+                f"(nested classes?) -- rename one; the second declaration was "
+                f"silently overwriting the first")
+        seen.add(name)
+
+
 def const_strings(text: str) -> dict[str, str]:
-    return {name: _joined_literals(rhs) for name, rhs in _CONST.findall(text)}
+    pairs = _CONST.findall(text)
+    _check_no_duplicate_names((name for name, _ in pairs), "const string")
+    return {name: _joined_literals(rhs) for name, rhs in pairs}
 
 
 def expression_bodies(text: str, consts: dict[str, str] | None = None) -> dict[str, str]:
@@ -54,16 +74,22 @@ def expression_bodies(text: str, consts: dict[str, str] | None = None) -> dict[s
     identifier referring to a const declared in the same file (``=> Prefix;``)
     is: when ``consts`` is given and the stripped body names one of its keys,
     that const's value is used as the body.
+
+    Every literal in the body is joined (``_joined_literals``), not just the
+    first: a body built from two concatenated literals (``$"a" + "b"``, or a
+    multi-line interpolation) used to lose everything past the first ``"``.
     """
+    pairs = _EXPR.findall(text)
+    _check_no_duplicate_names((name for name, _ in pairs), "expression-bodied string")
     found: dict[str, str] = {}
-    for name, rhs in _EXPR.findall(text):
-        literal = _LITERAL.search(rhs)
-        if not literal:
+    for name, rhs in pairs:
+        joined = _joined_literals(rhs)
+        if not joined:
             identifier = rhs.strip()
             if consts is not None and _BARE_IDENTIFIER.match(identifier) and identifier in consts:
                 found[name] = consts[identifier]
             continue  # a body returning a bare identifier is not a key format
-        found[name] = _SPECIFIER.sub(r"{\1}", unescape(literal.group(1)))
+        found[name] = _SPECIFIER.sub(r"{\1}", joined)
     return found
 
 
