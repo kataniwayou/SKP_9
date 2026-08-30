@@ -210,21 +210,29 @@ public sealed class WorkflowFireJob(
             // is idempotent and does not require a stop first.
             //
             // Continue, not return: a frozen step suppresses itself and nothing else, and the
-            // reschedule at the call site is untouched either way.
-            if (step.EntryCondition == Never)
-            {
-                logger.LogInformation(
-                    "entry step {StepId} is frozen — its entry condition is Never; skipping it",
-                    step.StepId.ToString("D"));
-                continue;
-            }
-
+            // reschedule at the call site is untouched either way. It is also INSIDE the scope
+            // below rather than before it, which costs a dictionary on a step that will not be
+            // dispatched and buys two things. The record carries StepId and ProcessorId the way
+            // every sibling line does — from the scope, not from the template — and it carries the
+            // fire's correlation id, so "this fire skipped that step" sits under the same id as the
+            // steps the same fire dispatched. Interpolating the id into the message instead would
+            // put it on the record too, since the scope keys and the template parameter names are
+            // deliberately the same, but it would make the body unique per step: body.text is
+            // indexed as a KEYWORD, so a body carrying an id can only be found by a wildcard, while
+            // one that does not is an exact-match term like every other message here.
             var state = ExecutionLogScope.BuildScope(
                 Guid.Empty, Guid.Empty, step.StepId, step.ProcessorId, Guid.Empty);
             state[CorrelationKeys.LogScope] = CorrelationKeys.Render(correlationId);
 
             using (logger.BeginScope(state))
             {
+                if (step.EntryCondition == Never)
+                {
+                    logger.LogInformation(
+                        "the entry step is frozen — its entry condition is Never; skipping it");
+                    continue;
+                }
+
                 // Positional, in the canonical id order ProcessDispatch documents. The two
                 // Guid.Empty arguments are load-bearing sentinels rather than unset fields: the
                 // execution id because an entry dispatch opens no lineage and the author mints one,
