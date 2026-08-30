@@ -22,7 +22,14 @@ def normalise_server(url: str) -> str:
     a trailing slash, a default port spelled out explicitly, and
     ``127.0.0.1`` vs ``localhost``. A check that false-alarms on these
     trains operators to ignore it, which is worse than not checking."""
-    parsed = urllib.parse.urlsplit(url.strip())
+    stripped = url.strip()
+    if "://" not in stripped:
+        # urlsplit treats a scheme-less "host:port" as scheme="host",
+        # path="port" (no netloc at all) rather than defaulting the scheme --
+        # "cluster.example:6443" would otherwise normalise to
+        # "cluster.example://" and false-alarm against the real URL.
+        stripped = f"https://{stripped}"
+    parsed = urllib.parse.urlsplit(stripped)
     scheme = (parsed.scheme or "https").lower()
     host = (parsed.hostname or "").lower()
     if host == "127.0.0.1":
