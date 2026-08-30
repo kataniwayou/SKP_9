@@ -16,11 +16,33 @@ class FakeCluster:
         return self.stdout
 
 
+class PagedFakeCluster:
+    """Returns a different scripted response per call, in order -- for
+    testing SCAN's cursor-driven pagination, which a single fixed stdout
+    (FakeCluster) cannot simulate."""
+
+    def __init__(self, responses: list[str]):
+        self.calls: list[tuple[str, list[str]]] = []
+        self._responses = list(responses)
+
+    def exec(self, workload, argv):
+        self.calls.append((workload, argv))
+        return self._responses.pop(0)
+
+
 class PostgresTests(unittest.TestCase):
-    def test_rows_splits_on_pipes_and_newlines(self):
-        cluster = FakeCluster("a|1\nb|2")
+    def test_rows_are_parsed_as_csv(self):
+        cluster = FakeCluster("a,1\nb,2")
         rows = Postgres(cluster).rows("SELECT name, n FROM t")
         self.assertEqual(rows, [["a", "1"], ["b", "2"]])
+
+    def test_a_value_containing_a_pipe_survives_intact(self):
+        # I9: `-tAc` with the default `|` separator silently misaligned every
+        # column after a cell that itself contains a pipe -- a JSON schema
+        # definition with an alternation is exactly that realistic cell.
+        cluster = FakeCluster("a,json|schema\nb,2")
+        rows = Postgres(cluster).rows("SELECT name, schema FROM t")
+        self.assertEqual(rows[0], ["a", "json|schema"])
 
     def test_empty_output_is_no_rows(self):
         self.assertEqual(Postgres(FakeCluster("")).rows("SELECT 1"), [])
@@ -31,7 +53,7 @@ class PostgresTests(unittest.TestCase):
         workload, argv = cluster.calls[0]
         self.assertEqual(workload, "sts/postgres")
         self.assertEqual(argv[0], "sh")
-        self.assertIn('psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc', argv[2])
+        self.assertIn('psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t --csv -c', argv[2])
         self.assertEqual(argv[4], "SELECT 1")
 
     def test_a_double_quoted_identifier_survives_intact(self):
@@ -44,12 +66,28 @@ class PostgresTests(unittest.TestCase):
 
 class RedisTests(unittest.TestCase):
     def test_keys_returns_one_entry_per_line(self):
-        cluster = FakeCluster("skp:proc:a\nskp:proc:b")
+        cluster = FakeCluster("0\nskp:proc:a\nskp:proc:b")
         self.assertEqual(Redis(cluster).keys("skp:proc:*"), ["skp:proc:a", "skp:proc:b"])
-        self.assertEqual(cluster.calls[0][1], ["redis-cli", "KEYS", "skp:proc:*"])
+        self.assertEqual(cluster.calls[0][1],
+                         ["redis-cli", "SCAN", "0", "MATCH", "skp:proc:*", "COUNT", "1000"])
 
     def test_no_keys_is_an_empty_list_not_a_blank_entry(self):
-        self.assertEqual(Redis(FakeCluster("")).keys("nope:*"), [])
+        self.assertEqual(Redis(FakeCluster("0")).keys("nope:*"), [])
+
+    def test_KEYS_is_never_issued(self):
+        # I9: KEYS is O(N) and blocks the server for the duration -- exactly
+        # the "an investigation mutates the system it is investigating" risk.
+        cluster = FakeCluster("0\nskp:proc:a")
+        Redis(cluster).keys("skp:proc:*")
+        self.assertNotIn("KEYS", cluster.calls[0][1])
+        self.assertIn("SCAN", cluster.calls[0][1])
+
+    def test_keys_pages_through_multiple_SCAN_cursors(self):
+        cluster = PagedFakeCluster(["17\nskp:proc:a", "0\nskp:proc:b"])
+        self.assertEqual(Redis(cluster).keys("skp:proc:*"), ["skp:proc:a", "skp:proc:b"])
+        self.assertEqual(len(cluster.calls), 2)
+        self.assertEqual(cluster.calls[1][1],
+                         ["redis-cli", "SCAN", "17", "MATCH", "skp:proc:*", "COUNT", "1000"])
 
     def test_ttl_is_an_int(self):
         self.assertEqual(Redis(FakeCluster("40")).ttl("skp:proc:a:pod-1"), 40)

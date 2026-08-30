@@ -1,3 +1,6 @@
+import csv
+import io
+
 from skp.clients.http import Unreachable
 
 
@@ -13,9 +16,17 @@ class Postgres:
         self.workload = workload
 
     def rows(self, sql: str) -> list[list[str]]:
-        script = 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "$1"'
+        # I9: `-tAc` with the default `|` separator, split on "|", silently
+        # misaligns every column after a cell that itself contains a pipe -- a
+        # JSON schema definition with an alternation is exactly that cell, and
+        # exactly the realistic case for the Schemas table. `-t` still
+        # suppresses the header/footer; `--csv` makes the row shape unambiguous
+        # regardless of what a cell contains.
+        script = 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t --csv -c "$1"'
         out = self.cluster.exec(self.workload, ["sh", "-c", script, "sh", sql])
-        return [line.split("|") for line in out.splitlines() if line.strip()]
+        if not out.strip():
+            return []
+        return [row for row in csv.reader(io.StringIO(out)) if row]
 
     def ping(self) -> bool:
         try:

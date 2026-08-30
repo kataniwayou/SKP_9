@@ -12,7 +12,27 @@ class Redis:
         return self.cluster.exec(self.workload, ["redis-cli", *argv])
 
     def keys(self, pattern: str) -> list[str]:
-        return [k for k in self._cli("KEYS", pattern).splitlines() if k.strip()]
+        """Every key matching ``pattern``, read with ``SCAN`` rather than
+        ``KEYS``.
+
+        I9: ``KEYS`` is O(N) over the whole keyspace and blocks the server
+        for the duration -- an investigation that mutates the system it is
+        investigating (spec §15's own named risk), and ``skp:data:*`` on a
+        live system is exactly the unbounded case. ``SCAN`` walks the
+        keyspace in cursor-driven pages instead. The signature is unchanged.
+        """
+        found: list[str] = []
+        cursor = "0"
+        while True:
+            out = self._cli("SCAN", cursor, "MATCH", pattern, "COUNT", "1000")
+            lines = [line for line in out.splitlines() if line.strip()]
+            if not lines:
+                break
+            cursor, *batch = lines
+            found.extend(batch)
+            if cursor == "0":
+                break
+        return found
 
     def get(self, key: str) -> str:
         return self._cli("GET", key)
