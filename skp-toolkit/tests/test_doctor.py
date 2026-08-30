@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 from skp.profile import Profile
+from skp.result import EXIT_UNREACHABLE
 from skp.verbs.doctor import diagnose, run_with
 
 CATALOG = [{"id": "redis.Root", "component": "redis", "operation": "read key",
@@ -111,3 +112,22 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(any("this is the system, not the toolkit" in line
                             for line in result.lines))
         self.assertTrue(any("redis" in line for line in result.lines))
+
+    def test_a_reachability_only_failure_is_EXIT_UNREACHABLE_not_EXIT_DRIFT(self):
+        # I10: the branch's own text says "this is the system, not the toolkit" --
+        # the exit code has to agree, and NEXT: must not loop back into the doctor
+        # run that just produced it.
+        result = run_with(self.profile, clients(redis=Probeable(False)))
+        self.assertEqual(result.code, EXIT_UNREACHABLE)
+        self.assertNotEqual(result.next_command, "skp doctor")
+
+    def test_a_toolkit_failure_alongside_a_dead_store_still_gets_the_toolkit_fix(self):
+        # Merge-blocking minor: mixed-failure precedence. A toolkit check (source
+        # drift, generated files, catalog present) failing alongside a dead store
+        # must still recommend the toolkit remedy, not the "this is the system"
+        # reachability message -- recompiling is the actionable step either way.
+        self.source.write_text("edited", encoding="utf-8")
+        result = run_with(self.profile, clients(redis=Probeable(False)))
+        self.assertEqual(result.next_command, "skp init --refresh")
+        self.assertFalse(any("this is the system, not the toolkit" in line
+                             for line in result.lines))
