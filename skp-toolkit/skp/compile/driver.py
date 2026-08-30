@@ -19,6 +19,18 @@ SOURCE_MAP = {
     # this file's hash and registers as source drift instead of the hardcoded
     # prefix silently going stale.
     "api_version": "BaseApi.Core/Controllers/BaseController.cs",
+    # I4: the four sources ``ELASTICSEARCH_ENVELOPE`` and ``RESOURCE_LABELS`` name
+    # as their hand-listed authority, none of which previously matched SOURCE_MAP,
+    # CONTROLLER_GLOB, or METRICS_GLOB -- so editing or renaming any of them left
+    # the catalog stale with zero drift signal. No extractor reads these; `_read`
+    # returning text nobody parses is exactly what the "api_version" entry above
+    # already does, for the same reason.
+    "log_record_oracle": "tests/BaseApi.Tests/Live/Resilience/LogRecord.cs",
+    "observability_service_collection_extensions":
+        "BaseApi.Core/DependencyInjection/ObservabilityServiceCollectionExtensions.cs",
+    "base_console_observability_extensions":
+        "BaseConsole.Core/DependencyInjection/BaseConsoleObservabilityExtensions.cs",
+    "resource_attribute": "BaseConsole.Core/DependencyInjection/ResourceAttribute.cs",
 }
 
 CONTROLLER_GLOB = "BaseApi.Service/Features/**/*Controller.cs"
@@ -51,6 +63,11 @@ def _missing_fixed_path_problems(source_root: pathlib.Path) -> list[str]:
     problem, not an empty string quietly fed to an extractor."""
     return [f"SOURCE_MAP path missing: {rel} (component data extracted from it is lost)"
             for rel in SOURCE_MAP.values() if not (source_root / rel).exists()]
+
+
+def _metrics_texts(source_root: pathlib.Path) -> list[str]:
+    return [p.read_text(encoding="utf-8") for p in sorted(source_root.glob(METRICS_GLOB))
+            if "obj" not in p.parts and "bin" not in p.parts]
 
 
 CLUSTER_OPERATIONS = [
@@ -99,9 +116,7 @@ def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
         _read(source_root, SOURCE_MAP["execution_log_scope"]),
         _read(source_root, SOURCE_MAP["correlation_keys"]))
     surfaces += extract.pg_tables(_read(source_root, SOURCE_MAP["dbcontext"]))
-    surfaces += extract.metrics([
-        p.read_text(encoding="utf-8") for p in sorted(source_root.glob(METRICS_GLOB))
-        if "obj" not in p.parts and "bin" not in p.parts])
+    surfaces += extract.metrics(_metrics_texts(source_root))
     surfaces += extract.resource_labels()
     surfaces += extract.rest_endpoints({
         p.name: p.read_text(encoding="utf-8")
@@ -121,7 +136,9 @@ def compile_catalog(source_root: pathlib.Path, annotations_dir: pathlib.Path,
     surfaces = collect_surfaces(source_root)
     annotations = load_annotations(annotations_dir)
     entries = build(surfaces, annotations)
-    problems = check(entries, surfaces, annotations) + _missing_fixed_path_problems(source_root)
+    problems = (check(entries, surfaces, annotations)
+               + _missing_fixed_path_problems(source_root)
+               + extract.metric_label_gaps(_metrics_texts(source_root)))
 
     out_dir.mkdir(parents=True, exist_ok=True)
     catalog_path = out_dir / "catalog.json"
