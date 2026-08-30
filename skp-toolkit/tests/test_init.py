@@ -149,6 +149,47 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(profile.source_root, str(self.src))
         self.assertEqual(profile.project, "skp")
 
+    def test_an_unknown_endpoint_name_is_rejected_not_silently_persisted(self):
+        result = self._run(["--home", str(self.home), "--source-root", str(self.src),
+                            "--cluster-url", "https://c", "--project", "skp",
+                            "--endpoint", "elastic=http://typo:9200"])
+        self.assertNotEqual(result.code, 0)
+        self.assertIsNotNone(result.next_command)
+        self.assertFalse((self.home / "profile.json").exists())
+
+    def test_postgres_is_not_a_configurable_endpoint(self):
+        result = self._run(["--home", str(self.home), "--source-root", str(self.src),
+                            "--cluster-url", "https://c", "--project", "skp",
+                            "--endpoint", "postgres=http://postgres:5432"])
+        self.assertNotEqual(result.code, 0)
+
+    def test_a_valid_endpoint_name_is_accepted(self):
+        self._run(["--home", str(self.home), "--source-root", str(self.src),
+                   "--cluster-url", "https://c", "--project", "skp",
+                   "--endpoint", "prometheus=http://custom-prom:9090"])
+        self.assertEqual(Profile.load(self.home).endpoints["prometheus"],
+                         "http://custom-prom:9090")
+
+    def test_cluster_url_is_derived_when_absent(self):
+        with unittest.mock.patch("skp.verbs.init.detect_binary", return_value="oc"),              unittest.mock.patch("skp.verbs.init.active_server",
+                                 return_value="https://derived.example:6443"):
+            self._run(["--home", str(self.home), "--source-root", str(self.src),
+                       "--project", "skp"])
+        self.assertEqual(Profile.load(self.home).cluster_url, "https://derived.example:6443")
+
+    def test_a_supplied_cluster_url_is_kept_as_an_assertion_not_overwritten(self):
+        self._first_init()
+        self.assertEqual(Profile.load(self.home).cluster_url, "https://c")
+
+    def test_a_failed_derivation_is_EXIT_UNREACHABLE_with_NEXT(self):
+        from skp.clients.http import Unreachable as _Unreachable
+        with unittest.mock.patch("skp.verbs.init.detect_binary",
+                                 side_effect=_Unreachable("cluster", "no oc or kubectl")):
+            result = self._run(["--home", str(self.home), "--source-root", str(self.src),
+                                "--project", "skp"])
+        self.assertNotEqual(result.code, 0)
+        self.assertIsNotNone(result.next_command)
+
     def test_a_fresh_init_missing_a_required_flag_fails_with_NEXT(self):
         result = self._run(["--home", str(self.home), "--source-root", str(self.src)])
         self.assertNotEqual(result.code, 0)

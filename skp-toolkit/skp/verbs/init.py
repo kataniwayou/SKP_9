@@ -2,7 +2,7 @@ import argparse
 import pathlib
 
 from skp.clients.api import BaseApi
-from skp.clients.cluster import ClusterClient, detect_binary
+from skp.clients.cluster import ClusterClient, active_server, detect_binary
 from skp.clients.es import Elastic
 from skp.clients.http import HttpClient, Unreachable
 from skp.clients.pg import Postgres
@@ -62,7 +62,8 @@ class MissingBinary:
 
 def build_clients(profile: Profile) -> dict:
     try:
-        cluster = ClusterClient(profile.project, binary=detect_binary())
+        cluster = ClusterClient(profile.project, binary=detect_binary(),
+                                expected_server=profile.cluster_url)
     except Unreachable as exc:
         cluster = MissingBinary(exc.detail)
     token = profile.token
@@ -133,9 +134,11 @@ def run(argv: list[str]) -> Result:
         cluster_url = ns.cluster_url if ns.cluster_url is not None else stored.cluster_url
         project = ns.project if ns.project is not None else stored.project
     else:
+        # --cluster-url is not in this required list: spec §5 says init asks
+        # only for what it cannot derive, and the cluster's own active
+        # context supplies it below when the flag is absent.
         missing = [flag for flag, value in
                    (("--source-root", ns.source_root),
-                    ("--cluster-url", ns.cluster_url),
                     ("--project", ns.project)) if value is None]
         if missing:
             return Result(EXIT_USAGE,
@@ -146,6 +149,20 @@ def run(argv: list[str]) -> Result:
         cluster_url = ns.cluster_url
         project = ns.project
 
+    if cluster_url is None:
+        # A supplied --cluster-url is an assertion (verified once ClusterClient
+        # starts making calls); an absent one is derived from the active
+        # kube context, the same context every later call will use.
+        try:
+            cluster_url = active_server(detect_binary())
+        except Unreachable as exc:
+            return Result(EXIT_UNREACHABLE,
+                          [f"could not derive --cluster-url from the active kube "
+                           f"context: {exc.detail}",
+                           "pass --cluster-url explicitly"],
+                          next_command="skp init --source-root <path> "
+                                       "--cluster-url <url> --project <name>")
+
     # Endpoint resolution layers, in order: the built-in defaults, then a
     # stored profile's overrides (--refresh only — there is nothing stored on
     # a fresh init), then --endpoint flags actually passed on this call.
@@ -153,7 +170,17 @@ def run(argv: list[str]) -> Result:
     if stored is not None:
         endpoints.update(stored.endpoints)
     for pair in ns.endpoint:
-        name, _, url = pair.partition("=")
+        name, sep, url = pair.partition("=")
+        if not sep or name not in DEFAULT_ENDPOINTS:
+            # I7: an unknown or mistyped --endpoint name used to be accepted,
+            # persisted, and then never read by anything -- it looks applied
+            # and silently is not. postgres/redis/rabbitmq are not
+            # configurable this way; their workloads are hardcoded in
+            # pg.py/redis.py/rabbit.py (a deliberate deferral, see the brief).
+            valid = ", ".join(sorted(DEFAULT_ENDPOINTS))
+            return Result(EXIT_USAGE,
+                          [f"--endpoint {pair!r}: expected NAME=URL with NAME one of: {valid}"],
+                          next_command="skp init --endpoint <name>=<url> ...")
         endpoints[name] = url
 
     profile = Profile(
