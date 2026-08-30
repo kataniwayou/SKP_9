@@ -121,6 +121,13 @@ class NormaliseServerTests(unittest.TestCase):
         self.assertNotEqual(normalise_server("https://cluster-a.example"),
                             normalise_server("https://cluster-b.example"))
 
+    def test_a_scheme_less_url_defaults_to_https_like_the_bare_form(self):
+        # Minor 4: urlsplit("cluster.example:6443") parses scheme=
+        # "cluster.example" and an empty host -- normalising to
+        # "cluster.example://" instead of defaulting the missing scheme.
+        self.assertEqual(normalise_server("cluster.example:6443"),
+                         normalise_server("https://cluster.example:6443"))
+
 
 class ActiveServerTests(unittest.TestCase):
     def test_reads_the_server_from_config_view(self):

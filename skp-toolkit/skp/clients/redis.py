@@ -33,7 +33,10 @@ class Redis:
             found.extend(batch)
             if cursor == "0":
                 break
-        return found
+        # SCAN's cursor-driven pages may re-emit a key across iterations
+        # (unlike KEYS, which never did) -- de-duplicate while keeping a
+        # deterministic order so a caller counting keys does not over-count.
+        return sorted(dict.fromkeys(found))
 
     def get(self, key: str) -> str:
         return self._cli("GET", key)

@@ -113,6 +113,12 @@ class RedisTests(unittest.TestCase):
         self.assertTrue(Redis(FakeCluster("PONG")).ping())
         self.assertFalse(Redis(FakeCluster("")).ping())
 
+    def test_a_key_reemitted_across_scan_pages_is_returned_once(self):
+        # Minor 3: SCAN may re-emit a key across cursor iterations (KEYS
+        # never did) -- the second page repeats "skp:proc:a".
+        cluster = PagedFakeCluster(["17\nskp:proc:a", "0\nskp:proc:a\nskp:proc:b"])
+        self.assertEqual(Redis(cluster).keys("skp:proc:*"), ["skp:proc:a", "skp:proc:b"])
+
     def test_ping_records_the_unreachable_detail_as_last_error(self):
         redis = Redis(FailingCluster("connection refused"))
         self.assertFalse(redis.ping())
