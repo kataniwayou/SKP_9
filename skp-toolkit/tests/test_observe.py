@@ -147,7 +147,10 @@ class LivenessTests(unittest.TestCase):
     def test_a_fresh_instance_is_reported_fresh(self):
         now = time.time()
         ts = datetime.fromtimestamp(now, tz=timezone.utc).isoformat()
-        value = json.dumps({"timestamp": ts, "interval": 1000, "status": "Healthy"})
+        # "interval" is whole seconds on the wire (ProcessorLivenessOptions.
+        # IntervalSeconds), not milliseconds -- 10 matches the sample's own
+        # appsettings.json default.
+        value = json.dumps({"timestamp": ts, "interval": 10, "status": "Healthy"})
         redis = FakeRedis(members={"skp:proc:proc-1": ["inst-1"]},
                           values={"skp:proc:proc-1:inst-1": value})
         code, lines = observe.liveness(ENTRIES, redis, "proc-1", now)
