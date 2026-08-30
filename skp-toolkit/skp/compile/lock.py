@@ -27,6 +27,17 @@ def build_lock(sources, generated, root: pathlib.Path) -> dict:
     }
 
 
+def build_lock_two_roots(sources, source_root: pathlib.Path,
+                         generated, generated_root: pathlib.Path) -> dict:
+    """Sources and generated files live under different roots, so each is
+    recorded relative to its own. One shared root would force absolute paths,
+    which do not survive the bundle being moved."""
+    return {
+        "sources": {_relative(p, source_root): hash_file(p) for p in sources},
+        "generated": {_relative(p, generated_root): hash_file(p) for p in generated},
+    }
+
+
 def _changed(section: dict, root: pathlib.Path) -> list[str]:
     return sorted(rel for rel, digest in section.items()
                   if hash_file(root / rel) != digest)

@@ -9,8 +9,10 @@ from skp.clients.pg import Postgres
 from skp.clients.prom import Prometheus
 from skp.clients.rabbit import Rabbit
 from skp.clients.redis import Redis
+from skp.compile.catalog import CatalogError
+from skp.compile.driver import compile_catalog
 from skp.profile import Profile, default_home
-from skp.result import EXIT_OK, EXIT_UNREACHABLE, Result
+from skp.result import EXIT_DRIFT, EXIT_OK, EXIT_UNREACHABLE, Result
 
 PROBE_ORDER = ["cluster", "postgres", "redis", "rabbitmq",
                "elasticsearch", "prometheus", "baseapi"]
@@ -20,6 +22,8 @@ DEFAULT_ENDPOINTS = {
     "prometheus": "http://prometheus:9090",
     "elasticsearch": "http://elasticsearch:9200",
 }
+
+ANNOTATIONS_DIR = pathlib.Path(__file__).resolve().parent.parent / "annotations"
 
 
 class ClusterProbe:
@@ -130,9 +134,27 @@ def run(argv: list[str]) -> Result:
     )
     profile.save(token=ns.token)
 
+    try:
+        entries, problems = compile_catalog(
+            pathlib.Path(ns.source_root), ANNOTATIONS_DIR, profile.home / "model")
+    except CatalogError as exc:
+        return Result(EXIT_DRIFT,
+                      [f"memory folder: {profile.home}",
+                       "the annotation files contradict each other:",
+                       *(f"  {line}" for line in str(exc).splitlines())],
+                      next_command="skp doctor")
+
     rows = probe(build_clients(profile))
-    lines = [f"memory folder: {profile.home}", "", render_table(rows)]
+    lines = [f"memory folder: {profile.home}",
+             f"catalogued {len(entries)} capabilities from {ns.source_root}",
+             "", render_table(rows)]
+
     dead = [name for name, ok, _ in rows if not ok]
+    if problems:
+        return Result(EXIT_DRIFT,
+                      [*lines, "", f"{len(problems)} catalog problem(s):",
+                       *(f"  {p}" for p in problems)],
+                      next_command="skp doctor")
     if dead:
         return Result(EXIT_UNREACHABLE,
                       [*lines, "", f"unreachable: {', '.join(dead)}"],
