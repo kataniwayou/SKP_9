@@ -69,7 +69,28 @@ class FakeHttp:
         raise Unreachable("http", f"connection refused for {path}")
 
 
+def _flatten(obj, prefix=""):
+    """Test-side twin of the real (now-retired) verify._flatten_paths --
+    still needed here so FakeElastic.exists() can answer an ``exists``
+    filter against a nested hit the same way the real per-document flatten
+    used to."""
+    paths = {}
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            path = f"{prefix}.{key}" if prefix else key
+            paths[path] = value
+            paths.update(_flatten(value, path))
+    return paths
+
+
 class FakeElastic:
+    """Deliberately shallow for ``term``/``prefix`` clauses (any non-empty
+    ``hits`` confirms a template -- these tests pin wire-level behaviour, not
+    real ES matching semantics) but does honour ``exists`` clauses by field
+    path, because the fault-path-attribute tests specifically need "hits
+    present, but not for *this* field" to distinguish CONFIRMED from
+    NOT_OBSERVED.
+    """
     def __init__(self, http, hits=()):
         self.http = http
         self._hits = list(hits)
@@ -79,6 +100,16 @@ class FakeElastic:
 
     def search(self, body):
         return self._hits
+
+    def exists(self, filter_clauses):
+        for clause in filter_clauses:
+            if "exists" in clause:
+                field = clause["exists"]["field"]
+                if not any(field in _flatten(hit) for hit in self._hits):
+                    return False
+            elif not self._hits:
+                return False
+        return True
 
 
 class FakePrometheus:
@@ -360,6 +391,71 @@ class RabbitChecksTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------
+# rabbitmq -- Gap 3: actionable REFUTED (orphans + deployment status)
+# ---------------------------------------------------------------------
+
+PID1 = "11111111-1111-1111-1111-111111111111"
+PID2 = "22222222-2222-2222-2222-222222222222"
+ORPHAN_GUID = "99999999-9999-9999-9999-999999999999"
+
+
+class RabbitOrphanAndDeploymentTests(unittest.TestCase):
+    def entry(self, local_id, detail):
+        return {"id": f"rabbitmq.processor.{local_id}", "component": "rabbitmq",
+               "operation": "list_queues", "detail": detail}
+
+    def test_broker_side_orphan_queues_are_named_in_a_confirmed_claim(self):
+        """Both live processors have their queue, but a stray queue on the
+        broker matches no processors row at all -- the reverse of the usual
+        catalog-side check, and it must not be silently dropped just because
+        every catalogued claim itself confirms."""
+        entries = [self.entry("Work", "processor-{processorId}")]
+        rabbit = FakeRabbit(queue_names=[f"processor-{PID1}", f"processor-{PID2}",
+                                         f"processor-{ORPHAN_GUID}.dead"])
+        claims = verify.check_rabbitmq(entries, rabbit, processor_ids=[PID1, PID2])
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertIn(f"processor-{ORPHAN_GUID}.dead", claims[0].message)
+        self.assertIn("no processors row", claims[0].message)
+
+    def test_broker_side_orphan_queues_are_named_alongside_a_refuted_claim(self):
+        entries = [self.entry("Work", "processor-{processorId}")]
+        rabbit = FakeRabbit(queue_names=[f"processor-{ORPHAN_GUID}"])  # PID1 missing entirely
+        claims = verify.check_rabbitmq(entries, rabbit, processor_ids=[PID1])
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+        self.assertIn(f"processor-{ORPHAN_GUID}", claims[0].message)
+        self.assertIn("no processors row", claims[0].message)
+
+    def test_a_missing_queue_for_a_never_registered_processor_says_so(self):
+        """No skp:proc:<id> key anywhere -- this processor row has never
+        seen a live replica, so the remedy is deploy, not investigate."""
+        entries = [self.entry("Work", "processor-{processorId}")]
+        rabbit = FakeRabbit(queue_names=[])
+        redis = FakeRedis(keys_by_pattern={})
+        claims = verify.check_rabbitmq(entries, rabbit, processor_ids=[PID1], redis_client=redis)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+        self.assertIn("never registered a replica", claims[0].message)
+        self.assertIn("never deployed", claims[0].message)
+
+    def test_a_missing_queue_for_a_previously_registered_processor_says_so(self):
+        """skp:proc:<id> exists -- a replica registered at some point, so the
+        queue existed and was removed; the remedy is cleanup, not deploy."""
+        entries = [self.entry("Work", "processor-{processorId}")]
+        rabbit = FakeRabbit(queue_names=[])
+        redis = FakeRedis(keys_by_pattern={f"skp:proc:{PID1}": [f"skp:proc:{PID1}:pod-1"]})
+        claims = verify.check_rabbitmq(entries, rabbit, processor_ids=[PID1], redis_client=redis)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+        self.assertIn("registered at least one replica", claims[0].message)
+        self.assertIn("its queue existed and was removed", claims[0].message)
+
+    def test_deployment_status_is_unknown_when_redis_is_unreachable(self):
+        entries = [self.entry("Work", "processor-{processorId}")]
+        rabbit = FakeRabbit(queue_names=[])
+        claims = verify.check_rabbitmq(entries, rabbit, processor_ids=[PID1], redis_client=None)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+        self.assertIn("deployment status unknown", claims[0].message)
+
+
+# ---------------------------------------------------------------------
 # elasticsearch
 # ---------------------------------------------------------------------
 
@@ -418,32 +514,74 @@ class ElasticsearchChecksTests(unittest.TestCase):
         captured = []
 
         class RecordingElastic:
-            def search(self, body):
-                captured.append(body)
-                return []
+            def exists(self, filter_clauses):
+                captured.append(filter_clauses)
+                return False
 
         entries = [{"id": "elasticsearch.TerminalCompleted", "component": "elasticsearch",
                    "operation": "search by attributes.{OriginalFormat}",
                    "detail": "the workflow terminated — completed"}]
         verify.check_elasticsearch(entries, RecordingElastic())
         self.assertEqual(len(captured), 1)
-        query = captured[0]["query"]["bool"]["filter"][0]
+        query = captured[0][0]
         self.assertIn("prefix", query)
         self.assertEqual(query["prefix"]["attributes.{OriginalFormat}"], "the workflow terminated ")
 
-    def test_message_template_query_is_bounded_by_size(self):
+    def test_message_template_existence_query_uses_the_full_template_as_a_term(self):
+        """check_elasticsearch delegates the existence question to
+        Elastic.exists() -- itself pinned bounded (size=0, track_total_hits=1)
+        in ElasticTests -- rather than building a search body here, so this
+        only needs to pin the filter clause shape it hands over."""
         captured = []
 
         class RecordingElastic:
-            def search(self, body):
-                captured.append(body)
-                return []
+            def exists(self, filter_clauses):
+                captured.append(filter_clauses)
+                return False
 
         entries = [{"id": "elasticsearch.EntryDispatched", "component": "elasticsearch",
                    "operation": "search by attributes.{OriginalFormat}",
                    "detail": "entry step {StepId} dispatched"}]
         verify.check_elasticsearch(entries, RecordingElastic())
-        self.assertEqual(captured[0]["size"], 1)
+        self.assertEqual(captured[0], [{"term": {"attributes.{OriginalFormat}":
+                                                  "entry step {StepId} dispatched"}}])
+
+    def test_a_template_never_found_across_full_retention_names_the_window(self):
+        entries = [{"id": "elasticsearch.RefusingAndParking", "component": "elasticsearch",
+                   "operation": "search by attributes.{OriginalFormat}",
+                   "detail": "refusing and parking {EntryId}"}]
+
+        class NeverFound:
+            def exists(self, filter_clauses):
+                return False
+
+        claims = verify.check_elasticsearch(entries, NeverFound())
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+        self.assertIn(verify.RETENTION_NOTE, claims[0].message)
+
+    def test_an_attribute_existence_query_uses_the_attribute_path(self):
+        captured = []
+
+        class RecordingElastic:
+            def exists(self, filter_clauses):
+                captured.append(filter_clauses)
+                return True
+
+        entries = [{"id": "elasticsearch.attr.Queue", "component": "elasticsearch",
+                   "operation": "search by attributes.Queue", "detail": "x"}]
+        claims = verify.check_elasticsearch(entries, RecordingElastic())
+        self.assertEqual(captured[0], [{"exists": {"field": "attributes.Queue"}}])
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_an_elasticsearch_existence_query_failure_is_unverifiable(self):
+        class Failing:
+            def exists(self, filter_clauses):
+                raise Unreachable("elasticsearch", "timeout")
+
+        entries = [{"id": "elasticsearch.attr.Queue", "component": "elasticsearch",
+                   "operation": "search by attributes.Queue", "detail": "x"}]
+        claims = verify.check_elasticsearch(entries, Failing())
+        self.assertEqual(claims[0].verdict, verify.UNVERIFIABLE)
 
     def test_a_nested_resource_attribute_path_is_resolved(self):
         entries = [{"id": "elasticsearch.attr.service_instance_id", "component": "elasticsearch",
@@ -898,6 +1036,159 @@ class RedisChecksTests(unittest.TestCase):
         claims = verify.check_redis(entries, client)
         self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
 
+    def _with_tight_scan_timing(self, window, poll, fn):
+        original = (verify._KEEPER_PROBE_WINDOW_S, verify._KEEPER_PROBE_POLL_S)
+        verify._KEEPER_PROBE_WINDOW_S, verify._KEEPER_PROBE_POLL_S = window, poll
+        try:
+            return fn()
+        finally:
+            verify._KEEPER_PROBE_WINDOW_S, verify._KEEPER_PROBE_POLL_S = original
+
+    def test_keeper_probe_never_caught_is_a_permanent_exclusion_not_a_generic_skip(self):
+        entries = [{"id": "redis.KeeperProbe", "component": "redis", "operation": "read key",
+                   "detail": "skp:keeper:probe:{h}"}]
+        client = FakeRedis(keys_by_pattern={})
+        claims = self._with_tight_scan_timing(
+            0.02, 0.01, lambda: verify.check_redis(entries, client))
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+        self.assertIn("PERMANENT EXCLUSION", claims[0].message)
+        self.assertIn("KeeperProbe", claims[0].message)
+
+    def test_keeper_probe_caught_mid_flight_by_the_tight_scan_is_confirmed(self):
+        """A fake whose .keys() only returns something from its third call on
+        pins that the loop actually retries rather than giving up after the
+        first (already-empty, ordinary) SCAN."""
+        entries = [{"id": "redis.KeeperProbe", "component": "redis", "operation": "read key",
+                   "detail": "skp:keeper:probe:{h}"}]
+
+        class EventuallyPopulated:
+            def __init__(self):
+                self.calls = 0
+
+            def keys(self, pattern):
+                self.calls += 1
+                return ["skp:keeper:probe:abc"] if self.calls >= 3 else []
+
+        client = EventuallyPopulated()
+        claims = self._with_tight_scan_timing(
+            1.0, 0.001, lambda: verify.check_redis(entries, client))
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertGreaterEqual(client.calls, 3)
+
+    def test_other_families_are_unaffected_by_the_keeper_probe_special_case(self):
+        entries = [{"id": "redis.Root", "component": "redis", "operation": "read key",
+                   "detail": "skp:{workflowId}"}]
+        client = FakeRedis(keys_by_pattern={})
+        claims = verify.check_redis(entries, client)
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+        self.assertNotIn("PERMANENT EXCLUSION", claims[0].message)
+
+
+class FakePostHttp:
+    """Backs ``--probe-runs`` tests: records every ``post_json`` call and
+    either returns ``None`` (a 202-with-no-body success) or raises
+    ``Unreachable`` when constructed with ``fail=``."""
+
+    def __init__(self, fail=None):
+        self.posts: list[tuple[str, object]] = []
+        self._fail = fail
+
+    def post_json(self, path, body):
+        self.posts.append((path, body))
+        if self._fail:
+            raise Unreachable("baseapi", self._fail)
+        return None
+
+
+class ProbeRunsTests(unittest.TestCase):
+    ORCH_ENTRY = {"id": "api.orchestration.post_start", "component": "api",
+                 "operation": "POST /api/v1.0/orchestration/start", "detail": "orchestration"}
+    NOT_OBSERVED_DATA_CLAIM = verify.Claim("redis", "redis.ExecutionData", verify.NOT_OBSERVED,
+                                           "no live keys matching skp:data:*")
+
+    def _with_probe_run_timing(self, attempts, poll, fn):
+        original = (verify._PROBE_RUN_ATTEMPTS, verify._PROBE_RUN_POLL_S)
+        verify._PROBE_RUN_ATTEMPTS, verify._PROBE_RUN_POLL_S = attempts, poll
+        try:
+            return fn()
+        finally:
+            verify._PROBE_RUN_ATTEMPTS, verify._PROBE_RUN_POLL_S = original
+
+    def test_start_workflow_for_probe_uses_an_existing_id_and_the_catalogued_route(self):
+        http = FakePostHttp()
+        baseapi = FakeBaseApi(http, items_by_entity={"workflows": [{"id": "wf-1"}]})
+        workflow_id, note = verify.start_workflow_for_probe(
+            [self.ORCH_ENTRY], {"baseapi": baseapi})
+        self.assertEqual(workflow_id, "wf-1")
+        self.assertEqual(http.posts[0], ("/api/v1.0/orchestration/start", "wf-1"))
+        self.assertIn("wf-1", note)
+
+    def test_start_workflow_for_probe_with_no_workflows_registered_says_so(self):
+        baseapi = FakeBaseApi(FakePostHttp(), items_by_entity={"workflows": []})
+        workflow_id, note = verify.start_workflow_for_probe(
+            [self.ORCH_ENTRY], {"baseapi": baseapi})
+        self.assertIsNone(workflow_id)
+        self.assertIn("no workflow registered", note)
+
+    def test_start_workflow_for_probe_with_no_catalogued_route_says_so(self):
+        baseapi = FakeBaseApi(FakePostHttp(), items_by_entity={"workflows": [{"id": "wf-1"}]})
+        workflow_id, note = verify.start_workflow_for_probe([], {"baseapi": baseapi})
+        self.assertIsNone(workflow_id)
+        self.assertIn("route not found", note)
+
+    def test_apply_probe_runs_confirms_when_the_key_appears_in_flight(self):
+        class EventuallyPopulated:
+            def __init__(self):
+                self.calls = 0
+
+            def keys(self, pattern):
+                self.calls += 1
+                return ["skp:data:e1"] if self.calls >= 2 else []
+
+        baseapi = FakeBaseApi(FakePostHttp(), items_by_entity={"workflows": [{"id": "wf-1"}]})
+        clients = {"baseapi": baseapi, "redis": EventuallyPopulated()}
+        claims = self._with_probe_run_timing(5, 0.001, lambda: verify.apply_probe_runs(
+            [self.NOT_OBSERVED_DATA_CLAIM], [self.ORCH_ENTRY], clients, {"baseapi": True}))
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertIn("caught in flight", claims[0].message)
+
+    def test_apply_probe_runs_leaves_unrelated_claims_untouched(self):
+        other = verify.Claim("redis", "redis.Root", verify.CONFIRMED, "1 key(s)")
+        claims = verify.apply_probe_runs([other], [], {}, {"baseapi": True})
+        self.assertEqual(claims, [other])
+
+    def test_apply_probe_runs_leaves_already_confirmed_data_claim_untouched(self):
+        """A --probe-writes/--probe-runs combined run, or a race where a real
+        run happened to be in flight already, must never start a second
+        workflow just because the flag is set."""
+        confirmed = verify.Claim("redis", "redis.ExecutionData", verify.CONFIRMED, "1 key(s)")
+        http = FakePostHttp()
+        baseapi = FakeBaseApi(http, items_by_entity={"workflows": [{"id": "wf-1"}]})
+        claims = verify.apply_probe_runs(
+            [confirmed], [self.ORCH_ENTRY], {"baseapi": baseapi}, {"baseapi": True})
+        self.assertEqual(claims, [confirmed])
+        self.assertEqual(http.posts, [])
+
+    def test_apply_probe_runs_without_baseapi_reachable_says_so_and_does_not_start_anything(self):
+        http = FakePostHttp()
+        baseapi = FakeBaseApi(http, items_by_entity={"workflows": [{"id": "wf-1"}]})
+        claims = verify.apply_probe_runs(
+            [self.NOT_OBSERVED_DATA_CLAIM], [self.ORCH_ENTRY],
+            {"baseapi": baseapi}, {"baseapi": False})
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+        self.assertIn("baseapi unreachable", claims[0].message)
+        self.assertEqual(http.posts, [])
+
+    def test_apply_probe_runs_that_never_catches_the_key_says_so(self):
+        baseapi = FakeBaseApi(FakePostHttp(), items_by_entity={"workflows": [{"id": "wf-1"}]})
+        clients = {"baseapi": baseapi, "redis": FakeRedis(keys_by_pattern={})}
+        claims = self._with_probe_run_timing(2, 0.001, lambda: verify.apply_probe_runs(
+            [self.NOT_OBSERVED_DATA_CLAIM], [self.ORCH_ENTRY], clients, {"baseapi": True}))
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+        self.assertIn("--probe-runs", claims[0].message)
+        self.assertIn("never appeared", claims[0].message)
+        self.assertIn("no live keys matching skp:data:*", claims[0].message)  # original reason kept
+
 
 # ---------------------------------------------------------------------
 # cluster
@@ -965,6 +1256,48 @@ class VerifyAllTests(unittest.TestCase):
         claims = verify.verify_all(self.CATALOG, clients, component="postgres")
         self.assertTrue(all(c.component == "postgres" for c in claims))
 
+    def test_probe_runs_off_by_default_leaves_an_empty_data_family_not_observed(self):
+        entries = self.CATALOG + [{"id": "redis.ExecutionData", "component": "redis",
+                                   "operation": "read key", "detail": "skp:data:{id}"}]
+        clients = make_clients(redis=FakeRedis(keys_by_pattern={"skp:*": ["k"]}))
+        claims = verify.verify_all(entries, clients)
+        by_id = {c.surface_id: c for c in claims}
+        self.assertEqual(by_id["redis.ExecutionData"].verdict, verify.NOT_OBSERVED)
+        self.assertNotIn("--probe-runs", by_id["redis.ExecutionData"].message)
+
+    def test_probe_runs_flows_through_and_can_confirm_the_data_family(self):
+        entries = self.CATALOG + [
+            {"id": "redis.ExecutionData", "component": "redis", "operation": "read key",
+             "detail": "skp:data:{id}"},
+            {"id": "api.orchestration.post_start", "component": "api",
+             "operation": "POST /api/v1.0/orchestration/start", "detail": "orchestration"},
+        ]
+
+        class EventuallyPopulated:
+            def __init__(self):
+                self.calls = 0
+
+            def keys(self, pattern):
+                if pattern != "skp:data:*":
+                    return []
+                self.calls += 1
+                return ["skp:data:e1"] if self.calls >= 2 else []
+
+            def ping(self):
+                return True
+
+        baseapi = FakeBaseApi(FakePostHttp(), items_by_entity={"workflows": [{"id": "wf-1"}]})
+        clients = make_clients(redis=EventuallyPopulated(), baseapi=baseapi)
+        original = (verify._PROBE_RUN_ATTEMPTS, verify._PROBE_RUN_POLL_S)
+        verify._PROBE_RUN_ATTEMPTS, verify._PROBE_RUN_POLL_S = 5, 0.001
+        try:
+            claims = verify.verify_all(entries, clients, probe_runs=True)
+        finally:
+            verify._PROBE_RUN_ATTEMPTS, verify._PROBE_RUN_POLL_S = original
+        by_id = {c.surface_id: c for c in claims}
+        self.assertEqual(by_id["redis.ExecutionData"].verdict, verify.CONFIRMED)
+        self.assertIn("caught in flight", by_id["redis.ExecutionData"].message)
+
 
 # ---------------------------------------------------------------------
 # render_report -- every skip enumerable (Part 2)
@@ -1004,6 +1337,27 @@ class RenderReportTests(unittest.TestCase):
         text = "\n".join(lines)
         self.assertNotIn("--skips", text)
         self.assertIn("confirmed 2/2 (100%)", text)
+
+    def test_the_ratio_states_an_explicit_ceiling_when_refuted_or_permanently_excluded(self):
+        claims = [
+            verify.Claim("postgres", "postgres.workflows", verify.CONFIRMED, "3 row(s)"),
+            verify.Claim("rabbitmq", "rabbitmq.processor.Work", verify.REFUTED, "missing: x"),
+            verify.Claim("rabbitmq", "rabbitmq.processor.Dead", verify.REFUTED, "missing: y"),
+            verify.Claim("redis", "redis.KeeperProbe", verify.NOT_OBSERVED,
+                        "PERMANENT EXCLUSION: no call site writes this key"),
+        ]
+        lines = verify.render_report(claims)
+        text = "\n".join(lines)
+        self.assertIn("confirmed 1/4 (25%)", text)
+        self.assertIn("2 refuted", text)
+        self.assertIn("1 permanently excluded", text)
+        self.assertIn("maximum achievable 1/4", text)
+
+    def test_the_ratio_has_no_ceiling_clause_with_neither_refuted_nor_permanent(self):
+        lines = verify.render_report(self.CLAIMS[:2])
+        text = "\n".join(lines)
+        self.assertNotIn("maximum achievable", text)
+        self.assertNotIn("refuted", text)
 
 
 # ---------------------------------------------------------------------
