@@ -21,7 +21,7 @@ class HttpClient:
         self.timeout = timeout
         self._open = opener
 
-    def _request(self, path: str, params: dict | None, data: bytes | None):
+    def _fetch(self, path: str, params: dict | None, data: bytes | None) -> bytes:
         url = self.base + path
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
@@ -32,15 +32,21 @@ class HttpClient:
             request.add_header("Content-Type", "application/json")
         try:
             with self._open(request, timeout=self.timeout) as response:
-                raw = response.read()
+                return response.read()
         except urllib.error.HTTPError as exc:
             raise Unreachable(self.base, f"HTTP {exc.code} for {path}") from exc
         except (urllib.error.URLError, OSError) as exc:
             raise Unreachable(self.base, str(getattr(exc, "reason", exc))) from exc
+
+    def _request(self, path: str, params: dict | None, data: bytes | None):
+        raw = self._fetch(path, params, data)
         return json.loads(raw) if raw else None
 
     def get_json(self, path: str, params: dict | None = None):
         return self._request(path, params, None)
+
+    def get_text(self, path: str, params: dict | None = None) -> str:
+        return self._fetch(path, params, None).decode("utf-8", errors="replace")
 
     def post_json(self, path: str, body):
         return self._request(path, None, json.dumps(body).encode("utf-8"))
