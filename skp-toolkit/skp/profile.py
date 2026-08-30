@@ -31,6 +31,19 @@ def not_initialised() -> Result:
     )
 
 
+def not_compiled(home: pathlib.Path) -> Result:
+    """The memory folder exists but ``skp init`` never finished compiling a
+    catalog into it. Distinct from ``not_initialised()``: the folder is
+    plainly present, so telling the operator it is not is a wrong sentence
+    even though the ``NEXT:`` command is the same shape."""
+    return Result(
+        EXIT_NOT_INITIALISED,
+        [f"memory folder present at {home} but has no compiled catalog "
+         f"— 'skp init' did not finish"],
+        next_command="skp init --refresh",
+    )
+
+
 @dataclass
 class Profile:
     home: pathlib.Path
@@ -80,7 +93,12 @@ class Profile:
             raise ProfileMissing(str(path))
         body = json.loads(path.read_text(encoding="utf-8"))
         return cls(
-            home=pathlib.Path(body["home"]),
+            # ``home`` comes from the argument, not ``body["home"]``: the
+            # latter is an absolute path baked in at save time, and using it
+            # instead of the path we were actually asked to load from is
+            # I3 -- a copied/moved memory folder silently keeps reading the
+            # old location's token and catalog.
+            home=home,
             source_root=body["source_root"],
             cluster_url=body["cluster_url"],
             project=body["project"],
@@ -92,7 +110,9 @@ class Profile:
     @property
     def token(self) -> str:
         path = self.home / "token"
-        return path.read_text(encoding="utf-8") if path.exists() else ""
+        # .strip(): a trailing newline in the token file would otherwise be
+        # sent as part of the Authorization header value.
+        return path.read_text(encoding="utf-8").strip() if path.exists() else ""
 
     def redact(self, text: str) -> str:
         return redact(text, self.token)

@@ -1,9 +1,10 @@
 import json
 import pathlib
+import shutil
 import tempfile
 import unittest
 
-from skp.profile import Profile, ProfileMissing, not_initialised, redact
+from skp.profile import Profile, ProfileMissing, not_compiled, not_initialised, redact
 from skp.result import EXIT_NOT_INITIALISED
 
 
@@ -49,3 +50,28 @@ class ProfileTests(unittest.TestCase):
 
     def test_redact_is_a_no_op_for_an_empty_token(self):
         self.assertEqual(redact("nothing to hide", ""), "nothing to hide")
+
+    def test_a_moved_memory_folder_loads_against_its_new_location(self):
+        # I3: profile.json bakes in an absolute `home` at save time. Loading
+        # from a copy must resolve against where we were actually asked to
+        # load, not the path recorded inside the file.
+        self.make().save(token="sha256~MOVED")
+        moved = pathlib.Path(self.tmp.name) / "moved" / ".skp"
+        moved.parent.mkdir()
+        shutil.copytree(self.home, moved)
+
+        profile = Profile.load(moved)
+        self.assertEqual(profile.home, moved)
+        self.assertEqual(profile.token, "sha256~MOVED")
+
+    def test_a_trailing_newline_in_the_token_file_is_stripped(self):
+        self.make().save(token="sha256~X")
+        (self.home / "token").write_text("sha256~X\n", encoding="utf-8")
+        self.assertEqual(Profile.load(self.home).token, "sha256~X")
+
+    def test_not_compiled_names_the_folder_and_still_routes_forward(self):
+        result = not_compiled(self.home)
+        self.assertEqual(result.code, EXIT_NOT_INITIALISED)
+        self.assertNotIn("this machine has not been initialised", result.lines[0])
+        self.assertIn(str(self.home), result.lines[0])
+        self.assertIsNotNone(result.next_command)
