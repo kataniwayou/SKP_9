@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import unittest.mock as mock
 
+from skp.compile.catalog import CatalogError
 from skp.compile.driver import collect_surfaces, compile_catalog
 from skp.compile.lock import MISSING, stale_sources
 from skp.result import EXIT_DRIFT
@@ -33,6 +34,14 @@ LOG_RECORD = "internal sealed record LogRecord;"
 OBS_SVC_EXT = "public static class ObservabilityServiceCollectionExtensions { }"
 BASE_CONSOLE_OBS_EXT = "public static class BaseConsoleObservabilityExtensions { }"
 RESOURCE_ATTRIBUTE = "public sealed record ResourceAttribute(string LogKey, string MetricKey, object Value);"
+# C1: stub content for the two files pg_tables() scans to confirm the snake_case
+# naming convention before trusting pascal_to_snake() -- see extract.pg_tables.
+PERSIST_EXT = (
+    "internal static class PersistenceServiceCollectionExtensions "
+    "{ /* opts.UseNpgsql(...).UseSnakeCaseNamingConvention() */ }")
+BASE_DB_CONTEXT = (
+    "public abstract class BaseDbContext { "
+    "/* optionsBuilder.UseSnakeCaseNamingConvention(); */ }")
 
 
 def fake_source_root(root: pathlib.Path) -> pathlib.Path:
@@ -51,6 +60,8 @@ def fake_source_root(root: pathlib.Path) -> pathlib.Path:
         "BaseApi.Core/DependencyInjection/ObservabilityServiceCollectionExtensions.cs": OBS_SVC_EXT,
         "BaseConsole.Core/DependencyInjection/BaseConsoleObservabilityExtensions.cs": BASE_CONSOLE_OBS_EXT,
         "BaseConsole.Core/DependencyInjection/ResourceAttribute.cs": RESOURCE_ATTRIBUTE,
+        "BaseApi.Core/DependencyInjection/PersistenceServiceCollectionExtensions.cs": PERSIST_EXT,
+        "BaseApi.Core/Persistence/BaseDbContext.cs": BASE_DB_CONTEXT,
     }
     for rel, text in files.items():
         path = src / rel
@@ -245,7 +256,7 @@ class CatalogErrorTests(unittest.TestCase):
 
 _ALL_FIXTURE_IDS = [
     "redis.Root", "rabbitmq.processor.IdentityQuery", "rabbitmq.orchestrator.Control",
-    "elasticsearch.RunningTheStep", "postgres.Schemas", "prometheus.pipeline_queue_depth",
+    "elasticsearch.RunningTheStep", "postgres.schemas", "prometheus.pipeline_queue_depth",
     "api.workflows.get", "api.workflows.get_id", "api.workflows.post",
     "api.workflows.put_id", "api.workflows.delete_id",
 ]
@@ -356,3 +367,75 @@ class HandListedAuthorityTrackingTests(unittest.TestCase):
             self.assertIn(
                 "BaseConsole.Core/DependencyInjection/ResourceAttribute.cs",
                 stale_sources(lock, src))
+
+
+class SnakeCaseConventionTrackingTests(unittest.TestCase):
+    """C1: pg_tables() trusts pascal_to_snake() only after confirming
+    UseSnakeCaseNamingConvention() is actually wired, by scanning
+    PersistenceServiceCollectionExtensions.cs and BaseDbContext.cs. Both are
+    now tracked in SOURCE_MAP -- the same I4 shape -- so editing or renaming
+    either registers as drift instead of leaving the catalog silently
+    confident about table names EFCore no longer produces."""
+
+    def test_both_convention_files_are_tracked_in_the_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+            compile_catalog(src, notes, out)
+            lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
+            for rel in (
+                "BaseApi.Core/DependencyInjection/PersistenceServiceCollectionExtensions.cs",
+                "BaseApi.Core/Persistence/BaseDbContext.cs",
+            ):
+                self.assertIn(rel, lock["sources"], rel)
+                self.assertNotEqual(lock["sources"][rel], MISSING, rel)
+
+    def test_editing_base_db_context_registers_as_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            api_version_path = src / "BaseApi.Core" / "Controllers" / "BaseController.cs"
+            api_version_path.parent.mkdir(parents=True, exist_ok=True)
+            api_version_path.write_text('[ApiVersion("1.0")]', encoding="utf-8")
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+            compile_catalog(src, notes, out)
+            lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
+            self.assertEqual(stale_sources(lock, src), [])
+
+            base_db_context_path = src / "BaseApi.Core" / "Persistence" / "BaseDbContext.cs"
+            base_db_context_path.write_text(
+                base_db_context_path.read_text(encoding="utf-8") + "\n// edited",
+                encoding="utf-8")
+
+            self.assertIn(
+                "BaseApi.Core/Persistence/BaseDbContext.cs",
+                stale_sources(lock, src))
+
+
+class SnakeCaseConventionMissingTests(unittest.TestCase):
+    """C1: if a future edit drops UseSnakeCaseNamingConvention() from either
+    wiring point, compile_catalog must fail loudly rather than silently
+    keep emitting snake_case ids that no longer match the running schema."""
+
+    def test_dropping_the_convention_from_persistence_ext_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            (src / "BaseApi.Core" / "DependencyInjection"
+             / "PersistenceServiceCollectionExtensions.cs").write_text(
+                "internal static class PersistenceServiceCollectionExtensions { }",
+                encoding="utf-8")
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+            with self.assertRaises(CatalogError) as caught:
+                compile_catalog(src, notes, out)
+            self.assertIn("UseSnakeCaseNamingConvention", str(caught.exception))
