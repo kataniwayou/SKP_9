@@ -96,6 +96,7 @@ def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
     surfaces += extract.metrics([
         p.read_text(encoding="utf-8") for p in sorted(source_root.glob(METRICS_GLOB))
         if "obj" not in p.parts and "bin" not in p.parts])
+    surfaces += extract.resource_labels()
     surfaces += extract.rest_endpoints({
         p.name: p.read_text(encoding="utf-8")
         for p in sorted(source_root.glob(CONTROLLER_GLOB))})
