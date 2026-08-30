@@ -11,6 +11,12 @@ SOURCE_MAP = {
     "orchestrator_queues": "Messaging.Contracts/OrchestratorQueues.cs",
     "templates": "tests/BaseApi.Tests/Live/Resilience/Templates.cs",
     "dbcontext": "BaseApi.Service/AppDbContext.cs",
+    # Trivial one-liner: extract.API_PREFIX is hardcoded to "/api/v1.0" while the
+    # real version lives in [ApiVersion("1.0")] on this file. Not extracted (that
+    # is the fuller fix) -- tracked here at minimum, so a version bump changes
+    # this file's hash and registers as source drift instead of the hardcoded
+    # prefix silently going stale.
+    "api_version": "BaseApi.Core/Controllers/BaseController.cs",
 }
 
 CONTROLLER_GLOB = "BaseApi.Service/Features/**/*Controller.cs"

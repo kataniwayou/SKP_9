@@ -105,6 +105,34 @@ class CompileTests(unittest.TestCase):
             self.assertIn("catalog.json", lock["generated"])
 
 
+class ApiVersionTrackingTests(unittest.TestCase):
+    """Trivial one-liner: extract.API_PREFIX is hardcoded to "/api/v1.0" while
+    the real version lives in [ApiVersion("1.0")] on BaseController.cs, which
+    was not in _source_paths at all. Tracked at minimum, so an edit to that
+    file (a version bump, realistically) registers as source drift instead of
+    the hardcoded prefix silently going stale with no signal anywhere."""
+
+    def test_base_controller_cs_is_tracked_and_an_edit_is_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            src = fake_source_root(root)
+            api_version_path = src / "BaseApi.Core" / "Controllers" / "BaseController.cs"
+            api_version_path.parent.mkdir(parents=True, exist_ok=True)
+            api_version_path.write_text('[ApiVersion("1.0")]', encoding="utf-8")
+
+            notes = root / "annotations"
+            notes.mkdir()
+            (notes / "empty.json").write_text("{}", encoding="utf-8")
+            out = root / "model"
+            compile_catalog(src, notes, out)
+            lock = json.loads((out / "compile.lock").read_text(encoding="utf-8"))
+            self.assertIn("BaseApi.Core/Controllers/BaseController.cs", lock["sources"])
+
+            api_version_path.write_text('[ApiVersion("2.0")]', encoding="utf-8")
+            self.assertIn("BaseApi.Core/Controllers/BaseController.cs",
+                          stale_sources(lock, src))
+
+
 class NewFileDriftTests(unittest.TestCase):
     """I8: stale_sources used to walk only paths the lock already knew, so a
     newly *added* controller (or *Metrics.cs) file was undetectable -- the
