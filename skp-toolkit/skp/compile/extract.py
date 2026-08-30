@@ -73,6 +73,94 @@ def templates(text: str) -> list[Surface]:
         key=lambda s: s.id)
 
 
+_PLACEHOLDER = re.compile(r"\{([A-Za-z_]\w*)\}")
+_TOSTRING_FORMAT = re.compile(r'\.ToString\(\s*"(\w)"\s*\)')
+
+ELASTICSEARCH_ENVELOPE = [
+    ("timestamp", "@timestamp",
+     "record time; arrives as either an ISO-8601 string or epoch milliseconds with a fractional part"),
+    ("body_text", "body.text", "the rendered message text"),
+    ("original_format", "attributes.{OriginalFormat}",
+     "the unsubstituted template -- what templates() catalogues one surface per"),
+    ("service_name", "resource.attributes.service.name", "which role emitted the record"),
+    ("scope_name", "scope.name", "the .NET logger category name"),
+]
+"""Hand-listed, not extracted: none of this is C#. The authority is
+``tests/BaseApi.Tests/Live/Resilience/LogRecord.cs`` (``FromSource``) -- the
+actual field-by-field reader an existing verifier trusts, so drift here would
+mean the catalog and that oracle disagree about the document shape."""
+
+
+def log_attributes(templates_text: str, scope_text: str, correlation_text: str) -> list[Surface]:
+    """Every field an Elasticsearch log record can be queried by, across the
+    three C# sources plus the one hand-listed envelope (see
+    ``ELASTICSEARCH_ENVELOPE``).
+
+    **Message-scoped.** Every ``{Placeholder}`` in a log template becomes
+    ``attributes.<Placeholder>`` -- mechanical, since ``templates()`` already
+    reads all 26 templates and the vocabulary is just their placeholders.
+    Present only on the records whose own template names it.
+
+    **Dispatch-scope.** The five ``ExecutionLogScope`` ids ride the scope
+    ``ProcessDispatchHandler`` opens for the whole hop, so they appear on
+    every record that hop writes whether or not its template names them --
+    a different presence rule from the message-scoped attributes above, and
+    the ``detail`` text says so.
+
+    **The trap.** ``ExecutionLogScope.BuildScope`` renders every id with
+    ``ToString("D")`` (hyphenated); ``CorrelationKeys.Render`` renders with
+    ``ToString("N")`` (32 lowercase hex, no dashes) -- verified here by
+    scanning both sources for the literal format character rather than
+    trusting prose, so a future rendering change shows up as a changed
+    surface instead of a stale comment. A query formatting one id like the
+    other returns zero hits.
+    """
+    out: list[Surface] = []
+
+    sources: dict[str, list[str]] = {}
+    for template_name, template_value in const_strings(templates_text).items():
+        for placeholder in _PLACEHOLDER.findall(template_value):
+            sources.setdefault(placeholder, []).append(template_name)
+    for name, from_templates in sorted(sources.items()):
+        example = sorted(from_templates)[0]
+        out.append(_surface(
+            "elasticsearch", f"attr.{name}",
+            f"search by attributes.{name}",
+            f"attributes.{name} -- message-scoped placeholder, present only on a record whose "
+            f"own template names it (e.g. {example})"))
+
+    scope_consts = const_strings(scope_text)
+    scope_formats = sorted(set(_TOSTRING_FORMAT.findall(scope_text)))
+    scope_format = scope_formats[0] if len(scope_formats) == 1 else ("/".join(scope_formats) or "?")
+    for _member, value in sorted(scope_consts.items(), key=lambda kv: kv[1]):
+        out.append(_surface(
+            "elasticsearch", f"attr.{value}",
+            f"search by attributes.{value}",
+            f'attributes.{value} -- dispatch-scope id (ExecutionLogScope.BuildScope), rides every '
+            f'record the hop writes regardless of its own template; renders "{scope_format}" '
+            f'(hyphenated) -- DIFFERENT from CorrelationId, which renders "N" (no dashes)'))
+
+    correlation_consts = const_strings(correlation_text)
+    correlation_formats = sorted(set(_TOSTRING_FORMAT.findall(correlation_text)))
+    correlation_format = (correlation_formats[0] if len(correlation_formats) == 1
+                          else ("/".join(correlation_formats) or "?"))
+    for _member, value in sorted(correlation_consts.items(), key=lambda kv: kv[1]):
+        out.append(_surface(
+            "elasticsearch", f"attr.{value}",
+            f"search by attributes.{value}",
+            f'attributes.{value} -- cross-boundary correlation id (CorrelationKeys.Render); renders '
+            f'"{correlation_format}" (32 lowercase hex, no dashes) -- DIFFERENT from every '
+            f'ExecutionLogScope id, which renders "{scope_format}" (hyphenated)'))
+
+    for name, path, note in ELASTICSEARCH_ENVELOPE:
+        out.append(_surface(
+            "elasticsearch", f"attr.{name}",
+            f"read {path}",
+            f"{path} -- fixed envelope field, hand-listed from LogRecord.cs (not extracted): {note}"))
+
+    return sorted(out, key=lambda s: s.id)
+
+
 _METHOD_START = re.compile(
     r'(?:public|internal|private)\s+(?:static\s+)?(?:async\s+)?'
     r'[^{};(]+?\s(\w+)\s*\([^)]*\)\s*')

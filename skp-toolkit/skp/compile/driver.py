@@ -10,6 +10,8 @@ SOURCE_MAP = {
     "processor_queues": "Messaging.Contracts/ProcessorQueues.cs",
     "orchestrator_queues": "Messaging.Contracts/OrchestratorQueues.cs",
     "templates": "tests/BaseApi.Tests/Live/Resilience/Templates.cs",
+    "execution_log_scope": "Messaging.Contracts/ExecutionLogScope.cs",
+    "correlation_keys": "Messaging.Contracts/CorrelationKeys.cs",
     "dbcontext": "BaseApi.Service/AppDbContext.cs",
     # Trivial one-liner: extract.API_PREFIX is hardcoded to "/api/v1.0" while the
     # real version lives in [ApiVersion("1.0")] on this file. Not extracted (that
@@ -92,6 +94,10 @@ def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
     surfaces += extract.queues(_read(source_root, SOURCE_MAP["processor_queues"]),
                                _read(source_root, SOURCE_MAP["orchestrator_queues"]))
     surfaces += extract.templates(_read(source_root, SOURCE_MAP["templates"]))
+    surfaces += extract.log_attributes(
+        _read(source_root, SOURCE_MAP["templates"]),
+        _read(source_root, SOURCE_MAP["execution_log_scope"]),
+        _read(source_root, SOURCE_MAP["correlation_keys"]))
     surfaces += extract.pg_tables(_read(source_root, SOURCE_MAP["dbcontext"]))
     surfaces += extract.metrics([
         p.read_text(encoding="utf-8") for p in sorted(source_root.glob(METRICS_GLOB))
