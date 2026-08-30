@@ -660,6 +660,169 @@ class FakeBaseApi:
         return items
 
 
+class FakeProbeHttp:
+    """Backs ``--probe-writes`` tests. ``responses`` is one entry per
+    expected ``probe_status`` call, in order -- either a raw HTTP status
+    (int) or an exception instance to raise (mirroring ``probe_status``'s
+    real contract: 2xx through 5xx are all returned as plain ints, never
+    raised; only a transport failure raises). Every call actually made is
+    recorded in ``calls`` so a test can assert on the generated path (e.g.
+    that an ``{id}`` placeholder was replaced with a well-formed, freshly
+    generated guid) and the body (always ``{}``).
+    """
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls: list[tuple[str, str, object]] = []
+
+    def probe_status(self, method, path, body):
+        self.calls.append((method, path, body))
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+_UUID4 = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE)
+
+
+class WriteStatusClassificationTests(unittest.TestCase):
+    """``_classify_write_status`` is the whole assumption this probe rests
+    on, reduced to a pure function of (status, has_id) -- no HTTP client
+    needed to pin it down.
+    """
+
+    def test_400_is_confirmed(self):
+        verdict, _, mutation = verify._classify_write_status(400, has_id=False)
+        self.assertEqual(verdict, verify.CONFIRMED)
+        self.assertFalse(mutation)
+
+    def test_405_is_confirmed(self):
+        verdict, _, _ = verify._classify_write_status(405, has_id=True)
+        self.assertEqual(verdict, verify.CONFIRMED)
+
+    def test_422_is_confirmed(self):
+        verdict, _, _ = verify._classify_write_status(422, has_id=False)
+        self.assertEqual(verdict, verify.CONFIRMED)
+
+    def test_404_with_no_id_placeholder_is_refuted(self):
+        """No ``{id}`` in the route -- a 404 has nothing else to mean but
+        "this path does not match a real route"."""
+        verdict, reason, mutation = verify._classify_write_status(404, has_id=False)
+        self.assertEqual(verdict, verify.REFUTED)
+        self.assertFalse(mutation)
+        self.assertIn("does not exist", reason)
+
+    def test_404_with_an_id_placeholder_is_confirmed_not_refuted(self):
+        """A freshly generated guid is guaranteed absent, so a 404 here is
+        the not-found handler proving the route ran -- not proof it is
+        missing."""
+        verdict, reason, mutation = verify._classify_write_status(404, has_id=True)
+        self.assertEqual(verdict, verify.CONFIRMED)
+        self.assertFalse(mutation)
+        self.assertIn("not-found handler", reason)
+
+    def test_a_2xx_is_refuted_with_the_mutation_flag_set(self):
+        """The important case: this is the one signal that the probe's own
+        assumption -- model-state validation always short-circuits before
+        the action runs -- did not hold."""
+        verdict, reason, mutation = verify._classify_write_status(202, has_id=False)
+        self.assertEqual(verdict, verify.REFUTED)
+        self.assertTrue(mutation)
+        self.assertIn("mutated state", reason)
+
+    def test_a_2xx_with_an_id_is_also_refuted_with_the_mutation_flag_set(self):
+        verdict, reason, mutation = verify._classify_write_status(200, has_id=True)
+        self.assertEqual(verdict, verify.REFUTED)
+        self.assertTrue(mutation)
+
+    def test_a_5xx_is_unverifiable(self):
+        verdict, _, mutation = verify._classify_write_status(500, has_id=False)
+        self.assertEqual(verdict, verify.UNVERIFIABLE)
+        self.assertFalse(mutation)
+
+
+class ProbeWritesTests(unittest.TestCase):
+    def entry(self, entity, verb_id, operation):
+        return {"id": f"api.{entity}.{verb_id}", "component": "api",
+               "operation": operation, "detail": entity}
+
+    def test_probe_writes_off_by_default_names_the_remedy(self):
+        entries = [self.entry("workflows", "post", "POST /api/v1.0/workflows")]
+        api_client = FakeBaseApi(FakeProbeHttp([]))
+        claims = verify.check_api(entries, api_client)  # probe_writes defaults False
+        self.assertEqual(claims[0].verdict, verify.NOT_APPLICABLE)
+        self.assertIn("--probe-writes", claims[0].message)
+
+    def test_a_400_on_a_post_route_is_confirmed(self):
+        entries = [self.entry("workflows", "post", "POST /api/v1.0/workflows")]
+        http = FakeProbeHttp([400])
+        claims = verify.check_api(entries, FakeBaseApi(http), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertEqual(http.calls, [("POST", "/api/v1.0/workflows", {})])
+
+    def test_a_404_on_a_no_id_route_is_refuted(self):
+        entries = [self.entry("orchestration", "post_start", "POST /api/v1.0/orchestration/start")]
+        claims = verify.check_api(entries, FakeBaseApi(FakeProbeHttp([404])), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+
+    def test_a_404_on_a_put_id_route_is_confirmed_not_refuted(self):
+        entries = [self.entry("workflows", "put_id", "PUT /api/v1.0/workflows/{id}")]
+        claims = verify.check_api(entries, FakeBaseApi(FakeProbeHttp([404])), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_a_404_on_a_delete_id_route_is_confirmed_not_refuted(self):
+        entries = [self.entry("workflows", "delete_id", "DELETE /api/v1.0/workflows/{id}")]
+        claims = verify.check_api(entries, FakeBaseApi(FakeProbeHttp([404])), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_a_2xx_is_refuted_with_a_mutation_warning_in_the_message(self):
+        entries = [self.entry("workflows", "post", "POST /api/v1.0/workflows")]
+        claims = verify.check_api(entries, FakeBaseApi(FakeProbeHttp([201])), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+        self.assertIn("MUTATION WARNING", claims[0].message)
+
+    def test_a_5xx_is_unverifiable(self):
+        entries = [self.entry("workflows", "post", "POST /api/v1.0/workflows")]
+        claims = verify.check_api(entries, FakeBaseApi(FakeProbeHttp([503])), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.UNVERIFIABLE)
+
+    def test_a_transport_failure_is_unverifiable(self):
+        entries = [self.entry("workflows", "post", "POST /api/v1.0/workflows")]
+        http = FakeProbeHttp([Unreachable("http", "connection refused")])
+        claims = verify.check_api(entries, FakeBaseApi(http), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.UNVERIFIABLE)
+
+    def test_an_id_route_is_filled_with_a_freshly_generated_guid_not_a_real_one(self):
+        entries = [self.entry("workflows", "delete_id", "DELETE /api/v1.0/workflows/{id}")]
+        http = FakeProbeHttp([404])
+        verify.check_api(entries, FakeBaseApi(http), probe_writes=True)
+        method, path, body = http.calls[0]
+        self.assertEqual(method, "DELETE")
+        self.assertEqual(body, {})
+        prefix, _, guid = path.rpartition("/")
+        self.assertEqual(prefix, "/api/v1.0/workflows")
+        self.assertRegex(guid, _UUID4)
+
+    def test_an_empty_body_is_sent_for_every_write_route(self):
+        entries = [self.entry("workflows", "post", "POST /api/v1.0/workflows")]
+        http = FakeProbeHttp([400])
+        verify.check_api(entries, FakeBaseApi(http), probe_writes=True)
+        self.assertEqual(http.calls[0][2], {})
+
+    def test_orchestration_start_is_probed_like_any_other_no_id_write_route(self):
+        """start/stop take a bare workflow guid as the body, not an object --
+        ``{}`` still fails binding against it, and the generic status-code
+        mapping (not a route-specific special case) is what decides the
+        verdict either way."""
+        entries = [self.entry("orchestration", "post_start", "POST /api/v1.0/orchestration/start")]
+        http = FakeProbeHttp([400])
+        claims = verify.check_api(entries, FakeBaseApi(http), probe_writes=True)
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertEqual(http.calls, [("POST", "/api/v1.0/orchestration/start", {})])
+
+
 # ---------------------------------------------------------------------
 # redis
 # ---------------------------------------------------------------------
