@@ -32,13 +32,20 @@ def redis_keys(text: str) -> list[Surface]:
 
 
 def queues(processor_text: str, orchestrator_text: str) -> list[Surface]:
+    """Queue and exchange names from both topology classes.
+
+    Ids carry their declaring source because the two classes each define a
+    `DeadLetterExchange`; a bare member name would collide and one real
+    exchange would vanish at the first lookup by id.
+    """
     out = []
-    for text in (processor_text, orchestrator_text):
+    for namespace, text in (("processor", processor_text),
+                            ("orchestrator", orchestrator_text)):
         consts = const_strings(text)
         for name, value in consts.items():
-            out.append(_surface("rabbitmq", name, "list_queues", value))
+            out.append(_surface("rabbitmq", f"{namespace}.{name}", "list_queues", value))
         for name, body in expression_bodies(text, consts).items():
-            out.append(_surface("rabbitmq", name, "list_queues", body))
+            out.append(_surface("rabbitmq", f"{namespace}.{name}", "list_queues", body))
     return sorted(out, key=lambda s: s.id)
 
 

@@ -54,14 +54,21 @@ class RedisKeyTests(unittest.TestCase):
 class QueueTests(unittest.TestCase):
     def test_constant_and_templated_queues_are_both_surfaces(self):
         by_id = {s.id: s for s in queues(PROCESSOR_QUEUES, ORCHESTRATOR_QUEUES)}
-        self.assertEqual(by_id["rabbitmq.IdentityQuery"].detail, "processor-identity-query")
-        self.assertEqual(by_id["rabbitmq.Work"].detail, "processor-{processorId}")
-        self.assertEqual(by_id["rabbitmq.Control"].detail, "orchestrator-control")
+        self.assertEqual(by_id["rabbitmq.processor.IdentityQuery"].detail, "processor-identity-query")
+        self.assertEqual(by_id["rabbitmq.processor.Work"].detail, "processor-{processorId}")
+        self.assertEqual(by_id["rabbitmq.orchestrator.Control"].detail, "orchestrator-control")
 
     def test_both_source_files_contribute(self):
         ids = {s.id for s in queues(PROCESSOR_QUEUES, ORCHESTRATOR_QUEUES)}
-        self.assertIn("rabbitmq.DeadLetterExchange", ids)
-        self.assertIn("rabbitmq.Result", ids)
+        self.assertIn("rabbitmq.processor.DeadLetterExchange", ids)
+        self.assertIn("rabbitmq.orchestrator.Result", ids)
+
+    def test_a_member_name_declared_in_both_files_yields_two_surfaces(self):
+        processor = 'public static class ProcessorQueues { public const string DeadLetterExchange = "processor-dlx"; }'
+        orchestrator = 'public static class OrchestratorQueues { public const string DeadLetterExchange = "orchestrator-dlx"; }'
+        by_id = {s.id: s.detail for s in queues(processor, orchestrator)}
+        self.assertEqual(by_id["rabbitmq.processor.DeadLetterExchange"], "processor-dlx")
+        self.assertEqual(by_id["rabbitmq.orchestrator.DeadLetterExchange"], "orchestrator-dlx")
 
 
 class TemplateTests(unittest.TestCase):
