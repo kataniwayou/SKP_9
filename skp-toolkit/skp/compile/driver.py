@@ -193,12 +193,16 @@ def compile_catalog(source_root: pathlib.Path, annotations_dir: pathlib.Path,
         json.dumps([e.to_dict() for e in entries], indent=2, sort_keys=True),
         encoding="utf-8")
 
-    (out_dir / "gates.json").write_text(
+    gates_path = out_dir / "gates.json"
+    gates_path.write_text(
         json.dumps(extract.gates(_read(source_root, GATE_SOURCE)), indent=2),
         encoding="utf-8")
 
+    # M6: gates.json is written above but was missing from the "generated"
+    # set below, so a hand-edited gates.json escaped doctor's tamper check
+    # entirely -- the same protection catalog.json already gets.
     lock = build_lock_two_roots(_source_paths(source_root), source_root,
-                                [catalog_path], out_dir,
+                                [catalog_path, gates_path], out_dir,
                                 manifest_globs=[CONTROLLER_GLOB, METRICS_GLOB])
     (out_dir / "compile.lock").write_text(
         json.dumps(lock, indent=2, sort_keys=True), encoding="utf-8")

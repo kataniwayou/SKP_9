@@ -12,12 +12,14 @@ import time
 import uuid
 
 from skp import references, state
+from skp.clients.http import Unreachable
 from skp.profile import Profile, ProfileMissing, default_home
 from skp.result import (EXIT_NOT_INITIALISED, EXIT_OK, EXIT_UNREACHABLE,
                         EXIT_USAGE, EXIT_VERDICT, Result)
 from skp.verbs import investigate
 from skp.verbs.init import build_clients
-from skp.verbs.map import load_catalog
+from skp.verbs.map import index_by_id, load_catalog
+from skp.verbs.observe import _fill
 
 START_ID = "api.orchestration.post_start"
 STOP_ID = "api.orchestration.post_stop"
@@ -51,24 +53,36 @@ def _await_root(client, pattern: str, present: bool,
     return False
 
 
-def gate_result(status: int, text: str) -> Result | None:
-    """A 422 rendered as a gate verdict, or None when this is not a gate."""
+def gate_result(status: int, text: str, next_command: str) -> Result | None:
+    """A 422 rendered as a gate verdict, or None when this is not a gate.
+
+    Shared by ``operate.start`` and ``author.validate``: both POST
+    ``api.orchestration.post_start`` with the same body and get back the
+    same ``{gate, offending}`` shape, so one rendering serves both. Only
+    the NEXT: each caller wants differs -- author points back at
+    ``skp author apply``, operate at a concrete investigate form -- so that
+    travels in as a parameter instead of being hardcoded here.
+    """
     if status != 422:
         return None
     try:
         body = json.loads(text)
     except ValueError:
         body = {}
-    gate = (body.get("errors") or {}).get("gate")
+    errors = body.get("errors") or {}
+    gate = errors.get("gate")
     if not gate:
-        return Result(EXIT_VERDICT, [f"rejected with HTTP 422: {text[:200]}"],
+        return Result(EXIT_VERDICT,
+                      [f"rejected with HTTP 422 but no gate discriminator "
+                       f"in the body: {text[:200]}"],
                       next_command="skp doctor")
-    lines = [f"rejected at gate {gate!r}", body.get("detail", "")]
-    offending = (body.get("errors") or {}).get("offending")
+    lines = [f"rejected at gate {gate!r} -- {body.get('title', '')}".rstrip(),
+             body.get("detail", "")]
+    offending = errors.get("offending")
     if offending is not None:
         lines.append("offending: " + json.dumps(offending, sort_keys=True))
     return Result(EXIT_VERDICT, [ln for ln in lines if ln],
-                  next_command="skp investigate",
+                  next_command=next_command,
                   reference=references.reference_for(gate))
 
 
@@ -94,7 +108,8 @@ def start(entries, clients, workflow_id, confirm: bool,
         return Result(EXIT_UNREACHABLE, [f"POST {path} failed -- {exc}"],
                       next_command="skp doctor")
 
-    gated = gate_result(status, text)
+    gated = gate_result(status, text,
+                       next_command=f"skp investigate trace --workflow {workflow_id}")
     if gated is not None:
         return gated
     if status not in (200, 202):
@@ -110,7 +125,7 @@ def start(entries, clients, workflow_id, confirm: bool,
     return Result(EXIT_VERDICT, [
         f"accepted with HTTP {status}, but {pattern} did not appear in L2 "
         f"within {attempts * poll_s:.0f}s -- accepted, not applied.",
-    ], next_command="skp investigate")
+    ], next_command=f"skp investigate trace --workflow {workflow_id}")
 
 
 def stop(entries, clients, workflow_id, confirm: bool,
@@ -196,7 +211,7 @@ def freeze(entries, clients, step_id: str, confirm: bool) -> Result:
         return Result(EXIT_UNREACHABLE, [f"GET {get_path} failed -- {exc}"],
                       next_command="skp doctor")
 
-    if status not in (200, 204):
+    if status != 200:
         return Result(EXIT_VERDICT,
                       [f"GET step failed with HTTP {status}: {text[:200]}"],
                       next_command="skp map --component api")
@@ -229,7 +244,7 @@ def freeze(entries, clients, step_id: str, confirm: bool) -> Result:
         return Result(EXIT_VERDICT, [
             f"accepted with HTTP {status}, but steps.entry_condition reads "
             f"{observed!r}, not '{NEVER}' -- the freeze did not land.",
-        ], next_command="skp investigate")
+        ], next_command="skp investigate trace --workflow <id>")
 
     return Result(EXIT_OK, [
         f"frozen -- steps.entry_condition is {NEVER} (Never) for {step_id}.",
@@ -318,6 +333,10 @@ def resolve_verdict(observations: dict) -> tuple[str, list[str]]:
             f"processor-{processor}.dead holds messages -- deliveries were "
             f"rejected and dead-lettered.",
             "They are recoverable by hand; they are not lost.",
+            f"processor-{processor} is shared: it backs every workflow "
+            f"assigned to that processor, so a parked message here may "
+            f"belong to a different workflow than this one. Confirm with "
+            f"skp investigate parked --processor {processor}.",
         ]
     elif observations["wedged"]:
         processor = observations["wedged"][0]
@@ -338,10 +357,12 @@ def resolve_verdict(observations: dict) -> tuple[str, list[str]]:
             "steps are executing inside the window."]
     elif observations["dispatched"]:
         verdict, evidence = "never-started", [
-            "a dispatch record exists inside the window, but no completion, "
-            "failure, running step, or queue state followed it.",
-            "the run may still be initializing, or ended between dispatch "
-            "and the next observable event.",
+            "a dispatch record exists inside the window, but nothing "
+            "downstream -- no completion, failure, running step, or queue "
+            "state -- confirms the run ever took hold, so this reads as "
+            "never-started until something downstream says otherwise.",
+            "it may still be initializing, or it ended between dispatch and "
+            "the next observable event.",
         ]
     else:
         verdict, evidence = "never-started", [
@@ -359,21 +380,14 @@ def resolve_verdict(observations: dict) -> tuple[str, list[str]]:
     return verdict, evidence
 
 
-_ENTRY_COMPLETED = "the entry step completed with {Result}"
-_TERMINAL_COMPLETED = ("the terminal step completed with {Result} — "
-                       "no successor accepts it, the run ends here")
-_RUNNING = "running the step"
-_DISPATCHED = "dispatched an entry step"
-
-
-def _newest_correlation(es, workflow_id: str, window: str) -> str | None:
+def _newest_correlation(es, dispatched_tpl: str, workflow_id: str, window: str) -> str | None:
     """The current run's CorrelationId.
 
     order="desc" because ascending hands back the OLDEST dispatch in the
     window, and every workflow here recurs. Without this, a run that finished
     an hour ago supplies the verdict for the run happening now.
     """
-    hits = investigate._es_search(es, _DISPATCHED, window, workflow_id, None,
+    hits = investigate._es_search(es, dispatched_tpl, window, workflow_id, None,
                                   size=1, order="desc")
     for hit in hits:
         # skp.clients.es.Elastic.search() already unwraps `_source` -- each
@@ -402,7 +416,7 @@ def _entry_steps_all_never(clients, workflow_id: str) -> bool:
     return bool(values) and all(v == str(NEVER) for v in values)
 
 
-def _workflow_processors(clients, workflow_id: str) -> set[str]:
+def _workflow_processors(entries, clients, workflow_id: str) -> set[str]:
     """The processor ids backing this workflow's steps.
 
     Read, not inferred: the L2 projection enumerates this workflow's steps
@@ -412,7 +426,10 @@ def _workflow_processors(clients, workflow_id: str) -> set[str]:
     healthy verdict -- an unscoped scan reports another workflow's outage
     as this one's.
     """
-    keys = clients["redis"].keys(f"skp:{workflow_id}:*")
+    by_id = index_by_id(entries)
+    step_pattern = _fill(by_id["redis.Step"]["detail"],
+                        workflowId=workflow_id, stepId="*")
+    keys = clients["redis"].keys(step_pattern)
     step_ids = []
     for key in keys:
         candidate = key.rsplit(":", 1)[-1]
@@ -429,71 +446,98 @@ def _workflow_processors(clients, workflow_id: str) -> set[str]:
     return {r[0] for r in rows if r}
 
 
-def _queue_states(clients, processors: set[str]) -> tuple[list[str], list[str]]:
+def _queue_states(entries, clients, processors: set[str]) -> tuple[list[str], list[str]]:
     """Parked/wedged processors, filtered to those backing this workflow.
+
+    Queue names are derived from the catalog's ``rabbitmq.processor.Work``/
+    ``rabbitmq.processor.Dead`` templates rather than spelled as literals --
+    a renamed convention on the C# side must change what this reads, not
+    silently starve it (see the module docstring's ``operate verify`` trap).
 
     ``processors`` is expected to be non-empty here -- an empty set means
     nothing could be attributed to the workflow, and the caller must not
     call this with it (see ``observe_run``'s ``unscoped`` handling).
     """
+    by_id = index_by_id(entries)
+    work_tpl = by_id["rabbitmq.processor.Work"]["detail"]
+    dead_tpl = by_id["rabbitmq.processor.Dead"]["detail"]
+    work_prefix = work_tpl.split("{processorId}", 1)[0]
+    dead_prefix, dead_suffix = dead_tpl.split("{processorId}", 1)
+
     parked, wedged = [], []
     for queue in clients["rabbitmq"].queues():
         name = queue.get("name", "")
-        if not name.startswith("processor-"):
+        if not name.startswith(work_prefix):
             continue
-        if name.endswith(".dead"):
-            processor_id = name[len("processor-"):-len(".dead")]
-        else:
-            processor_id = name[len("processor-"):]
-        if processor_id not in processors:
-            continue
-        depth = int(queue.get("messages") or 0)
-        if name.endswith(".dead"):
+        if dead_suffix and name.endswith(dead_suffix):
+            processor_id = name[len(dead_prefix):len(name) - len(dead_suffix)]
+            if processor_id not in processors:
+                continue
+            depth = int(queue.get("messages") or 0)
             if depth > 0:
                 parked.append(processor_id)
-        elif depth > 0 and int(queue.get("consumers") or 0) == 0:
-            wedged.append(processor_id)
+        else:
+            processor_id = name[len(work_prefix):]
+            if processor_id not in processors:
+                continue
+            depth = int(queue.get("messages") or 0)
+            if depth > 0 and int(queue.get("consumers") or 0) == 0:
+                wedged.append(processor_id)
     return sorted(parked), sorted(wedged)
 
 
 def observe_run(entries, clients, workflow_id: str, window: str = "1h") -> dict:
     """Every field is a read of a catalogued surface. Nothing here recomputes
-    a decision the system already made."""
+    a decision the system already made.
+
+    Every log template this reads (``elasticsearch.EntryStepCompleted``,
+    ``elasticsearch.TerminalCompleted``, ``elasticsearch.RunningTheStep``,
+    ``elasticsearch.EntryDispatched``) comes out of ``entries`` by catalog
+    id, the same idiom ``investigate.py`` uses throughout: a missing id
+    means the catalog is stale, and the ``KeyError`` that follows is the
+    honest failure -- never a literal fallen back to silently.
+    """
     uuid.UUID(workflow_id)
+    by_id = index_by_id(entries)
+    entry_completed = by_id["elasticsearch.EntryStepCompleted"]["detail"]
+    terminal_completed = by_id["elasticsearch.TerminalCompleted"]["detail"]
+    running_tpl = by_id["elasticsearch.RunningTheStep"]["detail"]
+    dispatched_tpl = by_id["elasticsearch.EntryDispatched"]["detail"]
+
     es = clients["elasticsearch"]
-    correlation = _newest_correlation(es, workflow_id, window)
+    correlation = _newest_correlation(es, dispatched_tpl, workflow_id, window)
 
     def hits(template):
         return investigate._es_search(es, template, window, workflow_id,
                                       correlation)
 
     failed, completed = [], False
-    for template in (_ENTRY_COMPLETED, _TERMINAL_COMPLETED):
+    for template in (entry_completed, terminal_completed):
         for hit in hits(template):
             # Same unwrapped shape as _newest_correlation above -- Elastic
             # already strips `_source` before this ever sees the hit.
             attrs = hit.get("attributes") or {}
             if str(attrs.get("Result", "")).lower() == "failed":
                 failed.append(str(attrs.get("StepId", "unknown")))
-            elif template == _TERMINAL_COMPLETED:
+            elif template == terminal_completed:
                 completed = True
 
-    processors = _workflow_processors(clients, workflow_id)
+    processors = _workflow_processors(entries, clients, workflow_id)
     unscoped = not processors
     # Honest degradation: with no processors attributable to this workflow,
     # an unscoped scan would report another workflow's outage as this one's
     # (or its health as this one's), so parked/wedged stay empty and
     # `unscoped` records that the check could not be made -- never silently
     # "no parked messages".
-    parked, wedged = ([], []) if unscoped else _queue_states(clients, processors)
+    parked, wedged = ([], []) if unscoped else _queue_states(entries, clients, processors)
     return {
         "frozen": _entry_steps_all_never(clients, workflow_id),
         "parked": parked,
         "wedged": wedged,
         "failed": sorted(set(failed)),
         "completed": completed,
-        "running": bool(hits(_RUNNING)),
-        "dispatched": bool(hits(_DISPATCHED)),
+        "running": bool(hits(running_tpl)),
+        "dispatched": bool(hits(dispatched_tpl)),
         "unscoped": unscoped,
     }
 
@@ -504,7 +548,12 @@ def verify(entries, clients, workflow_id: str, window: str) -> Result:
     except ValueError:
         return Result(EXIT_USAGE, [f"{workflow_id!r} is not a UUID"],
                       next_command="skp operate verify --workflow <id>")
-    observations = observe_run(entries, clients, workflow_id, window)
+    try:
+        observations = observe_run(entries, clients, workflow_id, window)
+    except Unreachable as exc:
+        return Result(EXIT_UNREACHABLE,
+                      [f"{exc.target} unreachable -- {exc.detail}"],
+                      next_command="skp doctor")
     verdict, evidence = resolve_verdict(observations)
     code = EXIT_OK if verdict in ("completed", "running", "frozen") else EXIT_VERDICT
     nexts = {
@@ -512,5 +561,10 @@ def verify(entries, clients, workflow_id: str, window: str) -> Result:
         "running": "skp operate verify --workflow " + workflow_id,
         "frozen": "skp operate start --workflow " + workflow_id + " --confirm",
     }
+    if verdict.startswith("parked-at-processor-"):
+        default_next = ("skp investigate parked --processor "
+                        + verdict[len("parked-at-processor-"):])
+    else:
+        default_next = f"skp investigate trace --workflow {workflow_id}"
     return Result(code, [f"{verdict}"] + evidence,
-                  next_command=nexts.get(verdict, "skp investigate"))
+                  next_command=nexts.get(verdict, default_next))

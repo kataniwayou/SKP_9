@@ -1,7 +1,6 @@
 import unittest
 
-from skp.result import (EXIT_NOT_INITIALISED, EXIT_OK, EXIT_UNREACHABLE,
-                        EXIT_USAGE, EXIT_VERDICT)
+from skp.result import (EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE, EXIT_VERDICT)
 from skp.verbs import author
 
 WF = "4cd8af45-1295-43db-ab2e-e955dd82b5c5"
