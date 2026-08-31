@@ -9,11 +9,13 @@ from skp.verbs import init as init_verb
 from skp.verbs import investigate as investigate_verb
 from skp.verbs import map as map_verb
 from skp.verbs import observe as observe_verb
+from skp.verbs import operate as operate_verb
 from skp.verbs import verify as verify_verb
 
 GROUPS = {"init": init_verb.run, "map": map_verb.run, "doctor": doctor_verb.run,
           "verify": verify_verb.run, "observe": observe_verb.run,
-          "investigate": investigate_verb.run, "author": author_verb.run}
+          "investigate": investigate_verb.run, "author": author_verb.run,
+          "operate": operate_verb.run}
 """Group name -> callable(args: list[str]) -> Result. Populated by later tasks."""
 
 
