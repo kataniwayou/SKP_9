@@ -52,15 +52,14 @@ internal sealed class OrchestratorTopology(InstanceId instanceId) : IRabbitMqTop
         // Durable and never auto-delete, matching OrchestratorFanout's own remarks: a replica that is
         // down must accumulate its announcements and drain them on return, and the cost of that is a
         // queue outliving a permanently-removed replica.
-        // The routing key here is the DEAD queue's name, not the live one. That differs from the
-        // API's control pair and from every processor pair, which key on the live queue's name.
-        // Both route correctly — a direct exchange only needs the two sides to agree, which
-        // DeadLetteredPair now guarantees by taking the key once — but the two conventions are a
-        // real inconsistency. It cannot be closed here: x-dead-letter-routing-key is a queue
-        // argument, so changing it needs the queue deleted and re-declared. DeadLetterConventionTests
-        // pins the split and names the migration.
+        // The routing key is the LIVE queue's name, matching the API's control pair and every
+        // processor pair. It used to be the dead queue's name; the two conventions meant the key
+        // could not be derived from a queue name, so a redrive tool that computed it was right on
+        // some queues and, on the others, published under a key nothing was bound to — which a
+        // direct exchange discards. Keying on the source also makes the key carry provenance:
+        // at the exchange it says which queue refused the message.
         await DeadLetteredPair.DeclareAsync(
-            channel, queue, dead, OrchestratorFanout.DeadLetterExchange, dead, ct)
+            channel, queue, dead, OrchestratorFanout.DeadLetterExchange, queue, ct)
             .ConfigureAwait(false);
 
         // Empty routing key: the fan-out exchange is a fanout exchange, which ignores routing keys
@@ -96,14 +95,13 @@ internal sealed class OrchestratorTopology(InstanceId instanceId) : IRabbitMqTop
     /// of them; this method exists only to bind the two arguments the shared declarer cannot infer
     /// — which exchange, and which routing key.
     /// <para>
-    /// <b>The key is the DEAD queue's name here, and the live queue's name on the API's control pair
-    /// and on every processor pair.</b> Both route; the split is the open inconsistency
-    /// <c>DeadLetterConventionTests</c> pins, and closing it needs the queues re-declared because
-    /// <c>x-dead-letter-routing-key</c> is a queue argument.
+    /// <b>The key is the LIVE queue's own name</b>, as it is everywhere else in this system. That is
+    /// what makes the token derivable from a queue name alone, which is what a redrive tool needs,
+    /// and what makes the key mean "refused BY this queue" rather than restating the binding.
     /// </para>
     /// </summary>
     private static Task DeclareSharedAsync(
         IChannel channel, string queue, string dead, CancellationToken ct)
         => DeadLetteredPair.DeclareAsync(
-            channel, queue, dead, OrchestratorQueues.DeadLetterExchange, dead, ct);
+            channel, queue, dead, OrchestratorQueues.DeadLetterExchange, queue, ct);
 }
