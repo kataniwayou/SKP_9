@@ -438,7 +438,9 @@ offline-bundle/
 analyzer-reports/phase-88-screenshots/
 
 # Prior-repo copy kept for consultation only — read-only reference material, not source.
-references/
+# Anchored to repo root: unanchored "references/" also shadowed the unrelated
+# skp-toolkit/skp/references/ package (gate remedy files), which must be tracked.
+/references/
 
 # Local NuGet package feed (see NuGet.config) — restorable artifacts, not source.
 nugets/
