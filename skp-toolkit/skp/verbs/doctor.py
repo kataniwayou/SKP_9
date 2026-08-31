@@ -13,6 +13,7 @@ FIXES = {
     "source drift": "skp init --refresh",
     "generated files": "edit the annotation, not the generated file — then skp init --refresh",
     "catalog present": "skp init --refresh",
+    "gate references": "write the missing skp/references/*.md file, or skp init --refresh if gates.json is absent",
 }
 
 
