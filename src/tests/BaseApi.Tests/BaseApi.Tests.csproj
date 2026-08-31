@@ -23,24 +23,40 @@
     trap for the next person who adds a test and wonders where a value came from.
   -->
   <!--
-    KNOWN, UNFIXED: three referenced projects each contribute an appsettings.json to this
-    output directory — BaseApi.Service, Orchestrator and Processor.Sample — and all three
-    land on the same path. Which one wins is decided by file timestamps.
+    THREE referenced projects each contribute an appsettings.json to this output directory
+    — BaseApi.Service, Orchestrator and Processor.Sample — and all three target the same
+    relative path. Whichever copies last wins, so the ambient configuration a test host reads
+    was decided by file timestamps, and `dotnet publish` of this project failed outright with
+    NETSDK1152 on the duplicate.
 
-    Harmless today, and the reason is worth stating so nobody "fixes" it by picking one:
-    every test that builds a host supplies its own keys via AddInMemoryCollection, which is
-    applied after the file and therefore wins. What it does break is `dotnet publish` of this
-    project, which fails with NETSDK1152 on the duplicate. Nothing publishes a test project,
-    so that has never been hit.
+    ALL THREE ARE REMOVED HERE, rather than one being chosen. No test needs an ambient file:
+    every one that builds a host supplies its keys through AddInMemoryCollection, which is
+    registered after the JSON provider and wins. Picking a winner would fix the publish error
+    and keep the real hazard — a test that forgot a key would silently inherit some service's
+    default and pass for the wrong reason.
 
-    Two removals were tried and neither works: an ItemGroup Remove on
-    AllItemsFullPathWithTargetPath AfterTargets="GetCopyToOutputDirectoryItems" (too late —
-    the item is already resolved), and one on _SourceItemsToCopyToOutputDirectory /
+    A REMOVAL AFTER THE FACT, not a suppression of the copy, and that is a deliberate second
+    choice. Two attempts to stop the copy failed: an ItemGroup Remove on
+    AllItemsFullPathWithTargetPath AfterTargets="GetCopyToOutputDirectoryItems" (the item is
+    already resolved by then) and one on _SourceItemsToCopyToOutputDirectory /
     ReferenceCopyLocalPaths BeforeTargets="_CopyOutOfDateSourceItemsToOutputDirectory" (wrong
-    list — transitive content arrives by another path). The next thing to try is a
-    post-Build Delete task, which is crude but deterministic. Recorded here so the next person
-    starts from attempt three.
+    lists — transitive content arrives by another path). The two targets below are blunt but
+    deterministic, and they cover the two places the file appears: the build output and the
+    publish list. If someone later finds the item that actually carries it, replacing these
+    with a real suppression is strictly better.
   -->
+  <Target Name="RemoveTransitiveAppSettingsFromOutput" AfterTargets="Build">
+    <Delete Files="$(OutputPath)appsettings.json" ContinueOnError="true" />
+  </Target>
+
+  <Target Name="RemoveTransitiveAppSettingsFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)%(Extension)' == 'appsettings.json'" />
+    </ItemGroup>
+  </Target>
+
 
 
   <ItemGroup>
