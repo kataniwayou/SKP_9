@@ -246,5 +246,67 @@ class FreezeTests(unittest.TestCase):
         self.assertEqual(clients["baseapi"].http.calls[0][0], "GET")
 
 
+class VerdictTests(unittest.TestCase):
+    BASE = {"frozen": False, "parked": [], "wedged": [], "failed": [],
+            "completed": False, "running": False, "dispatched": False}
+
+    def obs(self, **kw):
+        merged = dict(self.BASE)
+        merged.update(kw)
+        return merged
+
+    def test_frozen_beats_never_started(self):
+        self.assertEqual(operate.resolve_verdict(self.obs(frozen=True))[0],
+                         "frozen")
+
+    def test_frozen_beats_wedged(self):
+        verdict, _ = operate.resolve_verdict(self.obs(frozen=True, wedged=["s2"]))
+        self.assertEqual(verdict, "frozen")
+
+    def test_parked_beats_wedged_and_names_the_step(self):
+        verdict, lines = operate.resolve_verdict(
+            self.obs(parked=["s1"], wedged=["s2"]))
+        self.assertEqual(verdict, "parked-at-s1")
+        self.assertTrue(any("dead" in ln for ln in lines))
+
+    def test_wedged_beats_failed(self):
+        self.assertEqual(
+            operate.resolve_verdict(self.obs(wedged=["s2"], failed=["s3"]))[0],
+            "wedged-at-s2")
+
+    def test_failed_beats_completed(self):
+        self.assertEqual(
+            operate.resolve_verdict(self.obs(failed=["s3"], completed=True))[0],
+            "failed-at-s3")
+
+    def test_completed_beats_running(self):
+        self.assertEqual(
+            operate.resolve_verdict(self.obs(completed=True, running=True))[0],
+            "completed")
+
+    def test_running_when_only_steps_are_moving(self):
+        self.assertEqual(
+            operate.resolve_verdict(self.obs(running=True, dispatched=True))[0],
+            "running")
+
+    def test_nothing_at_all_is_never_started(self):
+        verdict, lines = operate.resolve_verdict(self.obs())
+        self.assertEqual(verdict, "never-started")
+        self.assertTrue(any("no dispatch" in ln for ln in lines))
+
+    def test_every_verdict_is_one_of_the_seven(self):
+        """The set is closed. A new state must earn its own remedy -- it must
+        not be silently folded into a neighbour."""
+        flat = {"completed", "running", "frozen", "never-started"}
+        prefixes = ("failed-at-", "parked-at-", "wedged-at-")
+        for kwargs in ({"frozen": True}, {"parked": ["s"]}, {"wedged": ["s"]},
+                       {"failed": ["s"]}, {"completed": True},
+                       {"running": True}, {}):
+            verdict, lines = operate.resolve_verdict(self.obs(**kwargs))
+            self.assertTrue(verdict in flat or verdict.startswith(prefixes),
+                            f"{verdict} is outside the closed set")
+            self.assertTrue(lines, f"{verdict} carried no evidence")
+
+
 if __name__ == "__main__":
     unittest.main()
