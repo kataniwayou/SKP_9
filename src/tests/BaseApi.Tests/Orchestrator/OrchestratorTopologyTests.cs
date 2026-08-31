@@ -113,9 +113,20 @@ public sealed class OrchestratorTopologyTests
 
         var work = args[queue]!;
         Assert.Equal(OrchestratorQueues.DeadLetterExchange, work["x-dead-letter-exchange"]);
-        Assert.Equal(dead, work["x-dead-letter-routing-key"]);
+        // The LIVE queue's own name, as everywhere else in this system. It was the dead queue's name
+        // until these two pairs were re-declared; keying on the source is what makes the token
+        // derivable from a queue name and makes it carry which queue refused the message.
+        Assert.Equal(queue, work["x-dead-letter-routing-key"]);
+        Assert.NotEqual(dead, work["x-dead-letter-routing-key"]);
         Assert.Equal("quorum", work["x-queue-type"]);
         Assert.Equal(-1, work["x-delivery-limit"]);
+
+        // The dead queue is declared too, and carries no dead-letter routing of its own -- it parks
+        // nothing, so naming an exchange there would be a loop waiting to happen.
+        var parked = args[dead]!;
+        Assert.Equal("quorum", parked["x-queue-type"]);
+        Assert.Equal(-1, parked["x-delivery-limit"]);
+        Assert.False(parked.ContainsKey("x-dead-letter-exchange"));
     }
 
     [Fact]
@@ -154,11 +165,12 @@ public sealed class OrchestratorTopologyTests
             queue, OrchestratorFanout.Exchange, string.Empty,
             Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
 
-        // The dead queue binds to the DIRECT dead-letter exchange under its own name, which is the
-        // routing key the queue above parks with. The two have to agree or a parked announcement is
-        // discarded with nothing logged.
+        // The dead queue binds to the DIRECT dead-letter exchange under the LIVE queue's name, which
+        // is the routing key the queue above parks with. The two have to agree or a parked
+        // announcement is discarded with nothing logged — and they agree by construction now, since
+        // DeadLetteredPair takes the key once and feeds both sides.
         await channel.Received(1).QueueBindAsync(
-            dead, OrchestratorFanout.DeadLetterExchange, dead,
+            dead, OrchestratorFanout.DeadLetterExchange, queue,
             Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
     }
 
@@ -214,7 +226,7 @@ public sealed class OrchestratorTopologyTests
         Assert.NotNull(queueArgs);
         Assert.Equal("quorum", queueArgs!["x-queue-type"]);
         Assert.Equal(OrchestratorFanout.DeadLetterExchange, queueArgs["x-dead-letter-exchange"]);
-        Assert.Equal(dead, queueArgs["x-dead-letter-routing-key"]);
+        Assert.Equal(queue, queueArgs["x-dead-letter-routing-key"]);
 
         Assert.NotNull(deadArgs);
         Assert.Equal("quorum", deadArgs!["x-queue-type"]);

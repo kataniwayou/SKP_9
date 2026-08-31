@@ -112,23 +112,22 @@ public sealed class DeadLetterConventionTests
     }
 
     /// <summary>
-    /// Queues whose routing key is their DEAD queue's name rather than their own, pending the
-    /// migration that closes the split.
+    /// Queues whose routing key is their DEAD queue's name rather than their own.
     /// <para>
-    /// <b>This list is the TODO, and it is deliberately an allowlist rather than a skipped test.</b>
-    /// Anything NOT named here is asserted, so a queue added tomorrow has to comply or fail — which a
-    /// skip would not give. Closing the split means re-declaring these three on the broker, because
-    /// <c>x-dead-letter-routing-key</c> is a queue argument and changing one fails the channel with a
-    /// precondition error; it therefore rides the next teardown rather than justifying its own. When
-    /// it does, delete this list and this comment together.
+    /// <b>Empty, and kept empty on purpose.</b> It held three entries until the orchestrator's two
+    /// pairs were re-declared: <c>orchestrator-result</c>, <c>orchestrator-result-post</c> and the
+    /// per-replica announcement queue all keyed on their dead queue's name, so the token could not be
+    /// derived from a queue name and a redrive tool computing it would have published under a key
+    /// nothing was bound to — which a direct exchange discards. Closing that needed those queues
+    /// deleted and re-declared, because <c>x-dead-letter-routing-key</c> is a queue argument.
+    /// </para>
+    /// <para>
+    /// The list stays as the seam for the next exception rather than being deleted with the migration:
+    /// an entry here has to carry a reason, which is a higher bar than quietly keying on something
+    /// else. <see cref="TheAllowlistIsEmpty"/> is what keeps it honest.
     /// </para>
     /// </summary>
-    private static readonly HashSet<string> KeyedByDeadQueueName = new(StringComparer.Ordinal)
-    {
-        OrchestratorQueues.Result,
-        OrchestratorQueues.ResultPost,
-        OrchestratorFanout.PerReplica("orchestrator-0"),
-    };
+    private static readonly HashSet<string> KeyedByDeadQueueName = new(StringComparer.Ordinal);
 
     [Theory]
     [MemberData(nameof(Topologies))]
@@ -173,12 +172,13 @@ public sealed class DeadLetterConventionTests
     }
 
     [Fact]
-    public void TheAllowlistNamesOnlyQueuesThatStillNeedMigrating()
+    public void TheAllowlistIsEmpty()
     {
         // A list that outlives what it excuses is worse than no list: it silently exempts queues that
-        // have already been fixed. Three today -- both shared orchestrator execution queues and the
-        // per-replica announcement queue. When the teardown re-declares them this drops to zero and
-        // the list, this test and the comment above it all go together.
-        Assert.Equal(3, KeyedByDeadQueueName.Count);
+        // have already been fixed. It held three -- both shared orchestrator execution queues and the
+        // per-replica announcement queue -- until those were re-declared. Every queue in the system
+        // now keys on its own name, so an addition here is a deliberate exception someone has to
+        // justify rather than a default that spreads.
+        Assert.Empty(KeyedByDeadQueueName);
     }
 }
