@@ -83,6 +83,65 @@ class FakePg:
         return self._rows
 
 
+class ScriptedPg:
+    """A postgres fake that answers differently depending on which query is
+    asked, keyed by a substring of the SQL. observe_run issues two distinct
+    queries against the same client (entry-condition, then processor
+    mapping) and a fixture needs to tell them apart."""
+
+    def __init__(self, by_substring):
+        self._by_substring = by_substring
+
+    def rows(self, sql):
+        for substring, rows in self._by_substring.items():
+            if substring in sql:
+                return rows
+        return []
+
+
+class FakeRabbit:
+    def __init__(self, queues=()):
+        self._queues = list(queues)
+
+    def queues(self):
+        return self._queues
+
+
+class FakeElastic:
+    """``search()`` filters records against every ``term`` clause in the
+    request -- the same shape ``investigate._es_search`` builds -- and
+    ignores ``range``/``prefix`` clauses, which a fixture with no real clock
+    or corrupted-em-dash byte stream has no business asserting on."""
+
+    def __init__(self, records=()):
+        self.records = list(records)
+
+    def search(self, body):
+        filters = body["query"]["bool"]["filter"]
+        out = []
+        for rec in self.records:
+            attrs = rec.get("attributes", {})
+            ok = True
+            for f in filters:
+                if "term" not in f:
+                    continue
+                (field, value), = f["term"].items()
+                key = field.split(".", 1)[1]
+                if attrs.get(key) != value:
+                    ok = False
+                    break
+            if ok:
+                out.append(rec)
+        return out
+
+
+def es_hit(template, **attrs):
+    """A hit exactly as ``skp.clients.es.Elastic.search`` returns it: already
+    unwrapped from ``_source``, matching how ``investigate.py``'s own rungs
+    read hits (``hits[0].get("attributes", {})``)."""
+    return {"attributes": {"{OriginalFormat}": template, **attrs}}
+
+
 class StartTests(unittest.TestCase):
     def test_a_202_is_not_started_until_the_root_key_appears(self):
         clients = {"baseapi": FakeApi((202, "")),
@@ -248,7 +307,8 @@ class FreezeTests(unittest.TestCase):
 
 class VerdictTests(unittest.TestCase):
     BASE = {"frozen": False, "parked": [], "wedged": [], "failed": [],
-            "completed": False, "running": False, "dispatched": False}
+            "completed": False, "running": False, "dispatched": False,
+            "unscoped": False}
 
     def obs(self, **kw):
         merged = dict(self.BASE)
@@ -263,18 +323,21 @@ class VerdictTests(unittest.TestCase):
         verdict, _ = operate.resolve_verdict(self.obs(frozen=True, wedged=["s2"]))
         self.assertEqual(verdict, "frozen")
 
-    def test_parked_beats_wedged_and_names_the_step(self):
+    def test_parked_beats_wedged_and_names_a_processor_not_a_step(self):
         verdict, lines = operate.resolve_verdict(
-            self.obs(parked=["s1"], wedged=["s2"]))
-        self.assertEqual(verdict, "parked-at-s1")
+            self.obs(parked=["p1"], wedged=["p2"]))
+        self.assertEqual(verdict, "parked-at-processor-p1")
         self.assertTrue(any("dead" in ln for ln in lines))
 
-    def test_wedged_beats_failed(self):
-        self.assertEqual(
-            operate.resolve_verdict(self.obs(wedged=["s2"], failed=["s3"]))[0],
-            "wedged-at-s2")
+    def test_wedged_beats_failed_and_names_a_processor_not_a_step(self):
+        verdict, _ = operate.resolve_verdict(
+            self.obs(wedged=["p2"], failed=["s3"]))
+        self.assertEqual(verdict, "wedged-at-processor-p2")
 
-    def test_failed_beats_completed(self):
+    def test_failed_beats_completed_and_still_names_a_step(self):
+        """Unlike parked/wedged, `failed` is read from the ES StepId
+        attribute and genuinely names a step -- it must NOT be renamed to
+        `failed-at-processor-...`."""
         self.assertEqual(
             operate.resolve_verdict(self.obs(failed=["s3"], completed=True))[0],
             "failed-at-s3")
@@ -294,18 +357,150 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(verdict, "never-started")
         self.assertTrue(any("no dispatch" in ln for ln in lines))
 
+    def test_never_started_names_the_dispatch_when_one_happened(self):
+        """A dispatch record inside the window with nothing after it is
+        still `never-started` (the set stays closed at seven), but printing
+        "no dispatch record" would be a lie -- one exists."""
+        verdict, lines = operate.resolve_verdict(self.obs(dispatched=True))
+        self.assertEqual(verdict, "never-started")
+        self.assertFalse(any("no dispatch" in ln for ln in lines))
+        self.assertTrue(any("dispatch record exists" in ln for ln in lines))
+
+    def test_unscoped_appends_an_evidence_line_without_changing_the_verdict(self):
+        verdict, lines = operate.resolve_verdict(self.obs(unscoped=True))
+        self.assertEqual(verdict, "never-started")
+        self.assertTrue(any("could not be attributed" in ln for ln in lines))
+
+    def test_unscoped_note_rides_along_with_a_healthy_verdict_too(self):
+        """Even a good-news verdict must not imply the queue check happened
+        when it did not -- unscoped is orthogonal to which verdict won."""
+        verdict, lines = operate.resolve_verdict(
+            self.obs(completed=True, unscoped=True))
+        self.assertEqual(verdict, "completed")
+        self.assertTrue(any("could not be attributed" in ln for ln in lines))
+
     def test_every_verdict_is_one_of_the_seven(self):
         """The set is closed. A new state must earn its own remedy -- it must
         not be silently folded into a neighbour."""
         flat = {"completed", "running", "frozen", "never-started"}
-        prefixes = ("failed-at-", "parked-at-", "wedged-at-")
-        for kwargs in ({"frozen": True}, {"parked": ["s"]}, {"wedged": ["s"]},
+        prefixes = ("failed-at-", "parked-at-processor-", "wedged-at-processor-")
+        for kwargs in ({"frozen": True}, {"parked": ["p"]}, {"wedged": ["p"]},
                        {"failed": ["s"]}, {"completed": True},
                        {"running": True}, {}):
             verdict, lines = operate.resolve_verdict(self.obs(**kwargs))
             self.assertTrue(verdict in flat or verdict.startswith(prefixes),
                             f"{verdict} is outside the closed set")
             self.assertTrue(lines, f"{verdict} carried no evidence")
+
+
+PROC_IN = "11111111-1111-1111-1111-111111111111"
+PROC_OUT = "22222222-2222-2222-2222-222222222222"
+
+
+def _healthy_pg():
+    """entry_condition not Never (not frozen) and this workflow's one step
+    maps to PROC_IN."""
+    return ScriptedPg({
+        "workflow_entry_steps": [["4"]],
+        "processor_id": [[PROC_IN]],
+    })
+
+
+class ObserveRunScopingTests(unittest.TestCase):
+    """The regression cover for the unscoped-broker-scan defect: a stuck
+    queue belonging to a processor that backs some OTHER workflow must never
+    surface as this workflow's verdict, and one that backs THIS workflow
+    must."""
+
+    def clients(self, rabbit_queues, pg=None, redis_keys=None):
+        return {
+            "elasticsearch": FakeElastic([]),
+            "redis": FakeRedis({f"skp:{WF}:*": [redis_keys if redis_keys is not None
+                                                 else [f"skp:{WF}:{STEP}"]]}),
+            "postgres": pg or _healthy_pg(),
+            "rabbitmq": FakeRabbit(rabbit_queues),
+        }
+
+    def test_a_wedged_processor_outside_the_workflow_is_not_reported(self):
+        clients = self.clients([
+            {"name": f"processor-{PROC_OUT}", "messages": 5, "consumers": 0},
+        ])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["wedged"], [])
+        self.assertEqual(obs["parked"], [])
+        self.assertFalse(obs["unscoped"])
+
+    def test_a_wedged_processor_inside_the_workflow_is_reported(self):
+        clients = self.clients([
+            {"name": f"processor-{PROC_IN}", "messages": 5, "consumers": 0},
+        ])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["wedged"], [PROC_IN])
+
+    def test_a_parked_processor_outside_the_workflow_is_not_reported(self):
+        clients = self.clients([
+            {"name": f"processor-{PROC_OUT}.dead", "messages": 3, "consumers": 0},
+        ])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["parked"], [])
+
+    def test_a_parked_processor_inside_the_workflow_is_reported(self):
+        clients = self.clients([
+            {"name": f"processor-{PROC_IN}.dead", "messages": 3, "consumers": 0},
+        ])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["parked"], [PROC_IN])
+
+    def test_no_l2_projection_is_unscoped_not_a_false_all_clear(self):
+        """Empty processor set (no skp:{workflowId}:{stepId} keys) must not
+        fall back to an unscoped scan -- parked/wedged stay empty and the
+        gap is recorded as `unscoped`, never reported as a clean queue."""
+        clients = self.clients(
+            [{"name": f"processor-{PROC_IN}", "messages": 9, "consumers": 0}],
+            redis_keys=[])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["wedged"], [])
+        self.assertEqual(obs["parked"], [])
+        self.assertTrue(obs["unscoped"])
+
+
+class ObserveRunElasticsearchShapeTests(unittest.TestCase):
+    """Elastic.search() already strips `_source` -- these guard against
+    observe_run re-wrapping a lookup in a `_source` key that was never
+    there, which would silently zero out every ES-derived observation."""
+
+    def test_a_failed_completion_record_is_read(self):
+        clients = {
+            "elasticsearch": FakeElastic([
+                es_hit(operate._ENTRY_COMPLETED, WorkflowId=WF, Result="Failed",
+                       StepId="s9"),
+            ]),
+            "redis": FakeRedis({f"skp:{WF}:*": [[f"skp:{WF}:{STEP}"]]}),
+            "postgres": _healthy_pg(),
+            "rabbitmq": FakeRabbit([]),
+        }
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["failed"], ["s9"])
+
+    def test_a_dispatch_record_is_read(self):
+        clients = {
+            "elasticsearch": FakeElastic([
+                es_hit(operate._DISPATCHED, WorkflowId=WF,
+                       CorrelationId="c" * 32),
+            ]),
+            "redis": FakeRedis({f"skp:{WF}:*": [[f"skp:{WF}:{STEP}"]]}),
+            "postgres": _healthy_pg(),
+            "rabbitmq": FakeRabbit([]),
+        }
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertTrue(obs["dispatched"])
+
+
+class VerifyUsageTests(unittest.TestCase):
+    def test_an_invalid_workflow_id_is_a_usage_error_not_a_crash(self):
+        result = operate.verify(ENTRIES, {}, "not-a-uuid", "1h")
+        self.assertEqual(result.code, EXIT_USAGE)
+        self.assertIn("not a UUID", result.render())
 
 
 if __name__ == "__main__":
