@@ -299,38 +299,64 @@ def resolve_verdict(observations: dict) -> tuple[str, list[str]]:
     hold at once, and the most actionable has to win: a frozen workflow is
     not dispatching, so checking `frozen` after `wedged` would send an
     operator to redeploy a processor that is working perfectly.
+
+    ``parked``/``wedged`` name a *processor* (``parked-at-processor-{id}``,
+    ``wedged-at-processor-{id}``), not a step: the RabbitMQ queue name is
+    ``processor-{processorId}``, and one processor can back several steps in
+    a workflow, so naming a step would invent precision the data does not
+    have. ``failed`` is read from the Elasticsearch ``StepId`` attribute and
+    genuinely names a step, so ``failed-at-{stepId}`` is left as is.
     """
     if observations["frozen"]:
-        return "frozen", [
+        verdict, evidence = "frozen", [
             "every entry step reads steps.entry_condition = 5 (Never).",
             "Nothing is wrong: this workflow was deliberately frozen.",
         ]
-    if observations["parked"]:
-        step = observations["parked"][0]
-        return f"parked-at-{step}", [
-            f"processor-{step}.dead holds messages -- deliveries were rejected "
-            f"and dead-lettered.",
+    elif observations["parked"]:
+        processor = observations["parked"][0]
+        verdict, evidence = f"parked-at-processor-{processor}", [
+            f"processor-{processor}.dead holds messages -- deliveries were "
+            f"rejected and dead-lettered.",
             "They are recoverable by hand; they are not lost.",
         ]
-    if observations["wedged"]:
-        step = observations["wedged"][0]
-        return f"wedged-at-{step}", [
-            f"processor-{step} has queued messages and no consumers -- nothing "
-            f"is reading the queue.",
+    elif observations["wedged"]:
+        processor = observations["wedged"][0]
+        verdict, evidence = f"wedged-at-processor-{processor}", [
+            f"processor-{processor} has queued messages and no consumers -- "
+            f"nothing is reading the queue.",
         ]
-    if observations["failed"]:
+    elif observations["failed"]:
         step = observations["failed"][0]
-        return f"failed-at-{step}", [
+        verdict, evidence = f"failed-at-{step}", [
             f"a completion record for {step} reports Failed.",
         ]
-    if observations["completed"]:
-        return "completed", ["a terminal step completed and the run ended."]
-    if observations["running"]:
-        return "running", ["steps are executing inside the window."]
-    return "never-started", [
-        "no dispatch record inside the window, and nothing queued or parked.",
-        "Either start was never issued, or it was rejected at a gate.",
-    ]
+    elif observations["completed"]:
+        verdict, evidence = "completed", [
+            "a terminal step completed and the run ended."]
+    elif observations["running"]:
+        verdict, evidence = "running", [
+            "steps are executing inside the window."]
+    elif observations["dispatched"]:
+        verdict, evidence = "never-started", [
+            "a dispatch record exists inside the window, but no completion, "
+            "failure, running step, or queue state followed it.",
+            "the run may still be initializing, or ended between dispatch "
+            "and the next observable event.",
+        ]
+    else:
+        verdict, evidence = "never-started", [
+            "no dispatch record inside the window, and nothing queued or "
+            "parked.",
+            "Either start was never issued, or it was rejected at a gate.",
+        ]
+
+    if observations.get("unscoped"):
+        evidence = evidence + [
+            "queue states could not be attributed to this workflow -- it "
+            "has no L2 projection (no skp:{workflowId}:{stepId} keys), so "
+            "parked and wedged could not be checked.",
+        ]
+    return verdict, evidence
 
 
 _ENTRY_COMPLETED = "the entry step completed with {Result}"
@@ -350,7 +376,12 @@ def _newest_correlation(es, workflow_id: str, window: str) -> str | None:
     hits = investigate._es_search(es, _DISPATCHED, window, workflow_id, None,
                                   size=1, order="desc")
     for hit in hits:
-        attrs = (hit.get("_source") or {}).get("attributes") or {}
+        # skp.clients.es.Elastic.search() already unwraps `_source` -- each
+        # hit here IS the source document, exactly as investigate.py's own
+        # rungs read it (`hits[0].get("attributes", {})`). A `_source`
+        # lookup here would find nothing and silently starve every verdict
+        # of its evidence.
+        attrs = hit.get("attributes") or {}
         if attrs.get("CorrelationId"):
             return str(attrs["CorrelationId"])
     return None
@@ -371,18 +402,57 @@ def _entry_steps_all_never(clients, workflow_id: str) -> bool:
     return bool(values) and all(v == str(NEVER) for v in values)
 
 
-def _queue_states(clients) -> tuple[list[str], list[str]]:
+def _workflow_processors(clients, workflow_id: str) -> set[str]:
+    """The processor ids backing this workflow's steps.
+
+    Read, not inferred: the L2 projection enumerates this workflow's steps
+    under skp:{workflowId}:{stepId} (catalogued as redis.Step), and Postgres
+    maps each step to its processor. Scoping matters because one processor
+    backs steps in several workflows, and parked/wedged outrank every
+    healthy verdict -- an unscoped scan reports another workflow's outage
+    as this one's.
+    """
+    keys = clients["redis"].keys(f"skp:{workflow_id}:*")
+    step_ids = []
+    for key in keys:
+        candidate = key.rsplit(":", 1)[-1]
+        try:
+            uuid.UUID(candidate)
+        except ValueError:
+            continue
+        step_ids.append(candidate)
+    if not step_ids:
+        return set()
+    quoted = ",".join(f"'{s}'" for s in step_ids)
+    rows = clients["postgres"].rows(
+        f"select distinct processor_id from steps where id in ({quoted})")
+    return {r[0] for r in rows if r}
+
+
+def _queue_states(clients, processors: set[str]) -> tuple[list[str], list[str]]:
+    """Parked/wedged processors, filtered to those backing this workflow.
+
+    ``processors`` is expected to be non-empty here -- an empty set means
+    nothing could be attributed to the workflow, and the caller must not
+    call this with it (see ``observe_run``'s ``unscoped`` handling).
+    """
     parked, wedged = [], []
     for queue in clients["rabbitmq"].queues():
         name = queue.get("name", "")
         if not name.startswith("processor-"):
             continue
+        if name.endswith(".dead"):
+            processor_id = name[len("processor-"):-len(".dead")]
+        else:
+            processor_id = name[len("processor-"):]
+        if processor_id not in processors:
+            continue
         depth = int(queue.get("messages") or 0)
         if name.endswith(".dead"):
             if depth > 0:
-                parked.append(name[len("processor-"):-len(".dead")])
+                parked.append(processor_id)
         elif depth > 0 and int(queue.get("consumers") or 0) == 0:
-            wedged.append(name[len("processor-"):])
+            wedged.append(processor_id)
     return sorted(parked), sorted(wedged)
 
 
@@ -400,13 +470,22 @@ def observe_run(entries, clients, workflow_id: str, window: str = "1h") -> dict:
     failed, completed = [], False
     for template in (_ENTRY_COMPLETED, _TERMINAL_COMPLETED):
         for hit in hits(template):
-            attrs = (hit.get("_source") or {}).get("attributes") or {}
+            # Same unwrapped shape as _newest_correlation above -- Elastic
+            # already strips `_source` before this ever sees the hit.
+            attrs = hit.get("attributes") or {}
             if str(attrs.get("Result", "")).lower() == "failed":
                 failed.append(str(attrs.get("StepId", "unknown")))
             elif template == _TERMINAL_COMPLETED:
                 completed = True
 
-    parked, wedged = _queue_states(clients)
+    processors = _workflow_processors(clients, workflow_id)
+    unscoped = not processors
+    # Honest degradation: with no processors attributable to this workflow,
+    # an unscoped scan would report another workflow's outage as this one's
+    # (or its health as this one's), so parked/wedged stay empty and
+    # `unscoped` records that the check could not be made -- never silently
+    # "no parked messages".
+    parked, wedged = ([], []) if unscoped else _queue_states(clients, processors)
     return {
         "frozen": _entry_steps_all_never(clients, workflow_id),
         "parked": parked,
@@ -415,10 +494,16 @@ def observe_run(entries, clients, workflow_id: str, window: str = "1h") -> dict:
         "completed": completed,
         "running": bool(hits(_RUNNING)),
         "dispatched": bool(hits(_DISPATCHED)),
+        "unscoped": unscoped,
     }
 
 
 def verify(entries, clients, workflow_id: str, window: str) -> Result:
+    try:
+        uuid.UUID(workflow_id)
+    except ValueError:
+        return Result(EXIT_USAGE, [f"{workflow_id!r} is not a UUID"],
+                      next_command="skp operate verify --workflow <id>")
     observations = observe_run(entries, clients, workflow_id, window)
     verdict, evidence = resolve_verdict(observations)
     code = EXIT_OK if verdict in ("completed", "running", "frozen") else EXIT_VERDICT
