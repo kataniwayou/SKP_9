@@ -157,6 +157,25 @@ public sealed class ProcessorHostWiringTests
     }
 
     [Fact]
+    public async Task BothQueuesGetTheirOwnGatedConsumer()
+    {
+        // TWO consumers, one per queue, and the count is the assertion. AddGatedQueue's own remarks
+        // spell out the trap this guards: AddHostedService registers through TryAddEnumerable, which
+        // de-duplicates on IMPLEMENTATION TYPE -- so a second registration naming GatedQueueConsumer
+        // would be silently dropped, the post queue would never be consumed, and nothing anywhere
+        // would say so. Branches would pile up on a queue with no consumer while every probe stayed
+        // green.
+        //
+        // A count rather than a Contains: one consumer satisfies Contains just as well as two, which
+        // is precisely the failure being guarded against.
+        await using var sp = BuildWithIdentity();
+
+        var consumers = sp.GetServices<IHostedService>().OfType<GatedQueueConsumer>().ToList();
+
+        Assert.Equal(2, consumers.Count);
+    }
+
+    [Fact]
     public async Task EachLoopGetsItsOwnHeartbeatHolder()
     {
         // A shared holder would let either loop's beat mask the other's death.

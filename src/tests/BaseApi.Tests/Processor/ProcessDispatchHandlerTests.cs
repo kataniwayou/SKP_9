@@ -443,7 +443,7 @@ public sealed class ProcessDispatchHandlerTests
     public async Task CarriesTheDispatchsProcessorIdOntoEveryBranch()
     {
         // The same pass-through on the branch path, which also decides where the branch is SENT:
-        // SendToPostAsync addresses ProcessorQueues.Work(state.ProcessorId). That is the one place the
+        // SendToPostAsync addresses ProcessorQueues.Post(state.ProcessorId). That is the one place the
         // substitution is observable rather than cosmetic, so it is pinned separately.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
@@ -456,7 +456,7 @@ public sealed class ProcessDispatchHandlerTests
         await h.Build(probe).HandleAsync(Body(Dispatch(E) with { ProcessorId = foreign }), CancellationToken.None);
 
         Assert.Equal(foreign, sent!.ProcessorId);
-        await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(foreign), MessageTypes.ProcessedData,
+        await h.Sender.Received(1).SendAsync(ProcessorQueues.Post(foreign), MessageTypes.ProcessedData,
                                              Arg.Any<ProcessedData>(), Arg.Any<CancellationToken>(),
                                              Arg.Any<string?>());
     }

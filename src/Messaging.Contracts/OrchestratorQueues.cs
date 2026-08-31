@@ -18,10 +18,18 @@ public static class OrchestratorQueues
 {
     /// <summary>
     /// The durable control queue carrying both start and stop. Declared with a dead-letter exchange
-    /// and <b>deliberately without <c>x-delivery-limit</c></b>: a delivery limit counts every
-    /// redelivery, including the requeues issued while the projection store is unreachable, so a long
-    /// outage would dead-letter a start that was never malformed. Poison messages are parked by the
-    /// consumer on their first delivery, which is what a limit would otherwise be protecting against.
+    /// and <b>with <c>x-delivery-limit</c> set explicitly to -1, meaning unlimited</b>: a delivery
+    /// limit counts every redelivery, including the requeues issued while the projection store is
+    /// unreachable, so a limit would dead-letter a start that was never malformed once an outage ran
+    /// long enough. Poison messages are parked by the consumer on their first delivery, which is what
+    /// a limit would otherwise be protecting against.
+    /// <para>
+    /// <b>The argument is stated rather than omitted, and the difference is not cosmetic.</b> This
+    /// queue carried no such argument until it was found that RabbitMQ 4.x applies a default
+    /// delivery-limit of 20 to every quorum queue declaring none — so the omission did not mean "no
+    /// limit", it meant twenty, with nothing in the source saying so. Twenty requeue cycles is well
+    /// inside a Redis outage this design is built to ride out.
+    /// </para>
     /// </summary>
     public const string Control = "orchestrator-control";
 
