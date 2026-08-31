@@ -54,7 +54,11 @@
     <PackageVersion Include="JsonSchema.Net" Version="9.2.1" />
     <PackageVersion Include="Cronos" Version="0.13.0" />
 
-    <!-- Scheduling -->
+    <!-- Scheduling. Quartz has no PackageReference anywhere — it arrives transitively through
+         the hosting package — but its PackageVersion is REQUIRED all the same: this SDK enables
+         central transitive pinning by default, so the lock files record Quartz as a CentralTransitive
+         dependency and a locked-mode restore fails with NU1004 the moment this line is missing.
+         The same is true of Asp.Versioning.Http below. Neither line is safe to tidy away. -->
     <PackageVersion Include="Quartz" Version="3.18.1" />
     <PackageVersion Include="Quartz.Extensions.Hosting" Version="3.18.1" />
 
@@ -65,18 +69,17 @@
     <!-- HTTP — API versioning and Swagger. Asp.Versioning.Mvc is the package that resolves
          [ApiController] + [ApiVersion] attributes for controllers; ApiExplorer is required for
          SubstituteApiVersionInUrl and GroupNameFormat. -->
+    <!-- Transitive-only, and pinned for the NU1004 reason spelled out on Quartz above. -->
     <PackageVersion Include="Asp.Versioning.Http" Version="8.1.0" />
     <PackageVersion Include="Asp.Versioning.Mvc" Version="8.1.0" />
     <PackageVersion Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.0" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.9.0" />
 
     <!-- Tests -->
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.27" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.v3.assert" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.11.0" />
 
     <!-- Microsoft.Extensions.* family versions on its own cadence -->
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="8.10.0" />
