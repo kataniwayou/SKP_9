@@ -1,5 +1,5 @@
 # ============================================================================
-# grafana — dashboard UI (ClusterIP Service + Deployment + 2 provisioning ConfigMaps).
+# grafana — dashboard UI (ClusterIP Service + Deployment + 1 provisioning ConfigMap).
 # ============================================================================
 # Phase 87. Unlike every other manifest in k8s/ this has NO compose ancestor —
 # Grafana is new to the stack, so the header records the design decisions instead
@@ -10,38 +10,34 @@
 # specifically: Grafana
 # 13.0 REMOVED the Classic dashboard-JSON export (12.2 already made the V2 Resource
 # form the export default), which is the round-trip that lets a human iterate on a
-# panel in the editor, export, and commit the result back into k8s/dashboards/*.json
+# panel in the editor, export, and commit the result back into grafana/dashboards/*.json
 # (OQ-5). Hand-authored classic JSON still provisions on 13.1.1 — verified — so this
 # is about keeping the authoring loop, not a hard runtime block.
 #
 # NO PERSISTENCE — /var/lib/grafana is an `emptyDir`, not a PVC. The ABSENCE of
 # persistence IS the requirement (DASH-03): deleting the pod must throw away every
-# byte of Grafana state and reproduce the datasource and both dashboards from this
-# repo alone. If a PVC ever appears here, "the repo is the single source of truth"
-# stops being provable. This is also the repo's first `emptyDir` and first
-# `securityContext` — neither has an analog in the other 14 manifests.
+# byte of Grafana state and reproduce the datasource from this repo alone. Dashboards
+# are NOT reproduced: they are imported by hand (see grafana/README.md), so a pod
+# recreate leaves this Grafana with no boards until someone imports them again. That
+# is the accepted cost of hand-import. This is also the repo's first `emptyDir` and
+# first `securityContext` — neither has an analog in the other 14 manifests.
 #
-# LEAF-DIRECTORY MOUNT RULE — the three ConfigMap volumes mount at
-# /etc/grafana/provisioning/datasources, /etc/grafana/provisioning/dashboards and
-# /etc/grafana/dashboards. Mounting a ConfigMap over /etc/grafana/provisioning ITSELF
+# LEAF-DIRECTORY MOUNT RULE — the ConfigMap volume mounts at
+# /etc/grafana/provisioning/datasources. Mounting a ConfigMap over /etc/grafana/provisioning ITSELF
 # would shadow the image's sibling `alerting/`, `plugins/`, `access-control/` and
 # `notifiers/` subdirectories and Grafana would log provisioning errors at boot. That
 # is the same shadowing hazard T-80-07 guards against in 21-prometheus.yaml, but the
 # mechanism is INVERTED: prometheus mounts a single file by `subPath` to preserve its
 # sibling console libs; grafana needs whole directories, so it preserves its siblings
-# by mounting at the LEAVES instead. Note also that the dashboard JSONs mount at
-# /etc/grafana/dashboards — a SIBLING of the data dir. They are NEVER placed in a
-# subdirectory of /var/lib/grafana (the Helm-chart convention), which would nest a
-# ConfigMap volume inside the emptyDir and muddy the no-persistence story.
+# by mounting at the LEAVES instead.
 #
-# CONFIGMAP SIZE CEILING — a ConfigMap may not exceed 1 MiB (the etcd request-size
-# limit; the apiserver rejects larger, loudly, at apply time). The generated
-# `grafana-dashboards` ConfigMap (GENERATED into 24-grafana-dashboards.yaml by
-# grafana/build-dashboards.py) carries all five boards at ~275 KB, roughly 4x under. If they
-# pair ever approaches ~700 KB the remedy is to SPLIT into two ConfigMaps
-# (grafana-dashboards-runtime / grafana-dashboards-business) mounted at two paths, plus
-# a second provider entry in `grafana-dashboard-provider` (or one provider with
-# foldersFromFilesStructure: true). Do not pre-split.
+# NO DASHBOARD PROVISIONING — this Grafana provisions its datasource only. The boards in
+# grafana/dashboards/*.json are hand-imported by an operator (Dashboards > New > Import),
+# into a folder of their choosing, after they configure the Prometheus data source; each
+# board declares a `DS_PROMETHEUS` input and prompts for it on the import screen. There is
+# deliberately no `grafana-dashboards` ConfigMap and no file provider: the boards must
+# import into an org-managed Grafana that this repo cannot configure, and a provisioned
+# copy here would be a second source of truth that silently drifts from the imported one.
 #
 # AUTH POSTURE (accepted, not mitigated) — anonymous access is ON with org role Viewer,
 # plus admin/admin for the API. This matches the stack's existing posture exactly: the
@@ -125,13 +121,6 @@ spec:
             - name: gf-datasources
               mountPath: /etc/grafana/provisioning/datasources
               readOnly: true
-            - name: gf-provider
-              mountPath: /etc/grafana/provisioning/dashboards
-              readOnly: true
-            # the dashboard JSONs live OUTSIDE the provisioning tree and outside the data dir
-            - name: gf-dashboards
-              mountPath: /etc/grafana/dashboards
-              readOnly: true
             - name: grafana-storage
               mountPath: /var/lib/grafana
           # Phase-86 probe trio (32-keeper.yaml convention), all three on Grafana's single
@@ -171,13 +160,6 @@ spec:
         - name: gf-datasources
           configMap:
             name: grafana-datasources          # hand-authored below
-        - name: gf-provider
-          configMap:
-            name: grafana-dashboard-provider   # hand-authored below
-        - name: gf-dashboards
-          configMap:
-            name: grafana-dashboards           # GENERATED into 24-grafana-dashboards.yaml by
-                                               # grafana/build-dashboards.py -- name is load-bearing
         - name: grafana-storage
           # DASH-03 — no PVC, deliberately disposable. A pod recreate must rebuild all
           # Grafana state from the provisioning ConfigMaps, i.e. from this repo.
@@ -238,33 +220,3 @@ data:
           # floored $__rate_interval at 240s, which is why a sixty-second outage moved no rate
           # panel on any board.
           timeInterval: "15s"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-dashboard-provider
-  namespace: skp
-  labels:
-    app.kubernetes.io/part-of: skp
-data:
-  # Mounted (whole-dir, readOnly) at /etc/grafana/provisioning/dashboards.
-  skp.yaml: |
-    apiVersion: 1
-
-    providers:
-      - name: skp
-        orgId: 1
-        # both dashboards land in one named folder
-        folder: SKP
-        type: file
-        # UI cannot delete a provisioned dashboard
-        disableDeletion: true
-        # a UI "Save" is rejected with `Cannot save provisioned dashboard` (HTTP 400) — this
-        # is the mechanism that makes the repo the single source of truth (DASH-03, T-87-03)
-        allowUiUpdates: false
-        # re-reads the dir; with a ConfigMap this also picks up the kubelet's ConfigMap
-        # refresh (~60s) without a pod restart
-        updateIntervalSeconds: 30
-        options:
-          path: /etc/grafana/dashboards
-          foldersFromFilesStructure: false
