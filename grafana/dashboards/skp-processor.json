@@ -1172,7 +1172,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg by (queue,service_instance_id) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) - on(queue) group_left avg by (queue) (label_replace(rate(pipeline_produce_duration_seconds_sum{destination=~\"processor-$processorId\"}[$__rate_interval]) / rate(pipeline_produce_duration_seconds_count{destination=~\"processor-$processorId\"}[$__rate_interval]), \"queue\", \"$1\", \"destination\", \"(.*)\"))",
+          "expr": "avg by (queue,service_instance_id) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) - on(queue) group_left avg by (queue) (label_replace(rate(pipeline_produce_duration_seconds_sum{destination=~\"processor-$processorId(-post)?\"}[$__rate_interval]) / rate(pipeline_produce_duration_seconds_count{destination=~\"processor-$processorId(-post)?\"}[$__rate_interval]), \"queue\", \"$1\", \"destination\", \"(.*)\"))",
           "legendFormat": "net {{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1273,7 +1273,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(max by (queue,service_instance_id) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))) or (group by (queue,service_instance_id) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
+          "expr": "(max by (queue,service_instance_id) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId(-post)?\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))) or (group by (queue,service_instance_id) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId(-post)?\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "{{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
@@ -1365,7 +1365,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (queue,service_instance_id) (last_over_time(pipeline_queue_consumers{queue=~\"processor-$processorId\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
+          "expr": "max by (queue,service_instance_id) (last_over_time(pipeline_queue_consumers{queue=~\"processor-$processorId(-post)?\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
           "legendFormat": "{{queue}} {{service_instance_id}}",
           "range": true,
           "editorMode": "code"
