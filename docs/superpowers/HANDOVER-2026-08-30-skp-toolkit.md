@@ -1,6 +1,6 @@
 # Handover: the SKP toolkit (phases 1–3 partial)
 
-Date: 2026-08-30 (verification section updated 2026-08-31)
+Date: 2026-08-30 (verification section and phase-3 status updated 2026-08-31)
 Branch: `orchestrator-board-parity` (69 commits merged; working tree clean)
 Spec: `docs/superpowers/specs/2026-08-30-skp-skill-bundle-design.md`
 Plan: `docs/superpowers/plans/2026-08-30-skp-toolkit-ground-and-compile.md`
@@ -14,7 +14,7 @@ not recall**, because a small model's characteristic failure is confabulation �
 asked something it does not know, it invents a plausible answer and reports it
 confidently.
 
-**396 tests.** `python -m unittest discover -s tests -t .` from `skp-toolkit/`.
+**466 tests.** `python -m unittest discover -s tests -t .` from `skp-toolkit/`.
 
 ## Commands that exist
 
@@ -26,9 +26,33 @@ confidently.
 | `skp verify` | Takes the catalog's claims to the running system. `--component`, `--skips`, `--probe-writes`, `--probe-runs` |
 | `skp observe` | Current state and windowed quantities |
 | `skp investigate` | The nine-rung cut-point ladder + case files |
+| `skp author` | `validate` (runs the system's own five gates) and `apply` (a spec file, in foreign-key order) |
+| `skp operate` | `start`, `stop`, `freeze`, `verify` — each control command ending in a read-back |
 
-Not yet built: `skp author`, `skp operate` (phase 3 remainder), the developer
-verbs (phase 4), the skills themselves (phase 5).
+**Phase 3 is complete** (2026-08-31). Not yet built: the developer verbs
+(phase 4), the skills themselves (phase 5).
+
+### The seven run verdicts
+
+`skp operate verify` returns exactly one, and the rule is **one verdict per
+distinct remedy** — the same ruling that keeps NOT_OBSERVED, REFUTED and
+UNVERIFIABLE apart in `skp verify`. The resolution ORDER is load-bearing:
+`frozen` is checked first because a frozen workflow is not dispatching, and
+reporting that as `wedged` would send an operator to redeploy a healthy
+processor.
+
+`frozen` -> `parked-at-processor-{id}` -> `wedged-at-processor-{id}` ->
+`failed-at-{stepId}` -> `completed` -> `running` -> `never-started`
+
+Two of them name a **processor**, not a step, and that is deliberate: queues are
+per-processor and `steps.processor_id` is many-to-one, so naming a step there
+would invent precision the data does not have. `failed-at-{stepId}` really is a
+step — it is read from the Elasticsearch `StepId` attribute.
+
+A per-processor dead-letter queue is **shared**, so a `parked-at-processor-*`
+message may belong to a different workflow using the same processor. The verdict
+says so in its own evidence; confirm with
+`skp investigate parked --processor <id>`.
 
 ## Running against the live cluster
 
@@ -72,6 +96,22 @@ python -m skp verify --home <same> --probe-writes --probe-runs
 - **A template's em dash arrives transformed** through the OTel pipeline; exact
   `term` matching finds zero. Use a prefix match (`investigate._original_format_filter`).
 - **Liveness `interval` is whole seconds** on the wire, not milliseconds.
+- **`PUT /api/v1.0/steps/{id}` is a FULL-REPLACE DTO.** A partial body
+  `{"entryCondition": 5}` is rejected with HTTP 400 naming `Name` and `Version`
+  as required. `skp operate freeze` therefore does GET -> change one field ->
+  PUT the whole object back. This cost a live debugging cycle; the unit tests
+  could not see it.
+- **`Elastic.search()` already unwraps `_source`** (`clients/es.py`) — it
+  returns `[hit.get("_source", {}) ...]`. Reading `hit["_source"]["attributes"]`
+  yields `{}` on every hit and makes every Elasticsearch-derived observation
+  silently empty.
+- **There is no dry-run for workflow validation.** All five gates run before any
+  side effect, so a rejection is free — but a graph that passes every gate is
+  STARTED by the same call. That is why `skp author validate` needs
+  `--confirm-start`, and it is a property of the API, not a toolkit choice.
+- **`--home` must come BEFORE the subcommand** (`skp operate --home X verify`,
+  not `skp operate verify --home X`). It is declared on each group's own parser;
+  the wrong order exits 1 with "unrecognized arguments".
 
 ## Verification status: 135/135 (100%), no ceiling
 
