@@ -1,6 +1,6 @@
 # Handover: the SKP toolkit (phases 1–3 partial)
 
-Date: 2026-08-30
+Date: 2026-08-30 (verification section updated 2026-08-31)
 Branch: `orchestrator-board-parity` (69 commits merged; working tree clean)
 Spec: `docs/superpowers/specs/2026-08-30-skp-skill-bundle-design.md`
 Plan: `docs/superpowers/plans/2026-08-30-skp-toolkit-ground-and-compile.md`
@@ -14,7 +14,7 @@ not recall**, because a small model's characteristic failure is confabulation �
 asked something it does not know, it invents a plausible answer and reports it
 confidently.
 
-**398 tests.** `python -m unittest discover -s tests -t .` from `skp-toolkit/`.
+**396 tests.** `python -m unittest discover -s tests -t .` from `skp-toolkit/`.
 
 ## Commands that exist
 
@@ -73,34 +73,82 @@ python -m skp verify --home <same> --probe-writes --probe-runs
   `term` matching finds zero. Use a prefix match (`investigate._original_format_filter`).
 - **Liveness `interval` is whole seconds** on the wire, not milliseconds.
 
-## Verification status: 130/136 (96%), ceiling 133/136
+## Verification status: 135/135 (100%), no ceiling
 
-`skp verify --probe-writes --probe-runs`, live. Without flags: 112/136 (82%).
-The ratio is **not deterministic** — `redis.ExecutionData` is a genuine race
-(it confirms only if the scan lands while a run is in flight).
+`skp verify --probe-writes --probe-runs`, live, four consecutive runs. The verb
+prints `no refutations — every checkable claim is confirmed or legitimately not
+observed`, and the ceiling clause is gone because nothing is refuted and nothing
+is permanently excluded.
 
-The verb prints its own ceiling:
-`confirmed 130/136 (96%) — 2 refuted (system defect, not a toolkit gap);
-1 permanently excluded (structurally unobservable); maximum achievable 133/136`
+**This 100% is perishable, and that is the most important sentence here.** Three
+of the claims are Elasticsearch templates that only exist because a fault was
+injected to produce them (recipe below). Elasticsearch retains ~17 days. Around
+**2026-09-17** those records age out and the ratio falls back to 132/135 unless
+the injection is repeated. A 100% that expires without anyone noticing is exactly
+the kind of quiet lie this toolkit exists to prevent — so read the date, not just
+the number.
 
-What remains, and why:
+How the previous three residuals were closed:
 
-1. **3 Elasticsearch templates** — `ConnectionRecovered`, `EntryAbsentDuplicate`,
-   `SendFailedReturning`. Confirmed absent across the **full ~17-day retention**,
-   not merely a recent sample. A meaningful NOT_OBSERVED: these records have
-   genuinely never been written in the retained window. Closing them requires
-   fault injection (the repo's S1–S7 chaos scenarios produce them).
-2. **`redis.KeeperProbe` — permanent exclusion.** `L2ProjectionKeys.KeeperProbe`
-   has **zero call sites** in all of `src/` (grep confirms one hit: its own
-   declaration). Nothing writes the key, so no external observer can ever catch
-   it. **This is dead code in the C#** — worth removing there, at which point the
-   catalog entry disappears with it.
-3. **2 REFUTED — a real defect in the running system.** Processors `9e034ca0…`
-   and `5fed54d3…` are registered but **confirmed not deployed** (no
-   `skp:proc:<id>` liveness key has ever existed), so the remedy is
-   deploy-or-delete-the-row, not "investigate a broker loss". Separately, 12
-   orphaned `.dead` queues and 2 orphaned live work queues match no `processors`
-   row and are named in the output for cleanup.
+1. **The 2 REFUTED were a real system defect, and the system was fixed, not the
+   catalog.** All 23 `steps` rows pointed at `d033b408`; nothing referenced the
+   two accused processors, which were superseded registrations left behind by
+   `uq_processor_source_hash` on each SourceHash repoint. Both were deregistered
+   through `DELETE /api/v1/processors/{id}` (the product's own path, not SQL),
+   and the 14 orphan queues — each verified empty with zero consumers first —
+   were deleted. `processor-d033b408….dead` holds a parked message and has a
+   matching row; it is not an orphan, leave it.
+2. **`redis.KeeperProbe` was deleted, not excluded.** The dead C# method is gone
+   from `L2ProjectionKeys`, and with it the annotation, the `_KEEPER_PROBE_ID`
+   special case in `check_redis`, and its two tests. Its NOT_OBSERVED message had
+   asserted "grepped across src/**/*.cs; only its own definition matches" — false
+   the moment the definition went, so it had to go too. The generic
+   `PERMANENT EXCLUSION` machinery in `render_report` stays and is still tested;
+   no surface carries the marker today. Catalog is 135, not 136.
+3. **`redis.ExecutionData` was a fixable race, not an inherent one.** Measured on
+   the cluster, the delay from `200 OK` on `orchestration/start` to the first
+   `skp:data:*` key was **2.39s, 9.98s and 8.83s** — against a probe window of
+   exactly `20 × 0.5s = 10s`. The worst case sat *on* the deadline, so the same
+   command reported CONFIRMED or NOT_OBSERVED on an unchanged system. Now
+   `1200 × 0.05s` = 60s, six times the measured worst case. Window was the bug;
+   resolution was secondary.
+
+### Reproducing the three Elasticsearch templates
+
+The named chaos scenarios **do not** produce them, and it is worth knowing why
+before spending a morning on it. `FaultWitness` matches heal templates with
+"one of" semantics (`Expected one of: …`, `FirstOrDefault`), so `ConsumptionAdmitted`
+alone satisfies the Rabbit heal and `ConnectionRecovered` never has to appear.
+`RabbitUnavailable` and `RedisWipe` both pass green while all three templates
+stay at zero. That is sound test design — either record proves the fault healed —
+but it means a passing scenario is not evidence that every template in its list
+was emitted.
+
+What actually produces them, against a **drained** system:
+
+- **`ConnectionRecovered`** — `rabbitmqctl close_all_connections` under load.
+  Scaling the broker to zero does *not* work: the app rebuilds its own connection
+  (`broker connection open as {ClientName}; topology declared`) instead of letting
+  the client library recover it, so `RecoverySucceededAsync` never fires. The
+  connection must be severed while the broker stays **up**.
+- **`EntryAbsentDuplicate`** — the same connection severing. Killing the consumer
+  channel mid-flight forces redelivery, and the redelivery finds the entry key
+  already reclaimed.
+- **`SendFailedReturning`** — the hard one. It needs a publish to fail *inside* a
+  `GatedQueueConsumer` handler, which severing cannot do (it kills the consuming
+  channel too, so the handler never reaches its send). The recipe: put a
+  `max-length:1, overflow:reject-publish` policy on `orchestrator-result`, scale
+  processors to 0 and let a backlog build in `processor-{id}`, scale the
+  orchestrator to 0 so the result queue stops draining, then scale processors
+  back up. They drain the backlog, every outcome publish is rejected, and the
+  template fires in the hundreds. Clear the policy and restore both workloads
+  afterwards.
+
+**`skp verify --probe-runs` starts a workflow and never stops it.** The chaos
+scenarios refuse to start on a firing system (`N entry dispatch(es) in the last
+40s`), so a verify run will block the next chaos run until the workflow is
+stopped and drained. Stop every workflow via `POST /api/v1.0/orchestration/stop`
+and wait for a quiet 45s window first.
 
 ## How this build actually went — read this before trusting anything
 
