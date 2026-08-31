@@ -831,8 +831,20 @@ _PLACEHOLDER = re.compile(r"\{[^}]*\}")
 
 _DATA_FAMILY_ID = "redis.ExecutionData"
 _ORCH_START_ID = "api.orchestration.post_start"
-_PROBE_RUN_ATTEMPTS = 20
-_PROBE_RUN_POLL_S = 0.5
+# 60s at 50ms, and the WINDOW is the part that matters. Measured on the live
+# cluster, the delay from a 200 OK on orchestration/start to the first
+# skp:data:* key was 2.39s, 9.98s and 8.83s across three consecutive runs --
+# the orchestrator does not dispatch on the request thread, so the first blob
+# lands on its own schedule. The old bound was 20 x 0.5s = exactly 10s, which
+# put the observed worst case ON the deadline: the same command reported
+# CONFIRMED or NOT_OBSERVED on an unchanged system depending on which side of
+# 10s that run happened to fall. That is a flaky verdict, and a verdict that
+# flips is worse than one that is merely pessimistic -- it teaches a reader to
+# discount the ratio. 60s is six times the measured worst case; the finer poll
+# is secondary, and only bounds how much of a short-lived blob's life can be
+# stepped over once the window is wide enough to contain it.
+_PROBE_RUN_ATTEMPTS = 1200
+_PROBE_RUN_POLL_S = 0.05
 
 
 def _tight_scan(client, pattern: str, window_s: float, poll_s: float) -> list[str]:
