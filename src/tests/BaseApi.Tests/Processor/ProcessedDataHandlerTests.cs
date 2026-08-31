@@ -58,6 +58,33 @@ public sealed class ProcessedDataHandlerTests
         new(C, E, W, S, P, entryId, Encoding.UTF8.GetBytes(json));
 
     [Fact]
+    public async Task RefusesABranchStampedWithAnotherProcessorsId()
+    {
+        // WR-02, ported back from the reference. Everything this handler does acts on the ids in the
+        // body: it writes L2[EntryId] from them and reports a StepOutcome under them. The post queue
+        // is addressable on a shared broker and handlers resolve by message type across the whole
+        // container, so a message carrying someone else's ProcessorId would write into another
+        // lineage's key space and forge that step's outcome. Nothing enforced that until now.
+        var h = new Harness();
+        var foreign = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Build().HandleAsync(
+                Body(Branch(E) with { ProcessorId = foreign }), CancellationToken.None));
+
+        // Deterministic, so the consumer parks it on first delivery rather than requeueing forever.
+        Assert.Contains(foreign.ToString("D"), ex.Message, StringComparison.Ordinal);
+
+        // AND the refusal is total: nothing written, nothing reported. Asserting the throw alone
+        // would pass even if the guard sat after the write.
+        await h.Db.DidNotReceive().StringSetAsync(
+            Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
+            Arg.Any<When>(), Arg.Any<CommandFlags>());
+        await h.Sender.DidNotReceive().SendTransientAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<StepOutcome>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ReclaimsNothingAtAll()
     {
         // The pre handler owns the reclaim now: it deletes the input once its author's transform
@@ -225,19 +252,19 @@ public sealed class ProcessedDataHandlerTests
     [Fact]
     public async Task CarriesTheBranchsProcessorIdOntoTheOutcome()
     {
-        // ProcessorId passes through here as it does on the pre hop — a routing and tracing id, not a
-        // claim to verify. The inbound branch was stamped by this processor one hop ago off the
-        // dispatch that named it, so re-resolving it from identity would read the same fact twice and
-        // leave the field written and never read.
+        // ProcessorId rides the body onto the outcome rather than being re-resolved from identity.
+        // This USED to be asserted with a foreign id, on the reasoning that the field is a routing and
+        // tracing id rather than a claim to verify. It is verified now — see
+        // RefusesABranchStampedWithAnotherProcessorsId — so the case this pins is the real one: the
+        // id that arrives is the id reported, for a branch that legitimately belongs to us.
         var h = new Harness();
         StepOutcome? sent = null;
         await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        var foreign = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
-        await h.Build().HandleAsync(Body(Branch(E) with { ProcessorId = foreign }), CancellationToken.None);
+        await h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None);
 
-        Assert.Equal(foreign, sent!.ProcessorId);
+        Assert.Equal(P, sent!.ProcessorId);
     }
 
     [Fact]
@@ -250,11 +277,10 @@ public sealed class ProcessedDataHandlerTests
         await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        var foreign = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
         await h.Build().HandleAsync(
-            Body(Branch(E, """{"number":"seven"}""") with { ProcessorId = foreign }), CancellationToken.None);
+            Body(Branch(E, """{"number":"seven"}""")), CancellationToken.None);
 
-        Assert.Equal(foreign, sent!.ProcessorId);
+        Assert.Equal(P, sent!.ProcessorId);
     }
 
     [Fact]
