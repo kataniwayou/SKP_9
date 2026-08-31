@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
+using BaseConsole.Core.Health;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 
 namespace BaseProcessor.Core.Boot;
@@ -41,8 +43,18 @@ public sealed class BootProbeListener : IAsyncDisposable
     /// Binds the probe surface. Port 0 lets the OS choose, which is for tests; production passes the
     /// same <c>ConsoleHealth:Port</c> the real listener will take over.
     /// </summary>
-    public static async Task<BootProbeListener> StartAsync(int port, CancellationToken ct)
+    /// <param name="port">The port the real health listener will later take over.</param>
+    /// <param name="logs">
+    /// The boot sequence's own factory — the same one the identity bootstrap writes through. Required
+    /// rather than defaulted, because a default would mean a caller could silently reintroduce the
+    /// silent probe surface this parameter exists to remove.
+    /// </param>
+    /// <param name="ct">Cancels the bind.</param>
+    public static async Task<BootProbeListener> StartAsync(
+        int port, ILoggerFactory logs, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(logs);
+
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
         // Console logging belongs to the boot sequence, which owns its own factory. A second provider
@@ -51,9 +63,13 @@ public sealed class BootProbeListener : IAsyncDisposable
 
         var app = builder.Build();
 
-        app.MapGet("/health/startup", () => Results.Ok());
-        app.MapGet("/health/live",    () => Results.Ok());
-        app.MapGet("/health/ready",   () => Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+        // The same category the real listener uses, so one query spans the boot window and everything
+        // after it, and the handover between the two listeners is invisible to whoever is reading.
+        var probeLog = logs.CreateLogger(HealthProbeLog.Category);
+
+        app.MapGet("/health/startup", () => Answer(probeLog, "startup", HealthStatus.Healthy));
+        app.MapGet("/health/live",    () => Answer(probeLog, "live",    HealthStatus.Healthy));
+        app.MapGet("/health/ready",   () => Answer(probeLog, "ready",   HealthStatus.Unhealthy));
 
         await app.StartAsync(ct).ConfigureAwait(false);
 
@@ -64,6 +80,36 @@ public sealed class BootProbeListener : IAsyncDisposable
             ?? throw new InvalidOperationException("the boot probe listener reported no address");
 
         return new BootProbeListener(app, address);
+    }
+
+    /// <summary>
+    /// Logs the outcome and returns it. The report is synthesised rather than run, because the
+    /// answers here are constants — but it is a real <see cref="HealthReport"/> so the line renders
+    /// through the same code the real listener uses and cannot drift from it.
+    /// <para>
+    /// One entry, named for the only thing that is actually unknown during this window. On readiness
+    /// it is unhealthy, which is what makes the line say <c>failing: identity</c> — the true reason
+    /// this stage answers 503 at all. The duration is zero because nothing was checked.
+    /// </para>
+    /// </summary>
+    private static IResult Answer(ILogger log, string tag, HealthStatus status)
+    {
+        var code = status == HealthStatus.Unhealthy
+            ? StatusCodes.Status503ServiceUnavailable
+            : StatusCodes.Status200OK;
+
+        HealthProbeLog.Write(
+            log,
+            tag,
+            new HealthReport(
+                new Dictionary<string, HealthReportEntry>
+                {
+                    ["identity"] = new(status, description: null, duration: TimeSpan.Zero, exception: null, data: null),
+                },
+                TimeSpan.Zero),
+            code);
+
+        return Results.StatusCode(code);
     }
 
     /// <summary>

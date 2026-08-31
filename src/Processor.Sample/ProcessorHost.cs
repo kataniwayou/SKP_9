@@ -53,6 +53,7 @@ public static class ProcessorHost
                 bootConfig.GetValue<int?>("ConsoleHealth:Port") ?? 8081,
                 resolver,
                 identity => Create(args, identity, configure),
+                bootLogs,
                 ct).ConfigureAwait(false);
         }
         finally

@@ -1,10 +1,13 @@
 using Asp.Versioning.ApiExplorer;
+using BaseApi.Core.Health;
 using BaseApi.Core.Middleware;
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace BaseApi.Core.DependencyInjection;
 
@@ -43,22 +46,47 @@ public static class BaseApiApplicationBuilderExtensions
             });
         }
 
-        app.MapHealthChecks("/health/live", new HealthCheckOptions
-        {
-            Predicate      = c => c.Tags.Contains("live"),
-            ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse,
-        });
-        app.MapHealthChecks("/health/ready", new HealthCheckOptions
-        {
-            Predicate      = c => c.Tags.Contains("ready"),
-            ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse,
-        });
-        app.MapHealthChecks("/health/startup", new HealthCheckOptions
-        {
-            Predicate      = c => c.Tags.Contains("startup"),
-            ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse,
-        });
+        MapProbe(app, "live");
+        MapProbe(app, "ready");
+        MapProbe(app, "startup");
 
         return app;
     }
+
+    /// <summary>
+    /// One endpoint, selected by tag, that logs its outcome and then renders the body exactly as
+    /// before. The log line is deliberately identical to the one the workers' embedded endpoint
+    /// writes — same category, same template — so a single query covers the API, the orchestrator and
+    /// every processor rather than three service-shaped variants of the same question.
+    /// <para>
+    /// The ASP.NET Core request log already reports these hits, but only as a URL and a status code,
+    /// and only on a host that has request logging enabled. A worker has neither. This line is what
+    /// makes the three services answer the same way.
+    /// </para>
+    /// </summary>
+    /// <remarks>
+    /// Internal rather than private so a test can map it onto a bare host and drive it over real
+    /// HTTP. <c>UseBaseApi</c> itself needs the whole API service graph — versioning, Swagger,
+    /// EF — which would make the probe's log line untestable in practice.
+    /// </remarks>
+    internal static void MapProbe(WebApplication app, string tag) =>
+        app.MapHealthChecks($"/health/{tag}", new HealthCheckOptions
+        {
+            Predicate      = c => c.Tags.Contains(tag),
+            ResponseWriter = (context, report) =>
+            {
+                // The middleware sets the status code from ResultStatusCodes before invoking the
+                // writer, so this reads the value the kubelet will actually receive rather than a
+                // second, independently derived guess at it.
+                HealthProbeLog.Write(
+                    context.RequestServices
+                        .GetRequiredService<ILoggerFactory>()
+                        .CreateLogger(HealthProbeLog.Category),
+                    tag,
+                    report,
+                    context.Response.StatusCode);
+
+                return UIResponseWriter.WriteHealthCheckUIResponse(context, report);
+            },
+        });
 }

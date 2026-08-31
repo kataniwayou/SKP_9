@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace BaseConsole.Core.Health;
@@ -40,6 +41,7 @@ public sealed class EmbeddedHealthEndpointService : IHostedService
     private readonly ConsoleHealthOptions _options;
     private readonly ILogger<EmbeddedHealthEndpointService> _logger;
     private WebApplication? _app;
+    private ILogger _probeLog = NullLogger.Instance;
 
     public EmbeddedHealthEndpointService(
         IServiceProvider outer,
@@ -61,6 +63,11 @@ public sealed class EmbeddedHealthEndpointService : IHostedService
         builder.Logging.ClearProviders();   // the outer host owns logging; this one would duplicate it
 
         _app = builder.Build();
+
+        // From the outer factory, so it inherits the outer host's providers and its configured
+        // filters. The category is fixed rather than this class, so one settings key silences the
+        // probe line here and in the API alike.
+        _probeLog = _outer.GetRequiredService<ILoggerFactory>().CreateLogger(HealthProbeLog.Category);
 
         _app.MapGet("/health/live",    () => ProbeAsync("live"));
         _app.MapGet("/health/ready",   () => ProbeAsync("ready"));
@@ -109,6 +116,8 @@ public sealed class EmbeddedHealthEndpointService : IHostedService
         var code = report.Status == HealthStatus.Unhealthy
             ? StatusCodes.Status503ServiceUnavailable
             : StatusCodes.Status200OK;
+
+        HealthProbeLog.Write(_probeLog, tag, report, code);
 
         return Results.Json(body, statusCode: code);
     }
