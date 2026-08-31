@@ -55,8 +55,4 @@ public static class L2ProjectionKeys
     /// </para>
     /// </summary>
     public static string ExecutionData(Guid entryId) => $"{Prefix}data:{entryId:D}";
-
-    /// <summary>Probe scratch key — written then deleted, with a short TTL as the net for a crash
-    /// between the two.</summary>
-    public static string KeeperProbe(string h) => $"{Prefix}keeper:probe:{h}";
 }

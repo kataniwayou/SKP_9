@@ -46,13 +46,5 @@
     "write_authority": "gated",
     "cost": "cheap",
     "verb": "skp investigate blob"
-  },
-  "redis.KeeperProbe": {
-    "intents": ["observe", "investigate"],
-    "answers": "whether the L2 gate probe is mid-flight for a given holder",
-    "never_for": "gate state — the gate's own open/closed reading is pipeline.gate.open in Prometheus; this key is only the probe's scratch space and is absent almost always",
-    "write_authority": "none",
-    "cost": "cheap",
-    "verb": "skp observe gate"
   }
 }

@@ -1036,46 +1036,7 @@ class RedisChecksTests(unittest.TestCase):
         claims = verify.check_redis(entries, client)
         self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
 
-    def _with_tight_scan_timing(self, window, poll, fn):
-        original = (verify._KEEPER_PROBE_WINDOW_S, verify._KEEPER_PROBE_POLL_S)
-        verify._KEEPER_PROBE_WINDOW_S, verify._KEEPER_PROBE_POLL_S = window, poll
-        try:
-            return fn()
-        finally:
-            verify._KEEPER_PROBE_WINDOW_S, verify._KEEPER_PROBE_POLL_S = original
-
-    def test_keeper_probe_never_caught_is_a_permanent_exclusion_not_a_generic_skip(self):
-        entries = [{"id": "redis.KeeperProbe", "component": "redis", "operation": "read key",
-                   "detail": "skp:keeper:probe:{h}"}]
-        client = FakeRedis(keys_by_pattern={})
-        claims = self._with_tight_scan_timing(
-            0.02, 0.01, lambda: verify.check_redis(entries, client))
-        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
-        self.assertIn("PERMANENT EXCLUSION", claims[0].message)
-        self.assertIn("KeeperProbe", claims[0].message)
-
-    def test_keeper_probe_caught_mid_flight_by_the_tight_scan_is_confirmed(self):
-        """A fake whose .keys() only returns something from its third call on
-        pins that the loop actually retries rather than giving up after the
-        first (already-empty, ordinary) SCAN."""
-        entries = [{"id": "redis.KeeperProbe", "component": "redis", "operation": "read key",
-                   "detail": "skp:keeper:probe:{h}"}]
-
-        class EventuallyPopulated:
-            def __init__(self):
-                self.calls = 0
-
-            def keys(self, pattern):
-                self.calls += 1
-                return ["skp:keeper:probe:abc"] if self.calls >= 3 else []
-
-        client = EventuallyPopulated()
-        claims = self._with_tight_scan_timing(
-            1.0, 0.001, lambda: verify.check_redis(entries, client))
-        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
-        self.assertGreaterEqual(client.calls, 3)
-
-    def test_other_families_are_unaffected_by_the_keeper_probe_special_case(self):
+    def test_an_absent_key_family_never_carries_an_exclusion_marker(self):
         entries = [{"id": "redis.Root", "component": "redis", "operation": "read key",
                    "detail": "skp:{workflowId}"}]
         client = FakeRedis(keys_by_pattern={})
@@ -1343,7 +1304,7 @@ class RenderReportTests(unittest.TestCase):
             verify.Claim("postgres", "postgres.workflows", verify.CONFIRMED, "3 row(s)"),
             verify.Claim("rabbitmq", "rabbitmq.processor.Work", verify.REFUTED, "missing: x"),
             verify.Claim("rabbitmq", "rabbitmq.processor.Dead", verify.REFUTED, "missing: y"),
-            verify.Claim("redis", "redis.KeeperProbe", verify.NOT_OBSERVED,
+            verify.Claim("redis", "redis.HypotheticalUnobservable", verify.NOT_OBSERVED,
                         "PERMANENT EXCLUSION: no call site writes this key"),
         ]
         lines = verify.render_report(claims)

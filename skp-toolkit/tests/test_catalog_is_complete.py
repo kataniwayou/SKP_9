@@ -51,6 +51,11 @@ class CompletenessTests(unittest.TestCase):
         # elasticsearch.index -- 135 + 1 = 136. C1 (the snake_case fix) is
         # not a count change: it corrects the eight existing postgres.* ids'
         # casing, it does not add or remove any.
+        #
+        # Verification round: L2ProjectionKeys.KeeperProbe was deleted from the
+        # C# as dead code -- it had no call site anywhere in src/, so nothing
+        # ever wrote the key and no observer could ever catch it. The surface
+        # goes with the code that declared it. 136 - 1 = 135.
         with tempfile.TemporaryDirectory() as tmp:
             entries, _ = compile_catalog(SRC, ANNOTATIONS, pathlib.Path(tmp))
-        self.assertEqual(len(entries), 136)
+        self.assertEqual(len(entries), 135)
