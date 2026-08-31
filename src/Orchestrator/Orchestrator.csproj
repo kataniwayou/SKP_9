@@ -25,6 +25,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Microsoft.NET.Sdk does NOT copy appsettings.json the way the Web SDK does, so without this
+         the file never lands next to the assembly and every Require() at boot fails. Processor.Sample
+         carries the identical line for the identical reason. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- BaseProcessor.Core.csproj:14 and Messaging.Transport.csproj:6 carry the same idiom: it lets a
          test drive an internal loop body directly rather than only through its public surface. -->
     <InternalsVisibleTo Include="BaseApi.Tests" />
