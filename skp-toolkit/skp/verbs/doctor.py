@@ -2,6 +2,7 @@ import argparse
 import json
 import pathlib
 
+from skp import references
 from skp.compile.lock import edited_generated, stale_sources
 from skp.profile import Profile, ProfileMissing, default_home, not_initialised
 from skp.result import EXIT_DRIFT, EXIT_OK, EXIT_UNREACHABLE, Result
@@ -33,6 +34,28 @@ def _target_name(check_name: str) -> str:
     than raising ``IndexError`` on ``name.split(": ", 1)[1]``."""
     parts = check_name.split(": ", 1)
     return parts[1] if len(parts) > 1 else check_name
+
+
+def gate_reference_rows(gate_names: list[str]) -> list[tuple[str, bool, str]]:
+    """One row covering reference coverage for every extracted gate.
+
+    A gate the system can emit with no file to explain it is a dead ``SEE:``
+    line: the model is sent to read something that is not there, which is
+    worse than being sent nowhere. Reported as a single row because the
+    operator's action is the same for one missing file or five -- write them.
+
+    An empty gate list FAILS rather than passing vacuously. "Nothing to
+    check" and "everything checked" must not render identically.
+    """
+    if not gate_names:
+        return [("gate references", False,
+                 "no gates.json -- run skp init --refresh")]
+    missing = [g for g in gate_names if not references.path_for(g).exists()]
+    if missing:
+        return [("gate references", False,
+                 f"{len(missing)} gate(s) with no reference file: "
+                 f"{', '.join(missing)}")]
+    return [("gate references", True, f"{len(gate_names)} gate(s) covered")]
 
 
 def diagnose(profile: Profile, clients: dict) -> list[tuple[str, bool, str]]:
@@ -80,6 +103,15 @@ def diagnose(profile: Profile, clients: dict) -> list[tuple[str, bool, str]]:
             rows.append(("catalog present", not untagged,
                          f"{len(entries)} entries" if not untagged
                          else f"{len(untagged)} untagged: {', '.join(untagged[:3])}"))
+
+    gates_path = model / "gates.json"
+    try:
+        gate_names = json.loads(gates_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        gate_names = []
+    if not isinstance(gate_names, list):
+        gate_names = []
+    rows.extend(gate_reference_rows(gate_names))
 
     for name, ok, detail in probe(clients):
         rows.append((f"reachability: {name}", ok, detail or ("ok" if ok else "no answer")))

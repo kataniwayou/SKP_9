@@ -48,6 +48,10 @@ class DoctorTests(unittest.TestCase):
         model.mkdir(exist_ok=True)
         catalog_path = model / "catalog.json"
         catalog_path.write_text(json.dumps(CATALOG), encoding="utf-8")
+        (model / "gates.json").write_text(
+            json.dumps(["cycle", "missingStep", "schemaEdge",
+                        "payloadConfigSchema", "processorLiveness"]),
+            encoding="utf-8")
 
         from skp.compile.lock import build_lock_two_roots
         lock = build_lock_two_roots([self.source], self.source.parent,
