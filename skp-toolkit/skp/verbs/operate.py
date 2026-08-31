@@ -15,6 +15,7 @@ from skp import references, state
 from skp.profile import Profile, ProfileMissing, default_home
 from skp.result import (EXIT_NOT_INITIALISED, EXIT_OK, EXIT_UNREACHABLE,
                         EXIT_USAGE, EXIT_VERDICT, Result)
+from skp.verbs import investigate
 from skp.verbs.init import build_clients
 from skp.verbs.map import load_catalog
 
@@ -252,6 +253,10 @@ def run(argv: list[str]) -> Result:
         p.add_argument("--workflow", required=True)
         p.add_argument("--confirm", action="store_true")
 
+    p = sub.add_parser("verify")
+    p.add_argument("--workflow")
+    p.add_argument("--window", default="1h")
+
     ns = parser.parse_args(argv)
     home = pathlib.Path(ns.home)
     try:
@@ -266,8 +271,161 @@ def run(argv: list[str]) -> Result:
     if ns.mode == "freeze":
         return freeze(entries, clients, ns.step, ns.confirm)
 
+    if ns.mode == "verify":
+        workflow_id = ns.workflow or state.recall(home, "workflow")
+        if not workflow_id:
+            return Result(EXIT_USAGE,
+                          ["no workflow known -- pass --workflow"],
+                          next_command="skp operate verify --workflow <id>")
+        return verify(entries, clients, workflow_id, ns.window)
+
     handler = {"start": start, "stop": stop}[ns.mode]
     result = handler(entries, clients, ns.workflow, ns.confirm)
     if result.code == EXIT_OK:
         state.record(home, "workflow", ns.workflow)
     return result
+
+
+def resolve_verdict(observations: dict) -> tuple[str, list[str]]:
+    """The seven verdicts, resolved in a fixed order.
+
+    One verdict per distinct remedy: two states that send the operator to do
+    the same thing are one verdict, two that send them somewhere different
+    must never be merged. This is the ruling ``skp verify`` already makes for
+    NOT_OBSERVED / REFUTED / UNVERIFIABLE -- collapsing them makes a verb cry
+    wolf and be ignored.
+
+    The ORDER carries as much weight as the set. Several observations can
+    hold at once, and the most actionable has to win: a frozen workflow is
+    not dispatching, so checking `frozen` after `wedged` would send an
+    operator to redeploy a processor that is working perfectly.
+    """
+    if observations["frozen"]:
+        return "frozen", [
+            "every entry step reads steps.entry_condition = 5 (Never).",
+            "Nothing is wrong: this workflow was deliberately frozen.",
+        ]
+    if observations["parked"]:
+        step = observations["parked"][0]
+        return f"parked-at-{step}", [
+            f"processor-{step}.dead holds messages -- deliveries were rejected "
+            f"and dead-lettered.",
+            "They are recoverable by hand; they are not lost.",
+        ]
+    if observations["wedged"]:
+        step = observations["wedged"][0]
+        return f"wedged-at-{step}", [
+            f"processor-{step} has queued messages and no consumers -- nothing "
+            f"is reading the queue.",
+        ]
+    if observations["failed"]:
+        step = observations["failed"][0]
+        return f"failed-at-{step}", [
+            f"a completion record for {step} reports Failed.",
+        ]
+    if observations["completed"]:
+        return "completed", ["a terminal step completed and the run ended."]
+    if observations["running"]:
+        return "running", ["steps are executing inside the window."]
+    return "never-started", [
+        "no dispatch record inside the window, and nothing queued or parked.",
+        "Either start was never issued, or it was rejected at a gate.",
+    ]
+
+
+_ENTRY_COMPLETED = "the entry step completed with {Result}"
+_TERMINAL_COMPLETED = ("the terminal step completed with {Result} — "
+                       "no successor accepts it, the run ends here")
+_RUNNING = "running the step"
+_DISPATCHED = "dispatched an entry step"
+
+
+def _newest_correlation(es, workflow_id: str, window: str) -> str | None:
+    """The current run's CorrelationId.
+
+    order="desc" because ascending hands back the OLDEST dispatch in the
+    window, and every workflow here recurs. Without this, a run that finished
+    an hour ago supplies the verdict for the run happening now.
+    """
+    hits = investigate._es_search(es, _DISPATCHED, window, workflow_id, None,
+                                  size=1, order="desc")
+    for hit in hits:
+        attrs = (hit.get("_source") or {}).get("attributes") or {}
+        if attrs.get("CorrelationId"):
+            return str(attrs["CorrelationId"])
+    return None
+
+
+def _entry_steps_all_never(clients, workflow_id: str) -> bool:
+    """True only when the workflow HAS entry steps and every one is Never.
+
+    A workflow with no entry steps at all is NOT frozen -- it is
+    never-started. Conflating them would report "nothing is wrong" about a
+    definition that cannot run.
+    """
+    rows = clients["postgres"].rows(
+        "select s.entry_condition from workflow_entry_steps w "
+        "join steps s on s.id = w.step_id "
+        f"where w.workflow_id = '{workflow_id}'")
+    values = [r[0] for r in rows if r]
+    return bool(values) and all(v == str(NEVER) for v in values)
+
+
+def _queue_states(clients) -> tuple[list[str], list[str]]:
+    parked, wedged = [], []
+    for queue in clients["rabbitmq"].queues():
+        name = queue.get("name", "")
+        if not name.startswith("processor-"):
+            continue
+        depth = int(queue.get("messages") or 0)
+        if name.endswith(".dead"):
+            if depth > 0:
+                parked.append(name[len("processor-"):-len(".dead")])
+        elif depth > 0 and int(queue.get("consumers") or 0) == 0:
+            wedged.append(name[len("processor-"):])
+    return sorted(parked), sorted(wedged)
+
+
+def observe_run(entries, clients, workflow_id: str, window: str = "1h") -> dict:
+    """Every field is a read of a catalogued surface. Nothing here recomputes
+    a decision the system already made."""
+    uuid.UUID(workflow_id)
+    es = clients["elasticsearch"]
+    correlation = _newest_correlation(es, workflow_id, window)
+
+    def hits(template):
+        return investigate._es_search(es, template, window, workflow_id,
+                                      correlation)
+
+    failed, completed = [], False
+    for template in (_ENTRY_COMPLETED, _TERMINAL_COMPLETED):
+        for hit in hits(template):
+            attrs = (hit.get("_source") or {}).get("attributes") or {}
+            if str(attrs.get("Result", "")).lower() == "failed":
+                failed.append(str(attrs.get("StepId", "unknown")))
+            elif template == _TERMINAL_COMPLETED:
+                completed = True
+
+    parked, wedged = _queue_states(clients)
+    return {
+        "frozen": _entry_steps_all_never(clients, workflow_id),
+        "parked": parked,
+        "wedged": wedged,
+        "failed": sorted(set(failed)),
+        "completed": completed,
+        "running": bool(hits(_RUNNING)),
+        "dispatched": bool(hits(_DISPATCHED)),
+    }
+
+
+def verify(entries, clients, workflow_id: str, window: str) -> Result:
+    observations = observe_run(entries, clients, workflow_id, window)
+    verdict, evidence = resolve_verdict(observations)
+    code = EXIT_OK if verdict in ("completed", "running", "frozen") else EXIT_VERDICT
+    nexts = {
+        "completed": "skp observe projected --workflow " + workflow_id,
+        "running": "skp operate verify --workflow " + workflow_id,
+        "frozen": "skp operate start --workflow " + workflow_id + " --confirm",
+    }
+    return Result(code, [f"{verdict}"] + evidence,
+                  next_command=nexts.get(verdict, "skp investigate"))
