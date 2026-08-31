@@ -1,5 +1,6 @@
 using Messaging.Contracts;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace BaseProcessor.Core.Boot;
 
@@ -29,18 +30,24 @@ public static class ProcessorBoot
     /// because the identity has to be in hand before the builder runs — that is the whole ordering
     /// this method exists to enforce.
     /// </param>
+    /// <param name="logs">
+    /// The boot sequence's console factory, shared with the identity bootstrap so Stage 1's two
+    /// voices — what discovery is doing and what the kubelet is being told — land in one stream.
+    /// </param>
     public static async Task<IHost> StartAsync(
         int probePort,
         IIdentityBootstrap bootstrap,
         Func<ProcessorIdentityFound, IHost> buildHost,
+        ILoggerFactory logs,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(bootstrap);
         ArgumentNullException.ThrowIfNull(buildHost);
+        ArgumentNullException.ThrowIfNull(logs);
 
         ProcessorIdentityFound identity;
 
-        var probes = await BootProbeListener.StartAsync(probePort, ct).ConfigureAwait(false);
+        var probes = await BootProbeListener.StartAsync(probePort, logs, ct).ConfigureAwait(false);
         try
         {
             identity = await bootstrap.ResolveAsync(ct).ConfigureAwait(false);

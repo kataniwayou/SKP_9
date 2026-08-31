@@ -3,6 +3,7 @@ using System.Net;
 using BaseProcessor.Core.Boot;
 using Messaging.Contracts;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace BaseApi.Tests.Boot;
@@ -59,6 +60,7 @@ public sealed class ProcessorBootTests
             FreePort(),
             new Immediate(),
             id => { seen = id; return new HostBuilder().Build(); },
+            NullLoggerFactory.Instance,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(Identity, seen);
@@ -73,6 +75,7 @@ public sealed class ProcessorBootTests
 
         using var host = await ProcessorBoot.StartAsync(
             port, bootstrap, _ => new HostBuilder().Build(),
+            NullLoggerFactory.Instance,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, bootstrap.Startup);
@@ -87,10 +90,11 @@ public sealed class ProcessorBootTests
 
         using var host = await ProcessorBoot.StartAsync(
             port, new Immediate(), _ => new HostBuilder().Build(),
+            NullLoggerFactory.Instance,
             TestContext.Current.CancellationToken);
 
         await using var rebind = await BootProbeListener.StartAsync(
-            port, TestContext.Current.CancellationToken);
+            port, NullLoggerFactory.Instance, TestContext.Current.CancellationToken);
 
         Assert.Equal(port, rebind.Address.Port);
     }
@@ -106,11 +110,12 @@ public sealed class ProcessorBootTests
                 port,
                 new NeverResolves(),
                 _ => new HostBuilder().Build(),
+                NullLoggerFactory.Instance,
                 cts.Token));
 
         // And the port must not be left held by a listener nobody can reach any more.
         await using var rebind = await BootProbeListener.StartAsync(
-            port, TestContext.Current.CancellationToken);
+            port, NullLoggerFactory.Instance, TestContext.Current.CancellationToken);
         Assert.Equal(port, rebind.Address.Port);
     }
 
