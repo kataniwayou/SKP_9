@@ -177,6 +177,13 @@ class FreezeTests(unittest.TestCase):
         clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([])}
         result = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=False)
         self.assertEqual(result.code, EXIT_USAGE)
+        self.assertEqual(clients["baseapi"].http.calls, [])
+
+    def test_invalid_uuid_is_rejected_before_any_api_call(self):
+        clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([])}
+        result = operate.freeze(FREEZE_ENTRIES, clients, "not-a-uuid", confirm=True)
+        self.assertEqual(result.code, EXIT_USAGE)
+        self.assertEqual(clients["baseapi"].http.calls, [])
 
 
 if __name__ == "__main__":
