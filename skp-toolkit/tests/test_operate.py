@@ -1,6 +1,7 @@
 import json
 import unittest
 
+from skp.clients.http import Unreachable
 from skp.result import EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE, EXIT_VERDICT
 from skp.verbs import operate
 
@@ -13,7 +14,37 @@ ENTRIES = [
      "operation": "POST /api/v1.0/orchestration/stop", "detail": "orchestration"},
     {"id": "redis.Root", "component": "redis", "operation": "read key",
      "detail": "skp:{workflowId}"},
+    {"id": "redis.Step", "component": "redis", "operation": "read key",
+     "detail": "skp:{workflowId}:{stepId}"},
+    {"id": "rabbitmq.processor.Work", "component": "rabbitmq", "operation": "list_queues",
+     "detail": "processor-{processorId}"},
+    {"id": "rabbitmq.processor.Dead", "component": "rabbitmq", "operation": "list_queues",
+     "detail": "processor-{processorId}.dead"},
+    {"id": "elasticsearch.EntryDispatched", "component": "elasticsearch",
+     "operation": "search", "detail": "dispatched an entry step"},
+    {"id": "elasticsearch.RunningTheStep", "component": "elasticsearch",
+     "operation": "search", "detail": "running the step"},
+    {"id": "elasticsearch.EntryStepCompleted", "component": "elasticsearch",
+     "operation": "search", "detail": "the entry step completed with {Result}"},
+    {"id": "elasticsearch.TerminalCompleted", "component": "elasticsearch",
+     "operation": "search",
+     "detail": ("the terminal step completed with {Result} — "
+               "no successor accepts it, the run ends here")},
 ]
+
+
+def _detail(entry_id: str) -> str:
+    return next(e["detail"] for e in ENTRIES if e["id"] == entry_id)
+
+
+# The exact literal templates the C# side emits, read off the same ENTRIES
+# fixture ``operate.py`` itself now reads by catalog id (C1) -- kept here
+# purely as fixture data for building fake ES hits, never as a name
+# production code hardcodes.
+DISPATCHED_TPL = _detail("elasticsearch.EntryDispatched")
+RUNNING_TPL = _detail("elasticsearch.RunningTheStep")
+ENTRY_COMPLETED_TPL = _detail("elasticsearch.EntryStepCompleted")
+TERMINAL_COMPLETED_TPL = _detail("elasticsearch.TerminalCompleted")
 
 FREEZE_ENTRIES = ENTRIES + [
     {"id": "api.steps.get_id", "component": "api",
@@ -65,7 +96,15 @@ class FakeApi:
                     raise outer._raises
                 # Look up reply by method; fall back to default for backwards compat
                 if outer._replies:
-                    return outer._replies.get(method, (None, None))
+                    # I4: a fixture that forgets to script a method used to
+                    # get (None, None) back -- a silent lie a caller could
+                    # easily mistake for a real "no reply" outcome, deferring
+                    # the failure to some unrelated assertion downstream.
+                    # Fail loudly, at the call, instead.
+                    if method not in outer._replies:
+                        raise AssertionError(
+                            f"FakeApi has no scripted reply for method {method!r}")
+                    return outer._replies[method]
                 return outer._default_reply
 
         self.http = _Http()
@@ -110,8 +149,13 @@ class FakeRabbit:
 class FakeElastic:
     """``search()`` filters records against every ``term`` clause in the
     request -- the same shape ``investigate._es_search`` builds -- and
-    ignores ``range``/``prefix`` clauses, which a fixture with no real clock
-    or corrupted-em-dash byte stream has no business asserting on."""
+    against ``prefix`` clauses too (I4: ``investigate._original_format_filter``
+    emits a ``prefix`` clause, not ``term``, for any template carrying the
+    em-dash the live cluster mangles, e.g. ``TerminalCompleted`` -- ignoring
+    it meant a query for one template silently matched every other
+    template's records too, since ``{OriginalFormat}`` was the one filter
+    that could have told them apart). ``range`` stays ignored -- a fixture
+    with no real clock has no business asserting on it."""
 
     def __init__(self, records=()):
         self.records = list(records)
@@ -121,18 +165,25 @@ class FakeElastic:
         out = []
         for rec in self.records:
             attrs = rec.get("attributes", {})
-            ok = True
-            for f in filters:
-                if "term" not in f:
-                    continue
+            if self._matches(attrs, filters):
+                out.append(rec)
+        return out
+
+    @staticmethod
+    def _matches(attrs, filters):
+        for f in filters:
+            if "term" in f:
                 (field, value), = f["term"].items()
                 key = field.split(".", 1)[1]
                 if attrs.get(key) != value:
-                    ok = False
-                    break
-            if ok:
-                out.append(rec)
-        return out
+                    return False
+            elif "prefix" in f:
+                (field, value), = f["prefix"].items()
+                key = field.split(".", 1)[1]
+                if not str(attrs.get(key, "")).startswith(value):
+                    return False
+            # "range" clauses are ignored -- no real clock in a fixture.
+        return True
 
 
 def es_hit(template, **attrs):
@@ -472,7 +523,7 @@ class ObserveRunElasticsearchShapeTests(unittest.TestCase):
     def test_a_failed_completion_record_is_read(self):
         clients = {
             "elasticsearch": FakeElastic([
-                es_hit(operate._ENTRY_COMPLETED, WorkflowId=WF, Result="Failed",
+                es_hit(ENTRY_COMPLETED_TPL, WorkflowId=WF, Result="Failed",
                        StepId="s9"),
             ]),
             "redis": FakeRedis({f"skp:{WF}:*": [[f"skp:{WF}:{STEP}"]]}),
@@ -485,7 +536,7 @@ class ObserveRunElasticsearchShapeTests(unittest.TestCase):
     def test_a_dispatch_record_is_read(self):
         clients = {
             "elasticsearch": FakeElastic([
-                es_hit(operate._DISPATCHED, WorkflowId=WF,
+                es_hit(DISPATCHED_TPL, WorkflowId=WF,
                        CorrelationId="c" * 32),
             ]),
             "redis": FakeRedis({f"skp:{WF}:*": [[f"skp:{WF}:{STEP}"]]}),
@@ -494,6 +545,42 @@ class ObserveRunElasticsearchShapeTests(unittest.TestCase):
         }
         obs = operate.observe_run(ENTRIES, clients, WF)
         self.assertTrue(obs["dispatched"])
+        # I4: this single dispatch record used to also satisfy the
+        # terminal-completed query (the fake ignored {OriginalFormat}
+        # entirely), so `completed` came back silently True. It must not.
+        self.assertFalse(obs["completed"])
+
+    def test_an_entry_completion_alone_never_sets_completed(self):
+        """A regression that would fail if ``elasticsearch.EntryStepCompleted``
+        and ``elasticsearch.TerminalCompleted`` were ever swapped in
+        ``observe_run``'s catalog lookups: an ordinary (non-terminal) entry
+        step completing must never be read as the run having ended -- only a
+        genuine terminal record may set ``completed``."""
+        clients = {
+            "elasticsearch": FakeElastic([
+                es_hit(ENTRY_COMPLETED_TPL, WorkflowId=WF, Result="Succeeded",
+                       StepId="s1"),
+            ]),
+            "redis": FakeRedis({f"skp:{WF}:*": [[f"skp:{WF}:{STEP}"]]}),
+            "postgres": _healthy_pg(),
+            "rabbitmq": FakeRabbit([]),
+        }
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertFalse(obs["completed"])
+        self.assertEqual(obs["failed"], [])
+
+    def test_a_terminal_completion_record_sets_completed(self):
+        clients = {
+            "elasticsearch": FakeElastic([
+                es_hit(TERMINAL_COMPLETED_TPL, WorkflowId=WF, Result="Succeeded",
+                       StepId="s1"),
+            ]),
+            "redis": FakeRedis({f"skp:{WF}:*": [[f"skp:{WF}:{STEP}"]]}),
+            "postgres": _healthy_pg(),
+            "rabbitmq": FakeRabbit([]),
+        }
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertTrue(obs["completed"])
 
 
 class VerifyUsageTests(unittest.TestCase):
@@ -501,6 +588,64 @@ class VerifyUsageTests(unittest.TestCase):
         result = operate.verify(ENTRIES, {}, "not-a-uuid", "1h")
         self.assertEqual(result.code, EXIT_USAGE)
         self.assertIn("not a UUID", result.render())
+
+
+class RaisingElastic:
+    def search(self, body):
+        raise Unreachable("elasticsearch", "no answer")
+
+
+class RaisingRedis:
+    def keys(self, pattern):
+        raise Unreachable("redis", "no answer")
+
+
+class RaisingPostgres:
+    def rows(self, sql):
+        raise Unreachable("postgres", "no answer")
+
+
+class RaisingRabbit:
+    def queues(self):
+        raise Unreachable("rabbitmq", "no answer")
+
+
+class VerifyUnreachableTests(unittest.TestCase):
+    """I2: ``operate verify`` had no transport-failure path at all --
+    ``observe_run`` called Postgres, Redis, RabbitMQ and Elasticsearch with
+    no exception handling, so a down peripheral produced a Python traceback
+    and exit 1 instead of ``EXIT_UNREACHABLE``. One of each peripheral,
+    each raising in turn, must come back as a named row, never a crash."""
+
+    def test_elasticsearch_unreachable_is_EXIT_UNREACHABLE(self):
+        clients = {"elasticsearch": RaisingElastic(), "redis": FakeRedis({}),
+                   "postgres": FakePg([]), "rabbitmq": FakeRabbit([])}
+        result = operate.verify(ENTRIES, clients, WF, "1h")
+        self.assertEqual(result.code, EXIT_UNREACHABLE)
+        self.assertEqual(result.next_command, "skp doctor")
+
+    def test_redis_unreachable_is_EXIT_UNREACHABLE(self):
+        clients = {"elasticsearch": FakeElastic([]), "redis": RaisingRedis(),
+                   "postgres": FakePg([]), "rabbitmq": FakeRabbit([])}
+        result = operate.verify(ENTRIES, clients, WF, "1h")
+        self.assertEqual(result.code, EXIT_UNREACHABLE)
+        self.assertEqual(result.next_command, "skp doctor")
+
+    def test_postgres_unreachable_is_EXIT_UNREACHABLE(self):
+        clients = {"elasticsearch": FakeElastic([]),
+                   "redis": FakeRedis({f"skp:{WF}:*": [[f"skp:{WF}:{STEP}"]]}),
+                   "postgres": RaisingPostgres(), "rabbitmq": FakeRabbit([])}
+        result = operate.verify(ENTRIES, clients, WF, "1h")
+        self.assertEqual(result.code, EXIT_UNREACHABLE)
+        self.assertEqual(result.next_command, "skp doctor")
+
+    def test_rabbitmq_unreachable_is_EXIT_UNREACHABLE(self):
+        clients = {"elasticsearch": FakeElastic([]),
+                   "redis": FakeRedis({f"skp:{WF}:*": [[f"skp:{WF}:{STEP}"]]}),
+                   "postgres": _healthy_pg(), "rabbitmq": RaisingRabbit()}
+        result = operate.verify(ENTRIES, clients, WF, "1h")
+        self.assertEqual(result.code, EXIT_UNREACHABLE)
+        self.assertEqual(result.next_command, "skp doctor")
 
 
 if __name__ == "__main__":

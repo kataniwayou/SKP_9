@@ -18,10 +18,11 @@ import argparse
 import json
 import pathlib
 
-from skp import references, state
+from skp import state
 from skp.profile import Profile, ProfileMissing, default_home
 from skp.result import (EXIT_NOT_INITIALISED, EXIT_OK, EXIT_UNREACHABLE,
                         EXIT_USAGE, EXIT_VERDICT, Result)
+from skp.verbs import operate
 from skp.verbs.init import build_clients
 from skp.verbs.map import load_catalog
 
@@ -68,7 +69,13 @@ def validate(entries: list[dict], clients: dict, workflow_id: str,
         return Result(EXIT_UNREACHABLE, [f"POST {path} failed -- {exc}"],
                       next_command="skp doctor")
 
-    body = _body(text)
+    # I5: the same 422 shape operate.start renders -- one implementation,
+    # shared, so the two verbs never drift into rendering the identical
+    # gate rejection two different ways. Only the NEXT: differs by caller.
+    gated = operate.gate_result(
+        status, text, next_command="skp author apply --spec <file> --confirm-write")
+    if gated is not None:
+        return gated
 
     if status in (200, 202):
         return Result(EXIT_OK, [
@@ -77,23 +84,7 @@ def validate(entries: list[dict], clients: dict, workflow_id: str,
             "that starts. 202 means accepted, not applied.",
         ], next_command=f"skp operate verify --workflow {workflow_id}")
 
-    if status == 422:
-        errors = body.get("errors") or {}
-        gate = errors.get("gate")
-        if not gate:
-            return Result(EXIT_VERDICT,
-                          [f"rejected with HTTP 422 but no gate discriminator "
-                           f"in the body: {text[:200]}"],
-                          next_command="skp doctor")
-        lines = [f"rejected at gate {gate!r} -- {body.get('title', '')}".rstrip(),
-                 body.get("detail", "")]
-        offending = errors.get("offending")
-        if offending is not None:
-            lines.append("offending: " + json.dumps(offending, sort_keys=True))
-        return Result(EXIT_VERDICT, [ln for ln in lines if ln],
-                      next_command="skp author apply --spec <file> --confirm-write",
-                      reference=references.reference_for(gate))
-
+    body = _body(text)
     detail = body.get("detail") or text[:200] or f"HTTP {status}"
     return Result(EXIT_VERDICT, [f"start refused with HTTP {status}: {detail}"],
                   next_command="skp map --component api")
