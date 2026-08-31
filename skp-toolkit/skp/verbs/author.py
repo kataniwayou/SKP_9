@@ -1,0 +1,129 @@
+"""`skp author` -- design and verify workflow definitions.
+
+**This verb reimplements nothing.** The five gates -- cycle, missingStep,
+schemaEdge, payloadConfigSchema, processorLiveness -- live in
+``OrchestrationService.StartAsync``, run before any side effect, and report
+themselves in the 422's ``errors.gate``. Copying them into Python would give
+this toolkit a second opinion free to disagree with the system, which is the
+confabulation the whole design exists to prevent (spec §2: a hand-written
+copy "is recall with extra steps, and fails the same silent way when the C#
+moves").
+
+**There is no dry-run, and the verb says so.** Passing every gate IS
+starting: ``StartAsync`` sends ``StartOrchestration`` the moment the fifth
+gate returns. So a rejection is free, a pass is a running workflow, and
+``--confirm-start`` is the gate on that write (spec §8).
+"""
+import argparse
+import json
+import pathlib
+
+from skp import references, state
+from skp.profile import Profile, ProfileMissing, default_home
+from skp.result import (EXIT_NOT_INITIALISED, EXIT_OK, EXIT_UNREACHABLE,
+                        EXIT_USAGE, EXIT_VERDICT, Result)
+from skp.verbs.init import build_clients
+from skp.verbs.map import load_catalog
+
+START_ID = "api.orchestration.post_start"
+
+
+def path_for(entries: list[dict], surface_id: str) -> str | None:
+    for entry in entries:
+        if entry["id"] == surface_id:
+            return entry["operation"].split(" ", 1)[1]
+    return None
+
+
+def _body(text: str) -> dict:
+    try:
+        return json.loads(text) if text else {}
+    except ValueError:
+        return {}
+
+
+def validate(entries: list[dict], clients: dict, workflow_id: str,
+             confirm_start: bool) -> Result:
+    path = path_for(entries, START_ID)
+    if path is None:
+        return Result(EXIT_NOT_INITIALISED,
+                      [f"{START_ID} is not in the catalog"],
+                      next_command="skp init --refresh")
+
+    if not confirm_start:
+        return Result(EXIT_USAGE, [
+            "skp author validate runs the system's own five gates by calling",
+            f"POST {path}. There is no dry-run: a workflow that passes every",
+            "gate is STARTED by the same call that validates it.",
+            "",
+            "A rejection costs nothing -- all five gates run before any write.",
+            "Re-run with --confirm-start once you accept that a valid graph",
+            "will begin running.",
+        ], next_command=(f"skp author validate --workflow {workflow_id} "
+                         f"--confirm-start"))
+
+    try:
+        status, text = clients["baseapi"].http.probe_status("POST", path, workflow_id)
+    except Exception as exc:
+        return Result(EXIT_UNREACHABLE, [f"POST {path} failed -- {exc}"],
+                      next_command="skp doctor")
+
+    body = _body(text)
+
+    if status in (200, 202):
+        return Result(EXIT_OK, [
+            f"valid -- all five gates passed (HTTP {status}).",
+            "The workflow is now RUNNING: the call that validates is the call",
+            "that starts. 202 means accepted, not applied.",
+        ], next_command=f"skp operate verify --workflow {workflow_id}")
+
+    if status == 422:
+        errors = body.get("errors") or {}
+        gate = errors.get("gate")
+        if not gate:
+            return Result(EXIT_VERDICT,
+                          [f"rejected with HTTP 422 but no gate discriminator "
+                           f"in the body: {text[:200]}"],
+                          next_command="skp doctor")
+        lines = [f"rejected at gate {gate!r} -- {body.get('title', '')}".rstrip(),
+                 body.get("detail", "")]
+        offending = errors.get("offending")
+        if offending is not None:
+            lines.append("offending: " + json.dumps(offending, sort_keys=True))
+        return Result(EXIT_VERDICT, [ln for ln in lines if ln],
+                      next_command="skp author apply --spec <file> --confirm-write",
+                      reference=references.reference_for(gate))
+
+    detail = body.get("detail") or text[:200] or f"HTTP {status}"
+    return Result(EXIT_VERDICT, [f"start refused with HTTP {status}: {detail}"],
+                  next_command="skp map --component api")
+
+
+def run(argv: list[str]) -> Result:
+    parser = argparse.ArgumentParser(prog="skp author")
+    parser.add_argument("--home", default=str(default_home()))
+    sub = parser.add_subparsers(dest="mode", required=True)
+
+    p = sub.add_parser("validate")
+    p.add_argument("--workflow", required=True)
+    p.add_argument("--confirm-start", action="store_true")
+
+    ns = parser.parse_args(argv)
+    home = pathlib.Path(ns.home)
+    try:
+        profile = Profile.load(home)
+    except ProfileMissing:
+        return Result(EXIT_NOT_INITIALISED, ["no profile in " + str(home)],
+                      next_command="skp init")
+
+    entries = load_catalog(home)
+    clients = build_clients(profile)
+
+    if ns.mode == "validate":
+        result = validate(entries, clients, ns.workflow, ns.confirm_start)
+        if result.code == EXIT_OK:
+            state.record(home, "workflow", ns.workflow)
+        return result
+
+    return Result(EXIT_USAGE, [f"unknown mode {ns.mode!r}"],
+                  next_command="skp author validate --workflow <id>")
