@@ -84,8 +84,13 @@ public abstract class BaseProcessor
 
         try
         {
+            // The POST queue, not the work queue. A branch is the idempotent half of this hop -- the
+            // handler that takes it writes L2[EntryId] = Data from the message alone -- so it gets its
+            // own delivery, its own retry and its own dead-letter queue. It also keeps branch work off
+            // the lane an author occupies: prefetch is 1 per consumer, and an author is the one stage
+            // here with no bound on how long it holds its slot. See ProcessorQueues.Post.
             await state.Sender
-                .SendTransientAsync(ProcessorQueues.Work(state.ProcessorId), MessageTypes.ProcessedData, branch, ct)
+                .SendTransientAsync(ProcessorQueues.Post(state.ProcessorId), MessageTypes.ProcessedData, branch, ct)
                 .ConfigureAwait(false);
         }
         catch (TransientSendException ex)

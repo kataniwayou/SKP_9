@@ -38,39 +38,18 @@ internal sealed class OrchestrationTopology : IRabbitMqTopology
             arguments: null,
             cancellationToken: ct).ConfigureAwait(false);
 
-        // 2. Where refused messages land, bound under the control queue's own name so a future second
-        //    parked queue can share the exchange without ambiguity.
-        await channel.QueueDeclareAsync(
-            queue: OrchestratorQueues.ControlDead,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object?>
-            {
-                ["x-queue-type"] = "quorum",
-            },
-            cancellationToken: ct).ConfigureAwait(false);
-
-        await channel.QueueBindAsync(
-            queue: OrchestratorQueues.ControlDead,
-            exchange: OrchestratorQueues.DeadLetterExchange,
-            routingKey: OrchestratorQueues.Control,
-            arguments: null,
-            cancellationToken: ct).ConfigureAwait(false);
-
-        // 3. The control queue itself. Durable so it survives a broker restart; a durable queue is
+        // 2 and 3. The control queue and where it parks, declared as one unit by DeadLetteredPair:
+        //    dead queue and binding first, then the live queue naming the exchange. The routing key
+        //    is the CONTROL queue's own name — bound under the source rather than the destination so
+        //    a future second parked queue can share this exchange without ambiguity — and the shared
+        //    declarer takes it once, so the binding and x-dead-letter-routing-key cannot disagree.
+        //
+        //    Durability, the quorum type and x-delivery-limit: -1 all come from that helper and are
+        //    documented there. The control queue is durable so it survives a broker restart, which is
         //    half of the guarantee, with persistent delivery mode on each message being the other.
-        await channel.QueueDeclareAsync(
-            queue: OrchestratorQueues.Control,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object?>
-            {
-                ["x-queue-type"] = "quorum",
-                ["x-dead-letter-exchange"] = OrchestratorQueues.DeadLetterExchange,
-                ["x-dead-letter-routing-key"] = OrchestratorQueues.Control,
-            },
-            cancellationToken: ct).ConfigureAwait(false);
+        await DeadLetteredPair.DeclareAsync(
+            channel, OrchestratorQueues.Control, OrchestratorQueues.ControlDead,
+            OrchestratorQueues.DeadLetterExchange, OrchestratorQueues.Control, ct)
+            .ConfigureAwait(false);
     }
 }

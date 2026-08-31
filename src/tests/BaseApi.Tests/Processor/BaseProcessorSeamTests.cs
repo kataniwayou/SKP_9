@@ -155,13 +155,19 @@ public sealed class BaseProcessorSeamTests
     }
 
     [Fact]
-    public async Task SendsToTheProcessorsOwnQueueUnderTheProcessedDataType()
+    public async Task SendsToTheProcessorsOwnPostQueueUnderTheProcessedDataType()
     {
         var (processor, sender) = Build((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
 
         await processor.ExecuteAsync([], "", E, CancellationToken.None);
 
+        // The POST queue, and asserted against Work(P) too so the two can never quietly become the
+        // same string again. A branch on the work queue would be consumed on the lane an author
+        // occupies, which is the starvation shape the split exists to remove.
         await sender.Received(1).SendAsync(
+            ProcessorQueues.Post(P), MessageTypes.ProcessedData, Arg.Any<ProcessedData>(),
+            Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        await sender.DidNotReceive().SendAsync(
             ProcessorQueues.Work(P), MessageTypes.ProcessedData, Arg.Any<ProcessedData>(),
             Arg.Any<CancellationToken>(), Arg.Any<string?>());
     }

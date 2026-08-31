@@ -225,12 +225,23 @@ public static class BaseProcessorServiceCollectionExtensions
 
         services.AddBaseConsoleGating(cfg, ProcessorQueues.Work(processorId));
 
-        // How much work is waiting on this processor's queue, and whether the broker still has a
-        // consumer on it.
+        // The post queue's own consumer, reusing the gate and the probe the call above registered --
+        // the same two-call shape OrchestratorHost uses for its shared execution queues. It has to
+        // come second: AddBaseConsoleGating registers the gate, its probe and the first consumer,
+        // and AddGatedQueue adds only a consumer.
         //
-        // Registered here rather than in a host because every processor has exactly one work queue
-        // and it is named from the id this method already takes. A host that forgot would be a
-        // processor whose backlog nobody could see, and there would be nothing to notice.
+        // A SECOND CONSUMER IS A SECOND IN-FLIGHT SLOT, and that is the point rather than a side
+        // effect. Prefetch is 1 per consumer, so on one shared queue a replica running an author had
+        // its only slot occupied -- and with every replica mid-transform, branch work waited behind
+        // authors no matter how many replicas were added, because no slot was reserved for it.
+        services.AddGatedQueue(ProcessorQueues.Post(processorId));
+
+        // How much work is waiting on this processor's two queues, and whether the broker still has a
+        // consumer on each.
+        //
+        // Registered here rather than in a host because a processor's queue names are both derived
+        // from the id this method already takes. A host that forgot would be a processor whose
+        // backlog nobody could see, and there would be nothing to notice.
         //
         // This is the queue where a backlog matters most: replicas share it, so it is the one place
         // where the pipeline's throughput ceiling shows up as a level rather than as a rate that
@@ -263,7 +274,19 @@ public static class BaseProcessorServiceCollectionExtensions
 
         services.AddHostedService(sp => new QueueDepthProbe(
             sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
-            () => [ProcessorQueues.Work(processorId), .. DispatchedQueues.Snapshot()],
+            () =>
+            [
+                ProcessorQueues.Work(processorId),
+                // The post queue is probed here and NOWHERE ELSE. The orchestrator's own depth probe
+                // learns processor queues from DispatchedQueues, which it populates by noting queues
+                // it dispatches TO -- and nothing dispatches to this one, so it will never appear
+                // there. Losing that means losing the orchestrator's view of this queue after every
+                // pod of this processor is gone; accepted, because its backlog is bounded by the work
+                // queue's and the alternative is teaching the orchestrator a name it has no other
+                // reason to know. See the design's accepted costs.
+                ProcessorQueues.Post(processorId),
+                .. DispatchedQueues.Snapshot(),
+            ],
             TimeSpan.FromSeconds(10),
             sp.GetRequiredService<ILogger<QueueDepthProbe>>(),
             DispatchedQueues.Note,
@@ -283,9 +306,9 @@ public static class BaseProcessorServiceCollectionExtensions
         // DeadLetterDepthMetrics documents from orchestrator-result.dead: an absent series and an
         // empty queue are the same picture from outside, and the board renders the reassuring one.
         //
-        // A static single-element list, unlike the depth probe above: a processor has exactly one
-        // dead-letter queue and its name is derived from the id this method already takes, so there
-        // is nothing to discover at run time and nothing to forget.
+        // A static two-element list, unlike the depth probe above: a processor has exactly two
+        // dead-letter queues -- one per live queue -- and both names are derived from the id this
+        // method already takes, so there is nothing to discover at run time and nothing to forget.
         //
         // Five minutes, not thirty seconds, and the number is no longer what makes this timely.
         // DeadLetterReadSignal wakes this probe the moment something is parked; the interval is
@@ -298,11 +321,15 @@ public static class BaseProcessorServiceCollectionExtensions
         // channel fault) would otherwise leave this series absent for up to five minutes, and
         // nothing is being consumed on this queue to raise DeadLetterReadSignal and shorten that
         // window. Seeding at registration means the gauge is 0, not absent, from the first export.
+        //
+        // BOTH dead queues are seeded, for the reason the paragraph above gives about the first one:
+        // a panel cannot tell an absent series from an empty queue, and it renders the reassuring one.
         DeadLetterDepthMetrics.Report(ProcessorQueues.Dead(processorId), 0);
+        DeadLetterDepthMetrics.Report(ProcessorQueues.PostDead(processorId), 0);
 
         services.AddHostedService(sp => new DeadLetterDepthProbe(
             sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
-            [ProcessorQueues.Dead(processorId)],
+            [ProcessorQueues.Dead(processorId), ProcessorQueues.PostDead(processorId)],
             TimeSpan.FromMinutes(5),
             sp.GetRequiredService<ILogger<DeadLetterDepthProbe>>()));
 

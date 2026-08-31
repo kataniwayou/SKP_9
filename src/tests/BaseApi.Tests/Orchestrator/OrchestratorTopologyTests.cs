@@ -87,10 +87,11 @@ public sealed class OrchestratorTopologyTests
     public async Task GivesEachSharedExecutionQueueItsDeadLetterArgumentsAndNoDeliveryLimit(
         string queue, string dead)
     {
-        // No x-delivery-limit, matching the control queue: the limit counts every redelivery including
-        // the ones the L2 gate issues through an outage, so a long one would dead-letter results that
-        // were never malformed. A message the consumer genuinely refuses is parked on its first
-        // delivery, which is what a limit would otherwise protect against.
+        // x-delivery-limit is -1 (unlimited), matching the control queue: a limit counts every
+        // redelivery including the ones the L2 gate issues through an outage, so a finite one would
+        // dead-letter results that were never malformed. Asserted as PRESENT and -1 rather than
+        // absent, because absent is not neutral — RabbitMQ 4.x defaults a quorum queue declaring no
+        // limit to 20, which is what this assertion previously allowed through.
         var channel = Substitute.For<IChannel>();
         var args = new Dictionary<string, IDictionary<string, object?>?>(StringComparer.Ordinal);
 
@@ -114,7 +115,7 @@ public sealed class OrchestratorTopologyTests
         Assert.Equal(OrchestratorQueues.DeadLetterExchange, work["x-dead-letter-exchange"]);
         Assert.Equal(dead, work["x-dead-letter-routing-key"]);
         Assert.Equal("quorum", work["x-queue-type"]);
-        Assert.False(work.ContainsKey("x-delivery-limit"));
+        Assert.Equal(-1, work["x-delivery-limit"]);
     }
 
     [Fact]

@@ -5,7 +5,8 @@ using RabbitMQ.Client;
 namespace BaseProcessor.Core.Messaging;
 
 /// <summary>
-/// Declares this processor's work queue, its dead-letter exchange, and where refused messages land.
+/// Declares this processor's two queues — the work queue it is dispatched on and the post queue its
+/// author hands branches to — their shared dead-letter exchange, and where each parks what it refuses.
 /// <para>
 /// <b>Declared at connection setup rather than when consuming starts.</b> This consumer pauses
 /// whenever the projection store is unreachable, and a paused consumer declares nothing — so a
@@ -16,6 +17,13 @@ namespace BaseProcessor.Core.Messaging;
 /// The processor id is known before the host exists, thanks to the two-stage boot, which is what
 /// makes declaring here possible at all.
 /// </para>
+/// <para>
+/// <b>Two queues, mirroring the orchestrator's own advance/materialise pair.</b> See
+/// <see cref="ProcessorQueues.Post"/> for why the branch hop is a queue rather than a second type on
+/// the work queue. Both pairs are declared by <see cref="DeadLetteredPair"/>, which every topology in
+/// this system now shares — dead queue and binding first, then the live queue naming it, with one
+/// routing key feeding both halves so they cannot drift.
+/// </para>
 /// </summary>
 internal sealed class ProcessorTopology(Guid processorId) : IRabbitMqTopology
 {
@@ -25,7 +33,7 @@ internal sealed class ProcessorTopology(Guid processorId) : IRabbitMqTopology
 
         // First, and not negotiably: the dead-letter argument below is not validated when the queue is
         // declared, so naming an exchange that does not exist is accepted and every parked message is
-        // discarded silently.
+        // discarded silently. One exchange serves both pairs; the dead queues differ by routing key.
         await channel.ExchangeDeclareAsync(
             exchange: ProcessorQueues.DeadLetterExchange,
             type: ExchangeType.Direct,
@@ -34,39 +42,17 @@ internal sealed class ProcessorTopology(Guid processorId) : IRabbitMqTopology
             arguments: null,
             cancellationToken: ct).ConfigureAwait(false);
 
-        var work = ProcessorQueues.Work(processorId);
-        var dead = ProcessorQueues.Dead(processorId);
+        // The routing key is the LIVE queue's own name on both pairs — this assembly's convention.
+        // DeadLetteredPair takes it once and feeds both the binding and the queue's
+        // x-dead-letter-routing-key, so the two cannot drift apart into a silent discard.
+        await DeadLetteredPair.DeclareAsync(
+            channel, ProcessorQueues.Work(processorId), ProcessorQueues.Dead(processorId),
+            ProcessorQueues.DeadLetterExchange, ProcessorQueues.Work(processorId), ct)
+            .ConfigureAwait(false);
 
-        await channel.QueueDeclareAsync(
-            queue: dead,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object?> { ["x-queue-type"] = "quorum" },
-            cancellationToken: ct).ConfigureAwait(false);
-
-        await channel.QueueBindAsync(
-            queue: dead,
-            exchange: ProcessorQueues.DeadLetterExchange,
-            routingKey: work,
-            arguments: null,
-            cancellationToken: ct).ConfigureAwait(false);
-
-        // No x-delivery-limit, deliberately: a limit counts every redelivery, and this consumer
-        // redelivers on purpose for as long as the projection store is unreachable. What a limit
-        // normally guards against is already handled — an unreadable message is parked on its first
-        // delivery rather than retried at all.
-        await channel.QueueDeclareAsync(
-            queue: work,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object?>
-            {
-                ["x-queue-type"] = "quorum",
-                ["x-dead-letter-exchange"] = ProcessorQueues.DeadLetterExchange,
-                ["x-dead-letter-routing-key"] = work,
-            },
-            cancellationToken: ct).ConfigureAwait(false);
+        await DeadLetteredPair.DeclareAsync(
+            channel, ProcessorQueues.Post(processorId), ProcessorQueues.PostDead(processorId),
+            ProcessorQueues.DeadLetterExchange, ProcessorQueues.Post(processorId), ct)
+            .ConfigureAwait(false);
     }
 }

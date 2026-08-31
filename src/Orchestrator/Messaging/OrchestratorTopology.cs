@@ -52,33 +52,16 @@ internal sealed class OrchestratorTopology(InstanceId instanceId) : IRabbitMqTop
         // Durable and never auto-delete, matching OrchestratorFanout's own remarks: a replica that is
         // down must accumulate its announcements and drain them on return, and the cost of that is a
         // queue outliving a permanently-removed replica.
-        await channel.QueueDeclareAsync(
-            queue: dead,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object?> { ["x-queue-type"] = "quorum" },
-            cancellationToken: ct).ConfigureAwait(false);
-
-        await channel.QueueBindAsync(
-            queue: dead,
-            exchange: OrchestratorFanout.DeadLetterExchange,
-            routingKey: dead,
-            arguments: null,
-            cancellationToken: ct).ConfigureAwait(false);
-
-        await channel.QueueDeclareAsync(
-            queue: queue,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object?>
-            {
-                ["x-queue-type"] = "quorum",
-                ["x-dead-letter-exchange"] = OrchestratorFanout.DeadLetterExchange,
-                ["x-dead-letter-routing-key"] = dead,
-            },
-            cancellationToken: ct).ConfigureAwait(false);
+        // The routing key here is the DEAD queue's name, not the live one. That differs from the
+        // API's control pair and from every processor pair, which key on the live queue's name.
+        // Both route correctly — a direct exchange only needs the two sides to agree, which
+        // DeadLetteredPair now guarantees by taking the key once — but the two conventions are a
+        // real inconsistency. It cannot be closed here: x-dead-letter-routing-key is a queue
+        // argument, so changing it needs the queue deleted and re-declared. DeadLetterConventionTests
+        // pins the split and names the migration.
+        await DeadLetteredPair.DeclareAsync(
+            channel, queue, dead, OrchestratorFanout.DeadLetterExchange, dead, ct)
+            .ConfigureAwait(false);
 
         // Empty routing key: the fan-out exchange is a fanout exchange, which ignores routing keys
         // entirely and delivers to every bound queue regardless.
@@ -108,45 +91,19 @@ internal sealed class OrchestratorTopology(InstanceId instanceId) : IRabbitMqTop
     }
 
     /// <summary>
-    /// One shared execution queue and the queue it parks into, in the only order that works: the
-    /// dead-letter queue and its binding first, then the queue naming it.
+    /// One shared execution queue and the queue it parks into. The declare order, the quorum type and
+    /// the unlimited delivery limit all come from <see cref="DeadLetteredPair"/>, which documents each
+    /// of them; this method exists only to bind the two arguments the shared declarer cannot infer
+    /// — which exchange, and which routing key.
     /// <para>
-    /// <b>Deliberately no <c>x-delivery-limit</c>,</b> matching the control queue's reasoning. A
-    /// delivery limit counts every redelivery, including the requeues the L2 gate issues while the
-    /// projection store is unreachable — so a long outage would dead-letter results that were never
-    /// malformed. A message the consumer genuinely refuses is parked on its first delivery, which is
-    /// what a limit would otherwise be protecting against.
+    /// <b>The key is the DEAD queue's name here, and the live queue's name on the API's control pair
+    /// and on every processor pair.</b> Both route; the split is the open inconsistency
+    /// <c>DeadLetterConventionTests</c> pins, and closing it needs the queues re-declared because
+    /// <c>x-dead-letter-routing-key</c> is a queue argument.
     /// </para>
     /// </summary>
-    private static async Task DeclareSharedAsync(
+    private static Task DeclareSharedAsync(
         IChannel channel, string queue, string dead, CancellationToken ct)
-    {
-        await channel.QueueDeclareAsync(
-            queue: dead,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object?> { ["x-queue-type"] = "quorum" },
-            cancellationToken: ct).ConfigureAwait(false);
-
-        await channel.QueueBindAsync(
-            queue: dead,
-            exchange: OrchestratorQueues.DeadLetterExchange,
-            routingKey: dead,
-            arguments: null,
-            cancellationToken: ct).ConfigureAwait(false);
-
-        await channel.QueueDeclareAsync(
-            queue: queue,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object?>
-            {
-                ["x-queue-type"] = "quorum",
-                ["x-dead-letter-exchange"] = OrchestratorQueues.DeadLetterExchange,
-                ["x-dead-letter-routing-key"] = dead,
-            },
-            cancellationToken: ct).ConfigureAwait(false);
-    }
+        => DeadLetteredPair.DeclareAsync(
+            channel, queue, dead, OrchestratorQueues.DeadLetterExchange, dead, ct);
 }
