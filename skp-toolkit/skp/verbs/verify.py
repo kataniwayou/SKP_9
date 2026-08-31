@@ -97,11 +97,10 @@ Every claim's own message states, in place of a bare skip, *why* it was not
 confirmed -- and increasingly, that reason distinguishes two different
 things: **could not be checked** (UNVERIFIABLE: the store did not answer)
 versus **cannot be checked, structurally, by design** (a
-``PERMANENT EXCLUSION`` marker in the message -- e.g. ``redis.KeeperProbe``,
-whose write path has no call site anywhere in the current build). The
-ratio line in ``render_report`` reads that marker to report an honest
-achievable ceiling alongside the raw percentage, rather than implying 100%
-is reachable when it structurally is not.
+``PERMANENT EXCLUSION`` marker in the message). The ratio line in
+``render_report`` reads that marker to report an honest achievable ceiling
+alongside the raw percentage, rather than implying 100% is reachable when it
+structurally is not. No surface carries that marker in the current build.
 """
 import argparse
 import json
@@ -830,13 +829,6 @@ def check_api(entries: list[dict], client, probe_writes: bool = False) -> list[C
 
 _PLACEHOLDER = re.compile(r"\{[^}]*\}")
 
-# BaseConsole.Core.Gating.L2GateOptions.Interval default -- the probe loop
-# that (per L2ProjectionKeys.KeeperProbe's own doc comment) would write and
-# delete this key inside one tick, if anything actually called it.
-_KEEPER_PROBE_ID = "redis.KeeperProbe"
-_KEEPER_PROBE_WINDOW_S = 5.0
-_KEEPER_PROBE_POLL_S = 0.25
-
 _DATA_FAMILY_ID = "redis.ExecutionData"
 _ORCH_START_ID = "api.orchestration.post_start"
 _PROBE_RUN_ATTEMPTS = 20
@@ -845,9 +837,10 @@ _PROBE_RUN_POLL_S = 0.5
 
 def _tight_scan(client, pattern: str, window_s: float, poll_s: float) -> list[str]:
     """Re-issues ``SCAN MATCH pattern`` every ``poll_s`` for up to ``window_s``
-    -- one gate-probe interval -- trying to catch a key that is written and
-    deleted inside a single tick. Still read-only, still bounded: worst case
-    is ``window_s`` seconds of cheap SCANs, not an unbounded wait.
+    trying to catch a key that is live only briefly -- one written and deleted
+    inside a single tick, or one that exists only while a run is in flight.
+    Still read-only, still bounded: worst case is ``window_s`` seconds of cheap
+    SCANs, not an unbounded wait.
     """
     deadline = time.monotonic() + window_s
     while True:
@@ -865,20 +858,6 @@ def check_redis(entries: list[dict], client) -> list[Claim]:
     family that is empty because nothing is mid-flight (``skp:data:*`` on
     an idle system) is normal, not wrong -- there is no live-system fact
     that contradicts "this key pattern exists in the schema".
-
-    ``redis.KeeperProbe`` (``skp:keeper:probe:*``) gets one extra, still
-    read-only step when the plain SCAN above finds nothing: a tight
-    re-SCAN loop across one full gate-probe interval (``_tight_scan``),
-    trying to catch a key that is written and deleted inside a single tick.
-    If that also finds nothing, the message states a **permanent,
-    reasoned exclusion**, not a generic skip: a grep across every
-    production ``.cs`` file in this build finds ``KeeperProbe(`` only in
-    its own definition (``L2ProjectionKeys.cs``) -- no call site anywhere
-    writes this key today, so no external observation window can exist for
-    it, independent of timing. ``skp verify``'s own ratio line (see
-    ``render_report``) reads the ``PERMANENT EXCLUSION`` marker in this
-    message to lower the achievable ceiling instead of counting this
-    against the toolkit.
     """
     claims = []
     for entry in entries:
@@ -890,26 +869,9 @@ def check_redis(entries: list[dict], client) -> list[Claim]:
                           f"SCAN {pattern} failed -- {exc.detail}"))
             continue
 
-        if not keys and entry["id"] == _KEEPER_PROBE_ID:
-            try:
-                keys = _tight_scan(client, pattern, _KEEPER_PROBE_WINDOW_S, _KEEPER_PROBE_POLL_S)
-            except Unreachable as exc:
-                claims.append(Claim("redis", entry["id"], UNVERIFIABLE,
-                              f"tight SCAN {pattern} failed -- {exc.detail}"))
-                continue
-
         if keys:
             claims.append(Claim("redis", entry["id"], CONFIRMED,
                           f"{len(keys)} key(s) matching {pattern}"))
-        elif entry["id"] == _KEEPER_PROBE_ID:
-            claims.append(Claim("redis", entry["id"], NOT_OBSERVED,
-                          f"no key matching {pattern} across a tight SCAN loop spanning "
-                          f"{_KEEPER_PROBE_WINDOW_S:.0f}s (one gate-probe interval) -- "
-                          f"PERMANENT EXCLUSION: L2ProjectionKeys.KeeperProbe(...) has no call "
-                          f"site anywhere in production source (grepped across src/**/*.cs; only "
-                          f"its own definition matches) -- nothing in this build ever writes "
-                          f"this key, so no external observer can ever catch it. Structurally "
-                          f"unobservable, not merely hard to time."))
         else:
             claims.append(Claim("redis", entry["id"], NOT_OBSERVED,
                           f"no live keys matching {pattern}"))

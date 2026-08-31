@@ -18,13 +18,12 @@ def _metrics_texts() -> dict[str, str]:
 
 @unittest.skipUnless(SRC.exists(), "run from inside the repo")
 class RealSourceTests(unittest.TestCase):
-    def test_the_seven_documented_key_families_are_all_found(self):
+    def test_the_six_documented_key_families_are_all_found(self):
         found = {s.id for s in redis_keys(
             read("Messaging.Contracts/Projections/L2ProjectionKeys.cs"))}
         self.assertEqual(found, {
             "redis.ParentIndex", "redis.Root", "redis.Step",
             "redis.PerInstance", "redis.InstanceIndex", "redis.ExecutionData",
-            "redis.KeeperProbe",
         })
 
     def test_the_execution_blob_key_carries_the_documented_shape(self):
