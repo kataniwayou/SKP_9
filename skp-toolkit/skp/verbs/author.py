@@ -99,6 +99,80 @@ def validate(entries: list[dict], clients: dict, workflow_id: str,
                   next_command="skp map --component api")
 
 
+# The foreign-key graph, read from the live database rather than assumed:
+#   processors -> schemas
+#   steps -> processors
+#   assignments -> steps
+#   workflow_entry_steps -> workflows, steps
+#   workflow_assignments -> workflows, assignments
+# The junctions ride the workflow body, so workflows go last.
+APPLY_ORDER = ("schemas", "processors", "steps", "assignments", "workflows")
+
+
+def _landed(applied: list[str]) -> str:
+    if not applied:
+        return "nothing"
+    counts: dict[str, int] = {}
+    for section in applied:
+        counts[section] = counts.get(section, 0) + 1
+    return ", ".join(f"{n} {s}" for s, n in counts.items())
+
+
+def apply(entries: list[dict], clients: dict, spec: dict,
+          confirm_write: bool) -> Result:
+    """POSTs each section verbatim, in foreign-key order.
+
+    The bodies are passed through untouched. This toolkit does not know the
+    DTO shapes and must not learn them: a translation layer here would be a
+    second definition of the contract, free to drift from the validators that
+    actually run. A malformed body comes back as the API's own 400 with its
+    own message, which is the authority.
+    """
+    unknown = [k for k in spec if k not in APPLY_ORDER]
+    if unknown:
+        return Result(EXIT_USAGE,
+                      [f"unknown spec section(s): {', '.join(sorted(unknown))}",
+                       f"known sections, in apply order: {', '.join(APPLY_ORDER)}"],
+                      next_command="skp author apply --spec <file>")
+
+    if not confirm_write:
+        planned = ", ".join(f"{len(spec[s])} {s}" for s in APPLY_ORDER if spec.get(s))
+        return Result(EXIT_USAGE,
+                      ["skp author apply writes to the live system.",
+                       f"planned, in foreign-key order: {planned or 'nothing'}",
+                       "re-run with --confirm-write to apply."],
+                      next_command="skp author apply --spec <file> --confirm-write")
+
+    applied: list[str] = []
+    for section in APPLY_ORDER:
+        path = path_for(entries, f"api.{section}.post")
+        if path is None:
+            return Result(EXIT_NOT_INITIALISED,
+                          [f"api.{section}.post is not in the catalog"],
+                          next_command="skp init --refresh")
+        for index, body in enumerate(spec.get(section) or []):
+            try:
+                status, text = clients["baseapi"].http.probe_status("POST", path, body)
+            except Exception as exc:
+                return Result(EXIT_UNREACHABLE,
+                              [f"POST {path} failed -- {exc}",
+                               f"applied before the failure: {_landed(applied)}"],
+                              next_command="skp doctor")
+            if status not in (200, 201, 202, 204):
+                detail = _body(text).get("detail") or text[:200] or f"HTTP {status}"
+                return Result(EXIT_VERDICT, [
+                    f"{section}[{index}] rejected with HTTP {status}: {detail}",
+                    f"applied before the failure: {_landed(applied)}",
+                    "The definition is now PARTIAL. Fix the section and "
+                    "re-apply; rows already created will collide rather than "
+                    "duplicate.",
+                ], next_command="skp author apply --spec <file> --confirm-write")
+            applied.append(section)
+
+    return Result(EXIT_OK, [f"applied: {_landed(applied)}"],
+                  next_command="skp author validate --workflow <id> --confirm-start")
+
+
 def run(argv: list[str]) -> Result:
     parser = argparse.ArgumentParser(prog="skp author")
     parser.add_argument("--home", default=str(default_home()))
@@ -107,6 +181,10 @@ def run(argv: list[str]) -> Result:
     p = sub.add_parser("validate")
     p.add_argument("--workflow", required=True)
     p.add_argument("--confirm-start", action="store_true")
+
+    p = sub.add_parser("apply")
+    p.add_argument("--spec", required=True)
+    p.add_argument("--confirm-write", action="store_true")
 
     ns = parser.parse_args(argv)
     home = pathlib.Path(ns.home)
@@ -124,6 +202,17 @@ def run(argv: list[str]) -> Result:
         if result.code == EXIT_OK:
             state.record(home, "workflow", ns.workflow)
         return result
+
+    if ns.mode == "apply":
+        try:
+            spec = json.loads(pathlib.Path(ns.spec).read_text(encoding="utf-8"))
+        except OSError as exc:
+            return Result(EXIT_USAGE, [f"cannot read {ns.spec}: {exc}"],
+                          next_command="skp author apply --spec <file>")
+        except ValueError as exc:
+            return Result(EXIT_USAGE, [f"{ns.spec} is not valid JSON: {exc}"],
+                          next_command="skp author apply --spec <file>")
+        return apply(entries, clients, spec, ns.confirm_write)
 
     return Result(EXIT_USAGE, [f"unknown mode {ns.mode!r}"],
                   next_command="skp author validate --workflow <id>")

@@ -1,6 +1,7 @@
 import unittest
 
-from skp.result import EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE, EXIT_VERDICT
+from skp.result import (EXIT_NOT_INITIALISED, EXIT_OK, EXIT_UNREACHABLE,
+                        EXIT_USAGE, EXIT_VERDICT)
 from skp.verbs import author
 
 WF = "4cd8af45-1295-43db-ab2e-e955dd82b5c5"
@@ -80,6 +81,80 @@ class ValidateTests(unittest.TestCase):
         result = author.validate(ENTRIES, clients_for(0, "", raises=OSError("boom")),
                                  WF, confirm_start=True)
         self.assertEqual(result.code, EXIT_UNREACHABLE)
+
+
+APPLY_ENTRIES = ENTRIES + [
+    {"id": f"api.{name}.post", "component": "api",
+     "operation": f"POST /api/v1.0/{name}", "detail": name}
+    for name in ("schemas", "processors", "steps", "assignments", "workflows")
+]
+
+
+class ApplyTests(unittest.TestCase):
+    def test_sections_are_posted_in_foreign_key_order(self):
+        posted = []
+
+        class RecordingApi:
+            class http:
+                @staticmethod
+                def probe_status(method, path, body):
+                    posted.append(path)
+                    return (201, '{"id":"x"}')
+
+        spec = {"workflows": [{"n": 1}], "schemas": [{"n": 2}],
+                "assignments": [{"n": 3}], "processors": [{"n": 4}],
+                "steps": [{"n": 5}]}
+        result = author.apply(APPLY_ENTRIES, {"baseapi": RecordingApi()}, spec,
+                              confirm_write=True)
+        self.assertEqual(result.code, EXIT_OK)
+        self.assertEqual(posted, [
+            "/api/v1.0/schemas", "/api/v1.0/processors", "/api/v1.0/steps",
+            "/api/v1.0/assignments", "/api/v1.0/workflows"])
+
+    def test_a_rejected_section_stops_the_apply_and_names_what_landed(self):
+        """Half an applied definition is a real state somebody has to clean
+        up, so the verb must say exactly how far it got."""
+        calls = []
+
+        class FailingApi:
+            class http:
+                @staticmethod
+                def probe_status(method, path, body):
+                    calls.append(path)
+                    if "processors" in path:
+                        return (400, '{"detail":"Name is required."}')
+                    return (201, '{"id":"x"}')
+
+        spec = {"schemas": [{"n": 1}], "processors": [{"n": 2}], "steps": [{"n": 3}]}
+        result = author.apply(APPLY_ENTRIES, {"baseapi": FailingApi()}, spec,
+                              confirm_write=True)
+        self.assertEqual(result.code, EXIT_VERDICT)
+        self.assertIn("Name is required", result.render())
+        self.assertIn("1 schemas", result.render())
+        self.assertNotIn("/api/v1.0/steps", calls)
+
+    def test_without_confirmation_nothing_is_posted(self):
+        class Forbidden:
+            class http:
+                @staticmethod
+                def probe_status(method, path, body):
+                    raise AssertionError("must not be called")
+
+        result = author.apply(APPLY_ENTRIES, {"baseapi": Forbidden()},
+                              {"schemas": [{}]}, confirm_write=False)
+        self.assertEqual(result.code, EXIT_USAGE)
+
+    def test_an_unknown_section_is_refused_before_any_write(self):
+        class Forbidden:
+            class http:
+                @staticmethod
+                def probe_status(method, path, body):
+                    raise AssertionError("must not be called")
+
+        result = author.apply(APPLY_ENTRIES, {"baseapi": Forbidden()},
+                              {"widgets": [{}]}, confirm_write=True)
+        self.assertEqual(result.code, EXIT_USAGE)
+        self.assertIn("widgets", result.render())
 
 
 if __name__ == "__main__":
