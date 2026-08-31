@@ -36,8 +36,11 @@ class FakeApi:
         outer = self
 
         class _Http:
+            calls = []
+
             @staticmethod
             def probe_status(method, path, body):
+                outer.http.calls.append((method, path, body))
                 if outer._raises:
                     raise outer._raises
                 return outer._reply
@@ -73,11 +76,12 @@ class StartTests(unittest.TestCase):
         self.assertEqual(result.reference,
                          "references/gate-processor-liveness.md")
 
-    def test_without_confirmation_it_refuses(self):
+    def test_without_confirmation_it_refuses_and_never_calls_the_api(self):
         clients = {"baseapi": FakeApi((202, "")), "redis": FakeRedis({})}
         result = operate.start(ENTRIES, clients, WF, confirm=False,
                                attempts=1, poll_s=0)
         self.assertEqual(result.code, EXIT_USAGE)
+        self.assertEqual(clients["baseapi"].http.calls, [])
 
     def test_a_transport_failure_is_unreachable(self):
         clients = {"baseapi": FakeApi((0, ""), raises=OSError("boom")),
@@ -86,8 +90,30 @@ class StartTests(unittest.TestCase):
                                attempts=1, poll_s=0)
         self.assertEqual(result.code, EXIT_UNREACHABLE)
 
+    def test_an_unparseable_422_names_the_status_rather_than_crashing(self):
+        clients = {"baseapi": FakeApi((422, "<html>nope</html>")),
+                   "redis": FakeRedis({})}
+        result = operate.start(ENTRIES, clients, WF, confirm=True,
+                               attempts=1, poll_s=0)
+        self.assertEqual(result.code, EXIT_VERDICT)
+        self.assertIn("422", result.render())
+
+    def test_a_422_with_no_gate_key_is_a_verdict_not_a_crash(self):
+        clients = {"baseapi": FakeApi((422, '{"detail":"nope"}')),
+                   "redis": FakeRedis({})}
+        result = operate.start(ENTRIES, clients, WF, confirm=True,
+                               attempts=1, poll_s=0)
+        self.assertEqual(result.code, EXIT_VERDICT)
+
 
 class StopTests(unittest.TestCase):
+    def test_without_confirmation_it_refuses_and_never_calls_the_api(self):
+        clients = {"baseapi": FakeApi((202, "")), "redis": FakeRedis({})}
+        result = operate.stop(ENTRIES, clients, WF, confirm=False,
+                              attempts=1, poll_s=0)
+        self.assertEqual(result.code, EXIT_USAGE)
+        self.assertEqual(clients["baseapi"].http.calls, [])
+
     def test_stop_waits_for_the_root_key_to_disappear(self):
         clients = {"baseapi": FakeApi((202, "")),
                    "redis": FakeRedis({f"skp:{WF}": [[f"skp:{WF}"], []]})}
