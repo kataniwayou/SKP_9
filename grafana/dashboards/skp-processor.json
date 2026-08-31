@@ -1,4 +1,14 @@
 {
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus data source that scrapes the SKP services.",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
   "id": null,
   "uid": "skp-processor",
   "title": "SKP Processor",
@@ -38,22 +48,12 @@
   "templating": {
     "list": [
       {
-        "name": "datasource",
-        "label": "Data source",
-        "type": "datasource",
-        "query": "prometheus",
-        "refresh": 1,
-        "hide": 0,
-        "current": {},
-        "options": []
-      },
-      {
         "name": "processorId",
         "label": "Processor id",
         "type": "query",
         "datasource": {
           "type": "prometheus",
-          "uid": "${datasource}"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(pipeline_identity_ready_ratio, processorId)",
         "query": {
@@ -84,7 +84,7 @@
         "type": "query",
         "datasource": {
           "type": "prometheus",
-          "uid": "${datasource}"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(pipeline_identity_ready_ratio{processorId=~\"$processorId\"}, service_instance_id)",
         "query": {
@@ -135,7 +135,7 @@
       "description": "Measures `pipeline.gate.open`, minimum across replicas. 1 = the projection store is usable and consumers may run; 0 = the gate is shut and every delivery is being requeued.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -148,7 +148,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "min by (service_instance_id)(last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
           "legendFormat": "{{service_instance_id}}",
@@ -202,7 +202,7 @@
       "description": "0 means the pod is up and waiting for a processor row whose SourceHash matches its image. Running / NotReady with 0 restarts is the designed behaviour, not a crash loop -- this is the metric that makes that legible.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -215,7 +215,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "min by (service_instance_id) (last_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
           "legendFormat": "{{service_instance_id}}",
@@ -269,7 +269,7 @@
       "description": "Measures `pipeline.messages.consumed` with disposition requeued or parked, over the last 5m. Split by `reason` on `Messages consumed by disposition`.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -282,7 +282,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[5m]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset 5m)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "{{service_instance_id}}",
@@ -336,7 +336,7 @@
       "description": "Measures `pipeline.messages.produced` with outcome transient, unroutable or refused, over the last 5m.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -349,7 +349,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[5m]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset 5m)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "{{service_instance_id}}",
@@ -403,7 +403,7 @@
       "description": "Measures `pipeline.messages.consumed` with disposition requeued or parked, over the visible range.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -416,7 +416,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"}[$__range]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"})) - (sum by (service_instance_id)(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=~\"requeued|parked\"} offset $__range)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "{{service_instance_id}}",
@@ -470,7 +470,7 @@
       "description": "Measures `pipeline.messages.produced` with a non-accepted outcome, over the visible range.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -483,7 +483,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "(((sum by (service_instance_id)(increase(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"}[$__range]))) > (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range)), 0))) or (clamp_min((sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"})) - (sum by (service_instance_id)(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=~\"transient|unroutable|refused\"} offset $__range)), 0))) or (group by (service_instance_id) (last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "{{service_instance_id}}",
@@ -537,7 +537,7 @@
       "description": "Measures `pipeline.deadletter.depth`, summed across this service's dead-letter queues, right now.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -550,7 +550,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "sum(max by (queue) (last_over_time(pipeline_deadletter_depth{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[2m])))",
           "legendFormat": "",
@@ -605,7 +605,7 @@
       "description": "Measures `changes(pipeline.process.start.timestamp)` across replicas over the visible range. The gauge holds the process start time and moves exactly once per process.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -618,7 +618,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "max by (service_instance_id) (changes(pipeline_process_start_timestamp_seconds{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range]))",
           "legendFormat": "{{service_instance_id}}",
@@ -685,7 +685,7 @@
       "description": "Measures the rate of `pipeline.messages.consumed` by queue and disposition. Exactly one increment per delivery, on every exit path.\n\nLegend: `{{queue}} {{disposition}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -698,7 +698,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "(sum by (queue,disposition,service_instance_id) (rate(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
           "legendFormat": "{{queue}} {{disposition}} {{service_instance_id}}",
@@ -772,7 +772,7 @@
       "description": "Egress. outcome != accepted is a fault.\n\nLegend: `{{type}} / {{outcome}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -785,7 +785,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "sum by (type,outcome,service_instance_id) (rate(pipeline_messages_produced_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{type}} / {{outcome}} {{service_instance_id}}",
@@ -859,7 +859,7 @@
       "description": "Measures the rate of acked `pipeline.messages.consumed` per replica. Replicas share one queue and the broker round-robins, so a replica near zero beside working peers is consuming nothing while still looking healthy.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -872,7 +872,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "sum by (service_instance_id) (rate(pipeline_messages_consumed_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",disposition=\"acked\"}[$__rate_interval])) and on(service_instance_id) present_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])",
           "legendFormat": "{{service_instance_id}}",
@@ -946,7 +946,7 @@
       "description": "Measures `pipeline.consumer.duration` \u2014 how long a delivery was held, on every exit path including the ones that never reached a handler.\n\nLegend: `mean {{queue}} {{disposition}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -959,7 +959,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "(sum by (queue,disposition,service_instance_id) (rate(pipeline_consumer_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (queue,disposition,service_instance_id) (rate(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"acked\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"requeued\", \"\", \"\") * 0) or (label_replace(group by (queue,service_instance_id) (last_over_time(pipeline_consumer_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])), \"disposition\", \"parked\", \"\", \"\") * 0)",
           "legendFormat": "mean {{queue}} {{disposition}} {{service_instance_id}}",
@@ -1033,7 +1033,7 @@
       "description": "Measures `pipeline.produce.duration` by queue \u2014 from the start of a send until the broker confirmed or refused it, publisher confirm included. p95, p99 and mean.\n\nLegend: `p95|p99|mean {{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1046,7 +1046,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "label_replace(histogram_quantile(0.95, sum by (le,destination,service_instance_id) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))), \"queue\", \"$1\", \"destination\", \"(.*)\")",
           "legendFormat": "p95 {{queue}} {{service_instance_id}}",
@@ -1057,7 +1057,7 @@
           "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "label_replace(histogram_quantile(0.99, sum by (le,destination,service_instance_id) (rate(pipeline_produce_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))), \"queue\", \"$1\", \"destination\", \"(.*)\")",
           "legendFormat": "p99 {{queue}} {{service_instance_id}}",
@@ -1068,7 +1068,7 @@
           "refId": "C",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "label_replace(sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / sum by (destination,service_instance_id) (rate(pipeline_produce_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])), \"queue\", \"$1\", \"destination\", \"(.*)\")",
           "legendFormat": "mean {{queue}} {{service_instance_id}}",
@@ -1146,7 +1146,7 @@
       "description": "Measures `pipeline.queue.wait` \u2014 seconds between a message being published and a consumer picking it up, as a mean per queue and replica.\n\nLegend: `raw|net {{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1159,7 +1159,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "avg by (queue,service_instance_id) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "raw {{queue}} {{service_instance_id}}",
@@ -1170,7 +1170,7 @@
           "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "avg by (queue,service_instance_id) (rate(pipeline_queue_wait_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]) / rate(pipeline_queue_wait_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) - on(queue) group_left avg by (queue) (label_replace(rate(pipeline_produce_duration_seconds_sum{destination=~\"processor-$processorId(-post)?\"}[$__rate_interval]) / rate(pipeline_produce_duration_seconds_count{destination=~\"processor-$processorId(-post)?\"}[$__rate_interval]), \"queue\", \"$1\", \"destination\", \"(.*)\"))",
           "legendFormat": "net {{queue}} {{service_instance_id}}",
@@ -1258,7 +1258,7 @@
       "description": "Measures `pipeline.queue.depth` per queue \u2014 messages ready and not yet taken, from the broker's own passive declare.\n\nLegend: `{{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1271,7 +1271,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "(max by (queue,service_instance_id) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId(-post)?\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))) or (group by (queue,service_instance_id) (last_over_time(pipeline_queue_depth{queue=~\"processor-$processorId(-post)?\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])) * 0)",
           "legendFormat": "{{queue}} {{service_instance_id}}",
@@ -1350,7 +1350,7 @@
       "description": "Measures `pipeline.queue.consumers` per queue \u2014 how many consumers THE BROKER has attached. 0 means nothing is listening.\n\nLegend: `{{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1363,7 +1363,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "max by (queue,service_instance_id) (last_over_time(pipeline_queue_consumers{queue=~\"processor-$processorId(-post)?\",processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s]))",
           "legendFormat": "{{queue}} {{service_instance_id}}",
@@ -1442,7 +1442,7 @@
       "description": "Measures `pipeline.deadletter.depth` per queue \u2014 refused messages nobody has dealt with yet.\n\nLegend: `{{queue}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1455,7 +1455,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "max by (queue,service_instance_id) (last_over_time(pipeline_deadletter_depth{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[2m]))",
           "legendFormat": "{{queue}} {{service_instance_id}}",
@@ -1547,7 +1547,7 @@
       "description": "Measures `pipeline.gate.open` per replica, with `increase(pipeline.gate.trips)` over the range beside it.\n\nLegend: `gate|trips {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1560,7 +1560,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "last_over_time(pipeline_gate_open_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])",
           "legendFormat": "gate {{service_instance_id}}",
@@ -1571,7 +1571,7 @@
           "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "increase(pipeline_gate_trips_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__range])",
           "legendFormat": "trips {{service_instance_id}}",
@@ -1646,7 +1646,7 @@
       "description": "Measures the RATE of `pipeline.gate.probe.duration` observations, split by outcome \u2014 healthy, timeout or failed.\n\nLegend: `{{outcome}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1659,7 +1659,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "sum by (outcome,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}} {{service_instance_id}}",
@@ -1733,7 +1733,7 @@
       "description": "Measures `pipeline.gate.probe.duration` \u2014 how long the projection store took to answer the gate probe. p95, p99 and mean.\n\nLegend: `p95|p99|mean {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1746,7 +1746,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "histogram_quantile(0.95, sum by (le,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
           "legendFormat": "p95 {{service_instance_id}}",
@@ -1757,7 +1757,7 @@
           "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "histogram_quantile(0.99, sum by (le,service_instance_id) (rate(pipeline_gate_probe_duration_seconds_bucket{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])))",
           "legendFormat": "p99 {{service_instance_id}}",
@@ -1768,7 +1768,7 @@
           "refId": "C",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "sum by (service_instance_id) (rate(pipeline_gate_probe_duration_seconds_sum{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval])) / sum by (service_instance_id) (rate(pipeline_gate_probe_duration_seconds_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\",outcome=\"healthy\"}[$__rate_interval]))",
           "legendFormat": "mean {{service_instance_id}}",
@@ -1846,7 +1846,7 @@
       "description": "Measures the rate of `pipeline.loop.iterations` by loop. Expected: l2-gate 0.2/s, processor-liveness and queue-depth 0.1/s.\n\nLegend: `{{loop}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1859,7 +1859,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "rate(pipeline_loop_iterations_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])",
           "legendFormat": "{{loop}} {{service_instance_id}}",
@@ -1933,7 +1933,7 @@
       "description": "Measures `pipeline.identity.ready` per replica. Red is a pod that is up and waiting for a processor row matching its SourceHash \u2014 the designed behaviour, not a crash loop.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1946,7 +1946,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "last_over_time(pipeline_identity_ready_ratio{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[40s])",
           "legendFormat": "{{service_instance_id}}",
@@ -2036,7 +2036,7 @@
           "description": "Correlates with rising parked / refused dispositions and with faulted process outcomes. On the visible tier because a rising exception rate is a cause an operator should not have to expand a row to find.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2049,7 +2049,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_exceptions_count_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
               "legendFormat": "{{service_instance_id}}",
@@ -2124,7 +2124,7 @@
           "description": "Explains consumption stalling while the gate is open and the consumer still reports consuming=1: callbacks are starved, not blocked.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2137,7 +2137,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "max by (service_instance_id) (process_runtime_dotnet_thread_pool_queue_length{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}}",
@@ -2211,7 +2211,7 @@
           "description": "Measures `process_runtime_dotnet_thread_pool_threads_count` per replica.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2224,7 +2224,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "max by (service_instance_id) (process_runtime_dotnet_thread_pool_threads_count{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}}",
@@ -2298,7 +2298,7 @@
           "description": "Seconds of GC pause per second. Explains duration p99 spikes with no broker or dependency fault.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2311,7 +2311,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_gc_duration_nanoseconds_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval])) / 1e9",
               "legendFormat": "{{service_instance_id}}",
@@ -2385,7 +2385,7 @@
           "description": "**The cause behind the pause time to its left.** Pause seconds answer *how much*, this answers *why*: gen0 is cheap and constant, and a gen2 rate that is anything but near-flat is the collection that actually costs you.\n\nLegend: `{{service_instance_id}} / {{generation}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2398,7 +2398,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "sum by (service_instance_id, generation) (rate(process_runtime_dotnet_gc_collections_count_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
               "legendFormat": "{{service_instance_id}} / {{generation}}",
@@ -2472,7 +2472,7 @@
           "description": "Managed heap, by generation. **The leak signal**: a gen2 or LOH line that steps up and never comes back down across several collections is retention, and it ends in an OOMKill that every pipeline panel will report as a restart with no cause.\n\nLegend: `{{service_instance_id}} / {{generation}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2485,7 +2485,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "sum by (service_instance_id, generation) (process_runtime_dotnet_gc_heap_size_bytes{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}} / {{generation}}",
@@ -2559,7 +2559,7 @@
           "description": "What the GC has committed from the OS -- **the number the container limit is compared against**, not the managed heap beside it. The two diverge, and the gap is why a pod can be OOMKilled while its heap looks healthy: committed memory is returned to the OS lazily, so it tracks the high-water mark rather than the live set.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2572,7 +2572,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "sum by (service_instance_id) (process_runtime_dotnet_gc_committed_memory_size_bytes{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"})",
               "legendFormat": "{{service_instance_id}}",
@@ -2646,7 +2646,7 @@
           "description": "Bytes allocated per second -- **upstream of every other panel in this row.** Collections, pause time and committed memory are all consequences of this number; it is the one that moves first when a transform starts allocating per message.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2659,7 +2659,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_gc_allocations_size_bytes_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
               "legendFormat": "{{service_instance_id}}",
@@ -2733,7 +2733,7 @@
           "description": "Monitor contentions per second: threads that had to WAIT for a lock rather than take it. **The stall with no external cause** -- gate open, broker healthy, store fast, and throughput down anyway.\n\nLegend: `{{service_instance_id}}`",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "gridPos": {
             "h": 7,
@@ -2746,7 +2746,7 @@
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${DS_PROMETHEUS}"
               },
               "expr": "sum by (service_instance_id) (rate(process_runtime_dotnet_monitor_lock_contention_count_total{processorId=~\"$processorId\",processorId!=\"\",service_instance_id=~\"$service_instance_id\"}[$__rate_interval]))",
               "legendFormat": "{{service_instance_id}}",

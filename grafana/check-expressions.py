@@ -71,16 +71,14 @@ def query(expr):
         return json.load(r)
 
 
-GEN = pathlib.Path(__file__).parent / "build-dashboards.py"
-
 # THE LIVENESS-COUPLING CHECK IS GONE, WITH THE ALERT RULES IT CHECKED.
 #
 # It asserted that the `*_over_time` windows in the skp-rules.yml block of
-# k8s/02-configmaps.yaml equalled LIVENESS in build-dashboards.py -- the same decision
-# expressed twice, because Prometheus cannot read the generator. There is no second copy
-# any more: this project ships no alert rules and will not, because in production
-# Prometheus is ORG-OWNED and its rule set is not a lever available here. LIVENESS now
-# has exactly one home, so there is nothing left to drift against.
+# k8s/02-configmaps.yaml equalled the LIVENESS constant the boards were generated from --
+# the same decision expressed twice, because Prometheus cannot read a generator. There is
+# no second copy any more: this project ships no alert rules and will not, because in
+# production Prometheus is ORG-OWNED and its rule set is not a lever available here.
+# LIVENESS now lives only in the board JSON, so there is nothing left to drift against.
 
 
 def main():

@@ -1,106 +1,68 @@
 # SKP Grafana dashboards
 
-Five boards, as plain portable JSON. **They are provisioned from this repo** -- see
-**Changing a board** -- and they are also portable, so the same file lands in this
-cluster's Grafana and in one on another machine without editing anything. Those two
-properties are independent: provisioning is how this cluster gets them, portability is
-what lets any other Grafana import them by hand.
+Three boards, as plain portable JSON, **hand-maintained and hand-imported**. There is no
+generator and no provisioning: the files in `dashboards/` are the artifact, and an operator
+imports them into an org-managed Grafana that this repo does not configure.
 
 ```
 grafana/
-  build-dashboards.py      generator — edit this, not the JSON
+  dashboards/
+    skp-baseapi.json       API HTTP ingress
+    skp-orchestrator.json  orchestrator control plane
+    skp-processor.json     processor replicas
   check-expressions.py     runs every panel expression against a live Prometheus
   audit-instruments.py     proves every pipeline.* instrument has a live series
   audit-boards.js          opens every board in a browser and reports what rendered
   audit-nav.js             checks every board can reach every other board
   chaos-timeline.js        samples every board at intervals across a fault window
   chaos-probe.py           the same window from Prometheus, segmented before/during/after
-  dashboards/
-    skp-baseapi.json       API HTTP ingress
-    skp-orchestrator.json  orchestrator control plane
-    skp-processor.json     processor replicas
 ```
+
+The boards target **Grafana 11.1.0**. They are `schemaVersion: 39`, which is 11.1's own
+version, and they use only core panels (`timeseries`, `stat`, `state-timeline`, `text`,
+`row`) with no pinned `pluginVersion` anywhere, so nothing binds them to one Grafana build.
 
 ## Importing
 
-**On this cluster you do not import.** The boards are provisioned from
-`k8s/24-grafana-dashboards.yaml` -- see **Changing a board**. Import by hand only into a
-Grafana that does not provision them, or to recover from a provisioning failure.
+Order of operations, once, by the operator:
 
-**Dashboards → New → Import → Upload JSON file**, then pick the Prometheus datasource
-when prompted. Repeat per file. Order does not matter.
+1. **Configure the Prometheus data source** in Grafana, if it is not already there.
+2. **Create a folder** for the boards. Any name; nothing in the JSON assumes one.
+3. **Dashboards → New → Import → Upload JSON file**, one file at a time, choosing that
+   folder. Repeat for all three. Order between the files does not matter.
 
-Two properties make this work anywhere:
+Each board declares a single input, `DS_PROMETHEUS`, so the import screen shows one
+**Prometheus** picker. Choose the data source from step 1; its uid is written into the
+board as it is saved. There is deliberately **no data source dropdown on the board itself**
+-- the binding is made once, at import, not re-chosen on every visit.
 
-- Every panel resolves its datasource through the `${datasource}` template variable
-  rather than a hardcoded uid, so the board binds to whatever Prometheus the importing
-  Grafana has. This cluster pins `uid: skp-prometheus` for its own verification script;
-  the dashboards never reference it.
-- Each board carries an explicit stable `uid` and `"id": null`, so re-importing an
-  updated file **updates the existing board** instead of creating a second copy. The
-  uids are `skp-baseapi`, `skp-orchestrator`, `skp-processor`.
+Each board also carries an explicit stable `uid` (`skp-baseapi`, `skp-orchestrator`,
+`skp-processor`) with `"id": null`, so re-importing an updated file **updates the existing
+board in place** rather than creating a second copy. Re-import prompts for the data source
+again; pick the same one.
 
-Folder is chosen at import time. Anything works; the boards link to each other by the
-`skp` tag, not by folder.
+The three boards link to each other through a `SKP boards` dashboard link resolved by the
+`skp` tag, not by folder — so the cross-board nav keeps working wherever they land, and it
+will also pick up any other board in that Grafana tagged `skp`.
+
+Nothing here is provisioned. A UI "Save" therefore succeeds, and is lost on the next
+import: treat `dashboards/*.json` as the source of truth by convention, since no mechanism
+enforces it.
 
 ## Changing a board
 
-Edit `build-dashboards.py` and regenerate. Do not hand-edit the JSON — the orchestrator
-and processor boards share six pipeline panels, emitted from one function
-(`pipeline_shared`) precisely so the two cannot drift. Hand-editing one JSON reintroduces
-at the presentation layer the divergence the shared-instrument design exists to prevent.
+Edit the JSON directly, then check the expressions against a live Prometheus:
 
 ```bash
-python grafana/build-dashboards.py
 python grafana/check-expressions.py http://localhost:19090
 ```
 
-A UI "Save" is possible here — that is the cost of dropping provisioning, which enforced
-read-only. A UI edit is lost on the next import, so treat this directory as the source of
-truth by convention rather than by mechanism.
-
-Every board here is generated. `skp-runtime.json` used to be the exception — exported from
-the old provisioning ConfigMap rather than built — and `build-dashboards.py` carried a
-`normalize_imported()` pass to stamp the shared nav onto it. Both the board and that pass
-have been deleted, along with `skp-flow`; the history below is kept because it is the
-reason nav is treated as a property of the *set* of boards.
-
-**The boards are provisioned from this repo again.** `build-dashboards.py` inlines every
-board in `grafana/dashboards/` into `k8s/24-grafana-dashboards.yaml`, which is the
-`grafana-dashboards` ConfigMap the pod mounts. The provider was never removed and needed no
-changes -- folder `SKP`, `disableDeletion: true`, `allowUiUpdates: false`, re-read every 30s.
-
-Provisioning had been torn out so the boards could be edited in the UI, and that trade
-expired when the workflow became *edit the generator, never the JSON*: the editability being
-paid for was not being used, while the durability being given up cost a hand re-import on
-every restart. `allowUiUpdates: false` now makes that explicit -- a UI Save is rejected with
-`Cannot save provisioned dashboard` (HTTP 400).
-
-**The API import path is now closed, and that is the mechanism working.** Posting a board to
-`/api/dashboards/db` returns `Cannot save provisioned dashboard` (HTTP 400), because the provider
-sets `allowUiUpdates: false`. Regenerating and applying the ConfigMap is the only way a board
-changes on this cluster. The re-import runbook above is for a Grafana that does not provision
-these, or for recovering one that failed to.
-
-**Apply it server-side, and do not believe the error if you forget:**
-
-```bash
-python grafana/build-dashboards.py
-kubectl apply --server-side --field-manager=skp-dashboards -f k8s/24-grafana-dashboards.yaml
-```
-
-A plain `kubectl apply` fails with `metadata.annotations: Too long: may not be more than
-262144 bytes`. That is the 256 KiB ceiling on the `last-applied-configuration` annotation
-client-side apply writes -- **not** the 1 MiB ConfigMap ceiling, which the ~275 KB of boards
-is comfortably under. Shrinking the boards is not the fix.
-
-No restart is needed or wanted: the kubelet refreshes the mounted files (~60s) and the
-provider re-reads them (30s), so a board updates in place within about 90s.
-
-**Why a generated manifest rather than a `configMapGenerator`.** kustomize refuses to read
-files above its own kustomization directory (`../grafana/dashboards/*.json`) without
-`--load-restrictor LoadRestrictionsNone`, which would have to be remembered at every apply.
-Generating the ConfigMap keeps one source of truth and needs no flags.
+**Watch for drift between the orchestrator and processor boards.** They share eight
+pipeline instruments by design, and their common panels used to be emitted from one
+function in a generator precisely so the two could not diverge. That guarantee is gone with
+the generator: a change to a shared panel now has to be made twice, by hand, in both files.
+A divergence here reintroduces at the presentation layer exactly the drift the shared
+instrument design exists to prevent, and nothing will catch it for you.
 
 ## Instruments that export nothing
 
