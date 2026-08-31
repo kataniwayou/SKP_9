@@ -114,6 +114,13 @@ T_NEUTRAL = [{"color": "text", "value": None}]
 # a cron fire dispatches a batch, PrefetchCount is 1, and two replicas drain it one message at a
 # time -- so the green band has to clear it.
 #
+# THE MEASUREMENT PREDATES THE PROCESSOR'S SECOND QUEUE and has not been retaken since. It was
+# taken when processor-{id} carried dispatches AND branches; branches now arrive on
+# processor-{id}-post, so the work queue's share should if anything be lower and the post queue
+# starts from nothing. The band is unchanged because it was already set above the measured max
+# with headroom, not because the new split has been characterised -- if either queue is ever seen
+# near 5, retake the baseline rather than raising the threshold.
+#
 # Green below 5, which is above the measured healthy max with headroom. Orange to 20. Red beyond,
 # which at this workload's ~0.4 dispatches/s is roughly a minute of nothing being consumed.
 #
@@ -891,9 +898,10 @@ def since_shared(layout, f, restarts=True, by_=""):
                   "**No `or vector(0)` here, deliberately.** Nothing reporting is not the "
                   "same fact as nothing dead-lettered, and a fallback to 0 would render "
                   "the two identically in green -- which is exactly the defect the hop-gap "
-                  "stats were carrying. On the processor board this reads as text rather "
-                  "than as a reassuring zero, because that deployment has a dead-letter "
-                  "queue and no probe measuring it.",
+                  "stats were carrying. It reads as text rather than as a reassuring zero "
+                  "on any board where nothing is reporting -- which is no longer the "
+                  "normal state of the processor board, since that deployment now probes "
+                  "both of its dead-letter queues.",
              thresholds=T_WARN, decimals=0,
              no_value="not probed"),
     ]
@@ -1107,14 +1115,13 @@ def pipeline_shared(layout, f, role_f="", consumed_seed=None, enumerate_names=Fa
                         "the message is still there -- which is how six parked step "
                         "outcomes sat in `orchestrator-result.dead` across four "
                         "incidents over two days with every board green." + PARA +
-                        "**On the processor board this is empty, and that is a finding "
-                        "rather than a rendering fault.** `ProcessorQueues.Dead()` "
-                        "declares a `processor-{id}.dead` queue, but "
-                        "`DeadLetterDepthProbe` is registered in `OrchestratorHost` "
-                        "only -- so the processor's dead-letter queue exists and nothing "
-                        "measures its depth. The panel is left on both boards, saying "
-                        "so, because an unmeasured queue an operator can name is worth "
-                        "more than a panel that quietly is not there." + PARA +
+                        "**The processor board reports this now, and used to be empty.** "
+                        "`DeadLetterDepthProbe` was registered in `OrchestratorHost` only, so "
+                        "`processor-{id}.dead` existed with nothing measuring it and this panel "
+                        "was blank on that board. The processor registers its own probe now, over "
+                        "BOTH of its dead-letter queues -- `processor-{id}.dead` and "
+                        "`processor-{id}-post.dead` -- each seeded to 0 at registration so the "
+                        "series is present rather than absent from the first export." + PARA +
                         "The window is 2m rather than the " + LIVENESS + " used "
                         "elsewhere: the probe runs every 30s by design, so a "
                         "liveness-width window would flap on the probe's own cadence "
@@ -1251,7 +1258,8 @@ def depth_panels(layout, queue_filter, who, enumerate_names=False, service_f="")
                         "message that vanished are the same number to them. A gap roughly equal to "
                         "the depth here is backlog; a gap far exceeding it is loss." + PARA +
                         "Healthy on this stack is **0 on every orchestrator queue** and **mean 0.65, "
-                        "max 3** on the processor work queue -- that burst is structural, not noise: "
+                        "max 3** on the processor work queue (measured before the work/post split, and not "
+                        "retaken since) -- that burst is structural, not noise: "
                         "a cron fire dispatches a batch, PrefetchCount is 1, and the replicas drain "
                         "it one message at a time. The reference line is at " + str(DEPTH_ORANGE) +
                         ", above that measured maximum." + PARA +
@@ -1282,7 +1290,9 @@ def depth_panels(layout, queue_filter, who, enumerate_names=False, service_f="")
                         "series over the orchestrator's fresh 0. Wrapped, it reads 0 within one "
                         "liveness window." + PARA +
                         "Expect 3 on the shared orchestrator queues (one per replica), 1 on each "
-                        "per-replica control queue, and 2 on the processor work queue. A count that "
+                        "per-replica control queue, and 2 on EACH of the processor's two queues -- "
+                        "work and post -- since every replica now attaches one consumer to each. A "
+                        "count that "
                         "drops without `Workers reporting` moving is a consumer that detached while "
                         "its process stayed up." + PARA +
                         "Not a complete answer: a consumer that reattaches inside one 10s probe "
@@ -2247,13 +2257,16 @@ PIPELINE_PANELS = {
         "from the broker's own passive declare." + PARA +
         "The only leading indicator on this board: a queue fills as soon as a consumer "
         "is merely SLOWER than its producer. Healthy here is 0 on orchestrator queues "
-        "and mean 0.65 / max 3 on the work queue, where prefetch 1 drains a cron batch "
-        "one message at a time."),
+        "and mean 0.65 / max 3 on the processor WORK queue, where prefetch 1 drains a cron "
+        "batch one message at a time. The processor's POST queue is the second half of the "
+        "same pair and has its own consumer and its own slot, so a backlog on one no longer "
+        "implies the other."),
     "Consumers attached by queue": (
         "Consumers attached by queue",
         "Measures `pipeline.queue.consumers` per queue — how many consumers THE BROKER "
         "has attached. 0 means nothing is listening." + PARA +
-        "Expect 2 on the processor work queue. Wrapped in a 40s liveness window: "
+        "Expect 2 on EACH of the processor's two queues, work and post -- every replica "
+        "attaches one consumer per queue. Wrapped in a 40s liveness window: "
         "unwrapped, a departed pod's stale series read a confident 2 against the "
         "broker's 0 for a whole outage."),
     "Dead-letter depth by queue": (
@@ -2466,7 +2479,14 @@ def build_processor():
         # Process duration is subsumed by `Consumer duration by disposition` below, which
         # measures more rather than less: the transform plus everything around it, on every
         # exit path including the ones that never reached a handler at all.
-        *depth_panels(lay, 'queue=~"processor-$processorId"', "this processor's work queue",
+        # `(-post)?` IS LOAD-BEARING. PromQL label matchers are fully anchored, so
+        # `queue=~"processor-$processorId"` matches the work queue and NOTHING ELSE -- it
+        # silently excluded `processor-{id}-post` from the moment that queue existed,
+        # leaving branch backlog and "does the post queue still have a consumer" with no
+        # panel at all. Verified against live Prometheus: the bare filter returns one
+        # series, this one returns two.
+        *depth_panels(lay, 'queue=~"processor-$processorId(-post)?"',
+                      "this processor's two queues, work and post",
                       enumerate_names=True, service_f="," + f),
         timeseries(lay, "Replica fan-out",
                    [(f'sum by (service_instance_id) (rate(pipeline_messages_consumed_total'
@@ -2561,7 +2581,13 @@ def build_processor():
         # the processor's work queue is published to by the ORCHESTRATOR, so filtering the
         # correction term by processor service_name selects the processor's own sends --
         # destination orchestrator-result -- and the join then matches nothing at all.
-        queue_wait_panel(lay, f, 'destination=~"processor-$processorId"'),
+        # `(-post)?` for the reason spelled out on the depth panels above, and it matters
+        # MORE here than there. The consume side is filtered by this board's service
+        # selector, so branch waits appear on it either way; only the produce-side
+        # correction is filtered by destination. Anchored without the group, branch
+        # messages kept their consume-side measurement and lost the subtraction -- an
+        # INFLATED queue wait rather than a missing one, which reads worse than nothing.
+        queue_wait_panel(lay, f, 'destination=~"processor-$processorId(-post)?"'),
     ]
 
     # The pipeline tier is 13 panels against a 3-across grid, so the last one sits
