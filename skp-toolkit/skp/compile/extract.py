@@ -701,3 +701,21 @@ def pg_tables(dbcontext_text: str, persistence_ext_text: str,
                   f"UseSnakeCaseNamingConvention() to both")
          for name in _DBSET.findall(dbcontext_text)),
         key=lambda s: s.id)
+
+
+_GATE_FACTORY = re.compile(r'=>\s*new\(\s*"([A-Za-z][A-Za-z0-9]*)"')
+
+
+def gates(text: str) -> list[str]:
+    """The orchestration gate discriminators, in declaration order.
+
+    Anchored on the ``=> new(`` expression-bodied factories in
+    ``OrchestrationValidationException``, so only the FIRST argument of a
+    factory is taken -- the title and detail beside it are quoted strings too.
+
+    Deliberately structural rather than a literal list. A sixth gate added to
+    the C# appears here on the next refresh and ``skp doctor`` fails until
+    somebody writes its remedy file. A typed-in list would silently
+    under-report, which is the exact failure this toolkit exists to remove.
+    """
+    return _GATE_FACTORY.findall(_strip_comments(text))

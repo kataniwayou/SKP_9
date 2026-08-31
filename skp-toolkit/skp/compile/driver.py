@@ -44,6 +44,9 @@ SOURCE_MAP = {
     "base_db_context": "BaseApi.Core/Persistence/BaseDbContext.cs",
 }
 
+GATE_SOURCE = ("BaseApi.Service/Features/Orchestration/"
+               "OrchestrationValidationException.cs")
+
 CONTROLLER_GLOB = "BaseApi.Service/Features/**/*Controller.cs"
 METRICS_GLOB = "**/*Metrics.cs"
 
@@ -56,13 +59,14 @@ def _read(root: pathlib.Path, rel: str) -> str:
 def _source_paths(source_root: pathlib.Path) -> list[pathlib.Path]:
     """Every source path the lock should track.
 
-    The ``SOURCE_MAP`` fixed paths are kept even when missing -- ``hash_file``
-    records them as ``MISSING`` rather than dropping them, so a rename shows
-    up as drift instead of quietly disappearing from the lock (see C2). Only
-    the glob-derived paths are filtered by existence, since a glob can only
+    The ``SOURCE_MAP`` fixed paths and ``GATE_SOURCE`` are kept even when missing
+    -- ``hash_file`` records them as ``MISSING`` rather than dropping them, so a
+    rename shows up as drift instead of quietly disappearing from the lock (see C2).
+    Only the glob-derived paths are filtered by existence, since a glob can only
     ever return paths that exist.
     """
     paths = [source_root / rel for rel in SOURCE_MAP.values()]
+    paths.append(source_root / GATE_SOURCE)
     paths += sorted(source_root.glob(CONTROLLER_GLOB))
     paths += [p for p in sorted(source_root.glob(METRICS_GLOB))
               if "obj" not in p.parts and "bin" not in p.parts]
@@ -70,10 +74,15 @@ def _source_paths(source_root: pathlib.Path) -> list[pathlib.Path]:
 
 
 def _missing_fixed_path_problems(source_root: pathlib.Path) -> list[str]:
-    """SOURCE_MAP paths are mandatory: a missing one is a named compile
-    problem, not an empty string quietly fed to an extractor."""
-    return [f"SOURCE_MAP path missing: {rel} (component data extracted from it is lost)"
-            for rel in SOURCE_MAP.values() if not (source_root / rel).exists()]
+    """SOURCE_MAP paths and GATE_SOURCE are mandatory: a missing one is a named
+    compile problem, not an empty string quietly fed to an extractor."""
+    problems = []
+    for rel in SOURCE_MAP.values():
+        if not (source_root / rel).exists():
+            problems.append(f"SOURCE_MAP path missing: {rel} (component data extracted from it is lost)")
+    if not (source_root / GATE_SOURCE).exists():
+        problems.append(f"GATE_SOURCE path missing: {GATE_SOURCE} (gate data extracted from it is lost)")
+    return problems
 
 
 def _metrics_texts(source_root: pathlib.Path) -> list[str]:
@@ -182,6 +191,10 @@ def compile_catalog(source_root: pathlib.Path, annotations_dir: pathlib.Path,
     catalog_path = out_dir / "catalog.json"
     catalog_path.write_text(
         json.dumps([e.to_dict() for e in entries], indent=2, sort_keys=True),
+        encoding="utf-8")
+
+    (out_dir / "gates.json").write_text(
+        json.dumps(extract.gates(_read(source_root, GATE_SOURCE)), indent=2),
         encoding="utf-8")
 
     lock = build_lock_two_roots(_source_paths(source_root), source_root,

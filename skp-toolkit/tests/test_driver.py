@@ -42,6 +42,19 @@ PERSIST_EXT = (
 BASE_DB_CONTEXT = (
     "public abstract class BaseDbContext { "
     "/* optionsBuilder.UseSnakeCaseNamingConvention(); */ }")
+# Gates stub content for OrchestrationValidationException.cs
+GATES = '''
+public static OrchestrationValidationException Cycle(x y)
+    => new("cycle", "Workflow contains a cycle", $"detail", new CycleOffending(y));
+public static OrchestrationValidationException MissingStep(x y)
+    => new("missingStep", "Workflow references a missing step", $"detail", new MissingStepOffending(y));
+public static OrchestrationValidationException SchemaEdge(x y)
+    => new("schemaEdge", "Workflow references a schema edge", $"detail", new SchemaEdgeOffending(y));
+public static OrchestrationValidationException PayloadConfigSchema(x y)
+    => new("payloadConfigSchema", "Payload config schema error", $"detail", new PayloadConfigSchemaOffending(y));
+public static OrchestrationValidationException ProcessorLiveness(x y)
+    => new("processorLiveness", "Processor liveness error", $"detail", new ProcessorLivenessOffending(y));
+'''
 
 
 def fake_source_root(root: pathlib.Path) -> pathlib.Path:
@@ -62,6 +75,7 @@ def fake_source_root(root: pathlib.Path) -> pathlib.Path:
         "BaseConsole.Core/DependencyInjection/ResourceAttribute.cs": RESOURCE_ATTRIBUTE,
         "BaseApi.Core/DependencyInjection/PersistenceServiceCollectionExtensions.cs": PERSIST_EXT,
         "BaseApi.Core/Persistence/BaseDbContext.cs": BASE_DB_CONTEXT,
+        "BaseApi.Service/Features/Orchestration/OrchestrationValidationException.cs": GATES,
     }
     for rel, text in files.items():
         path = src / rel
