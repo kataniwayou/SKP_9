@@ -74,19 +74,38 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
         _logger.LogDebug("validating and persisting a branch");
         var started = Stopwatch.GetTimestamp();
 
-        // Same as the pre handler: ProcessorId is passed through with WorkflowId and StepId, a
-        // routing and tracing id rather than a claim to verify. The value arriving here was stamped by
-        // this processor one hop ago off the dispatch that named it, and the branch was sent to this
-        // processor's own queue — so re-resolving it from identity would be a second read of the same
-        // fact and would leave the field written and never read.
-        //
-        // Identity is still needed for the output schema below, and nothing gates consumption on
-        // IProcessorContext.IsHealthy today, so this can genuinely run while the startup loops are
-        // still resolving. See the known gap in the execution-path plan; both guards here park rather
-        // than proceed until it is closed.
+        // Identity is needed for the output schema below AND for the provenance guard that follows,
+        // and nothing gates consumption on IProcessorContext.IsHealthy today, so this can genuinely
+        // run while the startup loops are still resolving. See the known gap in the execution-path
+        // plan; every guard here parks rather than proceeds until it is closed.
         var identity = _context.Identity
             ?? throw new InvalidOperationException(
                 "A branch was consumed before identity resolved — the queue must not be bound until then.");
+
+        // PROVENANCE. This used to read "a routing and tracing id rather than a claim to verify", on
+        // the grounds that the value was stamped by this processor one hop ago and the branch came
+        // back on this processor's own queue. Both halves are still true and neither is ENFORCED:
+        // processor-{id}-post is an addressable queue on a shared broker, this handler is resolved by
+        // message type across the whole container, and everything below acts on the ids in the body
+        // — it writes L2[EntryId] from them and reports a StepOutcome under them. A message arriving
+        // with someone else's ProcessorId would write a blob into another lineage's key space and
+        // forge that step's outcome. The reference carried this guard as WR-02 for exactly that
+        // reason; this assembly lost it in the port.
+        //
+        // PARKED, not dropped, which is where this departs from the reference. Dropping leaves a log
+        // line and nothing else, and the two ways this can fire want opposite handling: a bug on our
+        // own send path is a branch that must not vanish silently, while a forged message is
+        // evidence. Parking preserves both. It cannot flood the dead-letter queue in this deployment
+        // — the broker is in-cluster with no external reach — and if that ever changes, dropping
+        // becomes the right trade and this comment is where to make it.
+        //
+        // Ids only, never the payload, matching the schema-failure branch below.
+        if (p.ProcessorId != identity.Id)
+        {
+            throw new InvalidOperationException(
+                $"branch carries ProcessorId {p.ProcessorId:D} but this processor is {identity.Id:D} — "
+                + "refusing to write a blob or report an outcome for another processor's lineage");
+        }
 
         // The same "not applicable" vs "not yet" pair the pre handler reads, on the output role. A
         // non-null schema id whose definition is still null would hand TryValidate a null definition,
