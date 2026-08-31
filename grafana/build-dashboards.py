@@ -114,12 +114,17 @@ T_NEUTRAL = [{"color": "text", "value": None}]
 # a cron fire dispatches a batch, PrefetchCount is 1, and two replicas drain it one message at a
 # time -- so the green band has to clear it.
 #
-# THE MEASUREMENT PREDATES THE PROCESSOR'S SECOND QUEUE and has not been retaken since. It was
-# taken when processor-{id} carried dispatches AND branches; branches now arrive on
-# processor-{id}-post, so the work queue's share should if anything be lower and the post queue
-# starts from nothing. The band is unchanged because it was already set above the measured max
-# with headroom, not because the new split has been characterised -- if either queue is ever seen
-# near 5, retake the baseline rather than raising the threshold.
+# RETAKEN AFTER THE WORK/POST SPLIT, over a 30-minute window at 15s resolution: the work queue ran
+# mean 0.03 / max 1 and the post queue a flat 0, with every orchestrator queue also flat at 0.
+#
+# DO NOT READ THAT AS THE SPLIT HAVING LOWERED THE DEPTH. The original 0.65 / max 3 was measured
+# under a soak; this window carried whatever the stack happened to be running, and the workload here
+# is a periodic burst rather than a stream, so a window without a burst in it measures the idle
+# state. The two numbers are not comparable and the lower one is not evidence of an improvement.
+#
+# The band is unchanged at 5, which clears the HIGHER of the two measurements with headroom. If
+# either queue is ever seen near 5, retake the baseline under a known load rather than raising the
+# threshold.
 #
 # Green below 5, which is above the measured healthy max with headroom. Orange to 20. Red beyond,
 # which at this workload's ~0.4 dispatches/s is roughly a minute of nothing being consumed.
