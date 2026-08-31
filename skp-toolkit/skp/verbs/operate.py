@@ -181,16 +181,39 @@ def freeze(entries, clients, step_id: str, confirm: bool) -> Result:
                        "re-run with --confirm to set the step to Never."],
                       next_command=f"skp operate freeze --step {step_id} --confirm")
 
-    path = path_for(entries, "api.steps.put_id")
-    if path is None:
-        return Result(EXIT_NOT_INITIALISED, ["catalog is missing api.steps.put_id"],
+    get_path = path_for(entries, "api.steps.get_id")
+    put_path = path_for(entries, "api.steps.put_id")
+    if get_path is None or put_path is None:
+        return Result(EXIT_NOT_INITIALISED,
+                      ["catalog is missing api.steps.get_id or api.steps.put_id"],
                       next_command="skp init --refresh")
 
     try:
         status, text = clients["baseapi"].http.probe_status(
-            "PUT", path.replace("{id}", step_id), {"entryCondition": NEVER})
+            "GET", get_path.replace("{id}", step_id), None)
     except Exception as exc:
-        return Result(EXIT_UNREACHABLE, [f"PUT {path} failed -- {exc}"],
+        return Result(EXIT_UNREACHABLE, [f"GET {get_path} failed -- {exc}"],
+                      next_command="skp doctor")
+
+    if status not in (200, 204):
+        return Result(EXIT_VERDICT,
+                      [f"GET step failed with HTTP {status}: {text[:200]}"],
+                      next_command="skp map --component api")
+
+    try:
+        step_obj = json.loads(text)
+    except ValueError:
+        return Result(EXIT_VERDICT,
+                      [f"GET returned HTTP {status} but body is not JSON: {text[:200]}"],
+                      next_command="skp doctor")
+
+    step_obj["entryCondition"] = NEVER
+
+    try:
+        status, text = clients["baseapi"].http.probe_status(
+            "PUT", put_path.replace("{id}", step_id), step_obj)
+    except Exception as exc:
+        return Result(EXIT_UNREACHABLE, [f"PUT {put_path} failed -- {exc}"],
                       next_command="skp doctor")
 
     if status not in (200, 204):

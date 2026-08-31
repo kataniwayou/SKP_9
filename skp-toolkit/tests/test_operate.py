@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from skp.result import EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE, EXIT_VERDICT
@@ -15,6 +16,8 @@ ENTRIES = [
 ]
 
 FREEZE_ENTRIES = ENTRIES + [
+    {"id": "api.steps.get_id", "component": "api",
+     "operation": "GET /api/v1.0/steps/{id}", "detail": "steps"},
     {"id": "api.steps.put_id", "component": "api",
      "operation": "PUT /api/v1.0/steps/{id}", "detail": "steps"},
 ]
@@ -37,8 +40,18 @@ class FakeRedis:
 
 
 class FakeApi:
-    def __init__(self, reply, raises=None):
-        self._reply = reply
+    def __init__(self, reply=None, raises=None, replies=None):
+        # For backwards compatibility: accept single reply tuple, or a dict
+        # mapping method -> reply tuple. If replies dict, use it; else use reply.
+        if replies is not None:
+            self._replies = replies
+        elif reply is not None:
+            # Single reply for all calls (backwards compat)
+            self._replies = {}
+            self._default_reply = reply
+        else:
+            self._replies = {}
+            self._default_reply = None
         self._raises = raises
         outer = self
 
@@ -50,7 +63,10 @@ class FakeApi:
                 outer.http.calls.append((method, path, body))
                 if outer._raises:
                     raise outer._raises
-                return outer._reply
+                # Look up reply by method; fall back to default for backwards compat
+                if outer._replies:
+                    return outer._replies.get(method, (None, None))
+                return outer._default_reply
 
         self.http = _Http()
 
@@ -153,14 +169,44 @@ class StopTests(unittest.TestCase):
 
 class FreezeTests(unittest.TestCase):
     def test_freeze_reports_that_it_lands_on_the_next_start(self):
-        clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([["5"]])}
+        step_obj = {"id": STEP, "name": "step-A", "version": "1.0.0",
+                    "entryCondition": 4, "description": None}
+        get_reply = (200, json.dumps(step_obj))
+        clients = {"baseapi": FakeApi(replies={"GET": get_reply, "PUT": (204, "")}),
+                   "postgres": FakePg([["5"]])}
         result = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=True)
         self.assertEqual(result.code, EXIT_OK)
         self.assertIn("NEXT start", result.render())
         self.assertIn("skp operate start", result.render())
 
+    def test_put_body_is_get_response_with_only_entry_condition_changed(self):
+        step_obj = {"id": STEP, "name": "step-A", "version": "1.0.0",
+                    "description": None, "entryCondition": 4}
+        get_reply = (200, json.dumps(step_obj))
+        clients = {"baseapi": FakeApi(replies={"GET": get_reply, "PUT": (204, "")}),
+                   "postgres": FakePg([["5"]])}
+        operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=True)
+        # Verify two calls were made: GET then PUT
+        self.assertEqual(len(clients["baseapi"].http.calls), 2)
+        get_call, put_call = clients["baseapi"].http.calls
+        # GET call has no body
+        self.assertEqual(get_call[0], "GET")
+        self.assertIsNone(get_call[2])
+        # PUT call has the modified step object
+        self.assertEqual(put_call[0], "PUT")
+        put_body = put_call[2]
+        # Body must include name and version from GET
+        self.assertEqual(put_body["name"], "step-A")
+        self.assertEqual(put_body["version"], "1.0.0")
+        # And must have entryCondition set to NEVER
+        self.assertEqual(put_body["entryCondition"], operate.NEVER)
+
     def test_a_row_that_did_not_change_is_a_verdict(self):
-        clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([["1"]])}
+        step_obj = {"id": STEP, "name": "step-A", "version": "1.0.0",
+                    "entryCondition": 4}
+        get_reply = (200, json.dumps(step_obj))
+        clients = {"baseapi": FakeApi(replies={"GET": get_reply, "PUT": (204, "")}),
+                   "postgres": FakePg([["1"]])}
         result = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=True)
         self.assertEqual(result.code, EXIT_VERDICT)
         self.assertIn("entry_condition", result.render())
@@ -168,7 +214,11 @@ class FreezeTests(unittest.TestCase):
     def test_freeze_never_claims_dispatching_has_stopped(self):
         """The projection keeps firing until it is replaced, so any wording
         that implies immediate effect is false at the moment it is printed."""
-        clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([["5"]])}
+        step_obj = {"id": STEP, "name": "step-A", "version": "1.0.0",
+                    "entryCondition": 4}
+        get_reply = (200, json.dumps(step_obj))
+        clients = {"baseapi": FakeApi(replies={"GET": get_reply, "PUT": (204, "")}),
+                   "postgres": FakePg([["5"]])}
         text = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=True).render()
         self.assertNotIn("stopped dispatching", text)
         self.assertIn("projection", text)
@@ -184,6 +234,16 @@ class FreezeTests(unittest.TestCase):
         result = operate.freeze(FREEZE_ENTRIES, clients, "not-a-uuid", confirm=True)
         self.assertEqual(result.code, EXIT_USAGE)
         self.assertEqual(clients["baseapi"].http.calls, [])
+
+    def test_failing_get_does_not_issue_put(self):
+        clients = {"baseapi": FakeApi(replies={"GET": (404, "not found"), "PUT": (204, "")}),
+                   "postgres": FakePg([])}
+        result = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=True)
+        self.assertEqual(result.code, EXIT_VERDICT)
+        self.assertIn("404", result.render())
+        # Only the GET call should have been made
+        self.assertEqual(len(clients["baseapi"].http.calls), 1)
+        self.assertEqual(clients["baseapi"].http.calls[0][0], "GET")
 
 
 if __name__ == "__main__":
