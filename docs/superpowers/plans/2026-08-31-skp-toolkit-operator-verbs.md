@@ -979,7 +979,7 @@ GROUPS = {"init": init_verb.run, "map": map_verb.run, "doctor": doctor_verb.run,
 ```bash
 cd skp-toolkit
 python -m unittest discover -s tests -t .
-python -m skp author validate --home <TEMP> --workflow 4cd8af45-1295-43db-ab2e-e955dd82b5c5
+python -m skp author --home <TEMP> validate --workflow 4cd8af45-1295-43db-ab2e-e955dd82b5c5
 ```
 
 Expected: suite OK. The live call **refuses** and prints the `--confirm-start`
@@ -1583,8 +1583,8 @@ and `"operate": operate_verb.run` to `GROUPS`.
 ```bash
 cd skp-toolkit
 python -m unittest discover -s tests -t .
-python -m skp operate start --home <TEMP> --workflow 4cd8af45-1295-43db-ab2e-e955dd82b5c5 --confirm
-python -m skp operate stop  --home <TEMP> --workflow 4cd8af45-1295-43db-ab2e-e955dd82b5c5 --confirm
+python -m skp operate --home <TEMP> start --workflow 4cd8af45-1295-43db-ab2e-e955dd82b5c5 --confirm
+python -m skp operate --home <TEMP> stop  --workflow 4cd8af45-1295-43db-ab2e-e955dd82b5c5 --confirm
 ```
 
 Expected: suite OK; start reports `projected`, stop reports `gone from L2`.
@@ -2082,7 +2082,7 @@ arguments verifies the run that `skp operate start` just started"), and returnin
 ```bash
 cd skp-toolkit
 python -m unittest discover -s tests -t .
-python -m skp operate verify --home <TEMP> --workflow 4cd8af45-1295-43db-ab2e-e955dd82b5c5
+python -m skp operate --home <TEMP> verify --workflow 4cd8af45-1295-43db-ab2e-e955dd82b5c5
 ```
 
 Expected: suite OK. Against the cluster as of 2026-08-31 this should resolve to
