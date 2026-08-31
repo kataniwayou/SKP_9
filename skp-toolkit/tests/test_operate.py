@@ -14,6 +14,13 @@ ENTRIES = [
      "detail": "skp:{workflowId}"},
 ]
 
+FREEZE_ENTRIES = ENTRIES + [
+    {"id": "api.steps.put_id", "component": "api",
+     "operation": "PUT /api/v1.0/steps/{id}", "detail": "steps"},
+]
+
+STEP = "eb42edf2-062d-48be-896e-7860a7370b12"
+
 
 class FakeRedis:
     """Returns a scripted sequence per pattern, so a key that appears on the
@@ -46,6 +53,18 @@ class FakeApi:
                 return outer._reply
 
         self.http = _Http()
+
+
+class FakePg:
+    """Mirrors the real client: rows(sql) -> list[list[str]]. Values are
+    strings because psql --csv yields text, which is why the verb compares
+    against "5" and not 5."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def rows(self, sql):
+        return self._rows
 
 
 class StartTests(unittest.TestCase):
@@ -130,6 +149,34 @@ class StopTests(unittest.TestCase):
                               attempts=2, poll_s=0)
         self.assertEqual(result.code, EXIT_VERDICT)
         self.assertIn("queued, not applied", result.render())
+
+
+class FreezeTests(unittest.TestCase):
+    def test_freeze_reports_that_it_lands_on_the_next_start(self):
+        clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([["5"]])}
+        result = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=True)
+        self.assertEqual(result.code, EXIT_OK)
+        self.assertIn("NEXT start", result.render())
+        self.assertIn("skp operate start", result.render())
+
+    def test_a_row_that_did_not_change_is_a_verdict(self):
+        clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([["1"]])}
+        result = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=True)
+        self.assertEqual(result.code, EXIT_VERDICT)
+        self.assertIn("entry_condition", result.render())
+
+    def test_freeze_never_claims_dispatching_has_stopped(self):
+        """The projection keeps firing until it is replaced, so any wording
+        that implies immediate effect is false at the moment it is printed."""
+        clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([["5"]])}
+        text = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=True).render()
+        self.assertNotIn("stopped dispatching", text)
+        self.assertIn("projection", text)
+
+    def test_without_confirmation_it_refuses(self):
+        clients = {"baseapi": FakeApi((204, "")), "postgres": FakePg([])}
+        result = operate.freeze(FREEZE_ENTRIES, clients, STEP, confirm=False)
+        self.assertEqual(result.code, EXIT_USAGE)
 
 
 if __name__ == "__main__":

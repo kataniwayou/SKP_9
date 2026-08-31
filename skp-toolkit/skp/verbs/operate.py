@@ -9,6 +9,7 @@ import argparse
 import json
 import pathlib
 import time
+import uuid
 
 from skp import references, state
 from skp.profile import Profile, ProfileMissing, default_home
@@ -148,10 +149,80 @@ def stop(entries, clients, workflow_id, confirm: bool,
     ], next_command=f"skp operate verify --workflow {workflow_id}")
 
 
+NEVER = 5  # StepEntryCondition.Never -- a stored wire value, never renumbered.
+
+
+def freeze(entries, clients, step_id: str, confirm: bool) -> Result:
+    """Sets one entry step's condition to ``Never``.
+
+    Per ``StepEntryCondition.cs`` this is the operator's per-entry-step
+    freeze: a stop halts a whole workflow, which is the wrong instrument when
+    only one of several entry steps needs to stand down. Setting that one to
+    Never and re-issuing start leaves the schedule armed and its siblings
+    firing.
+
+    THE FREEZE IS NOT IMMEDIATE. L1 is a projection, so it lands on the next
+    start. The proof here is therefore the ROW plus the instruction to
+    re-issue start -- never "dispatching has stopped", which would still be
+    false at the moment this returns.
+    """
+    # pg.rows() interpolates SQL into a shell argument and offers no
+    # parameter binding, so an id arriving from argv is validated before it
+    # can reach the query.
+    try:
+        uuid.UUID(step_id)
+    except ValueError:
+        return Result(EXIT_USAGE, [f"{step_id!r} is not a UUID"],
+                      next_command="skp observe projected --workflow <id>")
+
+    if not confirm:
+        return Result(EXIT_USAGE,
+                      ["skp operate freeze writes to the live system.",
+                       "re-run with --confirm to set the step to Never."],
+                      next_command=f"skp operate freeze --step {step_id} --confirm")
+
+    path = path_for(entries, "api.steps.put_id")
+    if path is None:
+        return Result(EXIT_NOT_INITIALISED, ["catalog is missing api.steps.put_id"],
+                      next_command="skp init --refresh")
+
+    try:
+        status, text = clients["baseapi"].http.probe_status(
+            "PUT", path.replace("{id}", step_id), {"entryCondition": NEVER})
+    except Exception as exc:
+        return Result(EXIT_UNREACHABLE, [f"PUT {path} failed -- {exc}"],
+                      next_command="skp doctor")
+
+    if status not in (200, 204):
+        return Result(EXIT_VERDICT,
+                      [f"freeze refused with HTTP {status}: {text[:200]}"],
+                      next_command="skp map --component api")
+
+    rows = clients["postgres"].rows(
+        f"select entry_condition from steps where id = '{step_id}'")
+    observed = rows[0][0] if rows and rows[0] else None
+    if observed != str(NEVER):
+        return Result(EXIT_VERDICT, [
+            f"accepted with HTTP {status}, but steps.entry_condition reads "
+            f"{observed!r}, not '{NEVER}' -- the freeze did not land.",
+        ], next_command="skp investigate")
+
+    return Result(EXIT_OK, [
+        f"frozen -- steps.entry_condition is {NEVER} (Never) for {step_id}.",
+        "This takes effect on the NEXT start, not now: L1 is a projection, so "
+        "the running projection keeps firing until it is replaced.",
+        "Sibling entry steps and the schedule are unaffected.",
+    ], next_command="skp operate start --workflow <id> --confirm")
+
+
 def run(argv: list[str]) -> Result:
     parser = argparse.ArgumentParser(prog="skp operate")
     parser.add_argument("--home", default=str(default_home()))
     sub = parser.add_subparsers(dest="mode", required=True)
+
+    p = sub.add_parser("freeze")
+    p.add_argument("--step", required=True)
+    p.add_argument("--confirm", action="store_true")
 
     for name in ("start", "stop"):
         p = sub.add_parser(name)
@@ -168,6 +239,9 @@ def run(argv: list[str]) -> Result:
 
     entries = load_catalog(home)
     clients = build_clients(profile)
+
+    if ns.mode == "freeze":
+        return freeze(entries, clients, ns.step, ns.confirm)
 
     handler = {"start": start, "stop": stop}[ns.mode]
     result = handler(entries, clients, ns.workflow, ns.confirm)
