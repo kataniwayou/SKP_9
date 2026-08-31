@@ -6,8 +6,9 @@
 ## What the gate checks
 
 For every edge `parent -> child` in the step graph, the parent's **output**
-schema id must equal the child's **input** schema id. It runs third, after
-`cycle` and `missingStep`, and before `payloadConfigSchema`.
+schema id must equal the child's **input** schema id. It runs second, after the
+cycle detector (which raises both `cycle` and `missingStep`), and before
+`payloadConfigSchema`.
 
 ## What the offending payload tells you
 

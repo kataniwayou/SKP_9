@@ -4,7 +4,9 @@ HTTP 422 with `errors.gate = "missingStep"`.
 
 ## What the gate checks
 
-Every child step id referenced by a parent must exist. It runs after `cycle`.
+Every child step id referenced by a parent must exist. This is raised by the
+cycle detector itself, in the same first pass as `cycle` -- it is not a
+separate validation stage that runs afterward.
 
 ## What the offending payload tells you
 

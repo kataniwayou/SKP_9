@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from skp.profile import Profile
-from skp.result import EXIT_UNREACHABLE
+from skp.result import EXIT_DRIFT, EXIT_UNREACHABLE
 from skp.verbs.doctor import diagnose, run_with
 
 CATALOG = [{"id": "redis.Root", "component": "redis", "operation": "read key",
@@ -135,3 +135,19 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(result.next_command, "skp init --refresh")
         self.assertFalse(any("this is the system, not the toolkit" in line
                              for line in result.lines))
+
+    def test_a_missing_gate_reference_is_a_toolkit_fix_not_a_reachability_outage(self):
+        # Regression for the fix-round-1 finding: "gate references" was a new
+        # failing check name with no FIXES entry, so run_with's "no entry in
+        # FIXES means only reachability failed" assumption silently broke --
+        # a bad gates.json rendered as EXIT_UNREACHABLE with "the toolkit
+        # checks pass", which is false, and a remedy (skp map --intent
+        # observe) that cannot fix a missing reference file.
+        (self.home / "model" / "gates.json").write_text(
+            json.dumps(["cycle", "brandNewGate"]), encoding="utf-8")
+        result = run_with(self.profile, clients())
+        self.assertNotEqual(result.code, EXIT_UNREACHABLE)
+        self.assertEqual(result.code, EXIT_DRIFT)
+        self.assertFalse(any("the toolkit checks pass" in line
+                             for line in result.lines))
+        self.assertTrue(any("brandNewGate" in line for line in result.lines))
