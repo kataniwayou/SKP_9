@@ -16,4 +16,11 @@ app.Run();
 
 // Marker type so tests can target the host with WebApplicationFactory<Program>. Top-level
 // statements generate an internal Program; this declaration promotes it to public.
+//
+// NOTHING USES IT TODAY. Microsoft.AspNetCore.Mvc.Testing was removed once it was found to have no
+// PackageReference anywhere, and no test constructs a WebApplicationFactory. Kept rather than
+// deleted because it costs one type and is the seam any future end-to-end HTTP test needs first
+// — deleting it would make Program internal again and the next such test would open with an
+// unexplained accessibility error. Delete it only alongside a decision not to test this host over
+// HTTP at all.
 public partial class Program { }

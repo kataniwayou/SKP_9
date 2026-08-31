@@ -170,6 +170,21 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
                 //
                 // With execution blobs carrying no TTL, this branch now has exactly two readings, not
                 // three: reclaimed, or never written. It can no longer mean expired.
+                // DIVERGES FROM THE ORCHESTRATOR ON PURPOSE, and the two were unargued until now.
+                // StepOutcomeHandler.ReadAsync meets the same condition — the key its message names
+                // is gone — and THROWS, so the delivery parks. This one acks. Both stop the duplicate
+                // advancing; they differ in whether a lost ack becomes operator work.
+                //
+                // The case for acking here: a redelivery after a lost ack is the normal cost of
+                // at-least-once, not an incident, and parking one would put a message in a dead-letter
+                // queue for every such redelivery. The case for parking there: an outcome naming a
+                // blob the store does not hold can ALSO mean the processor reported an entry it never
+                // wrote, which is a real defect, and the orchestrator has no cheaper way to surface it.
+                //
+                // Neither is obviously right for both sides, so the split stands as a decision rather
+                // than an accident. Unifying it means choosing which of those two costs to pay
+                // everywhere; that choice has not been made and should not be made by whichever file
+                // is edited next.
                 _logger.LogInformation("entry absent — treating as a duplicate delivery");
                 return;
             }

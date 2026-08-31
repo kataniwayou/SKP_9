@@ -10,6 +10,39 @@
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
 
+  <!--
+    THREE referenced projects each contribute an appsettings.json to this output directory
+    — BaseApi.Service, Orchestrator and Processor.Sample — and they all land on the same
+    path. Which one wins is decided by file timestamps, so the ambient configuration these
+    tests build hosts against was silently non-deterministic, and `dotnet publish` of this
+    project would fail outright with NETSDK1152 on the duplicate.
+
+    No test depends on it: every one that builds a host supplies its own keys through
+    AddInMemoryCollection, which is applied after the file and therefore wins. So the fix is
+    to take none of them rather than to pick one — an ambient file nothing reads is just a
+    trap for the next person who adds a test and wonders where a value came from.
+  -->
+  <!--
+    KNOWN, UNFIXED: three referenced projects each contribute an appsettings.json to this
+    output directory — BaseApi.Service, Orchestrator and Processor.Sample — and all three
+    land on the same path. Which one wins is decided by file timestamps.
+
+    Harmless today, and the reason is worth stating so nobody "fixes" it by picking one:
+    every test that builds a host supplies its own keys via AddInMemoryCollection, which is
+    applied after the file and therefore wins. What it does break is `dotnet publish` of this
+    project, which fails with NETSDK1152 on the duplicate. Nothing publishes a test project,
+    so that has never been hit.
+
+    Two removals were tried and neither works: an ItemGroup Remove on
+    AllItemsFullPathWithTargetPath AfterTargets="GetCopyToOutputDirectoryItems" (too late —
+    the item is already resolved), and one on _SourceItemsToCopyToOutputDirectory /
+    ReferenceCopyLocalPaths BeforeTargets="_CopyOutOfDateSourceItemsToOutputDirectory" (wrong
+    list — transitive content arrives by another path). The next thing to try is a
+    post-Build Delete task, which is crude but deterministic. Recorded here so the next person
+    starts from attempt three.
+  -->
+
+
   <ItemGroup>
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Resilience\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />

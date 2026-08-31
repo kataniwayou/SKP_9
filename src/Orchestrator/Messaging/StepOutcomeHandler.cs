@@ -320,6 +320,11 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
         if (raw.IsNullOrEmpty)
         {
+            // PARKS, where the processor's pre hop ACKS on the same condition. See the long note at
+            // ProcessDispatchHandler's "entry absent" branch for both sides of that trade; in short,
+            // acking treats a lost ack as the routine cost of at-least-once, while parking keeps
+            // "the processor reported a blob it never wrote" visible. The divergence is deliberate
+            // and unresolved, not an oversight — do not unify it from one side.
             throw new InvalidOperationException(
                 "the outcome names an execution blob the store does not hold");
         }
