@@ -1397,7 +1397,6 @@ import argparse
 import json
 import pathlib
 import time
-import uuid
 
 from skp import references, state
 from skp.profile import Profile, ProfileMissing, default_home
@@ -1689,7 +1688,8 @@ Expected: FAIL — `AttributeError: module 'skp.verbs.operate' has no attribute 
 
 - [ ] **Step 3: Implement `freeze`**
 
-Append to `skp-toolkit/skp/verbs/operate.py`:
+Add `import uuid` to the module's import block (Task 5 deliberately left it
+out — an unused import is a defect in the task that introduces it), then append:
 
 ```python
 NEVER = 5  # StepEntryCondition.Never -- a stored wire value, never renumbered.
@@ -1966,11 +1966,11 @@ Expected: PASS (20 tests)
 
 - [ ] **Step 5: Implement `observe_run` and `verify`**
 
-Append to `skp-toolkit/skp/verbs/operate.py`:
+Add `from skp.verbs import investigate` to the module's import block — not
+mid-file, where the next reader has to wonder whether it is dodging a cycle.
+(It is not: `investigate` does not import `operate`.) Then append:
 
 ```python
-from skp.verbs import investigate
-
 _ENTRY_COMPLETED = "the entry step completed with {Result}"
 _TERMINAL_COMPLETED = ("the terminal step completed with {Result} — "
                        "no successor accepts it, the run ends here")
