@@ -5,7 +5,7 @@ import unittest
 
 from skp.profile import Profile
 from skp.result import EXIT_DRIFT, EXIT_UNREACHABLE
-from skp.verbs.doctor import diagnose, run_with
+from skp.verbs.doctor import diagnose, run_with, verb_reference_rows
 
 CATALOG = [{"id": "redis.Root", "component": "redis", "operation": "read key",
             "detail": "skp:{workflowId}", "intents": ["observe"],
@@ -151,3 +151,60 @@ class DoctorTests(unittest.TestCase):
         self.assertFalse(any("the toolkit checks pass" in line
                              for line in result.lines))
         self.assertTrue(any("brandNewGate" in line for line in result.lines))
+
+
+class VerbReferenceRowTests(unittest.TestCase):
+    """The sibling of the gate-reference check, for the same reason.
+
+    A gate with no reference file sends the model to READ something that is not
+    there; a verb naming no command sends it to RUN something that is not
+    there, and the argparse usage error it gets back is indistinguishable from
+    the system being broken.
+    """
+
+    def row(self, entries):
+        rows = verb_reference_rows(entries)
+        self.assertEqual(len(rows), 1)
+        return rows[0]
+
+    def test_an_invocable_verb_passes(self):
+        name, ok, detail = self.row([{"id": "a", "verb": "skp observe queues"}])
+        self.assertEqual(name, "verb references")
+        self.assertTrue(ok)
+        self.assertIn("1 entries", detail)
+
+    def test_a_dangling_verb_fails_and_names_the_entry(self):
+        _, ok, detail = self.row([{"id": "prometheus.x", "verb": "skp observe metric"}])
+        self.assertFalse(ok)
+        self.assertIn("prometheus.x", detail)
+        self.assertIn("skp observe metric", detail)
+
+    def test_a_planned_verb_passes_and_is_counted(self):
+        """Reported rather than hidden: declaring a verb planned buys silence
+        from the exit code and nothing from the output."""
+        _, ok, detail = self.row([{"id": "a", "verb": "skp author list --entity steps"}])
+        self.assertTrue(ok)
+        self.assertIn("1 name a declared planned verb", detail)
+
+    def test_an_entry_with_no_verb_is_not_a_failure(self):
+        _, ok, _ = self.row([{"id": "a"}])
+        self.assertTrue(ok)
+
+    def test_an_empty_catalog_fails_rather_than_passing_vacuously(self):
+        """"Nothing to check" and "everything checked" must not render alike --
+        the same ruling gate_reference_rows already makes."""
+        _, ok, detail = self.row([])
+        self.assertFalse(ok)
+        self.assertIn("no catalog entries", detail)
+
+    def test_the_real_annotations_all_resolve(self):
+        """The check must pass against what actually ships, or it is a check
+        nobody can leave switched on."""
+        import json
+        entries = []
+        root = pathlib.Path(__file__).resolve().parents[1] / "skp" / "annotations"
+        for path in sorted(root.glob("*.json")):
+            for cid, note in json.loads(path.read_text(encoding="utf-8")).items():
+                entries.append({"id": cid, "verb": note.get("verb", "")})
+        _, ok, detail = self.row(entries)
+        self.assertTrue(ok, detail)

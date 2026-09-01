@@ -6,6 +6,7 @@ from skp import references
 from skp.compile.lock import edited_generated, stale_sources
 from skp.profile import Profile, ProfileMissing, default_home, not_initialised
 from skp.result import EXIT_DRIFT, EXIT_OK, EXIT_UNREACHABLE, Result
+from skp.commands import resolve as resolve_verb
 from skp.verbs.init import build_clients, probe
 from skp.verbs.map import load_catalog
 
@@ -14,6 +15,8 @@ FIXES = {
     "generated files": "edit the annotation, not the generated file — then skp init --refresh",
     "catalog present": "skp init --refresh",
     "gate references": "skp init --refresh",
+    "verb references": "point the annotation at a real command, or declare it in "
+                       "skp/commands.py PLANNED with a justification — then skp init --refresh",
 }
 
 
@@ -57,6 +60,40 @@ def gate_reference_rows(gate_names: list[str]) -> list[tuple[str, bool, str]]:
                  f"{len(missing)} gate(s) with no reference file: "
                  f"{', '.join(missing)}")]
     return [("gate references", True, f"{len(gate_names)} gate(s) covered")]
+
+
+def verb_reference_rows(entries) -> list[tuple[str, bool, str]]:
+    """One row covering every ``verb`` a catalog entry names.
+
+    The sibling of ``gate_reference_rows``, and for the same reason. A gate with
+    no reference file sends the model to read something that is not there; a
+    verb naming no command sends it to RUN something that is not there, and the
+    argparse usage error it gets back looks exactly like the system being
+    broken. Both are dead references and both are cheap to check.
+
+    A verb declared PLANNED in ``skp.commands`` passes and is counted in the
+    detail, per section 6.5: a capability with no verb is a gap in the shipped
+    system, reported rather than hidden. What fails is a verb that is neither
+    invocable nor declared -- a rename, a typo, or a verb someone removed.
+
+    An empty entry list FAILS rather than passing vacuously, matching the gate
+    rows: "nothing to check" and "everything checked" must not render alike.
+    """
+    if not entries:
+        return [("verb references", False, "no catalog entries -- run skp init --refresh")]
+    dangling, planned = [], 0
+    for entry in entries:
+        verb = (entry or {}).get("verb", "")
+        ok, why = resolve_verb(verb)
+        if not ok:
+            dangling.append(f"{entry.get('id', '?')} -> {verb!r}")
+        elif why.startswith("planned"):
+            planned += 1
+    if dangling:
+        return [("verb references", False,
+                 f"{len(dangling)} entr(ies) naming no command: {', '.join(dangling[:3])}")]
+    return [("verb references", True,
+             f"{len(entries)} entries; {planned} name a declared planned verb")]
 
 
 def diagnose(profile: Profile, clients: dict) -> list[tuple[str, bool, str]]:
@@ -104,6 +141,11 @@ def diagnose(profile: Profile, clients: dict) -> list[tuple[str, bool, str]]:
             rows.append(("catalog present", not untagged,
                          f"{len(entries)} entries" if not untagged
                          else f"{len(untagged)} untagged: {', '.join(untagged[:3])}"))
+
+    try:
+        rows.extend(verb_reference_rows(load_catalog(profile.home)))
+    except (ProfileMissing, json.JSONDecodeError, AttributeError, TypeError):
+        rows.append(("verb references", False, "catalog unreadable"))
 
     gates_path = model / "gates.json"
     try:
