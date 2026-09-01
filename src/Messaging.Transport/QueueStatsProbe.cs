@@ -139,6 +139,23 @@ public abstract class QueueStatsProbe : BackgroundService
     /// </summary>
     protected abstract string Purpose { get; }
 
+    /// <summary>
+    /// The loop's logger, for a subclass whose reading carries an operator-facing meaning of its own
+    /// — as a consumer count does and a message count does not. Exposed rather than re-resolved so
+    /// both halves of a probe write under one category.
+    /// </summary>
+    protected ILogger Logger => _logger;
+
+    /// <summary>
+    /// Lets a subclass drop per-queue state for queues that have left a dynamic list, alongside the
+    /// pruning the loop already does for its own two sets. Without it a latched subclass would treat
+    /// a queue that left and came back as one it had already reported, and the return would pass in
+    /// silence — the same failure the <c>_announced</c> prune exists to prevent.
+    /// </summary>
+    protected virtual void PruneState(IReadOnlyCollection<string> queues)
+    {
+    }
+
     /// <summary>Publish one reading. Called once per queue per pass.</summary>
     protected abstract void Report(string queue, QueueDeclareOk ok);
 
@@ -169,6 +186,7 @@ public abstract class QueueStatsProbe : BackgroundService
             // set too, or its return would be announced as nothing new and pass in silence.
             _announced.IntersectWith(queues);
             _failing.IntersectWith(queues);
+            PruneState(queues);
 
             var added = queues.Where(q => _announced.Add(q)).ToList();
             if (added.Count > 0)

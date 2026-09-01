@@ -82,6 +82,19 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
         _services = services.BuildServiceProvider();
     }
 
+    /// <summary>
+    /// How long the loop waits before an unanswered ask stops reading as a normal startup race and
+    /// starts reading as an incident.
+    /// <para>
+    /// <b>A log level, never a behaviour change.</b> The loop still waits forever either way — that
+    /// tolerance is the whole point of the design, and an operator deploying the services in any
+    /// order depends on it. What changes at this threshold is only how the line reads, because a
+    /// wait of three seconds and a wait of three hours are the same sentence otherwise, and only one
+    /// of them is worth waking someone for.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan EscalateAfter = TimeSpan.FromSeconds(60);
+
     /// <summary>How long one ask waits for its reply before the loop treats it as unanswered.</summary>
     public int RequestTimeoutSeconds { get; }
 
@@ -97,11 +110,27 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
         var slot    = _services.GetRequiredService<ReplySlot<object>>();
         var delay   = TimeSpan.FromSeconds(1);
 
+        // Read once, before the first ask, so every line below reports the wait as the operator
+        // experiences it — from the moment the processor started asking, not from the last attempt.
+        var since = _clock.GetUtcNow();
+
         while (true)
         {
             ct.ThrowIfCancellationRequested();
 
             var reply = await AskAsync(sender, replies, slot, hash, ct).ConfigureAwait(false);
+
+            // One read per pass, shared by both waiting branches: two reads would let the two lines
+            // of a single pass disagree, and under a FakeTimeProvider a read is also what advances
+            // the clock at all.
+            var elapsed   = _clock.GetUtcNow() - since;
+            var escalated = elapsed >= EscalateAfter;
+
+            // Truncated to whole seconds for the log only, never for the comparison above. "c" on a
+            // raw TimeSpan renders 00:00:08.1062769, and seven decimal places of precision on a
+            // number an operator reads as "how long has this been stuck" is noise sitting exactly
+            // where the answer should be.
+            var waited = TimeSpan.FromSeconds(Math.Floor(elapsed.TotalSeconds));
 
             switch (reply)
             {
@@ -110,12 +139,46 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
                         "identity resolved: processor {ProcessorId} ({Name} {Version})",
                         found.Id, found.Name, found.Version);
                     return found;
+
+                // The API answered and said no. Nothing is broken in the deployment — the row this
+                // build's hash names has not been registered — so the remedy names the hash rather
+                // than a service.
+                case ProcessorIdentityNotFound when escalated:
+                    _logger.LogError(
+                        "still no processor registered for source hash {Hash} after {Waited:c}; "
+                        + "register a processor against this hash, or deploy the build whose hash is "
+                        + "already registered. retrying in {Delay}",
+                        hash, waited, delay);
+                    break;
                 case ProcessorIdentityNotFound:
                     _logger.LogInformation(
-                        "no processor registered for source hash {Hash}; retrying in {Delay}", hash, delay);
+                        "no processor registered for source hash {Hash} after {Waited:c}; "
+                        + "retrying in {Delay}",
+                        hash, waited, delay);
                     break;
+
+                // Nobody answered at all. THIS is the branch a processor deployed before the API
+                // sits in, and the queue and its server are named here because they are the whole
+                // remedy: without them the line reports a symptom the operator cannot act on, and
+                // the fact that this queue is the API's is visible only in the API's own log.
                 default:
-                    _logger.LogWarning("identity request went unanswered; retrying in {Delay}", delay);
+                    if (escalated)
+                    {
+                        _logger.LogError(
+                            "nothing has answered on {Queue} for {Waited:c} — that queue is served by "
+                            + "the BaseApi service (deployment baseapi-service); check that it is "
+                            + "deployed and running. retrying in {Delay}",
+                            ProcessorQueues.IdentityQuery, waited, delay);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "nothing answered on {Queue} after {Waited:c} — that queue is served by "
+                            + "the BaseApi service (deployment baseapi-service), which may not be up "
+                            + "yet. retrying in {Delay}",
+                            ProcessorQueues.IdentityQuery, waited, delay);
+                    }
+
                     break;
             }
 
@@ -155,7 +218,12 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
                 ct,
                 replies.QueueName,
                 correlationId).ConfigureAwait(false);
-            _logger.LogInformation("asked for the processor identity {CorrelationId}", correlationId);
+            // "request {id}", never "the identity {id}": the value is this ask's correlation id, and
+            // the previous wording read as though the GUID were the processor's identity — which
+            // changed on every retry, so a waiting operator watched an identity that never settled.
+            _logger.LogInformation(
+                "identity request {CorrelationId} sent to {Queue}",
+                correlationId, ProcessorQueues.IdentityQuery);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
