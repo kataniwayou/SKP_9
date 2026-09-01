@@ -1,151 +1,231 @@
 # Resume — SK_P9
 
-> **Correction block, 2026-09-01. Everything below is dated 2026-08-24 and parts of it are
-> now false.** It is annotated rather than rewritten, because it is a record of what one
-> session found and editing it to match later decisions would falsify that. Read this block
-> first, then the original for the reasoning that still holds.
->
-> - **The dashboards are no longer provisioned from the repo.** `795e667` deleted
->   `build-dashboards.py` and `k8s/24-grafana-dashboards.yaml`, and stripped the provisioning
->   volumes from `23-grafana.yaml`. The boards target an org-managed Grafana 11.1.0 and are
->   **hand-edited and hand-imported**, one `DS_PROMETHEUS` input each. So the "proven by
->   actually restarting Grafana" claim below no longer describes the delivery path, and the
->   `kubectl apply --server-side` trap for the ConfigMap is moot — there is no ConfigMap.
->   Anything that rewrites a board must emit `indent=2` with a trailing newline.
-> - **Three boards, not five.** `skp-baseapi`, `skp-orchestrator`, `skp-processor`.
-> - **The generator's drift guarantee is gone.** It emitted the orchestrator and processor
->   shared panels from one function so the two could not diverge. A shared panel is now edited
->   twice, by hand, and nothing checks that the two agree.
-> - **Toxiproxy is gone** (`755b020`), and with it both `SlowRedisScenarioTests`. The processor
->   is back on the production Redis path, which means every latency measurement taken before
->   that date included a userspace hop production never pays. **There is now no way to inject
->   slowness on this cluster — only absence.** Finding 1 below ("these boards detect absence,
->   not degradation") therefore stands and can no longer be demonstrated or regression-tested.
-> - **The topology changed.** Every processor now has four queues, not two: `processor-{id}`,
->   `-post`, and a `.dead` for each. 18 queues on the broker, 8 of them dead-lettering, all
->   keyed on their live queue's name.
-> - **`orchestrator-result.dead` holds 1, not 7.** The 2026-08-31 teardown deleted every queue
->   at 0 messages, so the six real parked outcomes and the synthetic
->   `deadbee5-0000-4000-8000-000000000001` are gone. The one message there now parked *after*
->   that date and nobody has looked at it. The "six parked step outcomes" investigation below
->   has lost its evidence.
-> - **Test counts:** the .NET suite is 733 passed / 20 skipped, exit 0.
+Written 2026-09-01. Replaces the 2026-08-24 handoff; this is the current one. Where that file's
+reasoning still holds it is carried forward below rather than left to be found.
 
-
-Written 2026-08-24, late. Replaces whatever was here before; this is the current handoff.
+The durable write-ups are `docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.md` (the toolkit, and
+the two orchestrator changes) and `grafana/README.md` (the boards, and the measurements behind
+them). This file is state, gaps and traps.
 
 ## Where things stand
 
-Branch `processor-sample-discovery`, clean tree, **unpushed, no git remote configured**.
-~26 commits added this session on top of `e9ee966`.
+Branch `topology/advance-materialize-consistency`, clean tree, **unpushed, no git remote
+configured**. 11 commits this session on top of `42c5779`.
 
-The durable write-up is `grafana/README.md`. Read that for measurements and reasoning; this
-file is only state, gaps and traps.
+Everything green, all measured today:
+
+| Gate | Result |
+| --- | --- |
+| `dotnet test SK_P.sln` | 0 failed, 741 passed, 20 skipped, exit 0 |
+| `python -m unittest discover -s tests -t .` (from `skp-toolkit/`) | 515 passed |
+| `skp doctor` | 12/12 rows ok |
+| `skp verify --probe-writes --probe-runs` | **141/141 (100%)**, no refutations |
+| `grafana/check-expressions.py http://localhost:19090` | 96 returning, 1 empty (intentional), 0 invalid |
+| `grafana/audit-instruments.py http://localhost:19090` | all 16 instruments have live series |
+
+Cluster is **kind**, node `desktop-control-plane`, despite the kubectl context being named
+`docker-desktop`. Namespace `skp`. 1 API, 3 orchestrator (StatefulSet), 2 processor (Deployment),
+all Ready, 0 restarts. Port-forwards are supervised and on **offset** ports
+(`k8s/port-forward-realstack.ps1`):
+
+```
+baseapi 18080   prometheus 19090   elasticsearch 19200   grafana 13000
+rabbitmq 5673   redis 6380         otel 14317 / 18889
+```
+
+Processor `d033b408-8471-4c3d-8acf-3bee6164f01e`, `sample-proc-v9` 1.5.0, SourceHash
+`c9ab4a65b0479195b3a2dfbf7f8c55babdb0fb3a153555f4e88a14e31b5c529b` — pod and registered row agree.
+Three workflows: `4cd8af45` v8-fanout-proof, `4a77ba79` simple-abc, `cbe1c767` v8-fanout-proof-clone.
+Broker holds 18 queues, 8 of them dead-lettering.
 
 ## What this session did
 
-**Panels that can name one replica.** `Replica fan-out` gated on liveness; `Consuming by queue`
-and `Channel resets by reason` split per replica on the processor board via one `by_instance`
-parameter on `pipeline_shared()`, so the two worker boards still cannot drift.
+**Re-grounded the toolkit against a system that had moved under it.** Twenty commits had landed
+since the toolkit was last verified; **two touched a file it tracks and eighteen did not**, so the
+drift lock could see two. The rest had to be found by reading commits and by reading the running
+system. Catalog 135 → 141, and `skp verify` is back at 100% against live.
 
-**The boards are provisioned from the repo again.** `build-dashboards.py` emits
-`k8s/24-grafana-dashboards.yaml`. **Proven by actually restarting Grafana** — all five boards
-came back by themselves, `skp-runtime` included.
+**Catalogued a contract file nothing knew about.** `Messaging.Contracts/OrchestratorFanout.cs` was
+not in `SOURCE_MAP`, so `orchestrator-fanout`, `orchestrator-fanout-dlx` and the three per-replica
+`orchestrator-control.{instanceId}` pairs — **6 live queues and 2 exchanges** — had no catalog id.
+The coverage check could not report it: it enumerates from the files `SOURCE_MAP` lists, so an
+unlisted contract file is not an uncovered surface, it is not a surface at all.
 
-**Three new scenarios.** S9 (one replica's AMQP connection closed repeatedly), S10 (Redis 300 ms
-slow), S11 (Redis 3 s slow, past the 2 s probe timeout).
+**Fixed four verbs that were reading a two-queue processor.** `operate verify` parsed
+`processor-<guid>-post.dead` into the id `<guid>-post`, matched no row, and skipped it — so a parked
+branch fell through to `wedged` or `running`, a different remedy for the same condition.
+`investigate parked` saw 3 of 8 dead-letter queues; `observe queues` saw 7 of 18.
 
-**Two instruments that did not exist.** `pipeline.gate.probe.duration` (store latency) and
-`pipeline.deadletter.depth` (work refused and not dealt with). Both verified against live faults.
+**Corrected a catalog entry that was instructing the model to run a query that reads 0 forever**
+(see the findings below), and added `skp doctor`'s `verb references` check with the registry that
+lets it pass.
 
-**`System flowing` now checks an expected band** (0.9–2.0 req/s at a pinned `[4m]` window) instead
-of "non-zero", plus reference lines on three latency panels.
+**Decided the absent-key divergence and shipped both halves.** The orchestrator now ACKS an absent
+execution blob instead of parking, and a **provenance guard** — the sibling of WR-02 — refuses an
+outcome whose `ProcessorId` disagrees with the one L1 assigns to that step. Orchestrator rebuilt and
+redeployed twice; both proved live.
 
-**`chaos-probe.py` gained `spans()`** — where each series ENDS — because a Grafana legend cannot
-express it.
+## The findings that matter
 
-## The three findings that matter
+**1. `service_instance_id` is unique per replica per PROCESS LIFETIME, not per replica.** It is the
+pod name. On a **Deployment** every restart mints a new one, so a restart arrives as a NEW series and
+`changes()`/`resets()`/`increase()` read 0 forever. On the orchestrator **StatefulSet** the ordinal
+is reclaimed and the series survives. Measured over 12h:
 
-**1. These boards detect absence, not degradation.** Redis made 685× slower (0.44 ms → 301 ms,
-verified with `redis-cli --latency`) moved *nothing*: gate 1, consuming 1, `process p95` flat at
-24 ms. Past the probe timeout it read character-for-character like Redis being *gone*. Two states,
-working and gone, nothing in between. Partly closed by the probe-latency instrument; still true
-for the broker, for slow-under-load, and for end-to-end duration.
+```
+processor  (Deployment)    changes() = 0 across 23 series   truth: 21 starts
+baseapi    (Deployment)    changes() = 0 across 10 series   truth:  9 starts
+orchestrator (StatefulSet) changes() = 29 (11/9/9)          correct
+instant read instead of max_over_time, processor:      2    truth: 21
+```
 
-**2. A live correctness defect was invisible.** Six step outcomes were found dead-lettered in
-`orchestrator-result.dead` — four incidents over two days, each a workflow run that lost progress
-permanently. Every board green, all five alert rules inactive. Found only by querying the broker
-by hand. Cause: `InvalidOperationException` at `StepOutcomeHandler`, workflow-or-step missing from
-L1. **Root cause is NOT closed** — see below.
+**The workload kind decides the query and each form is silently wrong on the other.** To count
+across a restart, group on a label that survives one — `processorId` on the processor, `source` on
+the API — and use `max_over_time` over the range, never an instant read.
 
-**3. All five alert rules are absence-shaped.** `TelemetryStale`, `PipelineNotConsuming`,
-`L2GateShut`, `WorkersMissing`, `EgressFaults`. Nothing covers work discarded, retried, backing up
-or slowing down.
+**2. The catalog was giving a confident wrong instruction, and nothing could catch it.** The
+`pipeline.process.start.timestamp` annotation said *"changes() is the whole query"* and *"POD_NAME
+identity is what keeps a restart on the same series"*. Both false on two of three workloads. No C#
+changed, so no drift; the claim is prose, so `skp verify` never tested it; `verify` checks series
+existence, not query semantics. **This is the failure the whole bundle exists to prevent, arriving
+from the catalog rather than the model.**
+
+**3. The one parked message was a migration artefact, not a defect.** `Result = Completed`, refused
+at `ReadAsync` — the **L2 absent-key branch**, not the L1 one the 2026-08-24 investigation chased,
+so `DescribeL1Miss` would never have fired on it. The run was in flight across two orchestrator
+restart waves, which were *planned*: the topology migration's own scale-down. One entry dispatch
+produced 3 entry-step completions, 20 hand-offs and **4 terminal completions**. The run did not lose
+progress; it made the same progress four times. The parked delivery was the first message
+`orchestrator-0` consumed after hydrating, 32ms in.
+
+**4. The park's own justification was unreachable.** By the time `ReadAsync` runs the workflow and
+step are in L1, `EntryId` is not the sentinel, the write happened (`ProcessedDataHandler` writes
+before it sends, and sends `Guid.Empty` when it did not write), and nothing else deletes that key.
+So an absent key means the outcome was already handled — and a parked one could not even be
+replayed, since the replay re-reads the same absent key and parks again.
 
 ## Open, in the order I would take them
 
 - **Nothing consumes the alerts.** No Alertmanager; `/api/v1/alertmanagers` is empty. Deliberately
-  deferred by the user. Still the largest gap.
+  deferred by the user. Still the largest gap, and **now larger**: dead-letter depth used to be the
+  de facto signal that outcomes were being redelivered after a restart, and it no longer is.
 - **No alert on `pipeline_deadletter_depth`.** The instrument ships; the rule (`depth > 0 for 5m`)
   does not. Adding it means editing `prometheus.yml` — see the TSDB trap below.
-- **The six parked messages are unexplained.** Narrowed, not solved: every parked step id is still
-  a valid step of the workflow, so they failed the *workflow-missing* branch, not the versioning
-  one. Three candidates remain — consumption admitted independently of that workflow's activation;
-  L1 losing it with no record; or hydration running while L2 did not hold it (`WorkflowActivator`
-  logs "L2 does not hold workflow X; nothing to activate" and returns, leaving L1 empty while the
-  consumer still starts — and the chaos suite wipes L2). **Untested.**
-  `StepOutcomeHandler.DescribeL1Miss` now names which lookup missed, so the next occurrence
-  diagnoses itself. Reproduction attempts by broker disruption and by restart both failed to
-  reproduce; base rate is ~1 per 12 h, so those negatives are weak.
+- **A duplicate outcome still logs `the entry step completed`** before it is discarded, because that
+  line sits above the read. Moving the read above it changes what
+  `elasticsearch.EntryStepCompleted` counts — a template the chaos scenarios, `skp operate verify`
+  and the boards all read — so it is its own change.
 - **No backlog/lag and no end-to-end latency.** The hop gap is a conservation check: a message in a
   queue and a message lost are identical to it.
-- **A true wedged replica still cannot be produced.** S9 makes a *flapping* consumer — the client
-  recovers inside one export interval and the stack absorbs it completely.
-- **A wipe still reads identically to a pause.**
+- **Degradation cannot be injected at all any more.** `755b020` removed toxiproxy and both
+  `SlowRedisScenarioTests`; every remaining scenario is binary, absent or present. The boards' known
+  blind spot — a 685× slower dependency reads green — can now be reasoned about but not
+  demonstrated or regression-tested.
+- **A true wedged replica still cannot be produced**, and **a wipe still reads identically to a
+  pause**.
 - **The API's consumer emits no metrics at all** (`BaseApi.Core/Messaging/GatedQueueConsumer.cs`:
   0 `Record(` calls against the console copy's 6).
+- **51 catalog entries name a verb that does not exist.** Declared in `skp/commands.py` `PLANNED`
+  with a justification each and counted by `skp doctor`. `skp analyze` does not exist at all.
+- **Toolkit phases 4 and 5 are unbuilt** — the developer verbs, and the skills. `.claude/skills/skp*`
+  does not exist.
+- **The six parked step outcomes are unresolvable now.** The 2026-08-31 teardown deleted every queue
+  at 0 messages, so the evidence is gone. Closed by loss of evidence, not by resolution.
 - **Calibration constants are deployment-specific** and nothing enforces them: `LIVENESS` 40s, the
-  `System flowing` band, and the three reference lines all describe *this* workload. Re-derive
-  before trusting a green band elsewhere.
+  `System flowing` band, the reference lines and the queue-depth threshold all describe *this*
+  workload. Re-derive before trusting a green band elsewhere.
+- **The 141/141 expires around 2026-09-17.** Three claims are Elasticsearch templates that exist only
+  because a fault was injected to produce them; retention is ~17 days and the ratio falls back to
+  138/141 on its own. Read the date, not the number. Recipe in the handover.
 
-## Traps, each of which cost time here
+## Traps, each of which cost time
 
-- **`kubectl apply` fails on the dashboards ConfigMap** with `metadata.annotations: Too long`. That
-  is the 256 KiB last-applied-annotation ceiling, **not** the 1 MiB ConfigMap ceiling. Use
-  `kubectl apply --server-side --field-manager=skp-dashboards -f k8s/24-grafana-dashboards.yaml`.
-- **Dashboards are provisioned now**, so `/api/dashboards/db` returns `Cannot save provisioned
-  dashboard`. Regenerate and apply the ConfigMap; hand import is the recovery path only.
-- **Restarting Prometheus discards the entire TSDB.** It has no storage volume, and both config
-  files are `subPath`-mounted so `apply` and `/-/reload` cannot see a change. Batch config edits.
+**Carried forward and still true**
+
+- **Restarting Prometheus discards the entire TSDB.** No storage volume, and both config files are
+  `subPath`-mounted so `apply` and `/-/reload` cannot see a change. Batch config edits.
 - **`kind load` cannot install ghcr images** carrying attestation manifests (`ctr: content digest
   not found`). Use `docker pull --platform linux/amd64` → tag → save →
-  `docker exec -i desktop-control-plane ctr -n k8s.io images import -`.
+  `docker exec -i desktop-control-plane ctr -n k8s.io images import -`. Locally built images
+  (`orchestrator:local`) load fine.
 - **From Git Bash, prefix `kubectl exec ... -- /binary` with `MSYS_NO_PATHCONV=1`** or the leading
-  slash becomes `C:/Program Files/Git/...`. Same for `kubectl cp` with a Windows path.
+  slash becomes `C:/Program Files/Git/...`. Used constantly this session.
 - **`powershell.exe` cannot load a .NET 8 assembly** (SourceHash reads). Use `pwsh`.
 - **`/tmp` is not one place**: Git Bash maps it into AppData; Windows Python reads `C:\tmp`.
-- **Elasticsearch `body.text` is not analysed** — `match`/`match_phrase` on it return 0 even for
-  text that is there. Filter client-side. And **a 500-hit ascending query silently truncates**: it
-  returned "no lifecycle events" for all four incidents until sorted descending.
-- **OpenTelemetry unit `"1"` appends `_ratio`** to the Prometheus name. That is where
-  `pipeline_gate_open_ratio` comes from. For a count use `"{message}"`.
-- **`LogDebug` is below the level shipped to the log store.** A loop that only logs failures at
-  Debug is indistinguishable from a loop that is working.
-- **A shared-library change does not move `Processor.Sample`'s SourceHash** — no row repoint needed.
-- The soak's drain check fails if the standing orchestration (`4cd8af45-1295-43db-ab2e-e955dd82b5c5`)
-  fired in the last 40s. Stop it, wait 55s.
-- **A background task reported as killed may still be running.** Verify the process tree first.
-- **`--filter` is silently ignored** by this runner. Use `--filter-class` or `--filter-method`.
-- Never scale Redis except via `RedisWipeScenarioTests`.
-- **`orchestrator-result.dead` holds 7, but only 6 are real.** The 7th is synthetic, injected to
-  validate the new diagnostic: correlation `deadbee5-0000-4000-8000-000000000001`.
+- **Elasticsearch `body.text` is not analysed** — `match`/`match_phrase` return 0 even for text that
+  is there. Filter client-side, or prefix-match `attributes.{OriginalFormat}`. A 500-hit ascending
+  query silently truncates; sort descending.
+- **OpenTelemetry unit `"1"` appends `_ratio`**, and a unit suffix lands before the type suffix.
+  `pipeline.leader` is `pipeline_leader_ratio`; `pipeline.process.start.timestamp` is
+  `pipeline_process_start_timestamp_seconds`. Try the bare name and the suffixed one, never hardcode
+  whichever works today — this is what once made 9 of 16 instruments read as absent.
+- **`LogDebug` is below the level shipped to the log store.**
+- **A background task reported as killed may still be running.** Verify the process tree.
+- **Never scale Redis** except via `RedisWipeScenarioTests`.
+- The soak's drain check fails if the standing orchestration (`4cd8af45`) fired in the last 40s.
+
+**Sharpened by this session**
+
+- **"A shared-library change does not move the SourceHash" is only half true, and the half that is
+  wrong bit twice this week.** `SourceHash.targets` hashes `BaseProcessor.Core/**/*.cs` **plus** the
+  concrete project's. `BaseConsole.Core` and `Messaging.Contracts` are siblings and are **not**
+  included. So a `Messaging.Contracts` edit does not move it and a **`BaseProcessor.Core` edit moves
+  it for every processor in the fleet at once** — which is why the topology design's recorded
+  `98de7130…` was already superseded by `c9ab4a65…` a day later.
+- **Read the hash from the pod, never from a document or a build log.** `54f4ebb` now prints it as
+  the processor's first log line in all three boot outcomes. A host incremental build could print a
+  new hash while the assembly carried an old one (observed 2026-07-27, three versions stale); there
+  is a guard target for it now, but the pod is still the only authority.
+- **`orchestrator-result.dead` holds 2, and they are different things.** The first is the genuine
+  2026-08-31 incident, kept as evidence. The second is synthetic —
+  `deadbee5-0000-4000-8000-000000000005`, injected to validate the provenance guard, following the
+  convention the old `deadbee5-…0001` marker used.
+
+**New**
+
+- **`--filter-class` is not a `dotnet test` argument.** It belongs to the test executable and
+  `dotnet test` rejects it with `MSBUILD : error MSB1001: Unknown switch`. Run
+  `src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe` directly, or run the whole suite.
+  (`--filter` is separately, silently ignored.)
+- **`dotnet test` does not print which test failed.** It names a log file that does not contain it
+  either. Run the executable directly to get the assertion.
+- **The Bash tool rewrites `\\n` inside heredocs.** A Python heredoc containing `"\\n"` arrives as a
+  real newline, so string anchors silently stop matching. Use raw strings (`r'''…'''`) or write the
+  content with the Write tool.
+- **A script that fails partway can still produce a commit.** `git add -A && git commit` staged
+  everything after a Python step aborted on a path error, and the change shipped without its
+  documentation. Check the script exited 0 before staging.
+- **`rabbitmqadmin` v2 sets the AMQP type header via `--properties '{"type":"step-outcome"}'`**;
+  `publish message` takes `--routing-key` and `--payload`. Peek a parked message with
+  `get messages --queue <q> --count 1 --ack-mode ack_requeue_true`, which requeues rather than
+  consumes — but **increments `x-delivery-count`**, harmless only because `x-delivery-limit` is now
+  `-1`. Before `ed0bae7` a peek spent one of twenty silent lives.
+- **`target_info` renders identity under `exported_job`/`exported_instance`**, not
+  `service_name`/`service_instance_id` — only the `pipeline_*` instruments carry those.
+- **PromQL label matchers are fully anchored.** `queue=~"processor-$processorId"` excluded the
+  `-post` queue entirely from the moment it existed. Same anchoring bug hid it from `skp verify`'s
+  orphan check.
+- **Probe outcomes never reach Elasticsearch.** The manifests set
+  `Logging__OpenTelemetry__LogLevel__HealthProbe=None`, so the `HealthProbe` category is stdout-only.
+  Verified both directions: 200 lines in a pod log, 0 records in ES over 24h. Reach for them with
+  `kubectl logs`, not a query.
 
 ## The lesson worth carrying
 
-Every real finding this session came from **measuring the instrument, not trusting it**. A green
-expression check, a passing chaos scenario, and a quiet log are each compatible with an instrument
-that is not wired at all — and all three happened. The dead-letter gauge itself shipped a
-confident green `0` while the broker held 7, because of a unit suffix.
+The 2026-08-24 lesson was *measure the instrument, not the documentation about it*. This session is
+the same lesson one level up: **the catalog is an instrument too, and it had gone wrong in the one
+way it is built to prevent.** An entry told the model to run `changes()` on a gauge whose series is
+reborn on every restart — confident, specific, and returning 0 forever. Nothing could catch it: no
+C# changed so there was no drift, the claim was prose so no check tested it, and `skp verify` proves
+series exist rather than that queries mean anything.
+
+What actually found things this session: reading the broker and counting (18 queues against a
+catalog that knew 12), running both forms of a query side by side over the same window, and
+publishing a message to see what the system did with it. What found nothing: reading the source.
+
+And one specific habit worth keeping — **when a check fires on your own change, read it before
+fixing it**. The suite failed on `AnOutcomeNamingABlobTheStoreDoesNotHoldIsRefused`, a test that
+existed precisely so the disposition could not be changed quietly. It was inverted, not deleted.
 
 ---
 
@@ -156,30 +236,36 @@ Continue SK_P9. Read docs/superpowers/RESUME.md first — it has the state, the
 open gaps, and the traps that have each cost time.
 
 REPO:   C:\Users\UserL\source\repos\SK_P9
-BRANCH: processor-sample-discovery (unpushed, clean, no remote configured)
+BRANCH: topology/advance-materialize-consistency (unpushed, clean, no remote)
 
-The dashboards are provisioned from the repo and survive a Grafana restart
-(tested). Store latency and dead-letter depth are instrumented and verified
-against live faults. grafana/README.md is the write-up.
+Everything is green: 741 .NET tests, 515 toolkit tests, skp verify 141/141
+against the live cluster, skp doctor 12/12. The cluster is up with all seven
+port-forwards. docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.md is the
+write-up for the toolkit and for the two orchestrator changes.
 
 Pick one:
 
 - Wire an Alertmanager, or at least add a dead-letter alert rule. Nothing
-  consumes the five existing rules, and none of them covers work being
-  discarded. Note a Prometheus config edit needs a restart that discards the
-  TSDB.
-- Chase the six parked step outcomes. Narrowed to the workflow-missing branch
-  with three candidates; StepOutcomeHandler.DescribeL1Miss now names which
-  lookup failed, so check orchestrator-result.dead and the log at that
-  timestamp. Remember the 7th message there is synthetic.
-- Add backlog/lag and end-to-end latency. The hop gap cannot tell a queued
-  message from a lost one.
+  consumes the five existing rules. This got MORE urgent: a redelivered
+  outcome no longer dead-letters, so dead-letter depth is no longer the signal
+  that outcomes are being replayed after a restart. Note a Prometheus config
+  edit needs a restart that discards the TSDB.
+- Build toolkit phase 4 (skp processor-build / processor-ship) or phase 5 (the
+  skills themselves). Phase 5 needs 3 and 4 for its verb lists. 51 catalog
+  entries name verbs that do not exist yet — they are listed in
+  skp/commands.py PLANNED with a justification each.
+- Move the read above "the entry step completed" so a duplicate outcome stops
+  logging a completion it did not cause. It changes what
+  elasticsearch.EntryStepCompleted counts, which the chaos scenarios, skp
+  operate verify and the boards all read, so it needs its own verification.
 
-Two things to carry in:
+Three things to carry in:
 
-- Validate instruments in BOTH directions, and against ground truth. A green
-  expression check, a passing scenario and a quiet log are all compatible with
-  an instrument that is not wired.
+- The catalog is an instrument. Validate its CLAIMS against the running
+  system, not just its coverage — an entry can be fully covered, internally
+  consistent, and factually wrong about how to query the thing it describes.
+- Read the SourceHash from the pod, never from a document. BaseProcessor.Core
+  is inside the hash fold and Messaging.Contracts is not.
 - Prometheus and RabbitMQ are ORG-OWNED in production. No scrape targets, no
   plugins, no broker-wide metrics. Anything new must be exported by the app
   through OTLP.
