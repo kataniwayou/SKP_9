@@ -295,9 +295,12 @@ as designed.
 - **There is no way to inject slowness on this cluster any more.** `755b020`
   removed toxiproxy and both `SlowRedisScenarioTests`. Every remaining scenario is
   binary — absent or present.
-- **`orchestrator-result.dead` holds 1**, and it is not the synthetic one: the
-  2026-08-31 teardown deleted every queue at 0 messages, so this message parked
-  after that date. **Now diagnosed — see the last section.**
+- **`orchestrator-result.dead` holds 2, and they are different things.** The
+  first is genuine: the 2026-08-31 teardown deleted every queue at 0 messages, so
+  it parked after that date — diagnosed two sections below, and kept as evidence.
+  The second is synthetic, correlation `deadbee5-0000-4000-8000-000000000005`,
+  injected to validate the provenance guard, following the convention the
+  2026-08-24 handover used for `deadbee5-…0001`.
 
 ### The live proof of the verdict fix
 
@@ -317,7 +320,7 @@ that message was invisible.
 | `python -m unittest discover -s tests -t .` | 515 passed |
 | `skp doctor` | every row ok, including the new `verb references` |
 | `skp verify --probe-writes --probe-runs` | **141/141 (100%)**, no refutations |
-| `dotnet test SK_P.sln` | 0 failed, 733 passed, 20 skipped, exit 0 |
+| `dotnet test SK_P.sln` | 0 failed, **741** passed, 20 skipped, exit 0 (733 before the two orchestrator changes below) |
 | `grafana/check-expressions.py` | 96 returning, 1 empty (intentional), **0 invalid** |
 | `grafana/audit-instruments.py` | all 16 instruments have live series |
 
@@ -329,8 +332,19 @@ that message was invisible.
   exist at all; `skp author` ships `validate` and `apply` and nothing else.
 - **Phases 4 and 5 are still unbuilt** — the developer verbs, and the skills
   themselves. `.claude/skills/skp*` does not exist.
+- **A duplicate outcome still logs `the entry step completed` before it is
+  discarded**, because that line sits above the read. Moving the read above it is
+  probably right and changes what `elasticsearch.EntryStepCompleted` counts — a
+  template the chaos scenarios, `skp operate verify` and the boards all read. See
+  the last section.
 
 ### The parked message in `orchestrator-result.dead`, diagnosed (2026-09-01)
+
+> Written before the disposition was decided, and left in the tense it was written
+> in. Where this section says the orchestrator *parks* on an absent key, read it as
+> the behaviour at the time of the incident: it acks now. The diagnosis is what the
+> decision was argued against, so rewriting it to match the outcome would remove the
+> input and keep only the conclusion.
 
 The section above notes one message parked there after the teardown, unexamined.
 It has now been read. **It is a migration artefact, no work was lost, and it is a
@@ -395,13 +409,117 @@ evidence either side has had. It does not settle it: parking is also what keeps
 *"the processor reported a blob it never wrote"* visible, and this incident cannot
 tell those two cases apart, which is precisely why the divergence is hard.
 
-**Left in place.** The message is evidence of a diagnosed incident and costs
-nothing where it sits — `orchestrator-result.dead` is not a per-processor queue,
-so it does not pin any `parked-at-processor-*` verdict. Purge it when the
-divergence is decided, not before.
+**Left in place, and now for a different reason.** The divergence WAS decided,
+later the same day — see the next section — so the condition that produced this
+message no longer parks anything. It is kept as the evidence that motivated the
+decision, and it costs nothing where it sits: `orchestrator-result.dead` is not a
+per-processor queue, so it pins no `parked-at-processor-*` verdict. **A message
+of this shape will not appear again**; if one does, it is an L1 miss or a
+provenance mismatch, which are different findings entirely.
 
 **The operational lesson worth keeping:** a planned orchestrator scale-down
 during an in-flight run is not free. It requeues unacked outcomes, and every
 redelivery advances the run again. The migration record in the topology design
 counts queues and messages before the teardown; it does not check for in-flight
 *runs*, and this is what that gap costs.
+
+### The two orchestrator changes (2026-09-01)
+
+Both land on `StepOutcomeHandler` and they are one movement: the first removes a
+refusal that was doing a job badly, and the second puts that job where it can
+actually be done. Design note:
+`docs/superpowers/specs/2026-09-01-absent-key-disposition-design.md`.
+
+#### 1. An absent execution blob is now ACKED, not parked
+
+`7ac5ce2` recorded this divergence as deliberate and unresolved and asked that it
+not be settled from whichever file was edited next. It is settled, and **not by
+the incident above** — that incident is evidence about cost, not about
+correctness. It is settled by the condition turning out to have one reachable
+cause. By the time `ReadAsync` runs:
+
+1. the workflow and step are in L1, since a miss already threw `DescribeL1Miss`;
+2. `EntryId` is not the empty sentinel, since that path never reads;
+3. the write happened, because `ProcessedDataHandler` writes before it sends and
+   sends `Guid.Empty` when it did not write — in its own words, naming the key
+   would *"send the orchestrator to reclaim a key that was never written"*;
+4. nothing else deletes that key. The processor reclaims its own **input**, a
+   different guid, because a fresh key is minted per successor;
+   `NextStepHandoffHandler` deletes only on the arm where no outcome was sent at
+   all; `L2Cleanup` touches other keys.
+
+So an absent key means the outcome was already handled. The second reading the
+park existed for — *"a step reporting a key it did not produce"* — cannot arise
+from the product's own paths.
+
+**And the park did not preserve what it was for.** A parked outcome cannot be
+replayed: the replay re-reads the same absent key and parks again. It was a
+message that could only be read once and deleted, bought with a permanent entry
+in `pipeline.deadletter.depth` and an interruption.
+
+Logged at **Warning**, not the processor's Information, because the processor can
+prove its own reclaim removed the key and this infers it. A burst means outcomes
+are being redelivered in volume, which is worth seeing.
+
+#### 2. A provenance guard, the sibling of WR-02
+
+Removing that refusal removed the only thing catching a forged outcome, badly —
+it caught one only if the forgery happened to name a bogus `EntryId`, and only
+after it was already inert. `orchestrator-result` is an addressable queue on a
+shared broker and `StepOutcomeHandler` acts entirely on the ids in the body, so
+an outcome naming a real workflow and a real step could be minted by anyone and
+would advance that workflow.
+
+`StepL1.ProcessorId` — *"the processor that executes this step"* — is the
+authority here that a processor's own identity is on the other side. All three
+senders satisfy it, which is why the guard passes real traffic:
+`ProcessedDataHandler`'s two sends carry `p.ProcessorId`, already proven equal to
+that processor's identity by WR-02 and put there by a dispatch addressed to
+`processor-{L1.ProcessorId}`; `NextStepHandoffHandler`'s failure outcome carries
+the id this orchestrator read from the same field.
+
+**Two properties that are not obvious from reading it:**
+
+- **It refuses WITHOUT reclaiming**, which is the one place it departs from the
+  L1-miss park directly above it. That branch reclaims to avoid leaking a blob.
+  Here the message just failed an authenticity check, so its `EntryId` is
+  unauthenticated input — and a forged outcome can name a blob belonging to a
+  real execution still in flight. Reclaiming would make the forgery destructive
+  by our own hand. A leaked blob is the cheaper failure.
+- **It is checked BEFORE the read**, with a test asserting the ordering. After
+  it, a forgery naming an absent key would take change 1's duplicate branch and
+  be **acked** — the guard skipped on exactly the input it exists to catch.
+
+The one legitimate way to trip it is a step reassigned to another processor while
+an outcome from the previous definition is in flight, which is the same class of
+event as a step removed mid-run, already parked one branch above.
+
+#### Verified live, both directions
+
+| Check | Result |
+| --- | --- |
+| Outcome naming a blob that never existed | acked, `orchestrator-result` back to 0, **no new park** |
+| Forged outcome, wrong `ProcessorId` | **parked**, log names claimed *and* assigned processor |
+| The blob the forged outcome named | **survived** — seeded `PROVENANCE-CANARY`, read back intact |
+| A real run started through both changes | `completed`, no new park |
+
+#### What an operator sees differently now
+
+A redelivered outcome no longer produces a dead-letter message. It produces one
+Warning line, `the execution blob is absent — treating as a duplicate delivery,
+advancing nothing`. **If dead-letter depth used to be your signal that outcomes
+were being redelivered — after a restart, a deploy or a migration — it is not any
+more.** Watch for that line instead. What still parks on this queue: an L1 miss
+(`DescribeL1Miss` says which lookup), and now a provenance mismatch.
+
+#### Left open, deliberately
+
+**A duplicate still logs `the entry step completed with {Result}` before it is
+discarded**, because that line sits above the read. In the 2026-08-31 incident
+the three completion lines were accurate — those deliveries really did re-advance
+the run — but for a delivery that advances nothing the line overstates what
+happened. Moving the read above it is probably right and is not done here,
+because it changes what `elasticsearch.EntryStepCompleted` counts, and that
+template is read by the chaos scenarios, by `skp operate verify`'s run
+observation and by the boards. Re-pointing a counted template is its own change
+with its own verification.
