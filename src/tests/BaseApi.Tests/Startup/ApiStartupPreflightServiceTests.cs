@@ -91,7 +91,12 @@ public sealed class ApiStartupPreflightServiceTests
 
         await h.Build().RunAsync(CancellationToken.None);
 
-        var opening = h.Log.Records[0];
+        // Record 0 is the environment block, which precedes the checks deliberately: it is what the
+        // endpoints below were built from, so a failure is unreadable without it already on screen.
+        Assert.Contains(
+            "application environment variable(s)", h.Log.Records[0].Message, StringComparison.Ordinal);
+
+        var opening = h.Log.Records[1];
         Assert.Equal(LogLevel.Information, opening.Level);
         Assert.Contains("RabbitMQ", opening.Message, StringComparison.Ordinal);
         Assert.Contains("Redis", opening.Message, StringComparison.Ordinal);
@@ -104,9 +109,11 @@ public sealed class ApiStartupPreflightServiceTests
 
         await h.Build().RunAsync(CancellationToken.None);
 
-        // Opening + one success per dependency + one all-clear, and nothing else: a pass that is
-        // healthy from the first attempt must not repeat or delay startup.
-        Assert.Equal(4, h.Log.Records.Count);
+        // Environment block + opening + one success per dependency + one all-clear, and nothing
+        // else: a pass that is healthy from the first attempt must not repeat or delay startup. The
+        // environment block is logged once and never repeats, so this count holds however many times
+        // the checks below run.
+        Assert.Equal(5, h.Log.Records.Count);
 
         var rabbitLine = Assert.Single(h.Log.Records, r =>
             r.Message.Contains("RabbitMQ reachable at", StringComparison.Ordinal));

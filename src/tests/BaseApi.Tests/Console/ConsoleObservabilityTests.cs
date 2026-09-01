@@ -32,27 +32,62 @@ public sealed class ConsoleObservabilityTests
     }
 
     [Fact]
-    public void FailsFastWhenTheServiceNameIsMissing()
+    public void FallsBackToTheDefaultWhenTheServiceNameIsMissing()
     {
-        // Letting null reach ResourceBuilder.AddService surfaces as an opaque SDK argument exception
-        // pointing at OpenTelemetry rather than at the missing setting.
+        // Was a fail-fast. A service that cannot read its own name now reports under the name it
+        // declares rather than refusing to start — deployment order and a half-applied config should
+        // not be able to keep a process down.
         var builder = BuilderWith(("Service:Version", "1.0.0"));
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => builder.AddBaseConsoleObservability(builder.Configuration, source: "worker"));
+        var returned = builder.AddBaseConsoleObservability(
+            builder.Configuration, source: "worker",
+            defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
-        Assert.Contains("Service:Name", ex.Message);
+        Assert.Same(builder, returned);
     }
 
     [Fact]
-    public void FailsFastWhenTheServiceVersionIsMissing()
+    public void FallsBackToTheDefaultWhenTheServiceVersionIsMissing()
     {
         var builder = BuilderWith(("Service:Name", "processor"));
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => builder.AddBaseConsoleObservability(builder.Configuration, source: "worker"));
+        var returned = builder.AddBaseConsoleObservability(
+            builder.Configuration, source: "worker",
+            defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
-        Assert.Contains("Service:Version", ex.Message);
+        Assert.Same(builder, returned);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void FallsBackWhenTheServiceNameIsPresentButBlank(string blank)
+    {
+        // The case the old null-only guard let through: an env var set to "" in a manifest, or one
+        // that templated to nothing, reached ResourceBuilder.AddService and failed there as
+        // "ArgumentException: Must not be null or empty (Parameter 'serviceName')" — an SDK error
+        // naming no setting. Blank must be treated as absent, not as a name.
+        var builder = BuilderWith(("Service:Name", blank), ("Service:Version", blank));
+
+        var returned = builder.AddBaseConsoleObservability(
+            builder.Configuration, source: "worker",
+            defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
+
+        Assert.Same(builder, returned);
+    }
+
+    [Fact]
+    public void RequiresADefaultServiceName()
+    {
+        // Required of both callers rather than defaulted here: this helper is shared by the
+        // orchestrator and every processor, so a default invented in it would be wrong for one of
+        // them, and an optional one would let a caller inherit the other's name by omission.
+        var builder = BuilderWith(("Service:Name", "processor"), ("Service:Version", "1.0.0"));
+
+        Assert.Throws<ArgumentException>(
+            () => builder.AddBaseConsoleObservability(
+                builder.Configuration, source: "worker",
+                defaultServiceName: "  ", defaultServiceVersion: "9.9.9"));
     }
 
     [Fact]
@@ -63,7 +98,7 @@ public sealed class ConsoleObservabilityTests
         var builder = BuilderWith(("Service:Name", "processor"), ("Service:Version", "0.0.0"));
 
         Assert.Throws<ArgumentException>(
-            () => builder.AddBaseConsoleObservability(builder.Configuration, source: "  "));
+            () => builder.AddBaseConsoleObservability(builder.Configuration, source: "  ", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9"));
     }
 
     [Fact]
@@ -71,7 +106,7 @@ public sealed class ConsoleObservabilityTests
     {
         var builder = BuilderWith(("Service:Name", "processor"), ("Service:Version", "0.0.0"));
 
-        var returned = builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        var returned = builder.AddBaseConsoleObservability(builder.Configuration, source: "worker", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
         Assert.Same(builder, returned);
     }
@@ -124,6 +159,7 @@ public sealed class ConsoleObservabilityTests
 
         var returned = builder.AddBaseConsoleObservability(
             builder.Configuration, source: "worker",
+            defaultServiceName: "test-service", defaultServiceVersion: "9.9.9",
             serviceName: "sample-proc", serviceVersion: "1.0.0");
 
         Assert.Same(builder, returned);
@@ -136,6 +172,7 @@ public sealed class ConsoleObservabilityTests
 
         var returned = builder.AddBaseConsoleObservability(
             builder.Configuration, source: "worker",
+            defaultServiceName: "test-service", defaultServiceVersion: "9.9.9",
             serviceName: "sample-proc", serviceVersion: "1.0.0");
 
         Assert.Same(builder, returned);
@@ -160,6 +197,7 @@ public sealed class ConsoleObservabilityTests
 
         var returned = builder.AddBaseConsoleObservability(
             builder.Configuration, source: "worker",
+            defaultServiceName: "test-service", defaultServiceVersion: "9.9.9",
             serviceName: "sample-proc", serviceVersion: "1.0.0",
             resourceAttributes: [new ResourceAttribute("ProcessorId", "processorId", "9e034ca0")]);
 
@@ -188,7 +226,7 @@ public sealed class ConsoleObservabilityTests
         // return type is the interface, so the concrete type is recovered here to call it.
         var builder = (HostApplicationBuilder)BuilderWith(
             ("Service:Name", "orchestrator"), ("Service:Version", "1.0.0"));
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
         var exporter = new CapturingExporter();
         builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddReader(

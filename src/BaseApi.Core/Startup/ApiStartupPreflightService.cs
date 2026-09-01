@@ -107,6 +107,15 @@ internal sealed class ApiStartupPreflightService : BackgroundService
     {
         await Task.Yield();
 
+        // Before the checks, not after: this block is what the endpoints below were built from, so an
+        // operator reading a failure needs it already on screen. Logged once even though the checks
+        // repeat — the environment cannot change under a running process, and repeating it would push
+        // the failures it explains off the top of the console.
+        var settings = EnvironmentSnapshot.Lines();
+        _logger.LogInformation(
+            "Loaded {SettingCount} application environment variable(s):{NewLine}{Settings}",
+            settings.Count, Environment.NewLine, string.Join(Environment.NewLine, settings));
+
         _logger.LogInformation(
             "Startup preflight beginning: checking RabbitMQ (connect + declare topology) and " +
             "Redis (connect + PING).");

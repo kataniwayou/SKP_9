@@ -61,14 +61,41 @@ public static class BaseConsoleObservabilityExtensions
     /// <c>ProcessorId</c> rides: it is the only value that identifies a processor exactly, because
     /// name and version are unconstrained columns and two different builds can share them.
     /// </param>
+    /// <summary>
+    /// The first of resolved, configured or default that actually says something. Whitespace is not
+    /// something — see the call site for the failure that distinction exists to prevent.
+    /// </summary>
+    private static string Fallback(string? resolved, string? configured, string fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            return resolved;
+        }
+
+        return string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+    }
+
+    /// <param name="defaultServiceName">
+    /// What <c>service.name</c> becomes when neither a resolved identity nor configuration supplies
+    /// one. Required rather than optional, and required of BOTH callers: this helper is shared by the
+    /// orchestrator and every processor, so it cannot know which role it is registering — a default
+    /// invented here would be wrong for one of them, and an optional one would let a caller omit its
+    /// own name by accident and inherit the other's.
+    /// </param>
+    /// <param name="defaultServiceVersion">The matching <c>service.version</c> fallback.</param>
     public static IHostApplicationBuilder AddBaseConsoleObservability(
         this IHostApplicationBuilder builder,
         IConfiguration cfg,
         string source,
+        string defaultServiceName,
+        string defaultServiceVersion,
         string? serviceName = null,
         string? serviceVersion = null,
         IEnumerable<ResourceAttribute>? resourceAttributes = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(defaultServiceName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(defaultServiceVersion);
+
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
@@ -77,10 +104,18 @@ public static class BaseConsoleObservabilityExtensions
         // and a hosted service runs after everything else the host builds.
         ProcessStartMetrics.Stamp(TimeProvider.System);
 
-        // Configuration is the fallback, not the authority. A caller that resolved a real identity
-        // knows something configuration cannot, so Require is consulted only when it did not.
-        var name    = serviceName    ?? cfg.Require("Service:Name");
-        var version = serviceVersion ?? cfg.Require("Service:Version");
+        // Resolved identity, then configuration, then this service's declared default. A caller that
+        // resolved a real identity knows something configuration cannot — a processor's name is a
+        // database column — so it wins outright and the rest is never consulted. Nothing about that
+        // order changed when the default was added behind it.
+        //
+        // Blank counts as absent at every step. The previous Require checked null only, so an env var
+        // that was present but empty passed straight through and failed later inside
+        // ResourceBuilder.AddService as "ArgumentException: Must not be null or empty (Parameter
+        // 'serviceName')" — an SDK error naming none of the settings that caused it, which is the one
+        // case the guard was written for and the one case it missed.
+        var name    = Fallback(serviceName,    cfg["Service:Name"],    defaultServiceName);
+        var version = Fallback(serviceVersion, cfg["Service:Version"], defaultServiceVersion);
 
         // The same replica identity that names this process's liveness key and reply queue. Sharing
         // one resolver is what lets an operator pivot from an L2 key to that pod's records; two

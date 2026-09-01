@@ -18,6 +18,24 @@ namespace BaseApi.Core.DependencyInjection;
 public static class ObservabilityServiceCollectionExtensions
 {
     /// <summary>
+    /// What <c>service.name</c> becomes when configuration carries none. Every service in this system
+    /// declares one, so a process that lost its configuration still reports as itself rather than
+    /// refusing to start.
+    /// </summary>
+    internal const string DefaultServiceName = "baseapi";
+
+    /// <summary>
+    /// The matching <c>service.version</c>. Deliberately NOT the <c>0.0.0</c> the shipped
+    /// appsettings.json carries: the two differing is what makes this value legible on a dashboard as
+    /// "configuration did not load" rather than blending in with a normal deployment.
+    /// </summary>
+    internal const string DefaultServiceVersion = "1.0.0";
+
+    /// <summary>Configuration if it says something, the default otherwise. Blank is not something.</summary>
+    private static string Fallback(string? configured, string fallback)
+        => string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+
+    /// <summary>
     /// Takes the host builder rather than the service collection, because
     /// <c>builder.Logging.AddOpenTelemetry</c> needs the <see cref="ILoggingBuilder"/> surface. The
     /// host builder exposes both logging and services.
@@ -33,10 +51,14 @@ public static class ObservabilityServiceCollectionExtensions
     public static IHostApplicationBuilder AddBaseApiObservability(
         this IHostApplicationBuilder builder, IConfiguration cfg, string source)
     {
-        // Fail fast at the boundary rather than letting null reach the resource builder and surface
-        // as an opaque SDK argument exception.
-        var serviceName    = cfg.Require("Service:Name");
-        var serviceVersion = cfg.Require("Service:Version");
+        // Configuration first, then this service's own name. Blank counts as absent: Require checked
+        // null only, so an env var present but empty (value: "" in a manifest, or one that templated
+        // to nothing) sailed past it and died inside ResourceBuilder.AddService as
+        // "ArgumentException: Must not be null or empty (Parameter 'serviceName')" — an opaque SDK
+        // error pointing away from the setting that caused it, which is the exact failure the old
+        // guard existed to prevent and the one case it did not cover.
+        var serviceName    = Fallback(cfg["Service:Name"],    DefaultServiceName);
+        var serviceVersion = Fallback(cfg["Service:Version"], DefaultServiceVersion);
 
         // Resolve the per-replica instance id exactly once per process and apply it to both the logs
         // and metrics resources. Resolving once is a correctness requirement: calling the resolver

@@ -86,6 +86,11 @@ public static class ProcessorHost
         builder.AddBaseConsoleObservability(
             builder.Configuration,
             source: "worker",
+            // Declared for symmetry with the other two services, and unreachable in practice: the
+            // identity below is a resolved database row and is never blank, so it wins every time.
+            // Stating it anyway keeps all three call sites answering the same question the same way.
+            defaultServiceName: "processor",
+            defaultServiceVersion: "1.0.0",
             serviceName: identity.Name,
             serviceVersion: identity.Version,
             resourceAttributes: [new ResourceAttribute("ProcessorId", "processorId", identity.Id.ToString())]);

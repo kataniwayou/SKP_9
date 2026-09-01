@@ -94,7 +94,7 @@ public sealed class GateProbeLatencyTests
     public void TheProbeHistogramCarriesSecondScaledBoundaries()
     {
         var builder = BuilderWith(("Service:Name", "orchestrator"), ("Service:Version", "1.0.0"));
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
         var exporter = new BoundaryCapturingExporter();
         builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddReader(
@@ -121,7 +121,7 @@ public sealed class GateProbeLatencyTests
         // Stated as its own claim, for the reason the send histogram states it: the equality above
         // would also fail if the ladder were merely changed, and the reader could not tell which.
         var builder = BuilderWith(("Service:Name", "orchestrator"), ("Service:Version", "1.0.0"));
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
         var exporter = new BoundaryCapturingExporter();
         builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddReader(
