@@ -10,13 +10,13 @@ them). This file is state, gaps and traps.
 ## Where things stand
 
 Branch `topology/advance-materialize-consistency`, clean tree, **unpushed, no git remote
-configured**. 13 commits this session on top of `42c5779`.
+configured**. 14 commits this session on top of `42c5779`.
 
 Everything green, all measured today:
 
 | Gate | Result |
 | --- | --- |
-| `dotnet test SK_P.sln` | 0 failed, 743 passed, 20 skipped, exit 0 |
+| `dotnet test SK_P.sln` | 0 failed, 748 passed, 20 skipped, exit 0 |
 | `python -m unittest discover -s tests -t .` (from `skp-toolkit/`) | 515 passed |
 | `skp doctor` | 12/12 rows ok |
 | `skp verify --probe-writes --probe-runs` | **141/141 (100%)**, no refutations |
@@ -59,6 +59,10 @@ branch fell through to `wedged` or `running`, a different remedy for the same co
 **Corrected a catalog entry that was instructing the model to run a query that reads 0 forever**
 (see the findings below), and added `skp doctor`'s `verb references` check with the registry that
 lets it pass.
+
+**Instrumented the API consumer's escape path**, and found the open item that sent me there was
+stale: it claimed the consumer emitted nothing, which `7afa107` had already fixed. The real gap was
+one arm — no outer catch, so an escaping delivery was timed and not counted.
 
 **Decided the absent-key divergence and shipped both halves.** The orchestrator now ACKS an absent
 execution blob instead of parking, and a **provenance guard** — the sibling of WR-02 — refuses an
@@ -121,10 +125,20 @@ replayed, since the replay re-reads the same absent key and parks again.
   demonstrated or regression-tested.
 - **A true wedged replica still cannot be produced**, and **a wipe still reads identically to a
   pause**.
-- **The API's consumer emits no metrics at all** (`BaseApi.Core/Messaging/GatedQueueConsumer.cs`:
-  0 `Record(` calls against the console copy's 6).
+- ~~**The API's consumer emits no metrics at all.**~~ **Stale when it was carried forward, and
+  corrected 2026-09-01.** `7afa107` had already instrumented it; the live series prove it
+  (`pipeline_messages_consumed_total{service_name="baseapi", queue="orchestrator-control"}`). The
+  REAL gap was one arm: no outer catch, so a delivery escaping classification was timed by
+  `pipeline.consumer.duration` and counted by nothing. Closed. **The residual gap is coverage, not
+  instrumentation** — see below.
 - **51 catalog entries name a verb that does not exist.** Declared in `skp/commands.py` `PLANNED`
   with a justification each and counted by `skp doctor`. `skp analyze` does not exist at all.
+- **The two `GatedQueueConsumer` copies drift, and only one is tested.** Every consumer test in
+  the suite targeted BaseConsole.Core's twin; the API's copy had none at all, which is how it came
+  to be missing an arm the twin has. `ApiIngressMetricsTests` now covers the arms that bear on that,
+  not the full matrix. The durable fix is the shape `HealthProbeLog` already uses — one test feeding
+  both copies and comparing — but the two consumers differ by more than a render string, so it is
+  real work.
 - **Toolkit phases 4 and 5 are unbuilt** — the developer verbs, and the skills. `.claude/skills/skp*`
   does not exist.
 - **The six parked step outcomes are unresolvable now.** The 2026-08-31 teardown deleted every queue
@@ -258,9 +272,9 @@ Pick one:
   skills themselves). Phase 5 needs 3 and 4 for its verb lists. 51 catalog
   entries name verbs that do not exist yet — they are listed in
   skp/commands.py PLANNED with a justification each.
-- Instrument the API's consumer. BaseApi.Core/Messaging/GatedQueueConsumer.cs
-  has 0 Record() calls against the console copy's 6, so the API's own hop is
-  invisible on every board and to skp observe.
+- Close the GatedQueueConsumer twin drift. The two copies diverge and only
+  BaseConsole.Core's was ever tested, which is how the API's lost an arm the
+  twin has. HealthProbeLog's one-test-feeds-both-copies shape is the model.
 
 Three things to carry in:
 

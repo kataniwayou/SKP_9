@@ -230,7 +230,11 @@ public sealed class GatedQueueConsumer : BackgroundService
         _channelUsable = true;
     }
 
-    private async Task OnReceivedAsync(object sender, BasicDeliverEventArgs ea)
+    // internal, matching BaseConsole.Core's twin and for the same reason: the disposition
+    // matrix is decided before any channel is touched, so driving this method directly is the
+    // only way to cover it without a broker. The twin has had that coverage since the metrics
+    // rewrite; this copy had none at all, which is how it came to be missing the escape arm.
+    internal async Task OnReceivedAsync(object sender, BasicDeliverEventArgs ea)
     {
         var epoch = Interlocked.Read(ref _epoch);
         var started = Stopwatch.GetTimestamp();
@@ -241,8 +245,22 @@ public sealed class GatedQueueConsumer : BackgroundService
         // out of this method entirely.
         var disposition = "requeued";
 
+        // Whether any branch below has already accounted for this delivery, so the outer catch can
+        // tell an escape from a classified exit. Without it, a delivery that leaves this method
+        // without passing a Record call is counted by pipeline.consumer.duration in the finally and
+        // by NOTHING in pipeline.messages.consumed -- the two series disagreeing about the same
+        // delivery, which is precisely what the twin's own comment forbids.
+        //
+        // Reachable here, not defence in depth. L2Gate.StateChanged subscribers run synchronously
+        // inside TripAsync, and the store-unreachable arm below calls TripAsync BEFORE its Record --
+        // so a subscriber that throws (the wake semaphore disposed during shutdown races that arm)
+        // escapes with nothing recorded. The RabbitMQ client library swallows whatever escapes a
+        // callback, so an unmeasured escape is invisible everywhere at once.
+        var recorded = false;
+
         void Record(string d, string reason)
         {
+            recorded = true;
             disposition = d;
             IngressMetrics.RecordConsumed(_options.Queue, type, d, reason);
         }
@@ -378,7 +396,21 @@ public sealed class GatedQueueConsumer : BackgroundService
                         break;
                     }
                 }
-            }        }
+            }
+        }
+        catch (Exception)
+        {
+            // "requeued", not "escaped": escaped is the REASON, and the disposition has to be the
+            // one the finally below carries for the same delivery, or the counter and the duration
+            // histogram describe it differently. Rethrown unchanged -- this arm measures, it does
+            // not handle.
+            if (!recorded)
+            {
+                IngressMetrics.RecordConsumed(_options.Queue, type, "requeued", "escaped");
+            }
+
+            throw;
+        }
         finally
         {
             // One measurement per delivery, on whichever path it ended -- including the gate-closed
