@@ -43,7 +43,7 @@ public sealed class GateTripSeedTests
     public async Task ARegisteredGateExportsATripSeriesBeforeItEverTrips()
     {
         var builder = BuilderWith(("Service:Name", "orchestrator"), ("Service:Version", "1.0.0"));
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
         var exporter = new ExportedSeriesExporter();
         builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddReader(
@@ -70,7 +70,7 @@ public sealed class GateTripSeedTests
         // failed to start would have been indistinguishable from a loop nothing was measuring,
         // which is the one case the seed exists to express.
         var builder = BuilderWith(("Service:Name", "orchestrator"), ("Service:Version", "1.0.0"));
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
         var exporter = new ExportedSeriesExporter();
         builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddReader(

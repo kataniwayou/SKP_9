@@ -45,7 +45,7 @@ public sealed class ArrivalHistogramBucketTests
     private static (BoundaryCapturingExporter Exporter, IHost Host) Started()
     {
         var builder = BuilderWith();
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
         var exporter = new BoundaryCapturingExporter();
         builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddReader(
@@ -94,7 +94,7 @@ public sealed class ArrivalHistogramBucketTests
     public void TheConsumerDurationHistogramCarriesTheArrivalLadder()
     {
         var builder = BuilderWith();
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker", defaultServiceName: "test-service", defaultServiceVersion: "9.9.9");
 
         var exporter = new BoundaryCapturingExporter();
         builder.Services.AddOpenTelemetry().WithMetrics(m => m.AddReader(

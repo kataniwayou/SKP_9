@@ -120,7 +120,11 @@ public static class OrchestratorHost
         var instanceId = InstanceId.Resolve();
         builder.Services.AddSingleton(instanceId);
 
-        builder.AddBaseConsoleObservability(builder.Configuration, source: "worker");
+        builder.AddBaseConsoleObservability(
+            builder.Configuration,
+            source: "worker",
+            defaultServiceName: "orchestrator",
+            defaultServiceVersion: "1.0.0");
 
         // A second WithMetrics on the same OpenTelemetryBuilder adds to the provider the shared
         // call configured rather than replacing it. The role meter is added here rather than
