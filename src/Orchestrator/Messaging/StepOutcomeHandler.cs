@@ -173,6 +173,43 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             throw new InvalidOperationException(DescribeL1Miss(_store, m.WorkflowId, m.StepId));
         }
 
+        // PROVENANCE. The sibling of the guard ProcessedDataHandler carries on the branch hop, and
+        // it exists for the same reason: orchestrator-result is an addressable queue on a shared
+        // broker, this handler is resolved by message type across the whole container, and
+        // everything below acts on the ids in the body — it reads a blob under EntryId, hands the
+        // successors off, and reclaims. Until now nothing compared the message against anything but
+        // the existence of its workflow and step, so an outcome naming a real workflow and a real
+        // step could be minted by anyone and would advance that workflow.
+        //
+        // L1 is the authority the processor's own identity is on the other side: StepL1.ProcessorId
+        // is "the processor that executes this step", and every legitimate outcome carries it. All
+        // three senders are covered — ProcessedDataHandler's two sends carry p.ProcessorId, which
+        // WR-02 has already proven equal to that processor's own identity, and the dispatch that
+        // named it was addressed to processor-{L1.ProcessorId}; NextStepHandoffHandler's failure
+        // outcome carries the id this orchestrator put in the hand-off, read from this same field.
+        //
+        // NOT RECLAIMED BEFORE PARKING, and that is the one place this deliberately departs from the
+        // L1-miss branch above. That branch reclaims to avoid leaking a blob. Here the message has
+        // just FAILED an authenticity check, so its EntryId is unauthenticated input — and a forged
+        // outcome can name a blob belonging to a real execution still in flight. Reclaiming would
+        // make the forgery destructive by our own hand, turning a message we refused into a deleted
+        // input for a run that was doing nothing wrong. A leaked blob is the cheaper failure, and
+        // this branch should be rare enough that it is not a leak worth trading for that.
+        //
+        // The one legitimate way to reach this: a step reassigned to a different processor while an
+        // outcome from the previous definition is still in flight. That is the same class of event as
+        // a step REMOVED mid-run, which the branch above already parks — "it holds a definition that
+        // disagrees with the outcome in flight" — so parking it here is consistent rather than new.
+        //
+        // Ids only, never the payload, matching the guard on the other side.
+        if (m.ProcessorId != completed.ProcessorId)
+        {
+            throw new InvalidOperationException(
+                $"the outcome for step {m.StepId:D} claims processor {m.ProcessorId:D} but this "
+                + $"workflow's definition assigns that step to {completed.ProcessorId:D} — refusing "
+                + "to advance the graph on an outcome whose provenance does not check out");
+        }
+
         // The record that the grace period did its job. Without it, "stopped mid-flight and drained
         // cleanly" and "was never stopped at all" produce identical logs, so the only visible evidence
         // the mark was ever load-bearing would be the absence of a parked message -- which is not
