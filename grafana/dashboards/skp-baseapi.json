@@ -507,7 +507,7 @@
       "id": 8,
       "type": "stat",
       "title": "Process restarts",
-      "description": "Process starts inside the visible range, counted by comparing each replica's recorded start timestamp against the window.\n\n**Why not `changes()` or `resets()`.** Both measure movement WITHIN one series, and `service_instance_id` is the pod name. On a Deployment every restart mints a new pod name, so the restart arrives as a brand-new series whose start timestamp is written once and never changes -- both functions read 0 forever. Measured 2026-09-01: this panel read 0 over 12h while Prometheus held 23 distinct processor instances and 10 baseapi ones. A StatefulSet keeps its pod name across a restart, which is why the orchestrator's copy was never wrong and is left alone.\n\n**`max_over_time` over the range, not an instant read.** An instant vector holds only series that are still alive, so a replica that started AND died inside the window would be missed -- which is most of them during a rollout. Verified against the same 12h window: the instant form counted 2 processor starts, the range form 21.",
+      "description": "Process starts inside the visible range, counted by comparing each replica's recorded start timestamp against the window.\n\n**Why not `changes()` or `resets()`.** Both measure movement WITHIN one series, and `service_instance_id` is the pod name. On a Deployment every restart mints a new pod name, so the restart arrives as a brand-new series whose start timestamp is written once and never changes -- both functions read 0 forever. Measured 2026-09-01: this panel read 0 over 12h while Prometheus held 23 distinct processor instances and 10 baseapi ones. A StatefulSet keeps its pod name across a restart, which is why the orchestrator's copy was never wrong and is left alone.\n\n**`max_over_time` over the range, not an instant read.** An instant vector holds only series that are still alive, so a replica that started AND died inside the window would be missed -- which is most of them during a rollout. Verified against the same 12h window: the instant form counted 2 processor starts, the range form 21.\n\n**Summarised by `source` (`webapi`), not by `service_instance_id`.** On a Deployment the pod name is the label that changes on every restart, so grouping by it puts exactly one process start in each group and reports 1 N times instead of N once. `source` is the process shape and survives every restart. The API runs a single replica, so nothing is aggregated away by summarising on it.\n\nThe zero arm is `0 * count by (source) (...)` rather than `or vector(0)`: with a `by` clause `vector(0)`'s empty label set never matches the grouped series, so `or` appends it and the stat renders a phantom 0 tile beside the real count.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -525,8 +525,8 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "count(max_over_time(pipeline_process_start_timestamp_seconds{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__range]) >= time() - $__range_s) or vector(0)",
-          "legendFormat": "",
+          "expr": "count by (source) (max_over_time(pipeline_process_start_timestamp_seconds{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__range]) >= time() - $__range_s) or (0 * count by (source) (max_over_time(pipeline_process_start_timestamp_seconds{service_name=~\"$service_name\",service_instance_id=~\"$service_instance_id\"}[$__range])))",
+          "legendFormat": "{{source}}",
           "range": true,
           "editorMode": "code"
         }
