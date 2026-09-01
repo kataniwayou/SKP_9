@@ -297,7 +297,7 @@ as designed.
   binary — absent or present.
 - **`orchestrator-result.dead` holds 1**, and it is not the synthetic one: the
   2026-08-31 teardown deleted every queue at 0 messages, so this message parked
-  after that date and nobody has looked at it.
+  after that date. **Now diagnosed — see the last section.**
 
 ### The live proof of the verdict fix
 
@@ -329,3 +329,79 @@ that message was invisible.
   exist at all; `skp author` ships `validate` and `apply` and nothing else.
 - **Phases 4 and 5 are still unbuilt** — the developer verbs, and the skills
   themselves. `.claude/skills/skp*` does not exist.
+
+### The parked message in `orchestrator-result.dead`, diagnosed (2026-09-01)
+
+The section above notes one message parked there after the teardown, unexamined.
+It has now been read. **It is a migration artefact, no work was lost, and it is a
+different failure from the six the 2026-08-24 RESUME investigation chased.**
+
+Peeked with
+`rabbitmqadmin get --queue orchestrator-result.dead --count 1 --ack-mode ack_requeue_true`,
+which requeues rather than consumes. That increments `x-delivery-count` (now 3);
+harmless only because `x-delivery-limit` is `-1` since `ed0bae7` — before that
+change this peek spent one of twenty silent lives.
+
+**What it is.** A `step-outcome` with `Result = Completed`, correlation
+`bebe990a-3770-4656-bbec-08b1bb60b3d7`, workflow `cbe1c767…`, step `cb3a45a7…`,
+entry `15f8a034…`. `x-first-death-reason: rejected` — the handler refused it on
+its first delivery, so this was never a delivery-limit casualty.
+
+**Why it parked.** Not the L1 branch. The stack trace is
+`StepOutcomeHandler.ReadAsync(Guid entryId)` at line 328 —
+*"the outcome names an execution blob the store does not hold"* — the **L2
+absent-key branch**. The six in RESUME were `workflow-or-step missing from L1`,
+which is what `DescribeL1Miss` was added to name. Different branch, different
+line, and `DescribeL1Miss` was never going to fire on this one.
+
+**What made the blob absent: two orchestrator restart waves mid-run.**
+
+```
+21:09:50.026  entry dispatched, run begins
+21:12:01.349  orchestrator-0 hydrated 3 workflows from L2; admitting the consumer
+21:12:06.316  orchestrator-0 consumption admitted -- consuming orchestrator-result
+21:12:06.348  PARKED                                          <-- 32ms later
+21:15:52      all three replicas hydrate (second wave)
+21:15:59.166  last record of the run
+```
+
+The parked delivery is the **first message orchestrator-0 consumed after
+hydrating**, 32ms in. Scaling the orchestrator to zero requeued every unacked
+delivery on `orchestrator-result`; on scale-up they were redelivered, and each
+redelivery re-advanced the run, because the advance hop mints `Guid.NewGuid()`
+per unit. One entry dispatch produced:
+
+| count | template |
+|---|---|
+| 1 | dispatched an entry step |
+| 3 | the entry step completed with {Result} |
+| 20 | handed off to {NextStepId} … with {NextEntryId} |
+| 18 | advanced {SuccessorCount} successor(s) |
+| 4 | the terminal step completed — no successor accepts it, the run ends here |
+| 1 | refusing message of type step-outcome — parked |
+
+**Four terminal completions from one dispatch.** The run did not lose progress;
+it made the same progress four times. One redelivery arrived for an entry whose
+blob a previous pass had already reclaimed, and the orchestrator parks on that
+condition rather than acking.
+
+**So this is the absent-key divergence `7ac5ce2` recorded as unresolved, firing.**
+The processor's advance hop acks the same condition as *"entry absent — treating
+as a duplicate delivery"*; the orchestrator throws and parks. Here the orchestrator's
+disposition converted a benign duplicate — caused by a planned scale-down — into an
+operator-visible parked message about a run that had already completed. That is a
+real argument for the processor's side of the divergence, and it is the first
+evidence either side has had. It does not settle it: parking is also what keeps
+*"the processor reported a blob it never wrote"* visible, and this incident cannot
+tell those two cases apart, which is precisely why the divergence is hard.
+
+**Left in place.** The message is evidence of a diagnosed incident and costs
+nothing where it sits — `orchestrator-result.dead` is not a per-processor queue,
+so it does not pin any `parked-at-processor-*` verdict. Purge it when the
+divergence is decided, not before.
+
+**The operational lesson worth keeping:** a planned orchestrator scale-down
+during an in-flight run is not free. It requeues unacked outcomes, and every
+redelivery advances the run again. The migration record in the topology design
+counts queues and messages before the teardown; it does not check for in-flight
+*runs*, and this is what that gap costs.
