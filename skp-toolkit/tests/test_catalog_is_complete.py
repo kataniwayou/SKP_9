@@ -56,6 +56,19 @@ class CompletenessTests(unittest.TestCase):
         # C# as dead code -- it had no call site anywhere in src/, so nothing
         # ever wrote the key and no observer could ever catch it. The surface
         # goes with the code that declared it. 136 - 1 = 135.
+        #
+        # Topology round (2026-08-31): the advance/materialize split gave every
+        # processor a second queue pair, so ProcessorQueues declares Post and
+        # PostDead. 135 + 2 = 137. Both were caught by this check the moment the
+        # C# landed, which is the check working.
+        #
+        # Fan-out round: OrchestratorFanout.cs was added to SOURCE_MAP, and this
+        # one was NOT caught by anything -- it was found by reading the live
+        # broker and noticing six queues and two exchanges that no catalog id
+        # named. The coverage check enumerates surfaces from the files SOURCE_MAP
+        # lists, so a contract file nobody listed is not an uncovered surface, it
+        # is not a surface at all. Exchange, DeadLetterExchange, PerReplica and
+        # Dead: 137 + 4 = 141.
         with tempfile.TemporaryDirectory() as tmp:
             entries, _ = compile_catalog(SRC, ANNOTATIONS, pathlib.Path(tmp))
-        self.assertEqual(len(entries), 135)
+        self.assertEqual(len(entries), 141)

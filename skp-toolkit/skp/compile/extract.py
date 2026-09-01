@@ -49,22 +49,60 @@ def redis_keys(text: str) -> list[Surface]:
     return sorted(out, key=lambda s: s.id)
 
 
-def queues(processor_text: str, orchestrator_text: str) -> list[Surface]:
-    """Queue and exchange names from both topology classes.
+def queues(processor_text: str, orchestrator_text: str,
+           fanout_text: str = "") -> list[Surface]:
+    """Queue and exchange names from all three contract classes.
 
-    Ids carry their declaring source because the two classes each define a
-    `DeadLetterExchange`; a bare member name would collide and one real
-    exchange would vanish at the first lookup by id.
+    Ids carry their declaring source because each class defines a
+    `DeadLetterExchange`; a bare member name would collide and two real
+    exchanges would vanish at the first lookup by id.
+
+    ``OrchestratorFanout`` is the third and was missing until a live read of
+    the broker found 6 queues and 2 exchanges that no catalog id named --
+    ``orchestrator-fanout``, ``orchestrator-fanout-dlx`` and the three
+    per-replica ``orchestrator-control.{instanceId}`` pairs. The completeness
+    check could not report them: it enumerates surfaces from the files
+    ``SOURCE_MAP`` lists, so a contract file nobody listed is not an
+    uncovered surface, it is not a surface at all. Section 6.3 of the design
+    names these queues explicitly, which is how far a promise gets without a
+    reader.
     """
     out = []
     for namespace, text in (("processor", processor_text),
-                            ("orchestrator", orchestrator_text)):
+                            ("orchestrator", orchestrator_text),
+                            ("fanout", fanout_text)):
+        if not text:
+            continue
         consts = const_strings(text)
         for name, value in consts.items():
             out.append(_surface("rabbitmq", f"{namespace}.{name}", "list_queues", value))
-        for name, body in expression_bodies(text, consts).items():
-            out.append(_surface("rabbitmq", f"{namespace}.{name}", "list_queues", body))
+        bodies = expression_bodies(text, consts)
+        for name, body in bodies.items():
+            out.append(_surface("rabbitmq", f"{namespace}.{name}", "list_queues",
+                                _resolve_siblings(body, bodies)))
     return sorted(out, key=lambda s: s.id)
+
+
+_SIBLING_CALL = re.compile(r"\{(\w+)\([^{}]*\)\}")
+
+
+def _resolve_siblings(body: str, bodies: dict[str, str]) -> str:
+    """Substitute ``{Sibling(arg)}`` with the sibling's own body.
+
+    ``OrchestratorFanout.Dead`` is ``$"{PerReplica(instanceId)}.dead"``, which
+    extracts verbatim as ``{PerReplica(instanceId)}.dead`` -- a template whose
+    placeholder is a method call. Nothing downstream can fill that: ``_fill``
+    substitutes named placeholders, so the name would be carried, compared
+    against the broker, and never match, which is a REFUTED claim about a queue
+    that exists. Resolved here rather than at every reader.
+
+    One pass, deliberately. A sibling that itself referenced a sibling would be
+    a chain worth failing on rather than silently half-resolving, and an
+    unresolved ``{Name(...)}`` surviving into the detail is visible to the
+    caller instead of being smoothed over.
+    """
+    return _SIBLING_CALL.sub(
+        lambda m: bodies.get(m.group(1), m.group(0)), body)
 
 
 def templates(text: str) -> list[Surface]:

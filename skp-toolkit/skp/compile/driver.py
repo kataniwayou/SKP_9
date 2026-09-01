@@ -11,6 +11,13 @@ SOURCE_MAP = {
     "l2_keys": "Messaging.Contracts/Projections/L2ProjectionKeys.cs",
     "processor_queues": "Messaging.Contracts/ProcessorQueues.cs",
     "orchestrator_queues": "Messaging.Contracts/OrchestratorQueues.cs",
+    # The third contract class, and the one a live broker read found missing: it
+    # declares orchestrator-fanout, orchestrator-fanout-dlx and the per-replica
+    # orchestrator-control.{instanceId} pair. Six live queues and two exchanges had
+    # no catalog id because this file was not listed here -- an omission the
+    # coverage check is structurally unable to report, since it enumerates only
+    # what these paths declare.
+    "fanout_queues": "Messaging.Contracts/OrchestratorFanout.cs",
     "templates": "tests/BaseApi.Tests/Live/Resilience/Templates.cs",
     "execution_log_scope": "Messaging.Contracts/ExecutionLogScope.cs",
     "correlation_keys": "Messaging.Contracts/CorrelationKeys.cs",
@@ -152,7 +159,8 @@ def collect_surfaces(source_root: pathlib.Path) -> list[extract.Surface]:
     surfaces: list[extract.Surface] = []
     surfaces += extract.redis_keys(_read(source_root, SOURCE_MAP["l2_keys"]))
     surfaces += extract.queues(_read(source_root, SOURCE_MAP["processor_queues"]),
-                               _read(source_root, SOURCE_MAP["orchestrator_queues"]))
+                               _read(source_root, SOURCE_MAP["orchestrator_queues"]),
+                               _read(source_root, SOURCE_MAP["fanout_queues"]))
     surfaces += extract.templates(_read(source_root, SOURCE_MAP["templates"]))
     surfaces += extract.log_attributes(
         _read(source_root, SOURCE_MAP["templates"]),

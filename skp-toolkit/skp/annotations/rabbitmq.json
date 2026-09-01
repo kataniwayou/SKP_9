@@ -1,6 +1,9 @@
 {
   "rabbitmq.processor.IdentityQuery": {
-    "intents": ["observe", "investigate"],
+    "intents": [
+      "observe",
+      "investigate"
+    ],
     "answers": "the queue name processor identity-resolution requests (RPC) are sent to at startup",
     "never_for": "the processor's own identity value — that is row data in postgres.Processors; this is only the RPC channel name",
     "write_authority": "none",
@@ -8,7 +11,10 @@
     "verb": "skp observe queues"
   },
   "rabbitmq.processor.SchemaQuery": {
-    "intents": ["observe", "investigate"],
+    "intents": [
+      "observe",
+      "investigate"
+    ],
     "answers": "the queue name schema-definition lookups are sent to at processor startup",
     "never_for": "the schema document itself — that is postgres.Schemas; this is only the RPC channel name",
     "write_authority": "none",
@@ -16,15 +22,21 @@
     "verb": "skp observe queues"
   },
   "rabbitmq.processor.Work": {
-    "intents": ["observe", "investigate"],
-    "answers": "the per-processor work queue, named processor-{processorId}; carries both dispatches and processed-data branches, routed by the type header",
-    "never_for": "identifying a processor — never for that. The queue name embeds the id, but a rebuilt processor keeps the same id, so the queue existing says nothing about whether the current binary matches the registered SourceHash",
+    "intents": [
+      "observe",
+      "investigate"
+    ],
+    "answers": "the per-processor WORK queue, named processor-{processorId}: the advance half of the pair, carrying the dispatches this processor is asked to run",
+    "never_for": "branch backlog -- since the 2026-08-31 split those ride processor-{processorId}-post and are absent here; a message routed by type header onto this queue is no longer how a branch travels. Never for identifying a processor either: the queue name embeds the id, but a rebuilt processor keeps the same id, so the queue existing says nothing about whether the current binary matches the registered SourceHash",
     "write_authority": "none",
     "cost": "cheap",
     "verb": "skp observe queues"
   },
   "rabbitmq.processor.Dead": {
-    "intents": ["investigate", "remediate"],
+    "intents": [
+      "investigate",
+      "remediate"
+    ],
     "answers": "where processor-{id}'s Work queue parks a message it could not read",
     "never_for": "assuming a parked message is inspectable at rest — reading one requires consuming it off this queue, which mutates the queue under investigation",
     "write_authority": "gated",
@@ -32,15 +44,21 @@
     "verb": "skp investigate parked"
   },
   "rabbitmq.processor.DeadLetterExchange": {
-    "intents": ["investigate", "verify"],
-    "answers": "the exchange processor-{id}'s Work queue names in its x-dead-letter-exchange argument; must exist before Work is declared or parked messages are silently discarded",
-    "never_for": "assuming a queue pointing at it is safe by default — the argument is not validated at declare time, so a queue naming a missing exchange is accepted anyway",
+    "intents": [
+      "investigate",
+      "verify"
+    ],
+    "answers": "the exchange BOTH processor-{processorId} and processor-{processorId}-post name in their x-dead-letter-exchange argument; one exchange serves both, the two dead queues distinguished by routing key. Every routing key is the LIVE queue's own name, so the key is derivable from the queue a message was refused by -- verified on the broker, 8 of 8 dead-lettering queues",
+    "never_for": "computing a redrive key from the DEAD queue's name -- it is the live queue's name that is bound, so a key built the other way is discarded silently by a direct exchange. Nor for assuming a queue pointing at this exchange is safe by default: the argument is not validated at declare time, so a queue naming a missing exchange is accepted anyway",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp verify topology"
+    "verb": "skp verify --component rabbitmq"
   },
   "rabbitmq.orchestrator.Control": {
-    "intents": ["observe", "investigate"],
+    "intents": [
+      "observe",
+      "investigate"
+    ],
     "answers": "the single durable queue carrying both start and stop commands, one at a time, in order — the ordering guarantee that a stop can never be handled before the start it follows",
     "never_for": "isolating start traffic from stop traffic — they share one queue by design, so depth and consumer counts here are the combined total of both",
     "write_authority": "none",
@@ -48,7 +66,10 @@
     "verb": "skp observe queues"
   },
   "rabbitmq.orchestrator.ControlDead": {
-    "intents": ["investigate", "remediate"],
+    "intents": [
+      "investigate",
+      "remediate"
+    ],
     "answers": "where Control parks a start or stop message it refused",
     "never_for": "assuming it is readable without consuming it, which mutates the queue under investigation",
     "write_authority": "gated",
@@ -56,15 +77,22 @@
     "verb": "skp investigate parked"
   },
   "rabbitmq.orchestrator.DeadLetterExchange": {
-    "intents": ["investigate", "verify"],
+    "intents": [
+      "investigate",
+      "verify"
+    ],
     "answers": "the exchange Control's x-dead-letter-exchange argument names; must be declared before Control or a parked message discards silently",
     "never_for": "assuming a queue pointing at it is safe by default — the argument is not validated at declare time",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp verify topology"
+    "verb": "skp verify --component rabbitmq"
   },
   "rabbitmq.orchestrator.Result": {
-    "intents": ["observe", "investigate", "analyze"],
+    "intents": [
+      "observe",
+      "investigate",
+      "analyze"
+    ],
     "answers": "the shared, competing-consumer queue every processor's StepOutcome lands on — deliberately not leader-gated, since a result is caused work rather than initiated work",
     "never_for": "attributing backlog here to the leader replica specifically — every replica, leader or follower, consumes this queue",
     "write_authority": "none",
@@ -72,7 +100,10 @@
     "verb": "skp observe queues"
   },
   "rabbitmq.orchestrator.ResultDead": {
-    "intents": ["investigate", "remediate"],
+    "intents": [
+      "investigate",
+      "remediate"
+    ],
     "answers": "where Result parks a StepOutcome it refused",
     "never_for": "assuming it is readable without consuming it, which mutates the queue under investigation",
     "write_authority": "gated",
@@ -80,7 +111,10 @@
     "verb": "skp investigate parked"
   },
   "rabbitmq.orchestrator.ResultPost": {
-    "intents": ["observe", "investigate"],
+    "intents": [
+      "observe",
+      "investigate"
+    ],
     "answers": "the pre-to-post fan-out hop — one NextStepHandoff per matched successor, so a partial multi-successor fan-out is visible here rather than as three inline sends that could half-happen",
     "never_for": "the terminal record of a hand-off — this is an intermediate hop; the post consumer still has to write the successor's input key and dispatch it",
     "write_authority": "none",
@@ -88,9 +122,78 @@
     "verb": "skp observe queues"
   },
   "rabbitmq.orchestrator.ResultPostDead": {
-    "intents": ["investigate", "remediate"],
+    "intents": [
+      "investigate",
+      "remediate"
+    ],
     "answers": "where ResultPost parks a NextStepHandoff it refused",
     "never_for": "assuming it is readable without consuming it, which mutates the queue under investigation",
+    "write_authority": "gated",
+    "cost": "cheap",
+    "verb": "skp investigate parked"
+  },
+  "rabbitmq.processor.Post": {
+    "intents": [
+      "observe",
+      "investigate"
+    ],
+    "answers": "the per-processor POST queue, named processor-{processorId}-post: the materialize half of the pair, carrying the branches an author hands off during its own run. Its consumer writes L2[EntryId] from the message alone, so it is idempotent under any number of redeliveries",
+    "never_for": "the dispatch backlog -- that is processor.Work. And never for judging total processor backlog from the orchestrator's view: DispatchedQueues is populated by the orchestrator noting queues it dispatches TO, so it never learns this name and its depth probe cannot see this queue",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.processor.PostDead": {
+    "intents": [
+      "investigate",
+      "remediate"
+    ],
+    "answers": "where processor-{processorId}-post parks a branch it refused. Two causes park here and they want opposite handling: a bug on this processor's own send path, and a message carrying another processor's ProcessorId, which the provenance guard refuses rather than letting it write a blob into that lineage's key space and forge that step's outcome",
+    "never_for": "assuming a parked branch belongs to the workflow being investigated -- the queue is per-processor and shared by every workflow assigned to it. Nor for reading one at rest: reading requires consuming it off this queue, which mutates the queue under investigation",
+    "write_authority": "gated",
+    "cost": "cheap",
+    "verb": "skp investigate parked"
+  },
+  "rabbitmq.fanout.Exchange": {
+    "intents": [
+      "observe",
+      "investigate"
+    ],
+    "answers": "the fan-out exchange the API publishes control-plane announcements to; every orchestrator replica binds its own durable queue, so one announcement reaches all three",
+    "never_for": "concluding that a replica missing an announcement is a transport fault. These queues are NON-EXCLUSIVE, so two replicas resolving the same queue name raises no RESOURCE_LOCKED and fails loudly nowhere: the broadcast silently degrades into a competing-consumer load balance, each announcement reaching one replica while the other two keep a stale L1 and a stale schedule, with nothing in the transport reporting it",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.fanout.DeadLetterExchange": {
+    "intents": [
+      "investigate",
+      "verify"
+    ],
+    "answers": "the exchange the per-replica control queues name in x-dead-letter-exchange, distinct from orchestrator-dlx; its three dead queues are keyed by the live queue's own name",
+    "never_for": "assuming a queue pointing at it is safe by default -- the argument is not validated at declare time, so a queue naming a missing exchange is accepted and discards everything it parks, silently",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp verify --component rabbitmq"
+  },
+  "rabbitmq.fanout.PerReplica": {
+    "intents": [
+      "observe",
+      "investigate"
+    ],
+    "answers": "one durable queue per orchestrator replica, orchestrator-control.{instanceId}, where the instance id is the replica's resolved identity -- a StatefulSet ordinal in production, so a restarted pod reclaims the same queue and drains the backlog it accumulated while down",
+    "never_for": "expecting it to disappear with its replica. It is durable and never auto-delete, precisely so a replica that is down accumulates its announcements rather than dropping them with nothing parked and nothing logged -- so it outlives a replica removed for good, which is why the orchestrator StatefulSet does not scale down. Zero consumers here means the replica is gone, not that the queue is broken",
+    "write_authority": "none",
+    "cost": "cheap",
+    "verb": "skp observe queues"
+  },
+  "rabbitmq.fanout.Dead": {
+    "intents": [
+      "investigate",
+      "remediate"
+    ],
+    "answers": "where one replica's orchestrator-control.{instanceId} queue parks an announcement it refused; bound to orchestrator-fanout-dlx under the live queue's own name",
+    "never_for": "assuming it is readable without consuming it, which mutates the queue under investigation. Nor for reading it as system-wide: this queue is one replica's, and the other replicas may have handled the same announcement successfully",
     "write_authority": "gated",
     "cost": "cheap",
     "verb": "skp investigate parked"

@@ -47,11 +47,62 @@ class RealSourceTests(unittest.TestCase):
                      "the entry step completed with {Result}"):
             self.assertIn(text, found)
 
+    def test_the_processor_post_pair_is_found(self):
+        """The 2026-08-31 advance/materialize split. The work queue no longer
+        carries branches, so a catalog that knows only the work pair is missing
+        the lane an author's own output travels on."""
+        found = {s.detail for s in queues(
+            read("Messaging.Contracts/ProcessorQueues.cs"),
+            read("Messaging.Contracts/OrchestratorQueues.cs"))}
+        self.assertIn("processor-{processorId}-post", found)
+        self.assertIn("processor-{processorId}-post.dead", found)
+
+    def test_the_fanout_surfaces_are_found(self):
+        """Six live queues and two exchanges had no catalog id because
+        OrchestratorFanout.cs was not in SOURCE_MAP. The coverage check could
+        not report them: it enumerates surfaces from the files SOURCE_MAP
+        lists, so an unlisted contract file is not an uncovered surface, it is
+        not a surface at all. Found by reading the broker, not the source."""
+        found = {s.id: s.detail for s in queues(
+            read("Messaging.Contracts/ProcessorQueues.cs"),
+            read("Messaging.Contracts/OrchestratorQueues.cs"),
+            read("Messaging.Contracts/OrchestratorFanout.cs"))}
+        self.assertEqual(found["rabbitmq.fanout.Exchange"], "orchestrator-fanout")
+        self.assertEqual(found["rabbitmq.fanout.DeadLetterExchange"], "orchestrator-fanout-dlx")
+        self.assertEqual(found["rabbitmq.fanout.PerReplica"],
+                         "orchestrator-control.{instanceId}")
+
+    def test_a_sibling_method_reference_is_resolved_not_carried(self):
+        """OrchestratorFanout.Dead is $"{PerReplica(instanceId)}.dead". Carried
+        verbatim, the placeholder is a method call that no reader can fill, so
+        the name would be compared against the broker and never match -- a
+        REFUTED claim about a queue that exists."""
+        found = {s.id: s.detail for s in queues(
+            read("Messaging.Contracts/ProcessorQueues.cs"),
+            read("Messaging.Contracts/OrchestratorQueues.cs"),
+            read("Messaging.Contracts/OrchestratorFanout.cs"))}
+        self.assertEqual(found["rabbitmq.fanout.Dead"],
+                         "orchestrator-control.{instanceId}.dead")
+        self.assertNotIn("PerReplica", found["rabbitmq.fanout.Dead"])
+
+    def test_the_third_dead_letter_exchange_does_not_collide(self):
+        """Three classes now declare a DeadLetterExchange. Ids carry their
+        declaring source for exactly this reason -- a bare member name would
+        collide and two real exchanges would vanish at the first lookup."""
+        found = {s.id: s.detail for s in queues(
+            read("Messaging.Contracts/ProcessorQueues.cs"),
+            read("Messaging.Contracts/OrchestratorQueues.cs"),
+            read("Messaging.Contracts/OrchestratorFanout.cs"))}
+        self.assertEqual(
+            sorted({found[i] for i in found if i.endswith("DeadLetterExchange")}),
+            ["orchestrator-dlx", "orchestrator-fanout-dlx", "processor-dlx"])
+
     def test_no_two_surfaces_share_an_id(self):
         surfaces = (
             redis_keys(read("Messaging.Contracts/Projections/L2ProjectionKeys.cs"))
             + queues(read("Messaging.Contracts/ProcessorQueues.cs"),
-                     read("Messaging.Contracts/OrchestratorQueues.cs"))
+                     read("Messaging.Contracts/OrchestratorQueues.cs"),
+                     read("Messaging.Contracts/OrchestratorFanout.cs"))
             + templates(read("tests/BaseApi.Tests/Live/Resilience/Templates.cs"))
         )
         ids = [s.id for s in surfaces]
