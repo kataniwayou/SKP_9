@@ -19,6 +19,9 @@ public static class L2ProjectionKeys
 '''
 PQ = 'public static class ProcessorQueues { public const string IdentityQuery = "processor-identity-query"; }'
 OQ = 'public static class OrchestratorQueues { public const string Control = "orchestrator-control"; }'
+OFO = ('public static class OrchestratorFanout { '
+       'public const string Exchange = "orchestrator-fanout"; '
+       'public static string PerReplica(string instanceId) => $"orchestrator-control.{instanceId}"; }')
 TPL = 'internal static class Templates { public const string RunningTheStep = "running the step"; }'
 DBC = 'public DbSet<SchemaEntity> Schemas => Set<SchemaEntity>();'
 MET = 'internal const string DepthInstrument = "pipeline.queue.depth";'
@@ -63,6 +66,7 @@ def fake_source_root(root: pathlib.Path) -> pathlib.Path:
         "Messaging.Contracts/Projections/L2ProjectionKeys.cs": L2,
         "Messaging.Contracts/ProcessorQueues.cs": PQ,
         "Messaging.Contracts/OrchestratorQueues.cs": OQ,
+        "Messaging.Contracts/OrchestratorFanout.cs": OFO,
         "tests/BaseApi.Tests/Live/Resilience/Templates.cs": TPL,
         "Messaging.Contracts/ExecutionLogScope.cs": SCOPE,
         "Messaging.Contracts/CorrelationKeys.cs": CORR,
