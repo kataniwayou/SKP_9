@@ -152,26 +152,84 @@ def liveness(entries: list[dict], redis, processor_id: str, now: float):
 # ---------------------------------------------------------------------
 
 _CONCRETE_QUEUES = ("orchestrator.Control", "orchestrator.Result", "orchestrator.ResultPost",
-                    "orchestrator.ControlDead", "orchestrator.ResultDead")
+                    "orchestrator.ControlDead", "orchestrator.ResultDead",
+                    "orchestrator.ResultPostDead",
+                    "processor.IdentityQuery", "processor.SchemaQuery")
+"""``ResultPostDead`` was annotated but never listed here, so the one dead-letter
+queue of the orchestrator's post hop had no reader in any verb. The two RPC
+queues were in the same position while their own annotations named this verb --
+a catalog entry pointing at a command that does not report it is the kind of
+dead reference this bundle exists to remove."""
+
+_PER_PROCESSOR = ("processor.Work", "processor.Post", "processor.Dead", "processor.PostDead")
+"""All four, since the 2026-08-31 advance/materialize split. Listing only the
+work pair reported a healthy two-queue processor while its branch lane was
+whatever it happened to be -- the shape of missing series that renders as fine."""
+
+
+def fanout_queues(by_id: dict, live: dict, template_ids=("rabbitmq.fanout.PerReplica",
+                                                          "rabbitmq.fanout.Dead")) -> list[str]:
+    """The per-replica control queues, discovered from the broker rather than guessed.
+
+    ``rabbitmq.fanout.PerReplica`` is ``orchestrator-control.{instanceId}``
+    and ``rabbitmq.fanout.Dead`` its ``.dead`` sibling. The instance ids are
+    not derivable from source -- they are whichever replicas exist -- so this
+    reads the live set through each template's own prefix and suffix instead
+    of inventing ordinals. A queue left behind by a replica removed for good
+    still appears, and that is deliberate: these queues are durable and never
+    auto-delete, so an abandoned one is real state somebody has to see.
+
+    Both templates are resolved explicitly rather than letting the live
+    template's empty suffix swallow the dead ones by accident. The two differ
+    only by a suffix, so a prefix match alone returns the right set for the
+    wrong reason -- and a caller asking for only the dead queues (``skp
+    investigate parked``) needs them apart.
+
+    ``orchestrator-control.dead`` shares the prefix and is NOT one of these:
+    it is the shared control queue's own dead-letter queue, carried among the
+    concrete names. Matching it here would double-report it and imply a
+    replica named ``dead``.
+    """
+    control_dead = (by_id.get("rabbitmq.orchestrator.ControlDead") or {}).get("detail")
+    found: list[str] = []
+    for template_id in template_ids:
+        entry = by_id.get(template_id)
+        if not entry:
+            continue
+        prefix, _, suffix = entry["detail"].partition("{instanceId}")
+        for name in live:
+            if name == control_dead or name in found:
+                continue
+            if not name.startswith(prefix) or not name.endswith(suffix):
+                continue
+            middle = name[len(prefix):len(name) - len(suffix) if suffix else len(name)]
+            if not middle or "." in middle:
+                # The instance id is one segment. Without this, the live
+                # template (empty suffix) also matches its own .dead sibling.
+                continue
+            found.append(name)
+    return sorted(found)
 
 
 def queues(entries: list[dict], rabbit, processor_id: str | None = None):
     by_id = index_by_id(entries)
-    wanted = []
-    for local in _CONCRETE_QUEUES:
-        entry = by_id.get(f"rabbitmq.{local}")
-        if entry:
-            wanted.append(entry["detail"])
-    if processor_id:
-        for local in ("processor.Work", "processor.Dead"):
-            entry = by_id.get(f"rabbitmq.{local}")
-            if entry:
-                wanted.append(_fill(entry["detail"], processorId=processor_id))
 
     try:
         live = _live_queue_map(rabbit)
     except Unreachable as exc:
         return EXIT_UNREACHABLE, [f"rabbitmq unreachable -- {exc.detail}"]
+
+    wanted = []
+    for local in _CONCRETE_QUEUES:
+        entry = by_id.get(f"rabbitmq.{local}")
+        if entry:
+            wanted.append(entry["detail"])
+    wanted += fanout_queues(by_id, live)
+    if processor_id:
+        for local in _PER_PROCESSOR:
+            entry = by_id.get(f"rabbitmq.{local}")
+            if entry:
+                wanted.append(_fill(entry["detail"], processorId=processor_id))
 
     lines = []
     width = max((len(n) for n in wanted), default=0)

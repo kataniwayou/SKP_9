@@ -36,7 +36,7 @@ from skp.profile import Profile, ProfileMissing, default_home, not_compiled, not
 from skp.result import EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE, EXIT_VERDICT, Result
 from skp.verbs.init import build_clients
 from skp.verbs.map import index_by_id, load_catalog
-from skp.verbs.observe import _fill
+from skp.verbs.observe import _fill, fanout_queues
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -251,8 +251,28 @@ def run_ladder(entries: list[dict], clients: dict, workflow_id: str, window: str
                 emit(3, FAIL, f"{queue_name}: not found on the broker")
             else:
                 note = "" if q.get("consumers", 0) else " -- WARNING: zero consumers, no ready replica"
+                # The post lane rides this rung's evidence rather than becoming a
+                # tenth rung. The rung's question is "did the dispatch reach the
+                # processor" and that is still the work queue alone -- but since
+                # the 2026-08-31 split the branch lane is a second place work can
+                # sit with no reader, and a ladder that never looks at it reports
+                # a clean rung 3 while the processor's own branches are stranded.
+                # Added as evidence so the boundary arithmetic the ladder depends
+                # on is untouched.
+                post_entry = by_id.get("rabbitmq.processor.Post")
+                post_note = ""
+                if post_entry:
+                    post_name = _fill(post_entry["detail"], processorId=processor_id)
+                    post_q = live.get(post_name)
+                    if post_q is None:
+                        post_note = f"; {post_name}: NOT FOUND on the broker"
+                    else:
+                        warn = ("" if post_q.get("consumers", 0)
+                                else " -- WARNING: zero consumers on the branch lane")
+                        post_note = (f"; {post_name}: depth={post_q.get('messages')} "
+                                     f"consumers={post_q.get('consumers')}{warn}")
                 emit(3, PASS, f"{queue_name}: depth={q.get('messages')} "
-                              f"consumers={q.get('consumers')}{note}")
+                              f"consumers={q.get('consumers')}{note}{post_note}")
     else:
         emit(3, UNKNOWN, "cannot determine -- no ProcessorId (rung 2 produced none; "
                          "pass --processor to override)")
@@ -444,16 +464,35 @@ def blob(entries: list[dict], redis, entry_id: str):
     return EXIT_OK, [f"{key}: present ({len(value)} byte(s))", f"  {value[:300]}"]
 
 
+_CONCRETE_DEAD = ("orchestrator.ControlDead", "orchestrator.ResultDead",
+                  "orchestrator.ResultPostDead")
+
+_PER_PROCESSOR_DEAD = ("processor.Dead", "processor.PostDead")
+
+
 def parked(entries: list[dict], rabbit, processor_id: str | None = None):
+    """Every dead-letter queue on the broker, not a subset of them.
+
+    This listed three of eight. ``ResultPostDead`` was annotated and never
+    read; the three per-replica fan-out dead queues had no catalog id at all
+    until ``OrchestratorFanout.cs`` was added to the source map; and
+    ``PostDead`` arrived with the 2026-08-31 split. A parked-message verb
+    that silently omits five of the eight places a message can be parked
+    answers "nothing is parked" with the same face either way, which is the
+    failure this whole bundle is built against.
+    """
     by_id = index_by_id(entries)
-    names = [by_id["rabbitmq.orchestrator.ControlDead"]["detail"],
-            by_id["rabbitmq.orchestrator.ResultDead"]["detail"]]
-    if processor_id:
-        names.append(_fill(by_id["rabbitmq.processor.Dead"]["detail"], processorId=processor_id))
     try:
         live = {q["name"]: q for q in rabbit.queues()}
     except Unreachable as exc:
         return EXIT_UNREACHABLE, [f"rabbitmq unreachable -- {exc.detail}"]
+
+    names = [by_id[f"rabbitmq.{local}"]["detail"] for local in _CONCRETE_DEAD
+             if f"rabbitmq.{local}" in by_id]
+    names += fanout_queues(by_id, live, template_ids=("rabbitmq.fanout.Dead",))
+    if processor_id:
+        names += [_fill(by_id[f"rabbitmq.{local}"]["detail"], processorId=processor_id)
+                  for local in _PER_PROCESSOR_DEAD if f"rabbitmq.{local}" in by_id]
     lines = []
     for name in names:
         q = live.get(name)

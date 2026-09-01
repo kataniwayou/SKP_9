@@ -329,8 +329,16 @@ def resolve_verdict(observations: dict) -> tuple[str, list[str]]:
         ]
     elif observations["parked"]:
         processor = observations["parked"][0]
+        # One verdict, because the remedy is the same either lane: recover the
+        # messages by hand. Which lane still has to reach the operator, since
+        # the two park for different reasons -- so it rides the evidence rather
+        # than splitting the verdict. Falls back to naming both when the caller
+        # did not resolve them (older callers, and every unit fixture).
+        holding = (observations.get("parked_queues") or {}).get(processor) or []
+        where = (", ".join(holding) if holding
+                 else f"one of processor-{processor}'s two dead-letter queues")
         verdict, evidence = f"parked-at-processor-{processor}", [
-            f"processor-{processor}.dead holds messages -- deliveries were "
+            f"{where} holds messages -- deliveries were "
             f"rejected and dead-lettered.",
             "They are recoverable by hand; they are not lost.",
             f"processor-{processor} is shared: it backs every workflow "
@@ -338,6 +346,13 @@ def resolve_verdict(observations: dict) -> tuple[str, list[str]]:
             f"belong to a different workflow than this one. Confirm with "
             f"skp investigate parked --processor {processor}.",
         ]
+        if any(name.endswith("-post.dead") for name in holding):
+            evidence.append(
+                "A branch parked on the post lane has two causes wanting "
+                "opposite handling: a bug on this processor's own send path, "
+                "or a message carrying another processor's ProcessorId, which "
+                "the provenance guard refuses rather than letting it write "
+                "into that lineage's key space.")
     elif observations["wedged"]:
         processor = observations["wedged"][0]
         verdict, evidence = f"wedged-at-processor-{processor}", [
@@ -449,41 +464,76 @@ def _workflow_processors(entries, clients, workflow_id: str) -> set[str]:
 def _queue_states(entries, clients, processors: set[str]) -> tuple[list[str], list[str]]:
     """Parked/wedged processors, filtered to those backing this workflow.
 
-    Queue names are derived from the catalog's ``rabbitmq.processor.Work``/
-    ``rabbitmq.processor.Dead`` templates rather than spelled as literals --
-    a renamed convention on the C# side must change what this reads, not
-    silently starve it (see the module docstring's ``operate verify`` trap).
+    Queue names come from the catalog's four ``rabbitmq.processor.*``
+    templates rather than being spelled as literals -- a renamed convention on
+    the C# side must change what this reads, not silently starve it.
+
+    It starved anyway, and the way it did is worth keeping written down: the
+    convention was not renamed on 2026-08-31, it was EXTENDED. This walked the
+    live queue list, split each name on the ``.dead`` suffix, and took what was
+    left as a processor id. ``processor-<guid>-post.dead`` yielded the id
+    ``<guid>-post``, which matches no row, so the branch lane's parked messages
+    were skipped in silence and the verdict fell through to ``wedged`` or
+    ``running`` -- a different remedy for the same condition, which is exactly
+    what the one-verdict-per-remedy ruling exists to prevent. Resolving each
+    processor's four names explicitly, rather than parsing names back into
+    ids, is what makes a fifth queue a compile-time problem instead of a
+    silent omission.
 
     ``processors`` is expected to be non-empty here -- an empty set means
-    nothing could be attributed to the workflow, and the caller must not
-    call this with it (see ``observe_run``'s ``unscoped`` handling).
+    nothing could be attributed to the workflow, and the caller must not call
+    this with it (see ``observe_run``'s ``unscoped`` handling).
     """
     by_id = index_by_id(entries)
-    work_tpl = by_id["rabbitmq.processor.Work"]["detail"]
-    dead_tpl = by_id["rabbitmq.processor.Dead"]["detail"]
-    work_prefix = work_tpl.split("{processorId}", 1)[0]
-    dead_prefix, dead_suffix = dead_tpl.split("{processorId}", 1)
+    templates = {local: by_id[f"rabbitmq.processor.{local}"]["detail"]
+                 for local in ("Work", "Post", "Dead", "PostDead")
+                 if f"rabbitmq.processor.{local}" in by_id}
+
+    live = {q.get("name", ""): q for q in clients["rabbitmq"].queues()}
+
+    def depth_and_consumers(name):
+        q = live.get(name) or {}
+        return int(q.get("messages") or 0), int(q.get("consumers") or 0)
 
     parked, wedged = [], []
-    for queue in clients["rabbitmq"].queues():
-        name = queue.get("name", "")
-        if not name.startswith(work_prefix):
-            continue
-        if dead_suffix and name.endswith(dead_suffix):
-            processor_id = name[len(dead_prefix):len(name) - len(dead_suffix)]
-            if processor_id not in processors:
-                continue
-            depth = int(queue.get("messages") or 0)
-            if depth > 0:
-                parked.append(processor_id)
-        else:
-            processor_id = name[len(work_prefix):]
-            if processor_id not in processors:
-                continue
-            depth = int(queue.get("messages") or 0)
-            if depth > 0 and int(queue.get("consumers") or 0) == 0:
-                wedged.append(processor_id)
+    for processor_id in sorted(processors):
+        names = {local: _fill(tpl, processorId=processor_id)
+                 for local, tpl in templates.items()}
+        # Either dead-letter queue holding anything is the same finding and the
+        # same remedy -- recover the messages by hand -- so they are one verdict.
+        # Which lane it was still reaches the operator, through the evidence.
+        if any(depth_and_consumers(names[local])[0] > 0
+               for local in ("Dead", "PostDead") if local in names):
+            parked.append(processor_id)
+        # Either live lane with work and no reader is wedged. The post lane
+        # counts: its consumer is a separate gated consumer that can be absent
+        # while the work lane's is attached.
+        if any(depth > 0 and consumers == 0
+               for depth, consumers in (depth_and_consumers(names[local])
+                                        for local in ("Work", "Post") if local in names)):
+            wedged.append(processor_id)
     return sorted(parked), sorted(wedged)
+
+
+def parked_queue_names(entries, clients, processor_id: str) -> list[str]:
+    """Which of a processor's two dead-letter queues actually hold messages.
+
+    The verdict is one string; the evidence has to be specific, because the
+    two lanes fail for different reasons -- a refused dispatch on ``.dead``,
+    and on ``-post.dead`` either a bug on this processor's own send path or a
+    branch carrying another processor's id that the provenance guard refused.
+    """
+    by_id = index_by_id(entries)
+    live = {q.get("name", ""): q for q in clients["rabbitmq"].queues()}
+    holding = []
+    for local in ("Dead", "PostDead"):
+        entry = by_id.get(f"rabbitmq.processor.{local}")
+        if not entry:
+            continue
+        name = _fill(entry["detail"], processorId=processor_id)
+        if int((live.get(name) or {}).get("messages") or 0) > 0:
+            holding.append(name)
+    return holding
 
 
 def observe_run(entries, clients, workflow_id: str, window: str = "1h") -> dict:
@@ -530,9 +580,13 @@ def observe_run(entries, clients, workflow_id: str, window: str = "1h") -> dict:
     # `unscoped` records that the check could not be made -- never silently
     # "no parked messages".
     parked, wedged = ([], []) if unscoped else _queue_states(entries, clients, processors)
+    # Resolved only for the processors actually parked -- one extra broker read
+    # in the one case where the operator is about to be told to go somewhere.
+    parked_queues = {pid: parked_queue_names(entries, clients, pid) for pid in parked}
     return {
         "frozen": _entry_steps_all_never(clients, workflow_id),
         "parked": parked,
+        "parked_queues": parked_queues,
         "wedged": wedged,
         "failed": sorted(set(failed)),
         "completed": completed,

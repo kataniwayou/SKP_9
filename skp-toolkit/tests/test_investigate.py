@@ -294,3 +294,45 @@ class CaseFileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ParkedCoverageTests(unittest.TestCase):
+    """Every dead-letter queue on the broker, not a subset.
+
+    This listed three of eight. ResultPostDead was annotated and never read,
+    the three per-replica fan-out dead queues had no catalog id at all, and
+    PostDead arrived with the 2026-08-31 split. A parked-message verb that
+    omits five of the eight places a message can park answers "nothing is
+    parked" with the same face either way.
+    """
+
+    PROC = "d033b408-8471-4c3d-8acf-3bee6164f01e"
+
+    def rabbit(self):
+        names = ["orchestrator-control.dead", "orchestrator-result.dead",
+                 "orchestrator-result-post.dead",
+                 "orchestrator-control.orchestrator-0.dead",
+                 "orchestrator-control.orchestrator-1.dead",
+                 "orchestrator-control.orchestrator-2.dead",
+                 f"processor-{self.PROC}.dead", f"processor-{self.PROC}-post.dead",
+                 "orchestrator-control", f"processor-{self.PROC}"]
+        return FakeRabbit([{"name": n, "messages": 0, "consumers": 0} for n in names])
+
+    def test_all_eight_dead_letter_queues_are_listed(self):
+        code, lines = investigate.parked(ENTRIES, self.rabbit(), processor_id=self.PROC)
+        self.assertEqual(code, EXIT_OK)
+        self.assertIn("8 dead-letter queue(s)", lines[0])
+        body = "\n".join(lines)
+        for name in ("orchestrator-result-post.dead",
+                     "orchestrator-control.orchestrator-1.dead",
+                     f"processor-{self.PROC}-post.dead"):
+            self.assertIn(name, body)
+
+    def test_no_live_queue_is_listed_as_a_dead_letter_queue(self):
+        _, lines = investigate.parked(ENTRIES, self.rabbit(), processor_id=self.PROC)
+        rows = [line.strip().split(":")[0] for line in lines[1:]]
+        self.assertTrue(all(name.endswith(".dead") for name in rows), rows)
+
+    def test_without_a_processor_the_six_shared_queues_are_still_listed(self):
+        _, lines = investigate.parked(ENTRIES, self.rabbit())
+        self.assertIn("6 dead-letter queue(s)", lines[0])
