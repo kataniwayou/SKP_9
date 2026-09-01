@@ -110,6 +110,18 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
         var slot    = _services.GetRequiredService<ReplySlot<object>>();
         var delay   = TimeSpan.FromSeconds(1);
 
+        // Stated once, unconditionally, before the first ask -- deliberately not from a branch.
+        // The two "no processor registered" lines below also carry the hash, but both are reachable
+        // only when the API is up AND answering: a processor deployed before it reports an
+        // unanswered queue and would never state the hash at all, which is the exact moment an
+        // operator needs it to register the row. On the happy path this is the only record of which
+        // build identity the pod claims, and so the only thing that makes a stale embed -- the
+        // failure SourceHash.targets documents, where the build log and the shipped assembly carry
+        // different hashes -- visible from the pod's own side rather than by unpacking its image.
+        _logger.LogInformation(
+            "resolving identity for source hash {Hash}; asking {Queue}",
+            hash, ProcessorQueues.IdentityQuery);
+
         // Read once, before the first ask, so every line below reports the wait as the operator
         // experiences it — from the moment the processor started asking, not from the last attempt.
         var since = _clock.GetUtcNow();
