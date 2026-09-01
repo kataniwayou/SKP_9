@@ -20,6 +20,10 @@ ENTRIES = [
      "detail": "processor-{processorId}"},
     {"id": "rabbitmq.processor.Dead", "component": "rabbitmq", "operation": "list_queues",
      "detail": "processor-{processorId}.dead"},
+    {"id": "rabbitmq.processor.Post", "component": "rabbitmq", "operation": "list_queues",
+     "detail": "processor-{processorId}-post"},
+    {"id": "rabbitmq.processor.PostDead", "component": "rabbitmq", "operation": "list_queues",
+     "detail": "processor-{processorId}-post.dead"},
     {"id": "elasticsearch.EntryDispatched", "component": "elasticsearch",
      "operation": "search", "detail": "dispatched an entry step"},
     {"id": "elasticsearch.RunningTheStep", "component": "elasticsearch",
@@ -501,6 +505,68 @@ class ObserveRunScopingTests(unittest.TestCase):
         ])
         obs = operate.observe_run(ENTRIES, clients, WF)
         self.assertEqual(obs["parked"], [PROC_IN])
+
+    def test_a_branch_parked_on_the_post_lane_is_reported(self):
+        """The regression this rewrite exists for.
+
+        The old reader split every live queue name on ``.dead`` and took the
+        remainder as a processor id, so ``processor-<guid>-post.dead`` yielded
+        ``<guid>-post``, matched no row, and was skipped in silence. The verdict
+        then fell through to wedged or running -- a different remedy for the
+        same condition.
+        """
+        clients = self.clients([
+            {"name": f"processor-{PROC_IN}-post.dead", "messages": 2, "consumers": 0},
+        ])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["parked"], [PROC_IN])
+        self.assertEqual(
+            obs["parked_queues"][PROC_IN], [f"processor-{PROC_IN}-post.dead"])
+
+    def test_the_post_lane_verdict_names_the_lane_and_the_guard(self):
+        """One verdict, because the remedy is the same -- but the evidence has
+        to say which lane, since the post lane parks for a reason the work lane
+        cannot have."""
+        clients = self.clients([
+            {"name": f"processor-{PROC_IN}-post.dead", "messages": 2, "consumers": 0},
+        ])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        verdict, evidence = operate.resolve_verdict(obs)
+        self.assertEqual(verdict, f"parked-at-processor-{PROC_IN}")
+        body = " ".join(evidence)
+        self.assertIn(f"processor-{PROC_IN}-post.dead", body)
+        self.assertIn("provenance guard", body)
+
+    def test_a_wedged_post_lane_is_reported(self):
+        """The post lane has its own gated consumer, so it can lose its reader
+        while the work lane keeps one. Depth with no consumer is wedged
+        whichever lane it is."""
+        clients = self.clients([
+            {"name": f"processor-{PROC_IN}-post", "messages": 4, "consumers": 0},
+        ])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["wedged"], [PROC_IN])
+
+    def test_a_post_lane_outside_the_workflow_is_still_not_reported(self):
+        """Scoping survives the extra lanes -- the defect fixed here must not
+        reintroduce the unscoped-scan defect this class was written for."""
+        clients = self.clients([
+            {"name": f"processor-{PROC_OUT}-post.dead", "messages": 3, "consumers": 0},
+            {"name": f"processor-{PROC_OUT}-post", "messages": 3, "consumers": 0},
+        ])
+        obs = operate.observe_run(ENTRIES, clients, WF)
+        self.assertEqual(obs["parked"], [])
+        self.assertEqual(obs["wedged"], [])
+
+    def test_the_evidence_falls_back_when_the_caller_resolved_no_queues(self):
+        """resolve_verdict is called directly by fixtures that carry no
+        parked_queues key; it must name both lanes rather than raise."""
+        obs = {"frozen": False, "parked": ["p1"], "wedged": [], "failed": [],
+               "completed": False, "running": False, "dispatched": False,
+               "unscoped": False}
+        verdict, evidence = operate.resolve_verdict(obs)
+        self.assertEqual(verdict, "parked-at-processor-p1")
+        self.assertIn("two dead-letter queues", " ".join(evidence))
 
     def test_no_l2_projection_is_unscoped_not_a_false_all_clear(self):
         """Empty processor set (no skp:{workflowId}:{stepId} keys) must not

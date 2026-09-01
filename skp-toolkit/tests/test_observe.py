@@ -63,6 +63,20 @@ ENTRIES = [
      "detail": "processor-{processorId}"},
     {"id": "rabbitmq.processor.Dead", "component": "rabbitmq", "operation": "list_queues",
      "detail": "processor-{processorId}.dead"},
+    {"id": "rabbitmq.processor.Post", "component": "rabbitmq", "operation": "list_queues",
+     "detail": "processor-{processorId}-post"},
+    {"id": "rabbitmq.processor.PostDead", "component": "rabbitmq", "operation": "list_queues",
+     "detail": "processor-{processorId}-post.dead"},
+    {"id": "rabbitmq.processor.IdentityQuery", "component": "rabbitmq",
+     "operation": "list_queues", "detail": "processor-identity-query"},
+    {"id": "rabbitmq.processor.SchemaQuery", "component": "rabbitmq",
+     "operation": "list_queues", "detail": "schema-definition-query"},
+    {"id": "rabbitmq.orchestrator.ResultPostDead", "component": "rabbitmq",
+     "operation": "list_queues", "detail": "orchestrator-result-post.dead"},
+    {"id": "rabbitmq.fanout.PerReplica", "component": "rabbitmq", "operation": "list_queues",
+     "detail": "orchestrator-control.{instanceId}"},
+    {"id": "rabbitmq.fanout.Dead", "component": "rabbitmq", "operation": "list_queues",
+     "detail": "orchestrator-control.{instanceId}.dead"},
     {"id": "prometheus.pipeline_queue_depth", "component": "prometheus",
      "operation": "instant query on pipeline.queue.depth", "detail": "labels: queue"},
 ]
@@ -183,6 +197,86 @@ class QueuesTests(unittest.TestCase):
         rabbit = FakeRabbit(queues=[])
         code, lines = observe.queues(ENTRIES, rabbit)
         self.assertIn("NOT FOUND", "\n".join(lines))
+
+    def test_all_four_processor_lanes_are_reported(self):
+        """Listing only the work pair reported a healthy two-queue processor
+        while the branch lane was whatever it happened to be."""
+        rabbit = FakeRabbit(queues=[
+            {"name": n, "messages": 0, "consumers": 2} for n in
+            ("processor-p1", "processor-p1-post", "processor-p1.dead", "processor-p1-post.dead")])
+        _, lines = observe.queues(ENTRIES, rabbit, processor_id="p1")
+        joined = "\n".join(lines)
+        # Each of the four must be READ, not merely listed: a name printed as
+        # NOT FOUND would satisfy a substring check while reporting nothing.
+        for name in ("processor-p1", "processor-p1-post",
+                     "processor-p1.dead", "processor-p1-post.dead"):
+            row = next(line for line in lines if line.split()[0:1] == [name])
+            self.assertIn("depth=0", row)
+            self.assertIn("consumers=2", row)
+
+    def test_the_orchestrator_post_dead_queue_is_reported(self):
+        """Annotated since the pipeline-metrics work and read by no verb until
+        now -- the one dead-letter queue of the orchestrator's post hop."""
+        rabbit = FakeRabbit(queues=[
+            {"name": "orchestrator-result-post.dead", "messages": 4, "consumers": 0}])
+        _, lines = observe.queues(ENTRIES, rabbit)
+        self.assertIn("orchestrator-result-post.dead", "\n".join(lines))
+
+    def test_the_rpc_queues_their_annotations_name_this_verb_are_reported(self):
+        rabbit = FakeRabbit(queues=[
+            {"name": "processor-identity-query", "messages": 0, "consumers": 1},
+            {"name": "schema-definition-query", "messages": 0, "consumers": 1}])
+        joined = "\n".join(observe.queues(ENTRIES, rabbit)[1])
+        self.assertIn("processor-identity-query", joined)
+        self.assertIn("schema-definition-query", joined)
+
+
+class FanoutDiscoveryTests(unittest.TestCase):
+    """The per-replica queues are discovered from the broker, because their
+    instance ids are not derivable from source -- they are whichever replicas
+    happen to exist."""
+
+    BY_ID = {e["id"]: e for e in ENTRIES}
+
+    def live(self, *names):
+        return {n: {"name": n, "messages": 0, "consumers": 1} for n in names}
+
+    def test_both_templates_are_resolved(self):
+        found = observe.fanout_queues(self.BY_ID, self.live(
+            "orchestrator-control.orchestrator-0",
+            "orchestrator-control.orchestrator-0.dead"))
+        self.assertEqual(found, ["orchestrator-control.orchestrator-0",
+                                 "orchestrator-control.orchestrator-0.dead"])
+
+    def test_the_shared_control_dead_queue_is_not_a_replica(self):
+        """orchestrator-control.dead shares the prefix and is the shared control
+        queue's own dead-letter queue -- matching it here would double-report it
+        and imply a replica named dead."""
+        found = observe.fanout_queues(self.BY_ID, self.live("orchestrator-control.dead"))
+        self.assertEqual(found, [])
+
+    def test_only_the_dead_template_can_be_asked_for(self):
+        """skp investigate parked needs the dead queues apart from the live
+        ones; a prefix match alone returns both."""
+        found = observe.fanout_queues(
+            self.BY_ID,
+            self.live("orchestrator-control.orchestrator-0",
+                      "orchestrator-control.orchestrator-0.dead"),
+            template_ids=("rabbitmq.fanout.Dead",))
+        self.assertEqual(found, ["orchestrator-control.orchestrator-0.dead"])
+
+    def test_an_instance_id_is_one_segment(self):
+        """Without this the live template's empty suffix swallows its own .dead
+        sibling, and the right answer comes out for the wrong reason."""
+        found = observe.fanout_queues(
+            self.BY_ID,
+            self.live("orchestrator-control.orchestrator-0",
+                      "orchestrator-control.orchestrator-0.dead"),
+            template_ids=("rabbitmq.fanout.PerReplica",))
+        self.assertEqual(found, ["orchestrator-control.orchestrator-0"])
+
+    def test_no_fanout_entry_in_the_catalog_is_not_a_crash(self):
+        self.assertEqual(observe.fanout_queues({}, self.live("anything")), [])
 
 
 if __name__ == "__main__":
