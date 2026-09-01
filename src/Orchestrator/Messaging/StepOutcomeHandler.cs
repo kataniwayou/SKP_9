@@ -205,6 +205,16 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             ? []
             : await ReadAsync(m.EntryId).ConfigureAwait(false);
 
+        // The duplicate-delivery branch. Returning HERE is what makes acking safe: it precedes every
+        // hand-off and the reclaim, so a second attempt at an outcome advances nothing and deletes
+        // nothing. The ids ride the open scope; the template carries none of them.
+        if (data is null)
+        {
+            _logger.LogWarning(
+                "the execution blob is absent — treating as a duplicate delivery, advancing nothing");
+            return;
+        }
+
         // One hand-off per matched successor, each with its own freshly minted key. The mint is
         // NewGuid, matching the processor: a redelivery of this outcome mints new keys and hands the
         // successors off a second time, so a step whose ack was lost advances twice. The reclaim below
@@ -291,24 +301,41 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     }
 
     /// <summary>
-    /// Reads the finished step's blob.
+    /// Reads the finished step's blob. Returns <c>null</c> when the key is absent, which the caller
+    /// treats as a duplicate delivery.
     /// <para>
-    /// <b>An absent key is refused rather than treated as a duplicate delivery</b>, which is the
-    /// opposite of the choice the processor's pre handler makes on the same shape. The reasoning
-    /// differs because the evidence does: a processor holds a dispatch it can prove it already
-    /// finished, since its own reclaim is what removed the key. Here the key could equally have been
-    /// removed by a previous attempt at this outcome or never written at all, and the second is a real
-    /// defect — a step reporting a key it did not produce. Parking is loud and recoverable; acking
-    /// would let the second case pass as the first, forever.
+    /// <b>An absent key is acked, matching the processor's pre handler.</b> This used to park, on the
+    /// grounds that the key could equally have been removed by a previous attempt at this outcome or
+    /// never written at all, the second being a real defect. <b>The second reading is not
+    /// reachable.</b> By the time this runs: the workflow and step are in L1 (a miss already threw
+    /// <see cref="DescribeL1Miss"/> above); <c>EntryId</c> is not the empty sentinel (that path never
+    /// reads); the write happened, because <c>ProcessedDataHandler</c> writes before it sends and
+    /// sends <c>Guid.Empty</c> when it did not write — its own comment says naming the key would
+    /// "send the orchestrator to reclaim a key that was never written"; and nothing else deletes this
+    /// key. The processor's reclaim takes its own INPUT, a different guid, since a fresh key is
+    /// minted per successor below. So an absent key means this outcome was already handled.
     /// </para>
     /// <para>
-    /// <b>The cost is a redelivery whose predecessor got all the way through the reclaim.</b> The
-    /// delete and the acknowledgement are not atomic, so a channel lost between them parks an outcome
-    /// that was in fact handled. It lands in the dead-letter queue with its ids intact rather than
-    /// being lost, and the hand-offs it already sent are unaffected.
+    /// <b>And the park did not preserve what it was for.</b> A parked outcome cannot be replayed —
+    /// the replay re-reads the same absent key and parks again — so it was a message that could only
+    /// be read once and deleted, at the cost of an entry in <c>pipeline.deadletter.depth</c> and an
+    /// interruption. The rate tracked restarts and migrations rather than defects: one planned
+    /// scale-down on 2026-08-31 produced a park 32ms after the replica admitted consumption, for a
+    /// run that had already completed four times over.
+    /// </para>
+    /// <para>
+    /// Logged at Warning rather than the processor's Information, because the processor can PROVE its
+    /// own reclaim removed the key and this infers it from the argument above. A burst here means
+    /// outcomes are being redelivered in volume, which is worth seeing.
+    /// </para>
+    /// <para>
+    /// See <c>docs/superpowers/specs/2026-09-01-absent-key-disposition-design.md</c>. The forgery
+    /// case this branch used to catch incidentally — a real workflow and step with a bogus EntryId —
+    /// belongs to a provenance guard on this queue, the sibling of the one
+    /// <c>ProcessedDataHandler</c> carries; it is not this branch's job and never did it well.
     /// </para>
     /// </summary>
-    private async Task<byte[]> ReadAsync(Guid entryId)
+    private async Task<byte[]?> ReadAsync(Guid entryId)
     {
         _logger.LogDebug("reading the finished step's blob from L2");
 
@@ -320,13 +347,10 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
         if (raw.IsNullOrEmpty)
         {
-            // PARKS, where the processor's pre hop ACKS on the same condition. See the long note at
-            // ProcessDispatchHandler's "entry absent" branch for both sides of that trade; in short,
-            // acking treats a lost ack as the routine cost of at-least-once, while parking keeps
-            // "the processor reported a blob it never wrote" visible. The divergence is deliberate
-            // and unresolved, not an oversight — do not unify it from one side.
-            throw new InvalidOperationException(
-                "the outcome names an execution blob the store does not hold");
+            // Null, not an exception: the caller returns without advancing or reclaiming, and the
+            // consumer acks. Matches ProcessDispatchHandler's "entry absent" branch, which is the
+            // divergence this closes.
+            return null;
         }
 
         return (byte[])raw!;

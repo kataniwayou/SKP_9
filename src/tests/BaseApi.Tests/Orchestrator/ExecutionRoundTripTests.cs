@@ -4,6 +4,7 @@ using BaseApi.Tests.Support;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Orchestrator.L1;
@@ -274,16 +275,22 @@ public sealed class ExecutionRoundTripTests
     }
 
     [Fact]
-    public async Task AnOutcomeNamingABlobTheStoreDoesNotHoldIsRefused()
+    public async Task AnOutcomeNamingABlobTheStoreDoesNotHoldIsAcked()
     {
-        // The opposite disposition to the processor's pre handler on the same shape, and deliberately
-        // so: a processor knows its own reclaim removed the key, this hop cannot tell that from a step
-        // reporting a key it never produced.
+        // INVERTED on 2026-09-01, not deleted: it pinned the opposite disposition and is the reason
+        // the change could not be made silently. It read "this hop cannot tell that from a step
+        // reporting a key it never produced" -- and it can, by elimination. ProcessedDataHandler
+        // writes before it sends and sends Guid.Empty when it did not write; the L1 miss above
+        // already parked anything naming an unknown workflow or step; and the only other deleters of
+        // this key touch a different guid or run where no outcome was ever sent. So the key was
+        // written, and this handler's own reclaim is what removed it.
+        // See docs/superpowers/specs/2026-09-01-absent-key-disposition-design.md.
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Record.ExceptionAsync(
             () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
 
+        Assert.Null(ex);
         Assert.Empty(h.Bus.Sent);
     }
 
@@ -510,5 +517,58 @@ public sealed class ExecutionRoundTripTests
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
         Assert.Contains(h.PreLog.Records, e => e.Message.Contains("the entry step completed"));
+    }
+
+    // ---------------------------------------------------------------- the absent-key disposition
+
+    [Fact]
+    public async Task ADuplicateOutcomeAdvancesNothingAndReclaimsNothing()
+    {
+        // Acking is only safe because the return precedes every hand-off AND the reclaim. If it did
+        // not, a duplicate would either re-dispatch the successor or delete a key belonging to the
+        // pass that is still running.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+
+        // A key that exists but is NOT the one the outcome names: the reclaim must not reach it.
+        var bystander = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        Seed(h, bystander, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+        await h.Drain();
+
+        Assert.Empty(h.Bus.Sent);
+        Assert.True(h.L2.Has(L2ProjectionKeys.ExecutionData(bystander)));
+    }
+
+    [Fact]
+    public async Task ADuplicateOutcomeIsLoggedAtWarning()
+    {
+        // Warning, not the processor's Information: the processor can PROVE its own reclaim removed
+        // the key and this infers it. A burst means outcomes are being redelivered in volume, and
+        // that is the signal the dead-letter queue used to carry at the cost of operator work.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Contains(
+            h.PreLog.Records,
+            e => e.Level == LogLevel.Warning
+                 && e.Message.Contains("duplicate delivery", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheEmptySentinelStillSkipsTheReadEntirely()
+    {
+        // Guid.Empty is not a key and must not take the duplicate branch: a failed source step has
+        // no blob by construction, and its successors are still entitled to be dispatched.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Guid.Empty));
+        await h.Drain();
+
+        Assert.NotEmpty(h.Bus.Sent);
+        Assert.DoesNotContain(
+            h.PreLog.Records,
+            e => e.Message.Contains("duplicate delivery", StringComparison.Ordinal));
     }
 }
