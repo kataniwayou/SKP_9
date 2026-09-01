@@ -30,13 +30,15 @@ spec:
           image: processor-sample:local
           imagePullPolicy: IfNotPresent
           env:
-            # Fallback only. The real service name and version come from the processor's database row,
-            # resolved before the host is built so they can reach the OTel resource. These values are
-            # used only if a host is started without that resolution — which the sample never does.
-            - name: Service__Name
-              value: processor
-            - name: Service__Version
-              value: 0.0.0
+            # NO Service__Name / Service__Version here, deliberately, and do not add them back.
+            # A processor takes its service.name and service.version from its database row, resolved
+            # before the host is built so they can reach the OTel resource, and that row wins over
+            # configuration unconditionally. Setting them here changed nothing: telemetry reported
+            # sample-proc-v9 / 1.5.0 whatever this said, so the pair read as live settings while
+            # being inert -- an operator renaming a processor by editing this manifest would have
+            # seen no effect and no error. The fallback they nominally provided now lives in code
+            # (ProcessorHost, "processor" / "1.0.0"), which is where the other two services declare
+            # theirs.
             # The replica identity that names this pod's liveness key, its reply queue, and the
             # service.instance.id on its telemetry. All three must be the same string, which is why it
             # is resolved once from the downward API rather than three times from three defaults.
