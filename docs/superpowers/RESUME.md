@@ -1,5 +1,37 @@
 # Resume — SK_P9
 
+> **Correction block, 2026-09-01. Everything below is dated 2026-08-24 and parts of it are
+> now false.** It is annotated rather than rewritten, because it is a record of what one
+> session found and editing it to match later decisions would falsify that. Read this block
+> first, then the original for the reasoning that still holds.
+>
+> - **The dashboards are no longer provisioned from the repo.** `795e667` deleted
+>   `build-dashboards.py` and `k8s/24-grafana-dashboards.yaml`, and stripped the provisioning
+>   volumes from `23-grafana.yaml`. The boards target an org-managed Grafana 11.1.0 and are
+>   **hand-edited and hand-imported**, one `DS_PROMETHEUS` input each. So the "proven by
+>   actually restarting Grafana" claim below no longer describes the delivery path, and the
+>   `kubectl apply --server-side` trap for the ConfigMap is moot — there is no ConfigMap.
+>   Anything that rewrites a board must emit `indent=2` with a trailing newline.
+> - **Three boards, not five.** `skp-baseapi`, `skp-orchestrator`, `skp-processor`.
+> - **The generator's drift guarantee is gone.** It emitted the orchestrator and processor
+>   shared panels from one function so the two could not diverge. A shared panel is now edited
+>   twice, by hand, and nothing checks that the two agree.
+> - **Toxiproxy is gone** (`755b020`), and with it both `SlowRedisScenarioTests`. The processor
+>   is back on the production Redis path, which means every latency measurement taken before
+>   that date included a userspace hop production never pays. **There is now no way to inject
+>   slowness on this cluster — only absence.** Finding 1 below ("these boards detect absence,
+>   not degradation") therefore stands and can no longer be demonstrated or regression-tested.
+> - **The topology changed.** Every processor now has four queues, not two: `processor-{id}`,
+>   `-post`, and a `.dead` for each. 18 queues on the broker, 8 of them dead-lettering, all
+>   keyed on their live queue's name.
+> - **`orchestrator-result.dead` holds 1, not 7.** The 2026-08-31 teardown deleted every queue
+>   at 0 messages, so the six real parked outcomes and the synthetic
+>   `deadbee5-0000-4000-8000-000000000001` are gone. The one message there now parked *after*
+>   that date and nobody has looked at it. The "six parked step outcomes" investigation below
+>   has lost its evidence.
+> - **Test counts:** the .NET suite is 733 passed / 20 skipped, exit 0.
+
+
 Written 2026-08-24, late. Replaces whatever was here before; this is the current handoff.
 
 ## Where things stand
