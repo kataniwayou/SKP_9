@@ -58,7 +58,7 @@ public sealed class BootProbeListenerTests
         }
 
         var lines = logs.Snapshot()
-            .Where(r => r.Category == BaseConsole.Core.Health.HealthProbeLog.Category)
+            .Where(r => r.Category == typeof(BaseConsole.Core.Health.HealthProbeLog).FullName)
             .Select(r => r.Message)
             .ToArray();
 

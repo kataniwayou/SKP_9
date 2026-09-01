@@ -241,10 +241,12 @@ replayed, since the replay re-reads the same absent key and parks again.
 - **PromQL label matchers are fully anchored.** `queue=~"processor-$processorId"` excluded the
   `-post` queue entirely from the moment it existed. Same anchoring bug hid it from `skp verify`'s
   orphan check.
-- **Probe outcomes never reach Elasticsearch.** The manifests set
-  `Logging__OpenTelemetry__LogLevel__HealthProbe=None`, so the `HealthProbe` category is stdout-only.
-  Verified both directions: 200 lines in a pod log, 0 records in ES over 24h. Reach for them with
-  `kubectl logs`, not a query.
+- **Probe outcomes now DO reach Elasticsearch.** Until 2026-09-01 the manifests set
+  `Logging__OpenTelemetry__LogLevel__HealthProbe=None` against a fixed `HealthProbe` logger category,
+  keeping the line stdout-only — verified both directions at the time: 200 lines in a pod log, 0
+  records in ES over 24h. That knob and the fixed category are both gone; probe lines are ordinary
+  `BaseApi.Core.Health.HealthProbeLog` / `BaseConsole.Core.Health.HealthProbeLog` records at
+  Information and export like any other log. Budget ~14,400 records per pod per day.
 
 ## The lesson worth carrying
 

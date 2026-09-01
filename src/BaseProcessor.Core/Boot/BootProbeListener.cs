@@ -65,7 +65,7 @@ public sealed class BootProbeListener : IAsyncDisposable
 
         // The same category the real listener uses, so one query spans the boot window and everything
         // after it, and the handover between the two listeners is invisible to whoever is reading.
-        var probeLog = logs.CreateLogger(HealthProbeLog.Category);
+        var probeLog = logs.CreateLogger(typeof(HealthProbeLog));
 
         app.MapGet("/health/startup", () => Answer(probeLog, "startup", HealthStatus.Healthy));
         app.MapGet("/health/live",    () => Answer(probeLog, "live",    HealthStatus.Healthy));

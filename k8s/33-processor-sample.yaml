@@ -47,15 +47,6 @@ spec:
                 fieldRef: { fieldPath: metadata.name }
             # The collector already running in this namespace. Without it the SDK still works and
             # export simply fails quietly, so this is an enrichment rather than a dependency.
-            # The probe line every service now writes at Information. It stays on stdout, where an
-            # operator debugging this pod wants it, and is dropped from the OTLP pipeline before it
-            # reaches Elasticsearch: liveness every 15s plus readiness every 10s is ~14,400 records
-            # per pod per day, and none of them is worth storing while healthy.
-            #
-            # Flip either half without a code change: set this to Information to ship the line to
-            # Elasticsearch too, or set Logging__LogLevel__HealthProbe=None to silence it entirely.
-            - name: Logging__OpenTelemetry__LogLevel__HealthProbe
-              value: "None"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://otel-collector:4317"
             # 10s, against a 15s Prometheus scrape. The collector emits explicit sample

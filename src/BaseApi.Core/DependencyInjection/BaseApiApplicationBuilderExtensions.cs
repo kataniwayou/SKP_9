@@ -81,7 +81,7 @@ public static class BaseApiApplicationBuilderExtensions
                 HealthProbeLog.Write(
                     context.RequestServices
                         .GetRequiredService<ILoggerFactory>()
-                        .CreateLogger(HealthProbeLog.Category),
+                        .CreateLogger(typeof(HealthProbeLog)),
                     tag,
                     report,
                     context.Response.StatusCode);

@@ -65,9 +65,8 @@ public sealed class EmbeddedHealthEndpointService : IHostedService
         _app = builder.Build();
 
         // From the outer factory, so it inherits the outer host's providers and its configured
-        // filters. The category is fixed rather than this class, so one settings key silences the
-        // probe line here and in the API alike.
-        _probeLog = _outer.GetRequiredService<ILoggerFactory>().CreateLogger(HealthProbeLog.Category);
+        // filters. Categorised by the type that renders the line, like every other logger here.
+        _probeLog = _outer.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(HealthProbeLog));
 
         _app.MapGet("/health/live",    () => ProbeAsync("live"));
         _app.MapGet("/health/ready",   () => ProbeAsync("ready"));
