@@ -189,7 +189,16 @@ def check_postgres(entries: list[dict], client) -> list[Claim]:
 # ---------------------------------------------------------------------
 
 _PROCESSOR_QUEUE = re.compile(
-    r"^processor-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\.dead)?$")
+    r"^processor-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"(-post)?(\.dead)?$")
+"""Matches all four of a processor's queues.
+
+The ``-post`` group was added after the 2026-08-31 split. Without it a
+decommissioned processor left two orphans this check could never report: the
+regex is fully anchored, so ``processor-<guid>-post`` simply did not match and
+fell through the loop as though it were somebody else's queue. The same
+anchoring bug that hid the post queue from the Grafana board hid it here, and
+in both places it reads as a clean result rather than a missing one."""
 
 
 def _orphaned_processor_queues(live: set[str], processor_ids: list[str]) -> tuple[list[str], list[str]]:
@@ -206,7 +215,11 @@ def _orphaned_processor_queues(live: set[str], processor_ids: list[str]) -> tupl
         match = _PROCESSOR_QUEUE.match(name)
         if not match or match.group(1) in known:
             continue
-        (dead if match.group(2) else work).append(name)
+        # group(3) is the ``.dead`` suffix; group(2) is ``-post``. A dead queue
+        # is a dead queue whichever lane it belongs to -- the operator's action
+        # is the same -- so the two orphan buckets stay split by live/dead, not
+        # by lane, and the names themselves say which lane.
+        (dead if match.group(3) else work).append(name)
     return work, dead
 
 
@@ -250,7 +263,7 @@ def _processor_deployment_status(processor_id: str, redis_client) -> str:
 
 
 def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None = None,
-                   redis_client=None) -> list[Claim]:
+                   redis_client=None, instance_ids: list[str] | None = None) -> list[Claim]:
     """A queue name's own ``detail`` is the value ``queues()`` extracted from
     source -- concrete (``orchestrator-control``) or templated
     (``processor-{processorId}``, still carrying its ``{`` placeholder since
@@ -292,7 +305,12 @@ def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None 
     exchanges_ok = True
     exchanges_err = ""
     live_exchanges: set[str] = set()
-    if any(e["id"].rsplit(".", 1)[-1] == "DeadLetterExchange" for e in entries):
+    # Any member whose name ends in "Exchange" is an exchange -- three classes
+    # declare a DeadLetterExchange and OrchestratorFanout also declares a plain
+    # Exchange. Matching the exact string "DeadLetterExchange" sent that one to
+    # list_queues, where an exchange can never appear, and REFUTED it: the
+    # catalog was right and the checker was wrong, which is the worse direction.
+    if any(e["id"].rsplit(".", 1)[-1].endswith("Exchange") for e in entries):
         try:
             live_exchanges = {x["name"] for x in client.exchanges()}
         except Unreachable as exc:
@@ -303,7 +321,7 @@ def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None 
     for entry in entries:
         name = entry["detail"]
         local = entry["id"].rsplit(".", 1)[-1]
-        if local == "DeadLetterExchange":
+        if local.endswith("Exchange"):
             if not exchanges_ok:
                 claims.append(Claim("rabbitmq", entry["id"], UNVERIFIABLE,
                               f"list_exchanges failed -- {exchanges_err}"))
@@ -314,6 +332,43 @@ def check_rabbitmq(entries: list[dict], client, processor_ids: list[str] | None 
                 claims.append(Claim("rabbitmq", entry["id"], REFUTED,
                               f"catalog claims exchange {name!r} exists -- absent from "
                               f"rabbitmqctl list_exchanges"))
+        elif "{instanceId}" in name:
+            # The fan-out queues are named for orchestrator REPLICAS, not
+            # processors, so processor_ids cannot fill them. Resolved from
+            # telemetry rather than from the broker being checked: the fan-out
+            # consumers are exactly the exporters of pipeline.leader, and asking
+            # the broker which queues exist to decide which queues should exist
+            # is not a check.
+            #
+            # This is the one check that can catch the failure the fan-out
+            # annotation warns about. The queues are non-exclusive, so a replica
+            # whose name does not resolve to its own queue raises nothing and
+            # logs nothing -- the broadcast quietly becomes a competing-consumer
+            # load balance and two replicas of three run on a stale L1.
+            if instance_ids is None:
+                claims.append(Claim("rabbitmq", entry["id"], UNVERIFIABLE,
+                              f"templated name {name!r} -- could not resolve orchestrator "
+                              f"replica ids (prometheus was unreachable)"))
+            elif not instance_ids:
+                claims.append(Claim("rabbitmq", entry["id"], NOT_OBSERVED,
+                              f"templated name {name!r} -- no orchestrator replicas "
+                              f"exporting pipeline.leader to resolve it against"))
+            else:
+                resolved = [_fill(name, instanceId=iid) for iid in instance_ids]
+                missing = [r for r in resolved if r not in live]
+                if missing:
+                    claims.append(Claim("rabbitmq", entry["id"], REFUTED,
+                                  f"catalog claims {name!r} resolves to a live queue for "
+                                  f"every orchestrator replica -- missing: "
+                                  f"{', '.join(missing)}. These queues are non-exclusive, "
+                                  f"so a replica without its own queue does not fail "
+                                  f"loudly: the broadcast degrades into a competing-"
+                                  f"consumer load balance and the replicas that miss an "
+                                  f"announcement keep a stale L1"))
+                else:
+                    claims.append(Claim("rabbitmq", entry["id"], CONFIRMED,
+                                  f"{len(resolved)} replica queue(s) present: "
+                                  f"{', '.join(resolved)}"))
         elif "{" in name:
             if processor_ids is None:
                 claims.append(Claim("rabbitmq", entry["id"], UNVERIFIABLE,
@@ -1041,6 +1096,41 @@ def check_cluster(entries: list[dict], raw_cluster) -> list[Claim]:
 # orchestration
 # ---------------------------------------------------------------------
 
+def _resolve_instance_ids(clients: dict, reachable: dict[str, bool]) -> list[str] | None:
+    """Orchestrator replica ids, for ``check_rabbitmq`` to fill
+    ``orchestrator-control.{instanceId}`` with.
+
+    Sourced from ``pipeline.leader``, which only the orchestrator exports and
+    which every replica exports (one reporting 1, the rest 0) -- so its
+    ``service_instance_id`` values are exactly the set of replicas that should
+    each own a fan-out queue. Deliberately NOT sourced from the broker: asking
+    which queues exist in order to decide which queues should exist confirms
+    nothing.
+
+    The live series carries the ``_ratio`` suffix OpenTelemetry appends for a
+    unitless gauge, so the bare name is tried first and the observed rendering
+    second -- the same pair ``skp observe gate`` already handles rather than
+    hardcoding whichever one happens to work today.
+
+    ``None`` means Prometheus could not be reached (a gap, UNVERIFIABLE);
+    ``[]`` means it answered and no replica is exporting (NOT_OBSERVED).
+    """
+    if not reachable.get("prometheus"):
+        return None
+    for expr in ("pipeline_leader", "pipeline_leader_ratio"):
+        try:
+            series = clients["prometheus"].query(expr)
+        except Unreachable:
+            return None
+        except Exception:  # pragma: no cover -- defensive, mirrors check_prometheus
+            series = []
+        if series:
+            return sorted({s.get("metric", {}).get("service_instance_id")
+                           for s in series
+                           if s.get("metric", {}).get("service_instance_id")})
+    return []
+
+
 def _resolve_processor_ids(clients: dict, reachable: dict[str, bool]) -> list[str] | None:
     """Real processor ids for ``check_rabbitmq`` to fill ``processor-{processorId}``
     with -- the BaseAPI list preferred (the same route ``check_api`` already
@@ -1108,7 +1198,8 @@ def verify_all(entries: list[dict], clients: dict, component: str | None = None,
             processor_ids = _resolve_processor_ids(clients, reachable)
             redis_for_status = clients.get("redis") if reachable.get("redis") else None
             claims += check_rabbitmq(comp_entries, clients["rabbitmq"], processor_ids,
-                                     redis_for_status)
+                                     redis_for_status,
+                                     _resolve_instance_ids(clients, reachable))
         elif comp == "elasticsearch":
             claims += check_elasticsearch(comp_entries, clients["elasticsearch"])
         elif comp == "prometheus":
