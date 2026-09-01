@@ -528,6 +528,15 @@ what a restart inside the range does to them.
 > moved it from **0.050-0.060s to 0.973s** on p95 -- a fault that "not one panel, not one stat"
 > could see now lands red on the board an operator opens first. See **Step latency, and the fault
 > that finally moved a panel**.
+>
+> **The lever is gone (2026-09-01), and this scenario cannot be re-run.** Toxiproxy was removed and
+> the processor repointed straight at `redis:6379`: the permanent proxy hop put the processor on a
+> Redis path production does not have, so every latency measured on it here carried a cost
+> production never pays. The finding above stands as recorded -- the instrument it produced,
+> `pipeline.step.elapsed`, is production code and is unaffected -- but with `tc netem` unavailable
+> on this kernel there is now no way to inject slowness rather than absence on this cluster, so no
+> future scenario can reproduce this run. Recovering the capability means an opt-in overlay rather
+> than a permanent hop; the removal is `git show` on the commit that deleted `k8s/13-toxiproxy.yaml`.
 
 **S11, a store slower than its own probe timeout -- and it reads exactly like an outage.**
 
