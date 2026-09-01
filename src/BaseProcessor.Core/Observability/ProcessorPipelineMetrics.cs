@@ -29,10 +29,24 @@ internal static class ProcessorPipelineMetrics
 /// Owns <c>pipeline.identity.ready</c>.
 /// <para>
 /// Reads <see cref="IProcessorContext.Identity"/> being non-null, deliberately NOT
-/// <see cref="IProcessorContext.IsHealthy"/> — the two are distinct. An unregistered processor waits
-/// for its identity row rather than restarting, so a pod sitting Running/NotReady with zero restarts
-/// is by design; without this gauge that state is indistinguishable from a hang. Identity resolving
-/// is the specific transition this gauge exists to make legible.
+/// <see cref="IProcessorContext.IsHealthy"/> — the two are distinct. A context whose identity is
+/// gone is not merely unhealthy; it cannot accept work at all, and that is the line this gauge draws.
+/// </para>
+/// <para>
+/// <b>In production this gauge only ever publishes 1, and the waiting state is its ABSENCE.</b> The
+/// tempting reading — that a 0 here marks a processor still waiting for a row matching its
+/// SourceHash — is wrong, and both dashboard panels asserted it until 2026-09-01. Identity is
+/// resolved in stage 1 by <c>BrokerIdentityBootstrap</c>, and only then does
+/// <c>ProcessorHost.Create</c> build the host that owns this meter; a pod still waiting has no
+/// MeterProvider and exports no series of any name. Verified against a processor left unregistered
+/// for 102 minutes: zero series, not a zero value. So an operator reading these panels must read a
+/// MISSING replica as waiting — the state is legible in <c>kubectl logs</c>
+/// (<c>no processor registered for source hash …</c>), not here.
+/// </para>
+/// <para>
+/// The 0 branch below is kept rather than replaced with a constant 1: it is what the tests drive,
+/// and it is the honest reading of a context that has no identity, whatever the reason. It simply
+/// cannot be reached by the deployment ordering this system actually has.
 /// </para>
 /// <para>
 /// <b>Observable created once in a static constructor, over a registry, not in the instance

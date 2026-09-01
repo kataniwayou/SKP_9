@@ -44,8 +44,11 @@ public sealed class ProcessorPipelineMetricsTests
     [Fact]
     public void IdentityReadyFollowsWhetherTheRowHasResolved()
     {
-        // An unregistered processor waits rather than restarting -- Running/NotReady with 0 restarts
-        // is by design, and this gauge is what makes that state legible instead of alarming.
+        // Drives the 0 branch, which production cannot reach: identity resolves in stage 1, before
+        // ProcessorHost.Create builds the host that owns this meter, so a processor still waiting for
+        // its row exports no series at all rather than a 0. The branch is worth keeping and worth
+        // testing -- it is the honest reading of a context with no identity -- but nothing on a
+        // dashboard will ever show it. See ProcessorPipelineMetricsHost's own remarks.
         //
         // ASSERT THE DELTA, NOT THE SET. The registry is process-wide and the gauge is deliberately
         // untagged -- there is one IProcessorContext per process, so a disambiguating tag would be a
