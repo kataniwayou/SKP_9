@@ -35,9 +35,16 @@ DASH = pathlib.Path(__file__).parent / "dashboards"
 # grafana/chaos-probe.py substitutes the same two for the same reason; if you change one,
 # change both. ($__range stays deliberately wide at 1h: it is an operator choice, not a
 # cadence constant, and a wide range is the widest selection to validate against.)
+#
+# The _s / _ms forms MUST be listed, and resolve() MUST substitute longest-key-first. Without both,
+# "$__range" is replaced inside "$__range_s" and leaves the literal "1hs", which Prometheus rejects
+# with a bare HTTP 400 -- a failure that reads like a broken query rather than a broken substitution.
 SUBS = {
+    "$__rate_interval_ms": "60000",
     "$__rate_interval": "60s",
+    "$__interval_ms": "15000",
     "$__interval": "15s",
+    "$__range_s": "3600",
     "$__range": "1h",
     "$service_name": ".*",
     "$service_version": ".*",
@@ -54,8 +61,10 @@ SUBS = {
 
 
 def resolve(expr):
-    for k, v in SUBS.items():
-        expr = expr.replace(k, v)
+    # Longest key first: every "_s" / "_ms" variable has a shorter variable as its prefix, so
+    # insertion order alone is too fragile a guarantee for something that fails as a bare HTTP 400.
+    for k in sorted(SUBS, key=len, reverse=True):
+        expr = expr.replace(k, SUBS[k])
     return expr
 
 
