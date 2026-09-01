@@ -23,6 +23,17 @@ Everything green, all measured today:
 | `grafana/check-expressions.py http://localhost:19090` | 96 returning, 1 empty (intentional), 0 invalid |
 | `grafana/audit-instruments.py http://localhost:19090` | all 16 instruments have live series |
 
+**The two `skp` rows need a memory folder, and it does not survive a session.** It is written
+outside the repo by design (`.gitignore` does not cover it), so recreate it before running either:
+
+```bash
+cd skp-toolkit
+python -m skp init --home <TEMP OUTSIDE THE REPO> --source-root ../src --project skp   --endpoint baseapi=http://localhost:18080   --endpoint prometheus=http://localhost:19090   --endpoint elasticsearch=http://localhost:19200
+```
+
+`--home` must come BEFORE the subcommand on the verb groups (`skp operate --home X verify`, not
+`skp operate verify --home X`). Everything else in the table needs only the repo and the cluster.
+
 Cluster is **kind**, node `desktop-control-plane`, despite the kubectl context being named
 `docker-desktop`. Namespace `skp`. 1 API, 3 orchestrator (StatefulSet), 2 processor (Deployment),
 all Ready, 0 restarts. Port-forwards are supervised and on **offset** ports
