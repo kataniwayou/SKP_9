@@ -1150,6 +1150,16 @@ four-minute window every orchestrator queue held a flat 0 while the processor wo
 ran **mean 0.65, max 3** — a cron fire dispatches a batch against `PrefetchCount` 1 and two
 replicas drain it one at a time. Green below 5 clears that; red at 20.
 
+> **Baseline retaken 2026-08-31, after the work/post split** (recovered here from
+> `7ac5ce2`, which wrote it into `build-dashboards.py` one day before `795e667` deleted
+> that file — so it survived only in git history). Over 30 minutes at 15s the work queue
+> ran **mean 0.03, max 1** and the post queue a **flat 0**.
+>
+> **This must NOT be read as the split lowering depth.** The 0.65 / max 3 above was
+> measured under a soak; this workload is a periodic burst, and a window without a burst
+> measures the idle state. The two numbers describe different workloads, not a before and
+> after. The band stays at 5, which clears the higher of the two.
+
 ### What it still cannot do
 
 - **A consumer that reattaches inside one 10s probe interval is invisible** — which is

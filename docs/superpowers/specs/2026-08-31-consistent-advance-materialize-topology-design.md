@@ -262,6 +262,16 @@ rode along with the `x-delivery-limit: -1` teardown already required, at no extr
 4. Deploy and scale up, API first so `orchestrator-control` and the identity-query responder exist
    before anything dials them. Topologies re-declare on connection setup.
 
+> **Annotation, 2026-09-01 — the hash in step 3 is superseded, and the record is left as written.**
+> `ac23c1e` edited `BaseProcessor.Core/Processing/ProcessedDataHandler.cs` to restore the WR-02
+> provenance guard (§10 said the guard belonged in its own change; this is that change). That file
+> is inside the SourceHash fold, so the fleet re-registered again and the live value is now
+> `c9ab4a65b0479195b3a2dfbf7f8c55babdb0fb3a153555f4e88a14e31b5c529b` — confirmed against both the
+> pod's first log line and the registered row. Anyone repointing a row from step 3's value would
+> point it at a binary that no longer exists. The step is not rewritten because it is a dated
+> record of what ran; the rule it illustrates is the one that matters, and it fired twice in two
+> days: **read the hash from the pod, never from a document.**
+
 ### 8.1 Verified after the fact
 
 | Check | Result |

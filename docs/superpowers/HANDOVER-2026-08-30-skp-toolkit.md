@@ -1,7 +1,8 @@
 # Handover: the SKP toolkit (phases 1–3 partial)
 
-Date: 2026-08-30 (verification section and phase-3 status updated 2026-08-31)
-Branch: `orchestrator-board-parity` (69 commits merged; working tree clean)
+Date: 2026-08-30 (verification section and phase-3 status updated 2026-08-31;
+catalog re-grounded against the post-split system 2026-09-01 -- see the last section)
+Branch: `topology/advance-materialize-consistency`
 Spec: `docs/superpowers/specs/2026-08-30-skp-skill-bundle-design.md`
 Plan: `docs/superpowers/plans/2026-08-30-skp-toolkit-ground-and-compile.md`
 
@@ -14,7 +15,7 @@ not recall**, because a small model's characteristic failure is confabulation �
 asked something it does not know, it invents a plausible answer and reports it
 confidently.
 
-**466 tests.** `python -m unittest discover -s tests -t .` from `skp-toolkit/`.
+**515 tests.** `python -m unittest discover -s tests -t .` from `skp-toolkit/`.
 
 ## Commands that exist
 
@@ -113,9 +114,10 @@ python -m skp verify --home <same> --probe-writes --probe-runs
   not `skp operate verify --home X`). It is declared on each group's own parser;
   the wrong order exits 1 with "unrecognized arguments".
 
-## Verification status: 135/135 (100%), no ceiling
+## Verification status: 141/141 (100%), no ceiling
 
-`skp verify --probe-writes --probe-runs`, live, four consecutive runs. The verb
+`skp verify --probe-writes --probe-runs`, live. Was 135/135 on 2026-08-31; the six
+surfaces added on 2026-09-01 are all confirmed against the running system. The verb
 prints `no refutations — every checkable claim is confirmed or legitimately not
 observed`, and the ceiling clause is gone because nothing is refuted and nothing
 is permanently excluded.
@@ -123,7 +125,7 @@ is permanently excluded.
 **This 100% is perishable, and that is the most important sentence here.** Three
 of the claims are Elasticsearch templates that only exist because a fault was
 injected to produce them (recipe below). Elasticsearch retains ~17 days. Around
-**2026-09-17** those records age out and the ratio falls back to 132/135 unless
+**2026-09-17** those records age out and the ratio falls back to 138/141 unless
 the injection is repeated. A 100% that expires without anyone noticing is exactly
 the kind of quiet lie this toolkit exists to prevent — so read the date, not just
 the number.
@@ -144,7 +146,7 @@ How the previous three residuals were closed:
    asserted "grepped across src/**/*.cs; only its own definition matches" — false
    the moment the definition went, so it had to go too. The generic
    `PERMANENT EXCLUSION` machinery in `render_report` stays and is still tested;
-   no surface carries the marker today. Catalog is 135, not 136.
+   no surface carries the marker today. Catalog was 135 there; it is 141 now.
 3. **`redis.ExecutionData` was a fixable race, not an inherent one.** Measured on
    the cluster, the delay from `200 OK` on `orchestration/start` to the first
    `skp:data:*` key was **2.39s, 9.98s and 8.83s** — against a probe window of
@@ -220,3 +222,110 @@ running against the live cluster over reading code; source is not the system.
   never a pass. Row counts proven identical before/after.
 - **NOT OBSERVED, REFUTED and UNVERIFIABLE are three different verdicts.**
   Collapsing them makes the verb cry wolf and be ignored.
+
+---
+
+## Re-grounding against the post-split system (2026-09-01)
+
+Twenty commits landed between the phase-3 handover and this section. **Two touched
+a file the toolkit tracks; eighteen did not**, and the drift lock can only see the
+two. What the other eighteen changed had to be found by reading commits and by
+reading the running system.
+
+### What the completeness check caught by itself
+
+The 2026-08-31 advance/materialize split added `ProcessorQueues.Post` and
+`PostDead`, and `skp init` refused to compile until both were annotated. Working
+as designed.
+
+### What nothing caught
+
+- **`Messaging.Contracts/OrchestratorFanout.cs` was not in `SOURCE_MAP`.** Six
+  live queues and two exchanges — `orchestrator-fanout`, `orchestrator-fanout-dlx`
+  and the three per-replica `orchestrator-control.{instanceId}` pairs — had no
+  catalog id at all. The coverage check could not report this: it enumerates
+  surfaces from the files `SOURCE_MAP` lists, so an unlisted contract file is not
+  an uncovered surface, it is not a surface at all. Section 6.3 of the design names
+  these queues explicitly, which is how far a promise gets without a reader. Found
+  by running `rabbitmqctl list_queues` and counting.
+- **`pipeline.process.start.timestamp` carried an instruction that is false.** The
+  annotation said "changes() is the whole query" and "POD_NAME identity is what
+  keeps a restart on the same series". Measured over 12h on 2026-09-01:
+  `changes()` returns **0 across all 23 processor pod-name series while 21 starts
+  had happened**, and 0 across 10 baseapi series against 9 starts. On a Deployment
+  every restart mints a new pod name, so a restart arrives as a NEW series and
+  neither `changes()` nor `resets()` can observe a series being born. The range
+  form is equally wrong the other way: on the orchestrator StatefulSet it reads 6
+  against `changes()`' true 29. **The workload kind decides the query**, and an
+  instant read in place of `max_over_time` loses every replica that died inside
+  the window (2 against 21, same data).
+- **Four verbs silently under-read the new topology.** `operate verify` parsed
+  `processor-<guid>-post.dead` into the id `<guid>-post`, matched no row, and
+  skipped it — so a parked branch fell through to `wedged` or `running`, a
+  different remedy for the same condition. `investigate parked` listed 3 of 8
+  dead-letter queues. `observe queues` listed 7 of 18. `verify`'s orphan regex is
+  fully anchored and never matched a `-post` lane, so a decommissioned processor
+  left two orphans it could not report.
+- **`skp verify` had no way to check either new kind of surface**, and said so
+  loudly the first time it ran: `fanout.Exchange` ends in "Exchange" but not
+  "DeadLetterExchange", so it was checked against `list_queues` where an exchange
+  can never appear; and `{instanceId}` templates were filled with processor ids.
+  Three REFUTED claims, all of them the checker's fault, not the catalog's.
+
+### Facts worth carrying
+
+- **The registered SourceHash is `c9ab4a65b0479195b3a2dfbf7f8c55babdb0fb3a153555f4e88a14e31b5c529b`.**
+  The topology design records `98de7130…`; `ac23c1e` edited
+  `BaseProcessor.Core/Processing/ProcessedDataHandler.cs`, which is inside the
+  SourceHash fold, and moved it again. Read it from the pod — it is now the
+  processor's first log line, in all three boot outcomes.
+- **Probe outcomes never reach Elasticsearch.** The manifests set
+  `Logging__OpenTelemetry__LogLevel__HealthProbe=None`, so the `HealthProbe`
+  category stays on stdout. Verified both directions: 200 lines in the pod log,
+  **0 records in Elasticsearch over 24h**. Reach for them with `cluster.logs`.
+- **All 8 dead-lettering queues key on their LIVE queue's name.** Verified on the
+  broker. That is what makes a redrive key derivable from the queue that refused
+  the message; before `5f32c35` it was right on three queues and wrong on five.
+- **The fan-out queues are non-exclusive**, so two replicas resolving one name
+  raises no `RESOURCE_LOCKED` and logs nothing — the broadcast degrades into a
+  competing-consumer load balance and two replicas of three run on a stale L1.
+  `skp verify --component rabbitmq` now checks each live replica has its own
+  queue, resolving the replica set from `pipeline.leader` rather than from the
+  broker it is checking.
+- **There is no way to inject slowness on this cluster any more.** `755b020`
+  removed toxiproxy and both `SlowRedisScenarioTests`. Every remaining scenario is
+  binary — absent or present.
+- **`orchestrator-result.dead` holds 1**, and it is not the synthetic one: the
+  2026-08-31 teardown deleted every queue at 0 messages, so this message parked
+  after that date and nobody has looked at it.
+
+### The live proof of the verdict fix
+
+`operate verify` reporting the wrong remedy cannot be proved by a unit test alone,
+so it was proved on the cluster. A `ProcessedData` carrying
+`ProcessorId=deadbee5-0000-4000-8000-000000000002` was published to
+`processor-{id}-post` with `type: processed-data`; the provenance guard refused it
+verbatim in the pod log and parked it; `_queue_states` reported
+`parked-at-processor-d033b408…` naming `-post.dead` and the guard as one of the two
+causes; the queue was purged back to its baseline of 0. Under the previous code
+that message was invisible.
+
+### Gates, all green on 2026-09-01
+
+| Gate | Result |
+| --- | --- |
+| `python -m unittest discover -s tests -t .` | 515 passed |
+| `skp doctor` | every row ok, including the new `verb references` |
+| `skp verify --probe-writes --probe-runs` | **141/141 (100%)**, no refutations |
+| `dotnet test SK_P.sln` | 0 failed, 733 passed, 20 skipped, exit 0 |
+| `grafana/check-expressions.py` | 96 returning, 1 empty (intentional), **0 invalid** |
+| `grafana/audit-instruments.py` | all 16 instruments have live series |
+
+### Still open
+
+- **51 catalog entries name a verb that does not exist yet.** They are now declared
+  in `skp/commands.py` `PLANNED` with a justification each, and `skp doctor` counts
+  them in its `verb references` row rather than hiding them. `skp analyze` does not
+  exist at all; `skp author` ships `validate` and `apply` and nothing else.
+- **Phases 4 and 5 are still unbuilt** — the developer verbs, and the skills
+  themselves. `.claude/skills/skp*` does not exist.
