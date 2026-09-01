@@ -89,10 +89,41 @@ addressable queue on a shared broker and `StepOutcomeHandler` never compares the
 anything but L1. Parking on an absent key was standing in for a provenance check, very indirectly:
 it caught only forgeries that happened to name a bogus `EntryId`, and only after they had already
 been inert. The real answer is the guard `ac23c1e` restored one hop away — `ProcessedDataHandler`
-refusing a branch whose `ProcessorId` is not its own. The orchestrator has no equivalent, and should
-have one; it is out of scope here for the same reason WR-02 was kept out of the topology change: it
-is justified equally before and after this decision, so it belongs in its own change and not riding
-on one that would let it in unexamined.
+refusing a branch whose `ProcessorId` is not its own.
+
+**Added 2026-09-01, in its own change immediately after this one.** `StepOutcomeHandler` now compares
+`m.ProcessorId` against `StepL1.ProcessorId` — "the processor that executes this step" — and refuses
+a mismatch. L1 is the authority here that the processor's own identity is on the other side, and all
+three senders satisfy it: `ProcessedDataHandler`'s two sends carry `p.ProcessorId`, which WR-02 has
+already proven equal to that processor's identity and which the dispatch addressed to
+`processor-{L1.ProcessorId}` put there; `NextStepHandoffHandler`'s failure outcome carries the id the
+orchestrator itself read from this same field.
+
+**It does not reclaim before parking, and that is the one place it departs from the L1-miss branch
+above.** That branch reclaims to avoid leaking a blob. Here the message has just failed an
+authenticity check, so its `EntryId` is unauthenticated input — and a forged outcome can name a blob
+belonging to a real execution still in flight. Reclaiming would make the forgery destructive by our
+own hand, turning a message we refused into a deleted input for a run that was doing nothing wrong.
+A leaked blob is the cheaper failure.
+
+It is checked **before** the read, asserted rather than assumed: after it, a forgery naming an absent
+key would take §1's duplicate-delivery branch and be acked — the guard skipped on exactly the input
+it exists to catch.
+
+The one legitimate way to reach it is a step reassigned to a different processor while an outcome
+from the previous definition is still in flight — the same class of event as a step removed mid-run,
+which the L1-miss branch already parks for the same stated reason.
+
+Verified live: a forged outcome naming a real workflow and a real step with
+`ProcessorId=deadbee5-…0006` parked (dead-letter depth 1 → 2), the log named both the claimed and
+the assigned processor, and **the blob it named survived** — seeded as `PROVENANCE-CANARY` and read
+back intact after the refusal. A real run was started and completed through the guard in the same
+window with no new park, so it passes legitimate traffic rather than parking everything.
+
+**`orchestrator-result.dead` therefore holds 2, and the second is synthetic** — correlation
+`deadbee5-0000-4000-8000-000000000005`, injected to validate this guard, following the same
+convention as the `deadbee5-…0001` marker the 2026-08-24 handover recorded. The first is the genuine
+2026-08-31 incident and is left as evidence.
 
 ## 6. What does not change
 
