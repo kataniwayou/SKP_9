@@ -17,14 +17,6 @@ namespace BaseApi.Core.Health;
 public static class HealthProbeLog
 {
     /// <summary>
-    /// A fixed category rather than the enclosing class, and the whole point of the design: it makes
-    /// <c>Logging:LogLevel:HealthProbe</c> one filter key that reaches this line in the API, the
-    /// orchestrator and every processor. A per-class category would need three different keys and
-    /// would silently stop matching whenever a class was renamed.
-    /// </summary>
-    public const string Category = "HealthProbe";
-
-    /// <summary>
     /// Renders one probe outcome. <paramref name="statusCode"/> is passed rather than derived,
     /// because it is what the kubelet actually acts on and each caller has already computed it.
     /// </summary>

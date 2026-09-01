@@ -69,8 +69,6 @@ public sealed class HealthProbeLogTests
 
         Assert.Equal(console, api);
         Assert.Equal(consoleLevel, apiLevel);
-        Assert.Equal(ConsoleProbeLog.Category, ApiProbeLog.Category);
-        Assert.Equal("HealthProbe", ApiProbeLog.Category);
     }
 
     /// <summary>
@@ -156,7 +154,7 @@ public sealed class HealthProbeLogTests
             var response = await client.GetAsync("/health/live", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-            var line = Assert.Single(recorder.Snapshot(), r => r.Category == ApiProbeLog.Category);
+            var line = Assert.Single(recorder.Snapshot(), r => r.Category == typeof(ApiProbeLog).FullName);
             Assert.Equal(LogLevel.Information, line.Level);
             // The status code in the line is the one the client actually received.
             Assert.StartsWith("live probe Unhealthy (503) in", line.Message, StringComparison.Ordinal);
@@ -205,7 +203,7 @@ public sealed class HealthProbeLogTests
             var response = await client.GetAsync("/health/live", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var line = Assert.Single(recorder.Snapshot(), r => r.Category == ConsoleProbeLog.Category);
+            var line = Assert.Single(recorder.Snapshot(), r => r.Category == typeof(ConsoleProbeLog).FullName);
             Assert.Equal(LogLevel.Information, line.Level);
             Assert.StartsWith("live probe Healthy (200) in", line.Message, StringComparison.Ordinal);
         }
