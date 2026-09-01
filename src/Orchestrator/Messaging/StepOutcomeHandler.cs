@@ -210,6 +210,32 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
                 + "to advance the graph on an outcome whose provenance does not check out");
         }
 
+        // READ BEFORE NARRATING. This sat below the two log lines until the duplicate branch
+        // gave it a reason to move: a delivery that advances nothing was announcing "the entry
+        // step completed" first and discarding itself second. That is not only misleading to
+        // read -- RunLedger's I8 asserts counts[EntryStepCompleted] == shape.EntryBranches
+        // EXACTLY, so a duplicate inflated the count and breached an invariant the chaos
+        // ledger checks. Duplicates that genuinely re-advance still log it, because they take
+        // the whole path below; only the ones that do nothing are now silent about it.
+        // Guid.Empty is not a key. It arrives on three shapes the processor produces — a failed source
+        // step, an output that failed its schema, and a cancellation of a source step — and it means
+        // there is no blob: nothing to read, nothing to copy, nothing to reclaim. The successors are
+        // handed empty data and dispatched with the same sentinel, which the processor's pre handler
+        // already reads as "no upstream input, the author produces its own".
+        var data = m.EntryId == Guid.Empty
+            ? []
+            : await ReadAsync(m.EntryId).ConfigureAwait(false);
+
+        // The duplicate-delivery branch. Returning HERE is what makes acking safe: it precedes every
+        // hand-off and the reclaim, so a second attempt at an outcome advances nothing and deletes
+        // nothing. The ids ride the open scope; the template carries none of them.
+        if (data is null)
+        {
+            _logger.LogWarning(
+                "the execution blob is absent — treating as a duplicate delivery, advancing nothing");
+            return;
+        }
+
         // The record that the grace period did its job. Without it, "stopped mid-flight and drained
         // cleanly" and "was never stopped at all" produce identical logs, so the only visible evidence
         // the mark was ever load-bearing would be the absence of a parked message -- which is not
@@ -232,25 +258,6 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         }
 
         var selection = StepAdvancement.SelectNext(m.Result, completed, entry.Steps);
-
-        // Guid.Empty is not a key. It arrives on three shapes the processor produces — a failed source
-        // step, an output that failed its schema, and a cancellation of a source step — and it means
-        // there is no blob: nothing to read, nothing to copy, nothing to reclaim. The successors are
-        // handed empty data and dispatched with the same sentinel, which the processor's pre handler
-        // already reads as "no upstream input, the author produces its own".
-        var data = m.EntryId == Guid.Empty
-            ? []
-            : await ReadAsync(m.EntryId).ConfigureAwait(false);
-
-        // The duplicate-delivery branch. Returning HERE is what makes acking safe: it precedes every
-        // hand-off and the reclaim, so a second attempt at an outcome advances nothing and deletes
-        // nothing. The ids ride the open scope; the template carries none of them.
-        if (data is null)
-        {
-            _logger.LogWarning(
-                "the execution blob is absent — treating as a duplicate delivery, advancing nothing");
-            return;
-        }
 
         // One hand-off per matched successor, each with its own freshly minted key. The mint is
         // NewGuid, matching the processor: a redelivery of this outcome mints new keys and hands the
