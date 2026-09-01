@@ -1,46 +1,65 @@
 {
   "prometheus.label.service_name": {
-    "intents": ["observe", "investigate"],
+    "intents": [
+      "observe",
+      "investigate"
+    ],
     "answers": "the role that emitted a series -- processor/orchestrator/keeper/webapi; ResourceBuilder.AddService(serviceName:) on both the logs and metrics resources. The Prometheus exporter also derives exported_job from it",
     "never_for": "picking out one replica -- every replica of the same role shares one service_name; use service_instance_id for that",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.label.service_instance_id": {
-    "intents": ["observe", "investigate", "verify"],
-    "answers": "the replica identity carried by every Prometheus series -- InstanceId.Resolve(), the same identity that names a replica's liveness key and reply queue",
-    "never_for": "grouping on instance for a per-replica question -- instance is the scrape target address, and every replica behind one scrape config can share it; service_instance_id is the label that is actually unique per replica. This is the one trap that applies to almost every prometheus.pipeline_* surface in this catalog",
+    "intents": [
+      "observe",
+      "investigate",
+      "verify"
+    ],
+    "answers": "the replica identity carried by every Prometheus series -- InstanceId.Resolve(), which renders as the POD NAME, the same identity that names a replica's liveness key and reply queue",
+    "never_for": "grouping on instance for a per-replica question -- instance is the scrape target address, and every replica behind one scrape config can share it; service_instance_id is the label that is actually unique per replica. This is the one trap that applies to almost every prometheus.pipeline_* surface in this catalog. But it is unique per replica per PROCESS LIFETIME, not per replica, so never use it to count events ACROSS a restart: on a Deployment (baseapi, processor) a restart mints a new pod name and therefore a new series, and any function reading movement WITHIN a series -- changes(), resets(), increase() -- reads 0 forever. On a StatefulSet (orchestrator) the ordinal is reclaimed and the series survives. The workload kind decides; see prometheus.pipeline_process_start_timestamp",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.label.processorId": {
-    "intents": ["investigate"],
+    "intents": [
+      "investigate"
+    ],
     "answers": "the processor's database identity, present on a processor host's metrics resource only -- ResourceAttribute(\"ProcessorId\", \"processorId\", identity.Id) passed to AddBaseConsoleObservability. The metric-side key is the camelCase processorId (MetricKey); the differently-cased ProcessorId is only the log-side key (LogKey), used on log records instead",
-    "never_for": "expecting this label on an orchestrator, keeper, or webapi series -- it is stamped only on a processor host's resource, since name and version alone cannot distinguish two builds of the same processor row",
+    "never_for": "expecting this label on an orchestrator, keeper, or webapi series -- it is stamped only on a processor host's resource, since name and version alone cannot distinguish two builds of the same processor row. Same converse as source: on the processor's Deployment this is the identity that survives a restart, so a per-processor count of process starts groups here and never on service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
     "verb": "skp investigate trace"
   },
   "prometheus.label.service_version": {
-    "intents": ["observe", "investigate"],
+    "intents": [
+      "observe",
+      "investigate"
+    ],
     "answers": "the running build's version, on every series -- ResourceBuilder.AddService(serviceVersion:), the same call that stamps service_name",
     "never_for": "deriving exported_job -- the Prometheus exporter derives that from service_name alone, not this",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.label.source": {
-    "intents": ["observe", "investigate"],
+    "intents": [
+      "observe",
+      "investigate"
+    ],
     "answers": "the application type stamped on every series -- worker/webapi; metric-side casing is lowercase source, the log-side attribute is the PascalCase Source already catalogued as elasticsearch.attr.source. Coarser than service_name and not a substitute for it",
-    "never_for": "picking out a role -- source only distinguishes worker from webapi, not processor from orchestrator from keeper; use service_name for that",
+    "never_for": "picking out a role -- source only distinguishes worker from webapi, not processor from orchestrator from keeper; use service_name for that. Conversely it is the label to REACH FOR when a question must survive a restart on a Deployment -- source (webapi/worker) is stamped on the resource and outlives every pod name, which is why the API's restart count summarises on it",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.label.le": {
-    "intents": ["observe", "analyze", "investigate"],
+    "intents": [
+      "observe",
+      "analyze",
+      "investigate"
+    ],
     "answers": "the bucket upper bound on every histogram series (pipeline.queue.wait, pipeline.consumer.duration, pipeline.produce.duration, pipeline.gate.probe.duration) -- required to compute histogram_quantile(0.95, sum(rate(...[5m])) by (le))",
     "never_for": "a grouping key on its own -- grouping by le alone collapses every real series into its buckets; le is structural to the histogram type, not a TagList entry, so it carries none of the instrument's own tags unless they are also in the by(...) clause",
     "write_authority": "none",

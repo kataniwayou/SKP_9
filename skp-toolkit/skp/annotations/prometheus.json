@@ -1,22 +1,34 @@
 {
   "prometheus.pipeline_consumer_duration": {
-    "intents": ["observe", "analyze", "investigate"],
+    "intents": [
+      "observe",
+      "analyze",
+      "investigate"
+    ],
     "answers": "seconds a delivery was held end-to-end, tagged by queue/type/disposition — every terminal path, not only a successful transform. disposition is exactly one of acked | requeued | parked; reason is NOT carried here, only on pipeline.messages.consumed. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all",
     "never_for": "grouping on instance for a per-replica question — instance is the scrape target, not the replica; use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.pipeline_deadletter_depth": {
-    "intents": ["observe", "investigate", "remediate"],
+    "intents": [
+      "observe",
+      "investigate",
+      "remediate"
+    ],
     "answers": "the standing count of messages parked in a dead-letter queue and not yet dealt with — a level, not an event, so it still reads nonzero long after the counter that recorded the park has scrolled off any rate window",
     "never_for": "trusting a counter view instead — pipeline.messages.consumed{disposition=parked} reports the park once, this is the only surface that still says so later. Also never group on instance — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.pipeline_gate_open": {
-    "intents": ["observe", "investigate", "verify"],
+    "intents": [
+      "observe",
+      "investigate",
+      "verify"
+    ],
     "answers": "1/0: whether this host's projection-store gate is open right now",
     "never_for": "reading degradation — a probe answering 685x slower than baseline but still inside the timeout still reads open=1 here; that is pipeline.gate.probe.duration's job. Never group on instance — use service_instance_id",
     "write_authority": "none",
@@ -24,7 +36,11 @@
     "verb": "skp observe gate"
   },
   "prometheus.pipeline_gate_probe_duration": {
-    "intents": ["observe", "analyze", "investigate"],
+    "intents": [
+      "observe",
+      "analyze",
+      "investigate"
+    ],
     "answers": "how long the projection store took to answer the gate probe, tagged by outcome — the only place a store that is merely much slower, not down, becomes visible",
     "never_for": "grouping on instance for a per-replica question — use service_instance_id",
     "write_authority": "none",
@@ -32,71 +48,101 @@
     "verb": "skp analyze latency"
   },
   "prometheus.pipeline_gate_trips": {
-    "intents": ["observe", "analyze", "investigate"],
+    "intents": [
+      "observe",
+      "analyze",
+      "investigate"
+    ],
     "answers": "falling-edge count only — how many times this host's gate closed, so the number means outages, not transitions; half of a naive both-directions count would be recoveries",
     "never_for": "a live open/closed reading — that is pipeline.gate.open; a host with no gate registered exports no series at all, which is not the same as zero. Never group on instance — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.pipeline_hydration_admitted": {
-    "intents": ["observe", "verify"],
+    "intents": [
+      "observe",
+      "verify"
+    ],
     "answers": "1 once the orchestrator's first L2 hydration pass finished and consumption was admitted — one-shot, orchestrator-only",
     "never_for": "a processor's own boot signal — that is pipeline.identity.ready. Never group on instance — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp verify restart"
+    "verb": "skp verify --component prometheus"
   },
   "prometheus.pipeline_identity_ready": {
-    "intents": ["observe", "verify"],
+    "intents": [
+      "observe",
+      "verify"
+    ],
     "answers": "1 once this processor resolved its identity row and can accept work — one-shot, processor-only",
     "never_for": "the orchestrator's hydration signal — that is pipeline.hydration.admitted. Never group on instance — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp verify restart"
+    "verb": "skp verify --component prometheus"
   },
   "prometheus.pipeline_leader": {
-    "intents": ["observe", "verify", "investigate"],
+    "intents": [
+      "observe",
+      "verify",
+      "investigate"
+    ],
     "answers": "1 while this orchestrator replica holds the lease and fires schedules — followers still consume, they just do not fire cron",
     "never_for": "grouping on instance to find which replica leads — instance is the scrape target; use service_instance_id to pick out the one replica reporting 1",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe leader"
+    "verb": "skp observe rate"
   },
   "prometheus.pipeline_loop_iterations": {
-    "intents": ["observe", "verify", "analyze"],
+    "intents": [
+      "observe",
+      "verify",
+      "analyze"
+    ],
     "answers": "iterations completed by a named loop; rate() over a window is the loop's liveness — a stalled loop reads rate()==0 rather than an absent series, because every loop seeds at zero on start",
     "never_for": "grouping on instance for a per-replica question — the loop name alone does not say which replica stalled; use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp verify liveness"
+    "verb": "skp verify --component prometheus"
   },
   "prometheus.pipeline_messages_consumed": {
-    "intents": ["observe", "analyze"],
+    "intents": [
+      "observe",
+      "analyze"
+    ],
     "answers": "deliveries handled, by queue, type, disposition (acked/requeued/parked) and reason. The (disposition, reason) pair is exactly one of six closed by GatedQueueConsumer: acked/handled, parked/refused, requeued/gate_closed, requeued/store_unreachable, requeued/send_failed, requeued/escaped — hand-listed here because the values are inline literals, not consts, so the extractor correctly declines to claim this domain in the catalogued detail. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all, so \"leaders versus followers\" is answerable here only on an orchestrator's own series",
     "never_for": "whether a parked delivery actually landed in a dead-letter queue — there is no landed tag here by design; that is on the consumer's own log line or pipeline.deadletter.depth. Never group on instance — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.pipeline_messages_produced": {
-    "intents": ["observe", "analyze"],
+    "intents": [
+      "observe",
+      "analyze"
+    ],
     "answers": "messages handed to the broker, by route, destination, type and outcome. outcome is exactly one of accepted | unroutable | transient | refused (EgressMetrics.Classify) — hand-listed here because the values are inline literals, not consts, so the extractor correctly declines to claim this domain in the catalogued detail. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all",
     "never_for": "grouping on instance for a per-replica question — use service_instance_id",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp observe metric"
+    "verb": "skp observe rate"
   },
   "prometheus.pipeline_process_start_timestamp": {
-    "intents": ["observe", "investigate"],
-    "answers": "unix seconds this process started; changes() over a window counts restarts on a stable per-pod series",
-    "never_for": "counting restarts with resets() as if this were a counter — it is a gauge timestamp, changes() is the whole query. Never group on instance — use service_instance_id, since POD_NAME identity is what keeps a restart on the same series",
+    "intents": [
+      "observe",
+      "investigate"
+    ],
+    "answers": "unix seconds this process started (live series name carries the unit suffix: pipeline_process_start_timestamp_seconds). Counting restarts over a window depends on the WORKLOAD KIND and the two forms are not interchangeable. StatefulSet (orchestrator): the pod name is reclaimed, a restart moves the timestamp inside one series, and changes(...[range]) is correct. Deployment (baseapi, processor): every restart mints a new pod name, so a restart arrives as a NEW series -- count the series whose recorded start falls inside the window, count by (<label that survives a restart>) (max_over_time(...[range]) >= time() - <range secs>)",
+    "never_for": "counting restarts with resets() as if this were a counter -- it is a gauge timestamp. Never changes() on a Deployment-backed service: measured 2026-09-01 over 12h it returned 0 across all 23 processor pod-name series while 21 starts had happened, and 0 across 10 baseapi series against 9 starts -- neither changes() nor resets() can observe a series being BORN. Never the range form on a StatefulSet either: it collapses repeated restarts of one pod into a single in-window start, reading 6 against changes()' true 29 over the same window. Never an INSTANT read in place of max_over_time over the range -- an instant vector holds only series still alive, so replicas that started and died inside the window vanish (2 against 21, same data). Never group by service_instance_id when counting starts on a Deployment: it is the label that CHANGES per restart, so every group holds exactly one start -- group by processorId (processor) or source (baseapi), which survive. And never group on instance, which is the scrape target",
     "write_authority": "none",
     "cost": "cheap",
     "verb": "skp investigate restart"
   },
   "prometheus.pipeline_produce_duration": {
-    "intents": ["observe", "analyze"],
+    "intents": [
+      "observe",
+      "analyze"
+    ],
     "answers": "time from starting a send until the broker confirmed or refused it. outcome is exactly one of accepted | unroutable | transient | refused (EgressMetrics.Classify) — hand-listed here because the values are inline literals, not consts, so the extractor correctly declines to claim this domain in the catalogued detail. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all",
     "never_for": "grouping on instance for a per-replica question — use service_instance_id",
     "write_authority": "none",
@@ -104,15 +150,23 @@
     "verb": "skp analyze latency"
   },
   "prometheus.pipeline_queue_consumers": {
-    "intents": ["observe", "investigate", "verify"],
+    "intents": [
+      "observe",
+      "investigate",
+      "verify"
+    ],
     "answers": "consumers the broker has attached to a live queue, reported by the broker itself rather than self-asserted by the process — zero means nothing is listening",
     "never_for": "catching a consumer that reattached inside one probe interval — that is still invisible here. This is broker-wide truth duplicated across every polling replica's own export; group by queue, and use service_instance_id rather than instance if isolating one poller's copy",
     "write_authority": "none",
     "cost": "cheap",
-    "verb": "skp verify consumers"
+    "verb": "skp verify --component prometheus"
   },
   "prometheus.pipeline_queue_depth": {
-    "intents": ["observe", "investigate", "analyze"],
+    "intents": [
+      "observe",
+      "investigate",
+      "analyze"
+    ],
     "answers": "messages ready in a live queue — work arrived and not yet taken; the one leading indicator on these boards, since consuming/freshness/liveness signals only degrade after the fact",
     "never_for": "distinguishing backlog from loss on its own — pair with produced-minus-consumed: a gap roughly equal to depth is backlog, a gap far exceeding it is loss. It counts READY messages only, not unacked, and that is accurate only because PrefetchCount is 1",
     "write_authority": "none",
@@ -120,7 +174,11 @@
     "verb": "skp analyze backlog"
   },
   "prometheus.pipeline_queue_wait": {
-    "intents": ["observe", "analyze", "investigate"],
+    "intents": [
+      "observe",
+      "analyze",
+      "investigate"
+    ],
     "answers": "seconds between a message being published and a consumer picking it up, labelled by queue. Also carries role=leader|follower, but ONLY on the orchestrator (PipelineAmbientTag) — a processor's series carry no role tag at all",
     "never_for": "the broker wait alone — the timestamp is stamped before publish, so this double-counts the sender's own confirm (roughly 12 of ~13ms on this stack); subtract pipeline.produce.duration for the true wait. Never group on instance — use service_instance_id",
     "write_authority": "none",
