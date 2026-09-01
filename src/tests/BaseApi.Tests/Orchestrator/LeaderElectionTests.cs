@@ -1,3 +1,6 @@
+using BaseConsole.Core.Messaging;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Orchestrator.Election;
 using Xunit;
 
@@ -48,12 +51,61 @@ public sealed class LeaderElectionTests
     }
 
     [Fact]
-    public void TheLeaseCoordinatesAreFixed()
+    public void TheLeaseNameIsFixed()
     {
-        // Nothing dynamic and nothing configurable feeds the lease's namespace or name: all three
-        // replicas must contend for the same object, and a value that could differ between them would
-        // give each its own lease and therefore its own leadership.
-        Assert.Equal("skp", LeaderElectionService.LeaseNamespace);
+        // Nothing feeds the lease's NAME: all three replicas must contend for the same object, and a
+        // name that could differ between them would give each its own lease and therefore its own
+        // leadership. The namespace is configurable (below) only because the manifest binds it to the
+        // pod's own namespace, which one pod template cannot vary across replicas.
         Assert.Equal("orchestrator-leader", LeaderElectionService.LeaseName);
+    }
+
+    [Fact]
+    public void TheLeaseNamespaceFallsBackWhenUnconfigured()
+    {
+        // The off-cluster shape. Absent is legal rather than fatal: the election is registered only
+        // in-cluster, so a local run has no namespace to require.
+        Assert.Equal("skp", LeaderElectionService.DefaultLeaseNamespace);
+        Assert.Equal("skp", Service(configured: null).LeaseNamespace);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ABlankLeaseNamespaceFallsBackRatherThanPassingThrough(string configured)
+    {
+        // An environment variable set to the empty string is a deployment mistake, and a Lease
+        // request against an empty namespace fails in a way that reads as an RBAC problem rather
+        // than as the typo it is.
+        Assert.Equal("skp", Service(configured).LeaseNamespace);
+    }
+
+    [Fact]
+    public void TheLeaseNamespaceBindsFromConfiguration()
+    {
+        // What the manifest's downward-API binding actually exercises: whatever namespace this
+        // StatefulSet was deployed into is the namespace the Lease is taken in, and therefore the
+        // one whose Role grants leases get/update/create.
+        Assert.Equal("other-ns", Service("other-ns").LeaseNamespace);
+    }
+
+    /// <summary>
+    /// The service with nothing but its configuration wired. <c>ExecuteAsync</c> is never called, so
+    /// no <c>IKubernetes</c> is ever constructed and the no-Kubernetes stance above holds.
+    /// </summary>
+    private static LeaderElectionService Service(string? configured)
+    {
+        var settings = configured is null
+            ? new Dictionary<string, string?>()
+            : new Dictionary<string, string?>
+            {
+                [LeaderElectionService.LeaseNamespaceKey] = configured,
+            };
+
+        return new LeaderElectionService(
+            new LeaderState(),
+            new InstanceId("test-replica"),
+            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(),
+            NullLogger<LeaderElectionService>.Instance);
     }
 }

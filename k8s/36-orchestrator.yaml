@@ -171,6 +171,19 @@ spec:
             - name: POD_NAME
               valueFrom:
                 fieldRef: { fieldPath: metadata.name }
+            # The namespace holding the leader Lease, taken from the pod rather than written out, so
+            # it always matches the namespace kustomize deployed this StatefulSet into -- and
+            # therefore the namespace whose Role above grants leases get/update/create. A literal
+            # here would be a second copy of that name, free to drift; the downward API cannot.
+            # Reading it needs no permissions: the kubelet resolves fieldRef from the pod spec
+            # without going through the API server.
+            #
+            # All three replicas share this pod template, so they cannot disagree and cannot elect
+            # two leaders. The one exception is a ROLLING update that CHANGES the value: old and new
+            # pods would hold separate Leases at once. Scale to 0 and back if you ever move it.
+            - name: Orchestrator__LeaseNamespace
+              valueFrom:
+                fieldRef: { fieldPath: metadata.namespace }
             # The collector already running in this namespace. Without it the SDK still works and
             # export simply fails quietly, so this is an enrichment rather than a dependency.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT

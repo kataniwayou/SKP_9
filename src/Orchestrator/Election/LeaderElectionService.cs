@@ -2,6 +2,7 @@ using BaseConsole.Core.Messaging;
 using k8s;
 using k8s.LeaderElection;
 using k8s.LeaderElection.ResourceLock;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -37,6 +38,7 @@ namespace Orchestrator.Election;
 public sealed class LeaderElectionService(
     LeaderState state,
     InstanceId instanceId,
+    IConfiguration configuration,
     ILogger<LeaderElectionService> logger) : BackgroundService
 {
     /// <summary>How long a granted lease stands without a renewal before another replica may take it.</summary>
@@ -51,11 +53,34 @@ public sealed class LeaderElectionService(
     /// <summary>How often a follower re-checks whether the lease has become acquirable.</summary>
     public static readonly TimeSpan RetryPeriod = TimeSpan.FromSeconds(2);
 
-    /// <summary>The namespace holding the Lease. Fixed, so all three replicas contend for one object.</summary>
-    public const string LeaseNamespace = "skp";
+    /// <summary>
+    /// The namespace holding the Lease when nothing configures one. Every replica must resolve the
+    /// SAME value or each gets its own Lease and therefore its own leadership — see the type remarks
+    /// for what two leaders do. In-cluster that agreement comes from the manifest, which binds
+    /// <see cref="LeaseNamespaceKey"/> to the pod's own namespace through the downward API: one pod
+    /// template, one namespace, so the three replicas cannot disagree.
+    /// </summary>
+    public const string DefaultLeaseNamespace = "skp";
 
-    /// <summary>The Lease's name. Fixed, for the same reason as <see cref="LeaseNamespace"/>.</summary>
+    /// <summary>
+    /// The configuration key <see cref="LeaseNamespace"/> reads. Absent means
+    /// <see cref="DefaultLeaseNamespace"/> rather than a failure: the election is registered only
+    /// in-cluster, and an off-cluster run that never elects has no namespace to require.
+    /// </summary>
+    public const string LeaseNamespaceKey = "Orchestrator:LeaseNamespace";
+
+    /// <summary>The Lease's name. Fixed, so all three replicas contend for one object.</summary>
     public const string LeaseName = "orchestrator-leader";
+
+    /// <summary>
+    /// The namespace this replica contends in. Blank falls back rather than passing through: an
+    /// environment variable set to the empty string is a deployment mistake, and a Lease request
+    /// against an empty namespace fails in a way that reads as an RBAC problem rather than a typo.
+    /// </summary>
+    internal string LeaseNamespace =>
+        configuration[LeaseNamespaceKey] is { } value && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : DefaultLeaseNamespace;
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -70,7 +95,12 @@ public sealed class LeaderElectionService(
         // config — guaranteed present here rather than merely likely.
         using IKubernetes kubernetes = new Kubernetes(KubernetesClientConfiguration.InClusterConfig());
 
-        var leaseLock = new LeaseLock(kubernetes, LeaseNamespace, LeaseName, identity);
+        // Read once into a local. Configuration can be reloaded under a running process, and a
+        // value that moved mid-election would leave this replica renewing one Lease while believing
+        // in another.
+        var leaseNamespace = LeaseNamespace;
+
+        var leaseLock = new LeaseLock(kubernetes, leaseNamespace, LeaseName, identity);
 
         using var elector = new LeaderElector(new LeaderElectionConfig(leaseLock)
         {
