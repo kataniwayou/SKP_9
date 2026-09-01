@@ -571,4 +571,88 @@ public sealed class ExecutionRoundTripTests
             h.PreLog.Records,
             e => e.Message.Contains("duplicate delivery", StringComparison.Ordinal));
     }
+
+    // ---------------------------------------------------------------- provenance
+
+    [Fact]
+    public async Task AnOutcomeClaimingAProcessorTheStepIsNotAssignedToIsRefused()
+    {
+        // The sibling of ProcessedDataHandler's WR-02 guard. orchestrator-result is addressable on a
+        // shared broker and this handler acts entirely on the ids in the body, so without this an
+        // outcome naming a real workflow and a real step could be minted by anyone and would advance
+        // that workflow. StepL1.ProcessorId is the authority the processor's own identity is on the
+        // other side.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        var forged = new StepOutcome(Corr, Exec, W, A, PC, Entry, StepResult.Completed);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Deliver(MessageTypes.StepOutcome, forged));
+
+        Assert.Contains("provenance", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARefusedOutcomeAdvancesNothing()
+    {
+        // The refusal must be total, the same property the branch-hop guard asserts. Checking only
+        // that it throws would pass even if the guard sat after the hand-offs.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Deliver(MessageTypes.StepOutcome,
+                new StepOutcome(Corr, Exec, W, A, PC, Entry, StepResult.Completed)));
+
+        Assert.Empty(h.Bus.Sent);
+    }
+
+    [Fact]
+    public async Task ARefusedOutcomeDoesNotReclaimTheBlobItNames()
+    {
+        // THE POINT OF THE GUARD, and where it departs from the L1-miss park above deliberately.
+        // That branch reclaims to avoid leaking. Here the message just failed an authenticity check,
+        // so its EntryId is unauthenticated input and can name a blob belonging to a real execution
+        // still in flight. Reclaiming would make the forgery destructive by our own hand.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Deliver(MessageTypes.StepOutcome,
+                new StepOutcome(Corr, Exec, W, A, PC, Entry, StepResult.Completed)));
+
+        Assert.True(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+    }
+
+    [Fact]
+    public async Task TheProcessorTheStepIsAssignedToIsAccepted()
+    {
+        // The guard must pass legitimate traffic rather than parking everything -- the same thing
+        // ac23c1e had to prove on the branch hop after deploying it.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+        await h.Drain();
+
+        Assert.Contains(h.Bus.Sent, s => s.Type == MessageTypes.ProcessDispatch);
+    }
+
+    [Fact]
+    public async Task ProvenanceIsCheckedBeforeTheBlobIsEvenRead()
+    {
+        // Ordering, asserted rather than assumed: a forged outcome must be refused whether or not the
+        // blob it names exists. Checked after the read, a forgery naming an absent key would take the
+        // duplicate-delivery branch and be ACKED -- the guard silently skipped on exactly the input
+        // it exists to catch.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+
+        // Deliberately not seeded.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => h.Deliver(MessageTypes.StepOutcome,
+                new StepOutcome(Corr, Exec, W, A, PC, Entry, StepResult.Completed)));
+
+        Assert.Contains("provenance", ex.Message, StringComparison.Ordinal);
+    }
 }
