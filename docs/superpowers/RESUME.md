@@ -10,13 +10,13 @@ them). This file is state, gaps and traps.
 ## Where things stand
 
 Branch `topology/advance-materialize-consistency`, clean tree, **unpushed, no git remote
-configured**. 14 commits this session on top of `42c5779`.
+configured**. 15 commits this session on top of `42c5779`.
 
 Everything green, all measured today:
 
 | Gate | Result |
 | --- | --- |
-| `dotnet test SK_P.sln` | 0 failed, 748 passed, 20 skipped, exit 0 |
+| `dotnet test SK_P.sln` | 0 failed, 757 passed, 20 skipped, exit 0 |
 | `python -m unittest discover -s tests -t .` (from `skp-toolkit/`) | 515 passed |
 | `skp doctor` | 12/12 rows ok |
 | `skp verify --probe-writes --probe-runs` | **141/141 (100%)**, no refutations |
@@ -63,6 +63,10 @@ lets it pass.
 **Instrumented the API consumer's escape path**, and found the open item that sent me there was
 stale: it claimed the consumer emitted nothing, which `7afa107` had already fixed. The real gap was
 one arm — no outer catch, so an escaping delivery was timed and not counted.
+
+**Closed the consumer twin drift.** Both `GatedQueueConsumer` copies — and both
+`DeliveryClassifier` copies with them — are now driven through one scenario matrix that
+asserts they agree, rather than each being asserted against expected values separately.
 
 **Decided the absent-key divergence and shipped both halves.** The orchestrator now ACKS an absent
 execution blob instead of parking, and a **provenance guard** — the sibling of WR-02 — refuses an
@@ -133,12 +137,15 @@ replayed, since the replay re-reads the same absent key and parks again.
   instrumentation** — see below.
 - **51 catalog entries name a verb that does not exist.** Declared in `skp/commands.py` `PLANNED`
   with a justification each and counted by `skp doctor`. `skp analyze` does not exist at all.
-- **The two `GatedQueueConsumer` copies drift, and only one is tested.** Every consumer test in
-  the suite targeted BaseConsole.Core's twin; the API's copy had none at all, which is how it came
-  to be missing an arm the twin has. `ApiIngressMetricsTests` now covers the arms that bear on that,
-  not the full matrix. The durable fix is the shape `HealthProbeLog` already uses — one test feeding
-  both copies and comparing — but the two consumers differ by more than a render string, so it is
-  real work.
+- ~~**The two `GatedQueueConsumer` copies drift, and only one is tested.**~~ **Closed
+  2026-09-01.** `ConsumerTwinParityTests` drives both copies through the same eight scenarios and
+  asserts EQUALITY rather than expected values per host — a row asserting the same pair twice can be
+  updated on one side and left on the other, which is the same failure one level up. It covers the
+  duplicated `DeliveryClassifier` too, since the classifier is what decides the disposition.
+  Falsified: reintroducing the escape drift fails exactly the escape row, by name.
+  **What remains is the duplication itself** — four types are aliased in that file rather than
+  reconciled (`GatedQueueConsumer`, `DeliveryClassifier`, `GatedConsumerOptions`, `L2Gate`).
+  Unifying the hosts is a real refactor; the parity test is the seam that makes keeping them safe.
 - **Toolkit phases 4 and 5 are unbuilt** — the developer verbs, and the skills. `.claude/skills/skp*`
   does not exist.
 - **The six parked step outcomes are unresolvable now.** The 2026-08-31 teardown deleted every queue
@@ -272,9 +279,9 @@ Pick one:
   skills themselves). Phase 5 needs 3 and 4 for its verb lists. 51 catalog
   entries name verbs that do not exist yet — they are listed in
   skp/commands.py PLANNED with a justification each.
-- Close the GatedQueueConsumer twin drift. The two copies diverge and only
-  BaseConsole.Core's was ever tested, which is how the API's lost an arm the
-  twin has. HealthProbeLog's one-test-feeds-both-copies shape is the model.
+- Add backlog/lag and end-to-end latency. The hop gap is a conservation
+  check: a message sitting in a queue and a message lost are identical to it,
+  and nothing on the boards separates them.
 
 Three things to carry in:
 
