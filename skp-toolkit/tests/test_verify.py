@@ -1408,3 +1408,150 @@ class RunTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProcessorQueueOrphanShapeTests(unittest.TestCase):
+    """The orphan check must see all four of a processor's lanes.
+
+    The regex is fully anchored, so before ``-post`` was added to it a
+    decommissioned processor left two queues this check could never report --
+    they did not match, so they fell through the loop as though they belonged
+    to somebody else. Same anchoring bug that hid the post queue from the
+    Grafana board, same shape of silence: a clean result rather than a missing
+    one.
+    """
+
+    LIVE = "aaaaaaaa-1111-2222-3333-444444444444"
+    GONE = "bbbbbbbb-5555-6666-7777-888888888888"
+
+    def queues(self):
+        return {f"processor-{p}{suffix}"
+                for p in (self.LIVE, self.GONE)
+                for suffix in ("", "-post", ".dead", "-post.dead")}
+
+    def test_all_four_lanes_of_an_unregistered_processor_are_orphans(self):
+        work, dead = verify._orphaned_processor_queues(self.queues(), [self.LIVE])
+        self.assertEqual(sorted(work),
+                         [f"processor-{self.GONE}", f"processor-{self.GONE}-post"])
+        self.assertEqual(sorted(dead),
+                         [f"processor-{self.GONE}-post.dead", f"processor-{self.GONE}.dead"])
+
+    def test_a_registered_processors_post_lanes_are_not_orphans(self):
+        work, dead = verify._orphaned_processor_queues(self.queues(), [self.LIVE, self.GONE])
+        self.assertEqual(work, [])
+        self.assertEqual(dead, [])
+
+    def test_the_orphan_note_names_the_post_lanes(self):
+        note = verify._orphan_note(self.queues(), [self.LIVE])
+        self.assertIn(f"processor-{self.GONE}-post", note)
+        self.assertIn(f"processor-{self.GONE}-post.dead", note)
+
+
+class FanoutExchangeAndReplicaTests(unittest.TestCase):
+    """The two defects the live cluster found the moment the fan-out surfaces
+    were catalogued -- neither visible to any unit test that existed."""
+
+    EXCHANGE = {"id": "rabbitmq.fanout.Exchange", "component": "rabbitmq",
+                "operation": "list_queues", "detail": "orchestrator-fanout"}
+    PER_REPLICA = {"id": "rabbitmq.fanout.PerReplica", "component": "rabbitmq",
+                   "operation": "list_queues", "detail": "orchestrator-control.{instanceId}"}
+
+    def test_a_plain_exchange_is_checked_against_list_exchanges(self):
+        """It ends in "Exchange" but not "DeadLetterExchange", so the old exact
+        match sent it to list_queues -- where an exchange can never appear --
+        and REFUTED it. The catalog was right and the checker was wrong, which
+        is the worse direction to be wrong in."""
+        claims = verify.check_rabbitmq(
+            [self.EXCHANGE],
+            FakeRabbit(queue_names=[], exchange_names=["orchestrator-fanout"]))
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+        self.assertIn("exchange", claims[0].message)
+
+    def test_a_missing_exchange_is_still_refuted(self):
+        claims = verify.check_rabbitmq(
+            [self.EXCHANGE], FakeRabbit(queue_names=["orchestrator-fanout"], exchange_names=[]))
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+
+    def test_every_replica_having_its_queue_is_confirmed(self):
+        claims = verify.check_rabbitmq(
+            [self.PER_REPLICA],
+            FakeRabbit(queue_names=["orchestrator-control.orchestrator-0",
+                                    "orchestrator-control.orchestrator-1"]),
+            instance_ids=["orchestrator-0", "orchestrator-1"])
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_a_replica_without_its_queue_is_refuted_and_says_why_it_is_silent(self):
+        """The one check that can catch the fan-out failure mode: the queues are
+        non-exclusive, so this condition raises nothing and logs nothing."""
+        claims = verify.check_rabbitmq(
+            [self.PER_REPLICA],
+            FakeRabbit(queue_names=["orchestrator-control.orchestrator-0"]),
+            instance_ids=["orchestrator-0", "orchestrator-1"])
+        self.assertEqual(claims[0].verdict, verify.REFUTED)
+        self.assertIn("orchestrator-control.orchestrator-1", claims[0].message)
+        self.assertIn("competing-", claims[0].message)
+
+    def test_processor_ids_never_fill_a_replica_template(self):
+        """The fan-out queues are named for replicas, not processors. Filling
+        them with processor ids produced three REFUTED claims about queues that
+        exist -- the catalog accused of being wrong about the system."""
+        claims = verify.check_rabbitmq(
+            [self.PER_REPLICA],
+            FakeRabbit(queue_names=["orchestrator-control.orchestrator-0"]),
+            processor_ids=["d033b408-8471-4c3d-8acf-3bee6164f01e"],
+            instance_ids=["orchestrator-0"])
+        self.assertEqual(claims[0].verdict, verify.CONFIRMED)
+
+    def test_unreachable_prometheus_is_unverifiable_not_refuted(self):
+        claims = verify.check_rabbitmq(
+            [self.PER_REPLICA], FakeRabbit(queue_names=[]), instance_ids=None)
+        self.assertEqual(claims[0].verdict, verify.UNVERIFIABLE)
+
+    def test_no_replicas_exporting_is_not_observed_not_refuted(self):
+        """A source answered and found none -- a fact, not a gap and not a
+        failure. The same three-way split the rest of this verb makes."""
+        claims = verify.check_rabbitmq(
+            [self.PER_REPLICA], FakeRabbit(queue_names=[]), instance_ids=[])
+        self.assertEqual(claims[0].verdict, verify.NOT_OBSERVED)
+
+
+class ResolveInstanceIdsTests(unittest.TestCase):
+    class Prom:
+        def __init__(self, by_expr=None, fail=False):
+            self.by_expr = by_expr or {}
+            self.fail = fail
+            self.asked = []
+
+        def query(self, expr):
+            self.asked.append(expr)
+            if self.fail:
+                raise Unreachable("prometheus", "down")
+            return self.by_expr.get(expr, [])
+
+    def ids(self, prom, reachable=True):
+        return verify._resolve_instance_ids({"prometheus": prom},
+                                            {"prometheus": reachable})
+
+    def test_replicas_come_from_pipeline_leader(self):
+        prom = self.Prom({"pipeline_leader": [
+            {"metric": {"service_instance_id": "orchestrator-1"}},
+            {"metric": {"service_instance_id": "orchestrator-0"}}]})
+        self.assertEqual(self.ids(prom), ["orchestrator-0", "orchestrator-1"])
+
+    def test_the_ratio_suffix_rendering_is_tried_second(self):
+        """OpenTelemetry appends _ratio to a unitless gauge. Hardcoding whichever
+        name happens to work today is how nine of sixteen instruments once read
+        as absent."""
+        prom = self.Prom({"pipeline_leader_ratio": [
+            {"metric": {"service_instance_id": "orchestrator-0"}}]})
+        self.assertEqual(self.ids(prom), ["orchestrator-0"])
+        self.assertEqual(prom.asked, ["pipeline_leader", "pipeline_leader_ratio"])
+
+    def test_prometheus_unreachable_is_none_not_empty(self):
+        """None is a gap this run could not check; [] is a checked fact. The
+        two must not collapse -- one is UNVERIFIABLE, the other NOT_OBSERVED."""
+        self.assertIsNone(self.ids(self.Prom(), reachable=False))
+        self.assertIsNone(self.ids(self.Prom(fail=True)))
+
+    def test_no_series_is_an_empty_list(self):
+        self.assertEqual(self.ids(self.Prom()), [])
