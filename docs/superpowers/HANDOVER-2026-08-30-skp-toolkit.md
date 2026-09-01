@@ -512,10 +512,33 @@ were being redelivered — after a restart, a deploy or a migration — it is no
 more.** Watch for that line instead. What still parks on this queue: an L1 miss
 (`DescribeL1Miss` says which lookup), and now a provenance mismatch.
 
+#### 3. The read moved above the narration (shipped, 2026-09-01)
+
+Left open in the two changes above and closed the same day, because the reason
+it was deferred turned out to understate it. A duplicate that advances nothing
+was announcing `the entry step completed` first and discarding itself second —
+and that is not only misleading to read: **`RunLedger`'s I8 asserts
+`counts[EntryStepCompleted] == shape.EntryBranches` EXACTLY**, so a duplicate
+inflated the count and breached an invariant the chaos ledger checks.
+
+The read and the duplicate branch now sit directly under the provenance guard,
+above both the stopped-mark log and the entry-step line. The ordering reads:
+authenticate, then find out whether there is work to do, then narrate.
+Duplicates that genuinely re-advance still log it, because they take the whole
+path below; only the ones that do nothing are now silent.
+
+Verified live by re-running the identical injection from before the change: it
+produced two records then (completion + Warning) and **one now** (Warning only).
+And on live traffic under the new ordering, **158 entry-step completions against
+79 entry dispatches — exactly 2.00 per dispatch, matching the entry-branch count
+with no surplus.**
+
 #### Left open, deliberately
 
-**A duplicate still logs `the entry step completed with {Result}` before it is
-discarded**, because that line sits above the read. In the 2026-08-31 incident
+*(nothing from these changes; the item that was here shipped as §3 above)*
+
+~~**A duplicate still logs `the entry step completed with {Result}` before it is
+discarded**~~, because that line sat above the read. In the 2026-08-31 incident
 the three completion lines were accurate — those deliveries really did re-advance
 the run — but for a delivery that advances nothing the line overstates what
 happened. Moving the read above it is probably right and is not done here,

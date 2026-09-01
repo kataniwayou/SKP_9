@@ -10,13 +10,13 @@ them). This file is state, gaps and traps.
 ## Where things stand
 
 Branch `topology/advance-materialize-consistency`, clean tree, **unpushed, no git remote
-configured**. 11 commits this session on top of `42c5779`.
+configured**. 13 commits this session on top of `42c5779`.
 
 Everything green, all measured today:
 
 | Gate | Result |
 | --- | --- |
-| `dotnet test SK_P.sln` | 0 failed, 741 passed, 20 skipped, exit 0 |
+| `dotnet test SK_P.sln` | 0 failed, 743 passed, 20 skipped, exit 0 |
 | `python -m unittest discover -s tests -t .` (from `skp-toolkit/`) | 515 passed |
 | `skp doctor` | 12/12 rows ok |
 | `skp verify --probe-writes --probe-runs` | **141/141 (100%)**, no refutations |
@@ -62,8 +62,10 @@ lets it pass.
 
 **Decided the absent-key divergence and shipped both halves.** The orchestrator now ACKS an absent
 execution blob instead of parking, and a **provenance guard** — the sibling of WR-02 — refuses an
-outcome whose `ProcessorId` disagrees with the one L1 assigns to that step. Orchestrator rebuilt and
-redeployed twice; both proved live.
+outcome whose `ProcessorId` disagrees with the one L1 assigns to that step. Then the read moved
+above the two log lines, so a duplicate stops announcing a completion it did not cause — which was
+breaching `RunLedger`'s I8 (`EntryStepCompleted == EntryBranches`, exactly). Orchestrator rebuilt and
+redeployed three times; all three proved live.
 
 ## The findings that matter
 
@@ -111,10 +113,6 @@ replayed, since the replay re-reads the same absent key and parks again.
   de facto signal that outcomes were being redelivered after a restart, and it no longer is.
 - **No alert on `pipeline_deadletter_depth`.** The instrument ships; the rule (`depth > 0 for 5m`)
   does not. Adding it means editing `prometheus.yml` — see the TSDB trap below.
-- **A duplicate outcome still logs `the entry step completed`** before it is discarded, because that
-  line sits above the read. Moving the read above it changes what
-  `elasticsearch.EntryStepCompleted` counts — a template the chaos scenarios, `skp operate verify`
-  and the boards all read — so it is its own change.
 - **No backlog/lag and no end-to-end latency.** The hop gap is a conservation check: a message in a
   queue and a message lost are identical to it.
 - **Degradation cannot be injected at all any more.** `755b020` removed toxiproxy and both
@@ -160,6 +158,12 @@ replayed, since the replay re-reads the same absent key and parks again.
   `pipeline_process_start_timestamp_seconds`. Try the bare name and the suffixed one, never hardcode
   whichever works today — this is what once made 9 of 16 instruments read as absent.
 - **`LogDebug` is below the level shipped to the log store.**
+- **Elasticsearch lags the pod log under load, and a zero can mean "not indexed yet".** Measured
+  today: three records visible in `kubectl logs` at 12:19:20–12:19:50 returned **0 hits** on a
+  bounded ES query at 12:21 and 78 hits for the same template four minutes later. The workload is a
+  burst rather than a stream, so an idle-looking window is doubly easy to get. Never conclude "the
+  system is quiet" or "that never happened" from one bounded query — cross-check `kubectl logs`, or
+  ask again after a minute.
 - **A background task reported as killed may still be running.** Verify the process tree.
 - **Never scale Redis** except via `RedisWipeScenarioTests`.
 - The soak's drain check fails if the standing orchestration (`4cd8af45`) fired in the last 40s.
@@ -254,10 +258,9 @@ Pick one:
   skills themselves). Phase 5 needs 3 and 4 for its verb lists. 51 catalog
   entries name verbs that do not exist yet — they are listed in
   skp/commands.py PLANNED with a justification each.
-- Move the read above "the entry step completed" so a duplicate outcome stops
-  logging a completion it did not cause. It changes what
-  elasticsearch.EntryStepCompleted counts, which the chaos scenarios, skp
-  operate verify and the boards all read, so it needs its own verification.
+- Instrument the API's consumer. BaseApi.Core/Messaging/GatedQueueConsumer.cs
+  has 0 Record() calls against the console copy's 6, so the API's own hop is
+  invisible on every board and to skp observe.
 
 Three things to carry in:
 

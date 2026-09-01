@@ -655,4 +655,35 @@ public sealed class ExecutionRoundTripTests
 
         Assert.Contains("provenance", ex.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ADuplicateDoesNotLogAnEntryStepCompletionItDidNotCause()
+    {
+        // The line sat above the read until the duplicate branch gave it a reason to move. It is not
+        // only misleading to read: RunLedger's I8 asserts
+        // counts[EntryStepCompleted] == shape.EntryBranches EXACTLY, so a duplicate that advances
+        // nothing inflated the count and breached an invariant the chaos ledger checks.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+
+        // Not seeded: the duplicate shape.
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.DoesNotContain(
+            h.PreLog.Records, e => e.Message.Contains("the entry step completed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ARealEntryStepStillLogsItsCompletionExactlyOnce()
+    {
+        // The other half: moving the read must not cost the line on the path that earns it, which is
+        // the one I8 counts.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Single(
+            h.PreLog.Records,
+            e => e.Message.Contains("the entry step completed", StringComparison.Ordinal));
+    }
 }
