@@ -199,7 +199,7 @@
       "id": 68,
       "type": "stat",
       "title": "Identity ready",
-      "description": "0 means the pod is up and waiting for a processor row whose SourceHash matches its image. Running / NotReady with 0 restarts is the designed behaviour, not a crash loop -- this is the metric that makes that legible.\n\nLegend: `{{service_instance_id}}`",
+      "description": "Measures `pipeline.identity.ready` -- 1 once this replica resolved its processor row.\n\nA replica still WAITING for a row matching its SourceHash publishes nothing at all, so read a MISSING tile as waiting, never a 0. Identity is resolved in stage 1, before the host that owns this meter is built, so a waiting pod has no MeterProvider and exports no series -- the 0 this gauge can encode is unreachable while a pod waits. Confirm the wait in `kubectl logs`: `no processor registered for source hash ...`.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -1930,7 +1930,7 @@
       "id": 82,
       "type": "state-timeline",
       "title": "Identity ready by replica",
-      "description": "Measures `pipeline.identity.ready` per replica. Red is a pod that is up and waiting for a processor row matching its SourceHash — the designed behaviour, not a crash loop.\n\nLegend: `{{service_instance_id}}`",
+      "description": "Measures `pipeline.identity.ready` per replica. Green is a replica that resolved its processor row.\n\nA replica still waiting for a row matching its SourceHash is ABSENT from this timeline rather than red: identity is resolved in stage 1, before the host that owns this meter exists, so a waiting pod exports no series to colour. Running/NotReady with 0 restarts is the designed wait, not a crash loop -- `kubectl logs` shows `no processor registered for source hash ...`.\n\nLegend: `{{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
