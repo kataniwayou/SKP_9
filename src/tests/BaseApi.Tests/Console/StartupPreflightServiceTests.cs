@@ -81,6 +81,38 @@ public sealed class StartupPreflightServiceTests
                 Thread.Sleep(1);
             }
         }
+
+        /// <summary>
+        /// Pumps the clock until <paramref name="condition"/> holds, or fails with what was actually
+        /// recorded. Use this — never a bare <see cref="PumpTime"/> — before cancelling a run that
+        /// the assertions need to have reached a particular point.
+        /// <para>
+        /// <b>PumpTime is not a wait.</b> It advances the FAKE clock a second per iteration and
+        /// yields ONE REAL millisecond each time, so PumpTime(1s) gives the thread pool a single
+        /// millisecond to start the run, log two lines and reach the first check. Under a full-suite
+        /// load it frequently does not, and cancelling then means the failure branch never runs at
+        /// all: CheckAsync swallows nothing and logs nothing once ct is cancelled, by design. That
+        /// surfaced as AttachesTheUnderlyingExceptionAndItsOwnMessage_OnFailure asserting a single
+        /// Error record against a log holding only the two opening Information lines.
+        /// </para>
+        /// </summary>
+        public void PumpUntil(Func<bool> condition, string what)
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (condition())
+                {
+                    return;
+                }
+
+                Clock.Advance(TimeSpan.FromSeconds(1));
+                Thread.Sleep(1);
+            }
+
+            Assert.Fail($"never observed {what}. Records:\n"
+                        + string.Join("\n", Log.Records.Select(r => $"  [{r.Level}] {r.Message}")));
+        }
     }
 
     [Fact]
@@ -212,10 +244,15 @@ public sealed class StartupPreflightServiceTests
         h.Rabbit.CheckAsync(Arg.Any<CancellationToken>()).ThrowsAsync(fault);
 
         var run = h.Build().RunAsync(h.Cts.Token);
-        // Under the retry interval on purpose: this test is about what one failure line carries, not
-        // about the repeat cadence — RepeatsOnlyTheStillFailingDependencyEveryRetryInterval_... owns
-        // that. One second is enough real time for the pool to run the first attempt.
-        h.PumpTime(TimeSpan.FromSeconds(1));
+        // Waits for the line rather than assuming the first attempt has run: cancelling before it
+        // does means CheckAsync's `when (!ct.IsCancellationRequested)` filter declines to log at all,
+        // and the assertion below then reads a log holding only the two opening Information lines.
+        // Only ONE attempt is awaited on purpose — this test is about what a single failure line
+        // carries, not the repeat cadence, which
+        // RepeatsOnlyTheStillFailingDependencyEveryRetryInterval_... owns.
+        h.PumpUntil(
+            () => h.Log.Records.Any(r => r.Level == LogLevel.Error),
+            "the first RabbitMQ failure line");
         h.Cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
 
@@ -262,7 +299,14 @@ public sealed class StartupPreflightServiceTests
         h.Db.PingAsync(Arg.Any<CommandFlags>()).Returns(pingNeverCompletes.Task);
 
         var run = h.Build().RunAsync(h.Cts.Token);
-        h.PumpTime(TimeSpan.FromSeconds(1));   // real time for the pool to reach the outstanding ping
+        // The RabbitMQ success line is logged immediately before the Redis check starts, so it is the
+        // observable proof that the run has reached the ping this test cancels inside. Waiting on it
+        // beats guessing: cancelling early would prove nothing, because a run that never reached
+        // Redis also logs no error.
+        h.PumpUntil(
+            () => h.Log.Records.Any(r =>
+                r.Message.Contains("RabbitMQ reachable at", StringComparison.Ordinal)),
+            "RabbitMQ succeeding, which is when the Redis ping begins");
         h.Cts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
