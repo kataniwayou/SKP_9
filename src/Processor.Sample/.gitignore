@@ -1,0 +1,7 @@
+# Build output for this project.
+#
+# Duplicated from the repository root deliberately. The root .gitignore covers these today, so this
+# file changes nothing right now -- it exists so the project stays correct on its own the day it is
+# extracted into a repository of its own, where the root file does not travel with it.
+bin/
+obj/
