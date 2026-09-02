@@ -3,16 +3,27 @@
   <!--
     SourceHash.targets (IDENT-01/02, Phase 28, D-01/D-02/D-03).
 
-    Build-time code-identity: computes a reproducible SHA-256 over the implementation .cs of
-    BaseProcessor.Core + the importing concrete (e.g. Processor.Sample) and embeds it as
-    [assembly: AssemblyMetadata("SourceHash", "<64-hex>")] onto the CONCRETE (entry) assembly.
-    The runtime reader (AssemblyMetadataSourceHashProvider) reads that attribute off
-    Assembly.GetEntryAssembly(), so the attribute MUST land on the concrete .dll, never on
-    BaseProcessor.Core (D-03).
+    Build-time code-identity: computes a reproducible SHA-256 over the .cs of the CONCRETE
+    processor that imports this file, and embeds it as
+    [assembly: AssemblyMetadata("SourceHash", "<64-hex>")] on that assembly. The runtime reader
+    (AssemblyMetadataSourceHashProvider) reads the attribute off Assembly.GetEntryAssembly(), so it
+    MUST land on the concrete .dll, never on BaseProcessor.Core (D-03).
 
-    Authored ONCE here and <Import>ed explicitly by each concrete Processor.*.csproj — a
-    ProjectReference does NOT auto-flow build/*.targets, hence the explicit import (D-01).
-    BaseProcessor.Core itself does NOT import this file, so it is never self-applied.
+    Shipped as build/BaseProcessor.Core.targets INSIDE the BaseProcessor.Core package, so NuGet
+    imports it into every consumer automatically. That replaces the relative <Import> each concrete
+    used to carry, which existed only because a ProjectReference does not flow build targets —
+    a PackageReference does. A new concrete processor now gets identity by referencing the package,
+    and can no longer ship without it by forgetting a line.
+
+    THE FOLD IS THE CONCRETE ONLY, and that is a deliberate narrowing (2026-09-02). It used to span
+    BaseProcessor.Core's 27 .cs files as well as the concrete's 4, which made a processor's identity
+    87% framework — so a doc-comment fix in a library the processor merely consumes re-issued the
+    identity of every processor built on it, and every registered row had to be repointed for a
+    change that altered no behaviour. That happened at ac23c1e and again at 6d6a132.
+    BaseProcessor.Core was in the fold only because it happened to be a ProjectReference in the same
+    repo; as a versioned package it belongs in the same category as RabbitMQ.Client and the runtime
+    patch level — a dependency, and out of scope. What guards a framework upgrade instead is the
+    exact version pin and the lock file, not this hash.
 
     Algorithm (IDENT-01, locked): for each impl .cs:
       text = File.ReadAllText(p); text = text.Replace("\r\n","\n").Replace("\r","\n");  // LF-normalize CONTENT
@@ -21,6 +32,16 @@
     SourceHash = SHA256(concatenated per-file hashes), lowercase 64-hex (b.ToString("x2")). Paths
     are forward-slash-normalized + ordinal-sorted so the hash is identical on Windows dev builds and
     Linux Docker builds (Pitfall 1).
+  -->
+
+  <!--
+    (0) OPT-OUT, defaulting ON. Shipping these targets in the package's build/ folder means NuGet
+    imports them into EVERY consumer of BaseProcessor.Core, not only concrete processors — the test
+    project included, where a SourceHash attribute on the entry assembly is meaningless and, worse,
+    latent: AssemblyMetadataSourceHashProvider is documented to THROW when the attribute is absent,
+    and a test written against that fail-fast would silently read the test assembly's own hash
+    instead. Default-on rather than opt-in, so a real processor still cannot ship without identity
+    by forgetting a line; a non-processor consumer sets EmitProcessorSourceHash=false.
   -->
 
   <!-- (1) Inline RoslynCodeTaskFactory task — netstandard2.0 surface only; recompiled each build. -->
@@ -73,14 +94,15 @@ public class ComputeSourceHash : Microsoft.Build.Utilities.Task
   </UsingTask>
 
   <!--
-    (2) Implementation-file set: BaseProcessor.Core ($(MSBuildThisFileDirectory)) + the concrete
-    ($(MSBuildProjectDirectory)). BaseConsole.Core and Messaging.Contracts are SIBLINGS (not under
-    either directory) so they are excluded automatically. Exclude generated + build-output files so
-    the fold is reproducible across clean/incremental and Windows/Linux builds (Pitfall 1).
+    (2) Implementation-file set: the importing concrete project's own .cs, and nothing else.
+    BaseProcessor.Core, BaseConsole.Core and Messaging.Contracts are all packages now, so no glob
+    can reach them and none should. Excluding obj is LOAD-BEARING rather than tidy: the generated
+    AssemblyInfo carries the PREVIOUS hash, so folding it in would make the hash self-referential
+    and it would never settle.
   -->
-  <ItemGroup>
-    <ImplFiles Include="$(MSBuildThisFileDirectory)**\*.cs;$(MSBuildProjectDirectory)\**\*.cs"
-               Exclude="$(MSBuildThisFileDirectory)obj\**\*.cs;$(MSBuildProjectDirectory)\obj\**\*.cs;$(MSBuildThisFileDirectory)bin\**\*.cs;$(MSBuildProjectDirectory)\bin\**\*.cs;**\*.g.cs;**\*GlobalUsings*.cs;**\*AssemblyInfo*.cs" />
+  <ItemGroup Condition="'$(EmitProcessorSourceHash)' != 'false'">
+    <ImplFiles Include="$(MSBuildProjectDirectory)\**\*.cs"
+               Exclude="$(MSBuildProjectDirectory)\obj\**\*.cs;$(MSBuildProjectDirectory)\bin\**\*.cs;**\*.g.cs;**\*GlobalUsings*.cs;**\*AssemblyInfo*.cs" />
   </ItemGroup>
 
   <!--
@@ -97,6 +119,7 @@ public class ComputeSourceHash : Microsoft.Build.Utilities.Task
     silently never embed). BeforeTargets="CoreGenerateAssemblyInfo" guarantees the item is present.
   -->
   <Target Name="ComputeSourceHash" BeforeTargets="CoreGenerateAssemblyInfo;CoreCompile"
+          Condition="'$(EmitProcessorSourceHash)' != 'false'"
           Inputs="@(ImplFiles)" Outputs="$(IntermediateOutputPath)sourcehash.stamp">
     <ComputeSourceHash Files="@(ImplFiles)">
       <Output PropertyName="SourceHash" TaskParameter="Hash" />
@@ -110,9 +133,9 @@ public class ComputeSourceHash : Microsoft.Build.Utilities.Task
     failure for a value whose whole job is code identity.
 
     Mechanism: the SDK's CoreGenerateAssemblyInfo is itself incremental on
-    Inputs="$(MSBuildAllProjects)" — the PROJECT files — NOT on @(AssemblyAttribute). So when only
-    BaseProcessor.Core *.cs change (they are in @(ImplFiles), so the hash changes) but this concrete
-    project's own files do not, ComputeSourceHash re-runs and EchoSourceHash prints the NEW hash,
+    Inputs="$(MSBuildAllProjects)" — the PROJECT files — NOT on @(AssemblyAttribute). So when a .cs
+    in @(ImplFiles) changes (the hash changes with it) but the .csproj does not — which is the
+    ordinary case for every edit — ComputeSourceHash re-runs and EchoSourceHash prints the NEW hash,
     yet CoreGenerateAssemblyInfo is skipped as up-to-date and $(GeneratedAssemblyInfoFile) keeps the
     PREVIOUS AssemblyMetadata("SourceHash", ...). CoreCompile then has no changed input, so the .dll
     ships the stale value. Docker builds are immune (always clean); host incremental builds are not.
@@ -129,6 +152,7 @@ public class ComputeSourceHash : Microsoft.Build.Utilities.Task
     this target is skipped and incrementality is fully preserved.
   -->
   <Target Name="InvalidateAssemblyInfoOnSourceHashChange"
+          Condition="'$(EmitProcessorSourceHash)' != 'false'"
           BeforeTargets="CoreGenerateAssemblyInfo"
           DependsOnTargets="ComputeSourceHash"
           Inputs="$(IntermediateOutputPath)sourcehash.stamp"
@@ -137,7 +161,8 @@ public class ComputeSourceHash : Microsoft.Build.Utilities.Task
     <Delete Files="$(GeneratedAssemblyInfoFile)" />
   </Target>
 
-  <Target Name="EmitSourceHashAttribute" BeforeTargets="CoreGenerateAssemblyInfo;CoreCompile" DependsOnTargets="ComputeSourceHash">
+  <Target Name="EmitSourceHashAttribute" BeforeTargets="CoreGenerateAssemblyInfo;CoreCompile"
+          Condition="'$(EmitProcessorSourceHash)' != 'false'" DependsOnTargets="ComputeSourceHash">
     <!-- If ComputeSourceHash was skipped (no source change), recover the hash from the stamp. -->
     <ReadLinesFromFile File="$(IntermediateOutputPath)sourcehash.stamp" Condition="'$(SourceHash)' == ''">
       <Output TaskParameter="Lines" PropertyName="SourceHash" />
@@ -158,18 +183,9 @@ public class ComputeSourceHash : Microsoft.Build.Utilities.Task
     incremental-skip paths. Importance="high" prints at the default `dotnet build` (minimal) verbosity;
     the project name distinguishes concretes in a multi-project build (Processor.Sample, BaseApi.Tests, …).
   -->
-  <Target Name="EchoSourceHash" AfterTargets="EmitSourceHashAttribute">
+  <Target Name="EchoSourceHash" AfterTargets="EmitSourceHashAttribute"
+          Condition="'$(EmitProcessorSourceHash)' != 'false'">
     <Message Text="SourceHash ($(MSBuildProjectName)): $(SourceHash)" Importance="high" />
-  </Target>
-
-  <!--
-    (4) Diagnostic dump target (Task 3 exclusion fact): when $(ImplFilesDump) is set, write the
-    @(ImplFiles) set to that file so a test can assert BaseConsole.Core / Messaging.Contracts /
-    generated files never leak into the fold. No-op in a normal build.
-  -->
-  <Target Name="DumpImplFiles">
-    <WriteLinesToFile File="$(ImplFilesDump)" Lines="@(ImplFiles)" Overwrite="true"
-                      Condition="'$(ImplFilesDump)' != ''" />
   </Target>
 
 </Project>

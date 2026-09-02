@@ -418,10 +418,6 @@ obj/
 # Offline bundle: SDK installer + saved image tars + isolated restore caches (multi-GB, ship out-of-band)
 offline-bundle/
 
-# Offline NuGet feed — force-track despite the global *.nupkg ignore above
-!nugets/
-!nugets/*.nupkg
-
 # Phase 88 rendered-panel screenshots — evidence, NEVER a verdict.
 #
 # Every measured number a Phase-88 claim rests on lives in the analyzer-reports/phase-88-*.json
@@ -442,8 +438,19 @@ analyzer-reports/phase-88-screenshots/
 # skp-toolkit/skp/references/ package (gate remedy files), which must be tracked.
 /references/
 
-# Local NuGet package feed (see NuGet.config) — restorable artifacts, not source.
-nugets/
+# Package feeds are TRACKED, contradicting the *.nupkg rule above, and that is deliberate.
+# Restore is offline: NuGet.config clears nuget.org and every source is a folder in this repo. A
+# clone that did not carry them could not restore at all, and neither could the Docker builds, which
+# copy these folders into the build context before `dotnet restore`. Two feeds are covered -- the
+# vendored third-party one, and each packable project's own nuget/<version>/ output.
+#
+# This block used to sit above as `!nugets/` alone and did nothing, because a later `nugets/` rule
+# re-ignored the directory and git cannot un-ignore a file inside an ignored directory. That is why
+# the offline feed was untracked for as long as it was.
+!nugets/
+!nugets/*.nupkg
+!src/*/nuget/
+!src/*/nuget/**
 
 # Subagent-driven-development scratch (ledger, briefs, review packages).
 .superpowers/

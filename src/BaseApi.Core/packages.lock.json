@@ -66,6 +66,25 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "2.1.0"
         }
       },
+      "Messaging.Contracts": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "riLHtgEAp20F22CzzcUuG2hv5QLAFagIjwg5r7jl992DBf4eh818HX6HPIW2/aGQ+tK61n7QQFCdOebltJj8Hg=="
+      },
+      "Messaging.Transport": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "aw5+tnla1mSGvjhNjBys+YMACEM9G3sg4N0brEN9amOV9SuAAeoI/rap1s0EZcoWymNrP5Ht885htCoMC47e4A==",
+        "dependencies": {
+          "Messaging.Contracts": "[1.0.0]",
+          "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",
+          "Microsoft.Extensions.Logging.Abstractions": "8.0.2",
+          "Microsoft.Extensions.Options": "8.0.2",
+          "RabbitMQ.Client": "7.1.2"
+        }
+      },
       "Microsoft.EntityFrameworkCore": {
         "type": "Direct",
         "requested": "[8.0.27, )",
@@ -435,19 +454,6 @@
         "type": "Transitive",
         "resolved": "8.0.0",
         "contentHash": "7mu9v0QDv66ar3DpGSZHg9NuNcxDaaAcnMULuZlaTpP9+hwXhrxNGsF5GmLkSHxFdb5bBc1TzeujsRgTrPWi+Q=="
-      },
-      "messaging.contracts": {
-        "type": "Project"
-      },
-      "messaging.transport": {
-        "type": "Project",
-        "dependencies": {
-          "Messaging.Contracts": "[1.0.0, )",
-          "Microsoft.Extensions.Hosting.Abstractions": "[8.0.1, )",
-          "Microsoft.Extensions.Logging.Abstractions": "[8.0.2, )",
-          "Microsoft.Extensions.Options": "[8.0.2, )",
-          "RabbitMQ.Client": "[7.1.2, )"
-        }
       },
       "Asp.Versioning.Http": {
         "type": "CentralTransitive",

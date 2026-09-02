@@ -1,0 +1,3 @@
+# This project's package feed. The folder must exist before restore: NuGet fails a
+# configured local source that is missing (NU1301), which would otherwise make a clean
+# clone unrestorable until the first pack. Tracked for that reason alone.

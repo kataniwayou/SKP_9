@@ -108,6 +108,20 @@
          carries advisory GHSA-w7r3-mgwf-4mqq, which NuGetAudit promotes to a build error here,
          so the pin is 18.0.13 — a stable net8.0 release exposing the same LeaderElector API. -->
     <PackageVersion Include="KubernetesClient" Version="18.0.13" />
+
+    <!-- This repo's own libraries, consumed as packages rather than project references. Each is
+         packed by its own project into src/<Project>/nuget/<version>/ and resolved from there
+         through the folder sources in NuGet.config.
+
+         Pinned EXACTLY, in bracket notation, so a consumer can never float onto a version that
+         happens to be present. The version is overwritten in place rather than bumped: repacking
+         replaces the .nupkg, and making that visible to a consumer — clearing the extracted copy
+         and restoring again — is the packing developer's step, not something restore infers. -->
+    <PackageVersion Include="Messaging.Contracts" Version="[1.0.0]" />
+    <PackageVersion Include="Messaging.Transport" Version="[1.0.0]" />
+    <PackageVersion Include="BaseConsole.Core" Version="[1.0.0]" />
+    <PackageVersion Include="BaseApi.Core" Version="[1.0.0]" />
+    <PackageVersion Include="BaseProcessor.Core" Version="[1.0.0]" />
   </ItemGroup>
 
 </Project>

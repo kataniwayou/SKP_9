@@ -2,6 +2,23 @@
   "version": 2,
   "dependencies": {
     "net8.0": {
+      "BaseConsole.Core": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "OA15K0ZERSzm0ht8tQCSEn6zpehUfESNB8ZsgQLDHpP7MDy9I26KlgwzxAQFA6afWVL2VYMBLdZP8lzKOysdeg==",
+        "dependencies": {
+          "Messaging.Contracts": "[1.0.0]",
+          "Messaging.Transport": "[1.0.0]",
+          "Microsoft.Extensions.Diagnostics.HealthChecks": "8.0.11",
+          "Microsoft.Extensions.Hosting": "8.0.1",
+          "OpenTelemetry": "1.15.3",
+          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "1.15.3",
+          "OpenTelemetry.Extensions.Hosting": "1.15.3",
+          "OpenTelemetry.Instrumentation.Runtime": "1.15.0",
+          "StackExchange.Redis": "2.13.1"
+        }
+      },
       "Cronos": {
         "type": "Direct",
         "requested": "[0.13.0, )",
@@ -17,6 +34,12 @@
           "Fractions": "7.3.0",
           "YamlDotNet": "16.3.0"
         }
+      },
+      "Messaging.Contracts": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "riLHtgEAp20F22CzzcUuG2hv5QLAFagIjwg5r7jl992DBf4eh818HX6HPIW2/aGQ+tK61n7QQFCdOebltJj8Hg=="
       },
       "Quartz.Extensions.Hosting": {
         "type": "Direct",
@@ -334,31 +357,17 @@
         "resolved": "16.3.0",
         "contentHash": "SgMOdxbz8X65z8hraIs6hOEdnkH6hESTAIUa7viEngHOYaH+6q5XJmwr1+yb9vJpNQ19hCQY69xbFsLtXpobQA=="
       },
-      "baseconsole.core": {
-        "type": "Project",
+      "Messaging.Transport": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "aw5+tnla1mSGvjhNjBys+YMACEM9G3sg4N0brEN9amOV9SuAAeoI/rap1s0EZcoWymNrP5Ht885htCoMC47e4A==",
         "dependencies": {
-          "Messaging.Contracts": "[1.0.0, )",
-          "Messaging.Transport": "[1.0.0, )",
-          "Microsoft.Extensions.Diagnostics.HealthChecks": "[8.0.11, )",
-          "Microsoft.Extensions.Hosting": "[8.0.1, )",
-          "OpenTelemetry": "[1.15.3, )",
-          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.15.3, )",
-          "OpenTelemetry.Extensions.Hosting": "[1.15.3, )",
-          "OpenTelemetry.Instrumentation.Runtime": "[1.15.0, )",
-          "StackExchange.Redis": "[2.13.1, )"
-        }
-      },
-      "messaging.contracts": {
-        "type": "Project"
-      },
-      "messaging.transport": {
-        "type": "Project",
-        "dependencies": {
-          "Messaging.Contracts": "[1.0.0, )",
-          "Microsoft.Extensions.Hosting.Abstractions": "[8.0.1, )",
-          "Microsoft.Extensions.Logging.Abstractions": "[8.0.2, )",
-          "Microsoft.Extensions.Options": "[8.0.2, )",
-          "RabbitMQ.Client": "[7.1.2, )"
+          "Messaging.Contracts": "[1.0.0]",
+          "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",
+          "Microsoft.Extensions.Logging.Abstractions": "8.0.2",
+          "Microsoft.Extensions.Options": "8.0.2",
+          "RabbitMQ.Client": "7.1.2"
         }
       },
       "Microsoft.Extensions.Diagnostics.HealthChecks": {
