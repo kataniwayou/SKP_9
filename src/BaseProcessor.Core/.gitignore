@@ -1,0 +1,17 @@
+# Build output for this project.
+#
+# Duplicated from the repository root deliberately. The root .gitignore covers these today, so this
+# file changes nothing right now -- it exists so the project stays correct on its own the day it is
+# extracted into a repository of its own, where the root file does not travel with it.
+bin/
+obj/
+
+# This project's package feed, and it is TRACKED -- do not add *.nupkg above.
+#
+# Restore is offline: NuGet.config clears nuget.org and resolves this package from the folder below,
+# and the three Docker builds copy it into the build context before `dotnet restore`. A clone that
+# did not carry it could not restore at all. The negations are stated here rather than left to the
+# root so they survive an extraction, and because the deepest .gitignore wins -- a `*.nupkg` rule
+# added at any level above cannot silently untrack this feed.
+!nuget/
+!nuget/**
