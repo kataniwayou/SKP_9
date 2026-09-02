@@ -38,8 +38,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BaseConsole.Core\BaseConsole.Core.csproj" />
-    <ProjectReference Include="..\Messaging.Contracts\Messaging.Contracts.csproj" />
+    <PackageReference Include="BaseConsole.Core" VersionOverride="[1.0.0]" />
+    <PackageReference Include="Messaging.Contracts" VersionOverride="[1.0.0]" />
   </ItemGroup>
 
   <ItemGroup>

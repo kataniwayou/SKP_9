@@ -4,6 +4,11 @@
     <RootNamespace>BaseApi.Tests</RootNamespace>
     <AssemblyName>BaseApi.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
+    <!-- BaseProcessor.Core's package auto-imports SourceHash.targets into every consumer.
+         This assembly is not a processor, and stamping a hash on it would give
+         AssemblyMetadataSourceHashProvider something to find on the entry assembly, hiding
+         the fail-fast it exists to perform. -->
+    <EmitProcessorSourceHash>false</EmitProcessorSourceHash>
     <IsTestProject>true</IsTestProject>
     <OutputType>Exe</OutputType>
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
@@ -77,11 +82,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\BaseApi.Core\BaseApi.Core.csproj" />
+    <PackageReference Include="BaseApi.Core" VersionOverride="[1.0.0]" />
     <ProjectReference Include="..\..\BaseApi.Service\BaseApi.Service.csproj" />
-    <ProjectReference Include="..\..\BaseConsole.Core\BaseConsole.Core.csproj" />
-    <ProjectReference Include="..\..\Messaging.Transport\Messaging.Transport.csproj" />
-    <ProjectReference Include="..\..\BaseProcessor.Core\BaseProcessor.Core.csproj" />
+    <PackageReference Include="BaseConsole.Core" VersionOverride="[1.0.0]" />
+    <PackageReference Include="Messaging.Transport" VersionOverride="[1.0.0]" />
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
     <ProjectReference Include="..\..\Processor.Sample\Processor.Sample.csproj" />
     <ProjectReference Include="..\..\Orchestrator\Orchestrator.csproj" />
   </ItemGroup>

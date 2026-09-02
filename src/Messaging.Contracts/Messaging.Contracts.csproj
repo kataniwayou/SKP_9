@@ -16,4 +16,19 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
+  <!--
+    Packed, not project-referenced. The .nupkg lands beside this project's own source in
+    nuget/<version>/, which NuGet.config registers as a folder source. Consumers pin the version
+    exactly; see Directory.Packages.props for why it is overwritten rather than bumped.
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Version>1.0.0</Version>
+    <PackageOutputPath>$(MSBuildProjectDirectory)\nuget\$(Version)</PackageOutputPath>
+    <!-- Both are required rather than decorative: TreatWarningsAsErrors is on repo-wide, and a
+         pack without them raises NU5017/NU5128-class warnings that would fail the build. -->
+    <Description>Dependency-free POCO contracts: the shared bus vocabulary and L2 projection shapes.</Description>
+    <Authors>SKP</Authors>
+  </PropertyGroup>
+
 </Project>

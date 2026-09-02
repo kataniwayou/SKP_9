@@ -18,8 +18,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BaseApi.Core\BaseApi.Core.csproj" />
-    <ProjectReference Include="..\Messaging.Contracts\Messaging.Contracts.csproj" />
+    <PackageReference Include="BaseApi.Core" VersionOverride="[1.0.0]" />
+    <PackageReference Include="Messaging.Contracts" VersionOverride="[1.0.0]" />
   </ItemGroup>
 
   <ItemGroup>

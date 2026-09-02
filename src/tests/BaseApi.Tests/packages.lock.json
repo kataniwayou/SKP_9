@@ -2,6 +2,82 @@
   "version": 2,
   "dependencies": {
     "net8.0": {
+      "BaseApi.Core": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "LC0qF5quY058tyFpsc/PACLcK6v6q2rD9tTXK0AoRC7096+JSJRukmUl9pfbyCgfuQJFKGQNolsOcPJTn7Balw==",
+        "dependencies": {
+          "Asp.Versioning.Mvc": "8.1.0",
+          "Asp.Versioning.Mvc.ApiExplorer": "8.1.0",
+          "AspNetCore.HealthChecks.NpgSql": "9.0.0",
+          "AspNetCore.HealthChecks.UI.Client": "9.0.0",
+          "EFCore.NamingConventions": "8.0.3",
+          "FluentValidation": "12.1.1",
+          "FluentValidation.DependencyInjectionExtensions": "12.1.1",
+          "Messaging.Contracts": "[1.0.0]",
+          "Messaging.Transport": "[1.0.0]",
+          "Microsoft.EntityFrameworkCore": "8.0.27",
+          "Microsoft.EntityFrameworkCore.Relational": "8.0.27",
+          "Npgsql": "8.0.9",
+          "Npgsql.EntityFrameworkCore.PostgreSQL": "8.0.10",
+          "Npgsql.OpenTelemetry": "8.0.4",
+          "OpenTelemetry": "1.15.3",
+          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "1.15.3",
+          "OpenTelemetry.Extensions.Hosting": "1.15.3",
+          "OpenTelemetry.Instrumentation.AspNetCore": "1.15.0",
+          "OpenTelemetry.Instrumentation.Http": "1.15.0",
+          "OpenTelemetry.Instrumentation.Runtime": "1.15.0",
+          "RabbitMQ.Client": "7.1.2",
+          "StackExchange.Redis": "2.13.1",
+          "Swashbuckle.AspNetCore": "6.9.0"
+        }
+      },
+      "BaseConsole.Core": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "OA15K0ZERSzm0ht8tQCSEn6zpehUfESNB8ZsgQLDHpP7MDy9I26KlgwzxAQFA6afWVL2VYMBLdZP8lzKOysdeg==",
+        "dependencies": {
+          "Messaging.Contracts": "[1.0.0]",
+          "Messaging.Transport": "[1.0.0]",
+          "Microsoft.Extensions.Diagnostics.HealthChecks": "8.0.11",
+          "Microsoft.Extensions.Hosting": "8.0.1",
+          "OpenTelemetry": "1.15.3",
+          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "1.15.3",
+          "OpenTelemetry.Extensions.Hosting": "1.15.3",
+          "OpenTelemetry.Instrumentation.Runtime": "1.15.0",
+          "StackExchange.Redis": "2.13.1"
+        }
+      },
+      "BaseProcessor.Core": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "9cOVz7dLCF5Zbva8GebF1l5pks8tY9NDwsiZzIVXJjl6KHcquYbYFgCqCNAQyhFp9h/J6ykhcZaSxG9ETBdU2w==",
+        "dependencies": {
+          "BaseConsole.Core": "[1.0.0]",
+          "JsonSchema.Net": "9.2.1",
+          "Messaging.Contracts": "[1.0.0]",
+          "Messaging.Transport": "[1.0.0]",
+          "Microsoft.Extensions.Hosting": "8.0.1",
+          "OpenTelemetry": "1.15.3",
+          "StackExchange.Redis": "2.13.1"
+        }
+      },
+      "Messaging.Transport": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "aw5+tnla1mSGvjhNjBys+YMACEM9G3sg4N0brEN9amOV9SuAAeoI/rap1s0EZcoWymNrP5Ht885htCoMC47e4A==",
+        "dependencies": {
+          "Messaging.Contracts": "[1.0.0]",
+          "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",
+          "Microsoft.Extensions.Logging.Abstractions": "8.0.2",
+          "Microsoft.Extensions.Options": "8.0.2",
+          "RabbitMQ.Client": "7.1.2"
+        }
+      },
       "Microsoft.EntityFrameworkCore.InMemory": {
         "type": "Direct",
         "requested": "[8.0.27, )",
@@ -579,90 +655,23 @@
         "resolved": "16.3.0",
         "contentHash": "SgMOdxbz8X65z8hraIs6hOEdnkH6hESTAIUa7viEngHOYaH+6q5XJmwr1+yb9vJpNQ19hCQY69xbFsLtXpobQA=="
       },
-      "baseapi.core": {
-        "type": "Project",
-        "dependencies": {
-          "Asp.Versioning.Mvc": "[8.1.0, )",
-          "Asp.Versioning.Mvc.ApiExplorer": "[8.1.0, )",
-          "AspNetCore.HealthChecks.NpgSql": "[9.0.0, )",
-          "AspNetCore.HealthChecks.UI.Client": "[9.0.0, )",
-          "EFCore.NamingConventions": "[8.0.3, )",
-          "FluentValidation": "[12.1.1, )",
-          "FluentValidation.DependencyInjectionExtensions": "[12.1.1, )",
-          "Messaging.Contracts": "[1.0.0, )",
-          "Messaging.Transport": "[1.0.0, )",
-          "Microsoft.EntityFrameworkCore": "[8.0.27, )",
-          "Microsoft.EntityFrameworkCore.Relational": "[8.0.27, )",
-          "Npgsql": "[8.0.9, )",
-          "Npgsql.EntityFrameworkCore.PostgreSQL": "[8.0.10, )",
-          "Npgsql.OpenTelemetry": "[8.0.4, )",
-          "OpenTelemetry": "[1.15.3, )",
-          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.15.3, )",
-          "OpenTelemetry.Extensions.Hosting": "[1.15.3, )",
-          "OpenTelemetry.Instrumentation.AspNetCore": "[1.15.0, )",
-          "OpenTelemetry.Instrumentation.Http": "[1.15.0, )",
-          "OpenTelemetry.Instrumentation.Runtime": "[1.15.0, )",
-          "RabbitMQ.Client": "[7.1.2, )",
-          "StackExchange.Redis": "[2.13.1, )",
-          "Swashbuckle.AspNetCore": "[6.9.0, )"
-        }
-      },
       "baseapi.service": {
         "type": "Project",
         "dependencies": {
-          "BaseApi.Core": "[1.0.0, )",
+          "BaseApi.Core": "[1.0.0, 1.0.0]",
           "Cronos": "[0.13.0, )",
           "JsonSchema.Net": "[9.2.1, )",
-          "Messaging.Contracts": "[1.0.0, )",
+          "Messaging.Contracts": "[1.0.0, 1.0.0]",
           "StackExchange.Redis": "[2.13.1, )"
-        }
-      },
-      "baseconsole.core": {
-        "type": "Project",
-        "dependencies": {
-          "Messaging.Contracts": "[1.0.0, )",
-          "Messaging.Transport": "[1.0.0, )",
-          "Microsoft.Extensions.Diagnostics.HealthChecks": "[8.0.11, )",
-          "Microsoft.Extensions.Hosting": "[8.0.1, )",
-          "OpenTelemetry": "[1.15.3, )",
-          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.15.3, )",
-          "OpenTelemetry.Extensions.Hosting": "[1.15.3, )",
-          "OpenTelemetry.Instrumentation.Runtime": "[1.15.0, )",
-          "StackExchange.Redis": "[2.13.1, )"
-        }
-      },
-      "baseprocessor.core": {
-        "type": "Project",
-        "dependencies": {
-          "BaseConsole.Core": "[1.0.0, )",
-          "JsonSchema.Net": "[9.2.1, )",
-          "Messaging.Contracts": "[1.0.0, )",
-          "Messaging.Transport": "[1.0.0, )",
-          "Microsoft.Extensions.Hosting": "[8.0.1, )",
-          "OpenTelemetry": "[1.15.3, )",
-          "StackExchange.Redis": "[2.13.1, )"
-        }
-      },
-      "messaging.contracts": {
-        "type": "Project"
-      },
-      "messaging.transport": {
-        "type": "Project",
-        "dependencies": {
-          "Messaging.Contracts": "[1.0.0, )",
-          "Microsoft.Extensions.Hosting.Abstractions": "[8.0.1, )",
-          "Microsoft.Extensions.Logging.Abstractions": "[8.0.2, )",
-          "Microsoft.Extensions.Options": "[8.0.2, )",
-          "RabbitMQ.Client": "[7.1.2, )"
         }
       },
       "orchestrator": {
         "type": "Project",
         "dependencies": {
-          "BaseConsole.Core": "[1.0.0, )",
+          "BaseConsole.Core": "[1.0.0, 1.0.0]",
           "Cronos": "[0.13.0, )",
           "KubernetesClient": "[18.0.13, )",
-          "Messaging.Contracts": "[1.0.0, )",
+          "Messaging.Contracts": "[1.0.0, 1.0.0]",
           "Quartz.Extensions.Hosting": "[3.18.1, )",
           "StackExchange.Redis": "[2.13.1, )"
         }
@@ -670,7 +679,7 @@
       "processor.sample": {
         "type": "Project",
         "dependencies": {
-          "BaseProcessor.Core": "[1.0.0, )"
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]"
         }
       },
       "Asp.Versioning.Http": {
@@ -770,6 +779,12 @@
           "Fractions": "7.3.0",
           "YamlDotNet": "16.3.0"
         }
+      },
+      "Messaging.Contracts": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "riLHtgEAp20F22CzzcUuG2hv5QLAFagIjwg5r7jl992DBf4eh818HX6HPIW2/aGQ+tK61n7QQFCdOebltJj8Hg=="
       },
       "Microsoft.EntityFrameworkCore": {
         "type": "CentralTransitive",

@@ -2,6 +2,12 @@
   "version": 2,
   "dependencies": {
     "net8.0": {
+      "Messaging.Contracts": {
+        "type": "Direct",
+        "requested": "[1.0.0, 1.0.0]",
+        "resolved": "1.0.0",
+        "contentHash": "riLHtgEAp20F22CzzcUuG2hv5QLAFagIjwg5r7jl992DBf4eh818HX6HPIW2/aGQ+tK61n7QQFCdOebltJj8Hg=="
+      },
       "Microsoft.Extensions.Hosting.Abstractions": {
         "type": "Direct",
         "requested": "[8.0.1, )",
@@ -88,9 +94,6 @@
         "type": "Transitive",
         "resolved": "8.0.0",
         "contentHash": "7mu9v0QDv66ar3DpGSZHg9NuNcxDaaAcnMULuZlaTpP9+hwXhrxNGsF5GmLkSHxFdb5bBc1TzeujsRgTrPWi+Q=="
-      },
-      "messaging.contracts": {
-        "type": "Project"
       }
     }
   }
