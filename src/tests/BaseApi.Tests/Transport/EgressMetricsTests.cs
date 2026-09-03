@@ -6,6 +6,7 @@ using Xunit;
 
 namespace BaseApi.Tests.Transport;
 
+[Collection(EnvironmentCollection.Name)]
 public sealed class EgressMetricsTests
 {
     [Fact]

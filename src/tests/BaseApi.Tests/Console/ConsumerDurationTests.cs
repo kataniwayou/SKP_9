@@ -5,6 +5,7 @@ using Xunit;
 
 namespace BaseApi.Tests.Console;
 
+[Collection(EnvironmentCollection.Name)]
 public sealed class ConsumerDurationTests
 {
     [Fact]

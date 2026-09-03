@@ -26,6 +26,7 @@ namespace BaseApi.Tests.Console;
 /// reachable hermetically.
 /// </para>
 /// </summary>
+[Collection(EnvironmentCollection.Name)]
 public sealed class IngressMetricsTests
 {
     private const string Queue = "some-queue";
