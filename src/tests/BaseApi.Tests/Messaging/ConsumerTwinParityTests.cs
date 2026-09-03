@@ -41,6 +41,7 @@ namespace BaseApi.Tests.Messaging;
 /// refactor and this is not it — this is the seam that makes the duplication safe to keep.
 /// </para>
 /// </summary>
+[Collection(EnvironmentCollection.Name)]
 public sealed class ConsumerTwinParityTests
 {
     private const string Queue = "twin-parity";

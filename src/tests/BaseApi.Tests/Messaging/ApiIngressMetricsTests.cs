@@ -29,6 +29,7 @@ namespace BaseApi.Tests.Messaging;
 /// for exactly once on every exit, including the exit that leaves through an exception.
 /// </para>
 /// </summary>
+[Collection(EnvironmentCollection.Name)]
 public sealed class ApiIngressMetricsTests
 {
     private const string Queue = "orchestrator-control";

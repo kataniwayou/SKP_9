@@ -15,8 +15,17 @@ namespace BaseApi.Tests.Observability;
 /// recorded by every other test class in the run, which is exactly the failure this file exists to
 /// prevent in production.
 /// </para>
+/// <para>
+/// <b>EnvironmentCollection rather than a collection of its own</b>, which is what this file used to
+/// carry. A single-class collection serialises a class against itself, which xunit already does; it
+/// does nothing about the classes this one actually collides with. The provider installed here is
+/// process-global and the instruments it tags are shared with <c>IngressMetricsTests</c>,
+/// <c>EgressMetricsTests</c> and the two consumer files, so all of them belong in the one collection
+/// that disables parallelisation -- see <see cref="EnvironmentCollection"/>'s own remarks on static
+/// metric instruments being the second kind of process-wide state it serialises.
+/// </para>
 /// </summary>
-[Collection(nameof(PipelineAmbientTagTests))]
+[Collection(EnvironmentCollection.Name)]
 public sealed class PipelineAmbientTagTests
 {
     private static string? RoleOf(RecordedMeasurement m) =>
