@@ -52,6 +52,10 @@
          nothing to do with anything in it. BaseApi.Core, BaseApi.Service and BaseProcessor.Core all
          declare it for the same reason. Version comes from Directory.Packages.props. -->
     <PackageReference Include="StackExchange.Redis" />
+    <!-- OrchestratorRoleConsoleFormatter derives from ConsoleFormatter, which lives here. It too
+         arrives transitively (via Microsoft.Extensions.Hosting this time), so the build works
+         without this line, and it is declared for the identical reason the line above is. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
   </ItemGroup>
 
 </Project>

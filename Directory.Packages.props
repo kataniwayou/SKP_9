@@ -86,6 +86,9 @@
     <!-- Logging/options abstractions for Messaging.Transport, which has no FrameworkReference to
          pull these in transitively the way BaseApi.Core's ASP.NET Core reference does. -->
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <!-- ConsoleFormatter, which OrchestratorRoleConsoleFormatter derives from. Pinned at the
+         version the host already pulls in transitively, so declaring it moves nothing. -->
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="8.0.2" />
     <!-- Health checks and hosting for BaseConsole.Core -->
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.0.11" />

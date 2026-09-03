@@ -4,6 +4,8 @@ using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
 using Orchestrator;
+using Orchestrator.Election;
+using Orchestrator.Observability;
 using Orchestrator.Hydration;
 using Orchestrator.Messaging;
 using Orchestrator.Scheduling;
@@ -13,6 +15,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using Xunit;
@@ -352,5 +355,42 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
         using var scope = _host.Services.CreateScope();
 
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<WorkflowFireJob>());
+    }
+
+    [Fact]
+    public void TheConsoleProviderIsPointedAtTheRoleFormatter()
+    {
+        // THE SILENT FAILURE THIS GUARDS. A FormatterName that names nothing does not throw:
+        // ConsoleLoggerProvider falls back to `simple` and every pod goes on logging correctly,
+        // minus the role. The registration and the name are therefore asserted separately --
+        // registering the formatter under one name and selecting another is exactly the shape of
+        // that mistake.
+        var selected = _host.Services
+            .GetRequiredService<IOptionsMonitor<ConsoleLoggerOptions>>().CurrentValue.FormatterName;
+
+        Assert.Equal(OrchestratorRoleConsoleFormatter.FormatterName, selected);
+
+        var formatter = Assert.Single(
+            _host.Services.GetServices<ConsoleFormatter>().OfType<OrchestratorRoleConsoleFormatter>());
+
+        Assert.Equal(selected, formatter.Name);
+    }
+
+    [Fact]
+    public void TheFormatterCanOnlyHaveTheLeaderStateTheElectionWrites()
+    {
+        // Two LeaderState objects would compile, pass every unit test either one has, and print
+        // role=follower on a leader forever. One registration is what forbids that: the formatter
+        // takes the type from DI, so a single descriptor means the instance it holds is the instance
+        // LeaderElectionService writes and PipelineAmbientTag reads.
+        //
+        // ASSERTED BY COUNTING REGISTRATIONS RATHER THAN BY FLIPPING THE STATE AND READING A LINE.
+        // The obvious version of this test -- BecomeLeader(), render, assert role=leader -- works and
+        // is wrong here: Create installs a PipelineAmbientTag provider closing over THIS container's
+        // LeaderState, and that provider is process-global. Every measurement any other test class
+        // records during the flip would carry role=leader, in a run where collections execute in
+        // parallel. The live-read behaviour is covered where it is safe to cover it, over a local
+        // LeaderState, in RoleConsoleFormatterTests.
+        Assert.Single(_host.Services.GetServices<LeaderState>());
     }
 }

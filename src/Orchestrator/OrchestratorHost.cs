@@ -20,6 +20,7 @@ using Orchestrator.Observability;
 using Orchestrator.Scheduling;
 using Quartz;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 namespace Orchestrator;
 
@@ -142,6 +143,21 @@ public static class OrchestratorHost
         builder.Services.AddSingleton<OrchestratorRoleLogEnricher>();
         builder.Services.ConfigureOpenTelemetryLoggerProvider(
             (sp, lp) => lp.AddProcessor(sp.GetRequiredService<OrchestratorRoleLogEnricher>()));
+
+        // And the same fact on stdout. The processor registered above does not reach it: it runs on
+        // records bound for the OTLP exporter, and pod stdout comes from ConsoleLoggerProvider,
+        // which never sees a LogRecord. Without these two lines the role is on the Elasticsearch
+        // documents and on the metric attributes and missing from `kubectl logs` -- the one surface
+        // an operator reads while a failover is in progress. See the formatter's own remarks for
+        // why it is a formatter rather than a scope.
+        //
+        // Selected here rather than through Logging:Console:FormatterName in appsettings.json,
+        // because that key would then have to be set in two places -- the local file and the
+        // manifest's env block -- and the one that matters is the one nothing in this repository
+        // would fail without.
+        builder.Services.AddSingleton<ConsoleFormatter, OrchestratorRoleConsoleFormatter>();
+        builder.Logging.AddConsole(
+            o => o.FormatterName = OrchestratorRoleConsoleFormatter.FormatterName);
 
         // The broker and Redis clients, and the health surface every console carries regardless of
         // what it does. Redis is required here — not merely by convention — because
