@@ -105,7 +105,13 @@ public static class BaseProcessorServiceCollectionExtensions
         // above actually work. Registered ahead of every other hosted service below —
         // ProcessorStartupOrchestrator among them — so its output leads the console. It gates nothing
         // and recovers nothing; see ConsolePreflightServiceCollectionExtensions.
-        services.AddBaseConsolePreflight(cfg);
+        //
+        // logEnvironment: false because ProcessorBoot has already logged that block, before stage 1
+        // asked for an identity. This host is the one host in the stack that does not exist yet when
+        // its process starts, so leaving the block here put it after the identity round trip -- past
+        // an unbounded wait, and therefore absent from exactly the window an operator is reading when
+        // the wait is what they are diagnosing. It moved; it did not get duplicated.
+        services.AddBaseConsolePreflight(cfg, logEnvironment: false);
 
         services.Configure<ProcessorLivenessOptions>(cfg.GetSection("Processor"));
 

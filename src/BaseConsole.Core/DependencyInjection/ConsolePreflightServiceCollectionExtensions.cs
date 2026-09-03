@@ -24,8 +24,13 @@ namespace BaseConsole.Core.DependencyInjection;
 /// </summary>
 public static class ConsolePreflightServiceCollectionExtensions
 {
+    /// <param name="logEnvironment">
+    /// Whether this service logs the masked environment block. True for every host that builds one
+    /// host and starts it; false for the processor, whose stage 1 has already logged the same block
+    /// through <see cref="Startup.EnvironmentSnapshot"/> before any host existed.
+    /// </param>
     public static IServiceCollection AddBaseConsolePreflight(
-        this IServiceCollection services, IConfiguration cfg)
+        this IServiceCollection services, IConfiguration cfg, bool logEnvironment = true)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(cfg);
@@ -44,7 +49,8 @@ public static class ConsolePreflightServiceCollectionExtensions
             sp.GetRequiredService<IConnectionMultiplexer>(),
             redisEndpoint,
             sp.GetRequiredService<TimeProvider>(),
-            sp.GetRequiredService<ILogger<StartupPreflightService>>()));
+            sp.GetRequiredService<ILogger<StartupPreflightService>>(),
+            logEnvironment));
 
         return services;
     }
