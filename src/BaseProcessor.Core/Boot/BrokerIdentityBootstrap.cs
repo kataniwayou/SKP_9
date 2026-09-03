@@ -111,13 +111,13 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
         var delay   = TimeSpan.FromSeconds(1);
 
         // Stated once, unconditionally, before the first ask -- deliberately not from a branch.
-        // The two "no processor registered" lines below also carry the hash, but both are reachable
-        // only when the API is up AND answering: a processor deployed before it reports an
-        // unanswered queue and would never state the hash at all, which is the exact moment an
-        // operator needs it to register the row. On the happy path this is the only record of which
-        // build identity the pod claims, and so the only thing that makes a stale embed -- the
-        // failure SourceHash.targets documents, where the build log and the shipped assembly carry
-        // different hashes -- visible from the pod's own side rather than by unpacking its image.
+        // Every waiting line below repeats the hash, so an operator reading a log mid-wait no longer
+        // depends on having seen this one. What it still covers is the opposite case: identity
+        // resolves on the first ask and no waiting line is ever emitted. On that happy path this is
+        // the only record of which build identity the pod claims, and so the only thing that makes a
+        // stale embed -- the failure SourceHash.targets documents, where the build log and the
+        // shipped assembly carry different hashes -- visible from the pod's own side rather than by
+        // unpacking its image.
         _logger.LogInformation(
             "resolving identity for source hash {Hash}; asking {Queue}",
             hash, ProcessorQueues.IdentityQuery);
@@ -173,22 +173,31 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
                 // sits in, and the queue and its server are named here because they are the whole
                 // remedy: without them the line reports a symptom the operator cannot act on, and
                 // the fact that this queue is the API's is visible only in the API's own log.
+                //
+                // The hash rides along for the same reason, and it matters most here. This is the
+                // one branch that can repeat for hours, and a wait that long outlives the single
+                // line above that stated the hash -- rotated out of the pod's log, or simply never
+                // read, because an operator opens the log at the moment it starts complaining. The
+                // hash is what they register the row against once the API does come up, so the line
+                // that reports the API missing is exactly the line that has to carry it.
                 default:
                     if (escalated)
                     {
                         _logger.LogError(
-                            "nothing has answered on {Queue} for {Waited:c} — that queue is served by "
-                            + "the BaseApi service (deployment baseapi-service); check that it is "
-                            + "deployed and running. retrying in {Delay}",
-                            ProcessorQueues.IdentityQuery, waited, delay);
+                            "nothing has answered on {Queue} for {Waited:c} while asking for source "
+                            + "hash {Hash} — that queue is served by the BaseApi service "
+                            + "(deployment baseapi-service); check that it is deployed and running. "
+                            + "retrying in {Delay}",
+                            ProcessorQueues.IdentityQuery, waited, hash, delay);
                     }
                     else
                     {
                         _logger.LogWarning(
-                            "nothing answered on {Queue} after {Waited:c} — that queue is served by "
-                            + "the BaseApi service (deployment baseapi-service), which may not be up "
-                            + "yet. retrying in {Delay}",
-                            ProcessorQueues.IdentityQuery, waited, delay);
+                            "nothing answered on {Queue} after {Waited:c} while asking for source "
+                            + "hash {Hash} — that queue is served by the BaseApi service "
+                            + "(deployment baseapi-service), which may not be up yet. retrying in "
+                            + "{Delay}",
+                            ProcessorQueues.IdentityQuery, waited, hash, delay);
                     }
 
                     break;
