@@ -60,6 +60,7 @@ internal sealed class StartupPreflightService : BackgroundService
     private readonly string _redisEndpoint;
     private readonly TimeProvider _clock;
     private readonly ILogger<StartupPreflightService> _logger;
+    private readonly bool _logEnvironment;
 
     public StartupPreflightService(
         IRabbitMqConnectivityCheck rabbit,
@@ -67,8 +68,11 @@ internal sealed class StartupPreflightService : BackgroundService
         IConnectionMultiplexer redis,
         string redisEndpoint,
         TimeProvider clock,
-        ILogger<StartupPreflightService> logger)
+        ILogger<StartupPreflightService> logger,
+        bool logEnvironment = true)
     {
+        _logEnvironment = logEnvironment;
+
         _rabbit        = rabbit ?? throw new ArgumentNullException(nameof(rabbit));
         _redis         = redis ?? throw new ArgumentNullException(nameof(redis));
         _redisEndpoint = redisEndpoint ?? throw new ArgumentNullException(nameof(redisEndpoint));
@@ -114,10 +118,20 @@ internal sealed class StartupPreflightService : BackgroundService
         // operator reading a failure needs it already on screen. Logged once even though the checks
         // repeat — the environment cannot change under a running process, and repeating it would push
         // the failures it explains off the top of the console.
-        var settings = EnvironmentSnapshot.Lines();
-        _logger.LogInformation(
-            "Loaded {SettingCount} application environment variable(s):{NewLine}{Settings}",
-            settings.Count, Environment.NewLine, string.Join(Environment.NewLine, settings));
+        //
+        // Skipped only by the processor, which has already logged this block from its stage 1 — it
+        // resolves its identity before a host exists to run this service in, so waiting until here
+        // would leave the whole identity window, which is unbounded by design, with no record of the
+        // configuration that shaped it. Logging it twice would be the alternative, and the second
+        // copy would push the first off an operator's screen. Everything below still runs: the
+        // reachability checks are this service's actual job.
+        if (_logEnvironment)
+        {
+            var settings = EnvironmentSnapshot.Lines();
+            _logger.LogInformation(
+                "Loaded {SettingCount} application environment variable(s):{NewLine}{Settings}",
+                settings.Count, Environment.NewLine, string.Join(Environment.NewLine, settings));
+        }
 
         _logger.LogInformation(
             "Startup preflight beginning: checking RabbitMQ (connect + declare topology) and " +

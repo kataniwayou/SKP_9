@@ -23,7 +23,7 @@ namespace BaseConsole.Core.Startup;
 /// answer none of that. Only credentials are withheld.
 /// </para>
 /// </summary>
-internal static class EnvironmentSnapshot
+public static class EnvironmentSnapshot
 {
     /// <summary>
     /// Keys whose value is replaced with <see cref="Mask"/> regardless of anything else.
@@ -145,6 +145,16 @@ internal static class EnvironmentSnapshot
     }
 
     /// <summary>This process's environment, rendered.</summary>
-    internal static IReadOnlyList<string> Lines()
+    /// <summary>
+    /// The live environment, masked and ordered, ready to log.
+    /// <para>
+    /// <b>Public, and the only public member here, because the processor's stage 1 is in another
+    /// assembly.</b> That host resolves its identity before it has a host to run
+    /// <see cref="StartupPreflightService"/> in, so it logs this block itself -- and the alternative,
+    /// a second copy of the masking above living in BaseProcessor.Core, is how a password reaches a
+    /// log the day the two copies drift. One implementation, two callers.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<string> Lines()
         => Lines(Environment.GetEnvironmentVariables());
 }

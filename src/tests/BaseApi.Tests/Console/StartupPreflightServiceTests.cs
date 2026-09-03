@@ -59,13 +59,14 @@ public sealed class StartupPreflightServiceTests
             // member completes successfully, which is what "everything reachable" looks like here.
         }
 
-        public StartupPreflightService Build() => new(
+        public StartupPreflightService Build(bool logEnvironment = true) => new(
             Rabbit,
             Options.Create(RabbitOptions),
             Redis,
             RedisEndpointRedactor.Redact(RedisConnectionString),
             Clock,
-            Log);
+            Log,
+            logEnvironment);
 
         /// <summary>
         /// Advances the fake clock a second at a time, the same worked example
@@ -129,6 +130,26 @@ public sealed class StartupPreflightServiceTests
 
         var opening = h.Log.Records[1];
         Assert.Equal(LogLevel.Information, opening.Level);
+        Assert.Contains("RabbitMQ", opening.Message, StringComparison.Ordinal);
+        Assert.Contains("Redis", opening.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheEnvironmentBlockIsSuppressedButTheChecksStillRun_WhenTheCallerLoggedItAlready()
+    {
+        // The processor's case. Its stage 1 has already printed this block before any host existed,
+        // so printing it again here would push the copy an operator has been reading -- the one that
+        // covers the identity window -- off the top of the console. Everything else this service does
+        // is unaffected: suppressing a diagnostic must not suppress the checks it introduces.
+        var h = new Harness();
+
+        await h.Build(logEnvironment: false).RunAsync(CancellationToken.None);
+
+        Assert.DoesNotContain(
+            h.Log.Records,
+            r => r.Message.Contains("application environment variable(s)", StringComparison.Ordinal));
+
+        var opening = h.Log.Records[0];
         Assert.Contains("RabbitMQ", opening.Message, StringComparison.Ordinal);
         Assert.Contains("Redis", opening.Message, StringComparison.Ordinal);
     }

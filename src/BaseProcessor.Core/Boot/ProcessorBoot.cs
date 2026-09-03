@@ -1,3 +1,4 @@
+using BaseConsole.Core.Startup;
 using Messaging.Contracts;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -44,6 +45,28 @@ public static class ProcessorBoot
         ArgumentNullException.ThrowIfNull(bootstrap);
         ArgumentNullException.ThrowIfNull(buildHost);
         ArgumentNullException.ThrowIfNull(logs);
+
+        // FIRST, ahead of the probe listener and the identity ask both. Every other host in the
+        // stack logs this block from StartupPreflightService, second or third line of its console;
+        // this one has no host to run that in until stage 1 has finished, and stage 1's wait is
+        // unbounded by design -- an unregistered hash retries rather than crashing. Logged there,
+        // the configuration that shaped the wait would appear only after the wait ended, which is
+        // the one time nobody needs it.
+        //
+        // Ahead of BootProbeListener rather than after it, so a port already in use still leaves the
+        // block on screen: that failure is one an operator diagnoses FROM this block.
+        //
+        // EnvironmentSnapshot is BaseConsole.Core's, not a copy. Its masking is what keeps
+        // RabbitMq__Password out of this line, and a second implementation of that is a leak waiting
+        // for the two to drift.
+        // Categorised as ProcessorBoot rather than borrowing StartupPreflightService's name. This
+        // line really is emitted here, and stage 1's other voices -- BootProbeListener,
+        // BrokerIdentityBootstrap -- log under their own names too. The message text is identical to
+        // the one every other host prints, so a grep for it still finds all four.
+        var settings = EnvironmentSnapshot.Lines();
+        logs.CreateLogger(typeof(ProcessorBoot).FullName!).LogInformation(
+            "Loaded {SettingCount} application environment variable(s):{NewLine}{Settings}",
+            settings.Count, Environment.NewLine, string.Join(Environment.NewLine, settings));
 
         ProcessorIdentityFound identity;
 

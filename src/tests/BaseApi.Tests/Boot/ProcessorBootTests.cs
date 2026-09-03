@@ -3,6 +3,7 @@ using System.Net;
 using BaseProcessor.Core.Boot;
 using Messaging.Contracts;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -14,6 +15,100 @@ public sealed class ProcessorBootTests
         Guid.Parse("9e034ca0-144b-44d5-ab90-7ed53b64a728"),
         InputSchemaId: null, OutputSchemaId: null, ConfigSchemaId: null,
         Name: "sample-proc", Version: "1.0.0");
+
+    /// <summary>
+    /// Captures what stage 1 logged, in order. A factory rather than a single logger because
+    /// <see cref="ProcessorBoot"/> takes an <see cref="ILoggerFactory"/> and the point of the test
+    /// below is WHEN a line was written relative to the identity ask.
+    /// </summary>
+    private sealed class CapturingFactory : ILoggerFactory
+    {
+        public List<string> Messages { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => new Sink(Messages);
+        public void AddProvider(ILoggerProvider provider) { }
+        public void Dispose() { }
+
+        private sealed class Sink(List<string> messages) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel level, EventId id, TState state, Exception? ex,
+                Func<TState, Exception?, string> formatter)
+                => messages.Add(formatter(state, ex));
+        }
+    }
+
+    /// <summary>Reports how much had been logged by the time the identity was asked for.</summary>
+    private sealed class RecordsWhatWasLoggedFirst(CapturingFactory factory) : IIdentityBootstrap
+    {
+        public string[] LoggedBeforeTheAsk { get; private set; } = [];
+
+        public Task<ProcessorIdentityFound> ResolveAsync(CancellationToken ct)
+        {
+            LoggedBeforeTheAsk = [.. factory.Messages];
+            return Task.FromResult(Identity);
+        }
+    }
+
+    [Fact]
+    public async Task TheEnvironmentBlockIsLoggedBeforeIdentityIsEverAsked()
+    {
+        // THE POINT OF MOVING IT HERE. Every other host prints this block from
+        // StartupPreflightService, near the top of its console. This host has no host to run that in
+        // until stage 1 finishes, and stage 1's wait is unbounded by design -- an unregistered source
+        // hash retries rather than crashing. Printed there, the configuration that shaped the wait
+        // would arrive only once the wait was over, which is the one moment nobody needs it.
+        //
+        // Asserted as "before the ask" rather than "first record", because what matters is the
+        // ordering against the identity round trip, not the index.
+        var factory = new CapturingFactory();
+        var bootstrap = new RecordsWhatWasLoggedFirst(factory);
+
+        using var host = await ProcessorBoot.StartAsync(
+            FreePort(),
+            bootstrap,
+            _ => new HostBuilder().Build(),
+            factory,
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(
+            bootstrap.LoggedBeforeTheAsk,
+            m => m.Contains("application environment variable(s)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheEnvironmentBlockCarriesTheSameMaskingEveryOtherHostUses()
+    {
+        // It reuses BaseConsole.Core's EnvironmentSnapshot rather than a copy, and this is what says
+        // so from the outside: a second implementation of the masking would be free to drift, and the
+        // day it did it would put RabbitMq__Password on an operator's screen.
+        Environment.SetEnvironmentVariable("SKP_BOOT_TEST_PASSWORD", "hunter2");
+        try
+        {
+            var factory = new CapturingFactory();
+
+            using var host = await ProcessorBoot.StartAsync(
+                FreePort(),
+                new Immediate(),
+                _ => new HostBuilder().Build(),
+                factory,
+                TestContext.Current.CancellationToken);
+
+            var block = Assert.Single(
+                factory.Messages,
+                m => m.Contains("application environment variable(s)", StringComparison.Ordinal));
+
+            Assert.Contains("SKP_BOOT_TEST_PASSWORD", block, StringComparison.Ordinal);
+            Assert.DoesNotContain("hunter2", block, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SKP_BOOT_TEST_PASSWORD", null);
+        }
+    }
 
     /// <summary>A bootstrap that answers immediately, so the sequencing is what is under test.</summary>
     private sealed class Immediate : IIdentityBootstrap
