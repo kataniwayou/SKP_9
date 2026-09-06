@@ -185,6 +185,7 @@ public sealed class PathImporterLoopTests
         await processor.ExecuteAsync([], Payload(2), inbound, CancellationToken.None);
 
         Assert.DoesNotContain(inbound, sends.Select(s => s.ExecutionId));
+        Assert.Equal(2, sends.Select(s => s.ExecutionId).Distinct().Count());
     }
 
     // ---- The Elasticsearch coupling --------------------------------------------------------
@@ -216,6 +217,36 @@ public sealed class PathImporterLoopTests
 
         await Assert.ThrowsAsync<FailedException>(() =>
             processor.ExecuteAsync([], "", Guid.Empty, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// A count of 0 would never enter the loop, leaving `consumed` at 0 and `reason` at its
+    /// Completed default -- "consumed 0/0 paths; stopped because Completed", a false HEALTHY
+    /// terminal against a topic that was never read. Elasticsearch cannot tell that apart from a
+    /// real completion, so this is reported as a step failure instead.
+    /// </summary>
+    [Fact]
+    public async Task FailsTheStepWhenMessageCountIsLessThanOne()
+    {
+        var (processor, _, _) = Build(new FakePathConsumerFactory(new FakePathConsumer()));
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(0), Guid.Empty, CancellationToken.None));
+    }
+
+    /// <summary>Same false-healthy-terminal hazard as a zero MessageCount, for the same reason.</summary>
+    [Fact]
+    public async Task FailsTheStepWhenIdleTimeoutSecondsIsLessThanOne()
+    {
+        var (processor, _, _) = Build(new FakePathConsumerFactory(new FakePathConsumer()));
+        const string payload =
+            """
+            {"brokerList":"kafka-1:9092","topic":"file-paths","consumerGroup":"path-importer",
+             "messageCount":10,"idleTimeoutSeconds":0}
+            """;
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], payload, Guid.Empty, CancellationToken.None));
     }
 
     [Fact]
