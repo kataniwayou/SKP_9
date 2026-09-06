@@ -230,13 +230,22 @@ public sealed class PathImporterProcessor(
         try
         {
             // Close before Dispose so the group is left deliberately rather than by session timeout.
-            // Close can itself throw on a consumer that is already broken, which is the common case
-            // here — and failing to release the field would leave the broken one cached forever.
+            //
+            // Both catches below are deliberately blanket, which is normally a smell and is right
+            // here for a specific reason: this method's entire job is to discard the consumer, and
+            // there is no failure of Close or Dispose that changes what happens next -- the handle
+            // is being thrown away either way. So there is nothing here worth propagating, and
+            // anything this method does propagate can only destroy information the caller already
+            // had: on the catch { Evict(); throw; } path above, a throw out of Evict would REPLACE
+            // the fault already in flight rather than accompany it -- a PostSendException the
+            // framework would requeue silently becoming something the framework fails outright, with
+            // the real fault gone. An ObjectDisposedException from a double Close, which the real
+            // adapter raises, is exactly the case a narrower catch would have let through.
             try
             {
                 _consumer.Close();
             }
-            catch (KafkaException ex)
+            catch (Exception ex)
             {
                 logger.LogWarning(ex, "closing the consumer failed; discarding it anyway");
             }
@@ -245,13 +254,8 @@ public sealed class PathImporterProcessor(
             {
                 _consumer.Dispose();
             }
-            catch (KafkaException ex)
+            catch (Exception ex)
             {
-                // Guarded the same way Close is, and for the same reason. This matters more here
-                // than it looks: on the catch { Evict(); throw; } path above, an exception escaping
-                // this method would REPLACE the fault already in flight rather than accompany it —
-                // a PostSendException the framework would requeue silently becoming something the
-                // framework fails outright.
                 logger.LogWarning(ex, "disposing the consumer failed; discarding it anyway");
             }
         }
