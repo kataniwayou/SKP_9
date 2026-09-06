@@ -398,7 +398,7 @@ public sealed class KafkaFaultClassifierTests
     [InlineData(ErrorCode.LeaderNotAvailable)]
     [InlineData(ErrorCode.NotCoordinatorForGroup)]
     [InlineData(ErrorCode.RebalanceInProgress)]
-    [InlineData(ErrorCode.CoordinatorLoadInProgress)]
+    [InlineData(ErrorCode.GroupLoadInProgress)]
     [InlineData(ErrorCode.RequestTimedOut)]
     public void TreatsEverythingElseAsTransient(ErrorCode code)
         => Assert.False(KafkaFaultClassifier.IsDeterministic(new Error(code)));
