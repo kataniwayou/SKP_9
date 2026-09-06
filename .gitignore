@@ -457,3 +457,11 @@ analyzer-reports/phase-88-screenshots/
 
 # chaos-timeline.js sampler output — screenshots and timelines, never committed
 .chaos-timeline/
+
+# Offline drop baseline — a copy of the buildable tree as the air-gapped machine last received it.
+# Deliberately untracked: it is a transport artifact, not history, and it is never aligned to a
+# commit boundary. tools/ship-delta.ps1 computes the delta against it.
+/ship/
+
+# Staged deltas produced by tools/ship-delta.ps1 -Out/-Zip. Carried across, then discarded.
+/drops/
