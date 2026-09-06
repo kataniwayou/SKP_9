@@ -25,22 +25,16 @@ A source step arrives with `data` empty and `executionId == Guid.Empty` — the 
 shape `SampleProcessor` demonstrates with two synthetic seeds: it does not transform an input, it
 manufactures one from outside the system.
 
-That has a consequence worth stating before the design rather than discovering after it.
+That decides one thing in §5: **the offset is committed per record, not once for the batch.**
 `BaseProcessorOfT` is explicit that a redelivered dispatch replays `ProcessAsync`, and that the
-input-key delete which normally makes replay a no-op **does not exist for a source step** — there is
-no input key to reclaim, so there is no idempotence token. The framework's own words: *"it is not
-reachable at all for a source step."*
+input-key delete which normally makes replay a no-op does not exist for a source step — there is no
+input key to reclaim. So a batch-level commit would mean a dispatch redelivered at record 60 re-reads
+and re-sends all sixty, opening sixty duplicate lineages. Per-record, the replay resumes at 60.
 
-So PathImporter is a processor that runs twice on redelivery, and unlike a pure transform it has
-external state. What keeps that safe is that its external state is *the committed offset*, and the
-offset is the idempotence token the framework couldn't give it. A replay resumes from the last
-commit; the paths already committed are not re-read and not re-sent. This is why §5 commits per
-message rather than once at the end, and why the commit is ordered after the send rather than
-before.
-
-The residual duplicate window is exactly one path wide: a send that succeeded and a commit that then
-failed. That path is re-read and re-sent on the next dispatch under a fresh execution id, producing
-a duplicate lineage. At-least-once, one record deep, and it is accepted rather than solved.
+The rule at each record is simply **commit only if the send succeeded** — §5 step 6 follows step 5,
+and a failed send never reaches the commit. The residual window is the ordinary at-least-once tail: a
+send that landed and a commit that then failed re-sends one path on the next dispatch. One record
+deep, accepted rather than solved.
 
 ## 3. Configuration — flat, from the step payload
 
@@ -151,10 +145,17 @@ Subscribe once when the consumer is built. Then, at most `MessageCount` times:
 5. `SendToPostAsync(payload, executionId, ct)`.
 6. `Commit(result)`.
 
-**Step 6 follows step 5, and that ordering is the whole of §2's safety argument.** Committing first
-would acknowledge a path whose branch had not been sent, and a fault between the two would lose it
-with nothing recording that it was lost. Committing after means the failure mode is a duplicate
-rather than a disappearance, and a duplicate is recoverable while a disappearance is not.
+**Step 6 follows step 5: commit only if the send succeeded.** Committing first would acknowledge a
+path whose branch had not been sent, and a fault between the two would lose it with nothing
+recording that it was lost. Committing after makes the failure mode a duplicate rather than a
+disappearance, and a duplicate is recoverable.
+
+**The loop does not start until the consumer has an assignment.** `Subscribe` is non-blocking and
+`Consume` returns null on timeout whether or not the group has finished joining — so on the first
+dispatch after a pod start, a join slower than `IdleTimeoutSeconds` yields a null against a partition
+that has not been assigned yet, and §6 would report `0/100 Drained` on a full topic. Before entering
+the loop, poll until `consumer.Assignment` is non-empty; a null with no assignment is *still joining*,
+never *drained*. This costs nothing after the first dispatch, because §4 holds the consumer.
 
 `Close()` runs in a `finally` for the eviction and disposal paths, so the group is left deliberately
 rather than by session timeout.
@@ -186,13 +187,13 @@ signal Kafka offers for "there is nothing more right now" — the client cannot 
 topic from a slow one except by waiting, and how long to wait is a property of the workflow, not of
 this code.
 
-**`Drained` means what it says only because the topic has one partition and the deployment has one
-replica.** A consumer reads only the partitions assigned to it, so under any other arrangement a
-drained *assignment* would be reported as a drained *topic*, and `12/100 Drained` would mean "my
-slice held 12" while the topic held a hundred. That is a false report of the exact distinction this
-section exists to make. The constraint is recorded in §9 and in the manifest, and **scaling either
-number invalidates this reason and requires renaming it** — it is not a capacity decision that can be
-made independently.
+At one partition and one replica an empty assignment and an empty topic are the same thing, so
+`Drained` is unambiguous and needs no qualification. The one way to report it falsely is the
+unassigned-consumer case, which §5 closes by waiting for the assignment before the loop begins.
+
+A note for later rather than a constraint now: a consumer reads only the partitions assigned to it,
+so at more than one partition or more than one replica a drained *assignment* would be reported as a
+drained *topic*. Whoever scales this reads §9 first and renames the reason.
 
 `Faulted` returns normally. The step succeeds with a partial count, no exception reaches the
 framework, and the uncommitted records are read by the next dispatch. This is the stated intent: a
@@ -278,8 +279,10 @@ The consumer sits behind a narrow interface — subscribe, consume, commit, clos
 exercised with a fake and **no Kafka runs in the hermetic suite**. The hermetic baseline is a shape
 (zero failed, exit zero, everything under `Live/` skipped) and this work must not change it.
 
-Hermetic coverage: all three terminals of §6 including the counts and reasons; the commit-after-send
-ordering, and that a failed send commits nothing; cache reuse across dispatches with a matching key,
+Hermetic coverage: all three terminals of §6 including the counts and reasons; **a null result while
+the assignment is still empty reported as joining rather than `Drained`**, which is the §5 case that
+would otherwise fire on every pod's first dispatch; the commit-after-send ordering, and that a failed
+send commits nothing; cache reuse across dispatches with a matching key,
 and rebuild on a differing one; eviction on `Faulted`; the classifier's allow-list on both arms,
 including the `Subscribe`-is-silent case from §8; a null config failing rather than defaulting; and
 that a distinct execution id is minted per path and appears on the log record.
