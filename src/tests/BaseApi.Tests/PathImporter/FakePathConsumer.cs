@@ -11,6 +11,7 @@ internal sealed class FakePathConsumer : IPathConsumer
 {
     private readonly Queue<PathRecord> _records = new();
     private int _consumeCalls;
+    private PathRecord? _lastConsumed;
 
     public List<string> Committed { get; } = new();
     public List<string> Subscribed { get; } = new();
@@ -50,11 +51,42 @@ internal sealed class FakePathConsumer : IPathConsumer
             throw new KafkaException(Fault);
         }
 
-        return _records.Count == 0 ? null : _records.Dequeue();
+        if (_records.Count == 0)
+        {
+            return null;
+        }
+
+        var record = _records.Dequeue();
+        _lastConsumed = record;
+        return record;
     }
 
+    /// <summary>
+    /// Enforced here BECAUSE <c>KafkaPathConsumer.Commit</c> enforces it against a real broker: it
+    /// asserts that <paramref name="record"/> is the record it last handed out and throws
+    /// <see cref="InvalidOperationException"/> otherwise. This fake must refuse the same thing, or a
+    /// loop that batches commits -- or commits any record but the last -- would pass every hermetic
+    /// fact here and throw on the first real broker call, since this is the one file no test can
+    /// reach to catch the two contracts drifting apart. The two must not drift.
+    /// </summary>
     public void Commit(PathRecord record)
     {
+        if (_lastConsumed is null)
+        {
+            throw new InvalidOperationException(
+                "FakePathConsumer.Commit was called before Consume returned a record; the loop " +
+                "must consume each path before acknowledging it.");
+        }
+
+        if (record != _lastConsumed)
+        {
+            throw new InvalidOperationException(
+                $"FakePathConsumer.Commit was given {record.Path}@{record.Offset} but the last " +
+                $"record handed out was {_lastConsumed.Path}@{_lastConsumed.Offset}. This fake " +
+                "commits the record it last returned, so each path must be committed before the " +
+                "next is consumed.");
+        }
+
         if (Committed.Count + 1 == CommitThrowsOnCall)
         {
             throw new KafkaException(Fault);
