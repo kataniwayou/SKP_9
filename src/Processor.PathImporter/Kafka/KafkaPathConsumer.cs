@@ -49,9 +49,14 @@ public sealed class KafkaPathConsumer : IPathConsumer
         while (clock.Elapsed < timeout)
         {
             // A record arriving IS the assignment, and it must be kept — see _pending. An EOF marker
-            // is neither: it is a control message, not a path, so it is discarded rather than
-            // buffered, and the assignment check below still fires because reaching EOF on a
-            // partition requires already being assigned one.
+            // would be neither: it is a control message, not a path, so it would be discarded rather
+            // than buffered, and the assignment check below would still fire because reaching EOF on
+            // a partition requires already being assigned one.
+            //
+            // Defensive and currently unreachable: KafkaConsumerSettings.For never sets
+            // EnablePartitionEof, which defaults to false, so librdkafka never emits this marker and
+            // IsPartitionEOF is never true here. Kept in case that setting is ever turned on -- cheap
+            // insurance against a live EOF being mistaken for a path.
             var result = _inner.Consume(slice);
             if (result is not null && !result.IsPartitionEOF)
             {
@@ -80,8 +85,13 @@ public sealed class KafkaPathConsumer : IPathConsumer
             result = _inner.Consume(timeout);
         }
 
-        // An EOF marker is a control message, not a path: hand back nothing, and do not let it
+        // An EOF marker would be a control message, not a path: hand back nothing, and do not let it
         // become the result Commit acts on.
+        //
+        // Defensive and currently unreachable, for the same reason as the branch in
+        // WaitForAssignment above: EnablePartitionEof is never set by KafkaConsumerSettings.For, so
+        // it defaults to false and IsPartitionEOF can never be true here. Kept as cheap insurance
+        // against that setting being enabled later.
         if (result is null || result.IsPartitionEOF)
         {
             return null;
@@ -106,11 +116,13 @@ public sealed class KafkaPathConsumer : IPathConsumer
     /// branch is sent.
     /// </para>
     /// <para>
-    /// The offset check below exists because the hermetic suite's fake commits the record it is
-    /// <i>handed</i>, while this adapter commits the record it last <i>handed out</i>. Those are the
-    /// same thing only while the loop consumes one record and commits it before consuming the next —
-    /// and this is the one file no test can reach to catch the two contracts drifting apart, so the
-    /// assertion has to live here instead.
+    /// The offset check below and <c>FakePathConsumer.Commit</c>'s own check enforce the identical
+    /// rule, deliberately: each refuses any record but the one its own <c>Consume</c> last handed
+    /// out. That symmetry is the point — a loop that batched commits, or committed a stale record,
+    /// now fails the same way in the hermetic suite as it would against a real broker, instead of
+    /// passing every fake-backed fact and only failing later. The fake is in fact the stricter of the
+    /// two: it compares <c>Path</c> and <c>Offset</c>, this adapter only <c>Offset</c>, since a
+    /// <see cref="TopicPartitionOffset"/> is what it has to commit with.
     /// </para>
     /// </summary>
     public void Commit(PathRecord record)

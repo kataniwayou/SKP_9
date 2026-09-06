@@ -25,7 +25,17 @@ public interface IPathConsumer : IDisposable
     /// <summary>Null when no record arrived within <paramref name="timeout"/>.</summary>
     PathRecord? Consume(TimeSpan timeout);
 
-    /// <summary>Commits through <paramref name="record"/>. The ACK.</summary>
+    /// <summary>
+    /// Commits through <paramref name="record"/>. The ACK.
+    /// <para>
+    /// <b>The contract, binding on every implementation:</b> <paramref name="record"/> must be the
+    /// same one the most recent call to <see cref="Consume"/> returned, and commits may not be
+    /// batched — each path is committed before the next is consumed. Both
+    /// <c>KafkaPathConsumer</c> and the hermetic suite's fake enforce this identically, refusing
+    /// anything else, so a loop that violated it would fail the same way against either. A third
+    /// implementation must enforce it too, or that guarantee stops being one.
+    /// </para>
+    /// </summary>
     void Commit(PathRecord record);
 
     /// <summary>Leaves the group deliberately, rather than by session timeout.</summary>
