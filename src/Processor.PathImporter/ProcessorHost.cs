@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
-// using Processor.PathImporter.Kafka;
+using Processor.PathImporter.Kafka;
 
 namespace Processor.PathImporter;
 
@@ -107,12 +107,12 @@ public static class ProcessorHost
 
         // The Kafka client factory. Singleton because the processor holds one consumer across
         // dispatches (§4) and the factory is what mints it.
-        // builder.Services.AddSingleton<IPathConsumerFactory, KafkaPathConsumerFactory>();
+        builder.Services.AddSingleton<IPathConsumerFactory, KafkaPathConsumerFactory>();
 
         // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
         // the seam's design: per-dispatch state lives in plain fields on this one instance, which is
         // safe only because prefetch is 1 — and here those fields include the cached consumer.
-        // builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, PathImporterProcessor>();
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, PathImporterProcessor>();
 
         return builder.Build();
     }
