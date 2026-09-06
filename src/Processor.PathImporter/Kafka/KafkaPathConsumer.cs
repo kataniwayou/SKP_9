@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Confluent.Kafka;
 
 namespace Processor.PathImporter.Kafka;
@@ -23,6 +24,12 @@ public sealed class KafkaPathConsumer : IPathConsumer
     /// </summary>
     private ConsumeResult<Ignore, string>? _pending;
 
+    /// <summary>
+    /// The result <see cref="Consume"/> most recently handed to the loop as a <see cref="PathRecord"/>.
+    /// This, not the <c>record</c> argument, is what <see cref="Commit"/> commits — see its comment.
+    /// </summary>
+    private ConsumeResult<Ignore, string>? _lastConsumed;
+
     public KafkaPathConsumer(string brokerList, string consumerGroup)
         => _inner = new ConsumerBuilder<Ignore, string>(
                KafkaConsumerSettings.For(brokerList, consumerGroup)).Build();
@@ -36,14 +43,17 @@ public sealed class KafkaPathConsumer : IPathConsumer
             return true;
         }
 
-        var deadline = DateTime.UtcNow + timeout;
+        var elapsed = Stopwatch.StartNew();
         var slice = TimeSpan.FromMilliseconds(200);
 
-        while (DateTime.UtcNow < deadline)
+        while (elapsed.Elapsed < timeout)
         {
-            // A record arriving IS the assignment, and it must be kept — see _pending.
+            // A record arriving IS the assignment, and it must be kept — see _pending. An EOF marker
+            // is neither: it is a control message, not a path, so it is discarded rather than
+            // buffered, and the assignment check below still fires because reaching EOF on a
+            // partition requires already being assigned one.
             var result = _inner.Consume(slice);
-            if (result is not null)
+            if (result is not null && !result.IsPartitionEOF)
             {
                 _pending = result;
                 return true;
@@ -70,21 +80,43 @@ public sealed class KafkaPathConsumer : IPathConsumer
             result = _inner.Consume(timeout);
         }
 
-        return result is null
-            ? null
-            : new PathRecord(result.Message.Value, result.TopicPartitionOffset.ToString());
+        // An EOF marker is a control message, not a path: hand back nothing, and do not let it
+        // become the result Commit acts on.
+        if (result is null || result.IsPartitionEOF)
+        {
+            return null;
+        }
+
+        _lastConsumed = result;
+        return new PathRecord(result.Message.Value, result.TopicPartitionOffset.ToString());
     }
 
     /// <summary>
-    /// Commits by position rather than by the record handed back, because the seam's
-    /// <see cref="PathRecord"/> carries no Confluent type to commit with. Safe only because the loop
-    /// commits the record it has just consumed, in order, one at a time — which it does, and which
-    /// is the ordering the whole design rests on.
+    /// Commits <see cref="_lastConsumed"/>, not <paramref name="record"/> — the seam's
+    /// <see cref="PathRecord"/> carries no Confluent type to commit with, so the adapter commits the
+    /// Confluent result it kept from the matching <see cref="Consume"/> instead.
+    /// <para>
+    /// This is not the offset-less <c>Commit()</c> overload. That one commits whatever was passed to
+    /// <c>StoreOffset</c>, and nothing here ever calls it — <c>EnableAutoOffsetStore</c> is off, on
+    /// purpose, so an offset-less commit would be a silent no-op or throw <c>Local_NoOffset</c>, and
+    /// the send-then-ACK ordering the design rests on would never reach the broker. Committing the
+    /// named result also closes a second hole an offset-less or position-based commit would leave
+    /// open: a record parked in <see cref="_pending"/> is never handed out by <see cref="Consume"/>,
+    /// so it never becomes <see cref="_lastConsumed"/> either, and cannot be acknowledged before its
+    /// branch is sent.
+    /// </para>
     /// </summary>
     public void Commit(PathRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        _inner.Commit();
+
+        if (_lastConsumed is null)
+        {
+            throw new InvalidOperationException(
+                "Commit was called before Consume produced a result to commit.");
+        }
+
+        _inner.Commit(_lastConsumed);
     }
 
     public void Close() => _inner.Close();
