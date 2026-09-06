@@ -21,6 +21,14 @@ internal sealed class FakePathConsumer : IPathConsumer
     /// <summary>False makes WaitForAssignment time out, as an unjoined group would.</summary>
     public bool Assigned { get; set; } = true;
 
+    /// <summary>
+    /// True makes <see cref="WaitForAssignment"/> throw <see cref="Fault"/> instead of returning.
+    /// Mirrors <see cref="ConsumeThrowsOnCall"/> so the fault-classification arms around the wait —
+    /// otherwise unreachable from this fake, since <c>=&gt; Assigned</c> could never throw — have a
+    /// hermetic path to exercise them.
+    /// </summary>
+    public bool AssignmentThrows { get; set; }
+
     /// <summary>1-based index of the Consume call that throws; null means none ever does.</summary>
     public int? ConsumeThrowsOnCall { get; set; }
 
@@ -41,7 +49,15 @@ internal sealed class FakePathConsumer : IPathConsumer
 
     public void Subscribe(string topic) => Subscribed.Add(topic);
 
-    public bool WaitForAssignment(TimeSpan timeout) => Assigned;
+    public bool WaitForAssignment(TimeSpan timeout)
+    {
+        if (AssignmentThrows)
+        {
+            throw new KafkaException(Fault);
+        }
+
+        return Assigned;
+    }
 
     public PathRecord? Consume(TimeSpan timeout)
     {

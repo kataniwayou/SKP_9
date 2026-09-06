@@ -118,6 +118,42 @@ public sealed class PathImporterLoopTests
         Assert.Contains("consumed 0/100 paths; stopped because Faulted", Summary(log));
     }
 
+    /// <summary>
+    /// Spec §8's deterministic allow-list applies to the wait exactly as it does to Consume, Commit
+    /// and the send — an unknown-topic fault surfacing on the first read after Subscribe (§8's own
+    /// example) must fail the step rather than escape unclassified.
+    /// </summary>
+    [Fact]
+    public async Task FailsTheStepOnADeterministicAssignmentFault()
+    {
+        var consumer = new FakePathConsumer
+        {
+            AssignmentThrows = true,
+            Fault = new Confluent.Kafka.Error(Confluent.Kafka.ErrorCode.UnknownTopicOrPart),
+        }.WithPaths("/mnt/a.txt");
+        var (processor, _, _) = Build(new FakePathConsumerFactory(consumer));
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// A transient fault waiting for assignment must reach the same Faulted terminal a transient
+    /// Consume fault does — nothing consumed, the consumer evicted, no exception reaching the
+    /// framework.
+    /// </summary>
+    [Fact]
+    public async Task StopsAtFaultedWhenAssignmentFaultsTransiently()
+    {
+        var consumer = new FakePathConsumer { AssignmentThrows = true }.WithPaths("/mnt/a.txt");
+        var (processor, sender, log) = Build(new FakePathConsumerFactory(consumer));
+
+        var sends = await Run(processor, sender, messageCount: 10);
+
+        Assert.Empty(sends);
+        Assert.Contains("consumed 0/10 paths; stopped because Faulted", Summary(log));
+    }
+
     // ---- Ordering and identity -------------------------------------------------------------
 
     /// <summary>
