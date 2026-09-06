@@ -18,4 +18,5 @@ resources:
   - 23-grafana.yaml
   - 30-baseapi-service.yaml
   - 33-processor-sample.yaml
+  - 34-processor-pathimporter.yaml
   - 36-orchestrator.yaml
