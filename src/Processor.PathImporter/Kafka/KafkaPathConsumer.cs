@@ -43,10 +43,10 @@ public sealed class KafkaPathConsumer : IPathConsumer
             return true;
         }
 
-        var elapsed = Stopwatch.StartNew();
+        var clock = Stopwatch.StartNew();
         var slice = TimeSpan.FromMilliseconds(200);
 
-        while (elapsed.Elapsed < timeout)
+        while (clock.Elapsed < timeout)
         {
             // A record arriving IS the assignment, and it must be kept — see _pending. An EOF marker
             // is neither: it is a control message, not a path, so it is discarded rather than
@@ -105,6 +105,13 @@ public sealed class KafkaPathConsumer : IPathConsumer
     /// so it never becomes <see cref="_lastConsumed"/> either, and cannot be acknowledged before its
     /// branch is sent.
     /// </para>
+    /// <para>
+    /// The offset check below exists because the hermetic suite's fake commits the record it is
+    /// <i>handed</i>, while this adapter commits the record it last <i>handed out</i>. Those are the
+    /// same thing only while the loop consumes one record and commits it before consuming the next —
+    /// and this is the one file no test can reach to catch the two contracts drifting apart, so the
+    /// assertion has to live here instead.
+    /// </para>
     /// </summary>
     public void Commit(PathRecord record)
     {
@@ -113,7 +120,16 @@ public sealed class KafkaPathConsumer : IPathConsumer
         if (_lastConsumed is null)
         {
             throw new InvalidOperationException(
-                "Commit was called before Consume produced a result to commit.");
+                "KafkaPathConsumer.Commit was called before Consume returned a record; the loop " +
+                "must consume each path before acknowledging it.");
+        }
+
+        if (record.Offset != _lastConsumed.TopicPartitionOffset.ToString())
+        {
+            throw new InvalidOperationException(
+                $"KafkaPathConsumer.Commit was given {record.Offset} but the last record handed out was " +
+                $"{_lastConsumed.TopicPartitionOffset}. This adapter commits the record it last returned, " +
+                "so each path must be committed before the next is consumed.");
         }
 
         _inner.Commit(_lastConsumed);
