@@ -2,6 +2,13 @@
 # processor-sample it has no Service: a pure consumer's only inbound traffic is the kubelet hitting
 # the pod IP for probes.
 #
+# EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS. Readiness reports identity resolution, and
+# identity is resolved by asking the API for the row matching this image's embedded SourceHash. Until
+# that row is registered the pod is live, healthy and unready — which is correct, and looks exactly
+# like a fault if you are not expecting it. `kubectl rollout status` will therefore time out waiting
+# for it to go Ready; that timeout is the expected signal, not a fault, and no restart shortens it —
+# the fix is registering the row. See k8s/README.md for the registration step.
+#
 # ONE REPLICA, and this is not a capacity decision. The topic has one partition, and a Kafka consumer
 # reads only the partitions assigned to it — so a second replica would own nothing, consume nothing,
 # and report "0/100 Drained" for every dispatch that landed on it. The processor's Drained reason
