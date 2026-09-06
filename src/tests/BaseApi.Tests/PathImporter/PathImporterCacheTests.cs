@@ -155,7 +155,11 @@ public sealed class PathImporterHostWiringTests
         // RabbitMq:Username and RabbitMq:Password are required by AddBaseProcessor even though the
         // brief's sketch omits them; ProcessorSampleTests.Build() is the working reference and sets
         // both, so this does too rather than leaving the host wiring test unable to resolve at all.
-        using var host = ProcessorHost.Create([], identity, config =>
+        //
+        // "--environment", "Development" turns on the container's ValidateOnBuild/ValidateScopes,
+        // which is what makes this fact prove the WHOLE graph resolves rather than just the two
+        // registrations it explicitly asks for below -- matching ProcessorSampleTests.Build().
+        using var host = ProcessorHost.Create(["--environment", "Development"], identity, config =>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
