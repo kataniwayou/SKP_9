@@ -86,7 +86,27 @@ public sealed class PathImporterProcessor(
                 // Before anything is read. An unassigned consumer polls empty, and an empty poll is
                 // indistinguishable from an empty topic — so without this the first dispatch after every
                 // pod start would report a full topic Drained.
-                if (!consumer.WaitForAssignment(idle))
+                //
+                // Classified exactly like Consume below: per §8, Subscribe does not throw on a
+                // nonexistent topic or a missing authorization grant -- the error surfaces on the
+                // first read after it, which in production is the read inside WaitForAssignment. Left
+                // unclassified, that exact deterministic fault would escape ProcessAsync raw instead
+                // of becoming a FailedException the orchestrator can see.
+                bool assigned;
+                try
+                {
+                    assigned = consumer.WaitForAssignment(idle);
+                }
+                catch (KafkaException ex) when (KafkaFaultClassifier.IsDeterministic(ex.Error))
+                {
+                    throw new FailedException($"waiting for {config.Topic} assignment failed: {ex.Error.Code}");
+                }
+                catch (KafkaException)
+                {
+                    assigned = false;
+                }
+
+                if (!assigned)
                 {
                     reason = StopReason.Faulted;
                 }
