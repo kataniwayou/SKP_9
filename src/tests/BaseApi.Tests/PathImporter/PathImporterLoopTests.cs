@@ -299,6 +299,40 @@ public sealed class PathImporterLoopTests
             processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
     }
 
+    /// <summary>
+    /// Rent (Create/Subscribe) gets its own classification, separate from the loop's — a deterministic
+    /// fault there must fail the step exactly as a deterministic Consume fault does.
+    /// </summary>
+    [Fact]
+    public async Task FailsTheStepOnADeterministicRentFault()
+    {
+        var factory = new FakePathConsumerFactory(new FakePathConsumer().WithPaths("/mnt/a.txt"))
+        {
+            CreateThrows = true,
+            Fault = new Confluent.Kafka.Error(Confluent.Kafka.ErrorCode.TopicAuthorizationFailed),
+        };
+        var (processor, _, _) = Build(factory);
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+    }
+
+    /// <summary>A transient Rent fault reports Faulted with nothing consumed, same as elsewhere in the loop.</summary>
+    [Fact]
+    public async Task StopsAtFaultedWhenRentFaultsTransiently()
+    {
+        var factory = new FakePathConsumerFactory(new FakePathConsumer().WithPaths("/mnt/a.txt"))
+        {
+            CreateThrows = true,
+        };
+        var (processor, sender, log) = Build(factory);
+
+        var sends = await Run(processor, sender, messageCount: 10);
+
+        Assert.Empty(sends);
+        Assert.Contains("consumed 0/10 paths; stopped because Faulted", Summary(log));
+    }
+
     [Fact]
     public async Task SubscribesToTheTopicTheStepNamed()
     {

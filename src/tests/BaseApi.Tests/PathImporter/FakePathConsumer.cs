@@ -124,9 +124,24 @@ internal sealed class FakePathConsumerFactory(params FakePathConsumer[] consumer
     public int Created => _created;
     public List<(string Brokers, string Group)> Requests { get; } = new();
 
+    /// <summary>
+    /// True makes <see cref="Create"/> throw <see cref="Fault"/> instead of handing out a consumer,
+    /// so the fault-classification arms around <c>Rent</c> — otherwise unreachable, since neither
+    /// this factory nor <see cref="FakePathConsumer.Subscribe"/> could ever throw — have a hermetic
+    /// path to exercise them.
+    /// </summary>
+    public bool CreateThrows { get; set; }
+
+    public Error Fault { get; set; } = new(ErrorCode.Local_Transport);
+
     public IPathConsumer Create(string brokerList, string consumerGroup)
     {
         Requests.Add((brokerList, consumerGroup));
+        if (CreateThrows)
+        {
+            throw new KafkaException(Fault);
+        }
+
         return consumers[_created++];
     }
 }
