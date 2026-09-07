@@ -33,6 +33,16 @@ public static class RealStack
     public static string OtlpEndpoint => Get("SKP_OTLP_ENDPOINT", "http://localhost:14317");
     public static string CollectorMetricsUrl => Get("SKP_COLLECTOR_METRICS_URL", "http://localhost:18889/metrics");
 
+    // The dev Kafka from tools/kafka-dev-broker.ps1. It is NOT a port-forward and not in the cluster:
+    // the broker is org infrastructure in production, so it runs as a plain container on the kind
+    // docker network. This is the host-side listener; a pod uses skp-kafka:9092 instead, and the two
+    // addresses are why that container advertises two listeners.
+    public static string KafkaBrokers => Get("SKP_KAFKA_BROKERS", "localhost:19092");
+    public static string KafkaTopic => Get("SKP_KAFKA_TOPIC", "skp-paths");
+
+    /// <summary>The container name, so a test that needs the broker to go away can take it away.</summary>
+    public static string KafkaContainer => Get("SKP_KAFKA_CONTAINER", "skp-kafka");
+
     // Read by RedisReconnectLiveTests as the far side of its own forwarder, never connected to
     // directly: the point of that test is a client whose endpoint is absent and then present, which
     // an always-open forward cannot express.
