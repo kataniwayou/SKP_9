@@ -118,8 +118,8 @@ and it silently destroys data.
 ### Faults evict the cache
 
 **A dispatch that ends in `Faulted` (§6) disposes the consumer before returning**, so the next
-dispatch builds a fresh one. Without this rule, a consumer wedged in some state the classifier read
-as transient stays wedged for the life of the pod, and every subsequent dispatch inherits it.
+dispatch builds a fresh one. Without this rule, a consumer wedged in some state that only
+ended the dispatch stays wedged for the life of the pod, and every subsequent dispatch inherits it.
 
 This is what makes the cached design strictly better than the stateless one rather than a trade:
 the fast path is cached, and the recovery path is per-dispatch.
@@ -180,7 +180,7 @@ consumed {Consumed}/{Requested} paths; stopped because {Reason}
 |---|---|---|
 | `Completed` | The loop ran `MessageCount` times. | All committed. |
 | `Drained` | `Consume` returned null after `IdleTimeoutSeconds`. The topic is empty. | All committed. |
-| `Faulted` | A transient fault at record *n+1*. | Committed through *n*; nothing beyond. |
+| `Faulted` | `Consume` or `Commit` threw at record *n+1*, whatever the code. | Committed through *n*; nothing beyond. |
 
 `Drained` is the reason `IdleTimeoutSeconds` is a config field rather than a constant. It is the only
 signal Kafka offers for "there is nothing more right now" — the client cannot distinguish an empty
@@ -189,7 +189,10 @@ this code.
 
 At one partition and one replica an empty assignment and an empty topic are the same thing, so
 `Drained` is unambiguous and needs no qualification. The one way to report it falsely is the
-unassigned-consumer case, which §5 closes by waiting for the assignment before the loop begins.
+unassigned-consumer case, which §5 closes by waiting for the assignment before the loop begins -- and
+since 2026-09-07 an unassigned consumer fails the step rather than reaching the loop at all, which is
+what keeps a broker outage from arriving as `Drained`. Proven by stopping the broker under a live
+dispatch; see §8.
 
 A note for later rather than a constraint now: a consumer reads only the partitions assigned to it,
 so at more than one partition or more than one replica a drained *assignment* would be reported as a
@@ -197,7 +200,8 @@ drained *topic*. Whoever scales this reads §9 first and renames the reason.
 
 `Faulted` returns normally. The step succeeds with a partial count, no exception reaches the
 framework, and the uncommitted records are read by the next dispatch. This is the stated intent: a
-transient fault is not a business failure, and the next dispatch will probably resolve it.
+fault once reading has started is not a business failure, and the next dispatch either resolves it or
+fails in part one, where the orchestrator is told.
 
 ## 7. The path in Elasticsearch
 
@@ -222,28 +226,39 @@ for. There is nothing to join on instead. **The consequence is that file paths l
 in the clear**, and if that is ever not acceptable the mitigation is to hash or truncate here, in one
 place.
 
-## 8. Fault classification
+## 8. Fault handling
 
-`KafkaFaultClassifier`, in the shape of `SendFaultClassifier` and `BrokerFaultClassifier`.
+**Superseded 2026-09-07.** This section originally specified a `KafkaFaultClassifier` in the shape of
+`SendFaultClassifier` — a deterministic allow-list of error codes, everything else transient. That
+classifier is gone, and no error code is consulted anywhere in this processor. What replaced it is a
+split by *where the fault happened*, not by *what the fault was*.
 
-**Deterministic is the allow-list**: unknown topic or partition, topic and group authorization
-failure, invalid argument or configuration, SASL authentication failure, and anything where
-`Error.IsFatal`. These throw `FailedException`, which the framework reports to the orchestrator as a
-failed step with a sanitized message.
+**Part one — getting a subscribed consumer with a partition under it.** Rent from the cache or create,
+subscribe, wait for assignment. Any failure, and the false return from the wait as much as a throw,
+raises `FailedException`: the framework reports a failed step to the orchestrator. The fault code is
+irrelevant, because the consequence is the same either way — this dispatch has no consumer, and a
+source step that never reached its broker is the one condition nothing downstream can infer. No
+branches arriving is exactly what an empty topic looks like too.
 
-**Everything unrecognized is transient**: break the loop, report `Faulted`, evict the consumer, commit
-nothing further.
+**Part two — the loop.** `Consume` returning a record means send then commit. `Consume` returning null
+means `Drained`; `Consume` or `Commit` throwing means `Faulted`. Neither ends the step: the dispatch
+stops where it stands, keeps what it already sent and committed, and the summary line reports the
+count. The next dispatch re-subscribes, and a fault that is genuinely permanent surfaces in part one,
+where it does fail the step — one dispatch later than the allow-list would have caught it, and without
+having to know the code.
 
-**That default is the inverse of `SendFaultClassifier`'s, deliberately.** There, an unrecognized fault
-is left raw so the dispatch parks somewhere a human can look, on the reasoning that a misclassified
-deterministic fault would requeue forever. Here the requirement is the opposite — an unrecognized
-consume fault should cost a partial batch and be retried by the next dispatch, not fail the step. The
-asymmetry is intentional and will carry a comment saying so, because a reader who knows the other
-classifier will otherwise read this one as a mistake.
+**Why the allow-list went.** It required predicting which Confluent error codes recur, and that was
+already shown to be unreliable: `25c9ed5` removed `CoordinatorLoadInProgress`, a name
+`Confluent.Kafka` does not define, from the list. A rule that needs a correct table of thirty error
+codes is a rule that fails quietly when the table is wrong.
 
-One behaviour worth encoding in a test: **`Subscribe` does not throw on a nonexistent topic.** The
-error surfaces on the first `Consume` as an error result. A classifier tested only against
-`Subscribe` would look correct and catch nothing.
+**Still true, and still worth its test: `Subscribe` does not throw on a nonexistent topic.** The error
+surfaces on the first read after it, which is the read inside `WaitForAssignment` — which is why that
+read is in part one. A mis-authored payload therefore fails the step, which is what it should do.
+
+**Measured against a live broker, 2026-09-07.** With the broker stopped, `WaitForAssignment` returns
+`false` rather than throwing: 87ms on a warm cached consumer, the full idle timeout on a cold one.
+That is why the false return is treated exactly like a throw.
 
 ## 9. Deployment
 

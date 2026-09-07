@@ -60,55 +60,59 @@ public sealed class PathImporterProcessor(
         var consumed = 0;
         var reason = StopReason.Completed;
 
-        // Renting is outside the loop's try so a fault here gets its own classification rather than
-        // sharing the loop's: Create/Subscribe faults are consume-side faults exactly as much as a
-        // failed Consume or Commit is, and the design's rule applies unchanged -- deterministic is
-        // reported to the orchestrator as a failed step, transient is a Faulted terminal with
-        // nothing consumed.
-        IPathConsumer? consumer = null;
+        // THE DISPATCH HAS TWO PARTS AND THEY FAIL DIFFERENTLY.
+        //
+        // Part one is getting a subscribed consumer with a partition under it: rent from the cache or
+        // create, subscribe, wait for assignment. ANY failure here fails the step, and the fault code
+        // is not consulted -- transient or permanent, this dispatch got no consumer, and a source step
+        // that never reached its broker is the one condition nothing downstream can infer. No branches
+        // arriving is exactly what an empty topic looks like too, so silence would be a lie.
+        //
+        // Part two is the loop, and NOTHING in it fails the step. A fault after reading has started
+        // ends the dispatch where it stands, keeping the paths already sent and committed; the next
+        // dispatch re-subscribes, and a fault that is genuinely permanent surfaces in part one, where
+        // it does fail. This is why the fault classifier is gone: the split does the work the
+        // deterministic allow-list used to attempt, without having to guess which error codes recur.
+        // Guessing was already shown to be unreliable -- 25c9ed5 removed a code Confluent does not
+        // define.
+        IPathConsumer consumer;
         try
         {
             consumer = Rent(config);
         }
-        catch (KafkaException ex) when (KafkaFaultClassifier.IsDeterministic(ex.Error))
+        catch (KafkaException ex)
         {
             throw new FailedException($"subscribing to {config.Topic} failed: {ex.Error.Code}");
-        }
-        catch (KafkaException)
-        {
-            reason = StopReason.Faulted;
         }
 
         try
         {
-            if (consumer is not null)
             {
                 // Before anything is read. An unassigned consumer polls empty, and an empty poll is
                 // indistinguishable from an empty topic — so without this the first dispatch after every
                 // pod start would report a full topic Drained.
                 //
-                // Classified exactly like Consume below: per §8, Subscribe does not throw on a
-                // nonexistent topic or a missing authorization grant -- the error surfaces on the
-                // first read after it, which in production is the read inside WaitForAssignment. Left
-                // unclassified, that exact deterministic fault would escape ProcessAsync raw instead
-                // of becoming a FailedException the orchestrator can see.
+                // Per §8, Subscribe does not throw on a nonexistent topic or a missing authorization
+                // grant -- the error surfaces on the first read after it, which in production is the
+                // read inside WaitForAssignment. So this is also where a mis-authored payload lands.
                 bool assigned;
                 try
                 {
                     assigned = consumer.WaitForAssignment(idle);
                 }
-                catch (KafkaException ex) when (KafkaFaultClassifier.IsDeterministic(ex.Error))
+                catch (KafkaException ex)
                 {
                     throw new FailedException($"waiting for {config.Topic} assignment failed: {ex.Error.Code}");
                 }
-                catch (KafkaException)
-                {
-                    assigned = false;
-                }
 
+                // A false return, not an exception, is what a live broker outage actually produces:
+                // measured against a stopped broker at 87ms on a warm consumer and at the full idle
+                // timeout on a cold one, neither of them throwing. It fails the step for the same
+                // reason a throw here does.
                 if (!assigned)
                 {
-                    reason = StopReason.Faulted;
+                    throw new FailedException(
+                        $"no partition of {config.Topic} was assigned within {idle}");
                 }
 
                 while (reason == StopReason.Completed && consumed < config.MessageCount)
@@ -117,10 +121,6 @@ public sealed class PathImporterProcessor(
                     try
                     {
                         record = consumer.Consume(idle);
-                    }
-                    catch (KafkaException ex) when (KafkaFaultClassifier.IsDeterministic(ex.Error))
-                    {
-                        throw new FailedException($"consuming {config.Topic} failed: {ex.Error.Code}");
                     }
                     catch (KafkaException)
                     {
@@ -169,10 +169,6 @@ public sealed class PathImporterProcessor(
                     try
                     {
                         consumer.Commit(record);
-                    }
-                    catch (KafkaException ex) when (KafkaFaultClassifier.IsDeterministic(ex.Error))
-                    {
-                        throw new FailedException($"committing {config.Topic} failed: {ex.Error.Code}");
                     }
                     catch (KafkaException)
                     {
