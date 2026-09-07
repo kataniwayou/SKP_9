@@ -40,12 +40,40 @@ public sealed class KafkaConsumerSettingsTests
     /// The consumer is held across dispatches, and nothing polls in between. At the five-minute
     /// default librdkafka would evict it from the group during any ordinary idle gap and the next
     /// dispatch would pay the rejoin the cache exists to avoid. Raising it is safe because
-    /// session.timeout.ms, left at its default, is what actually detects a dead pod.
+    /// session.timeout.ms — not this — is what detects a dead pod, and that one is now set
+    /// deliberately rather than left at its default.
     /// </summary>
     [Fact]
     public void ToleratesAnHourBetweenPolls()
     {
         Assert.Equal(TimeSpan.FromHours(1), KafkaConsumerSettings.MaxPollInterval);
         Assert.Equal(3_600_000, Config.MaxPollIntervalMs);
+    }
+
+    /// <summary>
+    /// The session timeout is what decides how long an outage reports Drained before it fails the
+    /// step. A warm consumer holds its assignment locally until this expires, so until then
+    /// WaitForAssignment answers true, Consume returns null with nothing to read, and the dispatch
+    /// reports a healthy-looking 0/N Drained. Measured at the 45s default: two dispatches on a 30s
+    /// cron said Drained before the third failed the step.
+    /// </summary>
+    [Fact]
+    public void GivesUpTheAssignmentInTenSecondsSoAnOutageFailsTheStepQuickly()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(10), KafkaConsumerSettings.SessionTimeout);
+        Assert.Equal(10_000, Config.SessionTimeoutMs);
+    }
+
+    /// <summary>
+    /// The heartbeat has to fit inside the session timeout several times over — librdkafka requires
+    /// it to be lower and the convention is a third — or an ordinary scheduling delay drops a
+    /// consumer that is perfectly healthy. 3s into 10s is the default heartbeat against the shortened
+    /// session, and it is the constraint that stops anyone lowering the session timeout alone.
+    /// </summary>
+    [Fact]
+    public void HeartbeatsThreeTimesInsideTheSessionTimeout()
+    {
+        Assert.Equal(3_000, Config.HeartbeatIntervalMs);
+        Assert.True(Config.HeartbeatIntervalMs * 3 <= Config.SessionTimeoutMs);
     }
 }
