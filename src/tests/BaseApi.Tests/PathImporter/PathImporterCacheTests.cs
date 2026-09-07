@@ -105,11 +105,10 @@ public sealed class PathImporterCacheTests
     [Fact]
     public async Task DiscardsTheConsumerWhenTheStepFails()
     {
-        var consumer = new FakePathConsumer
-        {
-            ConsumeThrowsOnCall = 1,
-            Fault = new Confluent.Kafka.Error(Confluent.Kafka.ErrorCode.TopicAuthorizationFailed),
-        }.WithPaths("/mnt/a.txt");
+        // The fault is at assignment rather than at Consume: those are the two sides of the split,
+        // and only the first fails the step. A Consume fault ends the dispatch at Faulted, which
+        // evicts as well but reaches it down the other path — the test above covers that one.
+        var consumer = new FakePathConsumer { AssignmentThrows = true }.WithPaths("/mnt/a.txt");
         var processor = Build(new FakePathConsumerFactory(consumer, new FakePathConsumer()));
 
         await Assert.ThrowsAsync<FailedException>(() =>

@@ -101,30 +101,35 @@ public sealed class PathImporterLoopTests
     }
 
     /// <summary>
-    /// The case that would otherwise fire on every pod's first dispatch: a consumer that has not
-    /// been assigned a partition yet polls empty, and an empty poll looks exactly like an empty
-    /// topic. It must not be reported as one.
+    /// No assignment, no dispatch — and the orchestrator is told. An unassigned consumer polls empty
+    /// and an empty poll is indistinguishable from an empty topic, so reaching the loop at all would
+    /// report a full topic Drained. Proven against a live broker: with the broker stopped the wait
+    /// returns false rather than throwing, in 87ms on a warm consumer and at the full idle timeout on
+    /// a cold one.
+    /// <para>
+    /// <b>Failed, not a Faulted terminal.</b> A Faulted terminal is silent to the orchestrator, and a
+    /// source step that cannot reach its broker is the one condition nothing downstream can infer:
+    /// no branches arrive, which is exactly what an empty topic also looks like.
+    /// </para>
     /// </summary>
     [Fact]
-    public async Task DoesNotCallAnUnassignedConsumerDrained()
+    public async Task FailsTheStepWhenNoPartitionIsAssigned()
     {
         var consumer = new FakePathConsumer { Assigned = false }.WithPaths("/mnt/a.txt");
-        var (processor, sender, log) = Build(new FakePathConsumerFactory(consumer));
+        var (processor, _, _) = Build(new FakePathConsumerFactory(consumer));
 
-        var sends = await Run(processor, sender, messageCount: 100);
-
-        Assert.Empty(sends);
-        Assert.DoesNotContain("Drained", Summary(log));
-        Assert.Contains("consumed 0/100 paths; stopped because Faulted", Summary(log));
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(100), Guid.Empty, CancellationToken.None));
     }
 
     /// <summary>
-    /// Spec §8's deterministic allow-list applies to the wait exactly as it does to Consume, Commit
-    /// and the send — an unknown-topic fault surfacing on the first read after Subscribe (§8's own
-    /// example) must fail the step rather than escape unclassified.
+    /// Waiting for assignment is part of getting a subscribed consumer, and every failure of that is
+    /// a step failure. The fault here is one the old allow-list called deterministic; the next test
+    /// uses one it called transient. Both fail the step now, which is the point: the classification
+    /// no longer decides anything on this path.
     /// </summary>
     [Fact]
-    public async Task FailsTheStepOnADeterministicAssignmentFault()
+    public async Task FailsTheStepWhenAssignmentThrowsADeterministicFault()
     {
         var consumer = new FakePathConsumer
         {
@@ -138,20 +143,18 @@ public sealed class PathImporterLoopTests
     }
 
     /// <summary>
-    /// A transient fault waiting for assignment must reach the same Faulted terminal a transient
-    /// Consume fault does — nothing consumed, the consumer evicted, no exception reaching the
-    /// framework.
+    /// The twin of the test above with a transient fault. It used to reach a Faulted terminal; it now
+    /// fails the step, because a source step that never got a partition has nothing to say and no
+    /// other way to say it.
     /// </summary>
     [Fact]
-    public async Task StopsAtFaultedWhenAssignmentFaultsTransiently()
+    public async Task FailsTheStepWhenAssignmentThrowsATransientFault()
     {
         var consumer = new FakePathConsumer { AssignmentThrows = true }.WithPaths("/mnt/a.txt");
-        var (processor, sender, log) = Build(new FakePathConsumerFactory(consumer));
+        var (processor, _, _) = Build(new FakePathConsumerFactory(consumer));
 
-        var sends = await Run(processor, sender, messageCount: 10);
-
-        Assert.Empty(sends);
-        Assert.Contains("consumed 0/10 paths; stopped because Faulted", Summary(log));
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
     }
 
     // ---- Ordering and identity -------------------------------------------------------------
@@ -285,26 +288,56 @@ public sealed class PathImporterLoopTests
             processor.ExecuteAsync([], payload, Guid.Empty, CancellationToken.None));
     }
 
+    /// <summary>
+    /// Once reading has started nothing fails the step, whatever the fault code. This one is from the
+    /// old deterministic allow-list and it now ends the dispatch at Faulted with the paths already
+    /// sent kept — the next dispatch re-subscribes, and if the fault is genuinely permanent it
+    /// surfaces there, where it does fail the step.
+    /// </summary>
     [Fact]
-    public async Task FailsTheStepOnADeterministicConsumeFault()
+    public async Task StopsAtFaultedWhenConsumeThrowsADeterministicFault()
     {
         var consumer = new FakePathConsumer
         {
             ConsumeThrowsOnCall = 1,
             Fault = new Confluent.Kafka.Error(Confluent.Kafka.ErrorCode.TopicAuthorizationFailed),
         }.WithPaths("/mnt/a.txt");
-        var (processor, _, _) = Build(new FakePathConsumerFactory(consumer));
+        var (processor, sender, log) = Build(new FakePathConsumerFactory(consumer));
 
-        await Assert.ThrowsAsync<FailedException>(() =>
-            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+        var sends = await Run(processor, sender, messageCount: 10);
+
+        Assert.Empty(sends);
+        Assert.Contains("consumed 0/10 paths; stopped because Faulted", Summary(log));
     }
 
     /// <summary>
-    /// Rent (Create/Subscribe) gets its own classification, separate from the loop's — a deterministic
-    /// fault there must fail the step exactly as a deterministic Consume fault does.
+    /// Commit is inside the loop, so a fault there ends the dispatch rather than failing the step.
+    /// The path was already sent and its offset was not committed, so the next dispatch re-reads it:
+    /// a duplicate, which is the recoverable direction.
     /// </summary>
     [Fact]
-    public async Task FailsTheStepOnADeterministicRentFault()
+    public async Task StopsAtFaultedWhenCommitThrows()
+    {
+        var consumer = new FakePathConsumer
+        {
+            CommitThrowsOnCall = 3,
+            Fault = new Confluent.Kafka.Error(Confluent.Kafka.ErrorCode.TopicAuthorizationFailed),
+        }.WithPaths("/mnt/a.txt", "/mnt/b.txt", "/mnt/c.txt", "/mnt/d.txt");
+        var (processor, sender, log) = Build(new FakePathConsumerFactory(consumer));
+
+        var sends = await Run(processor, sender, messageCount: 10);
+
+        Assert.Equal(3, sends.Count);
+        Assert.Equal(2, consumer.Committed.Count);
+        Assert.Contains("consumed 2/10 paths; stopped because Faulted", Summary(log));
+    }
+
+    /// <summary>
+    /// Rent is Create plus Subscribe — part of getting a subscribed consumer, so any fault there
+    /// fails the step. Deterministic code here, transient in the test below; both fail.
+    /// </summary>
+    [Fact]
+    public async Task FailsTheStepWhenRentThrowsADeterministicFault()
     {
         var factory = new FakePathConsumerFactory(new FakePathConsumer().WithPaths("/mnt/a.txt"))
         {
@@ -317,20 +350,18 @@ public sealed class PathImporterLoopTests
             processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
     }
 
-    /// <summary>A transient Rent fault reports Faulted with nothing consumed, same as elsewhere in the loop.</summary>
+    /// <summary>A transient Rent fault fails the step too: it never got a subscribed consumer.</summary>
     [Fact]
-    public async Task StopsAtFaultedWhenRentFaultsTransiently()
+    public async Task FailsTheStepWhenRentThrowsATransientFault()
     {
         var factory = new FakePathConsumerFactory(new FakePathConsumer().WithPaths("/mnt/a.txt"))
         {
             CreateThrows = true,
         };
-        var (processor, sender, log) = Build(factory);
+        var (processor, _, _) = Build(factory);
 
-        var sends = await Run(processor, sender, messageCount: 10);
-
-        Assert.Empty(sends);
-        Assert.Contains("consumed 0/10 paths; stopped because Faulted", Summary(log));
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
     }
 
     [Fact]
