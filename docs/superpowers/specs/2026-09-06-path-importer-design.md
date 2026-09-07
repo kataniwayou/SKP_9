@@ -105,8 +105,14 @@ regardless — the benefit above evaporates for exactly the schedules most likel
 
 **`max.poll.interval.ms` is raised to one hour.** This is safe because it is not the mechanism that
 detects a dead consumer. `session.timeout.ms` is, it is heartbeat-driven on librdkafka's own thread,
-it stays at its default of roughly forty-five seconds, and it releases the partition promptly when a
-pod dies. `max.poll.interval.ms` governs livelock detection only, and a livelocked author here is
+and it releases the partition promptly when a pod dies. **It is set to 10s rather than left at its
+roughly forty-five second default (2026-09-07).** That clock is also how long a warm consumer keeps
+answering "assigned" after its broker disappears, and therefore how long an outage reports a
+healthy-looking `Drained` before §8's part-one rule fails the step -- measured at the default, two
+dispatches on a 30s cron reported `Drained` before the third failed. It is not lowered further
+because `group.min.session.timeout.ms` is a broker setting we do not control, defaulting to 6s, and
+a value under that floor has the join rejected outright. `heartbeat.interval.ms` stays at 3s and
+must move with it. `max.poll.interval.ms` governs livelock detection only, and a livelocked author here is
 already a wedged dispatch that the framework's own liveness and queue-depth signals surface.
 
 **A background keepalive poll is explicitly not the fix.** `Consume` is what resets the interval, and
