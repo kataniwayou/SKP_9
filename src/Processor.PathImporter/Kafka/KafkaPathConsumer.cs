@@ -38,8 +38,29 @@ public sealed class KafkaPathConsumer : IPathConsumer
 
     public bool WaitForAssignment(TimeSpan timeout)
     {
-        if (_inner.Assignment.Count > 0 || _pending is not null)
+        // A record already in hand is proof of both things at once: assigned, and the broker answered
+        // recently enough to hand it over. Nothing to verify.
+        if (_pending is not null)
         {
+            return true;
+        }
+
+        // AN ASSIGNMENT IS LOCAL STATE AND LOCAL STATE OUTLIVES THE BROKER. librdkafka keeps the
+        // partition list it was last given until it decides to revoke it, which needs coordinator
+        // contact or a session timeout, so a consumer whose broker vanished a moment ago still
+        // answers "assigned" here. Returning true on that alone sends the dispatch into the loop,
+        // where Consume finds nothing to read and the dispatch reports 0/N Drained -- a healthy
+        // terminal, and indistinguishable from an empty topic.
+        //
+        // So the cached assignment is treated as a claim to be checked rather than an answer.
+        // QueryWatermarkOffsets is a round trip to the partition leader: it returns in single-digit
+        // milliseconds against a live broker and throws against an absent one, which part one turns
+        // into the failed step the orchestrator sees. Measured before this existed: a warm consumer
+        // claimed its assignment for two dispatches after the broker stopped at the 45s session
+        // timeout, and for one at 10s.
+        if (_inner.Assignment.Count > 0)
+        {
+            _inner.QueryWatermarkOffsets(_inner.Assignment[0], timeout);
             return true;
         }
 
