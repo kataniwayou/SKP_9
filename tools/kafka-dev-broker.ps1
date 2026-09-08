@@ -48,7 +48,7 @@ read §6 first: the Drained reason means "the topic is empty" only at one partit
 
 .EXAMPLE
 ./tools/kafka-dev-broker.ps1 -Up
-python tools/kafka-produce-records.py --count 12
+python tools/kafka-produce-records.py --provider acme --count 12
 #>
 [CmdletBinding(DefaultParameterSetName = 'Up')]
 param(

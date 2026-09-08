@@ -37,29 +37,36 @@ public sealed class KafkaExporterLiveTests
         var topic = $"live-export-{Guid.NewGuid():N}";
         await CreateTopicAsync(topic);
 
-        byte[] value = [0xC3, 0x28, 0x00, 0xFF];
-
-        using var producer = new KafkaRecordProducer(RealStack.KafkaBrokers, TimeSpan.FromSeconds(30));
-        var offset = await producer.ProduceAsync(topic, value, TestContext.Current.CancellationToken);
-
-        Assert.Contains(topic, offset);
-
-        using var consumer = new ConsumerBuilder<Ignore, byte[]>(new ConsumerConfig
+        try
         {
-            BootstrapServers = RealStack.KafkaBrokers,
-            GroupId = $"live-export-reader-{Guid.NewGuid():N}",
-            AutoOffsetReset = AutoOffsetReset.Earliest,
-            EnableAutoCommit = false,
-        }).Build();
+            byte[] value = [0xC3, 0x28, 0x00, 0xFF];
 
-        consumer.Subscribe(topic);
+            using var producer = new KafkaRecordProducer(RealStack.KafkaBrokers, TimeSpan.FromSeconds(30));
+            var offset = await producer.ProduceAsync(topic, value, TestContext.Current.CancellationToken);
 
-        var read = consumer.Consume(TimeSpan.FromSeconds(30));
-        Assert.NotNull(read);
-        Assert.Equal(value, read.Message.Value);
-        Assert.Equal(offset, read.TopicPartitionOffset.ToString());
+            Assert.Contains(topic, offset);
 
-        consumer.Close();
+            using var consumer = new ConsumerBuilder<Ignore, byte[]>(new ConsumerConfig
+            {
+                BootstrapServers = RealStack.KafkaBrokers,
+                GroupId = $"live-export-reader-{Guid.NewGuid():N}",
+                AutoOffsetReset = AutoOffsetReset.Earliest,
+                EnableAutoCommit = false,
+            }).Build();
+
+            consumer.Subscribe(topic);
+
+            var read = consumer.Consume(TimeSpan.FromSeconds(30));
+            Assert.NotNull(read);
+            Assert.Equal(value, read.Message.Value);
+            Assert.Equal(offset, read.TopicPartitionOffset.ToString());
+
+            consumer.Close();
+        }
+        finally
+        {
+            await DeleteTopicAsync(topic);
+        }
     }
 
     /// <summary>
@@ -109,5 +116,27 @@ public sealed class KafkaExporterLiveTests
         await admin.CreateTopicsAsync([
             new TopicSpecification { Name = topic, NumPartitions = 1, ReplicationFactor = 1 },
         ]);
+    }
+
+    /// <summary>
+    /// Best effort, and in a finally, because the topic name is unique per run: without this the dev
+    /// broker accumulates one dead topic for every live run anyone ever does, and each brings
+    /// partitions and __consumer_offsets entries with it. A failure here is swallowed deliberately —
+    /// the delete is housekeeping, and letting it replace a real assertion failure with a cleanup
+    /// error would hide the thing the run was for.
+    /// </summary>
+    private static async Task DeleteTopicAsync(string topic)
+    {
+        using var admin = new AdminClientBuilder(
+            new AdminClientConfig { BootstrapServers = RealStack.KafkaBrokers }).Build();
+
+        try
+        {
+            await admin.DeleteTopicsAsync([topic]);
+        }
+        catch (KafkaException)
+        {
+            // Left behind. `kafka-topics.sh --delete` clears it by hand; see tools/kafka-dev-broker.ps1.
+        }
     }
 }
