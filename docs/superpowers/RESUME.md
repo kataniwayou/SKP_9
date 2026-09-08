@@ -42,6 +42,13 @@ The durable write-ups remain `docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.m
 > workflow        a5498df6-1522-4098-ad65-f4aff4998988  kafka-import-export, */30s, STOPPED
 > ```
 >
+> `step-kafka-exporter` is `entryCondition: 1` (PreviousCompleted) since 2026-09-08 — it was created
+> as `4` (Always) by mistake and dispatched on failed imports. See finding 1 below.
+>
+> **The next piece of work is designed and approved but NOT built:**
+> `docs/superpowers/specs/2026-09-08-edge-processors-design.md` — `BaseImporter`/`BaseExporter`,
+> gated on `ExecutionId`. Nothing in `src/` implements it.
+>
 > The two step payloads, and no Kafka address appears anywhere in `k8s/`:
 >
 > ```json
@@ -171,6 +178,40 @@ else under `Live/`. `RealStack` grew `KafkaBrokers`, `KafkaTopic` and `KafkaCont
 
 ## The findings that matter
 
+### 2026-09-08 — the two-step pipeline
+
+**1. A failed entry step was still dispatching its successor, and the successor could not tell.** The
+exporter step was created with `entryCondition: 4`, copied from the sample steps without checking.
+`4` is `Always` — "enter whatever the predecessor reported". So a failed import handed off anyway,
+and the exporter received a dispatch with `ExecutionId` and `EntryId` both empty and failed with
+"dispatched with no input to export" — true, and blaming the branch for what was a wiring fault.
+Fixed to `1` (`PreviousCompleted`) and verified: the orchestrator now logs "the terminal step
+completed with Failed — no successor accepts it, the run ends here" and the exporter is never
+dispatched. **Check the entry condition of every step you create; the sample's `4` is not a default
+worth copying.**
+
+**2. A failed step's input DOES reach a `PreviousFailed` successor, with its lineage intact.** Not
+obvious from either file alone: the processor leaves the blob (its reclaim is gated on `ran`), the
+outcome carries `d.EntryId` rather than a sentinel, and `StepOutcomeHandler` reads it with no
+reference to the result. Proven by wiring a `PreviousFailed` step to a `skp-dead` topic and breaking
+the exporter — both payloads arrived byte-identical under the same execution ids. A dead-letter path
+is therefore workflow authoring, not processor code.
+
+**3. An author-reported failure logs at Information, not Warning.** `FailedException` and
+`CancelledException` both log at Information; only an unhandled exception reaches Warning. **A
+severity-based sweep for "did anything fail" will miss every reported failure.** Query the message or
+the outcome. A `zero warn-or-worse` check is not evidence that no step failed.
+
+**4. `ExecutionId` and `EntryId` are omitted from the log scope when empty, not zeroed.** So an entry
+dispatch shows neither field, and absence is the signal. `ExecutionLogScope` does this deliberately,
+so "does not apply" cannot be confused with the zero guid — consumers must be written for an absent
+field.
+
+**5. The sample workflow drowns the log store.** Any ES query over a time window is mostly
+`sample-proc-v9` and its orchestrator traffic. Filter on `attributes.WorkflowId`, or read a timeline
+that is not yours.
+
+
 **1. A Kafka assignment is local state, and local state outlives the broker.** `_inner.Assignment`
 stays populated after the broker vanishes, until librdkafka revokes it — which needs coordinator
 contact or a session timeout. Returning true on that alone sent the dispatch into a loop that read
@@ -273,8 +314,13 @@ sample is current — but any document naming a hash is stale by default. Read i
 - **Never scale Redis** except via `RedisWipeScenarioTests`.
 - **PromQL label matchers are fully anchored**, and `service_instance_id` is the pod name — on a
   Deployment every restart mints a new series, so `changes()`/`increase()` read 0 forever.
-- **`BaseProcessor.Core` is inside the SourceHash fold and `Messaging.Contracts` is not**, so a shared
-  edit moves the hash for every processor at once and a contracts edit moves none.
+- ~~**`BaseProcessor.Core` is inside the SourceHash fold**~~ — **WRONG, corrected 2026-09-08.** The
+  fold is `$(MSBuildProjectDirectory)\**\*.cs`: the concrete processor's OWN files and nothing else.
+  `dotnet msbuild src/Processor.Sample/Processor.Sample.csproj -getItem:ImplFiles` returns 4 files,
+  all its own. `SourceHash.targets` says so outright — "BaseProcessor.Core, BaseConsole.Core and
+  Messaging.Contracts are all packages now, so no glob can reach them and none should." A framework
+  edit therefore moves NO processor's hash and forces no re-registration. Run the `-getItem` command
+  rather than trusting either this line or the next document that repeats it.
 
 ## The lesson worth carrying
 
