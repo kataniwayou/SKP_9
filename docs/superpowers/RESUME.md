@@ -45,9 +45,15 @@ The durable write-ups remain `docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.m
 > `step-kafka-exporter` is `entryCondition: 1` (PreviousCompleted) since 2026-09-08 — it was created
 > as `4` (Always) by mistake and dispatched on failed imports. See finding 1 below.
 >
-> **The next piece of work is designed and approved but NOT built:**
-> `docs/superpowers/specs/2026-09-08-edge-processors-design.md` — `BaseImporter`/`BaseExporter`,
-> gated on `ExecutionId`. Nothing in `src/` implements it.
+> ~~**The next piece of work is designed and approved but NOT built:**~~
+> **BUILT 2026-09-09.** `docs/superpowers/specs/2026-09-08-edge-processors-design.md` —
+> `BaseImporter`/`BaseExporter`, gated on `ExecutionId` — is in `src/BaseProcessor.Core/Edge/`, and
+> both Kafka processors are ported onto it. Read the spec's "What was built" section for the five
+> places the code differs from the design. Hermetic suite: 0 failed, 841 passed, 23 skipped.
+>
+> **Compiled and tested only. NOT deployed** — neither processor image has been rebuilt, so the
+> cluster is still running the pre-port build and every `SourceHash` in the assignments still names
+> it.
 >
 > The two step payloads, and no Kafka address appears anywhere in `k8s/`:
 >

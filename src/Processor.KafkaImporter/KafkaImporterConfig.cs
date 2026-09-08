@@ -20,4 +20,4 @@ public sealed record KafkaImporterConfig(
     string Topic,
     string ConsumerGroup,
     int MessageCount,
-    int IdleTimeoutSeconds) : ProcessorConfig;
+    int IdleTimeoutSeconds) : ImporterConfig(MessageCount, IdleTimeoutSeconds);

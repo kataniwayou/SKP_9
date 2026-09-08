@@ -127,9 +127,60 @@ public sealed class KafkaExporterTests
     }
 
     /// <summary>
+    /// <b>The edge guard, and it is what the empty-data failure below used to be mistaken for.</b>
+    /// <c>ExecutionId</c> alone decides: an entry dispatch carries <see cref="Guid.Empty"/> and a
+    /// downstream one carries the lineage it belongs to, so an empty id here means the workflow wires
+    /// this step as an entry — which an exporter cannot be, since nothing upstream produced anything
+    /// for it to export.
+    /// <para>
+    /// <b>This is not defensive; it was observed happening.</b> Until 2026-09-08 the sample workflow
+    /// wired its exporter <c>entryCondition: Always</c>, so a failed importer handed off to it with
+    /// <c>ExecutionId</c> and <c>EntryId</c> both empty and this step ran on an entry-shaped dispatch
+    /// every time an import failed. What it reported then is the test below: "dispatched with no
+    /// input to export", true and misleading — an operator reading it looks upstream for a step that
+    /// sent an empty branch, and there is no such step. The wiring is fixed; this makes the class of
+    /// error impossible rather than absent.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task FailsTheStepWhenItIsDispatchedAsAnEntryStep()
+    {
+        var producer = new FakeRecordProducer();
+        var (processor, _, _) = Build(new FakeRecordProducerFactory(producer));
+
+        var failed = await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync(Input("payload"), Payload(), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("entry", failed.Message);
+        Assert.Empty(producer.Produced);
+    }
+
+    /// <summary>
+    /// The guard runs FIRST — before the payload check and before the empty-data check, both of which
+    /// an entry-dispatched exporter also trips. That ordering is the whole value of the guard: with
+    /// data as empty as an entry step's always is, the message below would fire instead and describe
+    /// the symptom.
+    /// </summary>
+    [Fact]
+    public async Task NamesTheWiringRatherThanTheEmptyInputWhenBothAreWrong()
+    {
+        var (processor, _, _) = Build(new FakeRecordProducerFactory(new FakeRecordProducer()));
+
+        var failed = await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("entry", failed.Message);
+        Assert.DoesNotContain("no input to export", failed.Message);
+    }
+
+    /// <summary>
     /// Producing a zero-byte record would put something on the topic that no reader can use, and the
     /// step would report Complete while doing it — the same false-healthy terminal the importer's
     /// MessageCount guard prevents, arriving from the other direction.
+    /// <para>
+    /// With the edge guard above in place, the one condition left that reaches here is an upstream
+    /// author that sent an empty branch — which is why this dispatch carries a real lineage.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task FailsTheStepWhenTheBranchCarriesNoData()
