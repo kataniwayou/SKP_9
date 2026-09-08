@@ -212,11 +212,24 @@ public sealed class KafkaImporterLoopTests
     }
 
     /// <summary>
-    /// Every record is the origin of its own lineage; there is no case where this processor continues
-    /// one it was handed. A non-empty inbound id must not be reused for the branches.
+    /// <b>THIS FACT WAS INVERTED, and the inversion is the point of the edge guard.</b> It used to
+    /// assert that a dispatch carrying a lineage was IGNORED — the importer minted per record anyway
+    /// and the inbound id simply went unused. Silently doing the right thing with a wrong dispatch is
+    /// still a wrong dispatch: an importer wired downstream of another step ran on every hand-off and
+    /// nothing said so.
+    /// <para>
+    /// Now it refuses. <c>ExecutionId</c> alone decides what an edge is — an entry dispatch carries
+    /// <see cref="Guid.Empty"/> and a downstream one carries the lineage it belongs to — so a
+    /// non-empty id here means the workflow wires this step downstream, which it cannot be: every
+    /// record is the origin of its own lineage, so there is none it could continue.
+    /// </para>
+    /// <para>
+    /// It refuses BEFORE it opens anything: nothing is consumed and no branch is sent, so a
+    /// mis-wired workflow cannot half-run.
+    /// </para>
     /// </summary>
     [Fact]
-    public async Task MintsPerRecordEvenWhenHandedAnExecutionId()
+    public async Task FailsTheStepWhenItIsDispatchedInsideALineage()
     {
         var inbound = Guid.Parse("99999999-9999-9999-9999-999999999999");
         var consumer = new FakeRecordConsumer().WithRecords("value-a", "value-b");
@@ -225,10 +238,31 @@ public sealed class KafkaImporterLoopTests
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
-        await processor.ExecuteAsync([], Payload(2), inbound, CancellationToken.None);
 
-        Assert.DoesNotContain(inbound, sends.Select(s => s.ExecutionId));
-        Assert.Equal(2, sends.Select(s => s.ExecutionId).Distinct().Count());
+        var failed = await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(2), inbound, CancellationToken.None));
+
+        Assert.Contains(inbound.ToString(), failed.Message);
+        Assert.Empty(sends);
+        Assert.Empty(consumer.Committed);
+    }
+
+    /// <summary>
+    /// The guard runs BEFORE the payload check, so a step that is both mis-wired and mis-authored
+    /// reports the wiring. Reaching the payload check first would name a symptom: an operator would
+    /// go and write the payload the message asked for, and the step would still be in the wrong place.
+    /// </summary>
+    [Fact]
+    public async Task NamesTheWiringRatherThanTheMissingPayloadWhenBothAreWrong()
+    {
+        var inbound = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var (processor, _, _) = Build(new FakeRecordConsumerFactory(new FakeRecordConsumer()));
+
+        var failed = await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], "", inbound, CancellationToken.None));
+
+        Assert.Contains("entry step", failed.Message);
+        Assert.DoesNotContain("step payload", failed.Message);
     }
 
     // ---- As is -----------------------------------------------------------------------------
