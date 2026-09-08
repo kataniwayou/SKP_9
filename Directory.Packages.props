@@ -107,9 +107,10 @@
          and pause/resume needs the ConnectReceiveEndpoint handle dance. Both are native here. -->
     <PackageVersion Include="RabbitMQ.Client" Version="7.1.2" />
 
-    <!-- Kafka consumer for Processor.PathImporter, and the only thing in this solution that speaks
-         it. The native librdkafka binaries arrive through the transitive librdkafka.redist package,
-         which is why no second PackageReference names it: pinning it here would be pinning a
+    <!-- Kafka client for Processor.KafkaImporter (consumer) and Processor.KafkaExporter
+         (producer), the only two things in this solution that speak it. The native librdkafka
+         binaries arrive through the transitive librdkafka.redist package, which is why no second
+         PackageReference names it: pinning it here would be pinning a
          dependency the client already carries, and CPM would then police two versions instead of
          one. -->
     <PackageVersion Include="Confluent.Kafka" Version="2.15.0" />

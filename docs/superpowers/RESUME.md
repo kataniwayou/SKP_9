@@ -9,6 +9,31 @@ The durable write-ups remain `docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.m
 `grafana/README.md`. The PathImporter's own design is
 `docs/superpowers/specs/2026-09-06-path-importer-design.md`, and §8 of it was rewritten today.
 
+> **2026-09-08 — PathImporter is now KafkaImporter, and there is a KafkaExporter beside it.**
+> Everything below still describes the system accurately EXCEPT the names and one behaviour, so read
+> it with this substitution in hand rather than as stale:
+>
+> | Was | Is |
+> | --- | --- |
+> | `Processor.PathImporter` | `Processor.KafkaImporter` |
+> | `PathImporterProcessor` / `PathImporterConfig` | `KafkaImporterProcessor` / `KafkaImporterConfig` |
+> | `IPathConsumer` / `KafkaPathConsumer` / `PathRecord` | `IRecordConsumer` / `KafkaRecordConsumer` / `KafkaRecord` |
+> | `Live/PathImporterLiveTests` | `Live/KafkaImporterLiveTests` |
+> | `k8s/34-processor-pathimporter.yaml`, pod `processor-pathimporter` | `k8s/34-processor-kafkaimporter.yaml`, pod `processor-kafkaimporter` |
+> | `tools/kafka-produce-paths.py` | `tools/kafka-produce-records.py` |
+>
+> **The behaviour that changed is the branch payload.** It used to be `{"path": "<record value>"}`;
+> it is now the record's value verbatim, as bytes, with no envelope — which is also why the seam
+> carries `byte[]` rather than `string`. A workflow authored against the old shape, and any output
+> schema registered for it, needs updating: the importer no longer builds an envelope for anyone.
+>
+> **The deployed state below is therefore stale in one specific way.** The processor row named
+> `path-importer 1.3.0` and the step payload quoted further down were registered against the old
+> assembly; both need re-registering against the renamed image's SourceHash before a live run, and
+> `processor-kafkaexporter` has no row at all yet. Nothing here has been re-deployed since the
+> rename — the hermetic suite is green (**0 failed, 831 passed, 21 skipped**) and that is the whole
+> of what has been verified.
+
 ## Where things stand
 
 Branch `feature/path-importer`, **72 commits ahead of `main`, 26 of them today**, clean tree apart

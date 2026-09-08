@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Stands up the single-node Kafka the PathImporter reads in a live run.
+Stands up the single-node Kafka the KafkaImporter reads, and the KafkaExporter writes to, in a live run.
 
 .DESCRIPTION
 The broker is ORG INFRASTRUCTURE in production -- outside this cluster, owned by someone else,
@@ -48,7 +48,7 @@ read §6 first: the Drained reason means "the topic is empty" only at one partit
 
 .EXAMPLE
 ./tools/kafka-dev-broker.ps1 -Up
-python tools/kafka-produce-paths.py --count 12
+python tools/kafka-produce-records.py --count 12
 #>
 [CmdletBinding(DefaultParameterSetName = 'Up')]
 param(
