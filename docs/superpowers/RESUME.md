@@ -51,9 +51,26 @@ The durable write-ups remain `docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.m
 > both Kafka processors are ported onto it. Read the spec's "What was built" section for the five
 > places the code differs from the design. Hermetic suite: 0 failed, 841 passed, 23 skipped.
 >
-> **Compiled and tested only. NOT deployed** — neither processor image has been rebuilt, so the
-> cluster is still running the pre-port build and every `SourceHash` in the assignments still names
-> it.
+> **Deployed and run 2026-09-09.** Both images rebuilt and `kind load`ed, both rows repointed, both
+> pods Ready. `kafka-importer` is now **2.1.0 / `34dc0458ab…`** and `kafka-exporter` **1.1.0 /
+> `099baeae6e…`**; `sample-proc-v9` is untouched at `32b3284a…` and that is the control — the
+> framework was rewritten underneath it and its hash did not move, which is the SourceHash fold being
+> project-only, demonstrated rather than remembered.
+>
+> The round trip on the ported code: five `edgeport` records seeded at offsets 12–16, importer
+> `consumed 5/5 records; stopped because Completed`, exporter five `exported 63 bytes` lines, next
+> fire `consumed 0/5 records; stopped because Drained`. Committed offset 17, lag 0.
+>
+> **Verified by a join in the log store**, scoped to the two message templates rather than to the two
+> services — an unscoped join on `attributes.ExecutionId` counts 2 and 3 per lineage, because
+> framework and orchestrator lines carry the same id, and reads as a MISMATCH against an
+> exactly-once expectation. Scoped, all five lineages appear exactly once at each end. The five
+> records on `skp-exports` at offsets 10–14 are byte-identical to the five seeded, 63 bytes each.
+>
+> **Zero failures, and the severity sweep is not what proves it.** Author-reported failures log at
+> *Information*, so `severity_number >= 13` returning 0 proves nothing on its own. The three failure
+> MESSAGE templates — author reported / author cancelled / transform faulted — each return 0 in the
+> window, and that is the check worth keeping.
 >
 > The two step payloads, and no Kafka address appears anywhere in `k8s/`:
 >

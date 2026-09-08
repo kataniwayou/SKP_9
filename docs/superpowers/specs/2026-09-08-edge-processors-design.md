@@ -240,9 +240,12 @@ Kafka word permanently in framework code that a folder reader also uses.
 
 ### Not done, and deliberately
 
-**Not deployed.** Both processors compile and pass, and neither image has been rebuilt. Every
-`SourceHash` in the live assignments still names the pre-port build, so the cluster is running the old
-code. Deploying is `kind load` plus a hash repoint per processor.
+~~**Not deployed.**~~ **Deployed and run 2026-09-09**, and the round trip passes on the ported code:
+5/5 `Completed`, five exports, `Drained` on the next fire, committed offset 17 and lag 0, five
+lineages each appearing exactly once at each end in Elasticsearch, and the exported bytes identical
+to the seeded ones. Two hashes repointed — `kafka-importer` 2.1.0 `34dc0458ab…`, `kafka-exporter`
+1.1.0 `099baeae6e…`. **`sample-proc-v9` needed none**, which is the fold being project-only shown
+rather than asserted: `BaseProcessor.Core` was rewritten underneath it and its hash did not move.
 
 **No `FileImporter`.** As scoped. Porting the two real edges is what proves the abstraction fits; a
 third invented from a guess would only prove it fits the guess. What the port did prove is narrower
