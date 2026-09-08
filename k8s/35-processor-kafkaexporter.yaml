@@ -1,0 +1,130 @@
+# processor-kafkaexporter — takes the branch it was dispatched, writes it to a Kafka topic, and ends
+# the lineage there. The mirror image of processor-kafkaimporter. Like it, and like processor-sample,
+# it has no Service: a pure consumer of the work queue has no inbound traffic but the kubelet hitting
+# the pod IP for probes.
+#
+# EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS. Readiness reports identity resolution, and
+# identity is resolved by asking the API for the row matching this image's embedded SourceHash. Until
+# that row is registered the pod is live, healthy and unready — which is correct, and looks exactly
+# like a fault if you are not expecting it. `kubectl rollout status` will therefore time out waiting
+# for it to go Ready; that timeout is the expected signal, not a fault, and no restart shortens it —
+# the fix is registering the row. See k8s/README.md for the registration step.
+#
+# ONE REPLICA, AND HERE THAT IS ONLY A CAPACITY DECISION — which is the one way this manifest really
+# differs from the importer's. There the count is load-bearing: a second replica would join the same
+# consumer group, be assigned no partition, and report every dispatch "0/N Drained", so the Drained
+# terminal means "the topic is empty" ONLY at one replica. A producer joins no group and owns no
+# partition, so this number can be raised whenever the dispatch rate justifies it, and nothing about
+# what the step reports changes when it is.
+#
+# The broker is org infrastructure outside this cluster. Nothing here stands it up, and no Kafka
+# address appears below: the broker list, the topic and the delivery timeout all travel in the
+# orchestrator's step payload.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor-kafkaexporter
+  namespace: skp
+  labels:
+    app: processor-kafkaexporter
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # The default surge, unlike the importer's. That one pins maxSurge to 0 because two replicas
+      # would be two members of one consumer group against a one-partition topic; a producer joins no
+      # group and owns no partition, so an overlapping handover here costs nothing and avoids a gap
+      # where dispatches queue with nothing to serve them.
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: processor-kafkaexporter
+  template:
+    metadata:
+      labels:
+        app: processor-kafkaexporter
+    spec:
+      containers:
+        - name: processor-kafkaexporter
+          image: processor-kafkaexporter:local
+          imagePullPolicy: IfNotPresent
+          env:
+            # NO Service__Name / Service__Version here, deliberately, and do not add them back.
+            # A processor takes its service.name and service.version from its database row, resolved
+            # before the host is built so they can reach the OTel resource, and that row wins over
+            # configuration unconditionally. Setting them here changed nothing: telemetry reported
+            # sample-proc-v9 / 1.5.0 whatever this said, so the pair read as live settings while
+            # being inert -- an operator renaming a processor by editing this manifest would have
+            # seen no effect and no error. The fallback they nominally provided now lives in code
+            # (ProcessorHost, "processor" / "1.0.0"), which is where the other two services declare
+            # theirs.
+            # The replica identity that names this pod's liveness key, its reply queue, and the
+            # service.instance.id on its telemetry. All three must be the same string, which is why it
+            # is resolved once from the downward API rather than three times from three defaults.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            # The collector already running in this namespace. Without it the SDK still works and
+            # export simply fails quietly, so this is an enrichment rather than a dependency.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+            # 10s, against a 15s Prometheus scrape. The collector emits explicit sample
+            # timestamps and Prometheus discards a re-scrape bearing one it already stored,
+            # so an export interval EQUAL to the scrape interval aliases and leaves some
+            # scrapes with nothing new. Exporting faster than the scrape makes the effective
+            # resolution the scrape interval.
+            #
+            # Load-bearing for the dashboards: Grafana derives $__rate_interval from the
+            # datasource's timeInterval, which must track this value. At 60s it floored the
+            # rate window at 240s, which is why a sixty-second outage moved no rate panel.
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: "10000"
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_USER }
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+            # Straight to Redis, the same address the orchestrator and the API use. This pointed at
+            # a toxiproxy hop until 2026-09-01: the proxy was the only way to make a dependency slow
+            # rather than absent on this cluster, but it put the processor on a Redis path production
+            # does not have, so every latency measured here carried a hop production never pays.
+            - name: ConnectionStrings__Redis
+              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            - name: ConsoleHealth__Port
+              value: "8081"
+          ports:
+            - containerPort: 8081
+          # Startup flips on the liveness loop's first beat, within moments of the host starting, so
+          # this passes long before discovery does. It is deliberately not gated on identity: a
+          # processor waiting on an unregistered row is starting correctly, however long that takes.
+          startupProbe:
+            httpGet: { path: /health/startup, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Readiness is identity resolution. It stays red until the processor row exists, and no
+          # restart will help — which is exactly why this is readiness and not liveness.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8081 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          # Liveness is the loops still turning, and nothing else. A broker that is down must not
+          # restart this pod: the startup loop is designed to retry against it forever, and a restart
+          # only throws away the backoff progress.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8081 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests: { memory: "160Mi" }
+            limits:   { memory: "384Mi" }

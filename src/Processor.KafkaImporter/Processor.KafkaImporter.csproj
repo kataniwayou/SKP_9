@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A concrete processor, and one of the two components here that speak to Kafka. Like
+    Processor.Sample it carries no identity, liveness, broker or Redis code — AddBaseProcessor folds
+    all of it in — but unlike the sample it carries real work: it reads a topic and opens one lineage
+    per record, sending each record's value downstream unchanged. Processor.KafkaExporter is its
+    mirror image and the two share no code, deliberately: the consumer seam and the producer seam
+    have almost nothing in common beyond the package they both reference.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare either
+    here.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.KafkaImporter</RootNamespace>
+    <AssemblyName>Processor.KafkaImporter</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/ folder
+         and NuGet imports it automatically, stamping the hash on THIS assembly — the entry assembly,
+         where the runtime reader looks, and the identity the API matches a processor row against. A
+         ProjectReference could not flow build targets. -->
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+    <PackageReference Include="Confluent.Kafka" />
+  </ItemGroup>
+
+</Project>

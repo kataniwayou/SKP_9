@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A concrete processor, and the mirror image of Processor.KafkaImporter: that one has no input and
+    produces branches, this one has an input and produces none. It takes the branch it was dispatched,
+    writes it to a Kafka topic, and ends the lineage there. Like Processor.Sample it carries no
+    identity, liveness, broker or Redis code — AddBaseProcessor folds all of it in.
+
+    NO PROJECT REFERENCE TO THE IMPORTER, deliberately. The two seams look symmetric and are not: a
+    consumer is bound to a group and a subscription and hands records out one at a time, a producer is
+    bound to neither and takes one record at a time. Sharing a Kafka folder between them would mean a
+    shared type that has to describe both, which is how a seam stops being narrow. The duplication is
+    a settings class and a two-line factory.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare either
+    here.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.KafkaExporter</RootNamespace>
+    <AssemblyName>Processor.KafkaExporter</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/ folder
+         and NuGet imports it automatically, stamping the hash on THIS assembly — the entry assembly,
+         where the runtime reader looks, and the identity the API matches a processor row against. A
+         ProjectReference could not flow build targets. -->
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+    <PackageReference Include="Confluent.Kafka" />
+  </ItemGroup>
+
+</Project>

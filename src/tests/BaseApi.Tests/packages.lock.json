@@ -670,7 +670,14 @@
           "StackExchange.Redis": "[2.13.1, )"
         }
       },
-      "processor.pathimporter": {
+      "processor.kafkaexporter": {
+        "type": "Project",
+        "dependencies": {
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]",
+          "Confluent.Kafka": "[2.15.0, )"
+        }
+      },
+      "processor.kafkaimporter": {
         "type": "Project",
         "dependencies": {
           "BaseProcessor.Core": "[1.0.0, 1.0.0]",

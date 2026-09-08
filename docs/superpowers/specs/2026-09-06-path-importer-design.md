@@ -1,3 +1,11 @@
+> **Historical. Written before the 2026-09-08 rename and deliberately not rewritten** — this is the
+> record of what was built and why, and editing it to match today's names would destroy that. Read
+> `Processor.PathImporter` as `Processor.KafkaImporter`, `IPathConsumer` as `IRecordConsumer`,
+> `PathRecord` as `KafkaRecord`, and the `KafkaFaultClassifier` this design mentions as gone (25c9ed5).
+> One decision here was also reversed: the branch payload is no longer `{"path": ...}` but the
+> record's value verbatim as bytes. Every other argument below still holds, including the §6
+> one-partition/one-replica reasoning that `k8s/34-processor-kafkaimporter.yaml` points back to.
+
 # PathImporter — Design
 
 **Date:** 2026-09-06
