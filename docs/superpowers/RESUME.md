@@ -27,12 +27,48 @@ The durable write-ups remain `docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.m
 > carries `byte[]` rather than `string`. A workflow authored against the old shape, and any output
 > schema registered for it, needs updating: the importer no longer builds an envelope for anyone.
 >
-> **The deployed state below is therefore stale in one specific way.** The processor row named
-> `path-importer 1.3.0` and the step payload quoted further down were registered against the old
-> assembly; both need re-registering against the renamed image's SourceHash before a live run, and
-> `processor-kafkaexporter` has no row at all yet. Nothing here has been re-deployed since the
-> rename — the hermetic suite is green (**0 failed, 831 passed, 21 skipped**) and that is the whole
-> of what has been verified.
+> **Both processors are deployed and a two-step workflow has run end to end.** The identifiers below
+> are superseded by the block that follows this note; the rest of the section is still accurate.
+>
+> ```
+> processor row   9d0fb8a6-1d57-4a2b-9394-cf0a9568c48a  kafka-importer 2.0.0
+> SourceHash      8135618071c624a065adba0657a8abf1249f15d23895eaa5d79d78c59dc85cc7
+> processor row   157a0f40-d668-42f3-a500-4762c587f64a  kafka-exporter 1.0.0
+> SourceHash      b64b8282c31f0e22bbad746fb2e016db1d298a356953d7bf8f34c2c03eb2dad1
+> step            86e5038f-f6e4-45cc-b52e-12aeb31b7755  step-kafka-importer, next -> c8a8ff61
+> step            c8a8ff61-b0dd-4440-9794-3dcc236aa34f  step-kafka-exporter, nextStepIds []
+> assignment      2f67881a-5ec6-4392-ac1a-301ea66b1fc3  asg-kafka-importer
+> assignment      899612f5-7a52-47ea-8c10-4388ab2e159b  asg-kafka-exporter
+> workflow        a5498df6-1522-4098-ad65-f4aff4998988  kafka-import-export, */30s, STOPPED
+> ```
+>
+> The two step payloads, and no Kafka address appears anywhere in `k8s/`:
+>
+> ```json
+> {"brokerList":"skp-kafka:9092","topic":"skp-paths","consumerGroup":"skp-kafkaimporter",
+>  "messageCount":5,"idleTimeoutSeconds":10}
+> {"brokerList":"skp-kafka:9092","topic":"skp-exports","deliveryTimeoutSeconds":30}
+> ```
+>
+> **The run, verified from Elasticsearch rather than from pod logs.** Five records seeded to
+> `skp-paths` carrying `{"path":..., "providerName":...}`; importer reported `consumed 5/5 records;
+> stopped because Completed`, exporter reported five `exported 59 bytes` lines, and the next fire
+> reported `consumed 0/5 records; stopped because Drained`. Aggregating both services on
+> `attributes.ExecutionId` over the window gives **5 lineages, each appearing exactly once at the
+> importer and once at the exporter** — the round trip proven by a join in the log store, not by
+> reading two logs side by side. Zero warn-or-worse records from either processor or the orchestrator
+> in the same window. Committed offset 5, lag 0. The five records on `skp-exports` are byte-identical
+> to the five seeded, 59 bytes each.
+>
+> **`path-importer` still appears in Elasticsearch** for records written before the rename: a
+> processor's `service.name` comes from its database row, and renaming the row does not rewrite
+> history. Scope any query by time.
+>
+> **The topic was reset before the run.** `skp-paths` held 22 bare-path records from the old shape and
+> the new consumer group reads `earliest`, so it would have replayed them. Deleted and recreated
+> rather than left to confuse the evidence.
+>
+> Hermetic suite after all of it: **0 failed, 831 passed, 23 skipped**.
 
 ## Where things stand
 
