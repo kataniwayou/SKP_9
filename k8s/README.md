@@ -284,8 +284,9 @@ The FileReader step's payload:
 with a config error naming both numbers. It bounds two things: the file on disk, and the cumulative
 size of everything an archive expands to across every level.
 
-`maxDepth` is optional and defaults to 1 (an omitted field, not a zero — `0` is rejected) — the top-level archive is expanded and its entries are left
-as files. Raise it to open archives inside archives:
+`maxDepth` is optional and defaults to 1 — the top-level archive is expanded and its entries are
+left as files. The default comes from an omitted field, not a zero: `0` is a rejected payload, as is
+anything above 64. Raise it to open archives inside archives:
 
     {"expectedExtension": ".zip", "minimumSizeBytes": 1, "maximumSizeBytes": 33554432,
      "maxDepth": 2}
