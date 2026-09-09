@@ -66,16 +66,32 @@ public sealed class FileReaderLocatorTests
     }
 
     [Fact]
-    public async Task TheFailureIsLoggedBeforeItIsThrown()
+    public async Task ADriveRelativePathFailsTheStep()
     {
-        // Step failures log at Information here, so the MESSAGE is what an operator searches. A
-        // thrown FailedException reaches the framework's log with a sanitized text; this line is
-        // the one that names the class of fault.
-        var (processor, log) = Build();
+        // On Windows, "\orders.csv" is rooted (Path.IsPathRooted would accept it) but not fully
+        // qualified: it still resolves against whatever drive is current, which is not a location any
+        // workflow author chose. Production runs on Linux, where rooted and fully-qualified agree, so
+        // this distinction is only visible here, on the platform the tests run on.
+        var (processor, _) = Build();
 
-        await Assert.ThrowsAsync<FailedException>(() => Run(processor, "not json"));
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => Run(processor, """{"filePath":"\\orders.csv"}"""));
 
-        Assert.Contains(log.Records, r => r.Message.StartsWith(
-            "input branch did not name a file path", StringComparison.Ordinal));
+        Assert.Contains("did not name a file path", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheFailureMessageNamesTheClassOfFault()
+    {
+        // Step failures log at Information here, so the MESSAGE is what an operator searches — and
+        // this step logs nothing of its own before throwing: ProcessDispatchHandler's catch for
+        // FailedException already logs ex.Message verbatim at Information, so the exception's own
+        // Message IS the record an operator's saved query matches on. This asserts that contract at
+        // the level that actually carries it.
+        var (processor, _) = Build();
+
+        var ex = await Assert.ThrowsAsync<FailedException>(() => Run(processor, "not json"));
+
+        Assert.StartsWith("input branch did not name a file path", ex.Message, StringComparison.Ordinal);
     }
 }

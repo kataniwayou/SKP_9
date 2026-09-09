@@ -18,6 +18,10 @@ public sealed class FileReaderProcessor(ILogger<FileReaderProcessor> logger)
     {
         var path = ReadPath(data);
 
+        // Not used by this task's failure path — the framework's own catch logs a thrown
+        // FailedException verbatim, so there is nothing for this step to log on that route. Task 4
+        // adds the success line that gives this parameter a use.
+        _ = logger;
         _ = config;
         _ = executionId;
         _ = ct;
@@ -50,7 +54,11 @@ public sealed class FileReaderProcessor(ILogger<FileReaderProcessor> logger)
 
         if (locator?.FilePath is { Length: > 0 } filePath)
         {
-            if (Path.IsPathRooted(filePath))
+            // IsPathFullyQualified, not IsPathRooted: on Windows a drive-relative path such as
+            // "\orders.csv" is rooted but not absolute — it still resolves against whatever drive is
+            // current, which is not a location any workflow author chose. Production runs on Linux,
+            // where the two agree, but the tests here run on Windows, where they do not.
+            if (Path.IsPathFullyQualified(filePath))
             {
                 return filePath;
             }
@@ -62,10 +70,11 @@ public sealed class FileReaderProcessor(ILogger<FileReaderProcessor> logger)
             reason = "the branch carries no filePath";
         }
 
-        // Logged BEFORE the throw. The thrown message reaches the framework; this line is what an
-        // operator's saved query matches on, and step failures log at Information in this system so
-        // the level distinguishes nothing.
-        logger.LogInformation("input branch did not name a file path: {Reason}", reason);
+        // No log here. ProcessDispatchHandler's catch for FailedException logs the author's message
+        // verbatim at Information — "the author reported the step failed: {Reason}" with ex.Message
+        // as the reason — so a pre-throw log of the same text would be a second, identical record.
+        // The thrown message below IS the operator-facing contract; it survives to that framework log
+        // unchanged, which is why it must not change a character.
         throw new FailedException($"input branch did not name a file path: {reason}");
     }
 }
