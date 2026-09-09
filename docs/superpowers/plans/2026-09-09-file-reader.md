@@ -21,7 +21,9 @@
 - **Document JSON is camelCase.** `MessagingJson`'s PascalCase governs the `ProcessedData` envelope only.
 - **Never log file content.** Log the path, the shape, the reason. Never `data`, never `content`.
 - **All failures are `FailedException`.** No retries, no transient class. `PostSendException` from `SendToPostAsync` propagates untouched.
-- **Log the failure before throwing**, using the exact templates in Task 3 and Task 5. Step failures log at Information in this system, so the message is what an operator searches.
+- **Do NOT log a failure before throwing.** `ProcessDispatchHandler` catches `FailedException` and logs `"the author reported the step failed: {Reason}"` with `ex.Message` **verbatim**, so the templates below already reach the log store in full; a pre-throw line emits every failure twice. `BaseImporter` and `BaseExporter` both rely on that catch and log nothing themselves. (Corrected 2026-09-09 mid-execution — an earlier draft of this plan and its spec mandated the pre-throw log on a wrong premise. The **messages** are unchanged; only the duplicate copy is gone.)
+- **The `FailedException` message templates are the contract** an operator's saved queries match, and must be reproduced character for character: `input branch did not name a file path: {Reason}` · `step payload rejected: {Reason}` · `file {FilePath} rejected: {Reason}` · `reading {FilePath} failed: {Reason}` · `extracting {FilePath} failed: {Reason}`.
+- **Use `Path.IsPathFullyQualified`, never `Path.IsPathRooted`, to mean "absolute."** `IsPathRooted` is true for a Windows drive-relative path like `\foo\bar.csv`. Production is Linux, where they agree; the tests run on Windows, where they do not.
 
 ---
 
@@ -365,17 +367,31 @@ public sealed class FileReaderLocatorTests
     }
 
     [Fact]
-    public async Task TheFailureIsLoggedBeforeItIsThrown()
+    public async Task TheFailureMessageNamesTheClassOfFault()
     {
-        // Step failures log at Information here, so the MESSAGE is what an operator searches. A
-        // thrown FailedException reaches the framework's log with a sanitized text; this line is
-        // the one that names the class of fault.
-        var (processor, log) = Build();
+        // Step failures log at Information here, so the MESSAGE is what an operator searches — and
+        // ProcessDispatchHandler writes this exact text verbatim when it catches the exception. The
+        // author logs nothing itself; a second copy would double every failure record. So the
+        // template is pinned on the exception, which is where it actually lives.
+        var (processor, _) = Build();
 
-        await Assert.ThrowsAsync<FailedException>(() => Run(processor, "not json"));
+        var ex = await Assert.ThrowsAsync<FailedException>(() => Run(processor, "not json"));
 
-        Assert.Contains(log.Records, r => r.Message.StartsWith(
-            "input branch did not name a file path", StringComparison.Ordinal));
+        Assert.StartsWith("input branch did not name a file path: ", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADriveRelativePathFailsTheStep()
+    {
+        // Path.IsPathRooted would accept this on Windows: it is rooted but not fully qualified, and
+        // the contract is an absolute path. Production is Linux, where the two agree; the tests run
+        // on Windows, where they do not.
+        var (processor, _) = Build();
+
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => Run(processor, """{"filePath":"\orders.csv"}"""));
+
+        Assert.Contains("did not name a file path", ex.Message, StringComparison.Ordinal);
     }
 }
 ```
@@ -457,7 +473,9 @@ public sealed class FileReaderProcessor(ILogger<FileReaderProcessor> logger)
 
         if (locator?.FilePath is { Length: > 0 } filePath)
         {
-            if (Path.IsPathRooted(filePath))
+            // IsPathFullyQualified, not IsPathRooted: the latter accepts a Windows drive-relative
+            // path like ooar.csv, which names no single location.
+            if (Path.IsPathFullyQualified(filePath))
             {
                 return filePath;
             }
@@ -592,36 +610,35 @@ public sealed class FileReaderGuardTests : IDisposable
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => Run(processor, path, Payload(".csv", 0, 4096)));
 
+        Assert.StartsWith("step payload rejected: ", ex.Message, StringComparison.Ordinal);
         Assert.Contains("above this pod's ceiling", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task AMissingFileFailsTheStepNamingThePath()
     {
-        var (processor, log) = Build();
+        var (processor, _) = Build();
         var path = Path.Combine(_dir, "absent.csv");
 
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => Run(processor, path, Payload(".csv", 0, 4096)));
 
-        Assert.Contains("does not exist", ex.Message, StringComparison.Ordinal);
-        Assert.Contains(log.Records, r =>
-            r.Message.Contains(path, StringComparison.Ordinal) &&
-            r.Message.StartsWith("reading ", StringComparison.Ordinal));
+        // The message IS the operator-facing contract — ProcessDispatchHandler logs it verbatim —
+        // so it is asserted here rather than on a RecordingLogger record the author no longer writes.
+        Assert.Equal($"reading {path} failed: it does not exist", ex.Message);
     }
 
     [Fact]
     public async Task TheWrongExtensionFailsTheStep()
     {
-        var (processor, log) = Build();
+        var (processor, _) = Build();
         var path = WriteFile("orders.txt", 10);
 
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => Run(processor, path, Payload(".csv", 0, 4096)));
 
+        Assert.StartsWith($"file {path} rejected: ", ex.Message, StringComparison.Ordinal);
         Assert.Contains("expected .csv", ex.Message, StringComparison.Ordinal);
-        Assert.Contains(log.Records, r => r.Message.StartsWith(
-            $"file {path} rejected", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -771,23 +788,23 @@ public sealed class FileReaderProcessor(
         if (string.IsNullOrWhiteSpace(config.ExpectedExtension)
             || !config.ExpectedExtension.StartsWith('.'))
         {
-            throw Rejected("the payload", $"ExpectedExtension must start with a dot; the payload named "
+            throw BadPayload($"ExpectedExtension must start with a dot; the payload named "
                                           + $"'{config.ExpectedExtension}'");
         }
 
         if (config.MinimumSizeBytes < 0)
         {
-            throw Rejected("the payload", "MinimumSizeBytes must not be negative");
+            throw BadPayload("MinimumSizeBytes must not be negative");
         }
 
         if (config.MaximumSizeBytes < 1)
         {
-            throw Rejected("the payload", "MaximumSizeBytes must be at least 1");
+            throw BadPayload("MaximumSizeBytes must be at least 1");
         }
 
         if (config.MinimumSizeBytes > config.MaximumSizeBytes)
         {
-            throw Rejected("the payload",
+            throw BadPayload(
                 $"MinimumSizeBytes {config.MinimumSizeBytes} is above MaximumSizeBytes "
                 + $"{config.MaximumSizeBytes}");
         }
@@ -796,7 +813,7 @@ public sealed class FileReaderProcessor(
         {
             // NOT clamped. Silently lowering it would have the author's 100MB expectation fail at 32
             // with nothing saying which number won.
-            throw Rejected("the payload",
+            throw BadPayload(
                 $"MaximumSizeBytes {config.MaximumSizeBytes} is above this pod's ceiling of "
                 + $"{_podCeiling}; raise FileReader__MaxFileSizeBytes or lower the step");
         }
@@ -859,17 +876,22 @@ public sealed class FileReaderProcessor(
         }
     }
 
-    private FailedException Rejected(string path, string reason)
-    {
-        logger.LogInformation("file {FilePath} rejected: {Reason}", path, reason);
-        return new FailedException($"file {path} rejected: {reason}");
-    }
+    // THE THREE FAILURE CLASSES, AND NONE OF THEM LOGS. ProcessDispatchHandler catches
+    // FailedException and writes the author's message verbatim, so a line here would emit every
+    // failure twice — which is why BaseImporter and BaseExporter log nothing either. The message
+    // text IS the contract an operator searches; only the duplicate copy is gone.
 
-    private FailedException Unreadable(string path, string reason)
-    {
-        logger.LogInformation("reading {FilePath} failed: {Reason}", path, reason);
-        return new FailedException($"reading {path} failed: {reason}");
-    }
+    /// <summary>A malformed payload, diagnosed before any path has been read.</summary>
+    private static FailedException BadPayload(string reason)
+        => new($"step payload rejected: {reason}");
+
+    /// <summary>A file that broke a rule. Separate from BadPayload because this one has a path.</summary>
+    private static FailedException Rejected(string path, string reason)
+        => new($"file {path} rejected: {reason}");
+
+    /// <summary>A file that could not be read, whatever the cause.</summary>
+    private static FailedException Unreadable(string path, string reason)
+        => new($"reading {path} failed: {reason}");
 
     // ... ReadPath from Task 2, unchanged ...
 }
@@ -1569,8 +1591,8 @@ In `src/Processor.FileReader/FileReaderProcessor.cs`, wrap the builder call:
                                       or NotSupportedException or ArgumentException)
         {
             // A corrupt or truncated archive. Deterministic — it fails identically on every
-            // redelivery — so it is a failed step, not something to park.
-            logger.LogInformation("extracting {FilePath} failed: {Reason}", info.FullName, ex.Message);
+            // redelivery — so it is a failed step, not something to park. No log here: the framework
+            // writes this message verbatim when it catches the exception.
             throw new FailedException($"extracting {info.FullName} failed: {ex.Message}");
         }
 ```

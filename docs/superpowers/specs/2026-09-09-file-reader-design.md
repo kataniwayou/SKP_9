@@ -229,18 +229,34 @@ included**. There is no transient class here: the requeue path in `ProcessDispat
 `TransientSendException` and its subclass only, and both arise solely from `SendToPostAsync`, so
 `PostSendException` propagates untouched and everything else is a terminal outcome.
 
-Stable log templates, emitted **before** the throw. Step failures log at Information in this system,
-so the message is what an operator searches, not the level:
+Stable message templates, carried by the **`FailedException` itself**. Step failures log at
+Information in this system, so the message is what an operator searches, not the level:
 
 | Class | Template |
 |---|---|
 | bad locator | `input branch did not name a file path: {Reason}` |
-| rejected | `file {FilePath} rejected: {Reason}` — extension, size floor, size ceiling, ceiling above the pod's |
+| bad payload | `step payload rejected: {Reason}` — a malformed config, including a ceiling above the pod's |
+| rejected | `file {FilePath} rejected: {Reason}` — extension, size floor, size ceiling |
 | unreadable | `reading {FilePath} failed: {Reason}` — any IO exception, cause not classified |
 | unextractable | `extracting {FilePath} failed: {Reason}` — corrupt or truncated archive |
 
 The path is in every line that has one. That is the whole reason these checks live in `ProcessAsync`
 rather than in the schema.
+
+**The author does not log these itself, and an earlier draft of this document said it should.**
+`ProcessDispatchHandler` catches `FailedException` and writes
+`"the author reported the step failed: {Reason}"` with `ex.Message` **verbatim** — so the templates
+above already reach the log store in full, and a pre-throw log line would emit every failure twice.
+The draft's premise was that the thrown text does not survive; it does. `BaseImporter` and
+`BaseExporter`, the only other authors that throw `FailedException`, both rely on that same catch and
+log nothing themselves. FileReader matches them.
+
+Corrected 2026-09-09 during implementation, after a task review found the duplication. The
+**messages** are unchanged — they are the contract; only the second copy of them is gone.
+
+**A `bad payload` class exists for the same reason.** The `rejected` template names a file, and a
+malformed payload is diagnosed before any path has been read — a message naming a file that was
+never named is worse than a fifth class.
 
 ## 10. Layout
 
