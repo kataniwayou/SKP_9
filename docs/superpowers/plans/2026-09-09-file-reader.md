@@ -723,7 +723,7 @@ namespace Processor.FileReader;
 /// </para>
 /// <para>
 /// <b>It is a manifest value because a file does not cost its own size in flight.</b> The raw bytes,
-/// the base64 string during serialization, the document, the broker message body and a full
+/// the serialized UTF-8 document at ~1.33x, the broker message body at ~1.78x, and a full
 /// JsonDocument DOM at validation can coexist — and the work and post consumers are the SAME
 /// process, so a dispatch and a branch overlap. Tuning that against a container's memory limit is an
 /// operator's job per environment, not a constant's.
@@ -2337,7 +2337,7 @@ Copy `k8s/34-processor-kafkaimporter.yaml` to `k8s/37-processor-filereader.yaml`
 # See §13 of docs/superpowers/specs/2026-09-09-file-reader-design.md.
 #
 # THE MEMORY LIMIT IS HIGHER THAN THE OTHER PROCESSORS' 384Mi, AND THAT IS NOT PADDING. A file does
-# not cost its own size in flight: the raw bytes, the base64 string during serialization, the
+# not cost its own size in flight: the raw bytes, the serialized UTF-8 document, the
 # document, the broker message body and a full JsonDocument DOM at validation can coexist — and the
 # work and post consumers are the SAME process, so a dispatch and a branch overlap. At the 32MiB
 # ceiling below that is comfortably over 200MB transient. Lower FileReader__MaxFileSizeBytes or
