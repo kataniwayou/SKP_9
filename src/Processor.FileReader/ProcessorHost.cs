@@ -113,6 +113,7 @@ public static class ProcessorHost
         // One registration per format. FileContentBuilder takes them all and asks each whether it
         // handles the step's extension.
         builder.Services.AddSingleton<IArchiveExtractor, ZipExtractor>();
+        builder.Services.AddSingleton<IArchiveExtractor, TarExtractor>();
 
         builder.Services.AddSingleton<FileContentBuilder>();
 
