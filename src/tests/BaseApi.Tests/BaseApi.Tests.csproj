@@ -68,6 +68,8 @@
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Resilience\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="FileReader\Fixtures\*.rar" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Processor.FileReader\schema\output.json"
+          Link="schema\output.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
