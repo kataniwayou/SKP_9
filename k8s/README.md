@@ -247,3 +247,20 @@ Four notes an operator will otherwise learn the hard way:
   `curl -s http://localhost:18080/api/v1/workflows` before leaving.
 
 Design: `docs/superpowers/specs/2026-08-22-live-stack-resilience-scenarios-design.md`
+
+## Seeding files for processor-filereader
+
+`processor-filereader` reads absolute paths under `/mnt/skp-files/in`, mounted read-only from the
+kind node. **That path is on the node container, not on Windows** — the node was created without
+`extraMounts` and Docker cannot add one to a running container.
+
+Put a file where the pod can read it:
+
+    docker cp ./orders.zip desktop-control-plane:/mnt/skp-files/in/
+
+Then the Kafka record the importer consumes names it:
+
+    {"filePath": "/mnt/skp-files/in/orders.zip"}
+
+It survives pod restarts and the `kind load` + SourceHash-repoint deploy loop. Only recreating the
+cluster loses it.

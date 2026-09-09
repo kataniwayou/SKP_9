@@ -21,3 +21,4 @@ resources:
   - 34-processor-kafkaimporter.yaml
   - 35-processor-kafkaexporter.yaml
   - 36-orchestrator.yaml
+  - 37-processor-filereader.yaml
