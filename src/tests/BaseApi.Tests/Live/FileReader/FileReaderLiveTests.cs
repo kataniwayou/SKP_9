@@ -18,7 +18,15 @@ namespace BaseApi.Tests.Live.FileReader;
 /// so the node must be running.
 /// </para>
 /// </summary>
+/// <remarks>
+/// Shares the <c>kafka-broker</c> collection with <see cref="KafkaImporterLiveTests"/> and
+/// <see cref="KafkaExporterLiveTests"/>, which stop and start the shared dev Kafka container.
+/// Without the collection, xunit's default parallelism (<c>maxParallelThreads: 6</c> in
+/// <c>xunit.runner.json</c>) could run this class while the broker is down, producing a flaky
+/// failure that looks like a FileReader bug instead of the borrowed-infrastructure race it is.
+/// </remarks>
 [Trait("Category", RealStack.Category)]
+[Collection("kafka-broker")]
 public sealed class FileReaderLiveTests
 {
     private const string NodeDir = "/mnt/skp-files/in";
@@ -43,31 +51,61 @@ public sealed class FileReaderLiveTests
         return $"{NodeDir}/{name}";
     }
 
+    /// <summary>
+    /// Runs a command and waits for it to exit, on purpose not with the void overload of
+    /// <c>WaitForExit</c>: that one blocks forever on a wedged child, and reading
+    /// <see cref="Process.ExitCode"/> after a timed-out bool overload throws
+    /// <c>InvalidOperationException("process has not exited")</c> — an unrelated crash standing in
+    /// for the diagnosable failure this method exists to report.
+    /// <para>
+    /// On timeout the child is killed rather than left running: a <c>using</c> block only disposes
+    /// the process handle, not the process itself, and an orphaned child here is not theoretical —
+    /// this repo has already lost a run to a background process that outlived it and corrupted a
+    /// later test's results.
+    /// </para>
+    /// </summary>
     private static void Run(string file, string arguments)
     {
         using var process = Process.Start(new ProcessStartInfo(file, arguments)
         {
             RedirectStandardError = true,
-            RedirectStandardOutput = true,
+            // Not redirecting stdout: nothing here reads it, and a redirected pipe nobody drains
+            // is a deadlock waiting for whichever command turns out to be chatty. `docker cp` is
+            // quiet today, which is exactly the kind of assumption that stops being true silently.
         })!;
-        process.WaitForExit(60_000);
+
+        if (!process.WaitForExit(60_000))
+        {
+            process.Kill(entireProcessTree: true);
+            Assert.Fail($"{file} {arguments} did not exit within 60s and was killed");
+        }
 
         Assert.True(process.ExitCode == 0,
             $"{file} {arguments} exited {process.ExitCode}: {process.StandardError.ReadToEnd()}");
     }
 
-    private static void Produce(string path)
+    /// <summary>
+    /// Produces with <c>ProduceAsync</c> and checks the delivery report, not <c>Produce</c> plus
+    /// <c>Flush</c>: flush only proves the local queue drained, which stays silent whether the
+    /// broker accepted the record or rejected it. A silent send here would let
+    /// <see cref="AFileWithTheWrongExtensionProducesNoDocument"/>'s absence mean "nothing ran
+    /// because the send never landed" as easily as "the extension guard correctly failed the
+    /// step" — the two outcomes that test exists to tell apart.
+    /// </summary>
+    private static async Task ProduceAsync(string path)
     {
         using var producer = new ProducerBuilder<Null, string>(
             new ProducerConfig { BootstrapServers = RealStack.KafkaBrokers }).Build();
 
-        producer.Produce(RealStack.KafkaTopic, new Message<Null, string>
+        var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
             // providerName rides along exactly as the org's records carry it, and the reader must
             // ignore it. Its absence from the document below is the assertion.
             Value = JsonSerializer.Serialize(new { filePath = path, providerName = "acme-feed" }),
         });
-        producer.Flush(TimeSpan.FromSeconds(15));
+
+        Assert.True(result.Status == PersistenceStatus.Persisted,
+            $"produce to {RealStack.KafkaTopic} did not persist: status was {result.Status}");
     }
 
     /// <summary>The first document on the out topic whose root name matches, or null on timeout.</summary>
@@ -103,14 +141,14 @@ public sealed class FileReaderLiveTests
     }
 
     [Fact]
-    public void AZipOnTheNodeBecomesADocumentOnTheOutTopic()
+    public async Task AZipOnTheNodeBecomesADocumentOnTheOutTopic()
     {
         RealStack.SkipUnlessEnabled();
 
         var name = $"orders-{Guid.NewGuid():N}.zip";
         var path = SeedZip(name, ("a.csv", "id\n"), ("b.csv", "id,name\n"));
 
-        Produce(path);
+        await ProduceAsync(path);
 
         var doc = Await(name, TimeSpan.FromMinutes(2));
         Assert.True(doc.HasValue, $"no document naming {name} reached {OutTopic} within two minutes");
@@ -125,7 +163,7 @@ public sealed class FileReaderLiveTests
     }
 
     [Fact]
-    public void AFileWithTheWrongExtensionProducesNoDocument()
+    public async Task AFileWithTheWrongExtensionProducesNoDocument()
     {
         RealStack.SkipUnlessEnabled();
 
@@ -138,8 +176,13 @@ public sealed class FileReaderLiveTests
         File.WriteAllText(local, "not a zip");
         Run("docker", $"cp \"{local}\" {Node}:{NodeDir}/{name}");
 
-        Produce($"{NodeDir}/{name}");
+        await ProduceAsync($"{NodeDir}/{name}");
 
-        Assert.Null(Await(name, TimeSpan.FromSeconds(90)));
+        // Same two-minute window as the positive test, on purpose: a shorter wait here would only
+        // prove the pipeline hadn't produced a document YET, not that it never would, and the two
+        // outcomes look identical from outside. Now the absence at two minutes means what the
+        // positive test's presence at two minutes means -- the pipeline had the same chance to act
+        // and didn't.
+        Assert.Null(Await(name, TimeSpan.FromMinutes(2)));
     }
 }
