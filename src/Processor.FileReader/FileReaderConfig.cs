@@ -18,6 +18,27 @@ namespace Processor.FileReader;
 /// <param name="MaximumSizeBytes">
 /// Ceiling, inclusive, for THIS step. Admitted only if it fits inside the pod's own ceiling — see
 /// <see cref="FileReaderOptions"/>.
+/// <para>
+/// <b>IT BOUNDS TWO THINGS, NOT ONE: the file on disk AND, for an archive, the cumulative size of
+/// everything it expands to.</b> A deliberate semantic change, made because the design's memory
+/// budget (§6, and the limit in <c>k8s/37-processor-filereader.yaml</c>) prices the transient cost at
+/// ~1.78x <i>the file</i> — correct for a leaf, and wrong for an archive, where the document is
+/// ~1.33x the <i>expanded</i> content. An ordinary 10:1 CSV zip admitted at a 32 MiB file ceiling is
+/// ~320 MB expanded before the document and the envelope are counted.
+/// </para>
+/// <para>
+/// <b>No second field, and that is the ruling rather than an oversight.</b> A separate expansion
+/// ceiling would be one more number a workflow author has to get right, and its only honest default
+/// is this one. So a step that must admit a highly compressible archive raises this value, within
+/// whatever the pod ceiling allows — the same knob, now meaning "the most this step will hold in
+/// memory at once" rather than "the biggest file this step will open".
+/// </para>
+/// <para>
+/// A file that expands past it fails with the <c>extracting {FilePath} failed:</c> template naming
+/// both the expanded total and this ceiling, and NOT with the <c>rejected</c> template — the file
+/// itself broke no rule, and an operator searching for a size rejection would not find a fault that
+/// only exists once the archive was opened.
+/// </para>
 /// </param>
 public sealed record FileReaderConfig(
     string ExpectedExtension,

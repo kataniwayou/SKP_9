@@ -12,7 +12,33 @@ public sealed class TarExtractor : IArchiveExtractor
     public bool CanHandle(string extension)
         => ".tar".Equals(extension, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Every regular file entry, one level deep, or an <see cref="ArchiveExtractionException"/>
+    /// saying why the archive could not be read.
+    /// </summary>
     public IReadOnlyList<ExtractedEntry> Extract(Stream archive)
+    {
+        try
+        {
+            return ExtractCore(archive);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException
+                                      or NotSupportedException or ArgumentException
+                                      or FormatException or EndOfStreamException)
+        {
+            // The BCL fault types System.Formats.Tar raises, wrapped into the one type the processor
+            // catches. FormatException is listed because TarReader reports an unparsable octal field
+            // that way, and it descends from neither IOException nor ArgumentException — the same
+            // kind of gap that let SharpCompress's whole hierarchy through unhandled.
+            //
+            // Not bare Exception: a NullReferenceException here is a bug in this class, and it must
+            // reach the framework's general catch with its stack trace rather than be reported to an
+            // operator as a corrupt file.
+            throw new ArchiveExtractionException(ex.Message, ex);
+        }
+    }
+
+    private static List<ExtractedEntry> ExtractCore(Stream archive)
     {
         var entries = new List<ExtractedEntry>();
 
@@ -86,7 +112,11 @@ public sealed class TarExtractor : IArchiveExtractor
         // head off.
         if (rawEntryCount == 0 && !IsAllZeroBytes(archive))
         {
-            throw new InvalidDataException(
+            // ArchiveExtractionException, not InvalidDataException as this originally threw. The
+            // type is now the seam's, not the BCL's: FileReaderProcessor catches exactly one type,
+            // so a guard that threw a BCL type would only be caught by coincidence of that type
+            // happening to still be on a list somewhere else.
+            throw new ArchiveExtractionException(
                 "The tar produced no entries and is not all zero bytes — treating it as corrupt " +
                 "rather than returning it as a healthy empty archive.");
         }
