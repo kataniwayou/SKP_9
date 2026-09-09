@@ -163,15 +163,29 @@ public interface IArchiveExtractor
 }
 ```
 
-Resolved by extension, registered in the container. **ZIP and TAR only**, on in-box
-`System.IO.Compression` and `System.Formats.Tar`. No new package.
+Resolved by extension, registered in the container. **ZIP, TAR and RAR.** ZIP and TAR run on in-box
+`System.IO.Compression` and `System.Formats.Tar`. RAR needs a package, and that package is the only
+dependency this whole design adds.
 
-**RAR is deferred, and the reason is the offline feed.** There is no in-box RAR reader, and
-`NuGet.config` clears nuget.org — every restore resolves from repo-local `nugets/`. Adding RAR means
-fetching `sharpcompress.nupkg` by hand into that folder, pinning it in `Directory.Packages.props`, and
-regenerating lock files. That is self-contained work for when a RAR file actually appears, and it
-lands as one more `IArchiveExtractor` with nothing else moving. SharpCompress also only *reads* RAR,
-and solid archives are partly unsupported — worth knowing before it is promised to anyone.
+### RAR costs one file in the offline feed
+
+`NuGet.config` clears nuget.org — every restore resolves from repo-local `nugets/` — so a new package
+is a deliberate act, not a `PackageReference`. **SharpCompress 1.0.0** was checked against that
+constraint and passes cleanly:
+
+- MIT licensed, and `lib/net8.0/SharpCompress.dll` ships in the package.
+- **Its `net8.0` dependency group is empty.** The .NET Framework and netstandard2.0 groups pull four
+  compatibility packages; net8.0 pulls none. So the feed gains exactly `sharpcompress.1.0.0.nupkg`
+  and nothing else — no transitive tree to vendor alongside it.
+
+The work is: drop the `.nupkg` into `nugets/`, add a `PackageVersion` to `Directory.Packages.props`,
+`PackageReference` it from `Processor.FileReader` alone, and regenerate that project's lock file.
+`NuGetAudit` is promoted to a build error in this repo, so a restore is what proves the pin is clean —
+that check belongs in the plan's first task, before any extractor code is written, because a failed
+audit changes the version rather than the design.
+
+**SharpCompress reads RAR and does not write it**, and solid archives are only partly supported. That
+is sufficient — this processor never writes an archive — but it decides how RAR is tested (§12).
 
 ## 8. The output schema
 
@@ -241,6 +255,7 @@ src/Processor.FileReader/
   Extractors/IArchiveExtractor.cs
   Extractors/ZipExtractor.cs
   Extractors/TarExtractor.cs
+  Extractors/RarExtractor.cs
   schema/output.json
   ProcessorHost.cs  Program.cs  Dockerfile  appsettings.json
 ```
@@ -272,6 +287,18 @@ real zip and tar archives built inside each test — no filesystem abstraction, 
 test *is* the filesystem interaction. Coverage: each guard in stage 1 with its exact log template; leaf
 and archive document shapes; depth-1 nesting; camelCase property names; a corrupt archive; a payload
 ceiling exceeding the pod ceiling.
+
+**RAR is the exception, because SharpCompress cannot write one.** Zip and tar fixtures are built
+inside the test from bytes; a `.rar` cannot be, so `Fixtures/three-entries.rar` is a **committed
+binary fixture**, generated once with the WinRAR CLI already on this machine:
+
+```
+"C:\Program Files\WinRAR\Rar.exe" a -ep three-entries.rar a.csv b.csv c.wav
+```
+
+That command goes in a README beside the fixture so it can be regenerated. It is the one test input
+this repo cannot produce from source, and the reason is stated so nobody later assumes the file is
+stale or accidental.
 
 **Live**, `src/tests/BaseApi.Tests/Live/FileReader/`, under `Live/` so the hermetic gate skips them,
 gated on `SKP_REALSTACK=1` with the offset-port recipe. The RabbitMQ forward is supervised across the
@@ -333,6 +360,7 @@ an omitted field binds to, so the value is stated explicitly rather than default
 
 ## 14. Not in scope
 
-Recursive archive expansion. RAR. Streaming — the file is fully in memory by design, which is what §6's
-ceiling bounds. A filesystem abstraction. The framework post-hop seam. Windows-host mounts.
-`FileWriter`, which is the next conversation.
+Recursive archive expansion. Writing archives of any format — SharpCompress is referenced for RAR
+reading only. Streaming: the file is fully in memory by design, which is what §6's ceiling bounds. A
+filesystem abstraction. The framework post-hop seam. Windows-host mounts. `FileWriter`, which is the
+next conversation.
