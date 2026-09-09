@@ -72,7 +72,8 @@ The durable write-ups remain `docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.m
 > MESSAGE templates — author reported / author cancelled / transform faulted — each return 0 in the
 > window, and that is the check worth keeping.
 >
-> The two step payloads, and no Kafka address appears anywhere in `k8s/`:
+> The two step payloads as they stood at this point — **both superseded later the same day**, when
+> the broker list moved to `Kafka__BrokerList` in the manifests. See the block below.
 >
 > ```json
 > {"brokerList":"skp-kafka:9092","topic":"skp-paths","consumerGroup":"skp-kafkaimporter",
@@ -99,10 +100,64 @@ The durable write-ups remain `docs/superpowers/HANDOVER-2026-08-30-skp-toolkit.m
 > rather than left to confuse the evidence.
 >
 > Hermetic suite after all of it: **0 failed, 831 passed, 23 skipped**.
+>
+> ---
+>
+> **2026-09-09, later — the broker list left the step payload.** It was org infrastructure sitting in
+> a workflow author's hands: an assignment row is plaintext `jsonb`, served by the API and editable
+> as ordinary authoring, and one deployment only ever talks to one cluster. `KafkaImporterConfig`
+> had already conceded the point in a doc comment — "the one field whose placement is arguable… if
+> that ever inverts it is one field and a fallback." It inverted.
+>
+> `Kafka__BrokerList` now sits in `k8s/34` and `k8s/35` beside `RabbitMq__Host` and
+> `ConnectionStrings__Redis`. A `KafkaBrokerOptions` per processor is bound eagerly at host
+> construction and injected into the factory, so `Create()` takes the consumer group (or the delivery
+> timeout) and nothing else — a payload has no way to name a broker. **Both cache keys shed the
+> broker that used to lead them**: `topic|group` for the importer, the delivery timeout alone for the
+> exporter.
+>
+> **Binding eagerly is the part worth keeping.** librdkafka accepts an empty bootstrap list and only
+> fails once it has to connect, so a missing setting would have surfaced on the importer as a step
+> reporting `Drained` — the terminal that means "the topic is empty" — rather than as anything an
+> operator could see. `ProcessorHost.Create` now throws naming `Kafka:BrokerList`, and the pod does
+> not start. This is also what makes SASL possible later: credentials cannot live in an assignment
+> row, and an address split from the credential that authenticates to it would let a step point at a
+> broker its credential does not match, with the mismatch appearing only as a hang.
+>
+> ```
+> processor row   9d0fb8a6-1d57-4a2b-9394-cf0a9568c48a  kafka-importer 2.2.0  5845e6092ad7…
+> processor row   157a0f40-d668-42f3-a500-4762c587f64a  kafka-exporter 1.2.0  c734986e5cbd…
+> assignment      2f67881a-5ec6-4392-ac1a-301ea66b1fc3  asg-kafka-importer 2.1.0
+> assignment      899612f5-7a52-47ea-8c10-4388ab2e159b  asg-kafka-exporter 1.1.0
+> ```
+>
+> The two payloads are now, and nothing in the database names a broker
+> (`select count(*) from assignments where payload ilike '%broker%'` returns 0):
+>
+> ```json
+> {"topic":"skp-paths","messageCount":5,"consumerGroup":"skp-kafkaimporter","idleTimeoutSeconds":10}
+> {"topic":"skp-exports","deliveryTimeoutSeconds":30}
+> ```
+>
+> **Run twice, on purpose.** The first run kept the stale `brokerList` in both stored payloads — 3
+> records seeded at offsets 17–19, all three imported, all three exported to `skp-exports` at 15–17
+> and consumed back byte-identical. That is what proves the leftover key is *inert* rather than
+> merely tolerated, which is the whole migration guarantee: nothing rewrites those rows, so binding
+> has to ignore what it does not know. Only then were the payloads rewritten, and a second run of 2
+> records (offsets 20–21 in, 18–19 out) proved the broker-free shape. A test on each side pins the
+> same fact hermetically.
+>
+> **A librdkafka `FAIL … 1/1 brokers are down` line at exporter startup is not an outage.** It
+> resolves `skp-kafka.kind` — the docker-network-suffixed name — to an unreachable address, fails
+> once, retries the bare name and produces normally; every dispatch in that same run succeeded. A
+> genuinely wrong address fails every dispatch, not the first connect.
+>
+> Hermetic suite: **0 failed, 847 passed, 23 skipped** (841 before; +6 new facts).
 
 ## Where things stand
 
-Branch `feature/path-importer`, **72 commits ahead of `main`, 26 of them today**, clean tree apart
+Branch `feature/path-importer`, **81 commits ahead of `main`** (72 when this section was written),
+clean tree apart
 from an untracked `src/BaseApi.Service/Properties/launchSettings.json` that Visual Studio generates
 and nobody has committed. **Unpushed, no git remote configured.**
 
@@ -140,7 +195,11 @@ workflow        a5498df6-1522-4098-ad65-f4aff4998988  cron */30 * * * * *, STOPP
 the first slice, not a pipeline, and the complex workflow of the next milestone fills that field in
 without moving anything else.
 
-The step payload is the whole Kafka configuration, and no Kafka address appears anywhere in `k8s/`:
+The step payload was the whole Kafka configuration and no Kafka address appeared anywhere in `k8s/`.
+**Both halves of that stopped being true on 2026-09-09**: the broker list is now `Kafka__BrokerList`
+in each processor's manifest, and the payload carries only what a workflow author chooses. Kept as
+written because the reasoning around it is still the reasoning, and the group name here also predates
+the rename:
 
 ```json
 {"brokerList":"skp-kafka:9092","topic":"skp-paths","consumerGroup":"skp-pathimporter",
