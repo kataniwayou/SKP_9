@@ -149,7 +149,7 @@ namespace Processor.FileReader;
 /// <param name="MinimumSizeBytes">Floor, inclusive. Zero disables the check.</param>
 /// <param name="MaximumSizeBytes">
 /// Ceiling, inclusive, for THIS step. Admitted only if it fits inside the pod's own ceiling — see
-/// <see cref="FileReaderOptions"/>, added in a later task.
+/// <see cref="FileReaderOptions"/>.
 /// </param>
 public sealed record FileReaderConfig(
     string ExpectedExtension,
@@ -596,7 +596,8 @@ public sealed class FileReaderGuardTests : IDisposable
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => processor.ExecuteAsync([], "", E, CancellationToken.None));
 
-        Assert.Contains("needs a step payload", ex.Message, StringComparison.Ordinal);
+        Assert.StartsWith("step payload rejected: ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("needs ExpectedExtension", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -780,9 +781,12 @@ public sealed class FileReaderProcessor(
     {
         if (config is null)
         {
-            throw new FailedException(
-                "FileReader needs a step payload naming ExpectedExtension, MinimumSizeBytes and "
-                + "MaximumSizeBytes");
+            // The SAME prefix as every malformed-payload case, deliberately. An absent payload and a
+            // nonsensical one are the same class of workflow authoring error, and an operator
+            // searching for payload faults must find both with one query rather than learning that
+            // the commonest one is spelled differently.
+            throw BadPayload(
+                "FileReader needs ExpectedExtension, MinimumSizeBytes and MaximumSizeBytes");
         }
 
         if (string.IsNullOrWhiteSpace(config.ExpectedExtension)
