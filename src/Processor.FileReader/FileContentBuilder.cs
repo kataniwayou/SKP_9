@@ -32,10 +32,6 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
     /// </summary>
     public FileBuildResult Build(byte[] bytes, FileInfo info, FileReaderConfig config)
     {
-        // ONE budget for the WHOLE tree, not one per level. Threading a running total through the
-        // recursion is what keeps MaxDepth safe to raise: a per-level ceiling would let a depth-5
-        // archive hold five times the limit, and the pod's memory does not care which level a byte
-        // came from.
         // THE DECLARATION CROSS-CHECK, and it applies to the top-level file ONLY.
         //
         // Choosing the extractor by signature means a file whose bytes are not an archive is simply
@@ -59,6 +55,10 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
                 + "processor knows — treating it as corrupt rather than recording it as a plain file");
         }
 
+        // ONE budget for the WHOLE tree, not one per level. Threading a running total through the
+        // recursion is what keeps MaxDepth safe to raise: a per-level ceiling would let a depth-5
+        // archive hold five times the limit, and the pod's memory does not care which level a byte
+        // came from.
         var budget = new ExpansionBudget(config.MaximumSizeBytes);
         var depthReached = 0;
 
@@ -72,7 +72,7 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
             info.CreationTimeUtc,
             info.LastWriteTimeUtc,
             depth: 0,
-            config.EffectiveMaxDepth,
+            config.MaxDepth,
             budget,
             ref depthReached);
 

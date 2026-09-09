@@ -74,7 +74,7 @@ internal sealed class FileReaderProcessor(
             "read {FilePath} as {SizeBytes} bytes with {EntryCount} entries, expanded to depth "
             + "{DepthReached} of {MaxDepth}",
             info.FullName, info.Length, built.Node.Metadata.EntryCount, built.DepthReached,
-            settings.EffectiveMaxDepth);
+            settings.MaxDepth);
 
         var document = JsonSerializer.SerializeToUtf8Bytes(built.Node, FileDocument.Options);
 
@@ -128,19 +128,19 @@ internal sealed class FileReaderProcessor(
                 + $"{_podCeiling}; raise FileReader__MaxFileSizeBytes or lower the step");
         }
 
-        // Null is absent and means DefaultMaxDepth; an explicit value must be in range. Zero is
-        // rejected rather than read as "do not expand" — a step that wants no expansion is asking
-        // for a plain file, and naming a depth of nothing is far more likely to be a payload written
-        // against the wrong field than an intention.
+        // An omitted MaxDepth never reaches here as 0: System.Text.Json applies the record's own
+        // default parameter value to a missing property, so absent arrives as DefaultMaxDepth. A 0
+        // therefore means the payload SAID zero, and that is rejected rather than read as "do not
+        // expand" — a step wanting no expansion is asking for a plain file, and naming a depth of
+        // nothing is far more likely to be a payload written against the wrong field.
         //
         // The upper bound is what makes the builder's recursion safe: it is the stack depth this
         // pod will ever reach, fixed before any file is opened.
-        if (config.MaxDepth is { } depth
-            && (depth < 1 || depth > FileReaderConfig.MaxSupportedDepth))
+        if (config.MaxDepth < 1 || config.MaxDepth > FileReaderConfig.MaxSupportedDepth)
         {
             throw BadPayload(
                 $"MaxDepth must be between 1 and {FileReaderConfig.MaxSupportedDepth}; the payload "
-                + $"named {depth}");
+                + $"named {config.MaxDepth}");
         }
 
         return config;

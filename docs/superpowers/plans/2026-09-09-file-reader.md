@@ -55,7 +55,7 @@ Creates the project, vendors the one new package, and proves the offline restore
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `Processor.FileReader.FileReaderProcessor : BaseProcessor<FileReaderConfig>`; `Processor.FileReader.FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes, int? MaxDepth = null) : ProcessorConfig` *(`MaxDepth` arrived in Task 11)*; `Processor.FileReader.ProcessorHost.Create(string[] args, ProcessorIdentityFound identity, Action<IConfigurationBuilder>? configure = null)` returning `IHost`.
+- Produces: `Processor.FileReader.FileReaderProcessor : BaseProcessor<FileReaderConfig>`; `Processor.FileReader.FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes, int MaxDepth = 1) : ProcessorConfig` *(`MaxDepth` arrived in Task 11)*; `Processor.FileReader.ProcessorHost.Create(string[] args, ProcessorIdentityFound identity, Action<IConfigurationBuilder>? configure = null)` returning `IHost`.
 
 - [ ] **Step 1: Vendor the package**
 
@@ -1388,10 +1388,6 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
     /// </summary>
     public FileBuildResult Build(byte[] bytes, FileInfo info, FileReaderConfig config)
     {
-        // ONE budget for the WHOLE tree, not one per level. Threading a running total through the
-        // recursion is what keeps MaxDepth safe to raise: a per-level ceiling would let a depth-5
-        // archive hold five times the limit, and the pod's memory does not care which level a byte
-        // came from.
         // THE DECLARATION CROSS-CHECK, and it applies to the top-level file ONLY.
         //
         // Choosing the extractor by signature means a file whose bytes are not an archive is simply
@@ -1415,6 +1411,10 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
                 + "processor knows — treating it as corrupt rather than recording it as a plain file");
         }
 
+        // ONE budget for the WHOLE tree, not one per level. Threading a running total through the
+        // recursion is what keeps MaxDepth safe to raise: a per-level ceiling would let a depth-5
+        // archive hold five times the limit, and the pod's memory does not care which level a byte
+        // came from.
         var budget = new ExpansionBudget(config.MaximumSizeBytes);
         var depthReached = 0;
 
@@ -1428,7 +1428,7 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
             info.CreationTimeUtc,
             info.LastWriteTimeUtc,
             depth: 0,
-            config.EffectiveMaxDepth,
+            config.MaxDepth,
             budget,
             ref depthReached);
 
@@ -1723,7 +1723,7 @@ In `src/Processor.FileReader/FileReaderProcessor.cs`, add `FileContentBuilder bu
             "read {FilePath} as {SizeBytes} bytes with {EntryCount} entries, expanded to depth "
             + "{DepthReached} of {MaxDepth}",
             info.FullName, info.Length, built.Node.Metadata.EntryCount, built.DepthReached,
-            settings.EffectiveMaxDepth);
+            settings.MaxDepth);
 
         var document = JsonSerializer.SerializeToUtf8Bytes(built.Node, FileDocument.Options);
 
@@ -4064,8 +4064,8 @@ resolve against. Collapses the node's two content fields into one.
   `Entries(IReadOnlyList<FileNode> Value)`; `public sealed record FileNode(FileMetadata Metadata, FileContent? Content)`;
   `public sealed class FileNodeConverter : JsonConverter<FileNode>`;
   `internal sealed record FileBuildResult(FileNode Node, int DepthReached)`;
-  `FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes, int? MaxDepth = null)`
-  with `DefaultMaxDepth = 1`, `MaxSupportedDepth = 64` and `EffectiveMaxDepth`;
+  `FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes, int MaxDepth = DefaultMaxDepth)`
+  with `DefaultMaxDepth = 1` and `MaxSupportedDepth = 64`;
   `IArchiveExtractor { string Extension { get; } bool CanHandle(ReadOnlySpan<byte> header); ... }`.
 
 - [x] **Step 1: Turn the extractor seam onto the bytes**
@@ -4120,11 +4120,12 @@ resolve against. Collapses the node's two content fields into one.
 
 - [x] **Step 4: Make depth a payload field, bounded**
 
-  `int? MaxDepth = null` on `FileReaderConfig`. **Nullable so "absent" and "zero" are different
-  answers:** `System.Text.Json` does not apply a C# default parameter value to a missing property on
-  a positional record — it passes `default(int)`, which is `0`. Null resolves to
-  `DefaultMaxDepth = 1`; `0`, negatives and anything above `MaxSupportedDepth = 64` are rejected
-  payloads, diagnosed before the file is opened.
+  `int MaxDepth = DefaultMaxDepth` on `FileReaderConfig`. **The fallback is the parameter's own
+  default, and it was measured rather than assumed:** `System.Text.Json` *does* apply a C# default
+  parameter value when a positional record's property is missing, so an omitted field arrives as `1`
+  and not as `default(int)`. A nullable was drafted first on the opposite belief and dropped once a
+  probe showed missing → `1`, explicit `0` → `0`. So `0`, negatives and anything above
+  `MaxSupportedDepth = 64` are rejected payloads, diagnosed before the file is opened.
 
   **No pod-level twin.** `MaxFileSizeBytes` exists because bytes cost memory; depth costs nothing on
   its own, and the bytes it reaches are already bounded. The 64 cap is a stack bound, not a memory

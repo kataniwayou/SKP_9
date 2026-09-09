@@ -56,14 +56,13 @@ namespace Processor.FileReader;
 /// </param>
 /// <param name="MaxDepth">
 /// How many levels of archive to expand. <b>Absent means 1</b> — the top-level archive is expanded
-/// and its entries are left as files, which is what this processor did before nesting existed. Read
-/// it through <see cref="EffectiveMaxDepth"/> rather than directly.
+/// and its entries are left as files, which is what this processor did before nesting existed.
 /// <para>
-/// <b>Nullable so that "absent" and "zero" are different answers.</b> System.Text.Json does not
-/// apply a C# default parameter value to a missing property on a positional record — it passes
-/// <c>default(int)</c>, which is 0 — so a non-nullable field could not tell a payload that omitted
-/// this from one that explicitly asked for no expansion at all. Null is absent and becomes 1; 0 is a
-/// rejected payload.
+/// <b>The fallback is the parameter's own default, and that was verified rather than assumed.</b>
+/// System.Text.Json applies a C# default parameter value when a positional record's property is
+/// missing from the payload, so an omitted field arrives as 1 rather than as <c>default(int)</c>.
+/// That keeps "absent" and "zero" distinguishable without a nullable: absent is 1, and an explicit 0
+/// stays 0 and is a rejected payload.
 /// </para>
 /// <para>
 /// <b>It has no memory cost of its own, which is why it has no pod-level twin.</b> Depth costs
@@ -84,7 +83,7 @@ public sealed record FileReaderConfig(
     string ExpectedExtension,
     long MinimumSizeBytes,
     long MaximumSizeBytes,
-    int? MaxDepth = null) : ProcessorConfig
+    int MaxDepth = FileReaderConfig.DefaultMaxDepth) : ProcessorConfig
 {
     /// <summary>
     /// The default: expand the top-level archive, leave its entries as files.
@@ -107,10 +106,4 @@ public sealed record FileReaderConfig(
     /// </para>
     /// </summary>
     public const int MaxSupportedDepth = 64;
-
-    /// <summary>
-    /// <see cref="MaxDepth"/> with the absent case resolved. Valid only once the processor has
-    /// admitted the payload, which is where the range is enforced.
-    /// </summary>
-    public int EffectiveMaxDepth => MaxDepth ?? DefaultMaxDepth;
 }
