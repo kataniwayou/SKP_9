@@ -670,6 +670,13 @@
           "StackExchange.Redis": "[2.13.1, )"
         }
       },
+      "processor.filereader": {
+        "type": "Project",
+        "dependencies": {
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]",
+          "SharpCompress": "[1.0.0, )"
+        }
+      },
       "processor.kafkaexporter": {
         "type": "Project",
         "dependencies": {
@@ -1031,6 +1038,12 @@
           "System.IO.Pipelines": "8.0.0",
           "System.Threading.RateLimiting": "8.0.0"
         }
+      },
+      "SharpCompress": {
+        "type": "CentralTransitive",
+        "requested": "[1.0.0, )",
+        "resolved": "1.0.0",
+        "contentHash": "bdBq9V2epw7KBX3TeA+lxnKU8dD61tsqVuyuo5cAXj4d+9+fcIQObTr0705oTWnPDRhjRx3TpgOFbYYAMObpaw=="
       },
       "StackExchange.Redis": {
         "type": "CentralTransitive",
