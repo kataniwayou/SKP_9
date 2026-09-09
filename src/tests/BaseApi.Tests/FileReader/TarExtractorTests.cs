@@ -114,6 +114,29 @@ public sealed class TarExtractorTests
     }
 
     [Fact]
+    public void ADirectoryOnlyArchiveSucceedsWithNoEntries()
+    {
+        // Fix round 2 regression: the guard above must gate on what TarReader actually yielded, not
+        // on what survived the regular-file filter. A directory-only archive (same as one that held
+        // only symlinks, hardlinks, or the excluded ContiguousFile/SparseFile types) parses cleanly —
+        // TarReader reads a real, non-zero header and yields one entry — but the filter drops it, so
+        // entries.Count is 0. Gating the guard on entries.Count made this valid, non-corrupt archive
+        // throw InvalidDataException; gating on the raw TarReader yield count (which is 1, not 0)
+        // fixes it. This test is the third side of the "empty vs. corrupt" line, alongside
+        // AGenuinelyEmptyTarSucceedsWithNoEntries and ATruncatedHeaderWithGarbageAfterItThrows.
+        using var buffer = new MemoryStream();
+        using (var writer = new TarWriter(buffer, leaveOpen: true))
+        {
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.Directory, "emptydir/"));
+        }
+
+        buffer.Position = 0;
+        var entries = new TarExtractor().Extract(buffer);
+
+        Assert.Empty(entries);
+    }
+
+    [Fact]
     public void ExtractedEntryModifiedUtcCarriesUtcKind()
     {
         // Task 4/6 review requirement: TarEntry.ModificationTime is a DateTimeOffset, and
