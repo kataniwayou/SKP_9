@@ -145,10 +145,18 @@ pod's acting as an admission check on it.
 
 The default lives in code so an unset variable is never unbounded.
 
-**Memory is why this is a manifest value.** A 32 MB file does not cost 32 MB in flight: the raw
-`byte[]`, the base64 string during serialization, the document bytes, the broker message body, and a
-full `JsonDocument` DOM at validation can coexist — and the work and post consumers are the *same
-process*, so a dispatch and a branch overlap. That is comfortably over 200 MB transient against the
+**Memory is why this is a manifest value.** A 32 MB file does not cost 32 MB in flight. What
+coexists is the raw file `byte[]`, the serialized UTF-8 document at ~1.33x the file, the broker
+message body — that document base64'd *again* inside the `ProcessedData` envelope, ~1.78x — and, at
+validation in the post handler, a full `JsonDocument` DOM over it. The work and post consumers are
+the *same process*, so a dispatch and a branch overlap.
+
+**An earlier draft of this paragraph also listed "the base64 string during serialization", and there
+is no such string.** `JsonSerializer.SerializeToUtf8Bytes` encodes a `byte[]` straight into its UTF-8
+output buffer; nothing materialises base64 as a managed `string`, so there is no UTF-16 doubling to
+budget for. Corrected 2026-09-09 during implementation and confirmed by measuring allocations against
+a deliberate `Convert.ToBase64String` control. The claim is recorded because the wrong version of it
+is the kind a reader would reason from when tuning the ceiling. That is comfortably over 200 MB transient against the
 `384Mi` limit the other processors carry. **FileReader's manifest gets a higher limit, or its ceiling
 is set well under 32 MB.** Being a manifest value is what lets that be tuned per environment without a
 rebuild.
