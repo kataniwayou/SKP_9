@@ -264,3 +264,21 @@ Then the Kafka record the importer consumes names it:
 
 It survives pod restarts and the `kind load` + SourceHash-repoint deploy loop. Only recreating the
 cluster loses it.
+
+### The FileReader workflow
+
+`KafkaImporter → FileReader → KafkaExporter`. **Both edges are `entryCondition: 1`
+(`PreviousCompleted`), not `4` (`Always`).**
+
+`Always` is what the sample steps use, and copying it here is a live bug rather than a style
+choice: a failed importer hands off with `ExecutionId` empty, and an `Always`-wired exporter then
+runs on an entry-shaped dispatch every time an import fails. That is the class of error
+`BaseImporter`'s edge guard exists to make impossible. `0` (`PreviousProcessing`) is rejected by the
+step validator and is also what an omitted field binds to, which is why the value is always stated.
+
+The FileReader step's payload:
+
+    {"expectedExtension": ".zip", "minimumSizeBytes": 1, "maximumSizeBytes": 33554432}
+
+`maximumSizeBytes` must not exceed the pod's `FileReader__MaxFileSizeBytes`, or every dispatch fails
+with a config error naming both numbers.
