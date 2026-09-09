@@ -297,3 +297,85 @@ baseline admits depth 1. A step producing a document deeper than the schema admi
 in the post handler, which reports `Failed` with `EntryId: Guid.Empty` and no file path. The
 processor logs the depth it actually reached (`expanded to depth N of M`); that line is the only
 place the number survives.
+
+### Verifying processor-filereader
+
+Four steps, in this order, and a test that proves each one landed. The order matters: step 3 is what
+makes every later assertion mean anything, and running the live suite before it passes vacuously.
+
+**1. Build, load, repoint the hash.**
+
+```bash
+docker build -f src/Processor.FileReader/Dockerfile -t processor-filereader:local .
+kind load docker-image processor-filereader:local
+kubectl -n skp rollout restart deploy/processor-filereader
+```
+
+The `:local` tag and `imagePullPolicy: IfNotPresent` mean a rebuilt image does not reach a running
+pod on its own, which is what the restart is for.
+
+Then repoint the processor row's `SourceHash` to this build's. Every rebuild needs it — the value
+changes on any source edit, and a pod whose hash matches no row resolves no identity. `dotnet build`
+prints it (`SourceHash (Processor.FileReader): …`), and the live suite reads it from the assembly
+rather than a constant, so it never needs pasting into a test.
+
+**2. Apply the manifest.**
+
+```bash
+kubectl apply -k k8s/
+```
+
+**`kubectl rollout status` will time out, and that timeout is the expected signal.** The pod sits
+Running/NotReady with 0 restarts until a processor row exists — it waits by design rather than
+crashing, so a `CrashLoopBackOff` here means something else is wrong.
+
+**3. Register the processor row and the output schema row.**
+
+The row is `file-reader` / `1.0.0`. The schema is `src/Processor.FileReader/schema/output.json`,
+registered against that row as its output schema.
+
+**Do not skip the schema.** With `OutputSchemaId` null, `TryValidate` returns true without decoding
+anything: shape, entry count and depth are enforced nowhere, and a document arriving on the out
+topic proves only that a document was produced. The pod should reach Ready once the row exists.
+
+Proved by `FileReaderLiveTests.TheOutputSchemaRowIsRegistered`.
+
+That test asks BaseApi for the row by this build's source hash and fails with the step that was
+missed — no row means the image was rebuilt without repointing, a null `OutputSchemaId` means the
+schema was never registered.
+
+**4. Wire the workflow.**
+
+`KafkaImporter → FileReader → KafkaExporter`, both edges `entryCondition: 1`, payload as above.
+
+#### Running the live tests
+
+    .\k8s\port-forward-realstack.ps1
+    .\tools\kafka-dev-broker.ps1 -Up
+    $env:SKP_REALSTACK = "1"
+    dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
+
+They seed files onto the node with `docker cp`, so the kind node must be running. What each proves:
+
+| Test | What only the cluster can answer |
+| --- | --- |
+| `TheOutputSchemaRowIsRegistered` | The schema is enforcing at all — step 3 landed |
+| `AZipOnTheNodeBecomesADocumentOnTheOutTopic` | The mount, the manifest ceiling, the wiring |
+| `AFileWithTheWrongExtensionProducesNoDocument` | The edge is `PreviousCompleted`, not `Always` |
+| `AtTheDefaultDepthANestedZipStaysAFile` | Nesting did not change what an existing workflow emits |
+| `ACorruptZipFailsWithThePathInTheLog` | The path reaches the log store |
+| `ADocumentDeeperThanTheSchemaFailsAndLogsTheDepth` | A schema rejection is diagnosable |
+
+The last one **skips unless `SKP_FILEREADER_DEEP_TOPIC` names the input topic of a second workflow
+whose FileReader step is wired `maxDepth: 2`**. Depth is a step payload, so one wired workflow
+has one depth and no message can ask for another. Wire that second workflow only when you intend
+to raise depth in earnest; the test exists so that raising it without deepening the schema is a
+diagnosable failure rather than a silent one.
+
+#### Three ways to read a false result here
+
+- **The RabbitMQ forward dies on most runs.** Supervise it, or read its five downstream failures as
+  real ones.
+- **Never `netstat` the default ports** to judge reachability. The forwards are on offset ports, and
+  a dead forward keeps its socket bound — the port looks free and refuses connections.
+- **Never scale Redis down.** It wipes L2, and the branch outputs go with it.
