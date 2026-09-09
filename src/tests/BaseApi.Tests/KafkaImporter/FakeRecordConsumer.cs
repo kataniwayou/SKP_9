@@ -144,7 +144,13 @@ internal sealed class FakeRecordConsumerFactory(params FakeRecordConsumer[] cons
     private int _created;
 
     public int Created => _created;
-    public List<(string Brokers, string Group)> Requests { get; } = new();
+
+    /// <summary>
+    /// The groups asked for, in order. <b>No broker list</b>: the production factory holds the org's
+    /// broker from configuration and a caller cannot name one, so there is nothing per-call to
+    /// record but the group.
+    /// </summary>
+    public List<string> Requests { get; } = new();
 
     /// <summary>
     /// True makes <see cref="Create"/> throw <see cref="Fault"/> instead of handing out a consumer,
@@ -156,9 +162,9 @@ internal sealed class FakeRecordConsumerFactory(params FakeRecordConsumer[] cons
 
     public Error Fault { get; set; } = new(ErrorCode.Local_Transport);
 
-    public IRecordConsumer Create(string brokerList, string consumerGroup)
+    public IRecordConsumer Create(string consumerGroup)
     {
-        Requests.Add((brokerList, consumerGroup));
+        Requests.Add(consumerGroup);
         if (CreateThrows)
         {
             throw new KafkaException(Fault);

@@ -105,6 +105,17 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
+        // The org's broker, bound eagerly and registered as an instance rather than through
+        // IOptions.
+        //
+        // EAGER BECAUSE A MISSING BROKER MUST STOP THE HOST. librdkafka accepts an empty bootstrap
+        // list at construction and only fails once it has to connect, so a processor started without
+        // this would come up healthy, go Ready, and fail nothing until a dispatch arrived — which
+        // would then hold this replica's only lane for the whole delivery timeout before failing the
+        // step, once per dispatch, for the life of the pod. Throwing here says it once, at startup,
+        // where an operator is already looking.
+        builder.Services.AddSingleton(ReadBroker(builder.Configuration));
+
         // The Kafka client factory. Singleton because the processor holds one producer across
         // dispatches and the factory is what mints it.
         builder.Services.AddSingleton<IRecordProducerFactory, KafkaRecordProducerFactory>();
@@ -115,5 +126,23 @@ public static class ProcessorHost
         builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, KafkaExporterProcessor>();
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// Binds <see cref="KafkaBrokerOptions"/> and refuses a blank one. See
+    /// <see cref="KafkaBrokerOptions"/> for why the broker is configuration rather than a step
+    /// payload field, and the call site above for why this throws rather than defaulting.
+    /// </summary>
+    private static KafkaBrokerOptions ReadBroker(IConfiguration cfg)
+    {
+        var broker = cfg.GetSection("Kafka").Get<KafkaBrokerOptions>() ?? new KafkaBrokerOptions();
+        if (string.IsNullOrWhiteSpace(broker.BrokerList))
+        {
+            throw new InvalidOperationException(
+                "Kafka:BrokerList is not configured. The broker is org infrastructure and reaches " +
+                "this processor from its environment as Kafka__BrokerList, not from a step payload.");
+        }
+
+        return broker;
     }
 }

@@ -20,17 +20,22 @@ public sealed class KafkaExporterProcessor(
     ILogger<KafkaExporterProcessor> logger)
     : BaseExporter<KafkaExporterConfig>(logger)
 {
-    protected override string RequiredPayload => "brokerList, topic and deliveryTimeoutSeconds";
+    protected override string RequiredPayload => "topic and deliveryTimeoutSeconds";
 
     /// <summary>
-    /// <b>The topic is not in the key</b> — a producer is not bound to one, and building a second
-    /// producer per topic would pay a connection and a metadata fetch for nothing. The delivery
-    /// timeout IS in the key, because that one is fixed at construction: a cached producer carries the
-    /// timeout it was built with, and without this a dispatch naming a longer timeout would silently
-    /// get the shorter one it inherited.
+    /// <b>The delivery timeout, and nothing else.</b> The topic is not in the key — a producer is not
+    /// bound to one, and building a second producer per topic would pay a connection and a metadata
+    /// fetch for nothing. The timeout IS, because that one is fixed at construction: a cached producer
+    /// carries the timeout it was built with, and without this a dispatch naming a longer timeout
+    /// would silently get the shorter one it inherited.
+    /// <para>
+    /// The broker used to lead this key. It left with the payload field: one deployment writes to one
+    /// org cluster, named once in configuration, so there is nothing left for a step to vary that
+    /// would warrant a second producer.
+    /// </para>
     /// </summary>
     protected override string CacheKey(KafkaExporterConfig config) =>
-        $"{config.BrokerList}|{config.DeliveryTimeoutSeconds}";
+        config.DeliveryTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     protected override string Destination(KafkaExporterConfig config) => config.Topic;
 
@@ -46,15 +51,16 @@ public sealed class KafkaExporterProcessor(
     /// <summary>
     /// <b>The factory throws Confluent's exception, so this is where it stops being one</b>, for the
     /// reason <c>KafkaImporterProcessor.CreateSource</c> gives: building the handle reaches
-    /// librdkafka, which rejects a malformed broker list outright, and the base class must not know
-    /// what a <see cref="KafkaException"/> is.
+    /// librdkafka, which rejects a malformed broker list outright — a deployment's misconfiguration
+    /// now rather than a step's — and the base class must not know what a
+    /// <see cref="KafkaException"/> is.
     /// </summary>
     protected override IExportSink CreateSink(KafkaExporterConfig config)
     {
         try
         {
             return new KafkaExportSink(
-                factory.Create(config.BrokerList, TimeSpan.FromSeconds(config.DeliveryTimeoutSeconds)));
+                factory.Create(TimeSpan.FromSeconds(config.DeliveryTimeoutSeconds)));
         }
         catch (KafkaException ex)
         {

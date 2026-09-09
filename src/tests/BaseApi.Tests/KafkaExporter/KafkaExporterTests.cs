@@ -21,7 +21,7 @@ public sealed class KafkaExporterTests
 
     private static string Payload(string topic = "exports", int deliveryTimeoutSeconds = 30) =>
         $$"""
-        {"brokerList":"kafka-1:9092","topic":"{{topic}}","deliveryTimeoutSeconds":{{deliveryTimeoutSeconds}}}
+        {"topic":"{{topic}}","deliveryTimeoutSeconds":{{deliveryTimeoutSeconds}}}
         """;
 
     private static (KafkaExporterProcessor Processor, IQueueSender Sender, RecordingLogger<KafkaExporterProcessor> Log)
@@ -243,7 +243,7 @@ public sealed class KafkaExporterTests
     /// path of every export.
     /// </summary>
     [Fact]
-    public async Task ReusesOneProducerAcrossDispatchesOnTheSameBrokerList()
+    public async Task ReusesOneProducerAcrossDispatches()
     {
         var factory = new FakeRecordProducerFactory(new FakeRecordProducer());
         var (processor, _, _) = Build(factory);
@@ -293,7 +293,7 @@ public sealed class KafkaExporterTests
         Assert.True(first.Disposed);
         Assert.Equal(
             [TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5)],
-            factory.Requests.Select(r => r.DeliveryTimeout));
+            factory.Requests);
     }
 
     /// <summary>

@@ -20,7 +20,7 @@ public sealed class KafkaImporterCacheTests
 
     private static string Payload(string topic, string group = "kafka-importer") =>
         $$"""
-        {"brokerList":"kafka-1:9092","topic":"{{topic}}","consumerGroup":"{{group}}",
+        {"topic":"{{topic}}","consumerGroup":"{{group}}",
          "messageCount":10,"idleTimeoutSeconds":1}
         """;
 
@@ -158,18 +158,58 @@ public sealed class KafkaImporterHostWiringTests
         // "--environment", "Development" turns on the container's ValidateOnBuild/ValidateScopes,
         // which is what makes this fact prove the WHOLE graph resolves rather than just the two
         // registrations it explicitly asks for below -- matching ProcessorSampleTests.Build().
-        using var host = ProcessorHost.Create(["--environment", "Development"], identity, config =>
-            config.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
-                ["RabbitMq:Host"] = "localhost",
-                ["RabbitMq:Username"] = "guest",
-                ["RabbitMq:Password"] = "guest",
-            }));
+        using var host = ProcessorHost.Create(["--environment", "Development"], identity, Settings());
 
         Assert.IsType<KafkaImporterProcessor>(
             host.Services.GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>());
         Assert.IsType<KafkaRecordConsumerFactory>(
             host.Services.GetRequiredService<IRecordConsumerFactory>());
     }
+
+    /// <summary>
+    /// <b>Where the broker list lives now.</b> It arrives as <c>Kafka__BrokerList</c> in the
+    /// deployment's environment, the same way the RabbitMQ and Redis addresses beside it do, and
+    /// nothing in a step payload can reach it.
+    /// </summary>
+    [Fact]
+    public void BindsTheOrgBrokerListFromConfiguration()
+    {
+        using var host = ProcessorHost.Create(
+            ["--environment", "Development"], Identity(),
+            Settings(brokerList: "kafka-1:9092,kafka-2:9092"));
+
+        Assert.Equal(
+            "kafka-1:9092,kafka-2:9092",
+            host.Services.GetRequiredService<KafkaBrokerOptions>().BrokerList);
+    }
+
+    /// <summary>
+    /// <b>A missing broker must stop the host, not the first dispatch.</b> librdkafka accepts an
+    /// empty bootstrap list at construction and only fails later, when it has nothing to connect
+    /// to — which would surface as a step that hangs until its idle timeout and reports Drained,
+    /// the one terminal that means "the topic is empty". Binding eagerly here turns a missing
+    /// setting into a pod that will not start, which is what an operator can see.
+    /// </summary>
+    [Fact]
+    public void RefusesToBuildWithoutABrokerList()
+    {
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            ProcessorHost.Create(["--environment", "Development"], Identity(), Settings(brokerList: null)));
+
+        Assert.Contains("Kafka:BrokerList", error.Message, StringComparison.Ordinal);
+    }
+
+    private static ProcessorIdentityFound Identity() => new(
+        Guid.NewGuid(), InputSchemaId: null, OutputSchemaId: null, ConfigSchemaId: null,
+        Name: "kafka-importer", Version: "1.0.0");
+
+    private static Action<IConfigurationBuilder> Settings(string? brokerList = "kafka-1:9092") =>
+        config => config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
+            ["RabbitMq:Host"] = "localhost",
+            ["RabbitMq:Username"] = "guest",
+            ["RabbitMq:Password"] = "guest",
+            ["Kafka:BrokerList"] = brokerList,
+        });
 }
