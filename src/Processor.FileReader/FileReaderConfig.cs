@@ -17,7 +17,7 @@ namespace Processor.FileReader;
 /// <param name="MinimumSizeBytes">Floor, inclusive. Zero disables the check.</param>
 /// <param name="MaximumSizeBytes">
 /// Ceiling, inclusive, for THIS step. Admitted only if it fits inside the pod's own ceiling — see
-/// <see cref="FileReaderOptions"/>, added in a later task.
+/// <see cref="FileReaderOptions"/>.
 /// </param>
 public sealed record FileReaderConfig(
     string ExpectedExtension,

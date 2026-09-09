@@ -63,7 +63,8 @@ public sealed class FileReaderGuardTests : IDisposable
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => processor.ExecuteAsync([], "", E, CancellationToken.None));
 
-        Assert.Contains("needs a step payload", ex.Message, StringComparison.Ordinal);
+        Assert.StartsWith("step payload rejected: ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("needs ExpectedExtension", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

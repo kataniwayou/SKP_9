@@ -45,9 +45,11 @@ public sealed class FileReaderProcessor(
     {
         if (config is null)
         {
-            throw new FailedException(
-                "FileReader needs a step payload naming ExpectedExtension, MinimumSizeBytes and "
-                + "MaximumSizeBytes");
+            // Same "step payload rejected" prefix as every other malformed-payload case below: an
+            // absent payload IS a malformed payload, and an operator searching for payload faults
+            // must find all of them — the commonest one included — with one query.
+            throw BadPayload(
+                "FileReader needs ExpectedExtension, MinimumSizeBytes and MaximumSizeBytes");
         }
 
         if (string.IsNullOrWhiteSpace(config.ExpectedExtension)
