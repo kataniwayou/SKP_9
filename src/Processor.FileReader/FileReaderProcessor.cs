@@ -31,7 +31,19 @@ internal sealed class FileReaderProcessor(
 
         var bytes = Read(info);
 
-        var node = builder.Build(bytes, info, settings);
+        FileNode node;
+        try
+        {
+            node = builder.Build(bytes, info, settings);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException
+                                      or NotSupportedException or ArgumentException)
+        {
+            // A corrupt or truncated archive. Deterministic — it fails identically on every
+            // redelivery — so it is a failed step, not something to park. No log here: the framework
+            // writes this message verbatim when it catches the exception.
+            throw new FailedException($"extracting {info.FullName} failed: {ex.Message}");
+        }
 
         // The SHAPE of the result, never its content. A count and a size are safe to log; the bytes
         // are upstream data and stay out of every template in this system.
