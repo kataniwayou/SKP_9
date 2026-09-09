@@ -16,6 +16,11 @@ public sealed class TarExtractor : IArchiveExtractor
     {
         var entries = new List<ExtractedEntry>();
 
+        // Counts every node TarReader actually yielded, before the type filter below drops any of
+        // them. Deliberately separate from entries.Count — see the guard below for why the two
+        // counts answer different questions and only one of them means "unreadable archive".
+        var rawEntryCount = 0;
+
         // leaveOpen: true, unlike ZipExtractor's default false. The all-zero check below re-reads
         // this same stream after the reader is done with it (to tell a genuinely empty tar from a
         // corrupt one), which requires the stream to still be open at that point — ZipExtractor has
@@ -24,6 +29,8 @@ public sealed class TarExtractor : IArchiveExtractor
         {
             while (reader.GetNextEntry() is { } entry)
             {
+                rawEntryCount++;
+
                 // Regular files only. TarEntryType also has ContiguousFile and SparseFile, both of
                 // which can carry real content — GNU tar --sparse emits SparseFile — and both are
                 // excluded here deliberately, not overlooked: this extractor's fixtures only ever
@@ -66,7 +73,18 @@ public sealed class TarExtractor : IArchiveExtractor
         // The check is "not all zero bytes", not "has any bytes" or a stricter POSIX two-block rule:
         // a genuinely empty archive IS all zero bytes (0 bytes and a lone zero block both satisfy
         // this, the former vacuously), and must still succeed.
-        if (entries.Count == 0 && !IsAllZeroBytes(archive))
+        //
+        // Gated on rawEntryCount, not entries.Count — fix round 2, after review caught the
+        // regression this introduced. Those two counts answer different questions: rawEntryCount is
+        // "did TarReader manage to read anything at all", which is the only question that means the
+        // archive itself is unreadable; entries.Count is "did anything survive the regular-file
+        // filter above", which a perfectly healthy directory-only, symlink-only, hardlink-only, or
+        // sparse/contiguous-only archive can legitimately answer "no" to. Gating on entries.Count
+        // made every one of those valid archives throw InvalidDataException — reporting a healthy
+        // file as corrupt, which is worse than the empty-list result it replaced. Do not collapse
+        // this back to entries.Count: that is exactly the "simplification" this comment exists to
+        // head off.
+        if (rawEntryCount == 0 && !IsAllZeroBytes(archive))
         {
             throw new InvalidDataException(
                 "The tar produced no entries and is not all zero bytes — treating it as corrupt " +
@@ -77,8 +95,9 @@ public sealed class TarExtractor : IArchiveExtractor
     }
 
     /// <summary>
-    /// Re-reads the whole stream from the start. Only reached when there are no entries to return,
-    /// so the extra pass costs nothing on the common path of an archive that actually has content.
+    /// Re-reads the whole stream from the start. Only reached when TarReader yielded no nodes at
+    /// all, so the extra pass costs nothing on the common path of an archive that actually has
+    /// content — including an archive whose content is entirely nodes this extractor filters out.
     /// </summary>
     private static bool IsAllZeroBytes(Stream stream)
     {
