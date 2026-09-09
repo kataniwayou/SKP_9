@@ -140,15 +140,15 @@ public sealed record FileReaderConfig(
     string ExpectedExtension,   // ".zip" — leading dot, case-insensitive
     long   MinimumSizeBytes,    // 0 disables
     long   MaximumSizeBytes,    // read-time ceiling, per step; ALSO the expansion ceiling
-    int?   MaxDepth = null      // levels of archive to expand; absent means 1
+    int    MaxDepth = 1         // levels of archive to expand; absent means 1
 ) : ProcessorConfig;
 ```
 
-**`MaxDepth` is nullable so that "absent" and "zero" are different answers.** `System.Text.Json` does
-not apply a C# default parameter value to a missing property on a positional record — it passes
-`default(int)`, which is `0` — so a non-nullable field could not tell a payload that omitted this
-from one explicitly asking for no expansion. Null is absent and resolves to 1; `0` is a rejected
-payload, as is anything above `MaxSupportedDepth` (64).
+**`MaxDepth`'s fallback is the parameter's own default, and that was verified rather than assumed.**
+`System.Text.Json` applies a C# default parameter value when a positional record's property is
+missing from the payload, so an omitted field arrives as `1` and not as `default(int)`. A nullable
+was drafted first on the opposite assumption and dropped once measured: absent is 1, an explicit `0`
+stays `0` and is a rejected payload, as is anything above `MaxSupportedDepth` (64).
 
 **It has no pod-level twin, and that is the ruling.** `MaxFileSizeBytes` exists because bytes cost
 memory and an operator must bound them per environment. Depth costs nothing on its own — the bytes it
