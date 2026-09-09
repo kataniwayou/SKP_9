@@ -18,11 +18,16 @@
 # See §13 of docs/superpowers/specs/2026-09-09-file-reader-design.md.
 #
 # THE MEMORY LIMIT IS HIGHER THAN THE OTHER PROCESSORS' 384Mi, AND THAT IS NOT PADDING. A file does
-# not cost its own size in flight: the raw bytes, the base64 string during serialization, the
-# document, the broker message body and a full JsonDocument DOM at validation can coexist — and the
-# work and post consumers are the SAME process, so a dispatch and a branch overlap. At the 32MiB
-# ceiling below that is comfortably over 200MB transient. Lower FileReader__MaxFileSizeBytes or
-# raise this limit; do not move one without the other.
+# not cost its own size in flight: the raw file bytes, the serialized UTF-8 document (~1.33x the
+# file — base64 is 4 bytes per 3), the broker message body (that document base64'd again inside the
+# ProcessedData envelope, ~1.78x the file), and a full JsonDocument DOM over the document at
+# validation can all coexist — and the work and post consumers are the SAME process, so a dispatch
+# and a branch overlap. At the 32MiB ceiling below that is comfortably over 200MB transient. Lower
+# FileReader__MaxFileSizeBytes or raise this limit; do not move one without the other.
+#
+# No intermediate base64 STRING sits alongside those: JsonSerializer.SerializeToUtf8Bytes writes
+# base64 straight into its UTF-8 output buffer at both serialization points, so there is no UTF-16
+# doubling to add on top of the figures above.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,8 +41,14 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      # maxSurge 0 so an update never briefly runs two members at once. The handover is
-      # stop-then-start rather than an overlap.
+      # maxSurge 0, and this is sized memory, not caution for its own sake: this pod's limit is
+      # 768Mi, double every other processor's 384Mi, so a surge briefly running two of them would
+      # want ~1.5Gi on the node at once — a single-node kind cluster already running Postgres, Redis,
+      # RabbitMQ, Prometheus, Grafana, an OTel collector, BaseApi, the orchestrator and four other
+      # processors. Stop-then-start trades a few seconds of throughput for not needing that headroom.
+      # (There is no correctness reason to forbid overlap here: the hostPath mount is read-only, and
+      # FileReader consumes from its own RabbitMQ queue as a competing consumer, not a single
+      # partition — this is purely a node-memory budget call.)
       maxSurge: 0
       maxUnavailable: 1
   selector:
