@@ -187,6 +187,36 @@ audit changes the version rather than the design.
 **SharpCompress reads RAR and does not write it**, and solid archives are only partly supported. That
 is sufficient — this processor never writes an archive — but it decides how RAR is tested (§12).
 
+### An archive library reporting nothing is not an archive containing nothing
+
+**Both `System.Formats.Tar` and SharpCompress will open a corrupt archive, report success, and
+enumerate zero entries.** Measured during implementation, not assumed:
+
+- `TarReader` inspects only the first 512-byte block and treats an all-zero one as the terminator
+  without reading further — so a zeroed header followed by garbage yields no entries and no
+  exception.
+- `RarArchive.Open` succeeds on the real fixture truncated to 8–11 bytes (past the RAR5 signature)
+  or 23–26 bytes (past the main archive header), and enumerates nothing.
+
+Either would have shipped a corrupt file reading as a **healthy empty archive** — the false-HEALTHY
+class this system rejects everywhere, and one no test notices because nothing throws and the
+document is structurally valid.
+
+**So each extractor guards it: zero raw entries means the archive is unreadable, and it throws.**
+Two details are load-bearing. The count is the **raw** yield, before the entry-type filter — gating
+on the filtered count reports a valid directory-only archive as corrupt. And tar, unlike rar, needs
+an exemption: a genuinely empty tar *is* a block of zeros, so it checks the bytes before deciding.
+
+**The guard covers a class, not two byte patterns.** Any corruption that opens successfully and
+yields nothing is caught however it arose. What remains unguarded is different and not reachable
+from inside an archive: corruption that yields a *nonzero but wrong* entry count — three entries
+silently becoming two — because nothing in the archive states how many there should have been.
+
+**How both were found is the transferable part.** The first probe of each tried only the extremes,
+all-zeros and all-garbage, and both extremes throw. The failure lives in the shape between them: a
+valid header followed by damage. A probe that tests only the ends of a range proves nothing about
+its middle.
+
 ## 8. The output schema
 
 Authored as `src/Processor.FileReader/schema/output.json`: recursive `$ref`, required keys,
