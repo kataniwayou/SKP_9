@@ -6,8 +6,10 @@ Stands up the single-node Kafka the KafkaImporter reads, and the KafkaExporter w
 The broker is ORG INFRASTRUCTURE in production -- outside this cluster, owned by someone else,
 never stood up by anything in k8s/. This script exists so a developer can have something that
 behaves like it locally, and it deliberately keeps that shape: the container is NOT in the skp
-namespace, no manifest references it, and no Kafka address appears anywhere in k8s/. Brokers,
-topic, group and counts all travel in the orchestrator's step payload.
+namespace and nothing in k8s/ stands it up. Its INTERNAL address does appear in k8s/, in each
+processor's Kafka__BrokerList, because an address is infrastructure rather than a workflow author's
+choice -- that is the one line to repoint when the real org cluster replaces this. Topic, group and
+counts still travel in the orchestrator's step payload.
 
 THE TWO ADDRESSES ARE THE WHOLE DESIGN. A Kafka client connects once to bootstrap, is told which
 address to use for the real work, and then talks to THAT. So a broker with one advertised listener

@@ -48,7 +48,13 @@ internal sealed class FakeRecordProducerFactory(params FakeRecordProducer[] prod
     private int _created;
 
     public int Created => _created;
-    public List<(string Brokers, TimeSpan DeliveryTimeout)> Requests { get; } = new();
+
+    /// <summary>
+    /// The delivery timeouts asked for, in order. <b>No broker list</b>: the production factory
+    /// holds the org's broker from configuration and a caller cannot name one, so the timeout is
+    /// all that varies per call.
+    /// </summary>
+    public List<TimeSpan> Requests { get; } = new();
 
     /// <summary>
     /// True makes <see cref="Create"/> throw <see cref="Fault"/> instead of handing out a producer.
@@ -59,9 +65,9 @@ internal sealed class FakeRecordProducerFactory(params FakeRecordProducer[] prod
 
     public Error Fault { get; set; } = new(ErrorCode.Local_Transport);
 
-    public IRecordProducer Create(string brokerList, TimeSpan deliveryTimeout)
+    public IRecordProducer Create(TimeSpan deliveryTimeout)
     {
-        Requests.Add((brokerList, deliveryTimeout));
+        Requests.Add(deliveryTimeout);
         if (CreateThrows)
         {
             throw new KafkaException(Fault);

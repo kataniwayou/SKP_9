@@ -22,15 +22,20 @@ public sealed class KafkaImporterProcessor(
     : BaseImporter<KafkaImporterConfig>(logger)
 {
     protected override string RequiredPayload =>
-        "brokerList, topic, consumerGroup, messageCount and idleTimeoutSeconds";
+        "topic, consumerGroup, messageCount and idleTimeoutSeconds";
 
     /// <summary>
-    /// <b>Broker, topic and group — all three.</b> A subscribed consumer is bound to every one of
-    /// them, so a step naming a different topic or a different group is a different source and must
-    /// get a different consumer rather than silently inheriting this one's subscription.
+    /// <b>Topic and group, which is now everything a step can vary.</b> A subscribed consumer is
+    /// bound to both, so a step naming a different topic or a different group is a different source
+    /// and must get a different consumer rather than silently inheriting this one's subscription.
+    /// <para>
+    /// The broker used to lead this key and no longer appears in it, because it no longer varies:
+    /// one deployment reads one org cluster, named once in configuration, and a consumer built
+    /// against a different one is not something a payload can ask for.
+    /// </para>
     /// </summary>
     protected override string CacheKey(KafkaImporterConfig config) =>
-        $"{config.BrokerList}|{config.Topic}|{config.ConsumerGroup}";
+        $"{config.Topic}|{config.ConsumerGroup}";
 
     /// <summary>The topic, which is the phrase an operator reading a failure message wants.</summary>
     protected override string SourceName(KafkaImporterConfig config) => config.Topic;
@@ -39,15 +44,16 @@ public sealed class KafkaImporterProcessor(
     /// <b>The factory throws Confluent's exception, so this is where it stops being one.</b> Building
     /// a consumer reaches librdkafka, which rejects a malformed broker list outright, and
     /// <see cref="IRecordConsumerFactory"/> is Confluent-free in what it returns but not in what it
-    /// throws. The base class must not know what a <see cref="KafkaException"/> is, so the conversion
-    /// belongs here alongside the one <c>KafkaImportSource</c> does for the verbs.
+    /// throws — and a malformed broker list is now a deployment's misconfiguration rather than a
+    /// step's, which makes this the arm that reports it. The base class must not know what a
+    /// <see cref="KafkaException"/> is, so the conversion belongs here alongside the one
+    /// <c>KafkaImportSource</c> does for the verbs.
     /// </summary>
     protected override IImportSource CreateSource(KafkaImporterConfig config)
     {
         try
         {
-            return new KafkaImportSource(
-                factory.Create(config.BrokerList, config.ConsumerGroup), config.Topic);
+            return new KafkaImportSource(factory.Create(config.ConsumerGroup), config.Topic);
         }
         catch (KafkaException ex)
         {

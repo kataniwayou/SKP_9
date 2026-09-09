@@ -18,7 +18,7 @@ public sealed class KafkaImporterLoopTests
 
     private static string Payload(int messageCount) =>
         $$"""
-        {"brokerList":"kafka-1:9092","topic":"records","consumerGroup":"kafka-importer",
+        {"topic":"records","consumerGroup":"kafka-importer",
          "messageCount":{{messageCount}},"idleTimeoutSeconds":1}
         """;
 
@@ -362,7 +362,7 @@ public sealed class KafkaImporterLoopTests
         var (processor, _, _) = Build(new FakeRecordConsumerFactory(new FakeRecordConsumer()));
         const string payload =
             """
-            {"brokerList":"kafka-1:9092","topic":"records","consumerGroup":"kafka-importer",
+            {"topic":"records","consumerGroup":"kafka-importer",
              "messageCount":10,"idleTimeoutSeconds":0}
             """;
 

@@ -17,9 +17,11 @@
 # docs/superpowers/specs/2026-09-06-path-importer-design.md before changing either. (That document
 # predates the rename from PathImporter and still uses the old names; the reasoning is unchanged.)
 #
-# The broker is org infrastructure outside this cluster. Nothing here stands it up, and no Kafka
-# address appears below: brokers, topic, group and counts all travel in the orchestrator's step
-# payload.
+# The broker is org infrastructure outside this cluster and nothing here stands it up -- but its
+# ADDRESS is below, in Kafka__BrokerList, because an address is not a workflow author's to choose.
+# What travels in the orchestrator's step payload is what an author does choose: the topic, the
+# consumer group and the counts. The broker list used to travel there too; it moved on 2026-09-09,
+# and payloads written before then still carry an inert `brokerList` key that binding ignores.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -80,6 +82,24 @@ spec:
             # rate window at 240s, which is why a sixty-second outage moved no rate panel.
             - name: OTEL_METRIC_EXPORT_INTERVAL
               value: "10000"
+            # THE ORG'S BROKER. It is infrastructure outside this cluster, owned by someone else and
+            # never stood up by anything in k8s/ -- but the ADDRESS of it belongs here, with the
+            # RabbitMQ and Redis addresses beside it, because it is not a workflow author's to
+            # choose. A step payload names the topic, the consumer group and the counts; one
+            # deployment reads one cluster.
+            #
+            # This is also where the credentials go when the org's broker starts wanting them: a
+            # secretKeyRef, exactly like RabbitMq__Password below. They could not go in a step
+            # payload -- an assignment row is plaintext jsonb served by the API -- and splitting the
+            # address from the credential that authenticates to it would let a step point at a
+            # broker its credential does not match, with the mismatch surfacing only as a hang.
+            #
+            # The value below is the INTERNAL listener of the local dev broker from
+            # tools/kafka-dev-broker.ps1, which is a container on the kind network rather than
+            # anything in this namespace -- so it resolves by container name and appears in no
+            # `kubectl get svc`. Point it at the real cluster wherever this is deployed for real.
+            - name: Kafka__BrokerList
+              value: "skp-kafka:9092"
             - name: RabbitMq__Host
               value: rabbitmq
             - name: RabbitMq__Username
