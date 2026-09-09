@@ -114,6 +114,7 @@ public static class ProcessorHost
         // handles the step's extension.
         builder.Services.AddSingleton<IArchiveExtractor, ZipExtractor>();
         builder.Services.AddSingleton<IArchiveExtractor, TarExtractor>();
+        builder.Services.AddSingleton<IArchiveExtractor, RarExtractor>();
 
         builder.Services.AddSingleton<FileContentBuilder>();
 
