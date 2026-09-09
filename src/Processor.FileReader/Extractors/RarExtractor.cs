@@ -1,5 +1,6 @@
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
+using SharpCompress.Common;
 
 namespace Processor.FileReader.Extractors;
 
@@ -34,7 +35,51 @@ public sealed class RarExtractor : IArchiveExtractor
     public bool CanHandle(string extension)
         => ".rar".Equals(extension, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Every file entry, one level deep, or an <see cref="ArchiveExtractionException"/> saying why
+    /// the archive could not be read.
+    /// <para>
+    /// <b>The wrapping is not decoration; it is the fix for a measured seam failure.</b> Every
+    /// SharpCompress fault descends from <c>SharpCompress.Common.SharpCompressException :
+    /// System.Exception</c> — <c>InvalidFormatException</c>, <c>ArchiveException</c>,
+    /// <c>IncompleteArchiveException</c> and the rest — and none of them is an
+    /// <see cref="InvalidDataException"/>, an <see cref="IOException"/>, a
+    /// <see cref="NotSupportedException"/> or an <see cref="ArgumentException"/>, which is what the
+    /// processor's catch list held when this class was added. So an ordinary corrupt rar failed the
+    /// step through the framework's general catch instead, with the file path in no line of it. Only
+    /// the two narrow truncation windows that trip this class's OWN guard ever produced the
+    /// contract's <c>extracting {FilePath} failed:</c> message.
+    /// </para>
+    /// </summary>
     public IReadOnlyList<ExtractedEntry> Extract(Stream archive)
+    {
+        try
+        {
+            return ExtractCore(archive);
+        }
+        catch (SharpCompressException ex)
+        {
+            // The library's own root type, so every present and future SharpCompress fault is
+            // covered by one clause rather than by a list that must be revisited whenever the
+            // package is upgraded. This is the only place in this project that names a SharpCompress
+            // type; the processor stays free of the package entirely, which is the point.
+            throw new ArchiveExtractionException(ex.Message, ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException
+                                      or NotSupportedException or ArgumentException
+                                      or EndOfStreamException)
+        {
+            // SharpCompress does not wrap everything it touches: a stream read that fails, or an
+            // argument it rejects before its own validation runs, still surfaces as a BCL type.
+            //
+            // Not bare Exception: a NullReferenceException here is a bug in this class, and it must
+            // reach the framework's general catch with its stack trace rather than be reported to an
+            // operator as a corrupt file.
+            throw new ArchiveExtractionException(ex.Message, ex);
+        }
+    }
+
+    private static List<ExtractedEntry> ExtractCore(Stream archive)
     {
         using var rar = RarArchive.Open(archive);
 
@@ -111,7 +156,9 @@ public sealed class RarExtractor : IArchiveExtractor
         // rather than loosening this check to guess at what such an archive would look like.
         if (rawEntryCount == 0)
         {
-            throw new InvalidDataException(
+            // ArchiveExtractionException, not InvalidDataException as this originally threw. The
+            // type is now the seam's, not the BCL's — see TarExtractor's matching guard.
+            throw new ArchiveExtractionException(
                 "The rar produced no entries even though it opened successfully — treating it as " +
                 "corrupt rather than returning it as a healthy empty archive.");
         }

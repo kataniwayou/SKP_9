@@ -1,12 +1,29 @@
 using System.Formats.Tar;
 using System.Text;
+using System.Text.Json;
+using BaseApi.Tests.Support;
+using BaseProcessor.Core.Processing;
+using Messaging.Transport;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Processor.FileReader;
 using Processor.FileReader.Extractors;
 using Xunit;
 
 namespace BaseApi.Tests.FileReader;
 
-public sealed class TarExtractorTests
+public sealed class TarExtractorTests : IDisposable
 {
+    private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    private readonly string _dir = Directory.CreateTempSubdirectory("skp-filereader-tar-").FullName;
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
     /// <summary>A real tar, built in memory from bytes.</summary>
     private static byte[] Tar(params (string Name, string Text)[] entries)
     {
@@ -73,9 +90,15 @@ public sealed class TarExtractorTests
     {
         // The processor turns this into a failed step naming the path; the extractor's job is only
         // to fail rather than to return a half-read archive as if it were whole.
+        //
+        // ArchiveExtractionException, not ThrowsAny<Exception>. A test named "for the processor to
+        // catch" that accepts ANY exception cannot tell the two cases apart — the one the processor
+        // catches and turns into "extracting {path} failed", and the one that escapes to the
+        // framework's general catch and loses the path entirely. Asserting the seam's type is the
+        // only assertion that means what the name says.
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes("this is not a tar"));
 
-        Assert.ThrowsAny<Exception>(() => new TarExtractor().Extract(stream));
+        Assert.Throws<ArchiveExtractionException>(() => new TarExtractor().Extract(stream));
     }
 
     [Fact]
@@ -109,7 +132,7 @@ public sealed class TarExtractorTests
 
         using var stream = new MemoryStream(bytes);
 
-        var ex = Assert.Throws<InvalidDataException>(() => new TarExtractor().Extract(stream));
+        var ex = Assert.Throws<ArchiveExtractionException>(() => new TarExtractor().Extract(stream));
         Assert.Contains("not all zero", ex.Message, StringComparison.Ordinal);
     }
 
@@ -134,6 +157,33 @@ public sealed class TarExtractorTests
         var entries = new TarExtractor().Extract(buffer);
 
         Assert.Empty(entries);
+    }
+
+    [Fact]
+    public async Task ACorruptArchiveFailsTheStepNamingThePath()
+    {
+        // THE PROCESSOR-LEVEL TEST TAR NEVER HAD. Only zip had one, which is why nobody noticed that
+        // the processor's catch list was written against zip's exception types and matched nothing
+        // any other library raises. An extractor-level assertion proves the extractor throws; it
+        // proves nothing about whether the throw reaches the caller's catch or escapes to the
+        // framework's general one, where the file path — the entire reason §9 puts these checks in
+        // ProcessAsync — is absent from every line.
+        var path = Path.Combine(_dir, "broken.tar");
+        File.WriteAllText(path, "this is not a tar");
+
+        var processor = new FileReaderProcessor(
+            new RecordingLogger<FileReaderProcessor>(),
+            Options.Create(new FileReaderOptions()),
+            new FileContentBuilder([new TarExtractor()]));
+        processor.BeginDispatch(
+            new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+
+        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            """{"ExpectedExtension":".tar","MinimumSizeBytes":0,"MaximumSizeBytes":65536}""",
+            E, CancellationToken.None));
+
+        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,4 +1,11 @@
 using System.Text;
+using System.Text.Json;
+using BaseApi.Tests.Support;
+using BaseProcessor.Core.Processing;
+using Messaging.Transport;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Processor.FileReader;
 using Processor.FileReader.Extractors;
 using SharpCompress.Archives.Rar;
 using Xunit;
@@ -10,8 +17,18 @@ namespace BaseApi.Tests.FileReader;
 /// this one cannot, because SharpCompress reads rar and cannot write one. See Fixtures/README.md for
 /// how the file is regenerated.
 /// </summary>
-public sealed class RarExtractorTests
+public sealed class RarExtractorTests : IDisposable
 {
+    private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    private readonly string _dir = Directory.CreateTempSubdirectory("skp-filereader-rar-").FullName;
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
     private static Stream Fixture()
         => File.OpenRead(Path.Combine(
             AppContext.BaseDirectory, "FileReader", "Fixtures", "three-entries.rar"));
@@ -62,9 +79,49 @@ public sealed class RarExtractorTests
     [Fact]
     public void ACorruptArchiveThrowsForTheProcessorToCatch()
     {
+        // THIS TEST USED TO ASSERT ThrowsAny<Exception>, AND THAT IS WHY THE SEAM FAILURE SURVIVED
+        // REVIEW. Its name claims the throw is one the processor catches; ThrowsAny asserts only
+        // that something was thrown, and what was actually thrown here was a SharpCompress
+        // exception, which descends from SharpCompressException : Exception and matched NONE of the
+        // BCL types the processor's catch list held. So an ordinary corrupt rar failed the step via
+        // the framework's general catch — "the transform faulted", at Warning, with a stack trace
+        // and no file path anywhere — and this test passed over it, every time.
+        //
+        // A test that accepts any exception cannot distinguish the outcome it is named for from the
+        // outcome it exists to prevent. The seam's type is the assertion.
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes("this is not a rar"));
 
-        Assert.ThrowsAny<Exception>(() => new RarExtractor().Extract(stream));
+        Assert.Throws<ArchiveExtractionException>(() => new RarExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public async Task ACorruptArchiveFailsTheStepNamingThePath()
+    {
+        // THE PROCESSOR-LEVEL TEST RAR NEVER HAD, and the one that fails outright against the old
+        // catch list. Only zip had this test; the extractor-level assertions above prove the
+        // extractor throws, and prove nothing about whether the throw reaches the processor's catch
+        // or escapes past it. §9 puts these checks in ProcessAsync precisely so the path is in the
+        // message, so the message is what gets asserted.
+        //
+        // Not a truncation: an ORDINARY corrupt rar, which is the case that was broken. The two
+        // truncation windows below were the only inputs that ever reached this template, because
+        // they trip RarExtractor's own guard rather than SharpCompress's parser.
+        var path = Path.Combine(_dir, "broken.rar");
+        File.WriteAllText(path, "this is not a rar");
+
+        var processor = new FileReaderProcessor(
+            new RecordingLogger<FileReaderProcessor>(),
+            Options.Create(new FileReaderOptions()),
+            new FileContentBuilder([new RarExtractor()]));
+        processor.BeginDispatch(
+            new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+
+        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            """{"ExpectedExtension":".rar","MinimumSizeBytes":0,"MaximumSizeBytes":65536}""",
+            E, CancellationToken.None));
+
+        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -78,7 +135,7 @@ public sealed class RarExtractorTests
         // rather than the truncated one it is — the same class of result Task 6 found in TarReader.
         using var stream = new MemoryStream(Truncated(10));
 
-        Assert.Throws<InvalidDataException>(() => new RarExtractor().Extract(stream));
+        Assert.Throws<ArchiveExtractionException>(() => new RarExtractor().Extract(stream));
     }
 
     [Fact]
@@ -90,7 +147,7 @@ public sealed class RarExtractorTests
         // directly against this exact fixture (see task-7-fix-round-1-report.md).
         using var stream = new MemoryStream(Truncated(24));
 
-        Assert.Throws<InvalidDataException>(() => new RarExtractor().Extract(stream));
+        Assert.Throws<ArchiveExtractionException>(() => new RarExtractor().Extract(stream));
     }
 
     [Fact]

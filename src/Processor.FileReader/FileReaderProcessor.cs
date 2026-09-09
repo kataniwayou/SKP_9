@@ -3,6 +3,7 @@ using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Processing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Processor.FileReader.Extractors;
 
 namespace Processor.FileReader;
 
@@ -36,12 +37,27 @@ internal sealed class FileReaderProcessor(
         {
             node = builder.Build(bytes, info, settings);
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException
-                                      or NotSupportedException or ArgumentException)
+        catch (ArchiveExtractionException ex)
         {
-            // A corrupt or truncated archive. Deterministic — it fails identically on every
-            // redelivery — so it is a failed step, not something to park. No log here: the framework
-            // writes this message verbatim when it catches the exception.
+            // A corrupt or truncated archive, or one that expands past the ceiling. Deterministic —
+            // it fails identically on every redelivery — so it is a failed step, not something to
+            // park. No log here: the framework writes this message verbatim when it catches the
+            // exception.
+            //
+            // ONE TYPE, NOT A LIST OF LIBRARY TYPES, and that is the fix for a measured seam
+            // failure. This catch was originally `InvalidDataException or IOException or
+            // NotSupportedException or ArgumentException` — the BCL types zip raises. When rar
+            // arrived it brought SharpCompress, whose entire hierarchy descends from
+            // SharpCompressException : Exception and matched none of them, so an ordinary corrupt
+            // rar fell through to the framework's general catch: "the transform faulted", at Warning,
+            // with a stack trace and THE FILE PATH NOWHERE. The path is the whole reason §9 puts
+            // these checks here. Each extractor now wraps its own library's faults, exactly as
+            // BaseExporter's sinks wrap theirs into ExportSinkException.
+            //
+            // Bare Exception is deliberately NOT caught: a NullReferenceException in the builder is
+            // a programming error, and reporting it to an operator as a corrupt file buries a bug
+            // under a plausible business failure. Anything that is not this type reaches the
+            // framework's general catch with its stack trace intact.
             throw new FailedException($"extracting {info.FullName} failed: {ex.Message}");
         }
 

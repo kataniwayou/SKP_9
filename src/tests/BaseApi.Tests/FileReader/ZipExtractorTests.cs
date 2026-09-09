@@ -165,6 +165,203 @@ public sealed class ZipExtractorTests : IDisposable
     }
 
     [Fact]
+    public async Task AnArchiveExpandingPastTheCeilingFailsTheStepNamingBothNumbers()
+    {
+        // THE POISON-MESSAGE CASE. Before this bound, the only ceiling anywhere was on the FILE, and
+        // an archive is exactly where that stops being the transient cost: this zip is a few hundred
+        // bytes on disk and 200,000 bytes expanded, so it sails through every check in stage one. At
+        // the real 32 MiB ceiling an ordinary 10:1 CSV zip is ~320 MB expanded plus document and
+        // envelope, against a 768Mi limit.
+        //
+        // An OOM-kill there is not one lost message: the author never returns, so the input key is
+        // never reclaimed, RabbitMQ requeues the unacked dispatch, and the replacement pod reads the
+        // same key and dies the same way — taking the processor down for every workflow on that
+        // queue. A FailedException is acked and terminal, which is the whole difference.
+        //
+        // Both numbers are asserted because an operator has to see which limit was hit and by how
+        // much; a message saying only "too large" cannot be acted on.
+        var path = Path.Combine(_dir, "compressible.zip");
+        using (var file = File.Create(path))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        {
+            // Zeros, so the archive is tiny and the expansion is not. Two entries, so the bound is
+            // also shown to be CUMULATIVE rather than per-entry — neither entry alone exceeds the
+            // 65536 ceiling the payload names.
+            foreach (var name in new[] { "a.csv", "b.csv" })
+            {
+                using var entry = archive.CreateEntry(name).Open();
+                entry.Write(new byte[100_000]);
+            }
+        }
+
+        Assert.True(new FileInfo(path).Length < 65536, "the archive itself must pass the file check");
+
+        var (processor, _) = Build();
+
+        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            ZipPayload, E, CancellationToken.None));
+
+        // The `extracting` template, not `rejected`: the file broke no rule, and the fault only
+        // exists once the archive was opened.
+        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("100000", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("65536", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnArchiveInsideTheCeilingStillSucceeds()
+    {
+        // The other side of the bound. The ceiling is inclusive and cumulative, so an archive whose
+        // entries total exactly the ceiling must still pass — an off-by-one here would reject valid
+        // work with a message about memory, which is the worst possible false positive for a limit
+        // whose whole purpose is to be invisible until it matters.
+        var path = Path.Combine(_dir, "exact.zip");
+        using (var file = File.Create(path))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        {
+            using var entry = archive.CreateEntry("a.csv").Open();
+            entry.Write(new byte[65536]);
+        }
+
+        var doc = await DocumentOf(path);
+
+        Assert.Equal(65536, doc.GetProperty("entries")[0]
+                                .GetProperty("metadata").GetProperty("sizeBytes").GetInt64());
+    }
+
+    /// <summary>A real two-entry zip, in memory. The corrupt fixtures below are damaged copies of it.</summary>
+    private static byte[] RealZipBytes()
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using (var w = new StreamWriter(archive.CreateEntry("a.csv").Open()))
+            {
+                w.Write("id\n");
+            }
+
+            using (var w = new StreamWriter(archive.CreateEntry("b.csv").Open()))
+            {
+                w.Write("id,name\n");
+            }
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>The offset of the End Of Central Directory record — <c>PK\x05\x06</c>, scanned from the tail.</summary>
+    private static int EndOfCentralDirectoryOffset(byte[] zip)
+    {
+        for (var i = zip.Length - 22; i >= 0; i--)
+        {
+            if (zip[i] == 0x50 && zip[i + 1] == 0x4B && zip[i + 2] == 0x05 && zip[i + 3] == 0x06)
+            {
+                return i;
+            }
+        }
+
+        throw new InvalidOperationException("the fixture has no EOCD record");
+    }
+
+    [Fact]
+    public void AGenuinelyEmptyZipSucceedsWithNoEntries()
+    {
+        // The "valid, so must not throw" side of the guard's line, and the shape was VERIFIED here
+        // rather than taken on description: a ZipArchive opened for Create and closed without a
+        // single entry writes exactly 22 bytes — a bare EOCD record beginning PK\x05\x06 — on .NET
+        // 8.0.31. Those two facts are what ZipExtractor's exemption tests for, so this test asserts
+        // them directly; if a future runtime writes a different empty archive, this fails HERE with
+        // the reason, rather than the exemption silently ceasing to match.
+        byte[] empty;
+        using (var buffer = new MemoryStream())
+        {
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+            }
+
+            empty = buffer.ToArray();
+        }
+
+        Assert.Equal(22, empty.Length);
+        Assert.Equal<byte[]>([0x50, 0x4B, 0x05, 0x06], empty[..4]);
+
+        using var stream = new MemoryStream(empty, writable: false);
+
+        Assert.Empty(new ZipExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public void AZipWhoseEndOfCentralDirectoryClaimsNothingThrows()
+    {
+        // THE MEASURED FALSE-HEALTHY HOLE, built from a real zip rather than a hand-typed blob.
+        //
+        // .NET 8.0.31's ZipArchive DOES cross-check the EOCD's declared entry count against what the
+        // central directory yields — ~2200 mutations of this fixture (truncation at every length,
+        // zeroed and 0xFF windows of eight sizes at every offset, the whole central directory
+        // zeroed, everything before the EOCD zeroed, prefix and suffix padding) all threw. What it
+        // does NOT cross-check is the central directory's declared size and offset. Zero the EOCD's
+        // entry counts AND its central-directory size/offset — twelve bytes at the tail, the shape a
+        // partially-flushed write or a padded transfer produces — and the file still holds both
+        // entries, still opens cleanly, and enumerates NOTHING with no exception.
+        //
+        // Without the guard that is {content: null, entries: [], entryCount: 0}: schema-valid,
+        // written to L2, reported Completed. This is the test that would have caught it.
+        var zip = RealZipBytes();
+        var eocd = EndOfCentralDirectoryOffset(zip);
+
+        // EOCD layout from its signature: +8 entries-on-this-disk, +10 total entries, +12 central
+        // directory size, +16 central directory offset. Twelve bytes, all zeroed.
+        Array.Clear(zip, eocd + 8, 12);
+
+        using var stream = new MemoryStream(zip, writable: false);
+
+        var ex = Assert.Throws<ArchiveExtractionException>(() => new ZipExtractor().Extract(stream));
+        Assert.Contains("no entries", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AZipWhoseCentralDirectoryIsZeroedThrows()
+    {
+        // The review's other named case: the central directory zeroed with the EOCD left intact.
+        // On .NET 8.0.31 this one is caught by the runtime itself — the EOCD still declares two
+        // entries and the directory now yields none, which ZipArchive rejects by name — so the
+        // throw arrives through ZipExtractor's WRAPPING rather than through its guard. Both paths
+        // must reach the processor as the same type, which is exactly what this pins: whichever
+        // layer notices, the caller sees ArchiveExtractionException and the step names the file.
+        var zip = RealZipBytes();
+        var eocd = EndOfCentralDirectoryOffset(zip);
+        var cdSize = BitConverter.ToInt32(zip, eocd + 12);
+        var cdOffset = BitConverter.ToInt32(zip, eocd + 16);
+
+        Array.Clear(zip, cdOffset, cdSize);
+
+        using var stream = new MemoryStream(zip, writable: false);
+
+        Assert.Throws<ArchiveExtractionException>(() => new ZipExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public void ADirectoryOnlyZipSucceedsWithNoEntries()
+    {
+        // The regression the raw-count split exists to prevent, and the reason the guard counts what
+        // ZipArchive yielded rather than what survived the directory filter. A zip holding nothing
+        // but a directory entry is healthy: it opens, it yields one entry, and the filter drops it.
+        // Gating on the filtered count would report this valid archive as corrupt — the exact fault
+        // fix round 2 found in tar.
+        var path = Path.Combine(_dir, "dirs-only.zip");
+        using (var file = File.Create(path))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        {
+            archive.CreateEntry("nested/");
+        }
+
+        using var stream = File.OpenRead(path);
+
+        Assert.Empty(new ZipExtractor().Extract(stream));
+    }
+
+    [Fact]
     public void ExtractedEntryModifiedUtcCarriesUtcKind()
     {
         // Task 4 review requirement: ZipArchiveEntry.LastWriteTime is a DateTimeOffset, and
