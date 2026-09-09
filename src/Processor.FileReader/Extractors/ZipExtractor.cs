@@ -17,14 +17,24 @@ public sealed class ZipExtractor : IArchiveExtractor
     /// <summary>The canonical empty archive: an EOCD record and nothing else.</summary>
     private const int EmptyArchiveLength = 22;
 
+    public string Extension => ".zip";
+
     /// <summary>
     /// <c>PK\x05\x06</c> — the End Of Central Directory signature, which in a 22-byte file is the
     /// whole file.
     /// </summary>
     private static ReadOnlySpan<byte> EndOfCentralDirectorySignature => [0x50, 0x4B, 0x05, 0x06];
 
-    public bool CanHandle(string extension)
-        => ".zip".Equals(extension, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// <c>PK\x03\x04</c> (a local file header) or <c>PK\x05\x06</c> (an End Of Central Directory
+    /// with nothing before it — the canonical empty archive, which must still be claimed here so it
+    /// reaches <see cref="Extract"/> and its exemption rather than being mistaken for a leaf).
+    /// </summary>
+    public bool CanHandle(ReadOnlySpan<byte> header)
+        => header.Length >= 4
+           && header[0] == 0x50 && header[1] == 0x4B
+           && ((header[2] == 0x03 && header[3] == 0x04)
+               || (header[2] == 0x05 && header[3] == 0x06));
 
     /// <summary>
     /// Every file entry, one level deep, or an <see cref="ArchiveExtractionException"/> saying why

@@ -9,8 +9,25 @@ namespace Processor.FileReader.Extractors;
 /// </summary>
 public sealed class TarExtractor : IArchiveExtractor
 {
-    public bool CanHandle(string extension)
-        => ".tar".Equals(extension, StringComparison.OrdinalIgnoreCase);
+    public string Extension => ".tar";
+
+    /// <summary>
+    /// <b>Tar is the one format here with no signature at offset zero.</b> Its magic is the string
+    /// <c>ustar</c> at byte 257, inside the first entry's header block — POSIX writes
+    /// <c>ustar\x00</c><c>00</c> and GNU writes <c>ustar  \x00</c>, and the five shared characters are
+    /// what both agree on. So this needs 262 bytes where zip needs four, and anything shorter is
+    /// answered false: a tar's header block alone is 512 bytes, so a file too small to hold the
+    /// marker cannot be one.
+    /// <para>
+    /// A pre-POSIX v7 tar carries no <c>ustar</c> marker at all and is therefore not claimed here.
+    /// Nothing in this system writes one, and the alternative — inferring tar from a plausible octal
+    /// checksum — would claim files that merely look numeric at the right offsets.
+    /// </para>
+    /// </summary>
+    public bool CanHandle(ReadOnlySpan<byte> header)
+        => header.Length >= 262
+           && header[257] == (byte)'u' && header[258] == (byte)'s' && header[259] == (byte)'t'
+           && header[260] == (byte)'a' && header[261] == (byte)'r';
 
     /// <summary>
     /// Every regular file entry, one level deep, or an <see cref="ArchiveExtractionException"/>

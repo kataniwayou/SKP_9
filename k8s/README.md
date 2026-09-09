@@ -281,4 +281,18 @@ The FileReader step's payload:
     {"expectedExtension": ".zip", "minimumSizeBytes": 1, "maximumSizeBytes": 33554432}
 
 `maximumSizeBytes` must not exceed the pod's `FileReader__MaxFileSizeBytes`, or every dispatch fails
-with a config error naming both numbers.
+with a config error naming both numbers. It bounds two things: the file on disk, and the cumulative
+size of everything an archive expands to across every level.
+
+`maxDepth` is optional and defaults to 1 — the top-level archive is expanded and its entries are left
+as files. Raise it to open archives inside archives:
+
+    {"expectedExtension": ".zip", "minimumSizeBytes": 1, "maximumSizeBytes": 33554432,
+     "maxDepth": 2}
+
+**Check the registered output schema before raising it.** The schema states its depth structurally
+and is a row against the processor identity, so it caps every workflow using this processor — the
+baseline admits depth 1. A step producing a document deeper than the schema admits fails validation
+in the post handler, which reports `Failed` with `EntryId: Guid.Empty` and no file path. The
+processor logs the depth it actually reached (`expanded to depth N of M`); that line is the only
+place the number survives.

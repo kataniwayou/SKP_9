@@ -72,7 +72,6 @@ public sealed class FileReaderDocumentTests : IDisposable
         Assert.Equal(8, doc.GetProperty("metadata").GetProperty("sizeBytes").GetInt64());
         Assert.Equal(0, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
         Assert.Equal("id,name\n", Encoding.UTF8.GetString(doc.GetProperty("content").GetBytesFromBase64()));
-        Assert.Empty(doc.GetProperty("entries").EnumerateArray());
     }
 
     [Fact]
@@ -110,8 +109,10 @@ public sealed class FileReaderDocumentTests : IDisposable
     [Fact]
     public async Task AnArchiveWithNoRegisteredExtractorIsALeaf()
     {
-        // No extractor is registered in these tests, so a .zip is content rather than entries. The
-        // switch is the extractor set, never the file's magic bytes.
+        // A leaf for TWO independent reasons, and either alone would do it: no extractor is
+        // registered in these tests, and these bytes are not a zip whatever the name says.
+        // The second is the one that holds in production - the extractor is chosen by
+        // signature, and ExpectedExtension only admitted the file to the step.
         var (processor, sender) = Build();
         var path = WriteText("bundle.zip", "not really a zip");
 
@@ -120,7 +121,7 @@ public sealed class FileReaderDocumentTests : IDisposable
 
         var doc = JsonDocument.Parse(Assert.Single(sends).Data).RootElement;
         Assert.Equal(JsonValueKind.String, doc.GetProperty("content").ValueKind);
-        Assert.Empty(doc.GetProperty("entries").EnumerateArray());
+        Assert.Equal(0, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
     }
 
     [Fact]

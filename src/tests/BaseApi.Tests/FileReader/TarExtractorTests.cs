@@ -49,9 +49,17 @@ public sealed class TarExtractorTests : IDisposable
     {
         var extractor = new TarExtractor();
 
-        Assert.True(extractor.CanHandle(".tar"));
-        Assert.True(extractor.CanHandle(".TAR"));
-        Assert.False(extractor.CanHandle(".zip"));
+        // TAR IS THE ONE FORMAT WITH NO SIGNATURE AT OFFSET ZERO: its magic is "ustar" at byte
+        // 257, so this needs 262 bytes where zip needs four.
+        var header = new byte[262];
+        "ustar"u8.CopyTo(header.AsSpan(257));
+        Assert.True(extractor.CanHandle(header));
+
+        // One byte short of the marker, and a zip. A file too small to hold the marker cannot be a
+        // tar at all - the header block alone is 512 bytes.
+        Assert.False(extractor.CanHandle(header.AsSpan(0, 261)));
+        Assert.False(extractor.CanHandle(new byte[] { 0x50, 0x4B, 0x03, 0x04 }));
+        Assert.False(extractor.CanHandle(ReadOnlySpan<byte>.Empty));
     }
 
     [Fact]

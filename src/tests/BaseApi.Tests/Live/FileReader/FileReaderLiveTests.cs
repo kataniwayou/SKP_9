@@ -154,9 +154,9 @@ public sealed class FileReaderLiveTests
         Assert.True(doc.HasValue, $"no document naming {name} reached {OutTopic} within two minutes");
 
         var root = doc!.Value;
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("content").ValueKind);
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("content").ValueKind);
         Assert.Equal(2, root.GetProperty("metadata").GetProperty("entryCount").GetInt32());
-        Assert.Equal(2, root.GetProperty("entries").GetArrayLength());
+        Assert.Equal(2, root.GetProperty("content").GetArrayLength());
 
         // The one field the reader is required to drop.
         Assert.DoesNotContain("acme", root.GetRawText(), StringComparison.OrdinalIgnoreCase);
