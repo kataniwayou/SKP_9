@@ -24,7 +24,8 @@ public sealed class FileReaderLocatorTests
     private static (FileReaderProcessor Processor, RecordingLogger<FileReaderProcessor> Log) Build()
     {
         var log = new RecordingLogger<FileReaderProcessor>();
-        var processor = new FileReaderProcessor(log, Options.Create(new FileReaderOptions()));
+        var processor = new FileReaderProcessor(
+            log, Options.Create(new FileReaderOptions()), new FileContentBuilder([]));
         processor.BeginDispatch(new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
         return (processor, log);
     }

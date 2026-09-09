@@ -11,14 +11,15 @@ namespace Processor.FileReader;
 /// it produces output, so it is not an edge and neither <c>BaseImporter</c> nor <c>BaseExporter</c>
 /// applies.
 /// </summary>
-public sealed class FileReaderProcessor(
+internal sealed class FileReaderProcessor(
     ILogger<FileReaderProcessor> logger,
-    IOptions<FileReaderOptions> options)
+    IOptions<FileReaderOptions> options,
+    FileContentBuilder builder)
     : BaseProcessor<FileReaderConfig>
 {
     private readonly long _podCeiling = options.Value.MaxFileSizeBytes;
 
-    protected override Task ProcessAsync(
+    protected override async Task ProcessAsync(
         byte[] data, FileReaderConfig? config, Guid executionId, CancellationToken ct)
     {
         // Config first: it is the cheapest check and it depends on nothing else. A step wired with a
@@ -30,14 +31,19 @@ public sealed class FileReaderProcessor(
 
         var bytes = Read(info);
 
-        // Not used by this task's failure path — the framework's own catch logs a thrown
-        // FailedException verbatim, so there is nothing for this step to log on that route. Task 4
-        // adds the success line that gives this parameter a use.
-        _ = logger;
-        _ = bytes;
-        _ = executionId;
-        _ = ct;
-        throw new NotImplementedException("Task 4 onwards");
+        var node = builder.Build(bytes, info, settings);
+
+        // The SHAPE of the result, never its content. A count and a size are safe to log; the bytes
+        // are upstream data and stay out of every template in this system.
+        logger.LogInformation(
+            "read {FilePath} as {SizeBytes} bytes with {EntryCount} entries",
+            info.FullName, info.Length, node.Metadata.EntryCount);
+
+        var document = JsonSerializer.SerializeToUtf8Bytes(node, FileDocument.Options);
+
+        // ONE branch, on the execution id this dispatch arrived with. Not NewExecutionId(): this is
+        // a transform, not a source, so the lineage it was handed is the lineage it continues.
+        await SendToPostAsync(document, executionId, ct).ConfigureAwait(false);
     }
 
     /// <summary>The payload, checked. Throws <see cref="FailedException"/> with the reason.</summary>

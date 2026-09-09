@@ -109,6 +109,8 @@ public static class ProcessorHost
         // expectations come from the step payload.
         builder.Services.Configure<FileReaderOptions>(builder.Configuration.GetSection("FileReader"));
 
+        builder.Services.AddSingleton<FileContentBuilder>();
+
         // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
         // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
         // safe only because prefetch is 1.
