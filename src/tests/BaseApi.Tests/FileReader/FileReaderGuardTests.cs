@@ -35,7 +35,8 @@ public sealed class FileReaderGuardTests : IDisposable
     {
         var log = new RecordingLogger<FileReaderProcessor>();
         var processor = new FileReaderProcessor(
-            log, Options.Create(new FileReaderOptions { MaxFileSizeBytes = podCeiling }));
+            log, Options.Create(new FileReaderOptions { MaxFileSizeBytes = podCeiling }),
+            new FileContentBuilder([]));
         processor.BeginDispatch(new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
         return (processor, log);
     }
@@ -112,14 +113,11 @@ public sealed class FileReaderGuardTests : IDisposable
     [Fact]
     public async Task TheExtensionComparisonIsCaseInsensitive()
     {
-        // Windows fixtures and Linux pods disagree about case, and the extension is a business
-        // expectation rather than a filesystem fact.
         var (processor, _) = Build();
         var path = WriteFile("orders.CSV", 10);
 
-        // Reaching the not-yet-implemented read means the extension guard passed.
-        await Assert.ThrowsAsync<NotImplementedException>(
-            () => Run(processor, path, Payload(".csv", 0, 4096)));
+        // No throw: the extension guard passed and the document was built and sent.
+        await Run(processor, path, Payload(".csv", 0, 4096));
     }
 
     [Fact]
