@@ -32,8 +32,18 @@ namespace Processor.FileReader.Extractors;
 /// </summary>
 public sealed class RarExtractor : IArchiveExtractor
 {
-    public bool CanHandle(string extension)
-        => ".rar".Equals(extension, StringComparison.OrdinalIgnoreCase);
+    public string Extension => ".rar";
+
+    /// <summary>
+    /// <c>Rar!\x1A\x07</c>, then <c>\x00</c> for RAR4 or <c>\x01</c> for RAR5. Both are claimed —
+    /// SharpCompress reads either, so distinguishing them here would only be able to refuse a file
+    /// the extractor can actually open.
+    /// </summary>
+    public bool CanHandle(ReadOnlySpan<byte> header)
+        => header.Length >= 7
+           && header[0] == (byte)'R' && header[1] == (byte)'a' && header[2] == (byte)'r'
+           && header[3] == (byte)'!' && header[4] == 0x1A && header[5] == 0x07
+           && (header[6] == 0x00 || header[6] == 0x01);
 
     /// <summary>
     /// Every file entry, one level deep, or an <see cref="ArchiveExtractionException"/> saying why

@@ -55,9 +55,28 @@ it is redundant here — `filePath` is absolute and complete. It appears nowhere
 Handed `(byte[] bytes, FileInfo info, FileReaderConfig config)`. Owns everything that involves
 looking inside the file.
 
-6. Resolve an `IArchiveExtractor` by `ExpectedExtension`. None registered → the file is a leaf.
-7. Expand **one level**; each entry becomes a node with its own metadata and content.
+6. Resolve an `IArchiveExtractor` by the file's own **leading bytes**. None matches → the file is a
+   leaf, unless its name declared an archive (see below).
+7. Expand recursively until `MaxDepth` is reached or nothing left is an archive, whichever comes
+   first. Each entry becomes a node with its own metadata and content, and is itself a candidate for
+   expansion.
 8. Build the document.
+
+**`ExpectedExtension` admits; the signature chooses.** Those were one job and are now two. The old
+resolution — extractor by declared extension — worked only because the top-level file has a
+declaration the processor had already validated. Nested entries have none: an entry's name is a
+string written by whoever built the archive, and below the first level there is nothing to check it
+against. The signature answers at every depth, so it is what dispatches.
+
+**The top level keeps one use for the declaration, and it is a corruption check.** Signature-only
+dispatch would make a damaged zip a leaf carrying its raw bytes, and the step would report Completed
+over a file nobody can open — the false-HEALTHY failure §7 builds guards against, arrived at from
+outside those guards, because a corrupt header is never shown to an extractor at all. So a top-level
+file whose name declares an archive and whose bytes are no archive at all fails the step. It asks
+whether the bytes are *an* archive, not whether they are the named one: a tar called `.zip` is read
+as a tar, because reading the content is a more useful answer than refusing the name. Nested entries
+get no such check, and an entry called `.zip` that is not one is simply a leaf — otherwise whoever
+built the archive would decide whether this processor succeeds.
 
 **The structure is hard-coded in this class. The output schema does not drive it and is not read
 here.** The schema judges the result one hop later; it never shapes it.
@@ -79,21 +98,30 @@ There is no code between the send and the validation. That is the fact that deci
   "metadata": { "name": "orders.zip", "extension": ".zip", "sizeBytes": 40219,
                 "createdUtc": "2026-09-08T11:02:14Z", "modifiedUtc": "2026-09-08T11:02:14Z",
                 "entryCount": 3 },
-  "content": null,
-  "entries": [
+  "content": [
     { "metadata": { "name": "a.csv", "extension": ".csv", "sizeBytes": 118,
                     "createdUtc": null, "modifiedUtc": "2026-09-08T10:58:00Z", "entryCount": 0 },
-      "content": "aWQsbmFtZQo...", "entries": [] }
+      "content": "aWQsbmFtZQo..." }
   ]
 }
 ```
 
-- **Identical node shape at every level**, so the schema is one self-referencing definition.
-- `content` is base64 for a leaf and **`null` for an archive** — carrying the zip bytes *and* its
-  expansion doubles the blob for no consumer.
-- A non-archive file is a root leaf: `content` set, `entries` empty.
-- **Depth 1.** A zip inside a zip is a leaf: recorded with its bytes and metadata, not expanded.
-  Recursion is the one dimension here with no natural bound, and nothing has asked for it.
+- **Identical node shape at every level**, and it is `{metadata, content}` — two keys, not three.
+- **`content` is one key holding one of three things:** a base64 string (a file's bytes), an array of
+  nodes (what an archive expanded to), or `null` (an archive that expanded to nothing). An expanded
+  archive never carries its own bytes as well — that doubles the blob for no consumer.
+- **It was `content` plus `entries`, and collapsing them is deliberate.** The pair encoded the
+  leaf/archive distinction twice — null content *and* empty entries — so nothing stopped the two
+  from disagreeing. `FileContent` is a closed hierarchy, which makes the illegal states
+  unrepresentable, and `FileNodeConverter` renders it as one JSON value. A hand-written converter
+  rather than `[JsonDerivedType]`, whose `$type` discriminator would leak a serializer detail into a
+  contract other systems read.
+- **`null` means no entries, not "this is an archive".** An archive that was *not* opened — the depth
+  limit stopped it, or nothing recognised the format — carries its own bytes like any other file,
+  because an unexpanded archive is a file.
+- **Depth is `MaxDepth`, and it defaults to 1.** At the default a zip inside a zip is a leaf,
+  recorded with its bytes and metadata, exactly as before this field existed. Raising it is a
+  decision taken against the registered output schema, not alone — see §8.
 - Metadata is `FileInfo` only. Archive entries carry `createdUtc: null` where the format records none.
 - **camelCase**, pinned explicitly in the document serializer. `MessagingJson`'s PascalCase governs
   the `ProcessedData` envelope, not the bytes inside `Data`, and getting that wrong is exactly what
@@ -111,9 +139,22 @@ where the entry-count rule now lives (§8). The encoding cost is accepted; §6 i
 public sealed record FileReaderConfig(
     string ExpectedExtension,   // ".zip" — leading dot, case-insensitive
     long   MinimumSizeBytes,    // 0 disables
-    long   MaximumSizeBytes     // read-time ceiling, per step
+    long   MaximumSizeBytes,    // read-time ceiling, per step; ALSO the expansion ceiling
+    int?   MaxDepth = null      // levels of archive to expand; absent means 1
 ) : ProcessorConfig;
 ```
+
+**`MaxDepth` is nullable so that "absent" and "zero" are different answers.** `System.Text.Json` does
+not apply a C# default parameter value to a missing property on a positional record — it passes
+`default(int)`, which is `0` — so a non-nullable field could not tell a payload that omitted this
+from one explicitly asking for no expansion. Null is absent and resolves to 1; `0` is a rejected
+payload, as is anything above `MaxSupportedDepth` (64).
+
+**It has no pod-level twin, and that is the ruling.** `MaxFileSizeBytes` exists because bytes cost
+memory and an operator must bound them per environment. Depth costs nothing on its own — the bytes it
+reaches are already bounded by `MaximumSizeBytes`, which is one running total across the whole tree —
+so a `FileReader__MaxDepth` would guard a thing already guarded. The 64 cap is a stack bound, not a
+memory one.
 
 A null payload is a `FailedException`, not a set of defaults. There is no meaningful default
 extension, and inventing one would have this processor accept files nobody asked for — the same
@@ -191,12 +232,17 @@ rebuild.
 ```csharp
 public interface IArchiveExtractor
 {
-    bool CanHandle(string extension);
+    string Extension { get; }
+    bool CanHandle(ReadOnlySpan<byte> header);
     IReadOnlyList<ExtractedEntry> Extract(Stream archive);
 }
 ```
 
-Resolved by extension, registered in the container. **ZIP, TAR and RAR.** ZIP and TAR run on in-box
+Resolved by signature, registered in the container. `Extension` is *not* how one is chosen — it
+serves only the top-level corruption check in §3. **Tar is the awkward one:** it has no signature at
+offset zero, its `ustar` marker sits at byte 257, so it needs 262 bytes where zip needs four. A
+buffer shorter than a signature is answered `false` rather than thrown on — a two-byte file is a
+legitimate leaf. **ZIP, TAR and RAR.** ZIP and TAR run on in-box
 `System.IO.Compression` and `System.Formats.Tar`. RAR needs a package, and that package is the only
 dependency this whole design adds.
 
@@ -252,8 +298,26 @@ its middle.
 
 ## 8. The output schema
 
-Authored as `src/Processor.FileReader/schema/output.json`: recursive `$ref`, required keys,
-`additionalProperties: false`, and `entries` cardinality via `minItems`/`maxItems`.
+Authored as `src/Processor.FileReader/schema/output.json`: one `{metadata, content}` node
+definition per level, required keys, `additionalProperties: false`, and `content` cardinality via
+`minItems`/`maxItems`.
+
+**Depth is structural, not declared.** JSON Schema has no depth keyword and cannot express "at most
+N levels" without writing the levels out, so the baseline unrolls: `depth1` may hold an array of
+`depth0`, and `depth0`'s `content` is a string and nothing else. You read the limit by counting the
+definitions. A self-referencing `$ref` admitting any depth was rejected for exactly the reason it
+sounds appealing — a schema that admits any depth can never tell you the depth was wrong.
+
+**Nothing keeps `MaxDepth` and the schema in sync, deliberately.** The payload says what to expand;
+the schema says what a document may look like. When they disagree the document fails validation,
+exactly as a wrong entry count does. Note the cost before raising either: this failure is the
+destructive one described below, so `ProcessAsync` logs the depth it actually reached — that line is
+where the diagnosis lives, because the failure itself carries no path.
+
+**The schema's depth caps every workflow using this processor.** `OutputSchemaId` is a column on the
+processor row, not the step, so there is one output schema per processor identity. A step's
+`MaxDepth` can sit at or below what the schema admits, never above it; a feed needing more than the
+baseline allows needs its own processor identity, not just its own payload. The baseline stays at 1.
 
 Mechanics it depends on, each a way to get it wrong:
 
@@ -267,7 +331,7 @@ Mechanics it depends on, each a way to get it wrong:
   would reject every field it did not itself restate.
 - `format` and `contentEncoding` are **annotations, not assertions**, in 2020-12, and `DefaultOptions`
   does not enable format assertion. They document; they do not enforce.
-- Constrain **`entries`**, not `metadata.entryCount`. The array is the fact; the count is derived, and
+- Constrain **`content`**, not `metadata.entryCount`. The array is the fact; the count is derived, and
   pinning the derived field would let a counting bug pass a schema the content fails.
 
 **Registering the schema against the processor identity is a database row and a deploy step, not this
@@ -439,7 +503,10 @@ an omitted field binds to, so the value is stated explicitly rather than default
 
 ## 14. Not in scope
 
-Recursive archive expansion. Writing archives of any format — SharpCompress is referenced for RAR
+Unbounded recursion — expansion is recursive, but `MaxDepth` is a required number with a validated
+range and no "unlimited" setting, because a self-reproducing archive expands to a copy of itself at
+roughly constant size and would otherwise grind against the byte ceiling for thousands of levels
+before stopping. Writing archives of any format — SharpCompress is referenced for RAR
 reading only. Streaming: the file is fully in memory by design, which is what §6's ceiling bounds. A
 filesystem abstraction. The framework post-hop seam. Windows-host mounts. `FileWriter`, which is the
 next conversation.

@@ -73,9 +73,17 @@ public sealed class ZipExtractorTests : IDisposable
     {
         var extractor = new ZipExtractor();
 
-        Assert.True(extractor.CanHandle(".zip"));
-        Assert.True(extractor.CanHandle(".ZIP"));
-        Assert.False(extractor.CanHandle(".tar"));
+        // A local file header, and the canonical empty archive's EOCD. The empty one must be
+        // claimed too, or it would be mistaken for a leaf instead of reaching the exemption in
+        // Extract that tells a genuinely empty zip from a corrupt one.
+        Assert.True(extractor.CanHandle(new byte[] { 0x50, 0x4B, 0x03, 0x04 }));
+        Assert.True(extractor.CanHandle(new byte[] { 0x50, 0x4B, 0x05, 0x06 }));
+
+        // A rar, a truncated signature, and nothing at all. A buffer shorter than the signature is
+        // answered rather than thrown on: a two-byte file is a legitimate leaf.
+        Assert.False(extractor.CanHandle(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 }));
+        Assert.False(extractor.CanHandle(new byte[] { 0x50, 0x4B }));
+        Assert.False(extractor.CanHandle(ReadOnlySpan<byte>.Empty));
     }
 
     [Fact]
@@ -85,9 +93,9 @@ public sealed class ZipExtractorTests : IDisposable
 
         var doc = await DocumentOf(path);
 
-        Assert.Equal(JsonValueKind.Null, doc.GetProperty("content").ValueKind);
+        Assert.Equal(JsonValueKind.Array, doc.GetProperty("content").ValueKind);
         Assert.Equal(2, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
-        Assert.Equal(2, doc.GetProperty("entries").GetArrayLength());
+        Assert.Equal(2, doc.GetProperty("content").GetArrayLength());
     }
 
     [Fact]
@@ -96,13 +104,13 @@ public sealed class ZipExtractorTests : IDisposable
         var path = WriteZip("orders.zip", ("a.csv", "id\n"));
 
         var doc = await DocumentOf(path);
-        var entry = doc.GetProperty("entries")[0];
+        var entry = doc.GetProperty("content")[0];
 
         Assert.Equal("a.csv", entry.GetProperty("metadata").GetProperty("name").GetString());
         Assert.Equal(".csv", entry.GetProperty("metadata").GetProperty("extension").GetString());
         Assert.Equal(3, entry.GetProperty("metadata").GetProperty("sizeBytes").GetInt64());
         Assert.Equal("id\n", Encoding.UTF8.GetString(entry.GetProperty("content").GetBytesFromBase64()));
-        Assert.Empty(entry.GetProperty("entries").EnumerateArray());
+        Assert.Equal(0, entry.GetProperty("metadata").GetProperty("entryCount").GetInt32());
     }
 
     [Fact]
@@ -120,11 +128,11 @@ public sealed class ZipExtractorTests : IDisposable
         }
 
         var doc = await DocumentOf(path);
-        var entry = doc.GetProperty("entries")[0];
+        var entry = doc.GetProperty("content")[0];
 
         Assert.Equal("inner.zip", entry.GetProperty("metadata").GetProperty("name").GetString());
         Assert.Equal(JsonValueKind.String, entry.GetProperty("content").ValueKind);
-        Assert.Empty(entry.GetProperty("entries").EnumerateArray());
+        Assert.Equal(0, entry.GetProperty("metadata").GetProperty("entryCount").GetInt32());
     }
 
     [Fact]
@@ -146,7 +154,7 @@ public sealed class ZipExtractorTests : IDisposable
 
         Assert.Equal(1, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
         Assert.Equal("a.csv",
-            doc.GetProperty("entries")[0].GetProperty("metadata").GetProperty("name").GetString());
+            doc.GetProperty("content")[0].GetProperty("metadata").GetProperty("name").GetString());
     }
 
     [Fact]
@@ -226,7 +234,7 @@ public sealed class ZipExtractorTests : IDisposable
 
         var doc = await DocumentOf(path);
 
-        Assert.Equal(65536, doc.GetProperty("entries")[0]
+        Assert.Equal(65536, doc.GetProperty("content")[0]
                                 .GetProperty("metadata").GetProperty("sizeBytes").GetInt64());
     }
 

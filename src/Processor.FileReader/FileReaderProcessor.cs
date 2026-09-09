@@ -32,10 +32,10 @@ internal sealed class FileReaderProcessor(
 
         var bytes = Read(info);
 
-        FileNode node;
+        FileBuildResult built;
         try
         {
-            node = builder.Build(bytes, info, settings);
+            built = builder.Build(bytes, info, settings);
         }
         catch (ArchiveExtractionException ex)
         {
@@ -61,13 +61,22 @@ internal sealed class FileReaderProcessor(
             throw new FailedException($"extracting {info.FullName} failed: {ex.Message}");
         }
 
-        // The SHAPE of the result, never its content. A count and a size are safe to log; the bytes
-        // are upstream data and stay out of every template in this system.
+        // The SHAPE of the result, never its content. A count, a size and a depth are safe to log;
+        // the bytes are upstream data and stay out of every template in this system.
+        //
+        // THE DEPTH IS HERE BECAUSE THIS IS THE ONLY PLACE IT SURVIVES. The registered output schema
+        // states its depth structurally, and a document deeper than the schema admits fails
+        // validation one hop later — reported with EntryId Guid.Empty, no payload and no file path,
+        // at Information. Nothing in that failure says how deep this document actually went, so a
+        // MaxDepth that disagrees with the schema would otherwise be undiagnosable from the logs.
+        // Both numbers are logged: what was asked for, and what the file actually needed.
         logger.LogInformation(
-            "read {FilePath} as {SizeBytes} bytes with {EntryCount} entries",
-            info.FullName, info.Length, node.Metadata.EntryCount);
+            "read {FilePath} as {SizeBytes} bytes with {EntryCount} entries, expanded to depth "
+            + "{DepthReached} of {MaxDepth}",
+            info.FullName, info.Length, built.Node.Metadata.EntryCount, built.DepthReached,
+            settings.EffectiveMaxDepth);
 
-        var document = JsonSerializer.SerializeToUtf8Bytes(node, FileDocument.Options);
+        var document = JsonSerializer.SerializeToUtf8Bytes(built.Node, FileDocument.Options);
 
         // ONE branch, on the execution id this dispatch arrived with. Not NewExecutionId(): this is
         // a transform, not a source, so the lineage it was handed is the lineage it continues.
@@ -117,6 +126,21 @@ internal sealed class FileReaderProcessor(
             throw BadPayload(
                 $"MaximumSizeBytes {config.MaximumSizeBytes} is above this pod's ceiling of "
                 + $"{_podCeiling}; raise FileReader__MaxFileSizeBytes or lower the step");
+        }
+
+        // Null is absent and means DefaultMaxDepth; an explicit value must be in range. Zero is
+        // rejected rather than read as "do not expand" — a step that wants no expansion is asking
+        // for a plain file, and naming a depth of nothing is far more likely to be a payload written
+        // against the wrong field than an intention.
+        //
+        // The upper bound is what makes the builder's recursion safe: it is the stack depth this
+        // pod will ever reach, fixed before any file is opened.
+        if (config.MaxDepth is { } depth
+            && (depth < 1 || depth > FileReaderConfig.MaxSupportedDepth))
+        {
+            throw BadPayload(
+                $"MaxDepth must be between 1 and {FileReaderConfig.MaxSupportedDepth}; the payload "
+                + $"named {depth}");
         }
 
         return config;

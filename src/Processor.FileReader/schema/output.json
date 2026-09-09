@@ -1,17 +1,28 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["metadata", "content", "entries"],
-  "properties": {
-    "metadata": { "$ref": "#/$defs/metadata" },
-    "content": { "type": ["string", "null"] },
-    "entries": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/leaf" }
-    }
-  },
+  "$ref": "#/$defs/depth1",
   "$defs": {
+    "depth1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "content"],
+      "properties": {
+        "metadata": { "$ref": "#/$defs/metadata" },
+        "content": {
+          "type": ["string", "array", "null"],
+          "items": { "$ref": "#/$defs/depth0" }
+        }
+      }
+    },
+    "depth0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "content"],
+      "properties": {
+        "metadata": { "$ref": "#/$defs/metadata" },
+        "content": { "type": "string" }
+      }
+    },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -23,16 +34,6 @@
         "createdUtc": { "type": ["string", "null"] },
         "modifiedUtc": { "type": ["string", "null"] },
         "entryCount": { "type": "integer", "minimum": 0 }
-      }
-    },
-    "leaf": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["metadata", "content", "entries"],
-      "properties": {
-        "metadata": { "$ref": "#/$defs/metadata" },
-        "content": { "type": "string" },
-        "entries": { "type": "array", "maxItems": 0 }
       }
     }
   }

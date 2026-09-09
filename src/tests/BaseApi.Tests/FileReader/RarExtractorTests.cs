@@ -47,9 +47,13 @@ public sealed class RarExtractorTests : IDisposable
     {
         var extractor = new RarExtractor();
 
-        Assert.True(extractor.CanHandle(".rar"));
-        Assert.True(extractor.CanHandle(".RAR"));
-        Assert.False(extractor.CanHandle(".zip"));
+        // RAR4 and RAR5 differ only in the seventh byte, and SharpCompress reads both.
+        Assert.True(extractor.CanHandle(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 }));
+        Assert.True(extractor.CanHandle(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01 }));
+
+        Assert.False(extractor.CanHandle(new byte[] { 0x50, 0x4B, 0x03, 0x04 }));
+        Assert.False(extractor.CanHandle(new byte[] { 0x52, 0x61, 0x72 }));
+        Assert.False(extractor.CanHandle(ReadOnlySpan<byte>.Empty));
     }
 
     [Fact]
