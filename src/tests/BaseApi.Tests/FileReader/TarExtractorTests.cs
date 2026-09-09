@@ -79,6 +79,41 @@ public sealed class TarExtractorTests
     }
 
     [Fact]
+    public void AGenuinelyEmptyTarSucceedsWithNoEntries()
+    {
+        // A valid empty tar is nothing but zero bytes — a lone 512-byte zero block satisfies it,
+        // same as the POSIX-standard two-block terminator, same as 0 bytes. TarReader.GetNextEntry
+        // returns null with no exception for all of these, same as it does for a corrupt archive
+        // (see ATruncatedHeaderWithGarbageAfterItThrows below) — the guard in TarExtractor.Extract
+        // tells them apart by checking whether the stream is all zero. This pins the "valid, so must
+        // not throw" side of that line.
+        using var stream = new MemoryStream(new byte[1024]);
+
+        var entries = new TarExtractor().Extract(stream);
+
+        Assert.Empty(entries);
+    }
+
+    [Fact]
+    public void ATruncatedHeaderWithGarbageAfterItThrows()
+    {
+        // The false-HEALTHY case the guard exists for: TarReader reads the first block, sees it is
+        // all zero, and treats that as the archive's terminator — GetNextEntry returns null with NO
+        // exception, exactly as it would for a real empty tar. Without the guard, a file that was
+        // truncated right after a zeroed header (or any file whose first 512 bytes happen to be
+        // zero, with real bytes after them) would read as a healthy empty archive instead of a
+        // corrupt one. Measured directly against TarReader before writing this test — see
+        // task-6-report.md, fix round 1.
+        var bytes = new byte[522];
+        Encoding.UTF8.GetBytes("garbagexyz").CopyTo(bytes, 512);
+
+        using var stream = new MemoryStream(bytes);
+
+        var ex = Assert.Throws<InvalidDataException>(() => new TarExtractor().Extract(stream));
+        Assert.Contains("not all zero", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExtractedEntryModifiedUtcCarriesUtcKind()
     {
         // Task 4/6 review requirement: TarEntry.ModificationTime is a DateTimeOffset, and
