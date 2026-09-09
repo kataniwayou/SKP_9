@@ -104,6 +104,11 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
+        // The pod's ceiling, from FileReader__MaxFileSizeBytes in the manifest. Same shape as the
+        // Kafka processors' broker address: infrastructure limits come from configuration, business
+        // expectations come from the step payload.
+        builder.Services.Configure<FileReaderOptions>(builder.Configuration.GetSection("FileReader"));
+
         // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
         // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
         // safe only because prefetch is 1.
