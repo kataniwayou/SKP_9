@@ -2,9 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `Processor.FileReader`, a downstream processor that turns an absolute file path into one recursive `{metadata, content, entries}` document, expanding zip/tar/rar archives one level.
+**Goal:** Build `Processor.FileReader`, a downstream processor that turns an absolute file path into one recursive `{metadata, content}` document, expanding zip/tar/rar archives to a configured depth.
 
-**Architecture:** A plain `BaseProcessor<FileReaderConfig>` — not an edge. `FileReaderProcessor.ProcessAsync` is *dry*: it validates config, parses the locator, checks extension and size from `FileInfo`, and reads bytes without ever opening the file's contents. It hands those bytes to `FileContentBuilder`, which resolves an `IArchiveExtractor` by extension, expands one level, and builds the document. One `SendToPostAsync` on the dispatch's own `executionId`.
+**Architecture:** A plain `BaseProcessor<FileReaderConfig>` — not an edge. `FileReaderProcessor.ProcessAsync` is *dry*: it validates config, parses the locator, checks extension and size from `FileInfo`, and reads bytes without ever opening the file's contents. It hands those bytes to `FileContentBuilder`, which resolves an `IArchiveExtractor` by the file's leading bytes, expands until `MaxDepth` is reached or nothing left is an archive, and builds the document. One `SendToPostAsync` on the dispatch's own `executionId`.
+
+> **TASKS 1-10 RECORD THE SYSTEM AS FIRST BUILT, AND TASK 11 CHANGED IT.** Tasks 4-8 below were
+> executed against a document of `{metadata, content, entries}` expanded exactly one level, with the
+> extractor resolved by `ExpectedExtension`. Task 11 collapsed the node to `{metadata, content}`,
+> moved extractor selection onto the file's signature, and made depth configurable. **The code
+> blocks in Tasks 4-8 are the state at the time those tasks ran, not the current source** — they are
+> left as executed rather than rewritten, because the sequence is what the plan records and the files
+> in `src/` are the authority on what the code is now. Read Task 11 before treating any of them as
+> current.
 
 **Tech Stack:** .NET 8, xunit.v3, NSubstitute, `System.IO.Compression` (zip), `System.Formats.Tar` (tar), SharpCompress 1.0.0 (rar, read-only), JsonSchema.Net (validation, already present).
 
@@ -47,7 +56,7 @@ Creates the project, vendors the one new package, and proves the offline restore
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `Processor.FileReader.FileReaderProcessor : BaseProcessor<FileReaderConfig>`; `Processor.FileReader.FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes) : ProcessorConfig`; `Processor.FileReader.ProcessorHost.Create(string[] args, ProcessorIdentityFound identity, Action<IConfigurationBuilder>? configure = null)` returning `IHost`.
+- Produces: `Processor.FileReader.FileReaderProcessor : BaseProcessor<FileReaderConfig>`; `Processor.FileReader.FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes) : ProcessorConfig` *(Task 11 adds `int? MaxDepth = null`)*; `Processor.FileReader.ProcessorHost.Create(string[] args, ProcessorIdentityFound identity, Action<IConfigurationBuilder>? configure = null)` returning `IHost`.
 
 - [ ] **Step 1: Vendor the package**
 
@@ -947,7 +956,7 @@ The leaf path end to end: a non-archive file becomes a root node with content an
 
 **Interfaces:**
 - Consumes: the guards (Task 3).
-- Produces: `public sealed record FileMetadata(string Name, string Extension, long SizeBytes, DateTime? CreatedUtc, DateTime? ModifiedUtc, int EntryCount)`; `public sealed record FileNode(FileMetadata Metadata, byte[]? Content, IReadOnlyList<FileNode> Entries)`; `internal static class FileDocument { public static readonly JsonSerializerOptions Options; }`; `internal sealed class FileContentBuilder { public FileNode Build(byte[] bytes, FileInfo info, FileReaderConfig config); }`. `FileReaderProcessor(ILogger<FileReaderProcessor>, IOptions<FileReaderOptions>, FileContentBuilder)`.
+- Produces: `public sealed record FileMetadata(string Name, string Extension, long SizeBytes, DateTime? CreatedUtc, DateTime? ModifiedUtc, int EntryCount)`; `public sealed record FileNode(FileMetadata Metadata, byte[]? Content, IReadOnlyList<FileNode> Entries)` *(Task 11 replaces this with `FileNode(FileMetadata Metadata, FileContent? Content)`)*; `internal static class FileDocument { public static readonly JsonSerializerOptions Options; }`; `internal sealed class FileContentBuilder { public FileNode Build(byte[] bytes, FileInfo info, FileReaderConfig config); }` *(Task 11 changes the return type to `FileBuildResult`)*. `FileReaderProcessor(ILogger<FileReaderProcessor>, IOptions<FileReaderOptions>, FileContentBuilder)`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2042,7 +2051,7 @@ git commit -m "feat(filereader): rar, from a fixture this repo cannot build"
 
 **Interfaces:**
 - Consumes: `FileNode`, `FileDocument.Options` (Task 4), `ProcessorJsonSchemaValidator` from `BaseProcessor.Core.Validation`.
-- Produces: the registered schema definition, as a file.
+- Produces: the registered schema definition, as a file. *(Task 11 rewrites it for the two-key node, keeping depth 1.)*
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2629,6 +2638,163 @@ git commit -m "feat(filereader): the live chain, and the absence that proves the
 
 ---
 
+### Task 11: Nested expansion
+
+**Executed 2026-09-09 in commit `bc3d8ed`, after Tasks 1-10 had shipped.** Boxes are ticked here
+because this task ran with its outcome known; Tasks 1-10 were executed without ever ticking theirs.
+
+Makes depth a step decision instead of a constant, and moves extractor selection off the declared
+extension onto the file's own signature — because below the first level there is no declaration to
+resolve against. Collapses the node's two content fields into one.
+
+**Files:**
+- Modify: `src/Processor.FileReader/Extractors/IArchiveExtractor.cs`
+- Modify: `src/Processor.FileReader/Extractors/ZipExtractor.cs`
+- Modify: `src/Processor.FileReader/Extractors/TarExtractor.cs`
+- Modify: `src/Processor.FileReader/Extractors/RarExtractor.cs`
+- Modify: `src/Processor.FileReader/FileNode.cs`
+- Modify: `src/Processor.FileReader/FileContentBuilder.cs`
+- Modify: `src/Processor.FileReader/FileReaderConfig.cs`
+- Modify: `src/Processor.FileReader/FileReaderProcessor.cs`
+- Modify: `src/Processor.FileReader/schema/output.json`
+- Modify: `src/Processor.FileReader/schema/README.md`
+- Test: `src/tests/BaseApi.Tests/FileReader/FileReaderDepthTests.cs` (new)
+- Test: `src/tests/BaseApi.Tests/FileReader/FileReaderDocumentTests.cs`, `FileReaderSchemaTests.cs`, `ZipExtractorTests.cs`, `TarExtractorTests.cs`, `RarExtractorTests.cs`
+- Test: `src/tests/BaseApi.Tests/Live/FileReader/FileReaderLiveTests.cs`
+- Modify: `docs/superpowers/specs/2026-09-09-file-reader-design.md`, `k8s/README.md`
+
+**Interfaces:**
+- Consumes: everything Tasks 4-8 produced.
+- Produces: `public abstract record FileContent` with nested `Bytes(byte[] Value)` and
+  `Entries(IReadOnlyList<FileNode> Value)`; `public sealed record FileNode(FileMetadata Metadata, FileContent? Content)`;
+  `public sealed class FileNodeConverter : JsonConverter<FileNode>`;
+  `internal sealed record FileBuildResult(FileNode Node, int DepthReached)`;
+  `FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes, int? MaxDepth = null)`
+  with `DefaultMaxDepth = 1`, `MaxSupportedDepth = 64` and `EffectiveMaxDepth`;
+  `IArchiveExtractor { string Extension { get; } bool CanHandle(ReadOnlySpan<byte> header); ... }`.
+
+- [x] **Step 1: Turn the extractor seam onto the bytes**
+
+  `CanHandle(string extension)` becomes `CanHandle(ReadOnlySpan<byte> header)`. Zip claims the local
+  file header signature and the End Of Central Directory one — the empty archive must be claimed
+  too, or it never reaches the exemption that tells an empty zip from a corrupt one. Rar claims the
+  RAR4 and RAR5 signatures, which differ only in their seventh byte.
+
+  **Tar is the awkward one: no signature at offset zero.** Its `ustar` marker sits at byte 257, so it
+  needs 262 bytes where zip needs four. A buffer shorter than a signature answers `false` rather than
+  throwing — a two-byte file is a legitimate leaf. A pre-POSIX v7 tar carries no marker and is not
+  claimed; inferring it from a plausible octal checksum would claim files that merely look numeric.
+
+  A `ReadOnlySpan` cannot be captured by a lambda, so the resolution loop is a plain `foreach` rather
+  than `FirstOrDefault` — copying the array to satisfy LINQ would allocate a second copy of every
+  file.
+
+- [x] **Step 2: Keep the declaration for the one job it can still do**
+
+  `IArchiveExtractor` also gains `string Extension { get; }`. **It is not how an extractor is
+  chosen.** It serves one check, at the top level only: a file whose name declares an archive and
+  whose bytes are no archive at all fails the step.
+
+  **Without it, corruption reads as success.** This was caught by three existing tests going green
+  that should have been red — `ACorruptArchiveFailsTheStepNamingThePath` in each extractor's suite.
+  A damaged zip matches no signature, so signature-only dispatch makes it a leaf carrying its raw
+  bytes and the step reports Completed over a file nobody can open. That is exactly the
+  false-HEALTHY failure Tasks 5-7 built guards for, reached from *outside* those guards, because a
+  corrupt header is never shown to an extractor at all.
+
+  The check asks whether the bytes are *an* archive, not whether they are the named one: a tar
+  called `.zip` is read as a tar. Nested entries get no such check — an entry called `.zip` that is
+  not one is a leaf, because otherwise whoever built the archive decides whether this processor
+  succeeds.
+
+- [x] **Step 3: Collapse the node's two content fields into one**
+
+  `FileNode(Metadata, byte[]? Content, IReadOnlyList<FileNode> Entries)` becomes
+  `FileNode(Metadata, FileContent? Content)`, where `FileContent` is an abstract record with a
+  private constructor and two nested cases. The old pair encoded the leaf/archive distinction twice
+  — null content *and* empty entries — and nothing stopped them disagreeing.
+
+  `content` is therefore one JSON key holding a base64 string, an array of nodes, or `null`. **Null
+  means no entries**, which an empty archive produces; an archive that was not *opened* carries its
+  own bytes like any other file.
+
+  `FileNodeConverter` is hand-written rather than `[JsonDerivedType]`, whose `$type` discriminator
+  would appear in the document and have to be admitted by the output schema — a serializer detail
+  leaking into a contract other systems read. Its `Read` exists so a test can round-trip and assert
+  on shape rather than on a string.
+
+- [x] **Step 4: Make depth a payload field, bounded**
+
+  `int? MaxDepth = null` on `FileReaderConfig`. **Nullable so "absent" and "zero" are different
+  answers:** `System.Text.Json` does not apply a C# default parameter value to a missing property on
+  a positional record — it passes `default(int)`, which is `0`. Null resolves to
+  `DefaultMaxDepth = 1`; `0`, negatives and anything above `MaxSupportedDepth = 64` are rejected
+  payloads, diagnosed before the file is opened.
+
+  **No pod-level twin.** `MaxFileSizeBytes` exists because bytes cost memory; depth costs nothing on
+  its own, and the bytes it reaches are already bounded. The 64 cap is a stack bound, not a memory
+  one — it is what makes plain recursion in the builder safe, and it stops a self-reproducing archive
+  (which expands to a copy of itself at roughly constant size) from grinding against the byte ceiling
+  for thousands of levels first.
+
+- [x] **Step 5: Thread one expansion budget through the whole tree**
+
+  `MaximumSizeBytes` becomes a single running total across every level rather than per level. **This
+  is what makes depth safe to raise:** a per-level ceiling would let a depth-5 archive hold five
+  times the limit, and the pod's memory does not care which level a byte came from. Charged before
+  each child is built, so the walk stops at the entry that crosses it rather than after its whole
+  subtree is materialised. A nested archive is charged twice on purpose — once as its parent's entry,
+  once for what it expands to — because at that moment both exist in memory.
+
+  The residual from Task 5 is unchanged and still recorded: an extractor materialises every entry's
+  bytes before the loop runs, so this bounds the document, not any single extractor's own peak.
+
+- [x] **Step 6: Return the depth reached, and log it**
+
+  `Build` returns `FileBuildResult(FileNode Node, int DepthReached)`, and `ProcessAsync` logs
+  `expanded to depth {DepthReached} of {MaxDepth}` alongside the entry count.
+
+  **It is logged because it survives nowhere else.** A document deeper than the registered schema
+  admits fails validation one hop later, reported with `EntryId: Guid.Empty`, no payload and no file
+  path, at Information. Nothing in that failure says how deep the document went, so a `MaxDepth`
+  disagreeing with the schema would otherwise be undiagnosable.
+
+- [x] **Step 7: Rewrite the schema for the two-key node, still at depth 1**
+
+  `depth1` holds an array of `depth0`; `depth0`'s `content` is a string and nothing else. **Depth is
+  structural, not declared** — JSON Schema has no depth keyword, so the bound is N definitions each
+  referencing the next, and you read the limit by counting them. `type: ["string", "array", "null"]`
+  with `items` covers all three forms without a `oneOf`, because `items` is ignored for the
+  non-array cases.
+
+  **A self-referencing `$ref` admitting any depth was rejected** for the reason it sounds appealing:
+  a schema that admits any depth can never tell you the depth was wrong.
+
+  **Nothing keeps `MaxDepth` and the schema in sync, deliberately.** They disagree by failing
+  validation, exactly as a wrong entry count does. And because `OutputSchemaId` is a column on the
+  processor row rather than the step, the schema's depth caps *every* workflow using this processor:
+  a step's `MaxDepth` may sit at or below it, never above.
+
+- [x] **Step 8: Tests**
+
+  New `FileReaderDepthTests` pins both stop conditions independently — the depth limit, and running
+  out of archives — plus: the default leaving a nested archive as a file; `MaxDepth: 2` expanding a
+  zip of zips; null content on an empty archive; the budget as one running total across levels; the
+  payload range rejection; a nested entry chosen by bytes not name, and its mirror; the top-level
+  cross-check firing on corruption and *not* firing on a mislabelled-but-valid archive; the depth
+  log line.
+
+  Existing suites moved from `entries` onto `content`, and the three `CanHandle` tests became
+  signature tests. `FileReaderSchemaTests` gained the empty-archive case, a rejection of the old
+  separate `entries` key, a depth-2 rejection, and a converter round-trip.
+
+- [x] **Step 9: Commit**
+
+  942 tests, 0 failed, 25 skipped (all `Live/`). Spec sections 3, 5, 6, 7, 8 and 14 rewritten, along
+  with `k8s/README.md`'s payload section and `schema/README.md`.
+
+---
+
 ## After the plan
 
 The processor is built, tested and deployable, but **not yet running**. Three operational steps remain, and they are deliberately outside the plan because each needs a decision or a credential the plan cannot carry:
@@ -2636,3 +2802,10 @@ The processor is built, tested and deployable, but **not yet running**. Three op
 1. **Build and load the image**, then repoint the processor row's `SourceHash` — every processor rebuild needs it.
 2. **Register the processor row** (name `file-reader`, version `1.0.0`), and the **output schema row** from `src/Processor.FileReader/schema/output.json`. Until the schema row exists, `OutputSchemaId` is null and nothing enforces entry count.
 3. **Wire the workflow** with both edges at `entryCondition: 1` and the step payload from `k8s/README.md`.
+
+**And one decision Task 11 leaves open:** the baseline schema stays at depth 1, so any step wanting
+`MaxDepth` above 1 needs the schema row deepened first — and because that row is per processor
+identity, deepening it raises the cap for every workflow using `file-reader 1.0.0`. A feed needing
+more than the baseline allows needs its own processor identity, not just its own payload. Nothing
+enforces the relationship; a disagreement surfaces as a validation failure with no file path, which
+is why the depth reached is logged.
