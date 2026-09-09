@@ -6,14 +6,13 @@
 
 **Architecture:** A plain `BaseProcessor<FileReaderConfig>` — not an edge. `FileReaderProcessor.ProcessAsync` is *dry*: it validates config, parses the locator, checks extension and size from `FileInfo`, and reads bytes without ever opening the file's contents. It hands those bytes to `FileContentBuilder`, which resolves an `IArchiveExtractor` by the file's leading bytes, expands until `MaxDepth` is reached or nothing left is an archive, and builds the document. One `SendToPostAsync` on the dispatch's own `executionId`.
 
-> **TASKS 1-10 RECORD THE SYSTEM AS FIRST BUILT, AND TASK 11 CHANGED IT.** Tasks 4-8 below were
-> executed against a document of `{metadata, content, entries}` expanded exactly one level, with the
-> extractor resolved by `ExpectedExtension`. Task 11 collapsed the node to `{metadata, content}`,
-> moved extractor selection onto the file's signature, and made depth configurable. **The code
-> blocks in Tasks 4-8 are the state at the time those tasks ran, not the current source** — they are
-> left as executed rather than rewritten, because the sequence is what the plan records and the files
-> in `src/` are the authority on what the code is now. Read Task 11 before treating any of them as
-> current.
+> **THE CODE BLOCKS IN TASKS 4-8 ARE THE CURRENT SOURCE, NOT THE STATE AT THE TIME THOSE TASKS
+> RAN.** They were refreshed from `src/` after Task 11, which collapsed the node from
+> `{metadata, content, entries}` to `{metadata, content}`, moved extractor selection from
+> `ExpectedExtension` onto the file's signature, and made depth configurable. **The step ORDER and
+> the narrative still record the original sequence** — Task 5 still introduces zip and Task 8 still
+> introduces the schema — so a step's prose may describe a smaller thing than the file it now shows.
+> Where the two differ, the file is right, and Task 11 is where the difference is explained.
 
 **Tech Stack:** .NET 8, xunit.v3, NSubstitute, `System.IO.Compression` (zip), `System.Formats.Tar` (tar), SharpCompress 1.0.0 (rar, read-only), JsonSchema.Net (validation, already present).
 
@@ -56,7 +55,7 @@ Creates the project, vendors the one new package, and proves the offline restore
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `Processor.FileReader.FileReaderProcessor : BaseProcessor<FileReaderConfig>`; `Processor.FileReader.FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes) : ProcessorConfig` *(Task 11 adds `int? MaxDepth = null`)*; `Processor.FileReader.ProcessorHost.Create(string[] args, ProcessorIdentityFound identity, Action<IConfigurationBuilder>? configure = null)` returning `IHost`.
+- Produces: `Processor.FileReader.FileReaderProcessor : BaseProcessor<FileReaderConfig>`; `Processor.FileReader.FileReaderConfig(string ExpectedExtension, long MinimumSizeBytes, long MaximumSizeBytes, int? MaxDepth = null) : ProcessorConfig` *(`MaxDepth` arrived in Task 11)*; `Processor.FileReader.ProcessorHost.Create(string[] args, ProcessorIdentityFound identity, Action<IConfigurationBuilder>? configure = null)` returning `IHost`.
 
 - [ ] **Step 1: Vendor the package**
 
@@ -945,7 +944,7 @@ git commit -m "feat(filereader): the dry guards, all of them before the file is 
 
 ### Task 4: The document, for a plain file
 
-The leaf path end to end: a non-archive file becomes a root node with content and no entries, and one branch is sent on the dispatch's own execution id.
+The leaf path end to end: a non-archive file becomes a root node whose `content` is its bytes, and one branch is sent on the dispatch's own execution id.
 
 **Files:**
 - Create: `src/Processor.FileReader/FileNode.cs`
@@ -956,7 +955,7 @@ The leaf path end to end: a non-archive file becomes a root node with content an
 
 **Interfaces:**
 - Consumes: the guards (Task 3).
-- Produces: `public sealed record FileMetadata(string Name, string Extension, long SizeBytes, DateTime? CreatedUtc, DateTime? ModifiedUtc, int EntryCount)`; `public sealed record FileNode(FileMetadata Metadata, byte[]? Content, IReadOnlyList<FileNode> Entries)` *(Task 11 replaces this with `FileNode(FileMetadata Metadata, FileContent? Content)`)*; `internal static class FileDocument { public static readonly JsonSerializerOptions Options; }`; `internal sealed class FileContentBuilder { public FileNode Build(byte[] bytes, FileInfo info, FileReaderConfig config); }` *(Task 11 changes the return type to `FileBuildResult`)*. `FileReaderProcessor(ILogger<FileReaderProcessor>, IOptions<FileReaderOptions>, FileContentBuilder)`.
+- Produces: `public sealed record FileMetadata(string Name, string Extension, long SizeBytes, DateTime? CreatedUtc, DateTime? ModifiedUtc, int EntryCount)`; `public sealed record FileNode(FileMetadata Metadata, FileContent? Content)` with `public abstract record FileContent` and its `Bytes`/`Entries` cases, plus `public sealed class FileNodeConverter : JsonConverter<FileNode>` *(the node was `(Metadata, byte[]? Content, IReadOnlyList<FileNode> Entries)` until Task 11)*; `internal static class FileDocument { public static readonly JsonSerializerOptions Options; }`; `internal sealed class FileContentBuilder { public FileBuildResult Build(byte[] bytes, FileInfo info, FileReaderConfig config); }` *(the return type was `FileNode` until Task 11)*. `FileReaderProcessor(ILogger<FileReaderProcessor>, IOptions<FileReaderOptions>, FileContentBuilder)`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1037,7 +1036,6 @@ public sealed class FileReaderDocumentTests : IDisposable
         Assert.Equal(8, doc.GetProperty("metadata").GetProperty("sizeBytes").GetInt64());
         Assert.Equal(0, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
         Assert.Equal("id,name\n", Encoding.UTF8.GetString(doc.GetProperty("content").GetBytesFromBase64()));
-        Assert.Empty(doc.GetProperty("entries").EnumerateArray());
     }
 
     [Fact]
@@ -1075,8 +1073,10 @@ public sealed class FileReaderDocumentTests : IDisposable
     [Fact]
     public async Task AnArchiveWithNoRegisteredExtractorIsALeaf()
     {
-        // No extractor is registered in these tests, so a .zip is content rather than entries. The
-        // switch is the extractor set, never the file's magic bytes.
+        // A leaf for TWO independent reasons, and either alone would do it: no extractor is
+        // registered in these tests, and these bytes are not a zip whatever the name says.
+        // The second is the one that holds in production - the extractor is chosen by
+        // signature, and ExpectedExtension only admitted the file to the step.
         var (processor, sender) = Build();
         var path = WriteText("bundle.zip", "not really a zip");
 
@@ -1085,7 +1085,7 @@ public sealed class FileReaderDocumentTests : IDisposable
 
         var doc = JsonDocument.Parse(Assert.Single(sends).Data).RootElement;
         Assert.Equal(JsonValueKind.String, doc.GetProperty("content").ValueKind);
-        Assert.Empty(doc.GetProperty("entries").EnumerateArray());
+        Assert.Equal(0, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
     }
 
     [Fact]
@@ -1132,7 +1132,7 @@ namespace Processor.FileReader;
 /// <c>+00:00</c> — the shape the output schema documents.
 /// </summary>
 /// <param name="EntryCount">
-/// How many entries the node holds. Derived from <see cref="FileNode.Entries"/> and present for a
+/// How many entries the node holds. Derived from <see cref="FileNode.Content"/> and present for a
 /// reader's convenience — the SCHEMA constrains the array, never this, because a counting bug here
 /// must not be able to satisfy a rule the content fails.
 /// </param>
@@ -1145,22 +1145,186 @@ public sealed record FileMetadata(
     int EntryCount);
 
 /// <summary>
-/// One node of the document, and the shape is identical at every level so the schema is a single
-/// self-referencing definition.
+/// What a node holds: either the bytes of a file, or the nodes an archive expanded to. Never both.
 /// <para>
-/// <b>A leaf carries <see cref="Content"/> and an empty <see cref="Entries"/>; an archive carries
-/// null content and its expansion.</b> Carrying the archive's own bytes as well would double the
-/// blob for no consumer.
+/// <b>This is a union, and it replaces a pair of fields that could contradict each other.</b> The
+/// node was <c>(Metadata, byte[]? Content, IReadOnlyList&lt;FileNode&gt; Entries)</c>, which encoded
+/// the leaf/archive distinction TWICE — null content and empty entries — and nothing stopped a bug
+/// from setting both or neither. A closed hierarchy makes the illegal states unrepresentable, and it
+/// is why <c>content</c> is one key in the document rather than two.
 /// </para>
 /// <para>
-/// <b>Depth is one.</b> A zip inside a zip is a leaf: recorded with its bytes and metadata, not
-/// expanded. Recursion is the one dimension here with no natural bound.
+/// C# has no union type, so this is the nearest thing the language offers: an abstract record with a
+/// private constructor, which nothing outside this file can extend.
+/// <see cref="FileNodeConverter"/> is what turns it into one JSON value.
 /// </para>
 /// </summary>
-public sealed record FileNode(
-    FileMetadata Metadata,
-    byte[]? Content,
-    IReadOnlyList<FileNode> Entries);
+public abstract record FileContent
+{
+    // Private, so the two nested records below are the only cases that will ever exist. A third case
+    // added later is a deliberate edit here, not an accident somewhere else.
+    private FileContent()
+    {
+    }
+
+    /// <summary>A file's own bytes. Rendered as a base64 string.</summary>
+    public sealed record Bytes(byte[] Value) : FileContent;
+
+    /// <summary>
+    /// What an archive expanded to. Rendered as an array of nodes.
+    /// <para>
+    /// <b>An archive that expanded to nothing is null, not this holding an empty list</b> — see
+    /// <see cref="FileNode.Content"/>.
+    /// </para>
+    /// </summary>
+    public sealed record Entries(IReadOnlyList<FileNode> Value) : FileContent;
+}
+
+/// <summary>
+/// One node of the document, and the shape is identical at every level so the schema is a single
+/// self-referencing definition.
+/// </summary>
+/// <param name="Content">
+/// The bytes, the expansion, or null.
+/// <para>
+/// <b>Null means no entries.</b> An archive this processor opened and found empty carries null
+/// rather than an empty array. An archive it did NOT open — because the depth limit stopped it, or
+/// because nothing recognised the format — carries <see cref="FileContent.Bytes"/> like any other
+/// file, because an unexpanded archive is a file.
+/// </para>
+/// <para>
+/// <b>An expanded archive never carries its own bytes as well.</b> The entries ARE its content, and
+/// holding both would double the blob for no consumer.
+/// </para>
+/// </param>
+public sealed record FileNode(FileMetadata Metadata, FileContent? Content);
+
+/// <summary>
+/// Writes <see cref="FileNode"/> as <c>{metadata, content}</c>, with <c>content</c> as a base64
+/// string, an array of nodes, or null.
+/// <para>
+/// <b>A hand-written converter rather than <c>[JsonDerivedType]</c>.</b> System.Text.Json's
+/// polymorphic support emits a <c>$type</c> discriminator property, which would appear in the
+/// document and have to be admitted by the output schema — a serializer's implementation detail
+/// leaking into a contract other systems read. Here the JSON value's own type IS the discriminator,
+/// which is what makes the schema expressible as one <c>type: ["string", "array", "null"]</c>.
+/// </para>
+/// </summary>
+public sealed class FileNodeConverter : JsonConverter<FileNode>
+{
+    private const string MetadataName = "metadata";
+    private const string ContentName = "content";
+
+    public override void Write(Utf8JsonWriter writer, FileNode value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+
+        writer.WritePropertyName(MetadataName);
+        JsonSerializer.Serialize(writer, value.Metadata, options);
+
+        writer.WritePropertyName(ContentName);
+
+        switch (value.Content)
+        {
+            case FileContent.Bytes bytes:
+                // Encodes straight into the output buffer. There is no intermediate base64 string on
+                // the heap, which is why the memory budget in the design does not carry one.
+                writer.WriteBase64StringValue(bytes.Value);
+                break;
+
+            case FileContent.Entries entries:
+                writer.WriteStartArray();
+                foreach (var entry in entries.Value)
+                {
+                    Write(writer, entry, options);
+                }
+
+                writer.WriteEndArray();
+                break;
+
+            default:
+                // Explicitly written, never omitted: the schema requires the key to be present.
+                writer.WriteNullValue();
+                break;
+        }
+
+        writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// The inverse. The processor only ever writes; this exists so a test can round-trip a document
+    /// and assert on its shape rather than on a string.
+    /// </summary>
+    public override FileNode Read(
+        ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException("a file node must be an object");
+        }
+
+        FileMetadata? metadata = null;
+        FileContent? content = null;
+
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName)
+            {
+                throw new JsonException("expected a property name");
+            }
+
+            var name = reader.GetString();
+            reader.Read();
+
+            switch (name)
+            {
+                case MetadataName:
+                    metadata = JsonSerializer.Deserialize<FileMetadata>(ref reader, options);
+                    break;
+
+                case ContentName:
+                    content = ReadContent(ref reader, options);
+                    break;
+
+                default:
+                    reader.Skip();
+                    break;
+            }
+        }
+
+        if (metadata is null)
+        {
+            throw new JsonException("a file node must carry metadata");
+        }
+
+        return new FileNode(metadata, content);
+    }
+
+    private FileContent? ReadContent(ref Utf8JsonReader reader, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.Null:
+                return null;
+
+            case JsonTokenType.String:
+                return new FileContent.Bytes(reader.GetBytesFromBase64());
+
+            case JsonTokenType.StartArray:
+                var entries = new List<FileNode>();
+                while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+                {
+                    entries.Add(Read(ref reader, typeof(FileNode), options));
+                }
+
+                return new FileContent.Entries(entries);
+
+            default:
+                throw new JsonException(
+                    $"content must be a string, an array or null, and was {reader.TokenType}");
+        }
+    }
+}
 
 /// <summary>The one serializer configuration for the document.</summary>
 internal static class FileDocument
@@ -1171,14 +1335,16 @@ internal static class FileDocument
     /// <c>Data</c>. Inheriting its convention here would silently rename every property the output
     /// schema names.
     /// <para>
-    /// <c>Never</c> ignore: <c>content</c> must be emitted as <c>null</c> on an archive rather than
-    /// omitted, because the schema requires the key to be present.
+    /// <c>Never</c> ignore: <c>content</c> must be emitted as <c>null</c> on an empty archive rather
+    /// than omitted, because the schema requires the key to be present. The converter writes that
+    /// key unconditionally, so this setting governs <see cref="FileMetadata"/>'s nullable timestamps.
     /// </para>
     /// </summary>
     public static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+        Converters = { new FileNodeConverter() },
     };
 }
 ```
@@ -1188,7 +1354,21 @@ internal static class FileDocument
 `src/Processor.FileReader/FileContentBuilder.cs`:
 
 ```csharp
+using Processor.FileReader.Extractors;
+
 namespace Processor.FileReader;
+
+/// <summary>
+/// The document, and how deep the expansion actually went.
+/// <para>
+/// <b>The depth is returned rather than logged here because it is the only place it survives.</b> A
+/// document that fails its output schema is reported by the framework with
+/// <c>EntryId: Guid.Empty</c>, no payload and no file path — so if a step's <c>MaxDepth</c> and the
+/// registered schema disagree, nothing in the failure says which depth was produced. The processor
+/// logs this alongside the entry count, where an operator can find it.
+/// </para>
+/// </summary>
+internal sealed record FileBuildResult(FileNode Node, int DepthReached);
 
 /// <summary>
 /// Stage two: everything that involves looking inside the file. Stage one — the processor — is dry
@@ -1203,57 +1383,205 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
     private readonly IReadOnlyList<IArchiveExtractor> _extractors = extractors.ToList();
 
     /// <summary>
-    /// The document. An extension with a registered extractor is expanded one level; anything else
-    /// is a leaf.
+    /// The document. An archive is expanded until <see cref="FileReaderConfig.MaxDepth"/> is
+    /// reached or nothing left is an archive, whichever comes first.
     /// </summary>
-    public FileNode Build(byte[] bytes, FileInfo info, FileReaderConfig config)
+    public FileBuildResult Build(byte[] bytes, FileInfo info, FileReaderConfig config)
     {
-        // The EXTENSION decides, not the file's magic bytes. It has already been checked against the
-        // payload, so this switch is on a value the workflow author declared — a file whose contents
-        // disagree with its name fails in the extractor, which is where that fault belongs.
-        var extractor = _extractors.FirstOrDefault(e => e.CanHandle(config.ExpectedExtension));
+        // ONE budget for the WHOLE tree, not one per level. Threading a running total through the
+        // recursion is what keeps MaxDepth safe to raise: a per-level ceiling would let a depth-5
+        // archive hold five times the limit, and the pod's memory does not care which level a byte
+        // came from.
+        // THE DECLARATION CROSS-CHECK, and it applies to the top-level file ONLY.
+        //
+        // Choosing the extractor by signature means a file whose bytes are not an archive is simply
+        // a leaf — which is right for a CSV and WRONG for a damaged zip, because the step would
+        // report Completed over a file nobody can open. That is the false-HEALTHY failure each
+        // extractor's internal guard exists to prevent, reached from outside those guards: a
+        // corrupt header matches no signature, so no extractor is ever asked.
+        //
+        // Here, and only here, there is something to check the bytes against. ExpectedExtension had
+        // to match this file's extension for it to be admitted at all, so a name declaring an
+        // archive is a claim a workflow author made. Below this level nothing is declared — an
+        // entry's name is written by whoever built the archive — so nested entries get no such
+        // check and an unrecognised one is an ordinary leaf.
+        //
+        // A .zip that is really a tar does NOT fail: an extractor claims it by signature, and
+        // reading the content is the more useful answer than refusing the name.
+        if (NamedAsArchive(info.Extension) && Match(bytes) is null)
+        {
+            throw new ArchiveExtractionException(
+                $"the file is named '{info.Extension}' and its leading bytes are no archive this "
+                + "processor knows — treating it as corrupt rather than recording it as a plain file");
+        }
+
+        var budget = new ExpansionBudget(config.MaximumSizeBytes);
+        var depthReached = 0;
+
+        var node = BuildNode(
+            info.Name,
+            info.Extension,
+            bytes,
+            // FileInfo.Length rather than the array's length: for the root they agree, and the
+            // former is what the dry inspection already reported to an operator.
+            info.Length,
+            info.CreationTimeUtc,
+            info.LastWriteTimeUtc,
+            depth: 0,
+            config.EffectiveMaxDepth,
+            budget,
+            ref depthReached);
+
+        return new FileBuildResult(node, depthReached);
+    }
+
+    /// <summary>
+    /// One node, and its subtree.
+    /// <para>
+    /// <b>Plain recursion, and the bound is the reason it is safe.</b> <c>MaxDepth</c> is validated
+    /// into <c>1..FileReaderConfig.MaxSupportedDepth</c> before any file is opened, so the stack
+    /// here is at most that many frames deep. There is no unlimited setting for this to run away on.
+    /// </para>
+    /// </summary>
+    private FileNode BuildNode(
+        string name,
+        string extension,
+        byte[] bytes,
+        long sizeBytes,
+        DateTime? createdUtc,
+        DateTime? modifiedUtc,
+        int depth,
+        int maxDepth,
+        ExpansionBudget budget,
+        ref int depthReached)
+    {
+        if (depth > depthReached)
+        {
+            depthReached = depth;
+        }
+
+        // THE BYTES DECIDE, not the name. See IArchiveExtractor.CanHandle for why this reversed:
+        // below the first level there is no declared extension to trust, because an entry's name is
+        // written by whoever built the archive. FileReaderConfig.ExpectedExtension still admits the
+        // file to the step; it no longer chooses what opens it.
+        //
+        // No match is the ordinary termination: a CSV matches nothing and is a leaf.
+        var extractor = depth < maxDepth ? Match(bytes) : null;
 
         if (extractor is null)
         {
-            return Leaf(info.Name, bytes, info.CreationTimeUtc, info.LastWriteTimeUtc);
+            // A leaf, and that includes an archive the depth limit stopped us opening — an
+            // unexpanded archive is a file, so it carries its own bytes exactly like any other.
+            return new FileNode(
+                new FileMetadata(name, extension, sizeBytes, createdUtc, modifiedUtc, EntryCount: 0),
+                new FileContent.Bytes(bytes));
         }
 
         using var stream = new MemoryStream(bytes, writable: false);
         var entries = extractor.Extract(stream);
 
-        var children = entries
-            .Select(e => Leaf(e.Name, e.Content, createdUtc: null, e.ModifiedUtc))
-            .ToList();
+        var children = new List<FileNode>(entries.Count);
+
+        foreach (var entry in entries)
+        {
+            // Charged BEFORE the child is built, so the budget stops the walk at the entry that
+            // crosses it rather than after its whole subtree is materialised. A nested archive is
+            // charged twice on purpose — once as its parent's entry, once for what it expands to —
+            // because at that moment both genuinely exist in memory.
+            budget.Charge(entry.Content.LongLength);
+
+            children.Add(BuildNode(
+                entry.Name,
+                Path.GetExtension(entry.Name),
+                entry.Content,
+                entry.Content.LongLength,
+                // Archives record no creation time; only a modification time, and not in every
+                // format.
+                createdUtc: null,
+                entry.ModifiedUtc,
+                depth + 1,
+                maxDepth,
+                budget,
+                ref depthReached));
+        }
 
         return new FileNode(
-            new FileMetadata(
-                info.Name,
-                info.Extension,
-                info.Length,
-                info.CreationTimeUtc,
-                info.LastWriteTimeUtc,
-                children.Count),
-            // Null, not the archive's bytes: the entries ARE its content, and carrying both doubles
-            // the blob.
-            Content: null,
-            children);
+            new FileMetadata(name, extension, sizeBytes, createdUtc, modifiedUtc, children.Count),
+            // Null, not an empty list: an archive that expanded to nothing has no entries, and the
+            // document says so with one value rather than an empty array a reader has to interpret.
+            children.Count == 0 ? null : new FileContent.Entries(children));
     }
 
     /// <summary>
-    /// A node with content and no entries. Used for a plain file and for every archive entry, which
-    /// is what makes depth exactly one — an entry is never itself expanded.
+    /// True when some registered extractor is normally named with this extension — i.e. the name
+    /// claims to be an archive this processor can open.
     /// </summary>
-    private static FileNode Leaf(string name, byte[] content, DateTime? createdUtc, DateTime? modifiedUtc)
-        => new(
-            new FileMetadata(
-                name,
-                Path.GetExtension(name),
-                content.LongLength,
-                createdUtc,
-                modifiedUtc,
-                EntryCount: 0),
-            content,
-            []);
+    private bool NamedAsArchive(string extension)
+        => _extractors.Any(e => e.Extension.Equals(extension, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The first extractor that recognises these bytes, or null when none does.</summary>
+    private IArchiveExtractor? Match(ReadOnlySpan<byte> bytes)
+    {
+        // A plain loop rather than LINQ: a ReadOnlySpan cannot be captured by a lambda, and copying
+        // the array to satisfy FirstOrDefault would allocate a second copy of every file.
+        foreach (var extractor in _extractors)
+        {
+            if (extractor.CanHandle(bytes))
+            {
+                return extractor;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// THE EXPANSION CEILING, carried across the whole tree.
+    /// <para>
+    /// Without it the only bound anywhere is on the FILE, and an archive is exactly where that stops
+    /// being the transient cost: the design and <c>k8s/37-processor-filereader.yaml</c> both price
+    /// the pod at ~1.78x the file, which is right for a leaf and wrong for an archive, where the
+    /// document is ~1.33x the EXPANDED content. An ordinary 10:1 CSV zip at a 32 MiB ceiling is
+    /// ~320 MB expanded plus document and envelope, against a 768Mi limit.
+    /// </para>
+    /// <para>
+    /// <b>An OOM here is not one lost message, it is a POISON MESSAGE.</b> The author never returns,
+    /// so <c>ProcessDispatchHandler</c> never reclaims the input key; RabbitMQ requeues the unacked
+    /// dispatch; the replacement pod reads the same key and dies the same way. One archive takes the
+    /// processor down for every workflow on that queue. A <c>FailedException</c> is acked and
+    /// terminal, which is the entire difference.
+    /// </para>
+    /// <para>
+    /// <b>The honest limit of this, unchanged by depth:</b> an extractor has already materialised
+    /// every entry's bytes by the time the loop above runs — the seam returns a list, and it cannot
+    /// stream, because wrapping a library fault requires a try/catch and C# forbids
+    /// <c>yield return</c> inside one. So this bounds the DOCUMENT and gives a deterministic, acked
+    /// failure; it does not bound any single extractor's own peak. That residual is recorded rather
+    /// than papered over.
+    /// </para>
+    /// </summary>
+    private sealed class ExpansionBudget(long ceiling)
+    {
+        private long _spent;
+
+        public void Charge(long bytes)
+        {
+            _spent += bytes;
+
+            if (_spent <= ceiling)
+            {
+                return;
+            }
+
+            // ArchiveExtractionException so it lands on the contract's `extracting {FilePath}
+            // failed:` template — the processor's one catch. Both numbers are named, because an
+            // operator needs to see which limit was hit and by how much; "at least" is literal,
+            // since the walk stops before totalling what is left.
+            throw new ArchiveExtractionException(
+                $"the archive expands to at least {_spent} bytes, above the {ceiling} byte ceiling "
+                + "that bounds the expansion as well as the file");
+        }
+    }
 }
 ```
 
@@ -1270,17 +1598,65 @@ namespace Processor.FileReader.Extractors;
 public sealed record ExtractedEntry(string Name, byte[] Content, DateTime? ModifiedUtc);
 
 /// <summary>
-/// One archive format. Registered in the container and resolved by extension, so adding a format is
-/// one class and one registration.
+/// One archive format. Registered in the container and resolved by the file's own leading bytes, so
+/// adding a format is one class and one registration.
 /// </summary>
 public interface IArchiveExtractor
 {
-    /// <summary>True when this extractor handles the extension, compared case-insensitively.</summary>
-    bool CanHandle(string extension);
+    /// <summary>
+    /// The extension a file of this format is normally named with, leading dot — <c>".zip"</c>.
+    /// <para>
+    /// <b>This is NOT how the extractor is chosen.</b> <see cref="CanHandle"/> does that, from the
+    /// bytes. This exists for one narrower job, at the top level only: telling a file whose name
+    /// declares an archive, and whose bytes are not one, from an ordinary file.
+    /// </para>
+    /// <para>
+    /// <b>Without it, corruption reads as success.</b> A <c>.zip</c> whose header is damaged matches
+    /// no signature, so signature-only dispatch would make it a leaf carrying its raw bytes and the
+    /// step would report Completed over a file nobody could open — precisely the false-HEALTHY
+    /// failure the guards inside each extractor exist to prevent, arrived at from outside them. The
+    /// top-level file is the one place a DECLARATION exists to cross-check against, because
+    /// <c>FileReaderConfig.ExpectedExtension</c> already had to match it for the file to be admitted
+    /// at all. Nested entries have no declaration and get no such check.
+    /// </para>
+    /// </summary>
+    string Extension { get; }
+
+    /// <summary>
+    /// True when these bytes are this extractor's format, judged by the format's signature.
+    /// <para>
+    /// <b>The BYTES decide, not the name — and that is a deliberate reversal.</b> This was
+    /// <c>CanHandle(string extension)</c>, resolved against <c>FileReaderConfig.ExpectedExtension</c>.
+    /// That worked only because the top-level file has a declared extension the processor had
+    /// already validated. Nested entries have no declaration: an entry's name is a string written by
+    /// whoever built the archive, and below the first level there is nothing to check it against. So
+    /// the two jobs are split — <c>ExpectedExtension</c> ADMITS a file to the step, and the
+    /// signature CHOOSES the extractor — and the second one works at every depth for the same
+    /// reason.
+    /// </para>
+    /// <para>
+    /// <b>What this costs: a mismatch is no longer a fault.</b> A file named <c>.zip</c> that is
+    /// really a tar used to reach <c>ZipExtractor</c> and throw. It now extracts as a tar. The
+    /// admission check still refuses a file whose extension is not what the step named, so the
+    /// disagreement that remains is between a name the step approved and the content behind it —
+    /// and reading the content is the more useful answer of the two.
+    /// </para>
+    /// <para>
+    /// <b>No match is the ordinary case, not a fault.</b> A CSV matches nothing, and that is exactly
+    /// how the expansion terminates: a node whose bytes match no extractor is a leaf.
+    /// </para>
+    /// </summary>
+    /// <param name="header">
+    /// The candidate's bytes, or as many as exist. Implementations must tolerate a buffer shorter
+    /// than the signature they look for and answer false rather than throw — a two-byte file is a
+    /// legitimate leaf, not a malformed archive.
+    /// </param>
+    bool CanHandle(ReadOnlySpan<byte> header);
 
     /// <summary>
     /// Every entry, one level deep. Directories are skipped rather than represented — an empty
-    /// directory carries no content and no metadata worth a node.
+    /// directory carries no content and no metadata worth a node. Depth beyond one is the caller's
+    /// job: this seam expands exactly the archive it is handed.
     /// </summary>
     IReadOnlyList<ExtractedEntry> Extract(Stream archive);
 }
@@ -1296,20 +1672,60 @@ In `src/Processor.FileReader/FileReaderProcessor.cs`, add `FileContentBuilder bu
     protected override async Task ProcessAsync(
         byte[] data, FileReaderConfig? config, Guid executionId, CancellationToken ct)
     {
+        // Config first: it is the cheapest check and it depends on nothing else. A step wired with a
+        // ceiling this pod cannot honour is wrong before any file is named.
         var settings = Validate(config);
+
         var path = ReadPath(data);
         var info = Inspect(path, settings);
+
         var bytes = Read(info);
 
-        var node = builder.Build(bytes, info, settings);
+        FileBuildResult built;
+        try
+        {
+            built = builder.Build(bytes, info, settings);
+        }
+        catch (ArchiveExtractionException ex)
+        {
+            // A corrupt or truncated archive, or one that expands past the ceiling. Deterministic —
+            // it fails identically on every redelivery — so it is a failed step, not something to
+            // park. No log here: the framework writes this message verbatim when it catches the
+            // exception.
+            //
+            // ONE TYPE, NOT A LIST OF LIBRARY TYPES, and that is the fix for a measured seam
+            // failure. This catch was originally `InvalidDataException or IOException or
+            // NotSupportedException or ArgumentException` — the BCL types zip raises. When rar
+            // arrived it brought SharpCompress, whose entire hierarchy descends from
+            // SharpCompressException : Exception and matched none of them, so an ordinary corrupt
+            // rar fell through to the framework's general catch: "the transform faulted", at Warning,
+            // with a stack trace and THE FILE PATH NOWHERE. The path is the whole reason §9 puts
+            // these checks here. Each extractor now wraps its own library's faults, exactly as
+            // BaseExporter's sinks wrap theirs into ExportSinkException.
+            //
+            // Bare Exception is deliberately NOT caught: a NullReferenceException in the builder is
+            // a programming error, and reporting it to an operator as a corrupt file buries a bug
+            // under a plausible business failure. Anything that is not this type reaches the
+            // framework's general catch with its stack trace intact.
+            throw new FailedException($"extracting {info.FullName} failed: {ex.Message}");
+        }
 
-        // The SHAPE of the result, never its content. A count and a size are safe to log; the bytes
-        // are upstream data and stay out of every template in this system.
+        // The SHAPE of the result, never its content. A count, a size and a depth are safe to log;
+        // the bytes are upstream data and stay out of every template in this system.
+        //
+        // THE DEPTH IS HERE BECAUSE THIS IS THE ONLY PLACE IT SURVIVES. The registered output schema
+        // states its depth structurally, and a document deeper than the schema admits fails
+        // validation one hop later — reported with EntryId Guid.Empty, no payload and no file path,
+        // at Information. Nothing in that failure says how deep this document actually went, so a
+        // MaxDepth that disagrees with the schema would otherwise be undiagnosable from the logs.
+        // Both numbers are logged: what was asked for, and what the file actually needed.
         logger.LogInformation(
-            "read {FilePath} as {SizeBytes} bytes with {EntryCount} entries",
-            info.FullName, info.Length, node.Metadata.EntryCount);
+            "read {FilePath} as {SizeBytes} bytes with {EntryCount} entries, expanded to depth "
+            + "{DepthReached} of {MaxDepth}",
+            info.FullName, info.Length, built.Node.Metadata.EntryCount, built.DepthReached,
+            settings.EffectiveMaxDepth);
 
-        var document = JsonSerializer.SerializeToUtf8Bytes(node, FileDocument.Options);
+        var document = JsonSerializer.SerializeToUtf8Bytes(built.Node, FileDocument.Options);
 
         // ONE branch, on the execution id this dispatch arrived with. Not NewExecutionId(): this is
         // a transform, not a source, so the lineage it was handed is the lineage it continues.
@@ -1443,9 +1859,17 @@ public sealed class ZipExtractorTests : IDisposable
     {
         var extractor = new ZipExtractor();
 
-        Assert.True(extractor.CanHandle(".zip"));
-        Assert.True(extractor.CanHandle(".ZIP"));
-        Assert.False(extractor.CanHandle(".tar"));
+        // A local file header, and the canonical empty archive's EOCD. The empty one must be
+        // claimed too, or it would be mistaken for a leaf instead of reaching the exemption in
+        // Extract that tells a genuinely empty zip from a corrupt one.
+        Assert.True(extractor.CanHandle(new byte[] { 0x50, 0x4B, 0x03, 0x04 }));
+        Assert.True(extractor.CanHandle(new byte[] { 0x50, 0x4B, 0x05, 0x06 }));
+
+        // A rar, a truncated signature, and nothing at all. A buffer shorter than the signature is
+        // answered rather than thrown on: a two-byte file is a legitimate leaf.
+        Assert.False(extractor.CanHandle(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 }));
+        Assert.False(extractor.CanHandle(new byte[] { 0x50, 0x4B }));
+        Assert.False(extractor.CanHandle(ReadOnlySpan<byte>.Empty));
     }
 
     [Fact]
@@ -1455,9 +1879,9 @@ public sealed class ZipExtractorTests : IDisposable
 
         var doc = await DocumentOf(path);
 
-        Assert.Equal(JsonValueKind.Null, doc.GetProperty("content").ValueKind);
+        Assert.Equal(JsonValueKind.Array, doc.GetProperty("content").ValueKind);
         Assert.Equal(2, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
-        Assert.Equal(2, doc.GetProperty("entries").GetArrayLength());
+        Assert.Equal(2, doc.GetProperty("content").GetArrayLength());
     }
 
     [Fact]
@@ -1466,13 +1890,13 @@ public sealed class ZipExtractorTests : IDisposable
         var path = WriteZip("orders.zip", ("a.csv", "id\n"));
 
         var doc = await DocumentOf(path);
-        var entry = doc.GetProperty("entries")[0];
+        var entry = doc.GetProperty("content")[0];
 
         Assert.Equal("a.csv", entry.GetProperty("metadata").GetProperty("name").GetString());
         Assert.Equal(".csv", entry.GetProperty("metadata").GetProperty("extension").GetString());
         Assert.Equal(3, entry.GetProperty("metadata").GetProperty("sizeBytes").GetInt64());
         Assert.Equal("id\n", Encoding.UTF8.GetString(entry.GetProperty("content").GetBytesFromBase64()));
-        Assert.Empty(entry.GetProperty("entries").EnumerateArray());
+        Assert.Equal(0, entry.GetProperty("metadata").GetProperty("entryCount").GetInt32());
     }
 
     [Fact]
@@ -1490,11 +1914,11 @@ public sealed class ZipExtractorTests : IDisposable
         }
 
         var doc = await DocumentOf(path);
-        var entry = doc.GetProperty("entries")[0];
+        var entry = doc.GetProperty("content")[0];
 
         Assert.Equal("inner.zip", entry.GetProperty("metadata").GetProperty("name").GetString());
         Assert.Equal(JsonValueKind.String, entry.GetProperty("content").ValueKind);
-        Assert.Empty(entry.GetProperty("entries").EnumerateArray());
+        Assert.Equal(0, entry.GetProperty("metadata").GetProperty("entryCount").GetInt32());
     }
 
     [Fact]
@@ -1516,7 +1940,7 @@ public sealed class ZipExtractorTests : IDisposable
 
         Assert.Equal(1, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
         Assert.Equal("a.csv",
-            doc.GetProperty("entries")[0].GetProperty("metadata").GetProperty("name").GetString());
+            doc.GetProperty("content")[0].GetProperty("metadata").GetProperty("name").GetString());
     }
 
     [Fact]
@@ -1532,6 +1956,219 @@ public sealed class ZipExtractorTests : IDisposable
             ZipPayload, E, CancellationToken.None));
 
         Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnArchiveExpandingPastTheCeilingFailsTheStepNamingBothNumbers()
+    {
+        // THE POISON-MESSAGE CASE. Before this bound, the only ceiling anywhere was on the FILE, and
+        // an archive is exactly where that stops being the transient cost: this zip is a few hundred
+        // bytes on disk and 200,000 bytes expanded, so it sails through every check in stage one. At
+        // the real 32 MiB ceiling an ordinary 10:1 CSV zip is ~320 MB expanded plus document and
+        // envelope, against a 768Mi limit.
+        //
+        // An OOM-kill there is not one lost message: the author never returns, so the input key is
+        // never reclaimed, RabbitMQ requeues the unacked dispatch, and the replacement pod reads the
+        // same key and dies the same way — taking the processor down for every workflow on that
+        // queue. A FailedException is acked and terminal, which is the whole difference.
+        //
+        // Both numbers are asserted because an operator has to see which limit was hit and by how
+        // much; a message saying only "too large" cannot be acted on.
+        var path = Path.Combine(_dir, "compressible.zip");
+        using (var file = File.Create(path))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        {
+            // Zeros, so the archive is tiny and the expansion is not. Two entries, so the bound is
+            // also shown to be CUMULATIVE rather than per-entry — neither entry alone exceeds the
+            // 65536 ceiling the payload names.
+            foreach (var name in new[] { "a.csv", "b.csv" })
+            {
+                using var entry = archive.CreateEntry(name).Open();
+                entry.Write(new byte[100_000]);
+            }
+        }
+
+        Assert.True(new FileInfo(path).Length < 65536, "the archive itself must pass the file check");
+
+        var (processor, _) = Build();
+
+        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            ZipPayload, E, CancellationToken.None));
+
+        // The `extracting` template, not `rejected`: the file broke no rule, and the fault only
+        // exists once the archive was opened.
+        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("100000", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("65536", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnArchiveInsideTheCeilingStillSucceeds()
+    {
+        // The other side of the bound. The ceiling is inclusive and cumulative, so an archive whose
+        // entries total exactly the ceiling must still pass — an off-by-one here would reject valid
+        // work with a message about memory, which is the worst possible false positive for a limit
+        // whose whole purpose is to be invisible until it matters.
+        var path = Path.Combine(_dir, "exact.zip");
+        using (var file = File.Create(path))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        {
+            using var entry = archive.CreateEntry("a.csv").Open();
+            entry.Write(new byte[65536]);
+        }
+
+        var doc = await DocumentOf(path);
+
+        Assert.Equal(65536, doc.GetProperty("content")[0]
+                                .GetProperty("metadata").GetProperty("sizeBytes").GetInt64());
+    }
+
+    /// <summary>A real two-entry zip, in memory. The corrupt fixtures below are damaged copies of it.</summary>
+    private static byte[] RealZipBytes()
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using (var w = new StreamWriter(archive.CreateEntry("a.csv").Open()))
+            {
+                w.Write("id\n");
+            }
+
+            using (var w = new StreamWriter(archive.CreateEntry("b.csv").Open()))
+            {
+                w.Write("id,name\n");
+            }
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>The offset of the End Of Central Directory record — <c>PK\x05\x06</c>, scanned from the tail.</summary>
+    private static int EndOfCentralDirectoryOffset(byte[] zip)
+    {
+        for (var i = zip.Length - 22; i >= 0; i--)
+        {
+            if (zip[i] == 0x50 && zip[i + 1] == 0x4B && zip[i + 2] == 0x05 && zip[i + 3] == 0x06)
+            {
+                return i;
+            }
+        }
+
+        throw new InvalidOperationException("the fixture has no EOCD record");
+    }
+
+    [Fact]
+    public void AGenuinelyEmptyZipSucceedsWithNoEntries()
+    {
+        // The "valid, so must not throw" side of the guard's line, and the shape was VERIFIED here
+        // rather than taken on description: a ZipArchive opened for Create and closed without a
+        // single entry writes exactly 22 bytes — a bare EOCD record beginning PK\x05\x06 — on .NET
+        // 8.0.31. Those two facts are what ZipExtractor's exemption tests for, so this test asserts
+        // them directly; if a future runtime writes a different empty archive, this fails HERE with
+        // the reason, rather than the exemption silently ceasing to match.
+        byte[] empty;
+        using (var buffer = new MemoryStream())
+        {
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+            }
+
+            empty = buffer.ToArray();
+        }
+
+        Assert.Equal(22, empty.Length);
+        Assert.Equal<byte[]>([0x50, 0x4B, 0x05, 0x06], empty[..4]);
+
+        using var stream = new MemoryStream(empty, writable: false);
+
+        Assert.Empty(new ZipExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public void AZipWhoseEndOfCentralDirectoryClaimsNothingThrows()
+    {
+        // THE MEASURED FALSE-HEALTHY HOLE, built from a real zip rather than a hand-typed blob.
+        //
+        // .NET 8.0.31's ZipArchive DOES cross-check the EOCD's declared entry count against what the
+        // central directory yields — ~2200 mutations of this fixture (truncation at every length,
+        // zeroed and 0xFF windows of eight sizes at every offset, the whole central directory
+        // zeroed, everything before the EOCD zeroed, prefix and suffix padding) all threw. What it
+        // does NOT cross-check is the central directory's declared size and offset. Zero the EOCD's
+        // entry counts AND its central-directory size/offset — twelve bytes at the tail, the shape a
+        // partially-flushed write or a padded transfer produces — and the file still holds both
+        // entries, still opens cleanly, and enumerates NOTHING with no exception.
+        //
+        // Without the guard that is {content: null, entries: [], entryCount: 0}: schema-valid,
+        // written to L2, reported Completed. This is the test that would have caught it.
+        var zip = RealZipBytes();
+        var eocd = EndOfCentralDirectoryOffset(zip);
+
+        // EOCD layout from its signature: +8 entries-on-this-disk, +10 total entries, +12 central
+        // directory size, +16 central directory offset. Twelve bytes, all zeroed.
+        Array.Clear(zip, eocd + 8, 12);
+
+        using var stream = new MemoryStream(zip, writable: false);
+
+        var ex = Assert.Throws<ArchiveExtractionException>(() => new ZipExtractor().Extract(stream));
+        Assert.Contains("no entries", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AZipWhoseCentralDirectoryIsZeroedThrows()
+    {
+        // The review's other named case: the central directory zeroed with the EOCD left intact.
+        // On .NET 8.0.31 this one is caught by the runtime itself — the EOCD still declares two
+        // entries and the directory now yields none, which ZipArchive rejects by name — so the
+        // throw arrives through ZipExtractor's WRAPPING rather than through its guard. Both paths
+        // must reach the processor as the same type, which is exactly what this pins: whichever
+        // layer notices, the caller sees ArchiveExtractionException and the step names the file.
+        var zip = RealZipBytes();
+        var eocd = EndOfCentralDirectoryOffset(zip);
+        var cdSize = BitConverter.ToInt32(zip, eocd + 12);
+        var cdOffset = BitConverter.ToInt32(zip, eocd + 16);
+
+        Array.Clear(zip, cdOffset, cdSize);
+
+        using var stream = new MemoryStream(zip, writable: false);
+
+        Assert.Throws<ArchiveExtractionException>(() => new ZipExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public void ADirectoryOnlyZipSucceedsWithNoEntries()
+    {
+        // The regression the raw-count split exists to prevent, and the reason the guard counts what
+        // ZipArchive yielded rather than what survived the directory filter. A zip holding nothing
+        // but a directory entry is healthy: it opens, it yields one entry, and the filter drops it.
+        // Gating on the filtered count would report this valid archive as corrupt — the exact fault
+        // fix round 2 found in tar.
+        var path = Path.Combine(_dir, "dirs-only.zip");
+        using (var file = File.Create(path))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        {
+            archive.CreateEntry("nested/");
+        }
+
+        using var stream = File.OpenRead(path);
+
+        Assert.Empty(new ZipExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public void ExtractedEntryModifiedUtcCarriesUtcKind()
+    {
+        // Task 4 review requirement: ZipArchiveEntry.LastWriteTime is a DateTimeOffset, and
+        // .UtcDateTime is the conversion that yields DateTimeKind.Utc. .DateTime or .LocalDateTime
+        // would silently produce Kind.Local/Unspecified, which System.Text.Json renders without a
+        // trailing Z (or with an offset) — a schema failure one hop downstream, in a branch that is
+        // discarded rather than reported.
+        var path = WriteZip("orders.zip", ("a.csv", "id\n"));
+
+        using var stream = File.OpenRead(path);
+        var entries = new ZipExtractor().Extract(stream);
+
+        Assert.Equal(DateTimeKind.Utc, Assert.Single(entries).ModifiedUtc!.Value.Kind);
     }
 }
 ```
@@ -1552,40 +2189,170 @@ namespace Processor.FileReader.Extractors;
 
 /// <summary>
 /// Zip, on the in-box <c>System.IO.Compression</c>. No package.
+/// <para>
+/// <b>The false-HEALTHY guard is here too, and it was added last.</b> This class predates the lesson
+/// tar and rar each learned — a library will open a damaged archive, report success, and enumerate
+/// nothing, so a corrupt file reads as a healthy <i>empty</i> archive and the step reports Completed
+/// over <c>{content: null, entries: [], entryCount: 0}</c>. Zip was written before that and was not
+/// revisited; see the guard below for what was measured on this runtime and what was not.
+/// </para>
 /// </summary>
 public sealed class ZipExtractor : IArchiveExtractor
 {
-    public bool CanHandle(string extension)
-        => ".zip".Equals(extension, StringComparison.OrdinalIgnoreCase);
+    /// <summary>The canonical empty archive: an EOCD record and nothing else.</summary>
+    private const int EmptyArchiveLength = 22;
 
+    public string Extension => ".zip";
+
+    /// <summary>
+    /// <c>PK\x05\x06</c> — the End Of Central Directory signature, which in a 22-byte file is the
+    /// whole file.
+    /// </summary>
+    private static ReadOnlySpan<byte> EndOfCentralDirectorySignature => [0x50, 0x4B, 0x05, 0x06];
+
+    /// <summary>
+    /// <c>PK\x03\x04</c> (a local file header) or <c>PK\x05\x06</c> (an End Of Central Directory
+    /// with nothing before it — the canonical empty archive, which must still be claimed here so it
+    /// reaches <see cref="Extract"/> and its exemption rather than being mistaken for a leaf).
+    /// </summary>
+    public bool CanHandle(ReadOnlySpan<byte> header)
+        => header.Length >= 4
+           && header[0] == 0x50 && header[1] == 0x4B
+           && ((header[2] == 0x03 && header[3] == 0x04)
+               || (header[2] == 0x05 && header[3] == 0x06));
+
+    /// <summary>
+    /// Every file entry, one level deep, or an <see cref="ArchiveExtractionException"/> saying why
+    /// the archive could not be read.
+    /// </summary>
     public IReadOnlyList<ExtractedEntry> Extract(Stream archive)
     {
-        using var zip = new ZipArchive(archive, ZipArchiveMode.Read);
-
-        var entries = new List<ExtractedEntry>(zip.Entries.Count);
-
-        foreach (var entry in zip.Entries)
+        try
         {
-            // A directory is a zero-length entry whose name ends in a slash. Skipped rather than
-            // represented: it carries no content, and counting it would make entryCount disagree
-            // with the nodes a reader actually sees.
-            if (entry.FullName.EndsWith('/') || entry.Name.Length == 0)
+            return ExtractCore(archive);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException
+                                      or NotSupportedException or ArgumentException)
+        {
+            // The BCL fault types System.IO.Compression raises, wrapped into the one type the
+            // processor catches. Not bare Exception: a NullReferenceException here is a bug in this
+            // class, and it must reach the framework's general catch with its stack trace rather
+            // than be reported to an operator as a corrupt file.
+            throw new ArchiveExtractionException(ex.Message, ex);
+        }
+    }
+
+    private static List<ExtractedEntry> ExtractCore(Stream archive)
+    {
+        var entries = new List<ExtractedEntry>();
+
+        // Counts every entry ZipArchive actually yielded, BEFORE the directory filter below drops
+        // any of them — the same split TarExtractor and RarExtractor make, and for the same reason.
+        // Gating the guard on entries.Count instead would report a valid directory-only zip as
+        // corrupt, which is the regression fix round 2 caught in tar.
+        var rawEntryCount = 0;
+
+        // leaveOpen: true, unlike the plain constructor this class used before. The empty-archive
+        // exemption below re-reads this same stream after the archive is done with it, which
+        // requires the stream to still be open at that point.
+        using (var zip = new ZipArchive(archive, ZipArchiveMode.Read, leaveOpen: true))
+        {
+            foreach (var entry in zip.Entries)
             {
-                continue;
+                rawEntryCount++;
+
+                // A directory is a zero-length entry whose name ends in a slash. Skipped rather than
+                // represented: it carries no content, and counting it would make entryCount disagree
+                // with the nodes a reader actually sees.
+                if (entry.FullName.EndsWith('/') || entry.Name.Length == 0)
+                {
+                    continue;
+                }
+
+                using var stream = entry.Open();
+                using var buffer = new MemoryStream();
+                stream.CopyTo(buffer);
+
+                // entry.Name, not FullName: the directory a zip recorded is not part of the entry's
+                // identity here, and a path separator in a node name would read as structure the
+                // document does not have.
+                //
+                // .UtcDateTime, not .DateTime or .LocalDateTime: LastWriteTime is a DateTimeOffset,
+                // and only the UtcDateTime conversion yields DateTimeKind.Utc. System.Text.Json
+                // renders a Local or Unspecified DateTime without the trailing Z (or with an offset
+                // instead), which fails the output schema one hop after this method returns — a
+                // branch where the failure is discarded rather than reported.
+                entries.Add(new ExtractedEntry(
+                    entry.Name, buffer.ToArray(), entry.LastWriteTime.UtcDateTime));
             }
+        }
 
-            using var stream = entry.Open();
-            using var buffer = new MemoryStream();
-            stream.CopyTo(buffer);
-
-            // entry.Name, not FullName: the directory a zip recorded is not part of the entry's
-            // identity here, and a path separator in a node name would read as structure the
-            // document does not have.
-            entries.Add(new ExtractedEntry(
-                entry.Name, buffer.ToArray(), entry.LastWriteTime.UtcDateTime));
+        // THE FALSE-HEALTHY GUARD, matching tar's shape rather than rar's — a genuinely empty zip is
+        // a real, valid file and must still succeed, so this needs an exemption where rar does not.
+        //
+        // WHAT WAS MEASURED, on .NET 8.0.31, against a real 221-byte two-entry zip built in a scratch
+        // program (not a hand-typed blob), before this guard was written:
+        //
+        //  - Truncation at every length 1..220 throws. So does every 1/2/4/8/16/32/64/97-byte window
+        //    zeroed or 0xFF-filled at every offset before the EOCD, every zeroing of the whole
+        //    central directory, every zeroing of everything before the EOCD, and 1..64 bytes of
+        //    padding prepended or appended. ~2200 mutations, ZERO of which opened with zero entries:
+        //    this runtime DOES cross-check the EOCD's declared entry count against what the central
+        //    directory actually yielded, and says so by name.
+        //  - It cross-checks the count, and NOT the central directory's declared size and offset.
+        //    Zero the EOCD's entry-count AND its central-directory size/offset fields — twelve bytes,
+        //    the shape a partially-flushed write or a padded transfer produces at the tail — and the
+        //    221-byte file with both of its entries still in it opens cleanly and enumerates NOTHING,
+        //    with no exception. That is the hole, reproduced, and it is what the test pins.
+        //
+        // The guard covers the CLASS, not that one byte pattern: any damage that opens successfully
+        // and yields nothing is caught however it arose, on this runtime version or a later one whose
+        // internal cross-checks differ again. What remains unguarded is a nonzero but wrong count —
+        // three entries silently becoming two — because nothing in a zip states how many there should
+        // have been.
+        if (rawEntryCount == 0 && !IsCanonicalEmptyArchive(archive))
+        {
+            throw new ArchiveExtractionException(
+                "The zip produced no entries and is not the canonical 22-byte empty archive — " +
+                "treating it as corrupt rather than returning it as a healthy empty archive.");
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// True for the one zip that legitimately yields nothing: a bare End Of Central Directory record
+    /// with no entries and no comment, which is exactly 22 bytes beginning <c>PK\x05\x06</c>.
+    /// <para>
+    /// <b>The shape was verified rather than assumed</b> — a <c>ZipArchive</c> opened in
+    /// <c>Create</c> mode and closed without a single entry writes precisely those 22 bytes on .NET
+    /// 8.0.31, checked in the same scratch program that found the hole above.
+    /// </para>
+    /// <para>
+    /// This is deliberately narrower than "no entries and a plausible EOCD". A zip longer than 22
+    /// bytes has something in it — local file records, a central directory, or padding — and a file
+    /// with content that enumerates to nothing is the corrupt case, not the empty one. A valid empty
+    /// zip carrying an archive comment would be rejected by this, and that is accepted: nothing in
+    /// this system writes one, and admitting a variable-length tail would reopen the door the guard
+    /// closes.
+    /// </para>
+    /// </summary>
+    private static bool IsCanonicalEmptyArchive(Stream stream)
+    {
+        // A stream that cannot seek cannot be re-read, so the exemption cannot be established and
+        // the archive is treated as corrupt. Every caller here hands over a seekable MemoryStream or
+        // FileStream; this is the safe answer for one that does not, because falsely claiming
+        // "empty" is the failure mode this whole guard exists to prevent.
+        if (!stream.CanSeek || stream.Length != EmptyArchiveLength)
+        {
+            return false;
+        }
+
+        stream.Position = 0;
+        Span<byte> head = stackalloc byte[4];
+        stream.ReadExactly(head);
+
+        return head.SequenceEqual(EndOfCentralDirectorySignature);
     }
 }
 ```
@@ -1595,17 +2362,32 @@ public sealed class ZipExtractor : IArchiveExtractor
 In `src/Processor.FileReader/FileReaderProcessor.cs`, wrap the builder call:
 
 ```csharp
-        FileNode node;
+        FileBuildResult built;
         try
         {
-            node = builder.Build(bytes, info, settings);
+            built = builder.Build(bytes, info, settings);
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException
-                                      or NotSupportedException or ArgumentException)
+        catch (ArchiveExtractionException ex)
         {
-            // A corrupt or truncated archive. Deterministic — it fails identically on every
-            // redelivery — so it is a failed step, not something to park. No log here: the framework
-            // writes this message verbatim when it catches the exception.
+            // A corrupt or truncated archive, or one that expands past the ceiling. Deterministic —
+            // it fails identically on every redelivery — so it is a failed step, not something to
+            // park. No log here: the framework writes this message verbatim when it catches the
+            // exception.
+            //
+            // ONE TYPE, NOT A LIST OF LIBRARY TYPES, and that is the fix for a measured seam
+            // failure. This catch was originally `InvalidDataException or IOException or
+            // NotSupportedException or ArgumentException` — the BCL types zip raises. When rar
+            // arrived it brought SharpCompress, whose entire hierarchy descends from
+            // SharpCompressException : Exception and matched none of them, so an ordinary corrupt
+            // rar fell through to the framework's general catch: "the transform faulted", at Warning,
+            // with a stack trace and THE FILE PATH NOWHERE. The path is the whole reason §9 puts
+            // these checks here. Each extractor now wraps its own library's faults, exactly as
+            // BaseExporter's sinks wrap theirs into ExportSinkException.
+            //
+            // Bare Exception is deliberately NOT caught: a NullReferenceException in the builder is
+            // a programming error, and reporting it to an operator as a corrupt file buries a bug
+            // under a plausible business failure. Anything that is not this type reaches the
+            // framework's general catch with its stack trace intact.
             throw new FailedException($"extracting {info.FullName} failed: {ex.Message}");
         }
 ```
@@ -1654,13 +2436,30 @@ git commit -m "feat(filereader): zip, one level deep"
 ```csharp
 using System.Formats.Tar;
 using System.Text;
+using System.Text.Json;
+using BaseApi.Tests.Support;
+using BaseProcessor.Core.Processing;
+using Messaging.Transport;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Processor.FileReader;
 using Processor.FileReader.Extractors;
 using Xunit;
 
 namespace BaseApi.Tests.FileReader;
 
-public sealed class TarExtractorTests
+public sealed class TarExtractorTests : IDisposable
 {
+    private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    private readonly string _dir = Directory.CreateTempSubdirectory("skp-filereader-tar-").FullName;
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
     /// <summary>A real tar, built in memory from bytes.</summary>
     private static byte[] Tar(params (string Name, string Text)[] entries)
     {
@@ -1686,9 +2485,17 @@ public sealed class TarExtractorTests
     {
         var extractor = new TarExtractor();
 
-        Assert.True(extractor.CanHandle(".tar"));
-        Assert.True(extractor.CanHandle(".TAR"));
-        Assert.False(extractor.CanHandle(".zip"));
+        // TAR IS THE ONE FORMAT WITH NO SIGNATURE AT OFFSET ZERO: its magic is "ustar" at byte
+        // 257, so this needs 262 bytes where zip needs four.
+        var header = new byte[262];
+        "ustar"u8.CopyTo(header.AsSpan(257));
+        Assert.True(extractor.CanHandle(header));
+
+        // One byte short of the marker, and a zip. A file too small to hold the marker cannot be a
+        // tar at all - the header block alone is 512 bytes.
+        Assert.False(extractor.CanHandle(header.AsSpan(0, 261)));
+        Assert.False(extractor.CanHandle(new byte[] { 0x50, 0x4B, 0x03, 0x04 }));
+        Assert.False(extractor.CanHandle(ReadOnlySpan<byte>.Empty));
     }
 
     [Fact]
@@ -1727,23 +2534,116 @@ public sealed class TarExtractorTests
     {
         // The processor turns this into a failed step naming the path; the extractor's job is only
         // to fail rather than to return a half-read archive as if it were whole.
+        //
+        // ArchiveExtractionException, not ThrowsAny<Exception>. A test named "for the processor to
+        // catch" that accepts ANY exception cannot tell the two cases apart — the one the processor
+        // catches and turns into "extracting {path} failed", and the one that escapes to the
+        // framework's general catch and loses the path entirely. Asserting the seam's type is the
+        // only assertion that means what the name says.
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes("this is not a tar"));
 
-        Assert.ThrowsAny<Exception>(() => new TarExtractor().Extract(stream));
+        Assert.Throws<ArchiveExtractionException>(() => new TarExtractor().Extract(stream));
     }
 
-    // MEASURED, NOT ASSUMED, and the measurement inverted this task's design. TarReader inspects
-    // only the first block and treats an all-zero one as the terminator without reading further --
-    // so 0 bytes, a lone 512-byte zero block, and a zero block FOLLOWED BY GARBAGE all yield zero
-    // entries and no exception. A corrupt archive would have read as a healthy empty one, which is
-    // the false-HEALTHY class this system rejects everywhere.
-    //
-    // The guard that closes it is gated on the RAW yield -- how many entries TarReader returned --
-    // and not on how many survived the regular-file filter. Those answer different questions, and
-    // the first attempt conflated them: a valid directory-only archive parses fine, yields entries,
-    // loses all of them to the filter, and was then reported to the operator as corrupt. Three
-    // tests pin the three sides of that line: AGenuinelyEmptyTarSucceedsWithNoEntries,
-    // ATruncatedHeaderWithGarbageAfterItThrows, ADirectoryOnlyArchiveSucceedsWithNoEntries.
+    [Fact]
+    public void AGenuinelyEmptyTarSucceedsWithNoEntries()
+    {
+        // A valid empty tar is nothing but zero bytes — a lone 512-byte zero block satisfies it,
+        // same as the POSIX-standard two-block terminator, same as 0 bytes. TarReader.GetNextEntry
+        // returns null with no exception for all of these, same as it does for a corrupt archive
+        // (see ATruncatedHeaderWithGarbageAfterItThrows below) — the guard in TarExtractor.Extract
+        // tells them apart by checking whether the stream is all zero. This pins the "valid, so must
+        // not throw" side of that line.
+        using var stream = new MemoryStream(new byte[1024]);
+
+        var entries = new TarExtractor().Extract(stream);
+
+        Assert.Empty(entries);
+    }
+
+    [Fact]
+    public void ATruncatedHeaderWithGarbageAfterItThrows()
+    {
+        // The false-HEALTHY case the guard exists for: TarReader reads the first block, sees it is
+        // all zero, and treats that as the archive's terminator — GetNextEntry returns null with NO
+        // exception, exactly as it would for a real empty tar. Without the guard, a file that was
+        // truncated right after a zeroed header (or any file whose first 512 bytes happen to be
+        // zero, with real bytes after them) would read as a healthy empty archive instead of a
+        // corrupt one. Measured directly against TarReader before writing this test — see
+        // task-6-report.md, fix round 1.
+        var bytes = new byte[522];
+        Encoding.UTF8.GetBytes("garbagexyz").CopyTo(bytes, 512);
+
+        using var stream = new MemoryStream(bytes);
+
+        var ex = Assert.Throws<ArchiveExtractionException>(() => new TarExtractor().Extract(stream));
+        Assert.Contains("not all zero", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADirectoryOnlyArchiveSucceedsWithNoEntries()
+    {
+        // Fix round 2 regression: the guard above must gate on what TarReader actually yielded, not
+        // on what survived the regular-file filter. A directory-only archive (same as one that held
+        // only symlinks, hardlinks, or the excluded ContiguousFile/SparseFile types) parses cleanly —
+        // TarReader reads a real, non-zero header and yields one entry — but the filter drops it, so
+        // entries.Count is 0. Gating the guard on entries.Count made this valid, non-corrupt archive
+        // throw InvalidDataException; gating on the raw TarReader yield count (which is 1, not 0)
+        // fixes it. This test is the third side of the "empty vs. corrupt" line, alongside
+        // AGenuinelyEmptyTarSucceedsWithNoEntries and ATruncatedHeaderWithGarbageAfterItThrows.
+        using var buffer = new MemoryStream();
+        using (var writer = new TarWriter(buffer, leaveOpen: true))
+        {
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.Directory, "emptydir/"));
+        }
+
+        buffer.Position = 0;
+        var entries = new TarExtractor().Extract(buffer);
+
+        Assert.Empty(entries);
+    }
+
+    [Fact]
+    public async Task ACorruptArchiveFailsTheStepNamingThePath()
+    {
+        // THE PROCESSOR-LEVEL TEST TAR NEVER HAD. Only zip had one, which is why nobody noticed that
+        // the processor's catch list was written against zip's exception types and matched nothing
+        // any other library raises. An extractor-level assertion proves the extractor throws; it
+        // proves nothing about whether the throw reaches the caller's catch or escapes to the
+        // framework's general one, where the file path — the entire reason §9 puts these checks in
+        // ProcessAsync — is absent from every line.
+        var path = Path.Combine(_dir, "broken.tar");
+        File.WriteAllText(path, "this is not a tar");
+
+        var processor = new FileReaderProcessor(
+            new RecordingLogger<FileReaderProcessor>(),
+            Options.Create(new FileReaderOptions()),
+            new FileContentBuilder([new TarExtractor()]));
+        processor.BeginDispatch(
+            new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+
+        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            """{"ExpectedExtension":".tar","MinimumSizeBytes":0,"MaximumSizeBytes":65536}""",
+            E, CancellationToken.None));
+
+        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExtractedEntryModifiedUtcCarriesUtcKind()
+    {
+        // Task 4/6 review requirement: TarEntry.ModificationTime is a DateTimeOffset, and
+        // .UtcDateTime is the conversion that yields DateTimeKind.Utc. .DateTime or .LocalDateTime
+        // would silently produce Kind.Local/Unspecified, which System.Text.Json renders without a
+        // trailing Z (or with an offset) — a schema failure one hop downstream, in a branch that is
+        // discarded rather than reported.
+        using var stream = new MemoryStream(Tar(("a.csv", "id\n")));
+
+        var entries = new TarExtractor().Extract(stream);
+
+        Assert.Equal(DateTimeKind.Utc, Assert.Single(entries).ModifiedUtc!.Value.Kind);
+    }
 }
 ```
 
@@ -1768,38 +2668,160 @@ namespace Processor.FileReader.Extractors;
 /// </summary>
 public sealed class TarExtractor : IArchiveExtractor
 {
-    public bool CanHandle(string extension)
-        => ".tar".Equals(extension, StringComparison.OrdinalIgnoreCase);
+    public string Extension => ".tar";
 
+    /// <summary>
+    /// <b>Tar is the one format here with no signature at offset zero.</b> Its magic is the string
+    /// <c>ustar</c> at byte 257, inside the first entry's header block — POSIX writes
+    /// <c>ustar\x00</c><c>00</c> and GNU writes <c>ustar  \x00</c>, and the five shared characters are
+    /// what both agree on. So this needs 262 bytes where zip needs four, and anything shorter is
+    /// answered false: a tar's header block alone is 512 bytes, so a file too small to hold the
+    /// marker cannot be one.
+    /// <para>
+    /// A pre-POSIX v7 tar carries no <c>ustar</c> marker at all and is therefore not claimed here.
+    /// Nothing in this system writes one, and the alternative — inferring tar from a plausible octal
+    /// checksum — would claim files that merely look numeric at the right offsets.
+    /// </para>
+    /// </summary>
+    public bool CanHandle(ReadOnlySpan<byte> header)
+        => header.Length >= 262
+           && header[257] == (byte)'u' && header[258] == (byte)'s' && header[259] == (byte)'t'
+           && header[260] == (byte)'a' && header[261] == (byte)'r';
+
+    /// <summary>
+    /// Every regular file entry, one level deep, or an <see cref="ArchiveExtractionException"/>
+    /// saying why the archive could not be read.
+    /// </summary>
     public IReadOnlyList<ExtractedEntry> Extract(Stream archive)
     {
-        using var reader = new TarReader(archive, leaveOpen: true);
+        try
+        {
+            return ExtractCore(archive);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException
+                                      or NotSupportedException or ArgumentException
+                                      or FormatException or EndOfStreamException)
+        {
+            // The BCL fault types System.Formats.Tar raises, wrapped into the one type the processor
+            // catches. FormatException is listed because TarReader reports an unparsable octal field
+            // that way, and it descends from neither IOException nor ArgumentException — the same
+            // kind of gap that let SharpCompress's whole hierarchy through unhandled.
+            //
+            // Not bare Exception: a NullReferenceException here is a bug in this class, and it must
+            // reach the framework's general catch with its stack trace rather than be reported to an
+            // operator as a corrupt file.
+            throw new ArchiveExtractionException(ex.Message, ex);
+        }
+    }
 
+    private static List<ExtractedEntry> ExtractCore(Stream archive)
+    {
         var entries = new List<ExtractedEntry>();
 
-        while (reader.GetNextEntry() is { } entry)
+        // Counts every node TarReader actually yielded, before the type filter below drops any of
+        // them. Deliberately separate from entries.Count — see the guard below for why the two
+        // counts answer different questions and only one of them means "unreadable archive".
+        var rawEntryCount = 0;
+
+        // leaveOpen: true, unlike ZipExtractor's default false. The all-zero check below re-reads
+        // this same stream after the reader is done with it (to tell a genuinely empty tar from a
+        // corrupt one), which requires the stream to still be open at that point — ZipExtractor has
+        // no equivalent second pass, so it can let ZipArchive close the stream on disposal.
+        using (var reader = new TarReader(archive, leaveOpen: true))
         {
-            // Regular files only. Directories, links and device nodes carry no content this document
-            // has a place for, and representing them would make entryCount disagree with the nodes a
-            // reader sees.
-            if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
-                || entry.DataStream is null)
+            while (reader.GetNextEntry() is { } entry)
             {
-                continue;
+                rawEntryCount++;
+
+                // Regular files only. TarEntryType also has ContiguousFile and SparseFile, both of
+                // which can carry real content — GNU tar --sparse emits SparseFile — and both are
+                // excluded here deliberately, not overlooked: this extractor's fixtures only ever
+                // needed RegularFile/V7RegularFile, and widening the filter to the other two is a
+                // considered follow-up, not a gap found by accident.
+                if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
+                    || entry.DataStream is null)
+                {
+                    continue;
+                }
+
+                using var buffer = new MemoryStream();
+                entry.DataStream.CopyTo(buffer);
+
+                entries.Add(new ExtractedEntry(
+                    // The archive records a path; the node carries a name. A separator in a node
+                    // name would read as structure the document does not have.
+                    Path.GetFileName(entry.Name),
+                    buffer.ToArray(),
+                    // .UtcDateTime, not .DateTime or .LocalDateTime: ModificationTime is a
+                    // DateTimeOffset, and only the UtcDateTime conversion yields DateTimeKind.Utc. A
+                    // Local or Unspecified DateTime renders through System.Text.Json without the
+                    // trailing Z (or with an offset instead), which fails the output schema one hop
+                    // after this method returns — a branch where the failure is discarded rather
+                    // than reported.
+                    entry.ModificationTime.UtcDateTime));
             }
+        }
 
-            using var buffer = new MemoryStream();
-            entry.DataStream.CopyTo(buffer);
-
-            entries.Add(new ExtractedEntry(
-                // The archive records a path; the node carries a name. A separator in a node name
-                // would read as structure the document does not have.
-                Path.GetFileName(entry.Name),
-                buffer.ToArray(),
-                entry.ModificationTime.UtcDateTime));
+        // Measured directly against this in-box reader (see task-6-report.md, fix round 1):
+        // TarReader.GetNextEntry returns null — no exception at all — not only for a genuinely
+        // empty tar (all-zero terminator blocks) but also for 0 bytes, a single 512-byte zero block,
+        // and a 512-byte zero block followed by ~10 bytes of garbage. Only input that reaches far
+        // enough to fail a field (a bad checksum, an unparsable number, a truncated read past the
+        // first block) throws. So "zero entries" alone does not distinguish a healthy empty archive
+        // from a corrupt one — a truncated or partially-zeroed file whose first block happens to be
+        // zero would otherwise read as a healthy empty archive, which is exactly the false-HEALTHY
+        // result this system's design rejects throughout.
+        //
+        // The check is "not all zero bytes", not "has any bytes" or a stricter POSIX two-block rule:
+        // a genuinely empty archive IS all zero bytes (0 bytes and a lone zero block both satisfy
+        // this, the former vacuously), and must still succeed.
+        //
+        // Gated on rawEntryCount, not entries.Count — fix round 2, after review caught the
+        // regression this introduced. Those two counts answer different questions: rawEntryCount is
+        // "did TarReader manage to read anything at all", which is the only question that means the
+        // archive itself is unreadable; entries.Count is "did anything survive the regular-file
+        // filter above", which a perfectly healthy directory-only, symlink-only, hardlink-only, or
+        // sparse/contiguous-only archive can legitimately answer "no" to. Gating on entries.Count
+        // made every one of those valid archives throw InvalidDataException — reporting a healthy
+        // file as corrupt, which is worse than the empty-list result it replaced. Do not collapse
+        // this back to entries.Count: that is exactly the "simplification" this comment exists to
+        // head off.
+        if (rawEntryCount == 0 && !IsAllZeroBytes(archive))
+        {
+            // ArchiveExtractionException, not InvalidDataException as this originally threw. The
+            // type is now the seam's, not the BCL's: FileReaderProcessor catches exactly one type,
+            // so a guard that threw a BCL type would only be caught by coincidence of that type
+            // happening to still be on a list somewhere else.
+            throw new ArchiveExtractionException(
+                "The tar produced no entries and is not all zero bytes — treating it as corrupt " +
+                "rather than returning it as a healthy empty archive.");
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// Re-reads the whole stream from the start. Only reached when TarReader yielded no nodes at
+    /// all, so the extra pass costs nothing on the common path of an archive that actually has
+    /// content — including an archive whose content is entirely nodes this extractor filters out.
+    /// </summary>
+    private static bool IsAllZeroBytes(Stream stream)
+    {
+        stream.Position = 0;
+        var buffer = new byte[8192];
+        int read;
+        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            for (var i = 0; i < read; i++)
+            {
+                if (buffer[i] != 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 }
 ```
@@ -1894,7 +2916,15 @@ In `src/tests/BaseApi.Tests/BaseApi.Tests.csproj`, in the ItemGroup holding `Res
 
 ```csharp
 using System.Text;
+using System.Text.Json;
+using BaseApi.Tests.Support;
+using BaseProcessor.Core.Processing;
+using Messaging.Transport;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Processor.FileReader;
 using Processor.FileReader.Extractors;
+using SharpCompress.Archives.Rar;
 using Xunit;
 
 namespace BaseApi.Tests.FileReader;
@@ -1904,20 +2934,43 @@ namespace BaseApi.Tests.FileReader;
 /// this one cannot, because SharpCompress reads rar and cannot write one. See Fixtures/README.md for
 /// how the file is regenerated.
 /// </summary>
-public sealed class RarExtractorTests
+public sealed class RarExtractorTests : IDisposable
 {
+    private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    private readonly string _dir = Directory.CreateTempSubdirectory("skp-filereader-rar-").FullName;
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
     private static Stream Fixture()
         => File.OpenRead(Path.Combine(
             AppContext.BaseDirectory, "FileReader", "Fixtures", "three-entries.rar"));
+
+    /// <summary>The fixture's first <paramref name="length"/> bytes — the real archive, cut short.</summary>
+    private static byte[] Truncated(int length)
+    {
+        using var full = Fixture();
+        var buffer = new byte[length];
+        var read = full.Read(buffer, 0, length);
+        return read == length ? buffer : buffer[..read];
+    }
 
     [Fact]
     public void ItHandlesRarAndNothingElse()
     {
         var extractor = new RarExtractor();
 
-        Assert.True(extractor.CanHandle(".rar"));
-        Assert.True(extractor.CanHandle(".RAR"));
-        Assert.False(extractor.CanHandle(".zip"));
+        // RAR4 and RAR5 differ only in the seventh byte, and SharpCompress reads both.
+        Assert.True(extractor.CanHandle(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 }));
+        Assert.True(extractor.CanHandle(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01 }));
+
+        Assert.False(extractor.CanHandle(new byte[] { 0x50, 0x4B, 0x03, 0x04 }));
+        Assert.False(extractor.CanHandle(new byte[] { 0x52, 0x61, 0x72 }));
+        Assert.False(extractor.CanHandle(ReadOnlySpan<byte>.Empty));
     }
 
     [Fact]
@@ -1947,9 +3000,117 @@ public sealed class RarExtractorTests
     [Fact]
     public void ACorruptArchiveThrowsForTheProcessorToCatch()
     {
+        // THIS TEST USED TO ASSERT ThrowsAny<Exception>, AND THAT IS WHY THE SEAM FAILURE SURVIVED
+        // REVIEW. Its name claims the throw is one the processor catches; ThrowsAny asserts only
+        // that something was thrown, and what was actually thrown here was a SharpCompress
+        // exception, which descends from SharpCompressException : Exception and matched NONE of the
+        // BCL types the processor's catch list held. So an ordinary corrupt rar failed the step via
+        // the framework's general catch — "the transform faulted", at Warning, with a stack trace
+        // and no file path anywhere — and this test passed over it, every time.
+        //
+        // A test that accepts any exception cannot distinguish the outcome it is named for from the
+        // outcome it exists to prevent. The seam's type is the assertion.
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes("this is not a rar"));
 
-        Assert.ThrowsAny<Exception>(() => new RarExtractor().Extract(stream));
+        Assert.Throws<ArchiveExtractionException>(() => new RarExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public async Task ACorruptArchiveFailsTheStepNamingThePath()
+    {
+        // THE PROCESSOR-LEVEL TEST RAR NEVER HAD, and the one that fails outright against the old
+        // catch list. Only zip had this test; the extractor-level assertions above prove the
+        // extractor throws, and prove nothing about whether the throw reaches the processor's catch
+        // or escapes past it. §9 puts these checks in ProcessAsync precisely so the path is in the
+        // message, so the message is what gets asserted.
+        //
+        // Not a truncation: an ORDINARY corrupt rar, which is the case that was broken. The two
+        // truncation windows below were the only inputs that ever reached this template, because
+        // they trip RarExtractor's own guard rather than SharpCompress's parser.
+        var path = Path.Combine(_dir, "broken.rar");
+        File.WriteAllText(path, "this is not a rar");
+
+        var processor = new FileReaderProcessor(
+            new RecordingLogger<FileReaderProcessor>(),
+            Options.Create(new FileReaderOptions()),
+            new FileContentBuilder([new RarExtractor()]));
+        processor.BeginDispatch(
+            new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+
+        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            """{"ExpectedExtension":".rar","MinimumSizeBytes":0,"MaximumSizeBytes":65536}""",
+            E, CancellationToken.None));
+
+        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATruncatedArchiveJustPastTheSignatureThrowsForTheProcessorToCatch()
+    {
+        // The false-HEALTHY window fix round 1 found: RarArchive.Open succeeds and Entries
+        // enumerates to zero with NO exception for the real fixture truncated to 8-11 bytes — just
+        // past the RAR5 signature, before the main archive header is complete. Measured directly
+        // against this exact fixture (see task-7-fix-round-1-report.md) before adding the guard in
+        // RarExtractor. Without the raw-entry-count guard, this reads as a healthy empty archive
+        // rather than the truncated one it is — the same class of result Task 6 found in TarReader.
+        using var stream = new MemoryStream(Truncated(10));
+
+        Assert.Throws<ArchiveExtractionException>(() => new RarExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public void ATruncatedArchiveJustPastTheMainHeaderThrowsForTheProcessorToCatch()
+    {
+        // The second false-HEALTHY window fix round 1 found: the fixture truncated to 23-26 bytes —
+        // just past the main archive header, before the first file header — opens and enumerates to
+        // zero entries with no exception, same as the signature-window case above. Measured
+        // directly against this exact fixture (see task-7-fix-round-1-report.md).
+        using var stream = new MemoryStream(Truncated(24));
+
+        Assert.Throws<ArchiveExtractionException>(() => new RarExtractor().Extract(stream));
+    }
+
+    [Fact]
+    public void SharpCompressReportsLastModifiedTimeAsLocalKind()
+    {
+        // A canary on a library assumption, not a guard on RarExtractor's own output.
+        // DateTime.ToUniversalTime() returns Kind.Utc unconditionally by .NET contract, regardless
+        // of what Kind the input carried — so asserting the *output* Kind (the test below this one)
+        // is true for every possible thing SharpCompress could hand back, and cannot detect the
+        // change that actually matters. This test pins the input side instead: SharpCompress must
+        // keep reporting LastModifiedTime as Kind.Local for RarExtractor's bare .ToUniversalTime()
+        // call to remain correct. If a future SharpCompress version started returning an
+        // already-correct UTC value labelled Local or Unspecified — plausible for RAR5's
+        // UTC-flagged extended-time field, which this WinRAR-produced fixture does not exercise —
+        // .ToUniversalTime() would silently double-shift it while still landing on Kind.Utc, and
+        // the test below would keep passing over a wrong value. A failure HERE means
+        // RarExtractor's conversion must be re-derived against whatever Kind SharpCompress now
+        // reports — it does not mean this assertion should be relaxed to match.
+        using var stream = Fixture();
+        using var rar = RarArchive.Open(stream);
+
+        Assert.All(rar.Entries, e => Assert.Equal(DateTimeKind.Local, e.LastModifiedTime!.Value.Kind));
+    }
+
+    [Fact]
+    public void ExtractedEntryModifiedUtcCarriesUtcKind()
+    {
+        // Task 4/6/7 review requirement: SharpCompress exposes LastModifiedTime as a DateTime?, not
+        // a DateTimeOffset. Measured directly against this fixture (see task-7-report.md): the value
+        // comes back with Kind.Local (WinRAR records wall-clock time with no timezone, and
+        // SharpCompress marks the DateTime it hands back as Local rather than Unspecified), so
+        // .ToUniversalTime() correctly converts using this machine's offset and yields Kind.Utc.
+        //
+        // This assertion alone cannot regress-test the SharpCompress-side assumption —
+        // .ToUniversalTime() always returns Kind.Utc no matter what Kind it was given, so this test
+        // is documentation of the intended output shape, not a guard. The guard on the input
+        // assumption is SharpCompressReportsLastModifiedTimeAsLocalKind, above.
+        using var stream = Fixture();
+
+        var entries = new RarExtractor().Extract(stream);
+
+        Assert.All(entries, e => Assert.Equal(DateTimeKind.Utc, e.ModifiedUtc!.Value.Kind));
     }
 }
 ```
@@ -1966,6 +3127,7 @@ Expected: FAIL to compile — `RarExtractor` does not exist.
 ```csharp
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
+using SharpCompress.Common;
 
 namespace Processor.FileReader.Extractors;
 
@@ -1982,20 +3144,96 @@ namespace Processor.FileReader.Extractors;
 /// every entry in order, which is the access pattern that works — but an archive the library cannot
 /// read throws, and the processor reports it as an unextractable file rather than a partial success.
 /// </para>
+/// <para>
+/// <b>The false-HEALTHY hole IS present here, same class as Tar's.</b> Fix round 1 measured this
+/// directly by truncating the committed fixture byte by byte (see task-7-fix-round-1-report.md):
+/// most short truncations throw out of <c>RarArchive.Open</c> or out of the <c>Entries</c>
+/// enumeration, but two windows do not — truncated to 8-11 bytes (just past the RAR5 signature) or
+/// to 23-26 bytes (just past the main archive header, before the first file header) both open
+/// successfully and enumerate zero entries with no exception anywhere. An earlier round of this
+/// class tried only an empty stream, garbage bytes, an all-zero block, and a 100-byte truncation —
+/// all well outside this narrow window — and wrongly concluded no guard was needed. That was a gap
+/// in what was tried, not a property of the library: do not trust "every shape I tried throws" as
+/// a proof that no shape exists that doesn't.
+/// </para>
 /// </summary>
 public sealed class RarExtractor : IArchiveExtractor
 {
-    public bool CanHandle(string extension)
-        => ".rar".Equals(extension, StringComparison.OrdinalIgnoreCase);
+    public string Extension => ".rar";
 
+    /// <summary>
+    /// <c>Rar!\x1A\x07</c>, then <c>\x00</c> for RAR4 or <c>\x01</c> for RAR5. Both are claimed —
+    /// SharpCompress reads either, so distinguishing them here would only be able to refuse a file
+    /// the extractor can actually open.
+    /// </summary>
+    public bool CanHandle(ReadOnlySpan<byte> header)
+        => header.Length >= 7
+           && header[0] == (byte)'R' && header[1] == (byte)'a' && header[2] == (byte)'r'
+           && header[3] == (byte)'!' && header[4] == 0x1A && header[5] == 0x07
+           && (header[6] == 0x00 || header[6] == 0x01);
+
+    /// <summary>
+    /// Every file entry, one level deep, or an <see cref="ArchiveExtractionException"/> saying why
+    /// the archive could not be read.
+    /// <para>
+    /// <b>The wrapping is not decoration; it is the fix for a measured seam failure.</b> Every
+    /// SharpCompress fault descends from <c>SharpCompress.Common.SharpCompressException :
+    /// System.Exception</c> — <c>InvalidFormatException</c>, <c>ArchiveException</c>,
+    /// <c>IncompleteArchiveException</c> and the rest — and none of them is an
+    /// <see cref="InvalidDataException"/>, an <see cref="IOException"/>, a
+    /// <see cref="NotSupportedException"/> or an <see cref="ArgumentException"/>, which is what the
+    /// processor's catch list held when this class was added. So an ordinary corrupt rar failed the
+    /// step through the framework's general catch instead, with the file path in no line of it. Only
+    /// the two narrow truncation windows that trip this class's OWN guard ever produced the
+    /// contract's <c>extracting {FilePath} failed:</c> message.
+    /// </para>
+    /// </summary>
     public IReadOnlyList<ExtractedEntry> Extract(Stream archive)
+    {
+        try
+        {
+            return ExtractCore(archive);
+        }
+        catch (SharpCompressException ex)
+        {
+            // The library's own root type, so every present and future SharpCompress fault is
+            // covered by one clause rather than by a list that must be revisited whenever the
+            // package is upgraded. This is the only place in this project that names a SharpCompress
+            // type; the processor stays free of the package entirely, which is the point.
+            throw new ArchiveExtractionException(ex.Message, ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException
+                                      or NotSupportedException or ArgumentException
+                                      or EndOfStreamException)
+        {
+            // SharpCompress does not wrap everything it touches: a stream read that fails, or an
+            // argument it rejects before its own validation runs, still surfaces as a BCL type.
+            //
+            // Not bare Exception: a NullReferenceException here is a bug in this class, and it must
+            // reach the framework's general catch with its stack trace rather than be reported to an
+            // operator as a corrupt file.
+            throw new ArchiveExtractionException(ex.Message, ex);
+        }
+    }
+
+    private static List<ExtractedEntry> ExtractCore(Stream archive)
     {
         using var rar = RarArchive.Open(archive);
 
         var entries = new List<ExtractedEntry>();
 
+        // Counts every entry rar.Entries actually yielded, before the directory/null-key filter
+        // below drops any of them — the same split TarExtractor makes, and for the same reason.
+        // Gating the guard below on entries.Count instead would throw on a valid directory-only
+        // (or, here, entirely-directories) rar, which is a healthy archive with legitimately zero
+        // file nodes. See TarExtractor.Extract's guard comment for the fuller account of that
+        // regression; it applies unchanged to this class.
+        var rawEntryCount = 0;
+
         foreach (var entry in rar.Entries)
         {
+            rawEntryCount++;
+
             // Directories carry no content and no node, matching zip and tar.
             if (entry.IsDirectory || entry.Key is null)
             {
@@ -2009,8 +3247,57 @@ public sealed class RarExtractor : IArchiveExtractor
             entries.Add(new ExtractedEntry(
                 // Key is a path within the archive. The node carries a name, as with tar.
                 Path.GetFileName(entry.Key),
+                // MemoryStream.ToArray() never returns null, so Content is never null here — the
+                // record's constructor takes a non-nullable byte[], and FileContentBuilder.Leaf
+                // dereferences it unguarded.
                 buffer.ToArray(),
+                // LastModifiedTime is a DateTime?, not a DateTimeOffset like Zip's LastWriteTime or
+                // Tar's ModificationTime — SharpCompress has no offset to give for rar. Measured
+                // directly against this fixture (see task-7-report.md): the Kind SharpCompress hands
+                // back is Local, not Unspecified — WinRAR records wall-clock time with no timezone,
+                // and SharpCompress marks the DateTime it constructs as this machine's local time.
+                // .ToUniversalTime() on a Local value converts using that offset and returns
+                // DateTimeKind.Utc, which is what this class must produce: System.Text.Json renders
+                // a Local or Unspecified DateTime without the trailing Z (or with an offset instead),
+                // failing the output schema one hop after this method returns — a branch where the
+                // failure is discarded rather than reported. Had the measured Kind instead come back
+                // Unspecified, this same call would still be correct: .NET's ToUniversalTime treats
+                // Unspecified identically to Local.
+                //
+                // KNOWN LIMITATION, not fixable from here: a plain rar timestamp carries no timezone
+                // at all, so a rar built on a machine in a different timezone than this one produces
+                // a ModifiedUtc that is wrong by that offset — there is no information left in the
+                // format to recover the true instant. RAR5 defines an optional UTC-flagged extended-
+                // time field that would sidestep this, but this fixture (built by a plain WinRAR
+                // `a` command) does not carry it, and SharpCompress's LastModifiedTime does not
+                // expose whether it was present. This is a format/library ceiling, not a bug here.
                 entry.LastModifiedTime?.ToUniversalTime()));
+        }
+
+        // Fix round 1: measured directly against this library by truncating the real committed
+        // fixture byte by byte (see task-7-fix-round-1-report.md). Two windows open successfully via
+        // RarArchive.Open and then enumerate zero entries with no exception anywhere in the loop
+        // above: truncated to 8-11 bytes (just past the RAR5 signature, before the main archive
+        // header is complete) and truncated to 23-26 bytes (just past the main archive header,
+        // before the first file header). Both are ordinary corruption — a transfer or write cut off
+        // in the first ~30 bytes — and both would otherwise read as a healthy empty archive, exactly
+        // the class of false-HEALTHY result Task 6 found in TarReader.
+        //
+        // Unlike TarExtractor, there is no "all zero bytes is a legitimately empty archive" case to
+        // exempt: an all-zero stream and an empty stream both already fail at RarArchive.Open above
+        // (measured in task-7-report.md), and a rar with a valid, fully-read signature and header
+        // always carries at least an end-of-archive record — SharpCompress has no path that yields a
+        // genuinely empty rar with rawEntryCount == 0. So this guard is unconditional: any zero raw
+        // yield is corruption, full stop. If a genuinely empty-but-valid rar is ever found that this
+        // rejects, that is new information this comment does not currently have — stop and report it
+        // rather than loosening this check to guess at what such an archive would look like.
+        if (rawEntryCount == 0)
+        {
+            // ArchiveExtractionException, not InvalidDataException as this originally threw. The
+            // type is now the seam's, not the BCL's — see TarExtractor's matching guard.
+            throw new ArchiveExtractionException(
+                "The rar produced no entries even though it opened successfully — treating it as " +
+                "corrupt rather than returning it as a healthy empty archive.");
         }
 
         return entries;
@@ -2051,7 +3338,7 @@ git commit -m "feat(filereader): rar, from a fixture this repo cannot build"
 
 **Interfaces:**
 - Consumes: `FileNode`, `FileDocument.Options` (Task 4), `ProcessorJsonSchemaValidator` from `BaseProcessor.Core.Validation`.
-- Produces: the registered schema definition, as a file. *(Task 11 rewrites it for the two-key node, keeping depth 1.)*
+- Produces: the registered schema definition, as a file. *(Shown in its Task 11 form: the two-key node, unrolled to depth 1.)*
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2084,19 +3371,23 @@ public sealed class FileReaderSchemaTests
     private static byte[] Serialize(FileNode node)
         => JsonSerializer.SerializeToUtf8Bytes(node, FileDocument.Options);
 
+    private static DateTime Stamp => new(2026, 9, 8, 11, 2, 14, DateTimeKind.Utc);
+
     private static FileNode Leaf(string name, string extension, string text)
         => new(
-            new FileMetadata(name, extension, text.Length,
-                new DateTime(2026, 9, 8, 11, 2, 14, DateTimeKind.Utc),
-                new DateTime(2026, 9, 8, 11, 2, 14, DateTimeKind.Utc), 0),
-            Encoding.UTF8.GetBytes(text),
-            []);
+            new FileMetadata(name, extension, text.Length, Stamp, Stamp, 0),
+            new FileContent.Bytes(Encoding.UTF8.GetBytes(text)));
+
+    private static FileNode Archive(string name, params FileNode[] entries)
+        => new(
+            new FileMetadata(name, ".zip", 40219, Stamp, Stamp, entries.Length),
+            entries.Length == 0 ? null : new FileContent.Entries(entries));
 
     [Fact]
     public void APlainFileDocumentValidates()
     {
         var ok = ProcessorJsonSchemaValidator.TryValidate(
-            Definition(), Serialize(Leaf("orders.csv", ".csv", "id\n")), out var errors);
+            Definition(), Serialize(Leaf("orders.csv", ".csv", "id")), out var errors);
 
         Assert.True(ok, string.Join("; ", errors));
     }
@@ -2104,14 +3395,22 @@ public sealed class FileReaderSchemaTests
     [Fact]
     public void AnArchiveDocumentValidates()
     {
-        var archive = new FileNode(
-            new FileMetadata("orders.zip", ".zip", 40219,
-                new DateTime(2026, 9, 8, 11, 2, 14, DateTimeKind.Utc),
-                new DateTime(2026, 9, 8, 11, 2, 14, DateTimeKind.Utc), 2),
-            Content: null,
-            [Leaf("a.csv", ".csv", "id\n"), Leaf("b.csv", ".csv", "id,name\n")]);
+        var archive = Archive(
+            "orders.zip", Leaf("a.csv", ".csv", "id"), Leaf("b.csv", ".csv", "id,name"));
 
-        var ok = ProcessorJsonSchemaValidator.TryValidate(Definition(), Serialize(archive), out var errors);
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), Serialize(archive), out var errors);
+
+        Assert.True(ok, string.Join("; ", errors));
+    }
+
+    [Fact]
+    public void AnArchiveThatExpandedToNothingValidates()
+    {
+        // content: null is the third form the root may take, and it is the one an empty archive
+        // produces. It is NOT an empty array — see FileNode.Content.
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), Serialize(Archive("empty.zip")), out var errors);
 
         Assert.True(ok, string.Join("; ", errors));
     }
@@ -2122,8 +3421,15 @@ public sealed class FileReaderSchemaTests
         // The drift this schema exists to catch. MessagingJson is PascalCase and governs the
         // envelope; a document serialized with those options instead of FileDocument.Options would
         // rename every property here.
+        //
+        // It ALSO drops FileNodeConverter, so content would be written as whatever the default
+        // serializer makes of the FileContent hierarchy rather than as one value. Either failure
+        // alone is enough; the schema catches both as the same rejection.
+        //
+        // global:: because this namespace (BaseApi.Tests.FileReader) has a sibling
+        // BaseApi.Tests.Messaging namespace that shadows the unqualified "Messaging" lookup.
         var pascal = JsonSerializer.SerializeToUtf8Bytes(
-            Leaf("orders.csv", ".csv", "id\n"), Messaging.Contracts.MessagingJson.Options);
+            Leaf("orders.csv", ".csv", "id"), global::Messaging.Contracts.MessagingJson.Options);
 
         var ok = ProcessorJsonSchemaValidator.TryValidate(Definition(), pascal, out _);
 
@@ -2137,7 +3443,7 @@ public sealed class FileReaderSchemaTests
         // suggestions — and it is how providerName leaking into the document would be caught.
         var json = """
             {"metadata":{"name":"a.csv","extension":".csv","sizeBytes":3,"createdUtc":null,
-             "modifiedUtc":null,"entryCount":0},"content":"aWQK","entries":[],
+             "modifiedUtc":null,"entryCount":0},"content":"aWQK",
              "providerName":"acme"}
             """;
 
@@ -2148,23 +3454,60 @@ public sealed class FileReaderSchemaTests
     }
 
     [Fact]
-    public void AnEntryThatCarriesItsOwnEntriesIsRejected()
+    public void ASeparateEntriesKeyIsRejected()
     {
-        // Depth is one. A document claiming two levels did not come from this processor.
+        // The shape this document had before content became one key. A producer still writing the
+        // old pair must not pass: `entries` is now an unknown property, and additionalProperties
+        // false is what says so.
         var json = """
             {"metadata":{"name":"o.zip","extension":".zip","sizeBytes":9,"createdUtc":null,
-             "modifiedUtc":null,"entryCount":1},"content":null,
-             "entries":[{"metadata":{"name":"i.zip","extension":".zip","sizeBytes":3,
-               "createdUtc":null,"modifiedUtc":null,"entryCount":1},"content":"aWQK",
-               "entries":[{"metadata":{"name":"d.csv","extension":".csv","sizeBytes":3,
-                 "createdUtc":null,"modifiedUtc":null,"entryCount":0},"content":"aWQK",
-                 "entries":[]}]}]}
+             "modifiedUtc":null,"entryCount":0},"content":null,"entries":[]}
             """;
 
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(), Encoding.UTF8.GetBytes(json), out _);
 
         Assert.False(ok);
+    }
+
+    [Fact]
+    public void ADocumentNestedDeeperThanTheSchemaAdmitsIsRejected()
+    {
+        // THE DEPTH RULE, and it is structural rather than declared: the baseline unrolls to one
+        // level, so `depth0` admits only a string and an entry carrying its own entries has nowhere
+        // to validate against.
+        //
+        // This is the failure a step whose MaxDepth exceeds the registered schema produces. It is
+        // the contract working — nothing keeps MaxDepth and the schema in sync on purpose — and it
+        // is why FileReaderProcessor logs the depth it actually reached: this rejection carries no
+        // file path and no payload by the time an operator sees it.
+        var json = """
+            {"metadata":{"name":"o.zip","extension":".zip","sizeBytes":9,"createdUtc":null,
+             "modifiedUtc":null,"entryCount":1},
+             "content":[{"metadata":{"name":"i.zip","extension":".zip","sizeBytes":3,
+               "createdUtc":null,"modifiedUtc":null,"entryCount":1},
+               "content":[{"metadata":{"name":"d.csv","extension":".csv","sizeBytes":3,
+                 "createdUtc":null,"modifiedUtc":null,"entryCount":0},"content":"aWQK"}]}]}
+            """;
+
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), Encoding.UTF8.GetBytes(json), out _);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public void ADocumentRoundTripsThroughTheConverter()
+    {
+        // The converter's Read exists for this: asserting on the SHAPE that comes back rather than
+        // on a string, so a change to whitespace or property order does not read as a regression.
+        var archive = Archive("orders.zip", Leaf("a.csv", ".csv", "id"));
+
+        var back = JsonSerializer.Deserialize<FileNode>(Serialize(archive), FileDocument.Options);
+
+        var entries = Assert.IsType<FileContent.Entries>(back!.Content);
+        var bytes = Assert.IsType<FileContent.Bytes>(Assert.Single(entries.Value).Content);
+        Assert.Equal("id", Encoding.UTF8.GetString(bytes.Value));
     }
 }
 ```
@@ -2188,18 +3531,29 @@ Expected: FAIL — the placeholder `{}` accepts everything, so the three rejecti
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["metadata", "content", "entries"],
-  "properties": {
-    "metadata": { "$ref": "#/$defs/metadata" },
-    "content": { "type": ["string", "null"] },
-    "entries": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/leaf" }
-    }
-  },
+  "$ref": "#/$defs/depth1",
   "$defs": {
+    "depth1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "content"],
+      "properties": {
+        "metadata": { "$ref": "#/$defs/metadata" },
+        "content": {
+          "type": ["string", "array", "null"],
+          "items": { "$ref": "#/$defs/depth0" }
+        }
+      }
+    },
+    "depth0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "content"],
+      "properties": {
+        "metadata": { "$ref": "#/$defs/metadata" },
+        "content": { "type": "string" }
+      }
+    },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -2211,16 +3565,6 @@ Expected: FAIL — the placeholder `{}` accepts everything, so the three rejecti
         "createdUtc": { "type": ["string", "null"] },
         "modifiedUtc": { "type": ["string", "null"] },
         "entryCount": { "type": "integer", "minimum": 0 }
-      }
-    },
-    "leaf": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["metadata", "content", "entries"],
-      "properties": {
-        "metadata": { "$ref": "#/$defs/metadata" },
-        "content": { "type": "string" },
-        "entries": { "type": "array", "maxItems": 0 }
       }
     }
   }
@@ -2239,10 +3583,53 @@ particular feed. It is registered against the processor identity as the output s
 
 ## What it asserts
 
-- The recursive `{metadata, content, entries}` node, `additionalProperties: false` at both levels.
-- Depth one: an entry's `entries` is `maxItems: 0`.
-- The root's `content` may be a base64 string (a plain file) or null (an archive); an entry's is
-  always a string.
+- The `{metadata, content}` node, `additionalProperties: false` at every level.
+- `content` is one key holding one of three things: a base64 string (a file's bytes), an array of
+  nodes (what an archive expanded to), or null (an archive that expanded to nothing). It is never
+  two keys that can disagree — see `FileContent` for why that pair was collapsed.
+- **Depth one, structurally.** `depth1` may hold an array of `depth0`; `depth0`'s `content` is a
+  string and nothing else, so it cannot hold entries. That is the whole depth rule.
+
+## How depth is expressed, and why it is not a keyword
+
+JSON Schema has no depth keyword, and there is no way to say "at most two levels" without writing
+the levels out. So the bound is a property of the STRUCTURE: N node definitions, each referencing
+the next, and the last one admitting only a string. You read the limit by counting the definitions.
+
+To admit a zip whose entries are themselves zips — `MaxDepth: 2` on the step — add a level and
+repoint the root:
+
+    "$ref": "#/$defs/depth2",
+
+    "depth2": {
+      "type": "object", "additionalProperties": false,
+      "required": ["metadata", "content"],
+      "properties": {
+        "metadata": { "$ref": "#/$defs/metadata" },
+        "content": { "type": ["string", "array", "null"],
+                     "items": { "$ref": "#/$defs/depth1" } }
+      }
+    },
+
+leaving `depth1` and `depth0` as they are. Each level is the same object with `items` pointing one
+step shallower.
+
+**The alternative — a self-referencing `$ref` admitting any depth — is rejected.** It would validate
+every document this processor can produce, which sounds like a feature and is the opposite: a schema
+that admits any depth can never tell you the depth was wrong. The unrolled form is what makes a
+`MaxDepth` the schema does not expect show up as a validation failure instead of a surprise
+downstream.
+
+**Nothing keeps `MaxDepth` and this file in sync, and that is deliberate.** The step payload states
+what to expand; this states what a document may look like. When they disagree the document fails
+validation, exactly as a wrong entry count does. Note what that costs before raising either: the post
+handler reports `Failed` with `EntryId: Guid.Empty` and no file path, so the processor logs the depth
+it actually reached in `ProcessAsync` — that log line is where the diagnosis lives.
+
+**The depth here caps every workflow using this processor.** `OutputSchemaId` is a column on the
+processor row, not the step, so there is one output schema per processor identity. A step's
+`MaxDepth` can sit at or below what this file admits, never above it. A feed needing more than the
+baseline allows needs its own processor identity, not just its own payload.
 
 ## What it cannot assert
 
@@ -2252,42 +3639,50 @@ construction. `format` and `contentEncoding` are ANNOTATIONS in 2020-12, not ass
 `"format": "date-time"` to the timestamps would document them and enforce nothing. Use `pattern` if
 that is ever needed.
 
+**Which of the three `content` forms a given node should have.** `type: ["string", "array", "null"]`
+admits all three at `depth1`, because the root may legitimately be any of them: a plain file, an
+expanded archive, or an empty one. A feed that always ships an archive can narrow it — see below.
+
 ## Per-feed variants
 
 Entry count is enforced HERE rather than in the step payload, so a feed with a fixed layout gets its
-own schema derived from this one. Constrain `entries`, never `metadata.entryCount` — the array is
+own schema derived from this one. Constrain `content`, never `metadata.entryCount` — the array is
 the fact, the count is derived, and pinning the derived field would let a counting bug satisfy a
 rule the content fails.
 
-Exactly three entries:
+Always an archive, exactly three entries:
 
-    "entries": { "type": "array", "minItems": 3, "maxItems": 3,
-                 "items": { "$ref": "#/$defs/leaf" } }
+    "content": { "type": "array", "minItems": 3, "maxItems": 3,
+                 "items": { "$ref": "#/$defs/depth0" } }
+
+Dropping `"string"` and `"null"` from the type is what makes it "always an archive": a plain file or
+an empty archive now fails.
 
 One `.wav` and two `.csv`, order-independent — note that `minContains`/`maxContains` must sit beside
 their OWN `contains`, so two cardinality rules need two subschemas under `allOf`:
 
-    "entries": {
+    "content": {
       "type": "array", "minItems": 3, "maxItems": 3,
-      "items": { "$ref": "#/$defs/leaf" },
+      "items": { "$ref": "#/$defs/depth0" },
       "allOf": [
         { "contains": { "$ref": "#/$defs/wav" }, "minContains": 1, "maxContains": 1 },
         { "contains": { "$ref": "#/$defs/csv" }, "minContains": 2, "maxContains": 2 }
       ]
     }
 
-with narrowing definitions that REFINE `leaf` rather than replace it — legal because `$ref` takes
+with narrowing definitions that REFINE `depth0` rather than replace it — legal because `$ref` takes
 sibling keywords in 2020-12, and note the omitted `additionalProperties`, which only ever sees
 `properties` declared in the same schema object:
 
-    "wav": { "$ref": "#/$defs/leaf",
+    "wav": { "$ref": "#/$defs/depth0",
              "properties": { "metadata": { "properties": { "extension": { "const": ".wav" } } } } }
 
 ## Registration
 
 **This schema is not registered by the build.** It is a database row against the processor identity,
 applied as a deploy step. Until it is, `OutputSchemaId` is null, `TryValidate` returns true without
-decoding anything, and **nothing enforces entry count anywhere** — this file is its only home.
+decoding anything, and **nothing enforces entry count or depth anywhere** — this file is its only
+home.
 
 Note what a failure costs, because it decides where checks belong: the post handler reports
 `Failed` with `EntryId: Guid.Empty` and acks. Nothing is written to L2 and the step's input was
