@@ -1722,6 +1722,19 @@ public sealed class TarExtractorTests
 
         Assert.ThrowsAny<Exception>(() => new TarExtractor().Extract(stream));
     }
+
+    // MEASURED, NOT ASSUMED, and the measurement inverted this task's design. TarReader inspects
+    // only the first block and treats an all-zero one as the terminator without reading further --
+    // so 0 bytes, a lone 512-byte zero block, and a zero block FOLLOWED BY GARBAGE all yield zero
+    // entries and no exception. A corrupt archive would have read as a healthy empty one, which is
+    // the false-HEALTHY class this system rejects everywhere.
+    //
+    // The guard that closes it is gated on the RAW yield -- how many entries TarReader returned --
+    // and not on how many survived the regular-file filter. Those answer different questions, and
+    // the first attempt conflated them: a valid directory-only archive parses fine, yields entries,
+    // loses all of them to the filter, and was then reported to the operator as corrupt. Three
+    // tests pin the three sides of that line: AGenuinelyEmptyTarSucceedsWithNoEntries,
+    // ATruncatedHeaderWithGarbageAfterItThrows, ADirectoryOnlyArchiveSucceedsWithNoEntries.
 }
 ```
 
