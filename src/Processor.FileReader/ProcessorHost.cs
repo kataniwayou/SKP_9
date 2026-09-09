@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
+using Processor.FileReader.Extractors;
 
 namespace Processor.FileReader;
 
@@ -108,6 +109,10 @@ public static class ProcessorHost
         // Kafka processors' broker address: infrastructure limits come from configuration, business
         // expectations come from the step payload.
         builder.Services.Configure<FileReaderOptions>(builder.Configuration.GetSection("FileReader"));
+
+        // One registration per format. FileContentBuilder takes them all and asks each whether it
+        // handles the step's extension.
+        builder.Services.AddSingleton<IArchiveExtractor, ZipExtractor>();
 
         builder.Services.AddSingleton<FileContentBuilder>();
 
