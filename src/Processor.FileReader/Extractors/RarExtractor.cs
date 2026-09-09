@@ -17,15 +17,16 @@ namespace Processor.FileReader.Extractors;
 /// read throws, and the processor reports it as an unextractable file rather than a partial success.
 /// </para>
 /// <para>
-/// <b>No false-HEALTHY guard, unlike <see cref="TarExtractor"/>.</b> Tar's near miss was
-/// <c>TarReader.GetNextEntry</c> returning null with no exception for a truncated-right-after-a-
-/// zeroed-header file, making a corrupt archive read as a healthy empty one. Measured directly
-/// against this library before writing this class (see task-7-report.md): <c>RarArchive.Open</c>
-/// itself — before this method ever reaches the <c>Entries</c> enumeration below — throws
-/// <c>InvalidFormatException</c> for an empty stream, for a few bytes of garbage, for a block of
-/// all-zero bytes the same length as the fixture, and for the real fixture truncated to its first
-/// 100 bytes. Every corrupt shape tried fails at open, so there is no gap for a corrupt archive to
-/// fall through as an empty one, and no equivalent guard belongs here.
+/// <b>The false-HEALTHY hole IS present here, same class as Tar's.</b> Fix round 1 measured this
+/// directly by truncating the committed fixture byte by byte (see task-7-fix-round-1-report.md):
+/// most short truncations throw out of <c>RarArchive.Open</c> or out of the <c>Entries</c>
+/// enumeration, but two windows do not — truncated to 8-11 bytes (just past the RAR5 signature) or
+/// to 23-26 bytes (just past the main archive header, before the first file header) both open
+/// successfully and enumerate zero entries with no exception anywhere. An earlier round of this
+/// class tried only an empty stream, garbage bytes, an all-zero block, and a 100-byte truncation —
+/// all well outside this narrow window — and wrongly concluded no guard was needed. That was a gap
+/// in what was tried, not a property of the library: do not trust "every shape I tried throws" as
+/// a proof that no shape exists that doesn't.
 /// </para>
 /// </summary>
 public sealed class RarExtractor : IArchiveExtractor
@@ -39,8 +40,18 @@ public sealed class RarExtractor : IArchiveExtractor
 
         var entries = new List<ExtractedEntry>();
 
+        // Counts every entry rar.Entries actually yielded, before the directory/null-key filter
+        // below drops any of them — the same split TarExtractor makes, and for the same reason.
+        // Gating the guard below on entries.Count instead would throw on a valid directory-only
+        // (or, here, entirely-directories) rar, which is a healthy archive with legitimately zero
+        // file nodes. See TarExtractor.Extract's guard comment for the fuller account of that
+        // regression; it applies unchanged to this class.
+        var rawEntryCount = 0;
+
         foreach (var entry in rar.Entries)
         {
+            rawEntryCount++;
+
             // Directories carry no content and no node, matching zip and tar.
             if (entry.IsDirectory || entry.Key is null)
             {
@@ -70,7 +81,39 @@ public sealed class RarExtractor : IArchiveExtractor
                 // failure is discarded rather than reported. Had the measured Kind instead come back
                 // Unspecified, this same call would still be correct: .NET's ToUniversalTime treats
                 // Unspecified identically to Local.
+                //
+                // KNOWN LIMITATION, not fixable from here: a plain rar timestamp carries no timezone
+                // at all, so a rar built on a machine in a different timezone than this one produces
+                // a ModifiedUtc that is wrong by that offset — there is no information left in the
+                // format to recover the true instant. RAR5 defines an optional UTC-flagged extended-
+                // time field that would sidestep this, but this fixture (built by a plain WinRAR
+                // `a` command) does not carry it, and SharpCompress's LastModifiedTime does not
+                // expose whether it was present. This is a format/library ceiling, not a bug here.
                 entry.LastModifiedTime?.ToUniversalTime()));
+        }
+
+        // Fix round 1: measured directly against this library by truncating the real committed
+        // fixture byte by byte (see task-7-fix-round-1-report.md). Two windows open successfully via
+        // RarArchive.Open and then enumerate zero entries with no exception anywhere in the loop
+        // above: truncated to 8-11 bytes (just past the RAR5 signature, before the main archive
+        // header is complete) and truncated to 23-26 bytes (just past the main archive header,
+        // before the first file header). Both are ordinary corruption — a transfer or write cut off
+        // in the first ~30 bytes — and both would otherwise read as a healthy empty archive, exactly
+        // the class of false-HEALTHY result Task 6 found in TarReader.
+        //
+        // Unlike TarExtractor, there is no "all zero bytes is a legitimately empty archive" case to
+        // exempt: an all-zero stream and an empty stream both already fail at RarArchive.Open above
+        // (measured in task-7-report.md), and a rar with a valid, fully-read signature and header
+        // always carries at least an end-of-archive record — SharpCompress has no path that yields a
+        // genuinely empty rar with rawEntryCount == 0. So this guard is unconditional: any zero raw
+        // yield is corruption, full stop. If a genuinely empty-but-valid rar is ever found that this
+        // rejects, that is new information this comment does not currently have — stop and report it
+        // rather than loosening this check to guess at what such an archive would look like.
+        if (rawEntryCount == 0)
+        {
+            throw new InvalidDataException(
+                "The rar produced no entries even though it opened successfully — treating it as " +
+                "corrupt rather than returning it as a healthy empty archive.");
         }
 
         return entries;
