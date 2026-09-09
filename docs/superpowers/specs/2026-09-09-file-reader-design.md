@@ -1,7 +1,8 @@
 # FileReader — Design
 
 **Date:** 2026-09-09
-**Status:** Decided. Not yet implemented.
+**Status:** Implemented 2026-09-09, in `src/Processor.FileReader/`. Amended during
+implementation where measurement contradicted the design — each correction is marked in place.
 **Introduces:** `src/Processor.FileReader/`, the fourth concrete processor and the first that reads
 the filesystem.
 **Depends on:** `BaseProcessor.Core` unchanged. Every decision below lands in author code, a manifest,
@@ -150,6 +151,30 @@ coexists is the raw file `byte[]`, the serialized UTF-8 document at ~1.33x the f
 message body — that document base64'd *again* inside the `ProcessedData` envelope, ~1.78x — and, at
 validation in the post handler, a full `JsonDocument` DOM over it. The work and post consumers are
 the *same process*, so a dispatch and a branch overlap.
+
+### The ceiling bounds the expansion too, and one term of it is still unbounded
+
+**`MaximumSizeBytes` bounds the archive's expanded content as well as the file** — added during
+implementation, because the paragraph above priced only the leaf case. An archive's document is
+~1.33x its *expanded* content, not its file size, so an ordinary 10:1 CSV zip at a 32 MiB ceiling is
+~320 MB expanded before the document and envelope are built at all. `FileContentBuilder` accumulates
+expanded bytes as entries are read and fails with the `extracting` template naming both numbers.
+
+**Why an OOM here would be worse than a failed step.** The author never returns, so
+`ProcessDispatchHandler` never reclaims the input key; RabbitMQ requeues the unacked dispatch; the
+replacement pod reads the same key and dies identically. That is a poison message, and it takes the
+processor down for every workflow on its queue, not just the one that sent the file.
+
+**One term remains unbounded, and it is recorded rather than fixed.** `IArchiveExtractor.Extract`
+returns a materialised list, so every entry's bytes exist before the builder can check anything — the
+bound aborts before the document and envelope are built, which is most of the cost at ordinary
+compression ratios, but the extractor's own peak is not capped. A high-ratio archive is still
+reachable poison. **The fix is to move the ceiling into the seam** — `Extract(Stream, long
+maxExpandedBytes)`, with each extractor totalling as it reads — roughly four lines per extractor and
+one interface change. An implementation note claiming this needs an iterator, and that C# forbids
+`yield return` inside a try/catch so it cannot be done, is **wrong on the second half**: the manual
+enumerator form puts the `yield return` outside the try and compiles. Recorded here so the next
+person does not re-derive the wrong constraint.
 
 **An earlier draft of this paragraph also listed "the base64 string during serialization", and there
 is no such string.** `JsonSerializer.SerializeToUtf8Bytes` encodes a `byte[]` straight into its UTF-8
