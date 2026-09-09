@@ -2,6 +2,7 @@ using System.Text.Json;
 using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Processing;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Processor.FileReader;
 
@@ -10,23 +11,152 @@ namespace Processor.FileReader;
 /// it produces output, so it is not an edge and neither <c>BaseImporter</c> nor <c>BaseExporter</c>
 /// applies.
 /// </summary>
-public sealed class FileReaderProcessor(ILogger<FileReaderProcessor> logger)
+public sealed class FileReaderProcessor(
+    ILogger<FileReaderProcessor> logger,
+    IOptions<FileReaderOptions> options)
     : BaseProcessor<FileReaderConfig>
 {
+    private readonly long _podCeiling = options.Value.MaxFileSizeBytes;
+
     protected override Task ProcessAsync(
         byte[] data, FileReaderConfig? config, Guid executionId, CancellationToken ct)
     {
+        // Config first: it is the cheapest check and it depends on nothing else. A step wired with a
+        // ceiling this pod cannot honour is wrong before any file is named.
+        var settings = Validate(config);
+
         var path = ReadPath(data);
+        var info = Inspect(path, settings);
+
+        var bytes = Read(info);
 
         // Not used by this task's failure path — the framework's own catch logs a thrown
         // FailedException verbatim, so there is nothing for this step to log on that route. Task 4
         // adds the success line that gives this parameter a use.
         _ = logger;
-        _ = config;
+        _ = bytes;
         _ = executionId;
         _ = ct;
-        throw new NotImplementedException($"Task 3 onwards: {path}");
+        throw new NotImplementedException("Task 4 onwards");
     }
+
+    /// <summary>The payload, checked. Throws <see cref="FailedException"/> with the reason.</summary>
+    private FileReaderConfig Validate(FileReaderConfig? config)
+    {
+        if (config is null)
+        {
+            throw new FailedException(
+                "FileReader needs a step payload naming ExpectedExtension, MinimumSizeBytes and "
+                + "MaximumSizeBytes");
+        }
+
+        if (string.IsNullOrWhiteSpace(config.ExpectedExtension)
+            || !config.ExpectedExtension.StartsWith('.'))
+        {
+            throw BadPayload($"ExpectedExtension must start with a dot; the payload named "
+                                          + $"'{config.ExpectedExtension}'");
+        }
+
+        if (config.MinimumSizeBytes < 0)
+        {
+            throw BadPayload("MinimumSizeBytes must not be negative");
+        }
+
+        if (config.MaximumSizeBytes < 1)
+        {
+            throw BadPayload("MaximumSizeBytes must be at least 1");
+        }
+
+        if (config.MinimumSizeBytes > config.MaximumSizeBytes)
+        {
+            throw BadPayload(
+                $"MinimumSizeBytes {config.MinimumSizeBytes} is above MaximumSizeBytes "
+                + $"{config.MaximumSizeBytes}");
+        }
+
+        if (config.MaximumSizeBytes > _podCeiling)
+        {
+            // NOT clamped. Silently lowering it would have the author's 100MB expectation fail at 32
+            // with nothing saying which number won.
+            throw BadPayload(
+                $"MaximumSizeBytes {config.MaximumSizeBytes} is above this pod's ceiling of "
+                + $"{_podCeiling}; raise FileReader__MaxFileSizeBytes or lower the step");
+        }
+
+        return config;
+    }
+
+    /// <summary>
+    /// The dry inspection: existence, extension, size. Every one of these reads metadata only —
+    /// <c>FileInfo</c> never opens the file — so a file that fails here is never opened at all.
+    /// </summary>
+    private FileInfo Inspect(string path, FileReaderConfig config)
+    {
+        var info = new FileInfo(path);
+
+        if (!info.Exists)
+        {
+            // "reading", not "rejected": an absent file is not a file that broke a rule, and the two
+            // classes are searched separately.
+            throw Unreadable(path, "it does not exist");
+        }
+
+        var extension = info.Extension;
+        if (!extension.Equals(config.ExpectedExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Rejected(path,
+                $"expected {config.ExpectedExtension} and the file is '{extension}'");
+        }
+
+        if (info.Length < config.MinimumSizeBytes)
+        {
+            throw Rejected(path,
+                $"{info.Length} bytes is below the {config.MinimumSizeBytes} byte floor");
+        }
+
+        if (info.Length > config.MaximumSizeBytes)
+        {
+            throw Rejected(path,
+                $"{info.Length} bytes is above the {config.MaximumSizeBytes} byte ceiling");
+        }
+
+        return info;
+    }
+
+    /// <summary>
+    /// The read. Every IO fault is a failed step regardless of cause: there is no requeue path here
+    /// — the framework requeues only <c>TransientSendException</c>, which can arise solely from
+    /// <c>SendToPostAsync</c> — so classifying the fault would change nothing about the disposition.
+    /// </summary>
+    private byte[] Read(FileInfo info)
+    {
+        try
+        {
+            return File.ReadAllBytes(info.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                      or NotSupportedException)
+        {
+            throw Unreadable(info.FullName, ex.Message);
+        }
+    }
+
+    // THE THREE FAILURE CLASSES, AND NONE OF THEM LOGS. ProcessDispatchHandler catches
+    // FailedException and writes the author's message verbatim, so a line here would emit every
+    // failure twice — which is why BaseImporter and BaseExporter log nothing either. The message
+    // text IS the contract an operator searches; only the duplicate copy is gone.
+
+    /// <summary>A malformed payload, diagnosed before any path has been read.</summary>
+    private static FailedException BadPayload(string reason)
+        => new($"step payload rejected: {reason}");
+
+    /// <summary>A file that broke a rule. Separate from BadPayload because this one has a path.</summary>
+    private static FailedException Rejected(string path, string reason)
+        => new($"file {path} rejected: {reason}");
+
+    /// <summary>A file that could not be read, whatever the cause.</summary>
+    private static FailedException Unreadable(string path, string reason)
+        => new($"reading {path} failed: {reason}");
 
     /// <summary>
     /// The absolute path this dispatch names, or a failed step saying why there isn't one.
