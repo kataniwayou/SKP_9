@@ -72,7 +72,7 @@ nothing to resolve and goes straight through:
 ```bash
 kubectl -n skp port-forward svc/baseapi-service 8080:8080 &
 
-curl -X POST http://localhost:8080/api/v1.0/processors \
+curl -X POST http://localhost:8080/api/v1/processors \
   -H 'Content-Type: application/json' \
   -d '{
         "name": "sample",
@@ -389,20 +389,26 @@ kubectl -n skp port-forward svc/baseapi-service 18080:8080 &
 
 ENVELOPE=$(curl -s -X POST http://localhost:18080/api/v1/schemas \
   -H 'Content-Type: application/json' \
-  -d "$(jq -Rs '{name:"file-envelope", version:"1.0.0", \
-                 description:"FileFetcher/ArchiveCollapser output, ArchiveExpander input", \
-                 definition:.}' \
+  -d "$(jq -Rs '{name:"file-envelope", version:"1.0.0",
+description:"FileFetcher/ArchiveCollapser output, ArchiveExpander input",
+definition:.}' \
         src/tests/BaseApi.Tests/Schemas/envelope.json)")
 ENVELOPE_ID=$(echo "$ENVELOPE" | jq -r '.id')
 
 TREE=$(curl -s -X POST http://localhost:18080/api/v1/schemas \
   -H 'Content-Type: application/json' \
-  -d "$(jq -Rs '{name:"file-tree", version:"1.0.0", \
-                 description:"ArchiveExpander output, ArchiveCollapser input", \
-                 definition:.}' \
+  -d "$(jq -Rs '{name:"file-tree", version:"1.0.0",
+description:"ArchiveExpander output, ArchiveCollapser input",
+definition:.}' \
         src/tests/BaseApi.Tests/Schemas/tree.json)")
 TREE_ID=$(echo "$TREE" | jq -r '.id')
 ```
+
+**A jq program may span multiple lines with no escaping at all** — the lines above rely on that,
+not on shell line-continuation. A `\` placed inside the single-quoted jq program (as an earlier
+draft of this section had) is a literal backslash character as far as jq is concerned, which is a
+syntax error; only the backslashes *outside* the `'...'` — continuing the shell command itself
+between `curl`, `-H` and `-d` — are shell continuations and are required.
 
 **Point all three processor rows at them.** The endpoint is `PUT /api/v1/processors/{id}` with
 `ProcessorUpdateDto` (`src/BaseApi.Service/Features/Processor/ProcessorDtos.cs`): `name`, `version`,
@@ -430,10 +436,15 @@ for NAME_HASH in "file-fetcher:$FILEFETCHER_HASH" \
   curl -s -X PUT "http://localhost:18080/api/v1/processors/$ID" \
     -H 'Content-Type: application/json' \
     -d "$(echo "$ROW" | jq --argjson in "$IN" --argjson out "$OUT" \
-          '{name, version, description, sourceHash, \
-            inputSchemaId: $in, outputSchemaId: $out, configSchemaId}')"
+          '{name, version, description, sourceHash,
+inputSchemaId: $in, outputSchemaId: $out, configSchemaId}')"
 done
 ```
+
+**If the schema POST above 409s on a retry** — the row it tried to create in an earlier, partial
+attempt already exists — `GET /api/v1/schemas` and read the `id` off the existing `file-envelope` /
+`file-tree` row instead of re-posting; there is no upsert, so a second `POST` with the same
+`name`/`version` is a conflict, not a no-op.
 
 Replace `$FILEFETCHER_HASH` / `$ARCHIVEEXPANDER_HASH` / `$ARCHIVECOLLAPSER_HASH` with the three
 hashes `dotnet build` printed for this build (`SourceHash (Processor.FileFetcher): …`, etc. — see

@@ -401,21 +401,28 @@ public sealed class ArchiveCollapserLiveTests
     private sealed record ProcessorRow(Guid? InputSchemaId, Guid? OutputSchemaId);
 
     /// <summary>
+    /// The outcome of a lookup: the HTTP status code, always, and the row when the lookup
+    /// succeeded. Carrying the status code (rather than collapsing a miss to a bare <c>null</c>)
+    /// is what lets a caller's failure message tell a 404 ("not registered") apart from a 503
+    /// ("BaseApi is down") — see <see cref="ArchiveExpander.ArchiveExpanderLiveTests.TheOutputSchemaRowIsRegistered"/>,
+    /// whose message this mirrors.
+    /// </summary>
+    private sealed record ProcessorLookup(int StatusCode, ProcessorRow? Row);
+
+    /// <summary>
     /// Fetches a processor row by source hash, copying the query shape of
     /// <see cref="ArchiveExpander.ArchiveExpanderLiveTests.TheOutputSchemaRowIsRegistered"/> exactly:
     /// a plain <c>GetAsync</c> against <c>/api/v1/processors/by-source-hash/{sourceHash}</c> on
-    /// <see cref="RealStack.BaseApiUrl"/>, with a null return (rather than throwing) standing in for
-    /// the non-success status that method inlines, so both tests below can report which processor's
-    /// row was missing.
+    /// <see cref="RealStack.BaseApiUrl"/>.
     /// </summary>
-    private static async Task<ProcessorRow?> GetProcessorRowAsync(string sourceHash, CancellationToken ct)
+    private static async Task<ProcessorLookup> GetProcessorRowAsync(string sourceHash, CancellationToken ct)
     {
         using var client = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl) };
 
         var response = await client.GetAsync($"/api/v1/processors/by-source-hash/{sourceHash}", ct);
         if (!response.IsSuccessStatusCode)
         {
-            return null;
+            return new ProcessorLookup((int)response.StatusCode, null);
         }
 
         var row = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct)).RootElement;
@@ -425,7 +432,9 @@ public sealed class ArchiveCollapserLiveTests
                 ? value.GetGuid()
                 : null;
 
-        return new ProcessorRow(SchemaId("inputSchemaId"), SchemaId("outputSchemaId"));
+        return new ProcessorLookup(
+            (int)response.StatusCode,
+            new ProcessorRow(SchemaId("inputSchemaId"), SchemaId("outputSchemaId")));
     }
 
     [Fact]
@@ -437,18 +446,18 @@ public sealed class ArchiveCollapserLiveTests
         // the source hash; a null id means the schema was never registered, and with a null
         // TryValidate returns true without decoding anything -- so a document arriving downstream
         // would prove only that a document was produced, never that it was validated.
-        var row = await GetProcessorRowAsync(
+        var lookup = await GetProcessorRowAsync(
             CollapserSourceHash, TestContext.Current.CancellationToken);
 
-        Assert.True(row is not null,
-            $"no processor row for source hash {CollapserSourceHash} — the image was rebuilt "
-            + "without repointing the row, or the row was never registered");
+        Assert.True(lookup.Row is not null,
+            $"no processor row for source hash {CollapserSourceHash} ({lookup.StatusCode}) — the "
+            + "image was rebuilt without repointing the row, or the row was never registered");
 
-        Assert.True(row!.InputSchemaId is not null,
+        Assert.True(lookup.Row!.InputSchemaId is not null,
             "the processor row exists but InputSchemaId is null — the tree schema from "
             + "src/tests/BaseApi.Tests/Schemas/tree.json has not been registered");
 
-        Assert.True(row.OutputSchemaId is not null,
+        Assert.True(lookup.Row.OutputSchemaId is not null,
             "the processor row exists but OutputSchemaId is null — the envelope schema from "
             + "src/tests/BaseApi.Tests/Schemas/envelope.json has not been registered");
     }
@@ -469,11 +478,19 @@ public sealed class ArchiveCollapserLiveTests
         var collapser = await GetProcessorRowAsync(
             CollapserSourceHash, TestContext.Current.CancellationToken);
 
-        Assert.True(expander is not null,
-            $"no processor row for archive-expander's source hash {ExpanderSourceHash}");
-        Assert.True(collapser is not null,
-            $"no processor row for archive-collapser's source hash {CollapserSourceHash}");
+        Assert.True(expander.Row is not null,
+            $"no processor row for archive-expander's source hash {ExpanderSourceHash} "
+            + $"({expander.StatusCode})");
+        Assert.True(collapser.Row is not null,
+            $"no processor row for archive-collapser's source hash {CollapserSourceHash} "
+            + $"({collapser.StatusCode})");
 
-        Assert.Equal(expander!.OutputSchemaId, collapser!.InputSchemaId);
+        // Must stand alone rather than lean on TheSchemaRowsAreRegistered for the non-null half:
+        // with both ids null, Assert.Equal(null, null) would pass vacuously and this test would
+        // stop catching the one thing it exists to catch.
+        Assert.NotNull(expander.Row!.OutputSchemaId);
+        Assert.NotNull(collapser.Row!.InputSchemaId);
+
+        Assert.Equal(expander.Row.OutputSchemaId, collapser.Row.InputSchemaId);
     }
 }
