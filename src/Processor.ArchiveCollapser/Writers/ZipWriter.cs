@@ -80,8 +80,10 @@ public sealed class ZipWriter : IArchiveWriter
     /// 8.0.31, <c>ZipArchiveEntry.LastWriteTime</c>'s setter validates only <c>value.DateTime.Year</c>
     /// against 1980-2107 and packs <c>value.DateTime</c> -- the WALL-CLOCK component, offset
     /// discarded -- into the DOS fields at write time. <c>ZipExtractor</c>'s getter re-attaches
-    /// <b>this machine's current local offset</b> to that packed wall clock and returns
-    /// <c>.UtcDateTime</c> from that. Neither side ever looks at the offset the writer supplied.
+    /// <b>the offset this machine's local zone has AT THAT WALL-CLOCK VALUE</b> -- not "the offset
+    /// right now": in a DST-observing zone a June stamp and a January stamp can legitimately get
+    /// different offsets -- and returns <c>.UtcDateTime</c> from that. Neither side ever looks at
+    /// the offset the writer supplied.
     /// </para>
     /// <para>
     /// <b>Established by test on this machine (UTC+3, not UTC): a bare
@@ -104,6 +106,19 @@ public sealed class ZipWriter : IArchiveWriter
     /// 1980-01-01T00:00:00Z rather than some offset-shifted neighbour -- the post-conversion clamp is
     /// a second, independent bound that exists purely so a local offset can never push either end
     /// outside the DOS year range. Do not remove either clamp for the other.
+    /// </para>
+    /// <para>
+    /// <b>Only the positive-offset half of this was directly measured; the negative-offset half is
+    /// reasoned from the same mechanism, not separately observed on such a machine.</b> At a
+    /// negative offset, <c>1980-01-01T00:00:00Z</c> itself is UNREPRESENTABLE: its local wall clock
+    /// falls on <c>1979-12-31</c>, which the setter's year check rejects, so the post-conversion
+    /// clamp raises the packed wall clock to <c>1980-01-01 00:00:00</c> local -- and the getter then
+    /// reads that back as floor + |offset| in UTC, not the floor itself. This is still the right
+    /// behaviour: it is the minimum instant that machine can represent at all, it is stable (see the
+    /// fixed-point tests below), and it is deliberately not "corrected" back toward the floor -- only
+    /// this one non-canonical value round-trips exactly on a negative-offset machine. The fixed point
+    /// (collapse of a previously-collapsed value reproduces the same value) holds at every offset,
+    /// positive or negative, even on the machines where the floor value itself is not canonical.
     /// </para>
     /// </summary>
     internal static DateTimeOffset Clamp(DateTime? modifiedUtc)
