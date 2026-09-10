@@ -8,8 +8,10 @@ namespace Processor.ArchiveCollapser;
 /// constructs this without having read a valid document first.
 /// <para>
 /// <b>This is the writer's copy of <c>Processor.FileFetcher.FetchedFile</c>.</b> One JSON document
-/// across assemblies that must not reference each other; <c>EnvelopeContractTests</c> catches a
-/// divergence.
+/// across assemblies that must not reference each other; <c>EnvelopeContractTests</c> is what
+/// catches a divergence -- TIER1/TIER2 by byte equality against the fetcher's own envelope, and the
+/// schema assertions in TIER3 and the nested-timestamp LOSS case by validating a collapsed envelope
+/// those two never reach against the real, registered envelope schema directly.
 /// </para>
 /// <para>
 /// <b><c>SizeBytes</c> is the length of the archive actually produced</b>, never anything the input

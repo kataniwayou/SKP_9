@@ -32,12 +32,17 @@ internal sealed class ArchiveBuilder(IEnumerable<IArchiveWriter> writers)
     /// <summary>
     /// The deepest document this will pack.
     /// <para>
-    /// <b>This is the SECOND guard, not the first.</b> <c>FileNodeConverter.Read</c> recurses while
-    /// deserializing, so a pathologically deep document is refused by
-    /// <c>JsonSerializerOptions.MaxDepth</c> before a tree ever reaches this class -- pinned by
-    /// <c>FileNodeReadTests.ADeeplyNestedDocumentIsRefusedByTheDeserializer</c>. This bound exists
-    /// so that the recursion below is safe to read and safe to run regardless, and it matches
-    /// <c>ArchiveExpanderConfig.MaxSupportedDepth</c> so the two halves of the loop agree.
+    /// <b>This is the SECOND guard, not the first, and it is a ceiling neither half of the loop can
+    /// actually reach.</b> <c>FileNodeConverter.Read</c> recurses while deserializing, so a
+    /// pathologically deep document is refused by <c>JsonSerializerOptions.MaxDepth</c> before a
+    /// tree ever reaches this class -- pinned by
+    /// <c>FileNodeReadTests.ADeeplyNestedDocumentIsRefusedByTheDeserializer</c>. Neither
+    /// <c>FileDocument.Options</c> here nor <c>ArchiveExpanderConfig</c>'s copy sets
+    /// <c>MaxDepth</c> explicitly, so it stays at the deserializer's default of 64 JSON LEVELS, and
+    /// each node costs two of them -- so the real ceiling on either side of the loop is around 32
+    /// NODE levels, exactly as <c>FileNodeReadTests</c> says. <c>MaxSupportedDepth = 64</c> is
+    /// defence-in-depth for the walk below, not a bound that "agrees" with the expander's -- it is
+    /// unreachable in practice, because the deserializer refuses anything that deep first.
     /// </para>
     /// <para>
     /// <b>It is checked DURING the walk, unlike the expander's.</b> There, <c>MaxDepth</c> is
