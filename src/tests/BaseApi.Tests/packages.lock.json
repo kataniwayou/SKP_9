@@ -670,7 +670,7 @@
           "StackExchange.Redis": "[2.13.1, )"
         }
       },
-      "processor.filereader": {
+      "processor.archiveexpander": {
         "type": "Project",
         "dependencies": {
           "BaseProcessor.Core": "[1.0.0, 1.0.0]",
