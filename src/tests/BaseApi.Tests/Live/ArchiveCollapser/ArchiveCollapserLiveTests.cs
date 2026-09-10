@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net.Http;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
@@ -364,5 +366,114 @@ public sealed class ArchiveCollapserLiveTests
             LogContains($"collapsing {name} failed:", Window),
             $"the step failed but no 'collapsing {name} failed:' line reached the ArchiveCollapser "
             + $"log within {Window.TotalMinutes:0} minutes");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The two schema-row tests. Phase 1 registered every schema id null, so these were gated;
+    // Task 12 registers the two shared rows and re-arms them, here and on the two upstream
+    // processors (ArchiveExpanderLiveTests.TheOutputSchemaRowIsRegistered and
+    // FileFetcherLiveTests.TheOutputSchemaRowIsRegistered).
+    // ---------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// This build's source hash for ArchiveCollapser, read from the assembly rather than pasted in
+    /// — see <see cref="ArchiveExpander.ArchiveExpanderLiveTests.SourceHash"/> for why: a literal
+    /// here would be stale by the next commit and would fail as a missing processor row, which
+    /// reads like a deployment fault rather than a stale constant.
+    /// </summary>
+    private static string CollapserSourceHash
+        => typeof(global::Processor.ArchiveCollapser.FileNode).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Single(a => a.Key == "SourceHash").Value!;
+
+    /// <summary>
+    /// This build's source hash for ArchiveExpander, needed only by
+    /// <see cref="TheCollapserInputIdEqualsTheExpanderOutputId"/> — fully qualified rather than
+    /// pulled in with a <c>using</c>, since both processor assemblies declare their own
+    /// <c>FileNode</c> and this file already references ArchiveExpander's <c>Extractors</c>
+    /// namespace.
+    /// </summary>
+    private static string ExpanderSourceHash
+        => typeof(global::Processor.ArchiveExpander.FileNode).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Single(a => a.Key == "SourceHash").Value!;
+
+    private sealed record ProcessorRow(Guid? InputSchemaId, Guid? OutputSchemaId);
+
+    /// <summary>
+    /// Fetches a processor row by source hash, copying the query shape of
+    /// <see cref="ArchiveExpander.ArchiveExpanderLiveTests.TheOutputSchemaRowIsRegistered"/> exactly:
+    /// a plain <c>GetAsync</c> against <c>/api/v1/processors/by-source-hash/{sourceHash}</c> on
+    /// <see cref="RealStack.BaseApiUrl"/>, with a null return (rather than throwing) standing in for
+    /// the non-success status that method inlines, so both tests below can report which processor's
+    /// row was missing.
+    /// </summary>
+    private static async Task<ProcessorRow?> GetProcessorRowAsync(string sourceHash, CancellationToken ct)
+    {
+        using var client = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl) };
+
+        var response = await client.GetAsync($"/api/v1/processors/by-source-hash/{sourceHash}", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var row = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct)).RootElement;
+
+        Guid? SchemaId(string property) =>
+            row.TryGetProperty(property, out var value) && value.ValueKind != JsonValueKind.Null
+                ? value.GetGuid()
+                : null;
+
+        return new ProcessorRow(SchemaId("inputSchemaId"), SchemaId("outputSchemaId"));
+    }
+
+    [Fact]
+    public async Task TheSchemaRowsAreRegistered()
+    {
+        RealStack.SkipUnlessEnabled();
+
+        // Proves this build's half landed. No row means the image was rebuilt without repointing
+        // the source hash; a null id means the schema was never registered, and with a null
+        // TryValidate returns true without decoding anything -- so a document arriving downstream
+        // would prove only that a document was produced, never that it was validated.
+        var row = await GetProcessorRowAsync(
+            CollapserSourceHash, TestContext.Current.CancellationToken);
+
+        Assert.True(row is not null,
+            $"no processor row for source hash {CollapserSourceHash} — the image was rebuilt "
+            + "without repointing the row, or the row was never registered");
+
+        Assert.True(row!.InputSchemaId is not null,
+            "the processor row exists but InputSchemaId is null — the tree schema from "
+            + "src/tests/BaseApi.Tests/Schemas/tree.json has not been registered");
+
+        Assert.True(row.OutputSchemaId is not null,
+            "the processor row exists but OutputSchemaId is null — the envelope schema from "
+            + "src/tests/BaseApi.Tests/Schemas/envelope.json has not been registered");
+    }
+
+    [Fact]
+    public async Task TheCollapserInputIdEqualsTheExpanderOutputId()
+    {
+        RealStack.SkipUnlessEnabled();
+
+        // THE EDGE, and the only assertion that catches the two rows drifting apart. Byte-identical
+        // definitions are not enough -- SchemaEdgeValidator
+        // (BaseApi.Service/Features/Orchestration/Validation/SchemaEdgeValidator.cs) compares
+        // schema IDS, not definitions, so two rows holding the same JSON text under two different
+        // ids are still an unwireable edge: publishing a workflow across them throws a 422 naming
+        // the pair.
+        var expander = await GetProcessorRowAsync(
+            ExpanderSourceHash, TestContext.Current.CancellationToken);
+        var collapser = await GetProcessorRowAsync(
+            CollapserSourceHash, TestContext.Current.CancellationToken);
+
+        Assert.True(expander is not null,
+            $"no processor row for archive-expander's source hash {ExpanderSourceHash}");
+        Assert.True(collapser is not null,
+            $"no processor row for archive-collapser's source hash {CollapserSourceHash}");
+
+        Assert.Equal(expander!.OutputSchemaId, collapser!.InputSchemaId);
     }
 }

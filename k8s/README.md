@@ -353,23 +353,117 @@ image does not reach a running pod on its own, which is what the restart is for.
 sits Running/NotReady with 0 restarts until its own processor row exists — it waits by design rather
 than crashing, so a `CrashLoopBackOff` here means something else is wrong.
 
-**3. Register both processor rows and their schema rows.**
+**3. Register the two schema rows, and point all three processor rows at them.**
 
-The rows are `file-fetcher` / `1.0.0` and `archive-expander` / `1.0.0`. FileFetcher's is registered
-with `src/Processor.FileFetcher/schema/output.json` as its output schema and no input schema.
-ArchiveExpander's is registered with that same envelope document as its **input** schema — the
-contract between the two pods — and keeps `src/Processor.ArchiveExpander/schema/output.json`,
-unchanged from FileReader, as its output schema.
+**Two rows, not four or six.** `file-fetcher`, `archive-expander` and `archive-collapser` all touch
+only two shapes between them — an envelope (`{fileName, extension, sizeBytes, createdUtc,
+modifiedUtc, content}`) and a tree (`{metadata, content}`, nested to depth 2) — and
+`SchemaEdgeValidator` (`src/BaseApi.Service/Features/Orchestration/Validation/SchemaEdgeValidator.cs`)
+compares a parent's `OutputSchemaId` against a child's `InputSchemaId` by **id equality**, not by
+comparing definitions. So every processor on a given edge must point at the *same row* — two rows
+holding byte-identical JSON under two different ids are still, to the validator, an unwireable edge,
+and publishing a workflow across them throws a 422 naming the pair.
+
+| processor | inputSchemaId | outputSchemaId |
+|---|---|---|
+| `file-fetcher` | *(null — it is a source)* | **envelope** |
+| `archive-expander` | **envelope** | **tree** |
+| `archive-collapser` | **tree** | **envelope** |
+
+The same two GUIDs appear five times across three rows. That is what makes `FileFetcher →
+ArchiveExpander → ArchiveCollapser` (and `ArchiveCollapser` back into a second `FileFetcher →
+ArchiveExpander` hop, since its output shape is the same envelope FileFetcher produces) a wireable
+chain, and any other pairing a publish-time rejection instead of a silent no-op.
+
+**Create the two rows.** The endpoint is `POST /api/v1/schemas` — URL-segment versioning substitutes
+`{version:apiVersion}` with the bare major version (`opts.GroupNameFormat = "'v'VVV"` in
+`HttpServiceCollectionExtensions.cs`), so the route is `/api/v1/schemas`, not `/api/v1.0/schemas`.
+The body is `SchemaCreateDto` (`src/BaseApi.Service/Features/Schema/SchemaDtos.cs`): `name`,
+`version`, `description` and `definition`, where **`definition` is a string** — the whole schema
+document, serialized to text, not embedded as nested JSON — validated by
+`SchemaCreateDtoValidator` as parseable JSON that is itself a valid draft 2020-12 schema. `jq -Rs`
+slurps a file into exactly that string:
+
+```bash
+kubectl -n skp port-forward svc/baseapi-service 18080:8080 &
+
+ENVELOPE=$(curl -s -X POST http://localhost:18080/api/v1/schemas \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -Rs '{name:"file-envelope", version:"1.0.0", \
+                 description:"FileFetcher/ArchiveCollapser output, ArchiveExpander input", \
+                 definition:.}' \
+        src/tests/BaseApi.Tests/Schemas/envelope.json)")
+ENVELOPE_ID=$(echo "$ENVELOPE" | jq -r '.id')
+
+TREE=$(curl -s -X POST http://localhost:18080/api/v1/schemas \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -Rs '{name:"file-tree", version:"1.0.0", \
+                 description:"ArchiveExpander output, ArchiveCollapser input", \
+                 definition:.}' \
+        src/tests/BaseApi.Tests/Schemas/tree.json)")
+TREE_ID=$(echo "$TREE" | jq -r '.id')
+```
+
+**Point all three processor rows at them.** The endpoint is `PUT /api/v1/processors/{id}` with
+`ProcessorUpdateDto` (`src/BaseApi.Service/Features/Processor/ProcessorDtos.cs`): `name`, `version`,
+`description`, `sourceHash`, `inputSchemaId`, `outputSchemaId`, `configSchemaId` — **all seven
+fields**, because `PUT` replaces the row rather than patching it, so `name`/`version`/`description`/
+`sourceHash` must be read back from the existing row (via `GET
+/api/v1/processors/by-source-hash/{sourceHash}`) and echoed unchanged, or the update silently
+overwrites them:
+
+```bash
+for NAME_HASH in "file-fetcher:$FILEFETCHER_HASH" \
+                  "archive-expander:$ARCHIVEEXPANDER_HASH" \
+                  "archive-collapser:$ARCHIVECOLLAPSER_HASH"; do
+  NAME="${NAME_HASH%%:*}"; HASH="${NAME_HASH##*:}"
+
+  ROW=$(curl -s "http://localhost:18080/api/v1/processors/by-source-hash/$HASH")
+  ID=$(echo "$ROW" | jq -r '.id')
+
+  case "$NAME" in
+    file-fetcher)      IN=null;             OUT="\"$ENVELOPE_ID\"" ;;
+    archive-expander)   IN="\"$ENVELOPE_ID\""; OUT="\"$TREE_ID\"" ;;
+    archive-collapser)  IN="\"$TREE_ID\"";      OUT="\"$ENVELOPE_ID\"" ;;
+  esac
+
+  curl -s -X PUT "http://localhost:18080/api/v1/processors/$ID" \
+    -H 'Content-Type: application/json' \
+    -d "$(echo "$ROW" | jq --argjson in "$IN" --argjson out "$OUT" \
+          '{name, version, description, sourceHash, \
+            inputSchemaId: $in, outputSchemaId: $out, configSchemaId}')"
+done
+```
+
+Replace `$FILEFETCHER_HASH` / `$ARCHIVEEXPANDER_HASH` / `$ARCHIVECOLLAPSER_HASH` with the three
+hashes `dotnet build` printed for this build (`SourceHash (Processor.FileFetcher): …`, etc. — see
+Step 1 above). `configSchemaId` is carried through from `$ROW` unchanged; none of the three
+processors uses one.
+
+**This is a correction against the task plan's draft `curl` bodies, which were an explicit,
+unverified guess at the DTO shape.** Checked against the real source: the schema create endpoint is
+`/api/v1/schemas`, not `/api/v1.0/schemas` (URL-segment versioning renders the bare major version,
+confirmed by `ProcessorsController`'s own `/api/v1/processors/by-source-hash/...` route, which the
+live tests already call); the processor side is a `PUT` to `/api/v1/processors/{id}` with the full
+seven-field `ProcessorUpdateDto`, not a two-field patch — there is no partial-update verb, so the
+four fields the plan never mentioned (`name`, `version`, `description`, `sourceHash`) have to be
+read back from the existing row or the update erases them.
 
 **Do not skip either schema.** With `OutputSchemaId` null, `TryValidate` returns true without decoding
 anything: shape, entry count and depth are enforced nowhere, and a document arriving on the out
-topic proves only that a document was produced. Both pods should reach Ready once their rows exist.
+topic proves only that a document was produced. All three pods should reach Ready once their rows
+exist (unready was never about the schema ids — see the identity-resolution note above — but a
+missing schema id is the failure mode this step exists to close).
 
 `ArchiveExpanderLiveTests.TheOutputSchemaRowIsRegistered` proves ArchiveExpander's half landed: it
 asks BaseApi for that row by this build's source hash and fails with the step that was missed — no
 row means the image was rebuilt without repointing, a null `OutputSchemaId` means the schema was
 never registered. `FileFetcherLiveTests.TheOutputSchemaRowIsRegistered` is the same proof one hop
-upstream, for FileFetcher's own row — closing the gap this section used to note.
+upstream, for FileFetcher's own row. `ArchiveCollapserLiveTests.TheSchemaRowsAreRegistered` is the
+same proof for ArchiveCollapser's row, both ids at once; and
+`ArchiveCollapserLiveTests.TheCollapserInputIdEqualsTheExpanderOutputId` is the one assertion in the
+whole suite that catches the two rows drifting apart — a passing `TheSchemaRowsAreRegistered` on
+both sides only proves each id is non-null, not that they are the *same* id.
 
 **4. Wire the workflow.**
 
