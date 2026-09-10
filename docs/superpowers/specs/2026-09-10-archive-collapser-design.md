@@ -255,6 +255,15 @@ that caps the tree at roughly 32 node levels and throws a `JsonException` alread
 **This reading is load-bearing and is pinned by a test rather than trusted to this paragraph**,
 following the precedent of `ZipExtractor`'s "what was measured, on .NET 8.0.31" block.
 
+**A consequence found by the final review: `MaxSupportedDepth = 64` is unreachable on BOTH sides, and
+a `MaxDepth` above roughly 32 is legal-but-unusable.** `ArchiveExpanderConfig` validates `MaxDepth`
+into `1..64` before any file is opened, so a step naming 40 is accepted -- but neither assembly sets
+`JsonSerializerOptions.MaxDepth`, so a document that deep cannot be serialized by the expander or
+read by the collapser. The collapser reports it as `the branch is not JSON`, which diagnoses a depth
+overflow as a parse error. Nothing in this design reaches that depth and no real feed comes close, so
+this is recorded rather than fixed -- but the two constants do NOT "agree" at 64, and a reader who
+believes they do will size a workflow wrongly. The builder's own doc comment says so plainly.
+
 ### 7.1 The schema files leave `src/`, and there are two of them
 
 **No processor ships a schema file any more, because no processor can read one.** This was verified,
