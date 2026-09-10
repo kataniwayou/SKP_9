@@ -248,11 +248,12 @@ Four notes an operator will otherwise learn the hard way:
 
 Design: `docs/superpowers/specs/2026-08-22-live-stack-resilience-scenarios-design.md`
 
-## Seeding files for processor-filereader
+## Seeding files for processor-filefetcher
 
-`processor-filereader` reads absolute paths under `/mnt/skp-files/in`, mounted read-only from the
+`processor-filefetcher` reads absolute paths under `/mnt/skp-files/in`, mounted read-only from the
 kind node. **That path is on the node container, not on Windows** — the node was created without
-`extraMounts` and Docker cannot add one to a running container.
+`extraMounts` and Docker cannot add one to a running container. `processor-archiveexpander`, one hop
+downstream, never sees a path at all — it reads the envelope FileFetcher already built.
 
 Put a file where the pod can read it:
 
@@ -265,88 +266,107 @@ Then the Kafka record the importer consumes names it:
 It survives pod restarts and the `kind load` + SourceHash-repoint deploy loop. Only recreating the
 cluster loses it.
 
-### The FileReader workflow
+### The FileFetcher / ArchiveExpander workflow
 
-`KafkaImporter → FileReader → KafkaExporter`. **Both edges are `entryCondition: 1`
+`KafkaImporter → FileFetcher → ArchiveExpander → KafkaExporter`. **Every edge is `entryCondition: 1`
 (`PreviousCompleted`), not `4` (`Always`).**
 
 `Always` is what the sample steps use, and copying it here is a live bug rather than a style
-choice: a failed importer hands off with `ExecutionId` empty, and an `Always`-wired exporter then
-runs on an entry-shaped dispatch every time an import fails. That is the class of error
-`BaseImporter`'s edge guard exists to make impossible. `0` (`PreviousProcessing`) is rejected by the
-step validator and is also what an omitted field binds to, which is why the value is always stated.
+choice: a failed importer hands off with `ExecutionId` empty, and an `Always`-wired downstream step
+then runs on an entry-shaped dispatch every time the step before it fails — on the
+`FileFetcher → ArchiveExpander` edge specifically, that means expanding a file that was never
+fetched. That is the class of error `BaseImporter`'s edge guard exists to make impossible. `0`
+(`PreviousProcessing`) is rejected by the step validator and is also what an omitted field binds to,
+which is why the value is always stated.
 
-The FileReader step's payload:
+`processor-filefetcher` takes an absolute path, admits the file against an extension whitelist and a
+size range without opening it, and emits the file's bytes with its identity. Its step payload:
 
-    {"expectedExtension": ".zip", "minimumSizeBytes": 1, "maximumSizeBytes": 33554432}
+    {"allowedExtensions": [".zip"], "minimumSizeBytes": 1, "maximumSizeBytes": 33554432}
 
-`maximumSizeBytes` must not exceed the pod's `FileReader__MaxFileSizeBytes`, or every dispatch fails
-with a config error naming both numbers. It bounds two things: the file on disk, and the cumulative
-size of everything an archive expands to across every level.
+`maximumSizeBytes` must not exceed the pod's `FileFetcher__MaxFileSizeBytes`, or every dispatch fails
+with a config error naming both numbers. It bounds the file on disk, and only the file — what an
+archive expands to is a separate limit, one hop downstream.
+
+`processor-archiveexpander` takes that envelope and expands archives to the step's `maxDepth`,
+producing the same document as before. Its step payload:
+
+    {"maxDepth": 1}
 
 `maxDepth` is optional and defaults to 1 — the top-level archive is expanded and its entries are
 left as files. The default comes from an omitted field, not a zero: `0` is a rejected payload, as is
 anything above 64. Raise it to open archives inside archives:
 
-    {"expectedExtension": ".zip", "minimumSizeBytes": 1, "maximumSizeBytes": 33554432,
-     "maxDepth": 2}
+    {"maxDepth": 2}
 
-**Check the registered output schema before raising it.** The schema states its depth structurally
-and is a row against the processor identity, so it caps every workflow using this processor — the
-baseline admits depth 1. A step producing a document deeper than the schema admits fails validation
-in the post handler, which reports `Failed` with `EntryId: Guid.Empty` and no file path. The
-processor logs the depth it actually reached (`expanded to depth N of M`); that line is the only
-place the number survives.
+The cumulative size of everything an archive expands to, across every level, is no longer a step
+field — it moved to the pod-level `ArchiveExpander__MaxExpandedBytes`, a memory guard an operator
+sizes against the container limit rather than a number a workflow author could ever have known.
 
-### Verifying processor-filereader
+**Check the registered output schema before raising `maxDepth`.** The schema states its depth
+structurally and is a row against the processor identity, so it caps every workflow using this
+processor — the baseline admits depth 1. A step producing a document deeper than the schema admits
+fails validation in the post handler, which reports `Failed` with `EntryId: Guid.Empty` and no file
+path. The processor logs the depth it actually reached (`expanded to depth N of M`); that line is the
+only place the number survives.
+
+### Verifying processor-filefetcher and processor-archiveexpander
 
 Four steps, in this order, and a test that proves each one landed. The order matters: step 3 is what
 makes every later assertion mean anything, and running the live suite before it passes vacuously.
 
-**1. Build, load, repoint the hash.**
+**1. Build, load, repoint both hashes.**
 
 ```bash
-docker build -f src/Processor.FileReader/Dockerfile -t processor-filereader:local .
-kind load docker-image processor-filereader:local
-kubectl -n skp rollout restart deploy/processor-filereader
+docker build -f src/Processor.FileFetcher/Dockerfile -t processor-filefetcher:local .
+docker build -f src/Processor.ArchiveExpander/Dockerfile -t processor-archiveexpander:local .
+kind load docker-image processor-filefetcher:local
+kind load docker-image processor-archiveexpander:local
+kubectl -n skp rollout restart deploy/processor-filefetcher
+kubectl -n skp rollout restart deploy/processor-archiveexpander
 ```
 
 The `:local` tag and `imagePullPolicy: IfNotPresent` mean a rebuilt image does not reach a running
 pod on its own, which is what the restart is for.
 
-Then repoint the processor row's `SourceHash` to this build's. Every rebuild needs it — the value
+Then repoint both processor rows' `SourceHash` to this build's. Every rebuild needs it — the value
 changes on any source edit, and a pod whose hash matches no row resolves no identity. `dotnet build`
-prints it (`SourceHash (Processor.FileReader): …`), and the live suite reads it from the assembly
-rather than a constant, so it never needs pasting into a test.
+prints both (`SourceHash (Processor.FileFetcher): …` and `SourceHash (Processor.ArchiveExpander): …`),
+and the live suite reads them from the assembly rather than a constant, so neither ever needs pasting
+into a test.
 
-**2. Apply the manifest.**
+**2. Apply the manifests.**
 
 ```bash
 kubectl apply -k k8s/
 ```
 
-**`kubectl rollout status` will time out, and that timeout is the expected signal.** The pod sits
-Running/NotReady with 0 restarts until a processor row exists — it waits by design rather than
-crashing, so a `CrashLoopBackOff` here means something else is wrong.
+**`kubectl rollout status` will time out on both, and that timeout is the expected signal.** Each pod
+sits Running/NotReady with 0 restarts until its own processor row exists — it waits by design rather
+than crashing, so a `CrashLoopBackOff` here means something else is wrong.
 
-**3. Register the processor row and the output schema row.**
+**3. Register both processor rows and their schema rows.**
 
-The row is `file-reader` / `1.0.0`. The schema is `src/Processor.FileReader/schema/output.json`,
-registered against that row as its output schema.
+The rows are `file-fetcher` / `1.0.0` and `archive-expander` / `1.0.0`. FileFetcher's is registered
+with `src/Processor.FileFetcher/schema/output.json` as its output schema and no input schema.
+ArchiveExpander's is registered with that same envelope document as its **input** schema — the
+contract between the two pods — and keeps `src/Processor.ArchiveExpander/schema/output.json`,
+unchanged from FileReader, as its output schema.
 
-**Do not skip the schema.** With `OutputSchemaId` null, `TryValidate` returns true without decoding
+**Do not skip either schema.** With `OutputSchemaId` null, `TryValidate` returns true without decoding
 anything: shape, entry count and depth are enforced nowhere, and a document arriving on the out
-topic proves only that a document was produced. The pod should reach Ready once the row exists.
+topic proves only that a document was produced. Both pods should reach Ready once their rows exist.
 
-Proved by `FileReaderLiveTests.TheOutputSchemaRowIsRegistered`.
-
-That test asks BaseApi for the row by this build's source hash and fails with the step that was
-missed — no row means the image was rebuilt without repointing, a null `OutputSchemaId` means the
-schema was never registered.
+`ArchiveExpanderLiveTests.TheOutputSchemaRowIsRegistered` proves ArchiveExpander's half landed: it
+asks BaseApi for that row by this build's source hash and fails with the step that was missed — no
+row means the image was rebuilt without repointing, a null `OutputSchemaId` means the schema was
+never registered. There is not yet an equivalent live assertion naming FileFetcher's own row —
+the live suite below still lives in one file that exercises the whole chain end to end.
 
 **4. Wire the workflow.**
 
-`KafkaImporter → FileReader → KafkaExporter`, both edges `entryCondition: 1`, payload as above.
+`KafkaImporter → FileFetcher → ArchiveExpander → KafkaExporter`, every edge `entryCondition: 1`,
+payloads as above.
 
 #### Running the live tests
 
@@ -355,22 +375,25 @@ schema was never registered.
     $env:SKP_REALSTACK = "1"
     dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
 
-They seed files onto the node with `docker cp`, so the kind node must be running. What each proves:
+They seed files onto the node with `docker cp`, so the kind node must be running. All six currently
+live in `ArchiveExpanderLiveTests`, one suite exercising the whole `FileFetcher → ArchiveExpander`
+chain end to end. What each proves:
 
 | Test | What only the cluster can answer |
 | --- | --- |
 | `TheOutputSchemaRowIsRegistered` | The schema is enforcing at all — step 3 landed |
-| `AZipOnTheNodeBecomesADocumentOnTheOutTopic` | The mount, the manifest ceiling, the wiring |
+| `AZipOnTheNodeBecomesADocumentOnTheOutTopic` | The mount, both manifests' ceilings, the wiring |
 | `AFileWithTheWrongExtensionProducesNoDocument` | The edge is `PreviousCompleted`, not `Always` |
 | `AtTheDefaultDepthANestedZipStaysAFile` | Nesting did not change what an existing workflow emits |
 | `ACorruptZipFailsWithThePathInTheLog` | The path reaches the log store |
 | `ADocumentDeeperThanTheSchemaFailsAndLogsTheDepth` | A schema rejection is diagnosable |
 
 The last one **skips unless `SKP_FILEREADER_DEEP_TOPIC` names the input topic of a second workflow
-whose FileReader step is wired `maxDepth: 2`**. Depth is a step payload, so one wired workflow
-has one depth and no message can ask for another. Wire that second workflow only when you intend
-to raise depth in earnest; the test exists so that raising it without deepening the schema is a
-diagnosable failure rather than a silent one.
+whose ArchiveExpander step is wired `maxDepth: 2`** — the variable keeps its FileReader-era name on
+purpose, to avoid a mismatch with the value an operator already has set. Depth is a step payload, so
+one wired workflow has one depth and no message can ask for another. Wire that second workflow only
+when you intend to raise depth in earnest; the test exists so that raising it without deepening the
+schema is a diagnosable failure rather than a silent one.
 
 #### Three ways to read a false result here
 
