@@ -48,6 +48,27 @@ public sealed class ProcessorArchiveCollapserTests
         return Assert.Single(sends);
     }
 
+    /// <summary>
+    /// Like <see cref="Run"/>, but hands back the logger too -- for the one test that needs to read
+    /// the shape the processor logs rather than the envelope it sends.
+    /// </summary>
+    private static async Task<(ProcessedData Sent, RecordingLogger<ArchiveCollapserProcessor> Log)> RunLogging(
+        byte[] data, string payload = "")
+    {
+        var sender = Substitute.For<IQueueSender>();
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var log = new RecordingLogger<ArchiveCollapserProcessor>();
+        var processor = new ArchiveCollapserProcessor(log, new ArchiveBuilder([new ZipWriter(), new TarWriter()]));
+        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+
+        await processor.ExecuteAsync(data, payload, E, CancellationToken.None);
+
+        return (Assert.Single(sends), log);
+    }
+
     private static JsonElement Envelope(ProcessedData sent)
         => JsonDocument.Parse(sent.Data).RootElement;
 
@@ -133,11 +154,29 @@ public sealed class ProcessorArchiveCollapserTests
             () => Run(Encoding.UTF8.GetBytes("{ this is not json")));
 
         Assert.Equal(
-            "input branch did not carry a file document: the branch is not a file document",
+            "input branch did not carry a file document: the branch is not JSON",
             ex.Message);
 
-        // The parse error quotes the fragment that failed, and that fragment is upstream content.
+        // The parse error quotes the fragment that failed to parse, and that fragment is upstream
+        // content. This assertion cannot fail on its own -- the Assert.Equal above already pins the
+        // message exactly -- and it stays anyway: it documents for a future reader that upstream
+        // content must never reach the message, in case the catch is ever "improved" to include
+        // ex.Message.
         Assert.DoesNotContain("this is not json", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADocumentThatParsesToNullFailsWithItsOwnReason()
+    {
+        // Valid JSON whose value is literally `null` is a different fault than malformed JSON -- an
+        // operator chasing "not JSON" here would be chasing a parse error that never happened -- so
+        // it must not share ADocumentThatIsNotJsonFailsWithoutQuotingIt's reason.
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => Run(Encoding.UTF8.GetBytes("null")));
+
+        Assert.Equal(
+            "input branch did not carry a file document: the branch is empty",
+            ex.Message);
     }
 
     [Fact]
@@ -180,5 +219,26 @@ public sealed class ProcessorArchiveCollapserTests
 
         using var stream = new MemoryStream(content, writable: false);
         Assert.Equal(["a.csv", "b.csv"], new ZipExtractor().Extract(stream).Select(e => e.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task TheLoggedEntryCountAndDepthComeFromContentNotTheDeclaredMetadata()
+    {
+        // Depth 2: outer.zip -> child.zip -> a.csv. The root's declared entryCount is wrong ON
+        // PURPOSE -- 99 against the one real child -- so a reader who swapped built.EntryCount for
+        // root.Metadata.EntryCount in ArchiveCollapserProcessor would satisfy every other test in
+        // this file and be caught only here.
+        var child = new FileNode(
+            new FileMetadata("child.zip", ".zip", 0, null, Stamp, 1),
+            new FileContent.Entries([Leaf("a.csv", "id")]));
+        var root = new FileNode(
+            new FileMetadata("outer.zip", ".zip", 0, null, Stamp, 99),
+            new FileContent.Entries([child]));
+
+        var (_, log) = await RunLogging(Document(root));
+
+        Assert.Contains(log.Records, r =>
+            r.Message.Contains("of 1 entries", StringComparison.Ordinal)
+            && r.Message.Contains("from depth 2", StringComparison.Ordinal));
     }
 }
