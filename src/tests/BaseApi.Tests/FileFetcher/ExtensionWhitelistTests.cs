@@ -83,6 +83,7 @@ public sealed class ExtensionWhitelistTests
     [InlineData("*")]
     [InlineData("")]
     [InlineData("  ")]
+    [InlineData(".")]
     public void AMalformedEntryIsNamed(string entry)
     {
         // Named, not normalised. The house rule is to report the wrong value rather than quietly
