@@ -93,11 +93,17 @@ internal sealed class ArchiveCollapserProcessor(
     private static FileNode ReadDocument(byte[] data)
     {
         FileNode? node;
-        var reason = "the branch is not a file document";
+        string reason;
 
         try
         {
             node = JsonSerializer.Deserialize<FileNode>(data, FileDocument.Options);
+
+            // A successful parse can still hand back null: the bytes were valid JSON whose value
+            // was literally `null`, or empty. That is a different fault than malformed JSON -- an
+            // operator chasing "not JSON" here would be chasing a parse error that never happened --
+            // so it gets its own reason. Overwritten below if the node turns out non-null.
+            reason = "the branch is empty";
         }
         catch (JsonException)
         {
@@ -109,6 +115,7 @@ internal sealed class ArchiveCollapserProcessor(
             // FIRST depth guard -- FileNodeConverter.Read recurses, so a pathologically deep
             // document must be refused before ArchiveBuilder's own bound is reached.
             node = null;
+            reason = "the branch is not JSON";
         }
 
         if (node is not null)
