@@ -147,9 +147,12 @@ public sealed class ArchiveExpanderSchemaTests
             """;
 
         var ok = ProcessorJsonSchemaValidator.TryValidate(
-            Definition(), Encoding.UTF8.GetBytes(json), out _);
+            Definition(), Encoding.UTF8.GetBytes(json), out var errors);
 
         Assert.False(ok);
+        // Proves the DEPTH rule rejected it -- not a metadata typo in this hand-written fixture --
+        // by naming the exact instance location and keyword the validator reported.
+        Assert.Contains("/content/0/content/0/content: type", errors);
     }
 
     [Fact]
