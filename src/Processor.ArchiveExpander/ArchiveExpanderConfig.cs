@@ -57,7 +57,7 @@ public sealed record ArchiveExpanderConfig(
     /// <para>
     /// <b>A cap exists so the expansion cannot outrun the stack.</b> The builder recurses, and a
     /// bounded depth is what makes that safe to read and safe to run. Nothing legitimate nests
-    /// archives ten deep, and a self-reproducing archive — which expands to a copy of itself at
+    /// archives four deep, and a self-reproducing archive — which expands to a copy of itself at
     /// roughly constant size — is stopped here rather than being left to grind against the expansion
     /// ceiling for thousands of levels first.
     /// </para>
@@ -66,10 +66,17 @@ public sealed record ArchiveExpanderConfig(
     /// sets <c>JsonSerializerOptions.MaxDepth</c>, so the deserializer's default of 64 JSON levels
     /// caps a document near 32 NODE levels — each node costs two. A step naming 40 was therefore
     /// ACCEPTED here as legal and then could not round-trip: the collapser reported it as
-    /// <c>the branch is not JSON</c>, diagnosing a depth overflow as a parse error. Ten sits well
+    /// <c>the branch is not JSON</c>, diagnosing a depth overflow as a parse error. Four sits far
     /// below that wall, so every value this validator accepts is a value the loop can carry, and
     /// every value it rejects is rejected HERE — before a file is opened, with a message naming
     /// <c>MaxDepth</c> — rather than three hops later as corrupt data.
+    /// </para>
+    /// <para>
+    /// <b>Four rather than something roomier, because the real feeds are shallower still.</b>
+    /// Observed archives nest two deep; four leaves headroom for a level nobody has seen without
+    /// pretending this pipeline is in the business of deep nesting. Raising it is a one-line change
+    /// and needs no schema work — v3.0.0 admits any depth — so the cheap direction is up, later,
+    /// against a file that actually needs it.
     /// </para>
     /// <para>
     /// <b>The registered output schema no longer bounds this, which is why the number had to become
@@ -78,5 +85,5 @@ public sealed record ArchiveExpanderConfig(
     /// admits any depth. This constant is now the only declared ceiling on expansion.
     /// </para>
     /// </summary>
-    public const int MaxSupportedDepth = 10;
+    public const int MaxSupportedDepth = 4;
 }
