@@ -415,6 +415,13 @@ one wired workflow has one depth and no message can ask for another. Wire that s
 when you intend to raise depth in earnest; the test exists so that raising it without deepening the
 schema is a diagnosable failure rather than a silent one.
 
+**`ArchiveCollapserLiveTests` skips the same way, unless both `SKP_ARCHIVECOLLAPSER_IN_TOPIC` and
+`SKP_ARCHIVECOLLAPSER_OUT_TOPIC` are set.** Nothing in this repo wires a workflow for
+ArchiveCollapser — an operator must wire one as `KafkaImporter → ArchiveCollapser → KafkaExporter`
+and point the two variables at its in and out topics before either test in that suite can run for
+real; unset (the default), they skip naming exactly what to set rather than failing confusingly
+against topics nothing provisions.
+
 #### Three ways to read a false result here
 
 - **The RabbitMQ forward dies on most runs.** Supervise it, or read its five downstream failures as
