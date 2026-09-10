@@ -29,6 +29,10 @@ public sealed class TarWriter : IArchiveWriter
             // The same list TarExtractor wraps, for the same reason. FormatException is included
             // because System.Formats.Tar reports an unparsable octal field that way and it descends
             // from neither IOException nor ArgumentException.
+            //
+            // Not bare Exception: a NullReferenceException here is a bug in this class, and it must
+            // reach the framework's general catch with its stack trace rather than be reported to an
+            // operator as a bad document.
             throw new ArchiveWritingException(ex.Message, ex);
         }
     }
@@ -54,25 +58,7 @@ public sealed class TarWriter : IArchiveWriter
                 // the archive is finished with it.
                 var tarEntry = new PaxTarEntry(TarEntryType.RegularFile, entry.Name)
                 {
-                    // Null becomes the epoch: tar has no null, and the epoch is what TarExtractor
-                    // reads back, which is what keeps collapse -> expand a fixed point. NOT clamped
-                    // to 1980 like zip -- tar can represent what zip cannot, and the rule is to
-                    // write the value the expander would read back, not the narrowest value any
-                    // format could hold.
-                    //
-                    // MEASURED on .NET 8.0.31: PaxTarEntry.ModificationTime's setter throws
-                    // ArgumentOutOfRangeException below DateTimeOffset.UnixEpoch (1970-01-01T00:00:00Z)
-                    // -- 1969-01-01, 1900-01-01 and DateTimeOffset.MinValue all threw; the epoch
-                    // itself and DateTimeOffset.MaxValue (9999-12-31T23:59:59.9999999Z) were both
-                    // accepted unchanged. So the BCL's own floor already coincides with tar's null
-                    // sentinel -- nothing below the epoch is representable here at all, which is why
-                    // no separate clamp is needed beyond routing null to UnixEpoch: any ModifiedUtc
-                    // this codebase can produce that is *at or above* the epoch passes straight
-                    // through, and the one boundary case the tests probe (exactly 1970-01-01T00:00:00Z)
-                    // sits ON the accepted floor rather than below it.
-                    ModificationTime = entry.ModifiedUtc is { } stamp
-                        ? new DateTimeOffset(DateTime.SpecifyKind(stamp, DateTimeKind.Utc))
-                        : DateTimeOffset.UnixEpoch,
+                    ModificationTime = ModificationTime(entry.ModifiedUtc),
                     DataStream = new MemoryStream(entry.Content, writable: false),
                 };
 
@@ -86,5 +72,50 @@ public sealed class TarWriter : IArchiveWriter
         // healthy-empty-archive branch rather than the corrupt one; a document with content:null
         // needs no special case here, matching ZipWriter's empty-list comment.
         return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// The timestamp to store, per the same rule <c>ZipWriter.Clamp</c> follows: write the value the
+    /// expander would read back.
+    /// <para>
+    /// Null becomes the epoch: tar has no null, and the epoch is what <c>TarExtractor</c> reads
+    /// back, which is what keeps collapse -&gt; expand a fixed point.
+    /// </para>
+    /// <para>
+    /// <b>Above the epoch, this does NOT clamp to 1980 like zip</b> -- tar can represent what zip
+    /// cannot, and a value like 1975 passes straight through unclamped: the rule is to write the
+    /// value the expander would read back, not the narrowest value any format could hold.
+    /// </para>
+    /// <para>
+    /// <b>Below the epoch, though, this DOES clamp -- and that is a .NET WRITER bound, not a tar
+    /// FORMAT bound.</b> MEASURED on .NET 8.0.31: <c>PaxTarEntry.ModificationTime</c>'s setter throws
+    /// <see cref="ArgumentOutOfRangeException"/> for anything before <see
+    /// cref="DateTimeOffset.UnixEpoch"/> (1970-01-01T00:00:00Z) -- 1969-01-01, 1900-01-01 and
+    /// <see cref="DateTimeOffset.MinValue"/> all threw; the epoch itself and
+    /// <see cref="DateTimeOffset.MaxValue"/> (9999-12-31T23:59:59.9999999Z) were both accepted
+    /// unchanged. The tar FORMAT and the in-box <c>TarReader</c> do NOT share this limit -- a
+    /// hand-built PAX archive carrying a negative mtime extended record (GNU tar's own encoding for
+    /// a pre-1970 file) was read back by <c>TarReader</c> as 1969-12-31T00:00:00Z with no exception,
+    /// so <c>ArchiveExpander</c> can and does hand this writer a below-epoch <c>ModifiedUtc</c>; this
+    /// is demonstrated reachable, not a theoretical edge.
+    /// </para>
+    /// <para>
+    /// Refusing to write it (letting the setter throw) would not preserve the timestamp -- it was
+    /// already committed upstream by the expander -- it would only lose the timestamp AND the whole
+    /// archive, recovering neither. Clamping to the epoch loses just the one field, and keeps the
+    /// governing rule true at this boundary too: after the clamp, the epoch IS the value
+    /// <c>TarExtractor</c> reads back. This mirrors <c>ZipWriter.Clamp</c>, which already clamps to a
+    /// writer/format bound rather than pretending the bound does not exist.
+    /// </para>
+    /// </summary>
+    private static DateTimeOffset ModificationTime(DateTime? modifiedUtc)
+    {
+        if (modifiedUtc is not { } stamp)
+        {
+            return DateTimeOffset.UnixEpoch;
+        }
+
+        var offset = new DateTimeOffset(DateTime.SpecifyKind(stamp, DateTimeKind.Utc));
+        return offset < DateTimeOffset.UnixEpoch ? DateTimeOffset.UnixEpoch : offset;
     }
 }

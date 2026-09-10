@@ -44,9 +44,10 @@ public sealed class TarWriterTests
     {
         // TarExtractor treats "no entries" as corrupt UNLESS the archive is all zero bytes. A
         // document with content:null must land on the healthy side of that guard, or the loop does
-        // not close. Asserted through the extractor rather than by counting bytes, because whether
-        // the BCL writes trailing zero blocks or nothing at all is unmeasured -- and both satisfy
-        // the guard, so the test does not need to care which.
+        // not close. Asserted through the extractor rather than by counting bytes: measured
+        // separately that disposing a BclTarWriter with zero entries written produces a 0-byte
+        // stream (see TarWriter.WriteCore), which satisfies the all-zero-bytes guard vacuously --
+        // the test does not need to re-assert the byte count to prove the healthy branch is taken.
         var bytes = new TarWriter().Write([]);
 
         Assert.Empty(ReadBack(bytes));
@@ -65,15 +66,39 @@ public sealed class TarWriterTests
     }
 
     [Fact]
-    public void APreDosTimestampIsNotClampedBecauseTarCanRepresentIt()
+    public void APreDosPostEpochTimestampIsNotClampedBecauseTarCanRepresentIt()
     {
-        // The rule is "write the value the expander would read back", and tar reads back what zip
-        // could not hold. Clamping here would throw away information the format keeps.
-        var stamp = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Distinguishing value, not the epoch: 1975-06-01 is below zip's 1980 DOS floor (so this
+        // proves zip's clamp is genuinely absent here, not coincidentally satisfied) and above the
+        // BCL's own 1970 floor (so PaxTarEntry.ModificationTime's setter accepts it unclamped). The
+        // rule is "write the value the expander would read back", and tar reads back what zip could
+        // not hold. Clamping here would throw away information the writer is actually able to keep.
+        var stamp = new DateTime(1975, 6, 1, 0, 0, 0, DateTimeKind.Utc);
 
         var bytes = new TarWriter().Write([Entry("a.csv", "id", stamp)]);
 
         Assert.Equal(stamp, Assert.Single(ReadBack(bytes)).ModifiedUtc);
+    }
+
+    [Fact]
+    public void APreEpochTimestampIsClampedBecauseTheBclWriterCannotRepresentIt()
+    {
+        // Reachable, not theoretical: a hand-built PAX tar carrying a negative mtime extended record
+        // (GNU tar's own encoding for a pre-1970 file) reads back through the real TarReader as
+        // 1969-12-31T00:00:00Z with no exception -- so ArchiveExpander can and does hand this writer
+        // a below-epoch ModifiedUtc. PaxTarEntry.ModificationTime's setter throws
+        // ArgumentOutOfRangeException for anything before DateTimeOffset.UnixEpoch (measured; see
+        // TarWriter.WriteCore), so this is a .NET WRITER bound, not a tar FORMAT bound -- refusing to
+        // write here would lose the timestamp AND the whole archive, where clamping loses only the
+        // timestamp. The clamp lands on the epoch, which is exactly what TarExtractor reads back,
+        // keeping "write the value the expander would read back" true even at this boundary.
+        var stamp = new DateTime(1969, 12, 31, 0, 0, 0, DateTimeKind.Utc);
+
+        var bytes = new TarWriter().Write([Entry("a.csv", "id", stamp)]);
+
+        Assert.Equal(
+            new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            Assert.Single(ReadBack(bytes)).ModifiedUtc);
     }
 
     [Fact]
