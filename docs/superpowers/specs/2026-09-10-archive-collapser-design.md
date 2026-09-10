@@ -257,11 +257,21 @@ following the precedent of `ZipExtractor`'s "what was measured, on .NET 8.0.31" 
 
 ### 7.1 The schema files leave `src/`, and there are two of them
 
-**No processor ships a schema file any more.** Nothing in `src/` reads one: `FileContentBuilder` says
-so outright — *"The structure is hard-coded here. The output schema does not drive it and is not
-read."* The file on disk is the source of truth for content, and a schema shipped inside an image is
-carried solely so it can be registered from the container, which is a deploy convenience and not a
-runtime need.
+**No processor ships a schema file any more, because no processor can read one.** This was verified,
+not assumed: the only file reads in any processor or in `BaseProcessor.Core` are `appsettings.json`
+per `ProcessorHost` and `File.ReadAllBytes` in `FileFetcherProcessor.cs:169` — the data file the
+fetcher exists to fetch. There is no code path anywhere that opens a `schema/*.json`.
+
+Validation is entirely database-driven. `ProcessorStartupOrchestrator`'s Loop B walks
+`identity.InputSchemaId` / `OutputSchemaId` / `ConfigSchemaId` from the processor's own row, asks the
+broker over `ProcessorQueues.SchemaQuery` for each definition, and holds the returned **text** as
+`InputDefinition` / `OutputDefinition`. That string is what `TryValidate` receives in
+`ProcessDispatchHandler.cs:200` and `ProcessedDataHandler.cs:121`. A null id is skipped without a
+request — which is precisely why §1.1's phase 1 runs with everything null.
+
+So the `<Content Include>` entries were copying files into every runtime image that nothing in the
+container could open. They are deploy artifacts — text to paste into a POST — and they belong beside
+the tests that read them, not in a shipped image.
 
 So the schemas move to the test project, deduplicated to **one file per shape**:
 
