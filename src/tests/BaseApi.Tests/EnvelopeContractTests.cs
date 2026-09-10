@@ -43,10 +43,27 @@ public sealed class EnvelopeContractTests : IDisposable
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "input.json"));
 
     /// <summary>Runs the real fetcher and returns the single branch it sent.</summary>
-    private async Task<byte[]> Fetch(string name, byte[] content, string payload)
+    /// <param name="createdUtc">
+    /// When given, stamped onto the temp file before the fetcher inspects it, so a test can pin
+    /// <c>CreatedUtc</c> to a known value rather than merely asserting it is non-null.
+    /// </param>
+    /// <param name="modifiedUtc">The <paramref name="createdUtc"/> counterpart for <c>ModifiedUtc</c>.</param>
+    private async Task<byte[]> Fetch(
+        string name, byte[] content, string payload,
+        DateTime? createdUtc = null, DateTime? modifiedUtc = null)
     {
         var path = Path.Combine(_dir, name);
         await File.WriteAllBytesAsync(path, content);
+
+        if (createdUtc is { } created)
+        {
+            File.SetCreationTimeUtc(path, created);
+        }
+
+        if (modifiedUtc is { } modified)
+        {
+            File.SetLastWriteTimeUtc(path, modified);
+        }
 
         var sender = Substitute.For<IQueueSender>();
         var sends = new List<ProcessedData>();
@@ -118,7 +135,18 @@ public sealed class EnvelopeContractTests : IDisposable
     [Fact]
     public async Task APlainFileSurvivesBothHops()
     {
-        var envelope = await Fetch("orders.csv", Encoding.UTF8.GetBytes("id,name"), AnyFile);
+        // DISTINCT values, deliberately, and that is the whole point of the assertion below. Two
+        // NotNull checks would pass just as happily if a reader TRANSPOSED CreatedUtc and
+        // ModifiedUtc — mapped each into the other's field — because null-ness alone cannot see a
+        // swap. Pinning each to its OWN known value is what catches a transposition, a drop, or a
+        // rename anywhere between the fetcher's FetchedFile, the expander's FetchedFile, and the two
+        // schema files. Do not collapse these into one shared constant: that would silently reopen
+        // exactly the hole this exists to close.
+        var created = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        var modified = new DateTime(2026, 6, 7, 8, 9, 10, DateTimeKind.Utc);
+
+        var envelope = await Fetch(
+            "orders.csv", Encoding.UTF8.GetBytes("id,name"), AnyFile, created, modified);
 
         var document = await Expand(envelope, """{"MaxDepth":1}""");
         var node = JsonSerializer.Deserialize<FileNode>(document, FileDocument.Options)!;
@@ -128,7 +156,8 @@ public sealed class EnvelopeContractTests : IDisposable
         Assert.Equal("orders.csv", node.Metadata.Name);
         Assert.Equal(".csv", node.Metadata.Extension);
         Assert.Equal(7, node.Metadata.SizeBytes);
-        Assert.NotNull(node.Metadata.ModifiedUtc);
+        Assert.Equal(created, node.Metadata.CreatedUtc);
+        Assert.Equal(modified, node.Metadata.ModifiedUtc);
 
         var bytes = Assert.IsType<FileContent.Bytes>(node.Content);
         Assert.Equal("id,name", Encoding.UTF8.GetString(bytes.Value));
@@ -167,6 +196,19 @@ public sealed class EnvelopeContractTests : IDisposable
 
         Assert.Equal("README", node.Metadata.Name);
         Assert.Equal("", node.Metadata.Extension);
+    }
+
+    [Fact]
+    public void TheFetcherOutputSchemaAndTheExpanderInputSchemaAreByteIdentical()
+    {
+        // WhatTheFetcherSendsSatisfiesBothRegisteredSchemas proves one real envelope satisfies both
+        // files, but that alone cannot see input.json being LOOSENED relative to fetcher-output.json
+        // — widen additionalProperties, broaden a type, and the same real bytes still satisfy both,
+        // green, while the two contracts have quietly diverged. The two files are duplicated across
+        // assemblies that must not reference each other (Processor.FileFetcher and
+        // Processor.ArchiveExpander), so nothing but a test pins their identity — there is no shared
+        // file for a build to enforce it structurally.
+        Assert.Equal(FetcherOutputSchema(), ExpanderInputSchema(), StringComparer.Ordinal);
     }
 
     [Fact]
