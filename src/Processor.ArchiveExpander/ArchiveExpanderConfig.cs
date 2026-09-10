@@ -56,12 +56,27 @@ public sealed record ArchiveExpanderConfig(
     /// The most any step may ask for.
     /// <para>
     /// <b>A cap exists so the expansion cannot outrun the stack.</b> The builder recurses, and a
-    /// bounded depth is what makes that safe to read and safe to run. The number is arbitrary and
-    /// deliberately generous: nothing legitimate nests archives sixty-four deep, and a
-    /// self-reproducing archive — which expands to a copy of itself at roughly constant size — is
-    /// stopped here rather than being left to grind against the expansion ceiling for thousands of
-    /// levels first.
+    /// bounded depth is what makes that safe to read and safe to run. Nothing legitimate nests
+    /// archives ten deep, and a self-reproducing archive — which expands to a copy of itself at
+    /// roughly constant size — is stopped here rather than being left to grind against the expansion
+    /// ceiling for thousands of levels first.
+    /// </para>
+    /// <para>
+    /// <b>It was 64, and 64 was a number this system could not actually reach.</b> Neither assembly
+    /// sets <c>JsonSerializerOptions.MaxDepth</c>, so the deserializer's default of 64 JSON levels
+    /// caps a document near 32 NODE levels — each node costs two. A step naming 40 was therefore
+    /// ACCEPTED here as legal and then could not round-trip: the collapser reported it as
+    /// <c>the branch is not JSON</c>, diagnosing a depth overflow as a parse error. Ten sits well
+    /// below that wall, so every value this validator accepts is a value the loop can carry, and
+    /// every value it rejects is rejected HERE — before a file is opened, with a message naming
+    /// <c>MaxDepth</c> — rather than three hops later as corrupt data.
+    /// </para>
+    /// <para>
+    /// <b>The registered output schema no longer bounds this, which is why the number had to become
+    /// honest.</b> <c>archive-document</c> v2.0.0 unrolled the document shape to a fixed depth 2 and
+    /// rejected anything deeper with a clear schema failure; v3.0.0 is one self-referencing node and
+    /// admits any depth. This constant is now the only declared ceiling on expansion.
     /// </para>
     /// </summary>
-    public const int MaxSupportedDepth = 64;
+    public const int MaxSupportedDepth = 10;
 }
