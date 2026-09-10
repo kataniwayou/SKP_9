@@ -114,8 +114,8 @@ internal sealed class FileContentBuilder(
 
         // THE BYTES DECIDE, not the name. See IArchiveExtractor.CanHandle for why this reversed:
         // below the first level there is no declared extension to trust, because an entry's name is
-        // written by whoever built the archive. ArchiveExpanderConfig.ExpectedExtension still admits the
-        // file to the step; it no longer chooses what opens it.
+        // written by whoever built the archive. FileFetcher's extension whitelist still admits the
+        // file to the step, one hop upstream; it no longer chooses what opens it.
         //
         // No match is the ordinary termination: a CSV matches nothing and is a leaf.
         var extractor = depth < maxDepth ? Match(bytes) : null;

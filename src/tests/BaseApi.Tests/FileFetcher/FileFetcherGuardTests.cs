@@ -197,4 +197,33 @@ public sealed class FileFetcherGuardTests : IDisposable
         Assert.StartsWith($"file {path} rejected: ", ex.Message, StringComparison.Ordinal);
         Assert.Contains("is above the 100 byte ceiling", ex.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task TheSizeGuardsRunBeforeTheFileIsOpened()
+    {
+        // THE GUARANTEE THIS CLASS'S DOC COMMENT PROMISES IN PROSE ("Every one of these must fail
+        // BEFORE the file is opened") AND NOTHING ELSE IN THIS SUITE ENFORCES. An oversize file held
+        // open exclusively by another process must still be REJECTED with the ceiling message rather
+        // than reported unreadable — FileInfo.Length does not need the handle that
+        // File.ReadAllBytes does.
+        //
+        // THE EXCLUSIVE HANDLE IS THE POINT OF THIS TEST, NOT INCIDENTAL SETUP. Holding the file open
+        // with FileShare.None means that if a future change reordered the checks — or started
+        // reading bytes speculatively before the dry inspection finished — File.ReadAllBytes would
+        // collide with this test's own lock and the step would fail with the "reading {path} failed"
+        // template instead of "file {path} rejected". Asserting BOTH which template fired and which
+        // one did NOT is what makes this a regression test rather than an ordinary ceiling test; do
+        // not simplify it down to just the positive assertion.
+        var processor = Build();
+        var path = WriteFile("orders.csv", 5000);
+
+        using var exclusive = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => Run(processor, path, Payload([".csv"], 0, 4096)));
+
+        Assert.StartsWith($"file {path} rejected: ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("is above the 4096 byte ceiling", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain($"reading {path} failed", ex.Message, StringComparison.Ordinal);
+    }
 }
