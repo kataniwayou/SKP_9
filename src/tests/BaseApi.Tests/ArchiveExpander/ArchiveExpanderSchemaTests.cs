@@ -126,9 +126,10 @@ public sealed class ArchiveExpanderSchemaTests
     [Fact]
     public void ADocumentNestedDeeperThanTheSchemaAdmitsIsRejected()
     {
-        // THE DEPTH RULE, and it is structural rather than declared: the baseline unrolls to one
-        // level, so `depth0` admits only a string and an entry carrying its own entries has nowhere
-        // to validate against.
+        // THE DEPTH RULE, and it is structural rather than declared: the baseline unrolls to two
+        // levels, so `depth0` admits only a string and an entry carrying its own entries has nowhere
+        // to validate against. One level past the baseline -- root, one archive, one leaf -- now
+        // validates (see ADepthTwoDocumentValidates); this document nests one level past THAT.
         //
         // This is the failure a step whose MaxDepth exceeds the registered schema produces. It is
         // the contract working — nothing keeps MaxDepth and the schema in sync on purpose — and it
@@ -137,10 +138,12 @@ public sealed class ArchiveExpanderSchemaTests
         var json = """
             {"metadata":{"name":"o.zip","extension":".zip","sizeBytes":9,"createdUtc":null,
              "modifiedUtc":null,"entryCount":1},
-             "content":[{"metadata":{"name":"i.zip","extension":".zip","sizeBytes":3,
+             "content":[{"metadata":{"name":"i.zip","extension":".zip","sizeBytes":6,
                "createdUtc":null,"modifiedUtc":null,"entryCount":1},
-               "content":[{"metadata":{"name":"d.csv","extension":".csv","sizeBytes":3,
-                 "createdUtc":null,"modifiedUtc":null,"entryCount":0},"content":"aWQK"}]}]}
+               "content":[{"metadata":{"name":"m.zip","extension":".zip","sizeBytes":3,
+                 "createdUtc":null,"modifiedUtc":null,"entryCount":1},
+                 "content":[{"metadata":{"name":"d.csv","extension":".csv","sizeBytes":3,
+                   "createdUtc":null,"modifiedUtc":null,"entryCount":0},"content":"aWQK"}]}]}]}
             """;
 
         var ok = ProcessorJsonSchemaValidator.TryValidate(
@@ -161,5 +164,31 @@ public sealed class ArchiveExpanderSchemaTests
         var entries = Assert.IsType<FileContent.Entries>(back!.Content);
         var bytes = Assert.IsType<FileContent.Bytes>(Assert.Single(entries.Value).Content);
         Assert.Equal("id", Encoding.UTF8.GetString(bytes.Value));
+    }
+
+    [Fact]
+    public void ADepthTwoDocumentValidates()
+    {
+        // A zip inside a zip, both expanded -- three levels of node. The baseline rooted at depth1
+        // admits root -> leaves and no more, so this is the assertion that the re-rooting landed.
+        var document = Serialize(
+            Archive("outer.zip", Archive("inner.zip", Leaf("a.csv", ".csv", "id"))));
+
+        Assert.True(
+            ProcessorJsonSchemaValidator.TryValidate(Definition(), document, out var errors),
+            string.Join("; ", errors));
+    }
+
+    [Fact]
+    public void ADepthOneDocumentStillValidates()
+    {
+        // The widening must be BACKWARD COMPATIBLE: depth1 admits string content, so a shallow
+        // document is still legal. If this fails, the re-rooting replaced a level instead of adding
+        // one.
+        var document = Serialize(Archive("outer.zip", Leaf("a.csv", ".csv", "id")));
+
+        Assert.True(
+            ProcessorJsonSchemaValidator.TryValidate(Definition(), document, out var errors),
+            string.Join("; ", errors));
     }
 }

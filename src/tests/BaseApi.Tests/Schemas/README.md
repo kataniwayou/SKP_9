@@ -40,8 +40,10 @@ particular feed. ArchiveCollapser reads the same file as its input schema, one h
 - `content` is one key holding one of three things: a base64 string (a file's bytes), an array of
   nodes (what an archive expanded to), or null (an archive that expanded to nothing). It is never
   two keys that can disagree — see `FileContent` for why that pair was collapsed.
-- **Depth one, structurally.** `depth1` may hold an array of `depth0`; `depth0`'s `content` is a
-  string and nothing else, so it cannot hold entries. That is the whole depth rule.
+- **Depth two, structurally.** `depth2` may hold an array of `depth1`, `depth1` may hold an array of
+  `depth0`; `depth0`'s `content` is a string and nothing else, so it cannot hold entries. That is the
+  whole depth rule: root, one archive of archives, one archive of leaves — a zip inside a zip, both
+  expanded.
 
 ## How depth is expressed, and why it is not a keyword
 
@@ -49,29 +51,35 @@ JSON Schema has no depth keyword, and there is no way to say "at most two levels
 the levels out. So the bound is a property of the STRUCTURE: N node definitions, each referencing
 the next, and the last one admitting only a string. You read the limit by counting the definitions.
 
-To admit a zip whose entries are themselves zips — `MaxDepth: 2` on the step — add a level and
-repoint the root:
+To admit a zip whose entries are themselves zips of zips — `MaxDepth: 3` on the step — add a level
+and repoint the root:
 
-    "$ref": "#/$defs/depth2",
+    "$ref": "#/$defs/depth3",
 
-    "depth2": {
+    "depth3": {
       "type": "object", "additionalProperties": false,
       "required": ["metadata", "content"],
       "properties": {
         "metadata": { "$ref": "#/$defs/metadata" },
         "content": { "type": ["string", "array", "null"],
-                     "items": { "$ref": "#/$defs/depth1" } }
+                     "items": { "$ref": "#/$defs/depth2" } }
       }
     },
 
-leaving `depth1` and `depth0` as they are. Each level is the same object with `items` pointing one
-step shallower.
+leaving `depth2`, `depth1` and `depth0` as they are. Each level is the same object with `items`
+pointing one step shallower.
 
 **The alternative — a self-referencing `$ref` admitting any depth — is rejected.** It would validate
 every document this processor can produce, which sounds like a feature and is the opposite: a schema
 that admits any depth can never tell you the depth was wrong. The unrolled form is what makes a
 `MaxDepth` the schema does not expect show up as a validation failure instead of a surprise
 downstream.
+
+**The widening from depth 1 to depth 2 was a deliberate LOOSENING, and it has a cost.** A depth-1
+document still validates, because `depth1` admits string content — so nothing broke. But a step
+running at `MaxDepth: 1` and producing a shallow document is no longer distinguishable by this
+schema from one that should have gone deeper. The schema now says less about what a given feed
+should look like, which is precisely why per-feed variants exist below.
 
 **Nothing keeps `MaxDepth` and this file in sync, and that is deliberate.** The step payload states
 what to expand; this states what a document may look like. When they disagree the document fails
@@ -93,7 +101,7 @@ construction. `format` and `contentEncoding` are ANNOTATIONS in 2020-12, not ass
 that is ever needed.
 
 **Which of the three `content` forms a given node should have.** `type: ["string", "array", "null"]`
-admits all three at `depth1`, because the root may legitimately be any of them: a plain file, an
+admits all three at `depth2`, because the root may legitimately be any of them: a plain file, an
 expanded archive, or an empty one. A feed that always ships an archive can narrow it — see below.
 
 ## Per-feed variants
