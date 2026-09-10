@@ -142,6 +142,7 @@ internal sealed class ArchiveBuilder(IEnumerable<IArchiveWriter> writers)
                 + "— the format is proprietary and is readable but not writable here. Re-target the "
                 + "node to .zip or .tar.")
             : new ArchiveWritingException(
-                $"'{node.Metadata.Name}' holds entries but its extension "
+                $"'{node.Metadata.Name}' is an archive -- it carries entries, or null meaning "
+                + "entries that expanded to nothing -- but its extension "
                 + $"'{node.Metadata.Extension}' names no archive writer");
 }

@@ -58,6 +58,7 @@ public sealed class ArchiveBuilderTests
         var built = Builder().Build(Archive("empty.zip"));
 
         Assert.Equal(22, built.Archive.Length);
+        Assert.Empty(Unzip(built.Archive));
         Assert.Equal(0, built.EntryCount);
     }
 
@@ -91,11 +92,31 @@ public sealed class ArchiveBuilderTests
     [Fact]
     public void ANodeWithEntriesWhoseExtensionNamesNoWriterFails()
     {
+        // The node's name and its extension deliberately differ (orders.dat, not orders.csv) so
+        // that asserting the message contains ".dat" actually pins the extension clause -- a name
+        // ending in the same text as the extension would let that assertion pass even if the
+        // extension clause were dropped entirely.
         var ex = Assert.Throws<ArchiveWritingException>(
-            () => Builder().Build(Archive("orders.csv", Leaf("a.csv", "id"))));
+            () => Builder().Build(Archive("orders.dat", Leaf("a.csv", "id"))));
 
-        Assert.Contains("orders.csv", ex.Message, StringComparison.Ordinal);
-        Assert.Contains(".csv", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("orders.dat", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(".dat", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheWriterIsResolvedBeforeAnyChildIsBuilt()
+    {
+        // A two-fault document, on purpose: the root's extension names no writer, AND its only
+        // child's name carries a path separator. If the writer lookup happened AFTER the children
+        // were built (walking the loop first), the child's path-separator fault would surface
+        // first and this test would see THAT message instead -- proving nothing about resolution
+        // order. Resolving the writer first means the no-writer fault wins here, which is the
+        // observable proof that a document that cannot possibly succeed fails without first
+        // materialising a subtree.
+        var ex = Assert.Throws<ArchiveWritingException>(
+            () => Builder().Build(Archive("orders.dat", Leaf("a/b.csv", "id"))));
+
+        Assert.Contains("names no archive writer", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
