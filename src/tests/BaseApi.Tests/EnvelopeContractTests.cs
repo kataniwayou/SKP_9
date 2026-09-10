@@ -11,6 +11,13 @@ using Processor.ArchiveExpander;
 using Processor.ArchiveExpander.Extractors;
 using Processor.FileFetcher;
 using Xunit;
+// Aliased rather than a blanket `using Processor.ArchiveCollapser;`: that namespace declares its
+// own FileNode/FileContent/FileDocument -- a deliberate duplicate of ArchiveExpander's, per both
+// types' doc comments -- and a blanket import would make every existing unqualified use of those
+// names in this file ambiguous. Only the two types Collapse() needs are pulled in.
+using ArchiveBuilder = Processor.ArchiveCollapser.ArchiveBuilder;
+using ArchiveCollapserProcessor = Processor.ArchiveCollapser.ArchiveCollapserProcessor;
+using Processor.ArchiveCollapser.Writers;
 
 namespace BaseApi.Tests;
 
@@ -120,6 +127,49 @@ public sealed class EnvelopeContractTests : IDisposable
         return buffer.ToArray();
     }
 
+    /// <summary>Runs the real collapser over a document and returns the envelope it sent.</summary>
+    private static async Task<byte[]> Collapse(byte[] document)
+    {
+        var sender = Substitute.For<IQueueSender>();
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var collapser = new ArchiveCollapserProcessor(
+            new RecordingLogger<ArchiveCollapserProcessor>(),
+            new ArchiveBuilder(
+            [
+                new ZipWriter(),
+                new TarWriter(),
+            ]));
+        collapser.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
+
+        // The payload is empty and that is not an oversight: this processor reads none.
+        await collapser.ExecuteAsync(document, string.Empty, E, CancellationToken.None);
+
+        return Assert.Single(sends).Data;
+    }
+
+    /// <summary>The bytes inside an envelope's base64 `content`.</summary>
+    private static byte[] ContentOf(byte[] envelope)
+        => JsonDocument.Parse(envelope).RootElement.GetProperty("content").GetBytesFromBase64();
+
+    /// <summary>A zip holding one zip, built by the collapser so tier 2 starts from our own output.</summary>
+    private static byte[] NestedZip()
+        => new ZipWriter().Write(
+        [
+            new ArchiveEntry(
+                "inner.zip",
+                new ZipWriter().Write(
+                [
+                    new ArchiveEntry(
+                        "a.csv", Encoding.UTF8.GetBytes("id"), new DateTime(2026, 3, 4, 5, 6, 8, DateTimeKind.Utc)),
+                ]),
+                new DateTime(2026, 3, 4, 5, 6, 10, DateTimeKind.Utc)),
+            new ArchiveEntry(
+                "b.csv", Encoding.UTF8.GetBytes("id,name"), new DateTime(2026, 3, 4, 5, 6, 12, DateTimeKind.Utc)),
+        ]);
+
     [Fact]
     public async Task WhatTheFetcherSendsSatisfiesTheEnvelopeSchema()
     {
@@ -208,5 +258,125 @@ public sealed class EnvelopeContractTests : IDisposable
 
         Assert.StartsWith("extracting broken.zip failed: ", ex.Message, StringComparison.Ordinal);
         Assert.Contains("treating it as corrupt", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TIER1_APlainFileRoundTripsToAByteIdenticalEnvelope()
+    {
+        // THE PRIMARY ASSERTION, at its simplest: ArchiveExpander's INPUT data equals
+        // ArchiveCollapser's OUTPUT data, byte for byte, every field.
+        //
+        // Distinct timestamps on purpose -- see APlainFileSurvivesBothHops for why two NotNull
+        // checks cannot see a transposition. Do not collapse these into one constant.
+        var created = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        var modified = new DateTime(2026, 6, 7, 8, 9, 10, DateTimeKind.Utc);
+
+        var envelope = await Fetch(
+            "orders.csv", Encoding.UTF8.GetBytes("id,name"), AnyFile, created, modified);
+
+        var collapsed = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
+
+        Assert.Equal(envelope, collapsed);
+    }
+
+    [Fact]
+    public async Task TIER2_ANestedArchiveWeBuiltRoundTripsToAByteIdenticalEnvelope()
+    {
+        // THE REAL PROOF, at depth 2. Starting from an archive THIS SYSTEM produced, the loop is
+        // byte-exact: same writer, same Optimal level, same entry order (the document's array
+        // preserves it and ZipArchive.Entries enumerates in write order), timestamps already
+        // clamped so the second pass moves nothing.
+        //
+        // This is also the case that exercises the recursive descent on both sides -- the expander's
+        // walk down, the collapser's walk back up, and FileNodeConverter in both directions.
+        var envelope = await Fetch("orders.zip", NestedZip(), AnyFile);
+
+        var collapsed = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
+
+        Assert.Equal(envelope, collapsed);
+    }
+
+    [Fact]
+    public async Task TIER2_TheLoopIsAFixedPointAcrossASecondPass()
+    {
+        // Collapse, expand, collapse: the second envelope equals the first. This is what makes
+        // "consistent with ArchiveExpander" an assertion instead of a claim -- timestamps, ordering
+        // and compression all stop moving after the first hop.
+        var envelope = await Fetch("orders.zip", NestedZip(), AnyFile);
+
+        var once = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
+        var twice = await Collapse(await Expand(once, """{"MaxDepth":2}"""));
+
+        Assert.Equal(once, twice);
+    }
+
+    [Fact]
+    public async Task TIER3_AForeignArchiveKeepsWhatTheDocumentRecordsButNotItsBytes()
+    {
+        // A zip built by the TEST's own helper rather than by ZipWriter -- a stand-in for 7-Zip,
+        // zip(1) or Python. Re-encoding cannot reproduce another implementation's deflate stream,
+        // its extra fields, its per-entry compression method or its directory entries.
+        //
+        // THIS IS A PROPERTY OF ROUND-TRIPPING THROUGH A LOSSY INTERMEDIATE, NOT A DEFECT. It is
+        // asserted so that nobody reads tier 2 passing and files a bug that tier 3 does not have.
+        var envelope = await Fetch("orders.zip", Zip(("a.csv", "id"), ("b.csv", "id,name")), AnyFile);
+
+        var document = await Expand(envelope, """{"MaxDepth":2}""");
+        var collapsed = await Collapse(document);
+
+        // Everything the document records survives.
+        var e = JsonDocument.Parse(collapsed).RootElement;
+        Assert.Equal("orders.zip", e.GetProperty("fileName").GetString());
+        Assert.Equal(".zip", e.GetProperty("extension").GetString());
+
+        using var stream = new MemoryStream(ContentOf(collapsed), writable: false);
+        var entries = new ZipExtractor().Extract(stream);
+        Assert.Equal(["a.csv", "b.csv"], entries.Select(x => x.Name).Order().ToArray());
+        Assert.Equal("id,name", Encoding.UTF8.GetString(entries.Single(x => x.Name == "b.csv").Content));
+
+        // And the bytes do not. Asserted rather than merely omitted, so the boundary is documented
+        // by a test instead of by a comment somebody can delete.
+        Assert.NotEqual(envelope, collapsed);
+    }
+
+    [Fact]
+    public async Task TIER3_ButTheSECONDPassIsAFixedPoint()
+    {
+        // Once a foreign archive has been through the loop once, it is OUR archive -- so from the
+        // second pass onward tier 2's byte identity applies. This is the bridge between the tiers.
+        var envelope = await Fetch("orders.zip", Zip(("a.csv", "id"), ("b.csv", "id,name")), AnyFile);
+
+        var once = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
+        var twice = await Collapse(await Expand(once, """{"MaxDepth":2}"""));
+
+        Assert.Equal(once, twice);
+    }
+
+    [Fact]
+    public async Task LOSS_DirectoriesAreFlattenedAndThatIsExpected()
+    {
+        // ArchiveExpander records entry.Name, never FullName, so the document has never carried
+        // directory structure. Pinned as an expected fact rather than left to surprise someone.
+        var envelope = await Fetch("orders.zip", Zip(("sub/a.csv", "id")), AnyFile);
+
+        var collapsed = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
+
+        using var stream = new MemoryStream(ContentOf(collapsed), writable: false);
+        Assert.Equal("a.csv", Assert.Single(new ZipExtractor().Extract(stream)).Name);
+    }
+
+    [Fact]
+    public async Task LOSS_NestedNodesCarryNoCreationTimeSoNoneIsWrittenBack()
+    {
+        // Archives record no creation time; only a modification time, and not in every format. The
+        // ROOT's createdUtc survives because it rides the envelope, not the archive.
+        var created = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+
+        var envelope = await Fetch("orders.zip", NestedZip(), AnyFile, created);
+        var collapsed = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
+
+        Assert.Equal(
+            created,
+            JsonDocument.Parse(collapsed).RootElement.GetProperty("createdUtc").GetDateTime());
     }
 }
