@@ -1,29 +1,18 @@
-# processor-filereader — turns an absolute file path into one structured document of metadata and
-# content, expanding zip/tar/rar archives one level. A downstream transform: it has an input and it
-# produces output, so it is neither an importer nor an exporter. No Service — its only inbound
-# traffic is the kubelet hitting the pod IP for probes.
+# processor-archiveexpander — turns a fetched file into one structured document of metadata and
+# content, expanding zip/tar/rar archives to the step's MaxDepth. A downstream transform: it has an
+# input and it produces output, so it is neither an importer nor an exporter. No Service — its only
+# inbound traffic is the kubelet hitting the pod IP for probes.
 #
 # EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS, exactly as the other processors do.
 # `kubectl rollout status` will time out; that timeout is the expected signal, not a fault.
 #
-# THE MOUNT IS THE KIND NODE'S FILESYSTEM, NOT WINDOWS. This cluster's node container was created
-# with no extraMounts, and Docker cannot add a bind mount to a running container — so hostPath here
-# resolves inside desktop-control-plane. Reaching C:\ would mean recreating the cluster with
-# `extraMounts: hostPath: /run/desktop/mnt/host/c/...`, which loses every processor identity row,
-# schema definition, workflow and step in Postgres along with Redis L2. Fixtures are seeded onto the
-# node instead:
-#
-#   docker cp <file> desktop-control-plane:/mnt/skp-files/in/
-#
-# See §13 of docs/superpowers/specs/2026-09-09-file-reader-design.md.
-#
-# THE MEMORY LIMIT IS HIGHER THAN THE OTHER PROCESSORS' 384Mi, AND THAT IS NOT PADDING. A file does
-# not cost its own size in flight: the raw file bytes, the serialized UTF-8 document (~1.33x the
-# file — base64 is 4 bytes per 3), the broker message body (that document base64'd again inside the
-# ProcessedData envelope, ~1.78x the file), and a full JsonDocument DOM over the document at
-# validation can all coexist — and the work and post consumers are the SAME process, so a dispatch
-# and a branch overlap. At the 32MiB ceiling below that is comfortably over 200MB transient. Lower
-# FileReader__MaxFileSizeBytes or raise this limit; do not move one without the other.
+# THE MEMORY LIMIT IS HIGHER THAN THE OTHER PROCESSORS' 384Mi, AND THAT IS NOT PADDING. An archive
+# does not cost its own size in flight: the inbound envelope, its base64-decoded content, everything
+# the archive expands to (bounded by ArchiveExpander__MaxExpandedBytes below), the serialized UTF-8
+# document (~1.33x the expanded content), the broker message body (that document base64'd again
+# inside the ProcessedData envelope, ~1.78x), and a full JsonDocument DOM at validation can all
+# coexist — and the work and post consumers are the SAME process, so a dispatch and a branch overlap.
+# Lower ArchiveExpander__MaxExpandedBytes or raise this limit; do not move one without the other.
 #
 # No intermediate base64 STRING sits alongside those: JsonSerializer.SerializeToUtf8Bytes writes
 # base64 straight into its UTF-8 output buffer at both serialization points, so there is no UTF-16
@@ -31,10 +20,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: processor-filereader
+  name: processor-archiveexpander
   namespace: skp
   labels:
-    app: processor-filereader
+    app: processor-archiveexpander
     app.kubernetes.io/part-of: skp
 spec:
   replicas: 1
@@ -46,22 +35,22 @@ spec:
       # want ~1.5Gi on the node at once — a single-node kind cluster already running Postgres, Redis,
       # RabbitMQ, Prometheus, Grafana, an OTel collector, BaseApi, the orchestrator and four other
       # processors. Stop-then-start trades a few seconds of throughput for not needing that headroom.
-      # (There is no correctness reason to forbid overlap here: the hostPath mount is read-only, and
-      # FileReader consumes from its own RabbitMQ queue as a competing consumer, not a single
-      # partition — this is purely a node-memory budget call.)
+      # (There is no correctness reason to forbid overlap here: ArchiveExpander consumes from its
+      # own RabbitMQ queue as a competing consumer, not a single partition, and there is no volume
+      # to contend over any more — this is purely a node-memory budget call.)
       maxSurge: 0
       maxUnavailable: 1
   selector:
     matchLabels:
-      app: processor-filereader
+      app: processor-archiveexpander
   template:
     metadata:
       labels:
-        app: processor-filereader
+        app: processor-archiveexpander
     spec:
       containers:
-        - name: processor-filereader
-          image: processor-filereader:local
+        - name: processor-archiveexpander
+          image: processor-archiveexpander:local
           imagePullPolicy: IfNotPresent
           env:
             # NO Service__Name / Service__Version here, deliberately, and do not add them back.
@@ -94,9 +83,13 @@ spec:
             # rate window at 240s, which is why a sixty-second outage moved no rate panel.
             - name: OTEL_METRIC_EXPORT_INTERVAL
               value: "10000"
-            # The pod's ceiling. A step payload naming more than this fails by name rather than
-            # being clamped — see FileReaderOptions.
-            - name: FileReader__MaxFileSizeBytes
+            # The pod's expansion ceiling — the cumulative size of everything an archive expands to,
+            # across every level. NOT the file: FileFetcher bounded that one hop upstream. It moved
+            # here from the step payload because the size of an expansion is a number an operator
+            # sizes against the limit below, and a workflow author has no way to know it.
+            #
+            # This value and the memory limit move together. Do not change one without the other.
+            - name: ArchiveExpander__MaxExpandedBytes
               value: "33554432"
             - name: RabbitMq__Host
               value: rabbitmq
@@ -144,14 +137,3 @@ spec:
           resources:
             requests: { memory: "256Mi" }
             limits:   { memory: "768Mi" }
-          volumeMounts:
-            - name: skp-files
-              mountPath: /mnt/skp-files/in
-              readOnly: true
-      volumes:
-        - name: skp-files
-          # DirectoryOrCreate so a fresh node does not need the path seeded before the pod can
-          # start. An empty directory is a correct state: every dispatch names its own file.
-          hostPath:
-            path: /mnt/skp-files/in
-            type: DirectoryOrCreate
