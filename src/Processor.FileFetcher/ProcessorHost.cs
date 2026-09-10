@@ -105,8 +105,7 @@ public static class ProcessorHost
         // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
         // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
         // safe only because prefetch is 1.
-        // TODO(Task 3, Step 11): restore once FileFetcherProcessor exists.
-        // builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, FileFetcherProcessor>();
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, FileFetcherProcessor>();
 
         return builder.Build();
     }
