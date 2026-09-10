@@ -3,9 +3,10 @@
 **Date:** 2026-09-10
 **Status:** Designed. Not implemented.
 **Introduces:** `src/Processor.ArchiveCollapser/`, `k8s/39-processor-archivecollapser.yaml`.
-**Amends:** `src/Processor.ArchiveExpander/schema/output.json` — re-rooted from `depth1` to `depth2`
-(§7), and its `schema/README.md`, whose worked example of "how to extend the depth" becomes the
-baseline and must shift up a level.
+**Amends:** **deletes** `src/Processor.FileFetcher/schema/` and `src/Processor.ArchiveExpander/schema/`,
+relocating both to `src/tests/BaseApi.Tests/Schemas/` as one file per shape rather than five (§7.1);
+re-roots the tree schema from `depth1` to `depth2` (§7.2); rewrites the relocated schema README, whose
+worked example of "how to extend the depth" becomes the baseline.
 **Depends on:** `BaseProcessor.Core` unchanged. Every decision below lands in author code, a
 manifest, a schema file, or a test.
 
@@ -30,9 +31,9 @@ wireable edge if both point at one row. Registration therefore creates **two** s
 pair, not four: one for the envelope shape (FileFetcher output = Expander input = Collapser output)
 and one for the tree shape (Expander output = Collapser input).
 
-The byte-identical files of §7 are what make registering one row *safe* — they do not achieve it.
-The files exist so each image can carry its own contract for registration and so the tests can pin
-the duplicates against each other; the identity that the orchestrator enforces is the GUID.
+The single files of §7.1 are what make registering one row *safe* — they do not achieve it. One file
+per shape removes any question of which definition a row was created from; the identity the
+orchestrator actually enforces is the GUID.
 
 It is a plain downstream transform. It has an input and it produces output, so it is **not an edge** —
 neither `BaseImporter` nor `BaseExporter` applies — and it passes through the `executionId` it was
@@ -52,7 +53,7 @@ Most of the processor mirrors the expander file for file:
 | `FetchedFile.cs` / `SourceFile` | `CollapsedFile.cs` — the outbound envelope (§6) |
 | `Extractors/` × 3 + `ArchiveExtractionException` | `Writers/` × 2 + `ArchiveWritingException` (§8) |
 | `Program.cs`, `ProcessorHost.cs` | unchanged but for names and the dropped `Configure<TOptions>` |
-| `schema/input.json`, `schema/output.json` | the two swapped, byte-for-byte (§7) |
+| `schema/input.json`, `schema/output.json` | **neither — see §7.1** |
 
 `FileNode.cs` is duplicated across two assemblies that must not reference each other — exactly as
 `FetchedFile` already is between FileFetcher and ArchiveExpander — so it gets the same treatment: a
@@ -109,8 +110,9 @@ This costs nothing at either end, verified rather than assumed:
   `PayloadConfigSchemaValidator.cs:38` `continue`s past any processor that has none. The gate is not
   skipped by accident; it has nothing to run.
 
-This is already the house norm, not a new posture: no processor in this repo ships a
+This is already the house norm, not a new posture: no processor in this repo has ever shipped a
 `schema/config.json`, and the expander's own `MaxDepth` is validated in `ProcessAsync`, in code.
+After §7.1 no processor ships a schema file of any kind.
 
 **The one line that must not be mirrored** is the expander's
 `if (config is null) throw BadPayload("ArchiveExpander needs MaxDepth")`. Null is fine, `{}` is fine,
@@ -226,12 +228,44 @@ that caps the tree at roughly 32 node levels and throws a `JsonException` alread
 **This reading is load-bearing and is pinned by a test rather than trusted to this paragraph**,
 following the precedent of `ZipExtractor`'s "what was measured, on .NET 8.0.31" block.
 
-### The schema moves to depth 2
+### 7.1 The schema files leave `src/`, and there are two of them
+
+**No processor ships a schema file any more.** Nothing in `src/` reads one: `FileContentBuilder` says
+so outright — *"The structure is hard-coded here. The output schema does not drive it and is not
+read."* The file on disk is the source of truth for content, and a schema shipped inside an image is
+carried solely so it can be registered from the container, which is a deploy convenience and not a
+runtime need.
+
+So the schemas move to the test project, deduplicated to **one file per shape**:
+
+| shape | file | is the contract for |
+|---|---|---|
+| envelope | `src/tests/BaseApi.Tests/Schemas/envelope.json` | FileFetcher output = ArchiveExpander input = ArchiveCollapser output |
+| tree | `src/tests/BaseApi.Tests/Schemas/tree.json` | ArchiveExpander output = ArchiveCollapser input |
+
+**This applies to the existing processors too**, not only the new one — leaving FileFetcher's and
+ArchiveExpander's under `src/` while the collapser's sits elsewhere would be worse than either
+consistent choice. Deleted: `src/Processor.FileFetcher/schema/`,
+`src/Processor.ArchiveExpander/schema/`, their `<Content Include>` csproj entries, and the `Link`
+renames in `BaseApi.Tests.csproj`.
+
+**The duplication apparatus goes with them.** The three-way and two-way byte-identity assertions this
+spec originally specified exist only because one contract lived in two projects that must not
+reference each other. With one file per shape, divergence is impossible rather than detected, and
+those tests are deleted rather than written — along with the `fetcher-output.json` /
+`<processor>-input.json` link-naming problem, which only ever existed because five files were
+competing for two names in one output folder.
+
+What is given up: registering a schema from inside a running container. Registration now reads the
+file from a repo checkout or a deploy script. Since registration is a manual deploy step either way
+(§12), this costs a path, not a capability.
+
+### 7.2 The tree schema moves to depth 2
 
 The identity test in §10 runs at depth 2 — a zip inside a zip, both expanded — which is a three-level
-tree: root -> inner archive -> leaves. The shared schema currently roots at `depth1`, which admits
-root -> leaves and nothing more. So `Processor.ArchiveExpander/schema/output.json` is re-rooted using
-the recipe its own README already gives:
+tree: root -> inner archive -> leaves. The tree schema currently roots at `depth1`, which admits
+root -> leaves and nothing more. So `Schemas/tree.json` is re-rooted using the recipe the expander's
+schema README already gives:
 
     "$ref": "#/$defs/depth2",
 
@@ -253,9 +287,12 @@ README's own terms:** after this, a `MaxDepth: 1` step producing a shallow docum
 distinguishable by the schema from one that should have gone deeper. Accepted, and stated rather than
 glossed.
 
-The expander's `schema/README.md` needs a real edit, not a copy: it currently documents depth 1 as the
+The expander's `schema/README.md` **moves to `Schemas/README.md` and needs a real edit**, not a copy.
+It is the canonical explanation of depth-as-structure, per-feed variants and why a self-referencing
+`$ref` is rejected, so it survives the relocation intact — but it currently documents depth 1 as the
 baseline and uses depth 2 as its worked example of how to extend. Once depth 2 is the baseline, that
-example shifts up a level so the file still teaches the rule.
+example shifts up a level so the file still teaches the rule. It also stops being "the ArchiveExpander
+output schema" and becomes the README for both shapes and all three processors.
 
 **Depth 2 is what makes both recursions real.** At depth 1 the collapser's `BuildNode` would only ever
 be entered once below the root, and the expander's own recursion is barely exercised by the contract
@@ -320,11 +357,12 @@ the Unix epoch and tar-sourced documents can carry pre-epoch values.
 
 | artefact | note |
 |---|---|
-| `Processor.ArchiveCollapser.csproj` | the expander's **minus `SharpCompress`**. Keeps `InternalsVisibleTo("BaseApi.Tests")` and the pinned `BaseProcessor.Core [1.0.0]` **package** reference — not a `ProjectReference`, because `SourceHash.targets` ships in the package's `build/` folder and only a package flows build targets |
+| `Processor.ArchiveCollapser.csproj` | the expander's **minus `SharpCompress`, minus both `<Content Include>` schema entries** (§7.1). Keeps `InternalsVisibleTo("BaseApi.Tests")` and the pinned `BaseProcessor.Core [1.0.0]` **package** reference — not a `ProjectReference`, because `SourceHash.targets` ships in the package's `build/` folder and only a package flows build targets |
 | `packages.lock.json` | generated by restore, committed |
 | `Dockerfile` | the expander's with names changed. All five nuget feeds still copied even though fewer are consumed — NuGet fails `NU1301` on a source in `NuGet.config` that is absent, whether or not anything resolves from it |
 | `SK_P.sln` | new project added |
-| `BaseApi.Tests.csproj` | `ProjectReference`, plus the schema `Link` renames of §10 |
+| `BaseApi.Tests.csproj` | `ProjectReference`, plus two `<Content Include="Schemas\*.json">` — replacing the three cross-project `Link` entries at lines 71-82, which are deleted |
+| *(deleted)* | `src/Processor.FileFetcher/schema/`, `src/Processor.ArchiveExpander/schema/`, and both processors' `<Content Include>` schema entries |
 | `k8s/39-processor-archivecollapser.yaml` | next in sequence after `38-processor-filefetcher` |
 | `k8s/kustomization.yaml` | one line — the exact line `ffc4f9c` found stale in reverse |
 
@@ -382,10 +420,10 @@ implementation would fix.** It is stated here so nobody reads tier 2 passing and
 
 ### Contract — `EnvelopeContractTests` grows
 
-- **three-way** byte identity on the envelope shape (fetcher output / expander input / collapser
-  output), extending the existing two-way assertion
-- **two-way** byte identity on the tree shape (expander output / collapser input)
 - a `Collapse` helper beside the existing `Fetch` and `Expand`, running the real processor
+- every hop validated against the two files of §7.1 — the fetcher's envelope and the collapser's
+  envelope against `envelope.json`, the expander's document and the collapser's input against
+  `tree.json`
 - the three tiers above
 - **the fixed point**: expand -> collapse -> expand -> collapse, timestamps stationary after the first
   hop. This is what makes §11's "consistent with ArchiveExpander" an assertion instead of a claim
@@ -396,12 +434,15 @@ The existing `APlainFileSurvivesBothHops` carries a comment warning against coll
 distinct timestamps into one shared constant, because null-checks alone cannot see a transposition.
 The round-trip tests need the same discipline and the same comment.
 
-**The schema `Link` renames.** `BaseApi.Tests.csproj:71-82` links schema files into a single flat
-`schema/` folder in the test output, renaming FileFetcher's to `fetcher-output.json` because the
-expander's already claimed `output.json`. Two more files land in that folder, and at four the
-unqualified `input.json`/`output.json` (silently the expander's) stop being readable. All of them move
-to `<processor>-input.json` / `<processor>-output.json`, touching those three lines and the three
-helper methods that read them.
+**The existing byte-identity test is deleted, not extended.**
+`TheFetcherOutputSchemaAndTheExpanderInputSchemaAreByteIdentical` exists because one contract lived in
+two projects that must not reference each other, and nothing but a test could pin them. Under §7.1
+there is one file per shape, so there is nothing left to diverge — the assertion would be comparing a
+file with itself. Its three reader helpers (`FetcherOutputSchema`, `ExpanderInputSchema`, and the
+inline `output.json` read) collapse to two: `EnvelopeSchema` and `TreeSchema`.
+
+This is the clearest sign the relocation was right. A test whose whole purpose is detecting drift
+between duplicates is a cost the duplication imposed, not a safeguard the system needed.
 
 ### Unit — `src/tests/BaseApi.Tests/ArchiveCollapser/`
 
