@@ -10,23 +10,31 @@ using Xunit;
 namespace BaseApi.Tests.Live.ArchiveExpander;
 
 /// <summary>
-/// The whole chain, against the real cluster: a path on the node becomes a document on the
-/// exporter's topic. Everything in the hermetic ArchiveExpander suite runs against temp files and an
-/// in-process processor, which is what keeps that run cluster-free — but it also means the mount,
-/// the manifest's ceiling, the workflow wiring and the two entry conditions have no test above them.
-/// This file is that test.
+/// The half of the FileFetcher → ArchiveExpander chain that only the cluster can answer once a file
+/// has already been fetched: the end-to-end document on the exporter's out topic, the registered
+/// output schema, and ArchiveExpander's own depth logic and failure log line. Everything in the
+/// hermetic ArchiveExpander suite runs against an in-process processor handed an envelope directly,
+/// which is what keeps that run cluster-free — but it also means the registered schema row, the
+/// manifest's wiring, and the two entry conditions downstream of a real fetch have no test above
+/// them. This file is that test.
 /// <para>
 /// Needs <c>SKP_REALSTACK=1</c>, <c>k8s/port-forward-realstack.ps1</c> and
-/// <c>tools/kafka-dev-broker.ps1 -Up</c>. It seeds a file onto the kind node with <c>docker cp</c>,
-/// so the node must be running.
+/// <c>tools/kafka-dev-broker.ps1 -Up</c>. Every test here still seeds a file onto the kind node with
+/// <c>docker cp</c> — FileFetcher is the only entry point into this workflow, so there is no way to
+/// hand ArchiveExpander an envelope without going through it — but the assertions below are about
+/// what ArchiveExpander itself does with that envelope, not about the mount. See
+/// <see cref="BaseApi.Tests.Live.FileFetcher.FileFetcherLiveTests"/> for the tests that assert on the
+/// mount, the seeding, and FileFetcher's own log line.
 /// </para>
 /// </summary>
 /// <remarks>
-/// Shares the <c>kafka-broker</c> collection with <see cref="KafkaImporterLiveTests"/> and
-/// <see cref="KafkaExporterLiveTests"/>, which stop and start the shared dev Kafka container.
-/// Without the collection, xunit's default parallelism (<c>maxParallelThreads: 6</c> in
-/// <c>xunit.runner.json</c>) could run this class while the broker is down, producing a flaky
-/// failure that looks like an ArchiveExpander bug instead of the borrowed-infrastructure race it is.
+/// Shares the <c>kafka-broker</c> collection with <see cref="KafkaImporterLiveTests"/>,
+/// <see cref="KafkaExporterLiveTests"/> and
+/// <see cref="BaseApi.Tests.Live.FileFetcher.FileFetcherLiveTests"/>, which stop and start the shared
+/// dev Kafka container. Without the collection, xunit's default parallelism
+/// (<c>maxParallelThreads: 6</c> in <c>xunit.runner.json</c>) could run this class while the broker
+/// is down, producing a flaky failure that looks like an ArchiveExpander bug instead of the
+/// borrowed-infrastructure race it is.
 /// </remarks>
 [Trait("Category", RealStack.Category)]
 [Collection("kafka-broker")]
@@ -36,7 +44,7 @@ public sealed class ArchiveExpanderLiveTests
     private static string Node => RealStack.Get("SKP_KIND_NODE", "desktop-control-plane");
     private static string OutTopic => RealStack.Get("SKP_KAFKA_OUT_TOPIC", "skp-documents");
 
-    /// <summary>Builds a zip locally and copies it onto the node the pod mounts.</summary>
+    /// <summary>Builds a zip locally and copies it onto the node the FileFetcher pod mounts.</summary>
     private static string SeedZip(string name, params (string Entry, string Text)[] entries)
     {
         var local = Path.Combine(Path.GetTempPath(), name);
@@ -90,10 +98,7 @@ public sealed class ArchiveExpanderLiveTests
     /// <summary>
     /// Produces with <c>ProduceAsync</c> and checks the delivery report, not <c>Produce</c> plus
     /// <c>Flush</c>: flush only proves the local queue drained, which stays silent whether the
-    /// broker accepted the record or rejected it. A silent send here would let
-    /// <see cref="AFileWithTheWrongExtensionProducesNoDocument"/>'s absence mean "nothing ran
-    /// because the send never landed" as easily as "the extension guard correctly failed the
-    /// step" — the two outcomes that test exists to tell apart.
+    /// broker accepted the record or rejected it.
     /// </summary>
     private static async Task ProduceAsync(string path)
     {
@@ -148,6 +153,11 @@ public sealed class ArchiveExpanderLiveTests
     {
         RealStack.SkipUnlessEnabled();
 
+        // THE WHOLE CHAIN: a zip seeded onto the node reaches FileFetcher through the mount, becomes
+        // an envelope, crosses to ArchiveExpander, and comes out the far side as a document on the
+        // exporter's out topic. This is what proves the mount, both pods' manifests, and every edge
+        // in between are wired correctly together — no single hermetic suite can, because each one
+        // replaces its own processor's neighbours with an in-process call.
         var name = $"orders-{Guid.NewGuid():N}.zip";
         var path = SeedZip(name, ("a.csv", "id\n"), ("b.csv", "id,name\n"));
 
@@ -163,30 +173,6 @@ public sealed class ArchiveExpanderLiveTests
 
         // The one field the reader is required to drop.
         Assert.DoesNotContain("acme", root.GetRawText(), StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task AFileWithTheWrongExtensionProducesNoDocument()
-    {
-        RealStack.SkipUnlessEnabled();
-
-        // The step is wired ExpectedExtension ".zip". A .txt fails the dry guard, the step reports
-        // Failed, and the exporter — wired PreviousCompleted, not Always — never runs. The absence
-        // IS the assertion: an Always-wired exporter would publish here, which is the bug that
-        // wiring caused before.
-        var name = $"orders-{Guid.NewGuid():N}.txt";
-        var local = Path.Combine(Path.GetTempPath(), name);
-        File.WriteAllText(local, "not a zip");
-        Run("docker", $"cp \"{local}\" {Node}:{NodeDir}/{name}");
-
-        await ProduceAsync($"{NodeDir}/{name}");
-
-        // Same two-minute window as the positive test, on purpose: a shorter wait here would only
-        // prove the pipeline hadn't produced a document YET, not that it never would, and the two
-        // outcomes look identical from outside. Now the absence at two minutes means what the
-        // positive test's presence at two minutes means -- the pipeline had the same chance to act
-        // and didn't.
-        Assert.Null(Await(name, TimeSpan.FromMinutes(2)));
     }
 
     // ---------------------------------------------------------------------------------------
@@ -207,6 +193,11 @@ public sealed class ArchiveExpanderLiveTests
     /// wired workflow has one payload, so a test cannot ask for a different depth by producing a
     /// different record — the depth is decided by the row an operator wrote. Unset by default, and
     /// the test that needs it skips with instructions rather than failing.
+    /// </para>
+    /// <para>
+    /// <b>The variable keeps its FileReader-era name on purpose.</b> It is documented under
+    /// <c>SKP_FILEREADER_DEEP_TOPIC</c> in <c>k8s/README.md</c>, and renaming it here would silently
+    /// stop reading whatever value an operator already has set for that name.
     /// </para>
     /// </summary>
     private static string DeepTopic => RealStack.Get("SKP_FILEREADER_DEEP_TOPIC", "");
@@ -342,8 +333,10 @@ public sealed class ArchiveExpanderLiveTests
         // assertion here passes vacuously. A document arriving on the out topic is NOT evidence the
         // schema was applied — it is evidence a document was produced, which is a different claim.
         //
-        // This is also the second of the three deploy steps, so a failure here names the step that
-        // was skipped rather than surfacing later as an unexplained absence of enforcement.
+        // This is also one of the deploy steps, so a failure here names the step that was skipped
+        // rather than surfacing later as an unexplained absence of enforcement. See
+        // <see cref="BaseApi.Tests.Live.FileFetcher.FileFetcherLiveTests.TheOutputSchemaRowIsRegistered"/>
+        // for the same guarantee on the fetcher's own output schema, one hop upstream.
         using var client = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl) };
 
         var response = await client.GetAsync(
@@ -369,9 +362,9 @@ public sealed class ArchiveExpanderLiveTests
     {
         RealStack.SkipUnlessEnabled();
 
-        // The wired step omits maxDepth, so this is the default path: the outer zip is expanded and
-        // the inner one is recorded as a file. It pins that adding nesting did not change what an
-        // existing workflow produces.
+        // The wired ArchiveExpander step omits maxDepth, so this is the default path: the outer zip
+        // is expanded and the inner one is recorded as a file. It pins that splitting FileFetcher out
+        // and adding nesting did not change what an existing workflow produces.
         var name = $"outer-{Guid.NewGuid():N}.zip";
         var path = SeedBytes(name, ZipOf(
             ("inner.zip", ZipOf(("a.csv", "id\n"u8.ToArray()))),
@@ -394,14 +387,23 @@ public sealed class ArchiveExpanderLiveTests
     }
 
     [Fact]
-    public async Task ACorruptZipFailsWithThePathInTheLog()
+    public async Task ACorruptZipFailsAndLogsTheFileName()
     {
         RealStack.SkipUnlessEnabled();
 
         // The cross-check, in the cluster. Hermetically this already passes; what only the live run
-        // can show is that the PATH reaches the log store — which is the entire reason these checks
-        // live in ProcessAsync rather than in the schema. A failure reported by the post handler
-        // carries EntryId Guid.Empty and no path at all.
+        // can show is that ArchiveExpander's failure is diagnosable from ITS OWN log, given that it
+        // has no path to name any more.
+        //
+        // RENAMED FROM ACorruptZipFailsWithThePathInTheLog. FileReader used to log the path here;
+        // ArchiveExpander receives only an envelope from FileFetcher and has no FileInfo, no path,
+        // and nothing in this assembly that could produce one — `extracting {fileName} failed: ...`
+        // names the file, not a location on disk. The path-reaching-the-log-store guarantee this
+        // test used to carry moved with the path: it now belongs to FileFetcher's own rejection
+        // template, asserted in
+        // <see cref="BaseApi.Tests.Live.FileFetcher.FileFetcherLiveTests.AFileWithTheWrongExtensionProducesNoDocument"/>.
+        // This test still proves what only the cluster can show for THIS pod: that a failure reported
+        // by the post handler is traceable to a file name, not a stack trace with nothing in it.
         var name = $"broken-{Guid.NewGuid():N}.zip";
         var path = SeedBytes(name, "this is not a zip"u8.ToArray());
 
@@ -410,10 +412,11 @@ public sealed class ArchiveExpanderLiveTests
         Assert.Null(Await(name, TimeSpan.FromMinutes(2)));
 
         Assert.True(
-            LogContains($"extracting {path} failed", TimeSpan.FromMinutes(1)),
-            $"the step failed but no log line named {path} — a corrupt archive that fails through "
+            LogContains($"extracting {name} failed", TimeSpan.FromMinutes(1)),
+            $"the step failed but no log line named {name} — a corrupt archive that fails through "
             + "the framework's general catch instead of ArchiveExtractionException logs a stack "
-            + "trace with the path nowhere, which is the seam failure this message exists to close");
+            + "trace with the file name nowhere, which is the seam failure this message exists to "
+            + "close");
     }
 
     [Fact]
@@ -422,16 +425,16 @@ public sealed class ArchiveExpanderLiveTests
         RealStack.SkipUnlessEnabled();
 
         Assert.SkipWhen(DeepTopic.Length == 0,
-            "set SKP_FILEREADER_DEEP_TOPIC to the input topic of a second workflow whose ArchiveExpander "
-            + "step is wired {\"expectedExtension\":\".zip\",...,\"maxDepth\":2}; depth is a step "
-            + "payload, so this case needs a workflow of its own");
+            "set SKP_FILEREADER_DEEP_TOPIC to the input topic of a second workflow whose "
+            + "ArchiveExpander step is wired {\"maxDepth\":2}; depth is a step payload, so this case "
+            + "needs a workflow of its own");
 
         // THE DESTRUCTIVE FAILURE, and the only one whose diagnosis depends on a log line.
         //
         // maxDepth 2 against a baseline schema that admits depth 1: the document is built, then
         // rejected by the post handler, which reports Failed with EntryId Guid.Empty, acks, and
         // writes nothing to L2. The step's input was already reclaimed, so the branch is gone with
-        // no key to recover it and no file path in that log.
+        // no key to recover it and no file identity in that failure.
         //
         // The disagreement is deliberate -- nothing syncs MaxDepth with the schema -- so this test
         // is not asserting a bug. It asserts that when an operator raises one without the other,
@@ -444,10 +447,12 @@ public sealed class ArchiveExpanderLiveTests
 
         Assert.Null(Await(name, TimeSpan.FromMinutes(2)));
 
+        // Matches the current template: "expanded {FileName} of {SizeBytes} bytes into
+        // {EntryCount} entries, reaching depth {DepthReached} of {MaxDepth}".
         Assert.True(
-            LogContains("expanded to depth 2 of 2", TimeSpan.FromMinutes(1)),
+            LogContains("reaching depth 2 of 2", TimeSpan.FromMinutes(1)),
             "the document never reached the out topic and the depth line is missing too, so nothing "
-            + "distinguishes a schema rejection from the file never having been read at all — which "
-            + "is exactly the gap this line was added to close");
+            + "distinguishes a schema rejection from the file never having been fetched at all — "
+            + "which is exactly the gap this line was added to close");
     }
 }

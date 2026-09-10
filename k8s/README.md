@@ -368,8 +368,8 @@ topic proves only that a document was produced. Both pods should reach Ready onc
 `ArchiveExpanderLiveTests.TheOutputSchemaRowIsRegistered` proves ArchiveExpander's half landed: it
 asks BaseApi for that row by this build's source hash and fails with the step that was missed — no
 row means the image was rebuilt without repointing, a null `OutputSchemaId` means the schema was
-never registered. There is not yet an equivalent live assertion naming FileFetcher's own row —
-the live suite below still lives in one file that exercises the whole chain end to end.
+never registered. `FileFetcherLiveTests.TheOutputSchemaRowIsRegistered` is the same proof one hop
+upstream, for FileFetcher's own row — closing the gap this section used to note.
 
 **4. Wire the workflow.**
 
@@ -383,18 +383,30 @@ payloads as above.
     $env:SKP_REALSTACK = "1"
     dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
 
-They seed files onto the node with `docker cp`, so the kind node must be running. All six currently
-live in `ArchiveExpanderLiveTests`, one suite exercising the whole `FileFetcher → ArchiveExpander`
-chain end to end. What each proves:
+They seed files onto the node with `docker cp`, so the kind node must be running. Eight tests now
+live in two suites, split along the same line as the processors: `FileFetcherLiveTests` owns what
+only the fetcher can answer — the mount, the seeding, the manifest's file ceiling, its own log line
+— and `ArchiveExpanderLiveTests` keeps the end-to-end assertion on the exporter's out topic plus
+everything that is genuinely about expansion. What each proves:
 
-| Test | What only the cluster can answer |
-| --- | --- |
-| `TheOutputSchemaRowIsRegistered` | The schema is enforcing at all — step 3 landed |
-| `AZipOnTheNodeBecomesADocumentOnTheOutTopic` | The mount, both manifests' ceilings, the wiring |
-| `AFileWithTheWrongExtensionProducesNoDocument` | The edge is `PreviousCompleted`, not `Always` |
-| `AtTheDefaultDepthANestedZipStaysAFile` | Nesting did not change what an existing workflow emits |
-| `ACorruptZipFailsWithThePathInTheLog` | The path reaches the log store |
-| `ADocumentDeeperThanTheSchemaFailsAndLogsTheDepth` | A schema rejection is diagnosable |
+| Test | Suite | What only the cluster can answer |
+| --- | --- | --- |
+| `ASeededFileBecomesAnEnvelope` | FileFetcherLiveTests | The mount and the fetch succeed, from the fetcher's own log line |
+| `AFileWithTheWrongExtensionProducesNoDocument` | FileFetcherLiveTests | The edge is `PreviousCompleted`, not `Always`, and the rejection names the path in the log |
+| `TheOutputSchemaRowIsRegistered` | FileFetcherLiveTests | FileFetcher's own output schema is enforcing at all |
+| `AZipOnTheNodeBecomesADocumentOnTheOutTopic` | ArchiveExpanderLiveTests | The mount, both manifests' ceilings, the wiring, end to end |
+| `TheOutputSchemaRowIsRegistered` | ArchiveExpanderLiveTests | ArchiveExpander's own output schema is enforcing at all — step 3 landed |
+| `AtTheDefaultDepthANestedZipStaysAFile` | ArchiveExpanderLiveTests | Nesting did not change what an existing workflow emits |
+| `ACorruptZipFailsAndLogsTheFileName` | ArchiveExpanderLiveTests | A corrupt archive fails diagnosably even though ArchiveExpander has no path to log — only a file name |
+| `ADocumentDeeperThanTheSchemaFailsAndLogsTheDepth` | ArchiveExpanderLiveTests | A schema rejection is diagnosable |
+
+`ACorruptZipFailsAndLogsTheFileName` is a rename of what used to be
+`ACorruptZipFailsWithThePathInTheLog`. FileReader used to log a path on this failure; ArchiveExpander
+receives only an envelope from FileFetcher now and has no path to log, so the assertion moved to the
+file name ArchiveExpander does carry. The "the path reaches the log store" guarantee that test used
+to stand for did not disappear — it moved with the path, to FileFetcher's own rejection template
+(`file {path} rejected: ...`, unchanged from FileReader), which is what
+`AFileWithTheWrongExtensionProducesNoDocument` now also asserts on.
 
 The last one **skips unless `SKP_FILEREADER_DEEP_TOPIC` names the input topic of a second workflow
 whose ArchiveExpander step is wired `maxDepth: 2`** — the variable keeps its FileReader-era name on
