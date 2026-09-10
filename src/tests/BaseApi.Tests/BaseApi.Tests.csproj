@@ -75,6 +75,11 @@
          would collide on one output path and one would silently win. -->
     <None Include="..\..\Processor.FileFetcher\schema\output.json"
           Link="schema\fetcher-output.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The expander's INPUT schema — the other half of the envelope contract. Linked under its own
+         name so EnvelopeContractTests validates against the REGISTERED file rather than a copy that
+         can drift from it. -->
+    <None Include="..\..\Processor.ArchiveExpander\schema\input.json"
+          Link="schema\input.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
