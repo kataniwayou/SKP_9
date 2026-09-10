@@ -174,6 +174,25 @@ dotnet sln SK_P.sln remove src/Processor.FileReader/Processor.FileReader.csproj 
 dotnet sln SK_P.sln add src/Processor.ArchiveExpander/Processor.ArchiveExpander.csproj
 ```
 
+- [ ] **Step 4b: Fix the test project's three references to the old paths**
+
+**Without this the build fails and Step 6 cannot pass.** `src/tests/BaseApi.Tests/BaseApi.Tests.csproj`
+names `Processor.FileReader` in three places and is outside every directory Step 2's sed touched.
+Apply all three:
+
+```xml
+    <None Include="ArchiveExpander\Fixtures\*.rar" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Processor.ArchiveExpander\schema\output.json"
+          Link="schema\output.json" CopyToOutputDirectory="PreserveNewest" />
+```
+
+```xml
+    <ProjectReference Include="..\..\Processor.ArchiveExpander\Processor.ArchiveExpander.csproj" />
+```
+
+The schema link keeps the name `schema\output.json`, so `ArchiveExpanderSchemaTests.Definition()`
+needs no change. Later tasks link their own schemas under distinct names rather than moving this one.
+
 - [ ] **Step 5: Sweep for stragglers outside the renamed directories**
 
 ```bash
@@ -723,7 +742,26 @@ This is the final schema, not a stand-in — Task 3 writes the tests that hold i
 }
 ```
 
-- [ ] **Step 10: Add to the solution, build, run the tests**
+- [ ] **Step 10: Add to the solution, wire the test project, build, run the tests**
+
+`InternalsVisibleTo` alone does not create a reference — without the `ProjectReference` below,
+`using Processor.FileFetcher;` in the tests does not compile. In
+`src/tests/BaseApi.Tests/BaseApi.Tests.csproj`, add alongside the other four processor references:
+
+```xml
+    <ProjectReference Include="..\..\Processor.FileFetcher\Processor.FileFetcher.csproj" />
+```
+
+and, in the `None` item group, link this processor's schema under a **distinct** name — the
+ArchiveExpander already occupies `schema\output.json` and must keep it:
+
+```xml
+    <!-- fetcher-output.json, not output.json: ArchiveExpander's output schema already links to
+         that name and ArchiveExpanderSchemaTests reads it there. Two files called output.json
+         would collide on one output path and one would silently win. -->
+    <None Include="..\..\Processor.FileFetcher\schema\output.json"
+          Link="schema\fetcher-output.json" CopyToOutputDirectory="PreserveNewest" />
+```
 
 ```bash
 dotnet sln SK_P.sln add src/Processor.FileFetcher/Processor.FileFetcher.csproj
@@ -1200,8 +1238,10 @@ namespace BaseApi.Tests.FileFetcher;
 /// </summary>
 public sealed class FileFetcherSchemaTests
 {
+    // fetcher-output.json, not output.json: ArchiveExpander's output schema owns that name in the
+    // test output. See the link in BaseApi.Tests.csproj.
     private static string Definition()
-        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "output.json"));
+        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "fetcher-output.json"));
 
     private static DateTime Stamp => new(2026, 9, 10, 8, 31, 2, DateTimeKind.Utc);
 
@@ -2514,7 +2554,7 @@ public sealed class EnvelopeContractTests : IDisposable
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     private static string FetcherOutputSchema()
-        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "output.json"));
+        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "fetcher-output.json"));
 
     private static string ExpanderInputSchema()
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "input.json"));
@@ -2663,21 +2703,25 @@ public sealed class EnvelopeContractTests : IDisposable
 }
 ```
 
-**Note on the two `schema/` folders:** both projects copy a `schema/` directory into their own output, and the test assembly references neither project's content. Before running, confirm `AppContext.BaseDirectory/schema/output.json` and `input.json` actually exist in the test output. If they do not, add to `src/tests/BaseApi.Tests/BaseApi.Tests.csproj`:
+**Note on the three schema files.** Each project copies its own `schema/` into its own output; the test assembly gets nothing automatically. Three files must reach the test output, and **two of them are called `output.json`**, so the links disambiguate rather than collide. Task 1 Step 4b and Task 2 Step 10 added the first two; add the third to `src/tests/BaseApi.Tests/BaseApi.Tests.csproj`:
 
 ```xml
-  <ItemGroup>
-    <!-- The two halves of the envelope contract, and ArchiveExpander's output schema, copied into
-         the test output so EnvelopeContractTests can validate against the REGISTERED files rather
-         than a copy that can drift from them. -->
-    <Content Include="..\..\Processor.FileFetcher\schema\output.json"
-             Link="schema\output.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\Processor.ArchiveExpander\schema\input.json"
-             Link="schema\input.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+    <!-- The expander's INPUT schema — the other half of the envelope contract. Linked under its own
+         name so EnvelopeContractTests validates against the REGISTERED file rather than a copy that
+         can drift from it. -->
+    <None Include="..\..\Processor.ArchiveExpander\schema\input.json"
+          Link="schema\input.json" CopyToOutputDirectory="PreserveNewest" />
 ```
 
-`ArchiveExpander/schema/output.json` and `FileFetcher/schema/output.json` share a filename. If both land at `schema/output.json` in the test output they will collide — link ArchiveExpander's as `schema\expander-output.json` and read it under that name in `AnArchiveSurvivesBothHopsAndTheDocumentValidates` and in `ArchiveExpanderSchemaTests.Definition()`.
+The three names in the test output are then:
+
+| Link name | Source | Read by |
+|---|---|---|
+| `schema/output.json` | `Processor.ArchiveExpander/schema/output.json` | `ArchiveExpanderSchemaTests`, `EnvelopeContractTests` |
+| `schema/fetcher-output.json` | `Processor.FileFetcher/schema/output.json` | `FileFetcherSchemaTests`, `EnvelopeContractTests` |
+| `schema/input.json` | `Processor.ArchiveExpander/schema/input.json` | `EnvelopeContractTests` |
+
+**`schema/output.json` stays pointed at the expander**, so `ArchiveExpanderSchemaTests` is untouched by this whole plan — which is what the Global Constraint about the unchanged output contract is asking for. In `EnvelopeContractTests` above, `FetcherOutputSchema()` reads `fetcher-output.json`, and the `outputSchema` local inside `AnArchiveSurvivesBothHopsAndTheDocumentValidates` reads `output.json` as written.
 
 - [ ] **Step 2: Run to verify it fails, then passes**
 
