@@ -14,8 +14,8 @@ either file directly any more; see [Registration](#registration).
 
 ## The envelope schema
 
-`envelope.json` is the file FileFetcher puts on the wire and ArchiveExpander reads back off it — and,
-once it exists, the shape ArchiveCollapser writes to reassemble a tree into a single file again.
+`envelope.json` is the file FileFetcher puts on the wire and ArchiveExpander reads back off it — and
+the shape ArchiveCollapser writes to reassemble a tree into a single file again.
 
 What it asserts:
 
@@ -144,10 +144,10 @@ sibling keywords in 2020-12, and note the omitted `additionalProperties`, which 
 
 ## Registration
 
-**This schema is not registered by the build.** It is a database row against the processor identity,
-applied as a deploy step. Until it is, `OutputSchemaId` is null, `TryValidate` returns true without
-decoding anything, and **nothing enforces entry count or depth anywhere** — this file is its only
-home.
+**Neither schema is registered by the build.** Each is a database row against a processor identity,
+applied as a deploy step. Until it is, the corresponding `OutputSchemaId` is null, `TryValidate`
+returns true without decoding anything, and **nothing enforces entry count or depth anywhere** —
+this file is their only home.
 
 Note what a failure costs, because it decides where checks belong: the post handler reports
 `Failed` with `EntryId: Guid.Empty` and acks. Nothing is written to L2 and the step's input was

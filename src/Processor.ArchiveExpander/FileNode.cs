@@ -60,6 +60,13 @@ public abstract record FileContent
 /// <summary>
 /// One node of the document, and the shape is identical at every level so the schema is a single
 /// self-referencing definition.
+/// <para>
+/// <b>This file has a deliberate duplicate: <c>Processor.ArchiveCollapser/FileNode.cs</c>.</b> The
+/// two describe one JSON document across two assemblies that must not reference each other — the
+/// same arrangement, for the same reason, as <c>FetchedFile</c> between FileFetcher and this
+/// assembly. <c>EnvelopeContractTests</c> is what catches a divergence, by running both real
+/// processors back to back.
+/// </para>
 /// </summary>
 /// <param name="Content">
 /// The bytes, the expansion, or null.

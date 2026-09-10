@@ -398,6 +398,12 @@ public sealed class EnvelopeContractTests : IDisposable
         // ZipWriter's Optimal. Asserted rather than merely omitted, so the boundary is documented by
         // a test instead of by a comment somebody can delete.
         Assert.NotEqual(envelope, collapsed);
+
+        // Not byte-identical to the fetcher's own envelope, so TIER1/TIER2's equality assertion
+        // cannot see this envelope at all -- this is the one place a foreign archive's collapsed
+        // output is checked against the real, registered envelope schema.
+        Assert.True(ProcessorJsonSchemaValidator.TryValidate(EnvelopeSchema(), collapsed, out var errors),
+                    string.Join("; ", errors));
     }
 
     [Fact]
@@ -458,5 +464,12 @@ public sealed class EnvelopeContractTests : IDisposable
         Assert.Equal(
             created,
             JsonDocument.Parse(collapsed).RootElement.GetProperty("createdUtc").GetDateTime());
+
+        // This collapsed envelope is never checked against the schema by TIER1/TIER2 -- neither
+        // reaches a document whose nested node lost its createdUtc -- so this is the other place
+        // that closes the gap Finding 3 named: nothing else in this file validates a collapsed
+        // envelope built from a document with a null nested timestamp.
+        Assert.True(ProcessorJsonSchemaValidator.TryValidate(EnvelopeSchema(), collapsed, out var errors),
+                    string.Join("; ", errors));
     }
 }

@@ -92,14 +92,19 @@ public sealed class ArchiveBuilderTests
     [Fact]
     public void ANodeWithEntriesWhoseExtensionNamesNoWriterFails()
     {
-        // The node's name and its extension deliberately differ (orders.dat, not orders.csv) so
-        // that asserting the message contains ".dat" actually pins the extension clause -- a name
-        // ending in the same text as the extension would let that assertion pass even if the
-        // extension clause were dropped entirely.
-        var ex = Assert.Throws<ArchiveWritingException>(
-            () => Builder().Build(Archive("orders.dat", Leaf("a.csv", "id"))));
+        // Hand-built, not Archive("orders.dat", ...): Archive() derives Extension from the name via
+        // Path.GetExtension, so any name ending ".dat" (e.g. "orders.dat") ALWAYS contains ".dat" as
+        // a substring -- Assert.Contains(".dat", ...) would pass even with the extension clause
+        // deleted from NoWriter's message entirely, proving nothing. The name and extension here
+        // share no text on purpose, so the ".dat" assertion can only pass because the message
+        // actually names the extension.
+        var node = new FileNode(
+            new FileMetadata("orders", ".dat", 999, null, Stamp, 1),
+            new FileContent.Entries([Leaf("a.csv", "id")]));
 
-        Assert.Contains("orders.dat", ex.Message, StringComparison.Ordinal);
+        var ex = Assert.Throws<ArchiveWritingException>(() => Builder().Build(node));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
         Assert.Contains(".dat", ex.Message, StringComparison.Ordinal);
     }
 
