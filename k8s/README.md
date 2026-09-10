@@ -322,12 +322,7 @@ docker build -f src/Processor.FileFetcher/Dockerfile -t processor-filefetcher:lo
 docker build -f src/Processor.ArchiveExpander/Dockerfile -t processor-archiveexpander:local .
 kind load docker-image processor-filefetcher:local
 kind load docker-image processor-archiveexpander:local
-kubectl -n skp rollout restart deploy/processor-filefetcher
-kubectl -n skp rollout restart deploy/processor-archiveexpander
 ```
-
-The `:local` tag and `imagePullPolicy: IfNotPresent` mean a rebuilt image does not reach a running
-pod on its own, which is what the restart is for.
 
 Then repoint both processor rows' `SourceHash` to this build's. Every rebuild needs it — the value
 changes on any source edit, and a pod whose hash matches no row resolves no identity. `dotnet build`
@@ -335,11 +330,24 @@ prints both (`SourceHash (Processor.FileFetcher): …` and `SourceHash (Processo
 and the live suite reads them from the assembly rather than a constant, so neither ever needs pasting
 into a test.
 
-**2. Apply the manifests.**
+**2. Delete the retired Deployment, apply the manifests, then restart both.**
+
+`processor-filereader` was renamed to `processor-archiveexpander`, not edited in place — `kubectl
+apply` matches on `metadata.name`, so applying the rename over the old name creates a second
+Deployment and leaves the first one running, a retired pod still consuming from its queue under an
+identity row that is about to change beneath it. Delete it before applying:
 
 ```bash
+kubectl delete deployment processor-filereader -n skp --ignore-not-found
 kubectl apply -k k8s/
+kubectl -n skp rollout restart deploy/processor-filefetcher
+kubectl -n skp rollout restart deploy/processor-archiveexpander
 ```
+
+Neither Deployment exists before this step — `processor-filefetcher` is brand new and
+`processor-archiveexpander` only exists once the apply above creates it — so the restarts must come
+after the apply, not before it. The `:local` tag and `imagePullPolicy: IfNotPresent` mean a rebuilt
+image does not reach a running pod on its own, which is what the restart is for.
 
 **`kubectl rollout status` will time out on both, and that timeout is the expected signal.** Each pod
 sits Running/NotReady with 0 restarts until its own processor row exists — it waits by design rather
