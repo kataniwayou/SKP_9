@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Processor.ArchiveExpander.Extractors;
 
 namespace Processor.ArchiveExpander;
@@ -22,15 +23,21 @@ internal sealed record FileBuildResult(FileNode Node, int DepthReached);
 /// schema judges the result one hop later, in the post handler; it never shapes it.
 /// </para>
 /// </summary>
-internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extractors)
+internal sealed class FileContentBuilder(
+    IEnumerable<IArchiveExtractor> extractors,
+    IOptions<ArchiveExpanderOptions> options)
 {
     private readonly IReadOnlyList<IArchiveExtractor> _extractors = extractors.ToList();
+
+    // The pod's ceiling, read once. It is not a step field: see ArchiveExpanderOptions for why the
+    // size of an expansion has an operator for an owner and not a workflow author.
+    private readonly long _maxExpandedBytes = options.Value.MaxExpandedBytes;
 
     /// <summary>
     /// The document. An archive is expanded until <see cref="ArchiveExpanderConfig.MaxDepth"/> is
     /// reached or nothing left is an archive, whichever comes first.
     /// </summary>
-    public FileBuildResult Build(byte[] bytes, FileInfo info, ArchiveExpanderConfig config)
+    public FileBuildResult Build(SourceFile file, ArchiveExpanderConfig config)
     {
         // THE DECLARATION CROSS-CHECK, and it applies to the top-level file ONLY.
         //
@@ -40,18 +47,19 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
         // extractor's internal guard exists to prevent, reached from outside those guards: a
         // corrupt header matches no signature, so no extractor is ever asked.
         //
-        // Here, and only here, there is something to check the bytes against. ExpectedExtension had
-        // to match this file's extension for it to be admitted at all, so a name declaring an
-        // archive is a claim a workflow author made. Below this level nothing is declared — an
-        // entry's name is written by whoever built the archive — so nested entries get no such
-        // check and an unrecognised one is an ordinary leaf.
+        // THE CLAIM IT CHECKS AGAINST NOW LIVES ONE HOP UPSTREAM. It used to be that
+        // ExpectedExtension had to match this file's extension for it to be admitted at all; it is
+        // now FileFetcher's whitelist that admitted it. Same guarantee, asserted by a different
+        // processor, and the extension reaches here in the envelope either way. Below this level
+        // nothing is declared — an entry's name is written by whoever built the archive — so nested
+        // entries get no such check and an unrecognised one is an ordinary leaf.
         //
         // A .zip that is really a tar does NOT fail: an extractor claims it by signature, and
         // reading the content is the more useful answer than refusing the name.
-        if (NamedAsArchive(info.Extension) && Match(bytes) is null)
+        if (NamedAsArchive(file.Extension) && Match(file.Content) is null)
         {
             throw new ArchiveExtractionException(
-                $"the file is named '{info.Extension}' and its leading bytes are no archive this "
+                $"the file is named '{file.Extension}' and its leading bytes are no archive this "
                 + "processor knows — treating it as corrupt rather than recording it as a plain file");
         }
 
@@ -59,18 +67,18 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
         // recursion is what keeps MaxDepth safe to raise: a per-level ceiling would let a depth-5
         // archive hold five times the limit, and the pod's memory does not care which level a byte
         // came from.
-        var budget = new ExpansionBudget(config.MaximumSizeBytes);
+        var budget = new ExpansionBudget(_maxExpandedBytes);
         var depthReached = 0;
 
         var node = BuildNode(
-            info.Name,
-            info.Extension,
-            bytes,
-            // FileInfo.Length rather than the array's length: for the root they agree, and the
-            // former is what the dry inspection already reported to an operator.
-            info.Length,
-            info.CreationTimeUtc,
-            info.LastWriteTimeUtc,
+            file.Name,
+            file.Extension,
+            file.Content,
+            // The size the fetcher measured with FileInfo.Length, not the array's length: for the
+            // root they agree, and the former is what the dry inspection reported to an operator.
+            file.SizeBytes,
+            file.CreatedUtc,
+            file.ModifiedUtc,
             depth: 0,
             config.MaxDepth,
             budget,
@@ -182,9 +190,10 @@ internal sealed class FileContentBuilder(IEnumerable<IArchiveExtractor> extracto
     /// <summary>
     /// THE EXPANSION CEILING, carried across the whole tree.
     /// <para>
-    /// Without it the only bound anywhere is on the FILE, and an archive is exactly where that stops
-    /// being the transient cost: the design and <c>k8s/37-processor-filereader.yaml</c> both price
-    /// the pod at ~1.78x the file, which is right for a leaf and wrong for an archive, where the
+    /// Without it the only bound anywhere is the file ceiling one hop upstream, and an archive is
+    /// exactly where that stops being the transient cost: the design and
+    /// <c>k8s/37-processor-archiveexpander.yaml</c> both price the pod at ~1.78x the file, which is
+    /// right for a leaf and wrong for an archive, where the
     /// document is ~1.33x the EXPANDED content. An ordinary 10:1 CSV zip at a 32 MiB ceiling is
     /// ~320 MB expanded plus document and envelope, against a 768Mi limit.
     /// </para>

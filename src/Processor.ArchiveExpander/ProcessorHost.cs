@@ -105,10 +105,11 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // The pod's ceiling, from ArchiveExpander__MaxFileSizeBytes in the manifest. Same shape as the
-        // Kafka processors' broker address: infrastructure limits come from configuration, business
-        // expectations come from the step payload.
-        builder.Services.Configure<ArchiveExpanderOptions>(builder.Configuration.GetSection("ArchiveExpander"));
+        // The pod's expansion ceiling, from ArchiveExpander__MaxExpandedBytes in the manifest. What
+        // an archive expands to is an operator's number sized against a container limit, which is
+        // why it is here and not on the step payload.
+        builder.Services.Configure<ArchiveExpanderOptions>(
+            builder.Configuration.GetSection("ArchiveExpander"));
 
         // One registration per format. FileContentBuilder takes them all and asks each whether it
         // handles the step's extension.

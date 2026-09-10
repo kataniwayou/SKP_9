@@ -1,6 +1,6 @@
 # ArchiveExpander output schema
 
-`output.json` is the BASELINE: the shape every FileReader document has, and nothing about a
+`output.json` is the BASELINE: the shape every ArchiveExpander document has, and nothing about a
 particular feed. It is registered against the processor identity as the output schema.
 
 ## What it asserts

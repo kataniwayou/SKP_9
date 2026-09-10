@@ -17,17 +17,13 @@ namespace BaseApi.Tests.ArchiveExpander;
 /// this one cannot, because SharpCompress reads rar and cannot write one. See Fixtures/README.md for
 /// how the file is regenerated.
 /// </summary>
-public sealed class RarExtractorTests : IDisposable
+public sealed class RarExtractorTests
 {
     private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
-
-    private readonly string _dir = Directory.CreateTempSubdirectory("skp-archiveexpander-rar-").FullName;
-
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     private static Stream Fixture()
         => File.OpenRead(Path.Combine(
@@ -110,22 +106,30 @@ public sealed class RarExtractorTests : IDisposable
         // Not a truncation: an ORDINARY corrupt rar, which is the case that was broken. The two
         // truncation windows below were the only inputs that ever reached this template, because
         // they trip RarExtractor's own guard rather than SharpCompress's parser.
-        var path = Path.Combine(_dir, "broken.rar");
-        File.WriteAllText(path, "this is not a rar");
+        var bytes = Encoding.UTF8.GetBytes("this is not a rar");
 
         var processor = new ArchiveExpanderProcessor(
             new RecordingLogger<ArchiveExpanderProcessor>(),
-            Options.Create(new ArchiveExpanderOptions()),
-            new FileContentBuilder([new RarExtractor()]));
+            new FileContentBuilder([new RarExtractor()], Options.Create(new ArchiveExpanderOptions())));
         processor.BeginDispatch(
             new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
 
-        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
-            """{"ExpectedExtension":".rar","MinimumSizeBytes":0,"MaximumSizeBytes":65536}""",
-            E, CancellationToken.None));
+        var envelope = JsonSerializer.SerializeToUtf8Bytes(
+            new
+            {
+                fileName    = "broken.rar",
+                extension   = ".rar",
+                sizeBytes   = (long)bytes.Length,
+                createdUtc  = (DateTime?)null,
+                modifiedUtc = (DateTime?)null,
+                content     = bytes,
+            },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 
-        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
+            envelope, """{"MaxDepth":1}""", E, CancellationToken.None));
+
+        Assert.Contains("extracting broken.rar failed", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -29,6 +29,9 @@
     <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The output schema travels with the processor so it can be registered from the image. -->
     <Content Include="schema\output.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The input schema travels too: this processor's input contract is the fetcher's output
+         contract, and both images must be able to register their own. -->
+    <Content Include="schema\input.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

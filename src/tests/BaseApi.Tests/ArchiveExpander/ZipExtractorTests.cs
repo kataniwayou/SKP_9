@@ -13,7 +13,7 @@ using Xunit;
 
 namespace BaseApi.Tests.ArchiveExpander;
 
-public sealed class ZipExtractorTests : IDisposable
+public sealed class ZipExtractorTests
 {
     private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
@@ -21,49 +21,60 @@ public sealed class ZipExtractorTests : IDisposable
     private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
 
-    private readonly string _dir = Directory.CreateTempSubdirectory("skp-archiveexpander-zip-").FullName;
-
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
-
-    /// <summary>A real zip on disk, built from bytes. No fixture file, no abstraction.</summary>
-    private string WriteZip(string name, params (string Entry, string Text)[] entries)
+    /// <summary>A real zip, built in memory from bytes. No fixture file, no disk.</summary>
+    private static byte[] ZipBytes(params (string Entry, string Text)[] entries)
     {
-        var path = Path.Combine(_dir, name);
-        using var file = File.Create(path);
-        using var archive = new ZipArchive(file, ZipArchiveMode.Create);
-        foreach (var (entry, text) in entries)
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
         {
-            using var writer = new StreamWriter(archive.CreateEntry(entry).Open());
-            writer.Write(text);
+            foreach (var (entry, text) in entries)
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(entry).Open());
+                writer.Write(text);
+            }
         }
 
-        return path;
+        return buffer.ToArray();
     }
 
-    private const string ZipPayload =
-        """{"ExpectedExtension":".zip","MinimumSizeBytes":0,"MaximumSizeBytes":65536}""";
+    private const string DefaultPayload = """{"MaxDepth":1}""";
 
-    private static (ArchiveExpanderProcessor Processor, IQueueSender Sender) Build()
+    /// <summary>The envelope FileFetcher would have sent for these bytes.</summary>
+    private static byte[] Envelope(string name, byte[] content, DateTime? stamp = null)
+        => JsonSerializer.SerializeToUtf8Bytes(
+            new
+            {
+                fileName    = name,
+                extension   = Path.GetExtension(name),
+                sizeBytes   = (long)content.Length,
+                createdUtc  = stamp,
+                modifiedUtc = stamp,
+                content,
+            },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+    private static (ArchiveExpanderProcessor Processor, IQueueSender Sender) Build(
+        long maxExpandedBytes = 33_554_432)
     {
         var sender = Substitute.For<IQueueSender>();
         var processor = new ArchiveExpanderProcessor(
             new RecordingLogger<ArchiveExpanderProcessor>(),
-            Options.Create(new ArchiveExpanderOptions()),
-            new FileContentBuilder([new ZipExtractor()]));
+            new FileContentBuilder(
+                [new ZipExtractor()],
+                Options.Create(new ArchiveExpanderOptions { MaxExpandedBytes = maxExpandedBytes })));
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
         return (processor, sender);
     }
 
-    private static async Task<JsonElement> DocumentOf(string path)
+    private static async Task<JsonElement> DocumentOf(
+        string name, byte[] content, long maxExpandedBytes = 33_554_432)
     {
-        var (processor, sender) = Build();
+        var (processor, sender) = Build(maxExpandedBytes);
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        await processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
-            ZipPayload, E, CancellationToken.None);
+        await processor.ExecuteAsync(Envelope(name, content), DefaultPayload, E, CancellationToken.None);
 
         return JsonDocument.Parse(Assert.Single(sends).Data).RootElement;
     }
@@ -89,9 +100,9 @@ public sealed class ZipExtractorTests : IDisposable
     [Fact]
     public async Task AnArchiveBecomesEntriesAndCarriesNoContentOfItsOwn()
     {
-        var path = WriteZip("orders.zip", ("a.csv", "id\n"), ("b.csv", "id,name\n"));
+        var bytes = ZipBytes(("a.csv", "id\n"), ("b.csv", "id,name\n"));
 
-        var doc = await DocumentOf(path);
+        var doc = await DocumentOf("orders.zip", bytes);
 
         Assert.Equal(JsonValueKind.Array, doc.GetProperty("content").ValueKind);
         Assert.Equal(2, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
@@ -101,9 +112,9 @@ public sealed class ZipExtractorTests : IDisposable
     [Fact]
     public async Task EachEntryIsALeafWithItsOwnMetadata()
     {
-        var path = WriteZip("orders.zip", ("a.csv", "id\n"));
+        var bytes = ZipBytes(("a.csv", "id\n"));
 
-        var doc = await DocumentOf(path);
+        var doc = await DocumentOf("orders.zip", bytes);
         var entry = doc.GetProperty("content")[0];
 
         Assert.Equal("a.csv", entry.GetProperty("metadata").GetProperty("name").GetString());
@@ -117,17 +128,21 @@ public sealed class ZipExtractorTests : IDisposable
     public async Task ANestedArchiveIsALeafRatherThanASecondLevel()
     {
         // Depth is one, by design. The inner zip's bytes are recorded; it is not expanded.
-        var inner = WriteZip("inner.zip", ("deep.csv", "id\n"));
-        var path = Path.Combine(_dir, "outer.zip");
-        using (var file = File.Create(path))
-        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        var inner = ZipBytes(("deep.csv", "id\n"));
+
+        byte[] outer;
+        using (var buffer = new MemoryStream())
         {
-            using var target = archive.CreateEntry("inner.zip").Open();
-            using var source = File.OpenRead(inner);
-            source.CopyTo(target);
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                using var target = archive.CreateEntry("inner.zip").Open();
+                target.Write(inner);
+            }
+
+            outer = buffer.ToArray();
         }
 
-        var doc = await DocumentOf(path);
+        var doc = await DocumentOf("outer.zip", outer);
         var entry = doc.GetProperty("content")[0];
 
         Assert.Equal("inner.zip", entry.GetProperty("metadata").GetProperty("name").GetString());
@@ -141,16 +156,20 @@ public sealed class ZipExtractorTests : IDisposable
         // A zip records directories as zero-length entries ending in a slash. They carry no content
         // and no metadata worth a node, and counting them would make entryCount disagree with what a
         // reader sees.
-        var path = Path.Combine(_dir, "orders.zip");
-        using (var file = File.Create(path))
-        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        byte[] bytes;
+        using (var buffer = new MemoryStream())
         {
-            archive.CreateEntry("nested/");
-            using var writer = new StreamWriter(archive.CreateEntry("nested/a.csv").Open());
-            writer.Write("id\n");
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                archive.CreateEntry("nested/");
+                using var writer = new StreamWriter(archive.CreateEntry("nested/a.csv").Open());
+                writer.Write("id\n");
+            }
+
+            bytes = buffer.ToArray();
         }
 
-        var doc = await DocumentOf(path);
+        var doc = await DocumentOf("orders.zip", bytes);
 
         Assert.Equal(1, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
         Assert.Equal("a.csv",
@@ -160,16 +179,14 @@ public sealed class ZipExtractorTests : IDisposable
     [Fact]
     public async Task ACorruptArchiveFailsTheStepNamingThePath()
     {
-        var path = Path.Combine(_dir, "broken.zip");
-        File.WriteAllText(path, "this is not a zip");
+        var bytes = Encoding.UTF8.GetBytes("this is not a zip");
 
         var (processor, _) = Build();
 
         var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
-            ZipPayload, E, CancellationToken.None));
+            Envelope("broken.zip", bytes), DefaultPayload, E, CancellationToken.None));
 
-        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("extracting broken.zip failed", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -177,9 +194,9 @@ public sealed class ZipExtractorTests : IDisposable
     {
         // THE POISON-MESSAGE CASE. Before this bound, the only ceiling anywhere was on the FILE, and
         // an archive is exactly where that stops being the transient cost: this zip is a few hundred
-        // bytes on disk and 200,000 bytes expanded, so it sails through every check in stage one. At
-        // the real 32 MiB ceiling an ordinary 10:1 CSV zip is ~320 MB expanded plus document and
-        // envelope, against a 768Mi limit.
+        // bytes and 200,000 bytes expanded, so it sails through every check upstream. At the real
+        // 32 MiB ceiling an ordinary 10:1 CSV zip is ~320 MB expanded plus document and envelope,
+        // against a 768Mi limit.
         //
         // An OOM-kill there is not one lost message: the author never returns, so the input key is
         // never reclaimed, RabbitMQ requeues the unacked dispatch, and the replacement pod reads the
@@ -188,31 +205,34 @@ public sealed class ZipExtractorTests : IDisposable
         //
         // Both numbers are asserted because an operator has to see which limit was hit and by how
         // much; a message saying only "too large" cannot be acted on.
-        var path = Path.Combine(_dir, "compressible.zip");
-        using (var file = File.Create(path))
-        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        byte[] bytes;
+        using (var buffer = new MemoryStream())
         {
-            // Zeros, so the archive is tiny and the expansion is not. Two entries, so the bound is
-            // also shown to be CUMULATIVE rather than per-entry — neither entry alone exceeds the
-            // 65536 ceiling the payload names.
-            foreach (var name in new[] { "a.csv", "b.csv" })
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
             {
-                using var entry = archive.CreateEntry(name).Open();
-                entry.Write(new byte[100_000]);
+                // Zeros, so the archive is tiny and the expansion is not. Two entries, so the bound
+                // is also shown to be CUMULATIVE rather than per-entry — neither entry alone exceeds
+                // the 65536 pod ceiling this test sets.
+                foreach (var name in new[] { "a.csv", "b.csv" })
+                {
+                    using var entry = archive.CreateEntry(name).Open();
+                    entry.Write(new byte[100_000]);
+                }
             }
+
+            bytes = buffer.ToArray();
         }
 
-        Assert.True(new FileInfo(path).Length < 65536, "the archive itself must pass the file check");
+        Assert.True(bytes.Length < 65536, "the archive itself must pass the file check");
 
-        var (processor, _) = Build();
+        var (processor, _) = Build(maxExpandedBytes: 65536);
 
         var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
-            ZipPayload, E, CancellationToken.None));
+            Envelope("compressible.zip", bytes), DefaultPayload, E, CancellationToken.None));
 
         // The `extracting` template, not `rejected`: the file broke no rule, and the fault only
         // exists once the archive was opened.
-        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("extracting compressible.zip failed", ex.Message, StringComparison.Ordinal);
         Assert.Contains("100000", ex.Message, StringComparison.Ordinal);
         Assert.Contains("65536", ex.Message, StringComparison.Ordinal);
     }
@@ -224,15 +244,19 @@ public sealed class ZipExtractorTests : IDisposable
         // entries total exactly the ceiling must still pass — an off-by-one here would reject valid
         // work with a message about memory, which is the worst possible false positive for a limit
         // whose whole purpose is to be invisible until it matters.
-        var path = Path.Combine(_dir, "exact.zip");
-        using (var file = File.Create(path))
-        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        byte[] bytes;
+        using (var buffer = new MemoryStream())
         {
-            using var entry = archive.CreateEntry("a.csv").Open();
-            entry.Write(new byte[65536]);
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                using var entry = archive.CreateEntry("a.csv").Open();
+                entry.Write(new byte[65536]);
+            }
+
+            bytes = buffer.ToArray();
         }
 
-        var doc = await DocumentOf(path);
+        var doc = await DocumentOf("exact.zip", bytes, maxExpandedBytes: 65536);
 
         Assert.Equal(65536, doc.GetProperty("content")[0]
                                 .GetProperty("metadata").GetProperty("sizeBytes").GetInt64());
@@ -357,14 +381,18 @@ public sealed class ZipExtractorTests : IDisposable
         // but a directory entry is healthy: it opens, it yields one entry, and the filter drops it.
         // Gating on the filtered count would report this valid archive as corrupt — the exact fault
         // fix round 2 found in tar.
-        var path = Path.Combine(_dir, "dirs-only.zip");
-        using (var file = File.Create(path))
-        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        byte[] bytes;
+        using (var buffer = new MemoryStream())
         {
-            archive.CreateEntry("nested/");
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                archive.CreateEntry("nested/");
+            }
+
+            bytes = buffer.ToArray();
         }
 
-        using var stream = File.OpenRead(path);
+        using var stream = new MemoryStream(bytes, writable: false);
 
         Assert.Empty(new ZipExtractor().Extract(stream));
     }
@@ -377,9 +405,9 @@ public sealed class ZipExtractorTests : IDisposable
         // would silently produce Kind.Local/Unspecified, which System.Text.Json renders without a
         // trailing Z (or with an offset) — a schema failure one hop downstream, in a branch that is
         // discarded rather than reported.
-        var path = WriteZip("orders.zip", ("a.csv", "id\n"));
+        var bytes = ZipBytes(("a.csv", "id\n"));
 
-        using var stream = File.OpenRead(path);
+        using var stream = new MemoryStream(bytes, writable: false);
         var entries = new ZipExtractor().Extract(stream);
 
         Assert.Equal(DateTimeKind.Utc, Assert.Single(entries).ModifiedUtc!.Value.Kind);

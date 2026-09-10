@@ -12,17 +12,13 @@ using Xunit;
 
 namespace BaseApi.Tests.ArchiveExpander;
 
-public sealed class TarExtractorTests : IDisposable
+public sealed class TarExtractorTests
 {
     private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
-
-    private readonly string _dir = Directory.CreateTempSubdirectory("skp-archiveexpander-tar-").FullName;
-
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     /// <summary>A real tar, built in memory from bytes.</summary>
     private static byte[] Tar(params (string Name, string Text)[] entries)
@@ -176,22 +172,30 @@ public sealed class TarExtractorTests : IDisposable
         // proves nothing about whether the throw reaches the caller's catch or escapes to the
         // framework's general one, where the file path — the entire reason §9 puts these checks in
         // ProcessAsync — is absent from every line.
-        var path = Path.Combine(_dir, "broken.tar");
-        File.WriteAllText(path, "this is not a tar");
+        var bytes = Encoding.UTF8.GetBytes("this is not a tar");
 
         var processor = new ArchiveExpanderProcessor(
             new RecordingLogger<ArchiveExpanderProcessor>(),
-            Options.Create(new ArchiveExpanderOptions()),
-            new FileContentBuilder([new TarExtractor()]));
+            new FileContentBuilder([new TarExtractor()], Options.Create(new ArchiveExpanderOptions())));
         processor.BeginDispatch(
             new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
 
-        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
-            """{"ExpectedExtension":".tar","MinimumSizeBytes":0,"MaximumSizeBytes":65536}""",
-            E, CancellationToken.None));
+        var envelope = JsonSerializer.SerializeToUtf8Bytes(
+            new
+            {
+                fileName    = "broken.tar",
+                extension   = ".tar",
+                sizeBytes   = (long)bytes.Length,
+                createdUtc  = (DateTime?)null,
+                modifiedUtc = (DateTime?)null,
+                content     = bytes,
+            },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 
-        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+        var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
+            envelope, """{"MaxDepth":1}""", E, CancellationToken.None));
+
+        Assert.Contains("extracting broken.tar failed", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
