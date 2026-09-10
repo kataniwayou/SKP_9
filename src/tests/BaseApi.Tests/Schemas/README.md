@@ -111,15 +111,19 @@ own schema derived from this one. Constrain `content`, never `metadata.entryCoun
 the fact, the count is derived, and pinning the derived field would let a counting bug satisfy a
 rule the content fails.
 
-Always an archive, exactly three entries:
+Always an archive, exactly three entries — the general form, following the file's own rule of
+pointing one step shallower than the root (`depth2` here, so `depth1`):
 
     "content": { "type": "array", "minItems": 3, "maxItems": 3,
-                 "items": { "$ref": "#/$defs/depth0" } }
+                 "items": { "$ref": "#/$defs/depth1" } }
 
 Dropping `"string"` and `"null"` from the type is what makes it "always an archive": a plain file or
 an empty archive now fails.
 
-One `.wav` and two `.csv`, order-independent — note that `minContains`/`maxContains` must sit beside
+One `.wav` and two `.csv`, order-independent. This variant is deliberately NARROWER than the one
+above: a `.wav` or `.csv` entry is always a leaf on the wire, never itself a further archive, so it
+points straight at `depth0` and skips `depth1` on purpose — this is the "always an archive of
+leaves" case, not the general form. Note also that `minContains`/`maxContains` must sit beside
 their OWN `contains`, so two cardinality rules need two subschemas under `allOf`:
 
     "content": {
