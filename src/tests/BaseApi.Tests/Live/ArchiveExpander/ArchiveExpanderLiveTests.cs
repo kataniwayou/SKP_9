@@ -163,8 +163,8 @@ public sealed class ArchiveExpanderLiveTests
 
         await ProduceAsync(path);
 
-        var doc = Await(name, TimeSpan.FromMinutes(2));
-        Assert.True(doc.HasValue, $"no document naming {name} reached {OutTopic} within two minutes");
+        var doc = Await(name, Window);
+        Assert.True(doc.HasValue, $"no document naming {name} reached {OutTopic} within {Window.TotalMinutes:0} minutes");
 
         var root = doc!.Value;
         Assert.Equal(JsonValueKind.Array, root.GetProperty("content").ValueKind);
@@ -284,6 +284,26 @@ public sealed class ArchiveExpanderLiveTests
             + $"--since={(int)since.TotalSeconds}s --tail=2000");
 
     /// <summary>
+    /// THE ONE WINDOW every assertion in this class waits on, positive and negative alike.
+    /// <para>
+    /// <b>It is one field rather than a repeated literal because the negative assertions depend on
+    /// matching the positive ones.</b> `Assert.Null(Await(...))` proves a document never arrives,
+    /// and that only means anything if a document that WAS coming would have arrived inside the
+    /// same window. Two different literals — a long positive wait and a short negative one — make
+    /// "nothing arrived" indistinguishable from "nothing arrived yet", which is a false pass.
+    /// </para>
+    /// <para>
+    /// <b>Five minutes, raised from two on 2026-09-10, because two was not enough.</b> The live
+    /// tests run concurrently (xunit <c>maxParallelThreads: 6</c>) and all produce to the same
+    /// topic; the importer drains a batch per cron tick and each processor takes one dispatch at a
+    /// time, so the work serialises and the last file in a batch waits behind every other. Two
+    /// tests failed on that alone — their log lines were present and correct, timestamped after the
+    /// assertion had given up. This bounds the WHOLE pipeline under concurrent load, not one step.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan Window = TimeSpan.FromMinutes(5);
+
+    /// <summary>
     /// Polls the log until it contains <paramref name="needle"/>, or the deadline passes.
     /// <para>
     /// Polled rather than read once: the document reaching Kafka and the line reaching the log store
@@ -372,8 +392,8 @@ public sealed class ArchiveExpanderLiveTests
 
         await ProduceAsync(path);
 
-        var doc = Await(name, TimeSpan.FromMinutes(2));
-        Assert.True(doc.HasValue, $"no document naming {name} reached {OutTopic} within two minutes");
+        var doc = Await(name, Window);
+        Assert.True(doc.HasValue, $"no document naming {name} reached {OutTopic} within {Window.TotalMinutes:0} minutes");
 
         var root = doc!.Value;
         Assert.Equal(2, root.GetProperty("metadata").GetProperty("entryCount").GetInt32());
@@ -409,10 +429,10 @@ public sealed class ArchiveExpanderLiveTests
 
         await ProduceAsync(path);
 
-        Assert.Null(Await(name, TimeSpan.FromMinutes(2)));
+        Assert.Null(Await(name, Window));
 
         Assert.True(
-            LogContains($"extracting {name} failed", TimeSpan.FromMinutes(1)),
+            LogContains($"extracting {name} failed", Window),
             $"the step failed but no log line named {name} — a corrupt archive that fails through "
             + "the framework's general catch instead of ArchiveExtractionException logs a stack "
             + "trace with the file name nowhere, which is the seam failure this message exists to "
@@ -445,12 +465,12 @@ public sealed class ArchiveExpanderLiveTests
 
         await ProduceToAsync(DeepTopic, path);
 
-        Assert.Null(Await(name, TimeSpan.FromMinutes(2)));
+        Assert.Null(Await(name, Window));
 
         // Matches the current template: "expanded {FileName} of {SizeBytes} bytes into
         // {EntryCount} entries, reaching depth {DepthReached} of {MaxDepth}".
         Assert.True(
-            LogContains("reaching depth 2 of 2", TimeSpan.FromMinutes(1)),
+            LogContains("reaching depth 2 of 2", Window),
             "the document never reached the out topic and the depth line is missing too, so nothing "
             + "distinguishes a schema rejection from the file never having been fetched at all — "
             + "which is exactly the gap this line was added to close");
