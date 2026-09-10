@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
+using Processor.ArchiveCollapser.Writers;
 
 namespace Processor.ArchiveCollapser;
 
@@ -104,9 +105,21 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // The writers, the builder and the processor itself are registered in Task 7, where those
-        // types exist. Everything above this line is framework wiring -- broker, Redis, health
-        // probes, the schema loop and the liveness loop -- and is complete as it stands.
+        // One registration per format. ArchiveBuilder takes them all and selects by the node's
+        // declared extension -- there are no bytes to sniff on the way out, so there is no
+        // CanHandle here and no signature dispatch.
+        //
+        // NO RAR. The format is proprietary and SharpCompress can only read it; a .rar node holding
+        // entries is a failed step with its own message. See ArchiveBuilder.NoWriter.
+        builder.Services.AddSingleton<IArchiveWriter, ZipWriter>();
+        builder.Services.AddSingleton<IArchiveWriter, TarWriter>();
+
+        builder.Services.AddSingleton<ArchiveBuilder>();
+
+        // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
+        // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
+        // safe only because prefetch is 1.
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, ArchiveCollapserProcessor>();
 
         return builder.Build();
     }
