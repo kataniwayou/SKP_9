@@ -302,6 +302,18 @@ public sealed class EnvelopeContractTests : IDisposable
         // Collapse, expand, collapse: the second envelope equals the first. This is what makes
         // "consistent with ArchiveExpander" an assertion instead of a claim -- timestamps, ordering
         // and compression all stop moving after the first hop.
+        //
+        // THIS CANNOT GO RED ON ITS OWN, and that is fine, not an oversight. Given TIER2's byte
+        // identity holding, `once` IS `envelope`, so re-running the same deterministic pipeline on
+        // the same bytes (once -> twice) cannot diverge while TIER2 is green -- no production change
+        // reddens THIS test without TIER2 already having failed first. Its value is diagnostic: when
+        // the loop DOES break, this isolates whether the break is in the first hop (TIER2 fails,
+        // this may still pass) or is itself unstable across repetition (both fail). Kept for that
+        // triage value, not for independent coverage -- do not read it as the fixed-point proof.
+        // TIER3_ButTheSECONDPassIsAFixedPoint is NOT implied by this one and carries the real weight:
+        // it starts from timestamps and structure a FOREIGN zip produced, not from NestedZip()'s own
+        // already-ZipWriter-clamped values, so it is where the fixed-point property is actually
+        // exercised rather than merely re-confirmed on data already known to be stable.
         var envelope = await Fetch("orders.zip", NestedZip(), AnyFile);
 
         var once = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
@@ -310,16 +322,63 @@ public sealed class EnvelopeContractTests : IDisposable
         Assert.Equal(once, twice);
     }
 
+    /// <summary>
+    /// A zip that TRULY cannot have been written by <see cref="ZipWriter"/> -- not merely a second
+    /// call through the same BCL writer. <see cref="Zip"/> above is
+    /// <c>System.IO.Compression.ZipArchive</c> at the same default <c>Optimal</c> level
+    /// <c>ZipWriter</c> uses, writing the same names in the same order: both sides are the same
+    /// writer, so a tier-3 test built on it alone would prove nothing about re-encoding a genuinely
+    /// foreign archive -- it would pass for a reason the comment could not honestly explain.
+    /// <para>
+    /// This adds two things <c>ZipWriter</c>'s own output never has: a DIRECTORY ENTRY (the
+    /// expander reads <c>entry.Name</c> and drops any entry whose full path ends in <c>/</c>;
+    /// <c>ZipWriter</c> never emits one) and one entry stored with
+    /// <see cref="CompressionLevel.NoCompression"/> -- a genuinely different per-entry compression
+    /// method than <c>ZipWriter</c> ever chooses (it always takes the <c>CreateEntry</c> default,
+    /// <c>Optimal</c>).
+    /// </para>
+    /// <para>
+    /// <b>What this still does NOT exercise</b>: a real third-party deflate stream -- 7-Zip's,
+    /// <c>zip(1)</c>'s or Python's own encoder. That needs a checked-in byte blob from an actual
+    /// external tool, not bytes any code in this repository generated. That is the honest limit of
+    /// this fixture, and it is stated here rather than implied by a comment at the call site that
+    /// nobody checks against what the helper actually does.
+    /// </para>
+    /// </summary>
+    private static byte[] ForeignZip(params (string Name, string Text)[] entries)
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // A directory entry. ZipExtractor drops it (entry.FullName.EndsWith('/')), so it must
+            // never appear in the document -- and re-packing a document that never carried it can
+            // never reproduce it either, which is one honest half of why tier 3 is not byte-identical.
+            archive.CreateEntry("sub/");
+
+            foreach (var (name, text) in entries)
+            {
+                // NoCompression, not Optimal: ZipWriter always takes CreateEntry's default, so this
+                // is a per-entry compression method ZipWriter provably never chooses.
+                using var writer = new StreamWriter(archive.CreateEntry(name, CompressionLevel.NoCompression).Open());
+                writer.Write(text);
+            }
+        }
+
+        return buffer.ToArray();
+    }
+
     [Fact]
     public async Task TIER3_AForeignArchiveKeepsWhatTheDocumentRecordsButNotItsBytes()
     {
-        // A zip built by the TEST's own helper rather than by ZipWriter -- a stand-in for 7-Zip,
-        // zip(1) or Python. Re-encoding cannot reproduce another implementation's deflate stream,
-        // its extra fields, its per-entry compression method or its directory entries.
+        // ForeignZip, not Zip: see ForeignZip's doc comment for exactly what makes this archive
+        // genuinely unlike anything ZipWriter produces -- a directory entry and a per-entry
+        // compression method ZipWriter never chooses. What is NOT exercised, and is not claimed to
+        // be: a real third-party deflate stream, which would need a checked-in byte blob from an
+        // actual external tool rather than bytes this repository's own code generated.
         //
         // THIS IS A PROPERTY OF ROUND-TRIPPING THROUGH A LOSSY INTERMEDIATE, NOT A DEFECT. It is
         // asserted so that nobody reads tier 2 passing and files a bug that tier 3 does not have.
-        var envelope = await Fetch("orders.zip", Zip(("a.csv", "id"), ("b.csv", "id,name")), AnyFile);
+        var envelope = await Fetch("orders.zip", ForeignZip(("a.csv", "id"), ("b.csv", "id,name")), AnyFile);
 
         var document = await Expand(envelope, """{"MaxDepth":2}""");
         var collapsed = await Collapse(document);
@@ -334,8 +393,10 @@ public sealed class EnvelopeContractTests : IDisposable
         Assert.Equal(["a.csv", "b.csv"], entries.Select(x => x.Name).Order().ToArray());
         Assert.Equal("id,name", Encoding.UTF8.GetString(entries.Single(x => x.Name == "b.csv").Content));
 
-        // And the bytes do not. Asserted rather than merely omitted, so the boundary is documented
-        // by a test instead of by a comment somebody can delete.
+        // And the bytes do not -- now for a reason this test can name: the directory entry
+        // ForeignZip writes and ZipWriter never does, and ForeignZip's NoCompression entries against
+        // ZipWriter's Optimal. Asserted rather than merely omitted, so the boundary is documented by
+        // a test instead of by a comment somebody can delete.
         Assert.NotEqual(envelope, collapsed);
     }
 
@@ -344,7 +405,9 @@ public sealed class EnvelopeContractTests : IDisposable
     {
         // Once a foreign archive has been through the loop once, it is OUR archive -- so from the
         // second pass onward tier 2's byte identity applies. This is the bridge between the tiers.
-        var envelope = await Fetch("orders.zip", Zip(("a.csv", "id"), ("b.csv", "id,name")), AnyFile);
+        // ForeignZip, matching TIER3 above, so `once` genuinely starts from a directory entry and a
+        // compression method ZipWriter never produces on its own.
+        var envelope = await Fetch("orders.zip", ForeignZip(("a.csv", "id"), ("b.csv", "id,name")), AnyFile);
 
         var once = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
         var twice = await Collapse(await Expand(once, """{"MaxDepth":2}"""));
@@ -356,25 +419,42 @@ public sealed class EnvelopeContractTests : IDisposable
     public async Task LOSS_DirectoriesAreFlattenedAndThatIsExpected()
     {
         // ArchiveExpander records entry.Name, never FullName, so the document has never carried
-        // directory structure. Pinned as an expected fact rather than left to surprise someone.
+        // directory structure. Read back through ZipArchive directly and asserted on FullName, not
+        // through ZipExtractor -- ZipExtractor's own ExtractedEntry exposes only Name (see
+        // ZipExtractor.Extract), so an assertion against THAT would still read "a.csv" even if the
+        // collapser somehow wrote "sub/a.csv" back into the archive; FullName is the property that
+        // would actually show a resurrected path.
         var envelope = await Fetch("orders.zip", Zip(("sub/a.csv", "id")), AnyFile);
 
         var collapsed = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
 
         using var stream = new MemoryStream(ContentOf(collapsed), writable: false);
-        Assert.Equal("a.csv", Assert.Single(new ZipExtractor().Extract(stream)).Name);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        Assert.Equal("a.csv", Assert.Single(archive.Entries).FullName);
     }
 
     [Fact]
     public async Task LOSS_NestedNodesCarryNoCreationTimeSoNoneIsWrittenBack()
     {
         // Archives record no creation time; only a modification time, and not in every format. The
-        // ROOT's createdUtc survives because it rides the envelope, not the archive.
+        // ROOT's createdUtc survives because it rides the envelope, not the archive -- pinned below
+        // by collapsing and checking the outbound envelope.
+        //
+        // The NESTED loss is pinned separately and directly, on the INTERMEDIATE DOCUMENT, because
+        // neither the root check below nor TIER1/TIER2's envelope-to-envelope byte equality can see
+        // it: a collapsed envelope carries no nested createdUtc field at all to compare, so nothing
+        // else in this file would notice if FileContentBuilder ever started populating one instead
+        // of passing createdUtc: null for every non-root node.
         var created = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
 
         var envelope = await Fetch("orders.zip", NestedZip(), AnyFile, created);
-        var collapsed = await Collapse(await Expand(envelope, """{"MaxDepth":2}"""));
+        var document = await Expand(envelope, """{"MaxDepth":2}""");
 
+        var root = JsonSerializer.Deserialize<FileNode>(document, FileDocument.Options)!;
+        var nested = Assert.IsType<FileContent.Entries>(root.Content).Value[0];
+        Assert.Null(nested.Metadata.CreatedUtc);
+
+        var collapsed = await Collapse(document);
         Assert.Equal(
             created,
             JsonDocument.Parse(collapsed).RootElement.GetProperty("createdUtc").GetDateTime());
