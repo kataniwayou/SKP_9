@@ -21,17 +21,13 @@ namespace BaseApi.Tests.ArchiveExpander;
 /// out of archives. A test that only ever hit one of them would pass with the other broken.
 /// </para>
 /// </summary>
-public sealed class ArchiveExpanderDepthTests : IDisposable
+public sealed class ArchiveExpanderDepthTests
 {
     private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
-
-    private readonly string _dir = Directory.CreateTempSubdirectory("skp-archiveexpander-depth-").FullName;
-
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     /// <summary>A zip in memory, so one can be nested inside another without touching disk.</summary>
     private static byte[] ZipOf(params (string Name, byte[] Content)[] entries)
@@ -51,49 +47,52 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
 
     private static byte[] Text(string text) => Encoding.UTF8.GetBytes(text);
 
-    private string Write(string name, byte[] bytes)
-    {
-        var path = Path.Combine(_dir, name);
-        File.WriteAllBytes(path, bytes);
-        return path;
-    }
-
     /// <summary>outer.zip → a.zip, b.zip → one csv each. Two levels of nesting below the root.</summary>
-    private string WriteZipOfZips(string name = "outer.zip")
-        => Write(name, ZipOf(
+    private static byte[] ZipOfZips()
+        => ZipOf(
             ("a.zip", ZipOf(("a.csv", Text("id,name")))),
-            ("b.zip", ZipOf(("b.csv", Text("id,name"))))));
+            ("b.zip", ZipOf(("b.csv", Text("id,name")))));
 
-    private static string Payload(int? maxDepth = null, long maximum = 262144)
-        => maxDepth is null
-            ? $$"""{"ExpectedExtension":".zip","MinimumSizeBytes":0,"MaximumSizeBytes":{{maximum}}}"""
-            : $$"""
-               {"ExpectedExtension":".zip","MinimumSizeBytes":0,"MaximumSizeBytes":{{maximum}},
-                "MaxDepth":{{maxDepth}}}
-               """;
+    /// <summary>The envelope FileFetcher would have sent for these bytes.</summary>
+    private static byte[] Envelope(string name, byte[] content, DateTime? stamp = null)
+        => JsonSerializer.SerializeToUtf8Bytes(
+            new
+            {
+                fileName    = name,
+                extension   = Path.GetExtension(name),
+                sizeBytes   = (long)content.Length,
+                createdUtc  = stamp,
+                modifiedUtc = stamp,
+                content,
+            },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 
-    private static (ArchiveExpanderProcessor Processor, IQueueSender Sender, RecordingLogger<ArchiveExpanderProcessor> Log) Build()
+    private static string Payload(int? maxDepth = null)
+        => maxDepth is null ? "{}" : $$"""{"MaxDepth":{{maxDepth}}}""";
+
+    private static (ArchiveExpanderProcessor Processor, IQueueSender Sender, RecordingLogger<ArchiveExpanderProcessor> Log) Build(
+        long maxExpandedBytes = 33_554_432)
     {
         var sender = Substitute.For<IQueueSender>();
         var log = new RecordingLogger<ArchiveExpanderProcessor>();
         var processor = new ArchiveExpanderProcessor(
             log,
-            Options.Create(new ArchiveExpanderOptions()),
-            new FileContentBuilder([new ZipExtractor(), new TarExtractor()]));
+            new FileContentBuilder(
+                [new ZipExtractor(), new TarExtractor()],
+                Options.Create(new ArchiveExpanderOptions { MaxExpandedBytes = maxExpandedBytes })));
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
         return (processor, sender, log);
     }
 
-    private static async Task<JsonElement> DocumentOf(string path, string payload)
+    private static async Task<JsonElement> DocumentOf(
+        string name, byte[] content, string payload, long maxExpandedBytes = 33_554_432)
     {
-        var (processor, sender, _) = Build();
+        var (processor, sender, _) = Build(maxExpandedBytes);
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        await processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
-            payload, E, CancellationToken.None);
+        await processor.ExecuteAsync(Envelope(name, content), payload, E, CancellationToken.None);
 
         return JsonDocument.Parse(Assert.Single(sends).Data).RootElement;
     }
@@ -108,7 +107,7 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
     {
         // THE DEFAULT, and it is what this processor did before nesting existed. Every workflow
         // authored without the field keeps documents of exactly this shape.
-        var doc = await DocumentOf(WriteZipOfZips(), Payload());
+        var doc = await DocumentOf("outer.zip", ZipOfZips(), Payload());
 
         var inner = Entry(doc, 0);
         Assert.Equal("a.zip", Name(inner));
@@ -122,7 +121,7 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
     [Fact]
     public async Task MaxDepthTwoExpandsAZipOfZips()
     {
-        var doc = await DocumentOf(WriteZipOfZips(), Payload(maxDepth: 2));
+        var doc = await DocumentOf("outer.zip", ZipOfZips(), Payload(maxDepth: 2));
 
         Assert.Equal(2, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
         Assert.Equal(2, doc.GetProperty("content").GetArrayLength());
@@ -141,7 +140,7 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
     {
         // THE OTHER STOP CONDITION. MaxDepth is 8 and the file only nests two deep, so the walk ends
         // because nothing left matches a signature — not because a limit was reached.
-        var doc = await DocumentOf(WriteZipOfZips(), Payload(maxDepth: 8));
+        var doc = await DocumentOf("outer.zip", ZipOfZips(), Payload(maxDepth: 8));
 
         var leaf = Entry(Entry(doc, 0), 0);
         Assert.Equal("a.csv", Name(leaf));
@@ -152,13 +151,12 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
     public async Task TheDepthReachedIsLogged()
     {
         // It is logged because it survives nowhere else: a document deeper than the registered
-        // schema fails validation one hop later with EntryId Guid.Empty, no payload and no path.
+        // schema fails validation one hop later with EntryId Guid.Empty, no payload and no name.
         var (processor, sender, log) = Build();
         await processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = WriteZipOfZips() })),
-            Payload(maxDepth: 2), E, CancellationToken.None);
+            Envelope("outer.zip", ZipOfZips()), Payload(maxDepth: 2), E, CancellationToken.None);
 
-        Assert.Contains(log.Records, r => r.Message.Contains("expanded to depth 2 of 2",
+        Assert.Contains(log.Records, r => r.Message.Contains("reaching depth 2 of 2",
                                                             StringComparison.Ordinal));
         _ = sender;
     }
@@ -166,7 +164,7 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
     [Fact]
     public async Task AnEmptyArchiveCarriesNullRatherThanAnEmptyArray()
     {
-        var doc = await DocumentOf(Write("empty.zip", ZipOf()), Payload());
+        var doc = await DocumentOf("empty.zip", ZipOf(), Payload());
 
         Assert.Equal(JsonValueKind.Null, doc.GetProperty("content").ValueKind);
         Assert.Equal(0, doc.GetProperty("metadata").GetProperty("entryCount").GetInt32());
@@ -179,13 +177,14 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
         // sum does. A per-level budget would admit this file, and the pod's memory does not care
         // which level a byte came from.
         var leaf = Text(new string('x', 4096));
-        var path = Write("big.zip", ZipOf(
+        var bytes = ZipOf(
             ("a.zip", ZipOf(("a.txt", leaf))),
-            ("b.zip", ZipOf(("b.txt", leaf)))));
+            ("b.zip", ZipOf(("b.txt", leaf))));
 
-        var ex = await Assert.ThrowsAsync<FailedException>(() => DocumentOf(path, Payload(maxDepth: 2, maximum: 6000)));
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => DocumentOf("big.zip", bytes, Payload(maxDepth: 2), maxExpandedBytes: 6000));
 
-        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("extracting big.zip failed", ex.Message, StringComparison.Ordinal);
         Assert.Contains("bounds the expansion as well as the file", ex.Message, StringComparison.Ordinal);
     }
 
@@ -193,16 +192,15 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
     public async Task ADepthOutsideTheSupportedRangeIsARejectedPayload()
     {
         var (processor, _, _) = Build();
-        var path = WriteZipOfZips();
+        var bytes = ZipOfZips();
 
         foreach (var depth in new[] { 0, -1, ArchiveExpanderConfig.MaxSupportedDepth + 1 })
         {
             var ex = await Assert.ThrowsAsync<FailedException>(() => processor.ExecuteAsync(
-                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
-                Payload(maxDepth: depth), E, CancellationToken.None));
+                Envelope("outer.zip", bytes), Payload(maxDepth: depth), E, CancellationToken.None));
 
-            // The payload class, diagnosed before the file is opened — not a "rejected" file and not
-            // an extraction fault.
+            // The payload class, diagnosed before the archive is opened — not a "rejected" file and
+            // not an extraction fault.
             Assert.Contains("step payload rejected", ex.Message, StringComparison.Ordinal);
             Assert.Contains("MaxDepth", ex.Message, StringComparison.Ordinal);
         }
@@ -214,9 +212,9 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
         // The entry is a real zip called ".dat". At the top level a name like that would never be
         // admitted; inside an archive there is no declaration to check, so the bytes are all there
         // is — and they are what decides.
-        var path = Write("outer.zip", ZipOf(("payload.dat", ZipOf(("inner.csv", Text("id"))))));
+        var bytes = ZipOf(("payload.dat", ZipOf(("inner.csv", Text("id")))));
 
-        var doc = await DocumentOf(path, Payload(maxDepth: 2));
+        var doc = await DocumentOf("outer.zip", bytes, Payload(maxDepth: 2));
 
         var inner = Entry(doc, 0);
         Assert.Equal("payload.dat", Name(inner));
@@ -230,9 +228,9 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
         // The mirror of the test above, and the reason the top-level cross-check does not apply
         // here: an entry named ".zip" whose bytes are not one is simply a file. Failing the step on
         // it would let whoever built the archive decide whether this processor succeeds.
-        var path = Write("outer.zip", ZipOf(("notreally.zip", Text("this is not a zip"))));
+        var bytes = ZipOf(("notreally.zip", Text("this is not a zip")));
 
-        var doc = await DocumentOf(path, Payload(maxDepth: 4));
+        var doc = await DocumentOf("outer.zip", bytes, Payload(maxDepth: 4));
 
         var inner = Entry(doc, 0);
         Assert.Equal("notreally.zip", Name(inner));
@@ -245,11 +243,12 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
         // THE CROSS-CHECK, and it exists because signature dispatch would otherwise turn corruption
         // into success: a damaged zip matches nothing, so without this it would be recorded as a
         // plain file and the step would report Completed over something nobody can open.
-        var path = Write("broken.zip", Text("this is not a zip"));
+        var bytes = Text("this is not a zip");
 
-        var ex = await Assert.ThrowsAsync<FailedException>(() => DocumentOf(path, Payload()));
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => DocumentOf("broken.zip", bytes, Payload()));
 
-        Assert.Contains($"extracting {path} failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("extracting broken.zip failed", ex.Message, StringComparison.Ordinal);
         Assert.Contains("no archive this processor knows", ex.Message, StringComparison.Ordinal);
     }
 
@@ -259,9 +258,9 @@ public sealed class ArchiveExpanderDepthTests : IDisposable
         // The cross-check asks whether the bytes are AN archive, not whether they are the named one.
         // A tar called .zip is read as a tar: an extractor claims it, and reading the content is a
         // more useful answer than refusing the name.
-        var path = Write("mislabelled.zip", TarOf("a.csv", Text("id")));
+        var bytes = TarOf("a.csv", Text("id"));
 
-        var doc = await DocumentOf(path, Payload());
+        var doc = await DocumentOf("mislabelled.zip", bytes, Payload());
 
         Assert.Equal(JsonValueKind.Array, doc.GetProperty("content").ValueKind);
         Assert.Equal("a.csv", Name(Entry(doc, 0)));

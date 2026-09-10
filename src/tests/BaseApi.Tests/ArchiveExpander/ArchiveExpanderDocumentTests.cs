@@ -11,7 +11,7 @@ using Xunit;
 
 namespace BaseApi.Tests.ArchiveExpander;
 
-public sealed class ArchiveExpanderDocumentTests : IDisposable
+public sealed class ArchiveExpanderDocumentTests
 {
     private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
@@ -19,52 +19,51 @@ public sealed class ArchiveExpanderDocumentTests : IDisposable
     private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid E = Guid.Parse("55555555-5555-5555-5555-555555555555");
 
-    private readonly string _dir = Directory.CreateTempSubdirectory("skp-archiveexpander-doc-").FullName;
-
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
-
-    private string WriteText(string name, string text)
-    {
-        var path = Path.Combine(_dir, name);
-        File.WriteAllText(path, text);
-        return path;
-    }
+    /// <summary>The envelope FileFetcher would have sent for these bytes.</summary>
+    private static byte[] Envelope(string name, byte[] content, DateTime? stamp = null)
+        => JsonSerializer.SerializeToUtf8Bytes(
+            new
+            {
+                fileName    = name,
+                extension   = Path.GetExtension(name),
+                sizeBytes   = (long)content.Length,
+                createdUtc  = stamp,
+                modifiedUtc = stamp,
+                content,
+            },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 
     private static (ArchiveExpanderProcessor Processor, IQueueSender Sender) Build()
     {
         var sender = Substitute.For<IQueueSender>();
         var processor = new ArchiveExpanderProcessor(
             new RecordingLogger<ArchiveExpanderProcessor>(),
-            Options.Create(new ArchiveExpanderOptions()),
-            new FileContentBuilder([]));
+            new FileContentBuilder([], Options.Create(new ArchiveExpanderOptions())));
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
         return (processor, sender);
     }
 
     private static async Task<List<ProcessedData>> SendsOf(
-        IQueueSender sender, ArchiveExpanderProcessor processor, string path, string payload, Guid executionId)
+        IQueueSender sender, ArchiveExpanderProcessor processor, byte[] branch, string payload, Guid executionId)
     {
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        await processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
-            payload, executionId, CancellationToken.None);
+        await processor.ExecuteAsync(branch, payload, executionId, CancellationToken.None);
 
         return sends;
     }
 
-    private const string CsvPayload =
-        """{"ExpectedExtension":".csv","MinimumSizeBytes":0,"MaximumSizeBytes":4096}""";
+    private const string DefaultPayload = """{"MaxDepth":1}""";
 
     [Fact]
     public async Task APlainFileBecomesOneRootLeaf()
     {
         var (processor, sender) = Build();
-        var path = WriteText("orders.csv", "id,name\n");
+        var bytes = Encoding.UTF8.GetBytes("id,name\n");
 
-        var sends = await SendsOf(sender, processor, path, CsvPayload, E);
+        var sends = await SendsOf(sender, processor, Envelope("orders.csv", bytes), DefaultPayload, E);
 
         var doc = JsonDocument.Parse(Assert.Single(sends).Data).RootElement;
         Assert.Equal("orders.csv", doc.GetProperty("metadata").GetProperty("name").GetString());
@@ -81,9 +80,9 @@ public sealed class ArchiveExpanderDocumentTests : IDisposable
         // was handed, and reusing one across several branches would make the lineage joins count
         // more than one where they expect one. Exactly one branch, on the id that arrived.
         var (processor, sender) = Build();
-        var path = WriteText("orders.csv", "id\n");
+        var bytes = Encoding.UTF8.GetBytes("id\n");
 
-        var sends = await SendsOf(sender, processor, path, CsvPayload, E);
+        var sends = await SendsOf(sender, processor, Envelope("orders.csv", bytes), DefaultPayload, E);
 
         Assert.Equal(E, Assert.Single(sends).ExecutionId);
     }
@@ -95,9 +94,9 @@ public sealed class ArchiveExpanderDocumentTests : IDisposable
         // schema in Task 8 pins camelCase, and a drift here fails it one hop later where the branch
         // is DISCARDED rather than reported — so it is pinned in a unit test too.
         var (processor, sender) = Build();
-        var path = WriteText("orders.csv", "id\n");
+        var bytes = Encoding.UTF8.GetBytes("id\n");
 
-        var sends = await SendsOf(sender, processor, path, CsvPayload, E);
+        var sends = await SendsOf(sender, processor, Envelope("orders.csv", bytes), DefaultPayload, E);
 
         var json = Encoding.UTF8.GetString(Assert.Single(sends).Data);
         Assert.Contains("\"metadata\"", json, StringComparison.Ordinal);
@@ -112,12 +111,11 @@ public sealed class ArchiveExpanderDocumentTests : IDisposable
         // A leaf for TWO independent reasons, and either alone would do it: no extractor is
         // registered in these tests, and these bytes are not a zip whatever the name says.
         // The second is the one that holds in production - the extractor is chosen by
-        // signature, and ExpectedExtension only admitted the file to the step.
+        // signature, and the extension only travelled through as a fact about the file.
         var (processor, sender) = Build();
-        var path = WriteText("bundle.zip", "not really a zip");
+        var bytes = Encoding.UTF8.GetBytes("not really a zip");
 
-        var sends = await SendsOf(sender, processor, path,
-            """{"ExpectedExtension":".zip","MinimumSizeBytes":0,"MaximumSizeBytes":4096}""", E);
+        var sends = await SendsOf(sender, processor, Envelope("bundle.zip", bytes), DefaultPayload, E);
 
         var doc = JsonDocument.Parse(Assert.Single(sends).Data).RootElement;
         Assert.Equal(JsonValueKind.String, doc.GetProperty("content").ValueKind);
@@ -130,15 +128,26 @@ public sealed class ArchiveExpanderDocumentTests : IDisposable
         // It rides in on the upstream record and is redundant. The design says it appears nowhere in
         // the output, and this is the test that keeps it true.
         var (processor, sender) = Build();
-        var path = WriteText("orders.csv", "id\n");
+        var bytes = Encoding.UTF8.GetBytes("id\n");
 
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
-        await processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(
-                JsonSerializer.Serialize(new { filePath = path, providerName = "acme-feed" })),
-            CsvPayload, E, CancellationToken.None);
+
+        var envelope = JsonSerializer.SerializeToUtf8Bytes(
+            new
+            {
+                fileName    = "orders.csv",
+                extension   = ".csv",
+                sizeBytes   = (long)bytes.Length,
+                createdUtc  = (DateTime?)null,
+                modifiedUtc = (DateTime?)null,
+                content     = bytes,
+                providerName = "acme-feed",
+            },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+        await processor.ExecuteAsync(envelope, DefaultPayload, E, CancellationToken.None);
 
         var json = Encoding.UTF8.GetString(Assert.Single(sends).Data);
         Assert.DoesNotContain("acme", json, StringComparison.OrdinalIgnoreCase);
