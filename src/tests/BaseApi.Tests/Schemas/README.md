@@ -1,9 +1,40 @@
-# ArchiveExpander output schema
+# Envelope and tree schemas
 
-`output.json` is the BASELINE: the shape every ArchiveExpander document has, and nothing about a
-particular feed. It is registered against the processor identity as the output schema.
+Two shapes, two files, shared across all three processors in this pipeline rather than owned by any
+one of them:
 
-## What it asserts
+| shape | file | is the contract for |
+|---|---|---|
+| envelope | `envelope.json` | FileFetcher output = ArchiveExpander input = ArchiveCollapser output |
+| tree | `tree.json` | ArchiveExpander output = ArchiveCollapser input |
+
+Each file is registered as a database row against a processor identity — the same file backs both
+ends of a hop, since the processor on either side of it agrees on one shape. Nothing in `src/` reads
+either file directly any more; see [Registration](#registration).
+
+## The envelope schema
+
+`envelope.json` is the file FileFetcher puts on the wire and ArchiveExpander reads back off it — and,
+once it exists, the shape ArchiveCollapser writes to reassemble a tree into a single file again.
+
+What it asserts:
+
+- Six keys, `additionalProperties: false`. A key nobody agreed on must not travel silently — in
+  particular `filePath`, which is deliberately absent from the envelope.
+- Every key is REQUIRED and present, including the two timestamps that are frequently null.
+  FileFetcher's own serializer is configured `DefaultIgnoreCondition.Never` for exactly this reason.
+- `content` is a base64 string. An empty file is `""`, which is why there is no `minLength` on it.
+- `extension` has no `minLength` either: a file with no dot in its name has `FileInfo.Extension` of
+  `""`, and such a file is legal under the `*.*` whitelist.
+- `fileName` DOES carry `minLength: 1`. There is no such thing as a file without a name, and the
+  tree schema's root metadata node requires one too.
+
+## The tree schema
+
+`tree.json` is the BASELINE: the shape every ArchiveExpander document has, and nothing about a
+particular feed. ArchiveCollapser reads the same file as its input schema, one hop downstream.
+
+### What the tree schema asserts
 
 - The `{metadata, content}` node, `additionalProperties: false` at every level.
 - `content` is one key holding one of three things: a base64 string (a file's bytes), an array of
