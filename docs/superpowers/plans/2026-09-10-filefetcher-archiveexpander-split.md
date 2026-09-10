@@ -3012,7 +3012,15 @@ Expected: `0 failed`, exit 0, every `Live/` test skipped.
 
 - [ ] **Step 6: Run the live suite**
 
-Set `SKP_REALSTACK=1`, start the offset-port forwards and `tools/kafka-dev-broker.ps1 -Up`, then run the suite. **Supervise the RabbitMQ forward** — it dies during a RealStack run and reads back as roughly five fake failures. Check the forwards before believing any regression.
+First confirm the live tests point at Deployments that exist. `ArchiveExpanderLiveTests` defaults `SKP_ARCHIVEEXPANDER_DEPLOYMENT` to `processor-archiveexpander`, which only became true when Task 6 Step 8 applied the renamed manifest:
+
+```bash
+kubectl get deployment -n skp | grep -E 'processor-(archiveexpander|filefetcher|filereader)'
+```
+
+Expected: `processor-archiveexpander` and `processor-filefetcher` present, `processor-filereader` **absent**. A surviving `processor-filereader` means Task 6 Step 8's delete did not run, and it is still consuming from a queue nobody is watching.
+
+Then set `SKP_REALSTACK=1`, start the offset-port forwards and `tools/kafka-dev-broker.ps1 -Up`, and run the suite. **Supervise the RabbitMQ forward** — it dies during a RealStack run and reads back as roughly five fake failures. Check the forwards before believing any regression.
 
 - [ ] **Step 7: Commit**
 
