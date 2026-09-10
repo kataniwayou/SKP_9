@@ -76,10 +76,13 @@ public sealed class FileFetcherEnvelopeTests : IDisposable
     }
 
     [Fact]
-    public async Task EveryKeyIsPresentEvenWhenItsValueIsNull()
+    public async Task EveryKeyIsPresent()
     {
-        // The registered schema requires the keys, so DefaultIgnoreCondition.Never is load-bearing
-        // rather than stylistic.
+        // FileInfo.CreationTimeUtc and LastWriteTimeUtc are non-nullable, so an envelope built from a
+        // real file never actually exercises a null value here — this only pins key PRESENCE. The
+        // case where a value is null and the key must still survive is
+        // FileFetcherSchemaTests.NullTimestampsValidate, which serializes a FetchedFile with null
+        // timestamps directly and validates it against the registered schema.
         var sends = await SendsFor("orders.csv", "id,name", E);
 
         using var doc = JsonDocument.Parse(Assert.Single(sends).Data);

@@ -72,4 +72,17 @@ public sealed class FileFetcherLocatorTests
 
         Assert.Contains("the path is relative", message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ADriveRelativePathFails()
+    {
+        // On Windows, "\orders.csv" is rooted (Path.IsPathRooted would accept it) but not fully
+        // qualified: it still resolves against whatever drive is current, which is not a location any
+        // workflow author chose. Production runs on Linux, where rooted and fully-qualified agree, so
+        // this distinction is only visible here, on the platform the tests run on.
+        var message = await FailureFor(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = "\\orders.csv" })));
+
+        Assert.Contains("the path is relative", message, StringComparison.Ordinal);
+    }
 }

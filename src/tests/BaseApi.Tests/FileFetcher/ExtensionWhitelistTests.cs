@@ -99,6 +99,16 @@ public sealed class ExtensionWhitelistTests
     }
 
     [Fact]
+    public void ANullEntryIsMalformedAndRendersAsTheLiteralNull()
+    {
+        // JsonSerializer.Deserialize will happily place a JSON null into this list despite it being
+        // declared IReadOnlyList<string> (non-nullable). It must be reported, not throw when
+        // FirstMalformed reaches its .Length — and reported as the literal text "null" rather than a
+        // C# null, which is this method's own "nothing is malformed" signal.
+        Assert.Equal("null", ExtensionWhitelist.FirstMalformed([".zip", null!]));
+    }
+
+    [Fact]
     public void DescribeRendersTheListForAnOperator()
     {
         // The rejection names the list so nobody has to go and read the step payload.

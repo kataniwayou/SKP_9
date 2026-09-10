@@ -84,6 +84,24 @@ public sealed class FileFetcherGuardTests : IDisposable
     }
 
     [Fact]
+    public async Task ANullExtensionEntryFailsAsAPayloadRejectionNotAFault()
+    {
+        // AllowedExtensions is declared IReadOnlyList<string> (non-nullable), but the list comes
+        // from JsonSerializer.Deserialize, which places a JSON null into it without complaint. This
+        // must surface through the documented "step payload rejected" contract, not an unhandled
+        // NullReferenceException logged as a faulted transform.
+        var processor = Build();
+        var path = WriteFile("a.zip", 10);
+        const string payload =
+            """{"AllowedExtensions":[".zip", null],"MinimumSizeBytes":0,"MaximumSizeBytes":4096}""";
+
+        var ex = await Assert.ThrowsAsync<FailedException>(() => Run(processor, path, payload));
+
+        Assert.StartsWith("step payload rejected: ", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'null'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task APayloadCeilingAboveThePodCeilingFailsTheStep()
     {
         // Not clamped. Clamping means the author asked for 100MB, got failures at 32, and nothing

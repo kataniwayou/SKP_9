@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    A concrete processor, and the first that reads the filesystem. Like every other processor here
-    it carries no identity, liveness, broker or Redis code — AddBaseProcessor folds all of it in.
+    A concrete processor. It performs no file IO of its own — it consumes the envelope FileFetcher
+    already fetched and expands whatever archives are in it. Like every other processor here it
+    carries no identity, liveness, broker or Redis code — AddBaseProcessor folds all of it in.
 
     Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
     Directory.Build.props, and package versions from Directory.Packages.props — never declare
@@ -16,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- FileContentBuilder, FileLocator and FileDocument are internal: they are this processor's
+    <!-- FileContentBuilder, FetchedFile and SourceFile are internal: they are this processor's
          construction, not its surface, and nothing outside should bind to them. The tests DO
          construct them directly — a builder tested only through the processor cannot be given an
          empty extractor set — so the test assembly is named here, matching what

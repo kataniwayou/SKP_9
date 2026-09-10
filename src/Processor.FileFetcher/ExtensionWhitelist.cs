@@ -41,6 +41,12 @@ internal static class ExtensionWhitelist
     /// It returns the offending entry rather than a bool so the rejection can quote it. An author
     /// who wrote <c>"zip"</c> needs to see <c>"zip"</c>, not a count.
     /// </para>
+    /// <para>
+    /// <b>A JSON <c>null</c> element is reported back as the literal text <c>"null"</c></b>, never as
+    /// a C# null: this method's own null return is the "nothing is malformed" signal, so a malformed
+    /// entry can never be allowed to reuse it — that would make the caller's <c>is { } malformed</c>
+    /// check silently pass a whitelist that still has a null in it.
+    /// </para>
     /// </summary>
     public static string? FirstMalformed(IReadOnlyList<string> whitelist)
     {
@@ -48,7 +54,7 @@ internal static class ExtensionWhitelist
         {
             if (!IsWellFormed(entry))
             {
-                return entry;
+                return entry ?? "null";
             }
         }
 
@@ -85,6 +91,12 @@ internal static class ExtensionWhitelist
     /// <summary>The list as an operator reads it, for the rejection message.</summary>
     public static string Describe(IReadOnlyList<string> whitelist) => string.Join(", ", whitelist);
 
-    private static bool IsWellFormed(string entry)
-        => entry == Wildcard || (entry.Length > 1 && entry.StartsWith('.'));
+    /// <summary>
+    /// <paramref name="entry"/> is declared as a non-nullable <c>string</c> in the list this walks,
+    /// but the list comes from <c>JsonSerializer.Deserialize</c>, which places a JSON <c>null</c> into
+    /// it without complaint — a non-nullable element type is a declaration, not a guarantee. Total over
+    /// that: a null entry is malformed, not a fault that reaches <c>entry.Length</c>.
+    /// </summary>
+    private static bool IsWellFormed(string? entry)
+        => entry is not null && (entry == Wildcard || (entry.Length > 1 && entry.StartsWith('.')));
 }
