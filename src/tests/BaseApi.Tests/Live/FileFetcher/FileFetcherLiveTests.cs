@@ -203,6 +203,33 @@ public sealed class FileFetcherLiveTests
             + $"--since={(int)since.TotalSeconds}s --tail=2000");
 
     /// <summary>
+    /// THE ONE WINDOW every assertion in this class waits on, positive and negative alike.
+    /// <para>
+    /// <b>It is one field rather than a repeated literal because the negative assertions depend on
+    /// matching the positive ones.</b> `Assert.Null(Await(...))` proves a document never arrives,
+    /// and that only means anything if a document that WAS coming would have arrived inside the
+    /// same window. Two different literals — a long positive wait and a short negative one — make
+    /// "nothing arrived" indistinguishable from "nothing arrived yet", which is a false pass. The
+    /// invariant used to be asserted in a comment; here it is structural.
+    /// </para>
+    /// <para>
+    /// <b>Five minutes, raised from two on 2026-09-10, because two was not enough.</b> The suite
+    /// runs its live tests concurrently (xunit <c>maxParallelThreads: 6</c>) and every one of them
+    /// produces to the same topic; the importer drains a batch per cron tick and each processor
+    /// takes one dispatch at a time, so the work serialises and whichever file is last in the batch
+    /// waits behind all the others. Two tests failed on that alone — their log lines were present
+    /// and correct, timestamped after the assertion had given up. This is a bound on the WHOLE
+    /// pipeline under concurrent load, not on any single step.
+    /// </para>
+    /// <para>
+    /// It costs wall-clock on the negative tests, which burn the full window by construction. That
+    /// is the price of the guarantee above; shortening it back buys minutes and loses the meaning
+    /// of every <c>Assert.Null</c> in this file.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan Window = TimeSpan.FromMinutes(5);
+
+    /// <summary>
     /// Polls the log until it contains <paramref name="needle"/>, or the deadline passes.
     /// <para>
     /// Polled rather than read once: the document reaching Kafka (or failing to) and the line
@@ -261,8 +288,8 @@ public sealed class FileFetcherLiveTests
         await ProduceAsync(path);
 
         Assert.True(
-            LogContains($"fetched {name} (.zip)", TimeSpan.FromMinutes(2)),
-            $"no 'fetched {name} (.zip)' line reached the FileFetcher log within two minutes — "
+            LogContains($"fetched {name} (.zip)", Window),
+            $"no 'fetched {name} (.zip)' line reached the FileFetcher log within {Window.TotalMinutes:0} minutes — "
             + "the mount, the seed, or the whitelist did not let the fetch through");
     }
 
@@ -285,10 +312,10 @@ public sealed class FileFetcherLiveTests
 
         await ProduceAsync(path);
 
-        // Same two-minute window the positive tests use, on purpose: a shorter wait here would only
-        // prove the pipeline hadn't produced a document YET, not that it never would, and the two
-        // outcomes look identical from outside.
-        Assert.Null(Await(name, TimeSpan.FromMinutes(2)));
+        // The SAME Window the positive tests use, and that is the whole point: a shorter wait here
+        // would only prove the pipeline hadn't produced a document YET, not that it never would,
+        // and the two outcomes look identical from outside. See Window for why it is one field.
+        Assert.Null(Await(name, Window));
 
         // THE MOVED ASSERTION. The old FileReader-era failure line named a path; so does this one —
         // `file {path} rejected: ...` is unchanged from FileReader, and it is now the ONLY failure
@@ -297,7 +324,7 @@ public sealed class FileFetcherLiveTests
         // path-reaching-the-log-store guarantee actually lives now.
         Assert.True(
             LogContains($"file {path} rejected: extension '.txt' is not in the allowed list",
-                TimeSpan.FromMinutes(1)),
+                Window),
             $"the step failed but no log line named {path} — the path-reaching-the-log-store "
             + "guarantee this assertion exists to pin");
     }
