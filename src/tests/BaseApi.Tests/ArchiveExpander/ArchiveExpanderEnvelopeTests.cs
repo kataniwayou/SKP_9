@@ -95,7 +95,13 @@ public sealed class ArchiveExpanderEnvelopeTests
                     """{"fileName":"a.csv","extension":".csv","sizeBytes":2,"createdUtc":null,"modifiedUtc":null,"content":"aWQ="}"""),
                 """{"MaxDepth":0}""", E, CancellationToken.None));
 
-        Assert.Contains("MaxDepth must be between 1 and 64", ex.Message, StringComparison.Ordinal);
+        // The bound comes from the constant, not a literal: this assertion was written as "1 and 64"
+        // and went red when MaxSupportedDepth was lowered to 10, which is the constant doing its job
+        // rather than a contract change. The message shape is what this test is about.
+        Assert.Contains(
+            $"MaxDepth must be between 1 and {ArchiveExpanderConfig.MaxSupportedDepth}",
+            ex.Message,
+            StringComparison.Ordinal);
     }
 
     [Fact]
