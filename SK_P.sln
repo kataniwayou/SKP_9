@@ -35,6 +35,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.FileFetcher", "sr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.ArchiveCollapser", "src\Processor.ArchiveCollapser\Processor.ArchiveCollapser.csproj", "{29A0207D-26D9-4622-BA5A-8E73B9C06758}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.FilePersister", "src\Processor.FilePersister\Processor.FilePersister.csproj", "{02440DA6-7910-4F7A-B982-F8BC0D00C5C5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -100,6 +102,10 @@ Global
 		{29A0207D-26D9-4622-BA5A-8E73B9C06758}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{29A0207D-26D9-4622-BA5A-8E73B9C06758}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{29A0207D-26D9-4622-BA5A-8E73B9C06758}.Release|Any CPU.Build.0 = Release|Any CPU
+		{02440DA6-7910-4F7A-B982-F8BC0D00C5C5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{02440DA6-7910-4F7A-B982-F8BC0D00C5C5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{02440DA6-7910-4F7A-B982-F8BC0D00C5C5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{02440DA6-7910-4F7A-B982-F8BC0D00C5C5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{6D576C78-9705-429A-B8CB-EE480922EF0C} = {1173193E-E2C7-4F2C-B933-043568A019E4}
@@ -117,5 +123,6 @@ Global
 		{4980C8C4-014A-4D6C-8472-14725E27103B} = {1173193E-E2C7-4F2C-B933-043568A019E4}
 		{BD224D36-CB85-4DEB-BB21-06F0672CFB2F} = {1173193E-E2C7-4F2C-B933-043568A019E4}
 		{29A0207D-26D9-4622-BA5A-8E73B9C06758} = {1173193E-E2C7-4F2C-B933-043568A019E4}
+		{02440DA6-7910-4F7A-B982-F8BC0D00C5C5} = {1173193E-E2C7-4F2C-B933-043568A019E4}
 	EndGlobalSection
 EndGlobal

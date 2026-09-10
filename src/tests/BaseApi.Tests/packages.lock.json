@@ -689,6 +689,12 @@
           "BaseProcessor.Core": "[1.0.0, 1.0.0]"
         }
       },
+      "processor.filepersister": {
+        "type": "Project",
+        "dependencies": {
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]"
+        }
+      },
       "processor.kafkaexporter": {
         "type": "Project",
         "dependencies": {
