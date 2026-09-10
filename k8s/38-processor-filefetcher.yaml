@@ -1,0 +1,156 @@
+# processor-filefetcher — turns an absolute file path into one fetched-file envelope of metadata
+# and raw content. It never looks inside the file — archive expansion is ArchiveExpander's job
+# downstream. A downstream transform: it has an input and it produces output, so it is neither an
+# importer nor an exporter. No Service — its only inbound traffic is the kubelet hitting the pod IP
+# for probes.
+#
+# EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS, exactly as the other processors do.
+# `kubectl rollout status` will time out; that timeout is the expected signal, not a fault.
+#
+# THE MOUNT IS THE KIND NODE'S FILESYSTEM, NOT WINDOWS. This cluster's node container was created
+# with no extraMounts, and Docker cannot add a bind mount to a running container — so hostPath here
+# resolves inside desktop-control-plane. Reaching C:\ would mean recreating the cluster with
+# `extraMounts: hostPath: /run/desktop/mnt/host/c/...`, which loses every processor identity row,
+# schema definition, workflow and step in Postgres along with Redis L2. Fixtures are seeded onto the
+# node instead:
+#
+#   docker cp <file> desktop-control-plane:/mnt/skp-files/in/
+#
+# See §13 of docs/superpowers/specs/2026-09-09-file-reader-design.md.
+#
+# THE MEMORY LIMIT IS 512Mi, HALFWAY BETWEEN THE OTHER PROCESSORS' 384Mi AND ArchiveExpander's 768Mi,
+# AND IT IS A STARTING NUMBER RATHER THAN A DERIVED ONE. A file does not cost its own size in flight:
+# the raw file bytes, the serialized envelope (~1.33x the file — base64 is 4 bytes per 3), the broker
+# message body (that envelope base64'd again inside the ProcessedData envelope, ~1.78x), and a
+# JsonDocument DOM at output validation can all coexist — and the work and post consumers are the SAME
+# process, so a dispatch and a branch overlap. At the 32MiB ceiling below that is roughly 200MB
+# transient. MEASURE IT before trusting it. Lower FileFetcher__MaxFileSizeBytes or raise this limit;
+# do not move one without the other.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor-filefetcher
+  namespace: skp
+  labels:
+    app: processor-filefetcher
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxSurge 0, and this is sized memory, not caution for its own sake: this pod's limit is
+      # 512Mi, higher than the other processors' 384Mi but half of ArchiveExpander's 768Mi, so a
+      # surge briefly running two of them would want ~1Gi on the node at once — a single-node kind
+      # cluster already running Postgres, Redis, RabbitMQ, Prometheus, Grafana, an OTel collector,
+      # BaseApi, the orchestrator and the other processors. Stop-then-start trades a few seconds of
+      # throughput for not needing that headroom.
+      # (There is no correctness reason to forbid overlap here: the hostPath mount is read-only, and
+      # FileFetcher consumes from its own RabbitMQ queue as a competing consumer, not a single
+      # partition — this is purely a node-memory budget call.)
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: processor-filefetcher
+  template:
+    metadata:
+      labels:
+        app: processor-filefetcher
+    spec:
+      containers:
+        - name: processor-filefetcher
+          image: processor-filefetcher:local
+          imagePullPolicy: IfNotPresent
+          env:
+            # NO Service__Name / Service__Version here, deliberately, and do not add them back.
+            # A processor takes its service.name and service.version from its database row, resolved
+            # before the host is built so they can reach the OTel resource, and that row wins over
+            # configuration unconditionally. Setting them here changed nothing: telemetry reported
+            # sample-proc-v9 / 1.5.0 whatever this said, so the pair read as live settings while
+            # being inert -- an operator renaming a processor by editing this manifest would have
+            # seen no effect and no error. The fallback they nominally provided now lives in code
+            # (ProcessorHost, "processor" / "1.0.0"), which is where the other two services declare
+            # theirs.
+            # The replica identity that names this pod's liveness key, its reply queue, and the
+            # service.instance.id on its telemetry. All three must be the same string, which is why it
+            # is resolved once from the downward API rather than three times from three defaults.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            # The collector already running in this namespace. Without it the SDK still works and
+            # export simply fails quietly, so this is an enrichment rather than a dependency.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+            # 10s, against a 15s Prometheus scrape. The collector emits explicit sample
+            # timestamps and Prometheus discards a re-scrape bearing one it already stored,
+            # so an export interval EQUAL to the scrape interval aliases and leaves some
+            # scrapes with nothing new. Exporting faster than the scrape makes the effective
+            # resolution the scrape interval.
+            #
+            # Load-bearing for the dashboards: Grafana derives $__rate_interval from the
+            # datasource's timeInterval, which must track this value. At 60s it floored the
+            # rate window at 240s, which is why a sixty-second outage moved no rate panel.
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: "10000"
+            # The pod's ceiling. A step payload naming more than this fails by name rather than
+            # being clamped — see FileFetcherOptions.
+            - name: FileFetcher__MaxFileSizeBytes
+              value: "33554432"
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_USER }
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+            # Straight to Redis, the same address the orchestrator and the API use. This pointed at
+            # a toxiproxy hop until 2026-09-01: the proxy was the only way to make a dependency slow
+            # rather than absent on this cluster, but it put the processor on a Redis path production
+            # does not have, so every latency measured here carried a hop production never pays.
+            - name: ConnectionStrings__Redis
+              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            - name: ConsoleHealth__Port
+              value: "8081"
+          ports:
+            - containerPort: 8081
+          # Startup flips on the liveness loop's first beat, within moments of the host starting, so
+          # this passes long before discovery does. It is deliberately not gated on identity: a
+          # processor waiting on an unregistered row is starting correctly, however long that takes.
+          startupProbe:
+            httpGet: { path: /health/startup, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Readiness is identity resolution. It stays red until the processor row exists, and no
+          # restart will help — which is exactly why this is readiness and not liveness.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8081 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          # Liveness is the loops still turning, and nothing else. A broker that is down must not
+          # restart this pod: the startup loop is designed to retry against it forever, and a restart
+          # only throws away the backoff progress.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8081 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests: { memory: "256Mi" }
+            limits:   { memory: "512Mi" }
+          volumeMounts:
+            - name: skp-files
+              mountPath: /mnt/skp-files/in
+              readOnly: true
+      volumes:
+        - name: skp-files
+          # DirectoryOrCreate so a fresh node does not need the path seeded before the pod can
+          # start. An empty directory is a correct state: every dispatch names its own file.
+          hostPath:
+            path: /mnt/skp-files/in
+            type: DirectoryOrCreate
