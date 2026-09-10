@@ -23,3 +23,4 @@ resources:
   - 36-orchestrator.yaml
   - 37-processor-archiveexpander.yaml
   - 38-processor-filefetcher.yaml
+  - 39-processor-archivecollapser.yaml
