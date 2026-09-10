@@ -39,6 +39,33 @@ It is a plain downstream transform. It has an input and it produces output, so i
 neither `BaseImporter` nor `BaseExporter` applies — and it passes through the `executionId` it was
 dispatched with rather than minting one. A transform continues the lineage it was handed.
 
+### 1.1 Staging: prove the loop first, register schemas second
+
+**Phase 1 ships with every schema id null in the database.** No `InputSchemaId`, no `OutputSchemaId`,
+on any of the three processors. `TryValidate` returns true without decoding, `SchemaEdgeValidator`
+passes on a null on either side, and the workflow Fetcher → Expander → Collapser publishes and runs
+with no schema row anywhere. The proof is the identity test of §10: ArchiveExpander's input data
+equals ArchiveCollapser's output data.
+
+**This ordering is not merely convenient — byte identity is the stricter check.** A schema asserts a
+document has the right shape; identity asserts it round-tripped losslessly. If §10's tiers 1 and 2
+pass, any schema they would have been validated against necessarily passes too. Registering first
+adds nothing to the proof and adds ways for the proof to fail for unrelated reasons.
+
+**Phase 2 registers the two rows of §1** and turns on what a schema can say that identity cannot: the
+publish-time edge check that refuses a miswired workflow, and the per-feed variants that express
+entry counts and layouts nothing else in the system expresses. `Schemas/envelope.json` and
+`Schemas/tree.json` (§7.1) are the source text POSTed to create them, and §7.2's depth-2 re-rooting is
+a **phase 2 task** — with nothing validating, the depth a schema admits is inert in phase 1.
+
+**Two existing live tests conflict with phase 1 and must be gated, not ignored.**
+`ArchiveExpanderLiveTests.TheOutputSchemaRowIsRegistered` and
+`FileFetcherLiveTests.TheOutputSchemaRowIsRegistered` ask BaseApi for the row and **fail on a null
+`OutputSchemaId`** — that is precisely what they exist to catch. Under phase 1 they go red by design.
+A red live suite is how a real failure becomes invisible, so they are explicitly skipped for phase 1
+and re-armed as the last step of phase 2, alongside the new collapser equivalent. Their skip reason
+names this section.
+
 ## 2. The file layout, and what is NOT mirrored
 
 Most of the processor mirrors the expander file for file:
@@ -508,9 +535,9 @@ Stated so nothing here reads as a promise:
 - **No `.tar.gz`.** A different extension, its own writer, and its own question about whether a double
   extension is one format or two. The expander does not do it either.
 - **No directory structure.** The document has never carried it; the expander strips it on read.
-- **No schema registration.** It stays a deploy step against the processor identity. Until those rows
-  exist, `TryValidate` returns true without decoding anything and **none of the schema constraints in
-  this document are enforced anywhere** — and `SchemaEdgeValidator` passes on a null on either side,
-  so an unregistered pair is also freely miswireable at publish. Registering the two rows of §1 is
-  what turns this design's contracts on; skipping it leaves the processors working and the contracts
-  inert.
+- **No schema registration in phase 1** — by design, see §1.1. Until those rows exist, `TryValidate`
+  returns true without decoding anything and **none of the schema constraints in this document are
+  enforced anywhere**, and `SchemaEdgeValidator` passes on a null on either side, so the pair is also
+  freely miswireable at publish. That is the accepted cost of proving the loop before the contracts:
+  the identity test of §10 is what holds phase 1, and it is a stricter check than a schema. Phase 2
+  registering the two rows of §1 is what turns the contracts on.
