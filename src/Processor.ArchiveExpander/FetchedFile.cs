@@ -8,8 +8,8 @@ namespace Processor.ArchiveExpander;
 /// <b>This is the reader's copy of <c>Processor.FileFetcher.FetchedFile</c>, whose fields are all
 /// non-nullable.</b> The two describe one JSON document across two assemblies that must not
 /// reference each other — the same arrangement, for the same reason, as
-/// <c>ProcessorJsonSchemaValidator</c> duplicating <c>JsonSchemaConfig</c>. The two registered
-/// schema files pin the shape and <c>EnvelopeContractTests</c> is what catches a divergence.
+/// <c>ProcessorJsonSchemaValidator</c> duplicating <c>JsonSchemaConfig</c>. The registered envelope
+/// schema pins the shape and <c>EnvelopeContractTests</c> is what catches a divergence.
 /// </para>
 /// <para>
 /// <c>byte[]</c> needs no converter: System.Text.Json reads a base64 string straight into one.

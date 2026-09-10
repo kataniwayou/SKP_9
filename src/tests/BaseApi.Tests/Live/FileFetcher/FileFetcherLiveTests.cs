@@ -335,7 +335,7 @@ public sealed class FileFetcherLiveTests
     /// existed, because the two processors still lived in one file exercising the whole chain. Now
     /// that FileFetcher has a file of its own, it gets the same proof ArchiveExpander already had:
     /// that its own output schema (<c>file-envelope</c>) is actually registered, not merely present
-    /// as a file under <c>src/Processor.FileFetcher/schema/</c>.
+    /// as a file under <c>src/tests/BaseApi.Tests/Schemas/</c>.
     /// </summary>
     [Fact]
     public async Task TheOutputSchemaRowIsRegistered()
@@ -363,7 +363,7 @@ public sealed class FileFetcherLiveTests
             row.TryGetProperty("outputSchemaId", out var schemaId)
             && schemaId.ValueKind != JsonValueKind.Null,
             "the processor row exists but OutputSchemaId is null — the output schema from "
-            + "src/Processor.FileFetcher/schema/output.json has not been registered, so nothing "
+            + "src/tests/BaseApi.Tests/Schemas/envelope.json has not been registered, so nothing "
             + "enforces the envelope's shape on the way out of this pod");
     }
 }

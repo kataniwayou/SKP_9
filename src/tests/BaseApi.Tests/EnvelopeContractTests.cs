@@ -17,11 +17,12 @@ namespace BaseApi.Tests;
 /// <summary>
 /// THE CONTRACT ACROSS THE SPLIT, and the one thing neither pod can verify alone.
 /// <para>
-/// The envelope is described in four places that nothing keeps in sync: FileFetcher's
+/// The envelope is described in three places that nothing keeps in sync: FileFetcher's
 /// <c>FetchedFile</c> (all fields required), ArchiveExpander's <c>FetchedFile</c> (all fields
-/// optional), and the two schema files. Each half's own tests pass happily while the halves disagree.
-/// This class runs both real processors back to back and validates the bytes in between against both
-/// registered schemas, so a divergence fails here rather than in the cluster.
+/// optional), and the registered envelope schema. Each half's own tests pass happily while the
+/// halves disagree. This class runs both real processors back to back and validates the bytes in
+/// between against the real, registered schema, so a divergence fails here rather than in the
+/// cluster.
 /// </para>
 /// </summary>
 public sealed class EnvelopeContractTests : IDisposable
@@ -36,11 +37,11 @@ public sealed class EnvelopeContractTests : IDisposable
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
-    private static string FetcherOutputSchema()
-        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "fetcher-output.json"));
+    private static string EnvelopeSchema()
+        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "envelope.json"));
 
-    private static string ExpanderInputSchema()
-        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "input.json"));
+    private static string TreeSchema()
+        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "tree.json"));
 
     /// <summary>Runs the real fetcher and returns the single branch it sent.</summary>
     /// <param name="createdUtc">
@@ -120,16 +121,13 @@ public sealed class EnvelopeContractTests : IDisposable
     }
 
     [Fact]
-    public async Task WhatTheFetcherSendsSatisfiesBothRegisteredSchemas()
+    public async Task WhatTheFetcherSendsSatisfiesTheEnvelopeSchema()
     {
-        // The two schema files are duplicates across assemblies that must not reference each other.
-        // This is what catches them drifting.
         var envelope = await Fetch("orders.csv", Encoding.UTF8.GetBytes("id,name"), AnyFile);
 
-        Assert.True(ProcessorJsonSchemaValidator.TryValidate(FetcherOutputSchema(), envelope, out var a),
-                    string.Join("; ", a));
-        Assert.True(ProcessorJsonSchemaValidator.TryValidate(ExpanderInputSchema(), envelope, out var b),
-                    string.Join("; ", b));
+        Assert.True(
+            ProcessorJsonSchemaValidator.TryValidate(EnvelopeSchema(), envelope, out var errors),
+            string.Join("; ", errors));
     }
 
     [Fact]
@@ -170,8 +168,7 @@ public sealed class EnvelopeContractTests : IDisposable
 
         var document = await Expand(envelope, """{"MaxDepth":1}""");
 
-        var outputSchema = File.ReadAllText(
-            Path.Combine(AppContext.BaseDirectory, "schema", "output.json"));
+        var outputSchema = TreeSchema();
         var node = JsonSerializer.Deserialize<FileNode>(document, FileDocument.Options)!;
 
         Assert.Equal("orders.zip", node.Metadata.Name);
@@ -196,19 +193,6 @@ public sealed class EnvelopeContractTests : IDisposable
 
         Assert.Equal("README", node.Metadata.Name);
         Assert.Equal("", node.Metadata.Extension);
-    }
-
-    [Fact]
-    public void TheFetcherOutputSchemaAndTheExpanderInputSchemaAreByteIdentical()
-    {
-        // WhatTheFetcherSendsSatisfiesBothRegisteredSchemas proves one real envelope satisfies both
-        // files, but that alone cannot see input.json being LOOSENED relative to fetcher-output.json
-        // — widen additionalProperties, broaden a type, and the same real bytes still satisfy both,
-        // green, while the two contracts have quietly diverged. The two files are duplicated across
-        // assemblies that must not reference each other (Processor.FileFetcher and
-        // Processor.ArchiveExpander), so nothing but a test pins their identity — there is no shared
-        // file for a build to enforce it structurally.
-        Assert.Equal(FetcherOutputSchema(), ExpanderInputSchema(), StringComparer.Ordinal);
     }
 
     [Fact]

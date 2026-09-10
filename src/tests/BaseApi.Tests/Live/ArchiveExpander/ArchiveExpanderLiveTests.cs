@@ -373,7 +373,7 @@ public sealed class ArchiveExpanderLiveTests
             row.TryGetProperty("outputSchemaId", out var schemaId)
             && schemaId.ValueKind != JsonValueKind.Null,
             "the processor row exists but OutputSchemaId is null — the output schema from "
-            + "src/Processor.ArchiveExpander/schema/output.json has not been registered, so nothing "
+            + "src/tests/BaseApi.Tests/Schemas/tree.json has not been registered, so nothing "
             + "enforces shape, entry count or depth");
     }
 
