@@ -138,9 +138,13 @@ public sealed class ArchiveExpanderDepthTests
     [Fact]
     public async Task ExpansionStopsWhenNothingIsAnArchive()
     {
-        // THE OTHER STOP CONDITION. MaxDepth is 8 and the file only nests two deep, so the walk ends
-        // because nothing left matches a signature — not because a limit was reached.
-        var doc = await DocumentOf("outer.zip", ZipOfZips(), Payload(maxDepth: 8));
+        // THE OTHER STOP CONDITION. MaxDepth is the ceiling itself and the file only nests two
+        // deep, so the walk ends because nothing left matches a signature — not because a limit was
+        // reached. Named via the constant rather than a literal: this read "8" until
+        // MaxSupportedDepth came down to 4, at which point the generous-looking number was a
+        // rejected payload and the test no longer reached its own assertion.
+        var doc = await DocumentOf(
+            "outer.zip", ZipOfZips(), Payload(maxDepth: ArchiveExpanderConfig.MaxSupportedDepth));
 
         var leaf = Entry(Entry(doc, 0), 0);
         Assert.Equal("a.csv", Name(leaf));

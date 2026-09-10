@@ -32,7 +32,7 @@ internal sealed class ArchiveBuilder(IEnumerable<IArchiveWriter> writers)
     /// <summary>
     /// The deepest document this will pack.
     /// <para>
-    /// <b>This is the SECOND guard, and at 10 it is the first one a document actually meets.</b>
+    /// <b>This is the SECOND guard, and at 4 it is the first one a document actually meets.</b>
     /// <c>FileNodeConverter.Read</c> recurses while deserializing, so a pathologically deep document
     /// is refused by <c>JsonSerializerOptions.MaxDepth</c> before a tree ever reaches this class --
     /// pinned by <c>FileNodeReadTests.ADeeplyNestedDocumentIsRefusedByTheDeserializer</c>. Neither
@@ -42,9 +42,9 @@ internal sealed class ArchiveBuilder(IEnumerable<IArchiveWriter> writers)
     /// <c>FileNodeReadTests</c> says.
     /// </para>
     /// <para>
-    /// <b>This was 64, which put it ABOVE that wall and made it unreachable; at 10 it sits below,
+    /// <b>This was 64, which put it ABOVE that wall and made it unreachable; at 4 it sits far below,
     /// and now the two halves of the loop genuinely agree.</b> The expander validates
-    /// <c>MaxDepth</c> into <c>1..ArchiveExpanderConfig.MaxSupportedDepth</c>, the same 10, so a
+    /// <c>MaxDepth</c> into <c>1..ArchiveExpanderConfig.MaxSupportedDepth</c>, the same 4, so a
     /// document this pipeline produced can never trip the check below. What can is a document from
     /// somewhere else -- a forged branch, or one written against an older, deeper contract -- and
     /// that now fails HERE, naming the node it tripped on, instead of surfacing as
@@ -56,7 +56,7 @@ internal sealed class ArchiveBuilder(IEnumerable<IArchiveWriter> writers)
     /// depth arrives with the document and can only be discovered.
     /// </para>
     /// </summary>
-    public const int MaxSupportedDepth = 10;
+    public const int MaxSupportedDepth = 4;
 
     private readonly IReadOnlyList<IArchiveWriter> _writers = writers.ToList();
 
