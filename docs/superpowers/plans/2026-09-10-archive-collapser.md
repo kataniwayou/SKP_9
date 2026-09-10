@@ -177,7 +177,7 @@ them -- with one file per shape it would compare a file with itself."
     document and packs it back into one archive. It performs no file IO of its own.
 
     Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
-    Directory.Build.props, and package versions from Directory.Packages.props -- never declare
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare
     either here.
   -->
 
@@ -189,8 +189,8 @@ them -- with one file per shape it would compare a file with itself."
 
   <ItemGroup>
     <!-- ArchiveBuilder, CollapsedFile and FileNode are internal: this processor's construction,
-         not its surface. The tests construct them directly -- a builder tested only through the
-         processor cannot be given an empty writer set -- so the test assembly is named here. -->
+         not its surface. The tests construct them directly — a builder tested only through the
+         processor cannot be given an empty writer set — so the test assembly is named here. -->
     <InternalsVisibleTo Include="BaseApi.Tests" />
   </ItemGroup>
 
@@ -205,7 +205,7 @@ them -- with one file per shape it would compare a file with itself."
     <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/
          folder and NuGet imports it automatically, stamping the hash on THIS assembly. A
          ProjectReference could not flow build targets, and the processor would never match its row.
-         NO SharpCompress -- it was in the expander for RAR alone, and RAR cannot be written. -->
+         NO SharpCompress — it was in the expander for RAR alone, and RAR cannot be written. -->
     <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
   </ItemGroup>
 
