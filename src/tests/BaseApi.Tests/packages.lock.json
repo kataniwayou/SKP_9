@@ -670,6 +670,12 @@
           "StackExchange.Redis": "[2.13.1, )"
         }
       },
+      "processor.archivecollapser": {
+        "type": "Project",
+        "dependencies": {
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]"
+        }
+      },
       "processor.archiveexpander": {
         "type": "Project",
         "dependencies": {

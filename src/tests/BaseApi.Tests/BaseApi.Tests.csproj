@@ -97,6 +97,7 @@
     <ProjectReference Include="..\..\Processor.KafkaImporter\Processor.KafkaImporter.csproj" />
     <ProjectReference Include="..\..\Processor.KafkaExporter\Processor.KafkaExporter.csproj" />
     <ProjectReference Include="..\..\Processor.ArchiveExpander\Processor.ArchiveExpander.csproj" />
+    <ProjectReference Include="..\..\Processor.ArchiveCollapser\Processor.ArchiveCollapser.csproj" />
     <ProjectReference Include="..\..\Processor.FileFetcher\Processor.FileFetcher.csproj" />
     <ProjectReference Include="..\..\Orchestrator\Orchestrator.csproj" />
   </ItemGroup>
