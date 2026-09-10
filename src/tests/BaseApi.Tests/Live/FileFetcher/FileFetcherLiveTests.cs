@@ -337,7 +337,8 @@ public sealed class FileFetcherLiveTests
     /// that its own output schema (<c>file-envelope</c>) is actually registered, not merely present
     /// as a file under <c>src/tests/BaseApi.Tests/Schemas/</c>.
     /// </summary>
-    [Fact]
+    [Fact(Skip = "Phase 1 registers every schema id null -- see the ArchiveCollapser design, " +
+                 "section 1.1. Re-armed by phase 2, which registers the two schema rows.")]
     public async Task TheOutputSchemaRowIsRegistered()
     {
         RealStack.SkipUnlessEnabled();
