@@ -530,8 +530,25 @@ where `modifiedUtc` is null and RAR cannot be written so it must land in a zip o
 - zip, outside 1980–2107 -> clamp to that bound, which is exactly what `ZipExtractor` reports
   afterwards
 - zip, null -> the floor, for the same reason
-- tar -> represents both cases natively, so nothing is clamped; null becomes the Unix epoch, tar's own
+- tar -> clamps only BELOW the Unix epoch, and nothing else; null becomes the epoch, tar's own
   conventional zero and what `TarExtractor` reads back
+
+**The tar bound is the .NET WRITER's, not the format's, and this correction was measured.** An
+earlier draft of this section said tar "represents both cases natively, so nothing is clamped", on
+the reasoning that tar can hold what zip cannot. That is true of the tar FORMAT and false of
+`System.Formats.Tar`: `PaxTarEntry.ModificationTime`'s setter throws below `DateTimeOffset.UnixEpoch`,
+while `TarReader` reads a negative mtime back happily -- demonstrated during review by hand-building
+a PAX tar carrying `18 mtime=-86400.0`, the record GNU tar writes for a pre-1970 file, and reading
+`1969-12-31T00:00:00Z` out of it with no exception. `TarExtractor` passes that through verbatim, so
+**the expander can emit a document the collapser could not consume** -- the loop open at exactly the
+input class the tar path exists to carry.
+
+Clamping closes it, and throwing would not have preserved anything: the pre-epoch value is already
+committed upstream by the time the collapser sees it, so refusing to write it loses the timestamp
+AND the branch. It also satisfies this section's own governing rule, since after a clamp the value
+the expander reads back IS the epoch -- and it matches `ZipWriter`, which likewise clamps to a
+**writer** bound rather than a format one. The rule generalises: **clamp to what the target writer
+can represent.**
 
 The property that falls out is that **collapse -> expand is a fixed point**: timestamps stop moving
 after the first hop. Silent, with the loss recorded in each writer's doc comment rather than a log
