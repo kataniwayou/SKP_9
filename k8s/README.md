@@ -282,7 +282,7 @@ which is why the value is always stated.
 `processor-filefetcher` takes an absolute path, admits the file against an extension whitelist and a
 size range without opening it, and emits the file's bytes with its identity. Its step payload:
 
-    {"allowedExtensions": [".zip"], "minimumSizeBytes": 1, "maximumSizeBytes": 33554432}
+    {"allowedExtensions": [".zip"], "minimumSizeBytes": 0, "maximumSizeBytes": 33554432}
 
 `maximumSizeBytes` must not exceed the pod's `FileFetcher__MaxFileSizeBytes`, or every dispatch fails
 with a config error naming both numbers. It bounds the file on disk, and only the file — what an
