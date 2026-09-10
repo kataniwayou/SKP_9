@@ -1,7 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$ref": "#/$defs/depth1",
+  "$ref": "#/$defs/depth2",
   "$defs": {
+    "depth2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "content"],
+      "properties": {
+        "metadata": { "$ref": "#/$defs/metadata" },
+        "content": {
+          "type": ["string", "array", "null"],
+          "items": { "$ref": "#/$defs/depth1" }
+        }
+      }
+    },
     "depth1": {
       "type": "object",
       "additionalProperties": false,
