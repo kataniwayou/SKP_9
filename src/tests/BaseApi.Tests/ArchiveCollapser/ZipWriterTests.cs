@@ -74,9 +74,20 @@ public sealed class ZipWriterTests
 
         var bytes = new ZipWriter().Write([Entry("a.csv", "id", stamp)]);
 
-        Assert.Equal(
-            new DateTime(1980, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            Assert.Single(ReadBack(bytes)).ModifiedUtc);
+        var result = Assert.Single(ReadBack(bytes)).ModifiedUtc;
+        Assert.NotNull(result);
+
+        // NOT a literal 1980-01-01T00:00:00Z -- that exact instant is unrepresentable west of UTC.
+        // ZipWriter.Clamp raises a too-early stamp to the DOS floor's WALL CLOCK (1980-01-01
+        // 00:00:00, unqualified), then relies on ZipArchiveEntry's getter to reattach this
+        // machine's offset for that wall clock. At a negative offset, midnight local on
+        // 1980-01-01 is still 1979-12-31 in UTC -- which the setter's year check would reject --
+        // so the getter's read-back instant lands at floor + |offset|, not exactly the floor. At
+        // a positive or zero offset it lands exactly on the floor. So this asserts a bound, not a
+        // literal: never earlier than the floor, and never more than one day later than it (the
+        // widest real-world UTC offset is well under 24h).
+        var floor = new DateTime(1980, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        Assert.True(result >= floor && result <= floor.AddDays(1), $"expected within a day of the DOS floor, got {result:o}");
     }
 
     [Fact]
@@ -91,16 +102,22 @@ public sealed class ZipWriterTests
         Assert.True(Assert.Single(ReadBack(bytes)).ModifiedUtc!.Value.Year <= 2107);
     }
 
-    [Fact]
-    public void ClampingIsAFixedPointAcrossASecondPass()
+    [Theory]
+    [InlineData(null)]                       // the floor: rar-sourced documents, no timestamp at all
+    [InlineData("2200-01-01T00:00:00Z")]     // the ceiling: where the SECOND clamp is load-bearing --
+                                              // this is the exact input that threw ArgumentOutOfRangeException
+                                              // before that clamp was added
+    public void ClampingIsAFixedPointAcrossASecondPass(string? iso)
     {
         // Write a clamped value, read it, write it again: the second archive must carry the same
         // timestamp as the first. This is what makes "collapse -> expand is a fixed point" true
-        // rather than aspirational.
+        // rather than aspirational -- at BOTH bounds, not only the floor the null case exercises.
+        DateTime? stamp = iso is null ? null : DateTime.Parse(iso).ToUniversalTime();
         var writer = new ZipWriter();
 
-        var first = writer.Write([Entry("a.csv", "id", null)]);
+        var first = writer.Write([Entry("a.csv", "id", stamp)]);
         var afterOne = Assert.Single(ReadBack(first)).ModifiedUtc;
+        Assert.NotNull(afterOne);
 
         var second = writer.Write([Entry("a.csv", "id", afterOne)]);
         var afterTwo = Assert.Single(ReadBack(second)).ModifiedUtc;
