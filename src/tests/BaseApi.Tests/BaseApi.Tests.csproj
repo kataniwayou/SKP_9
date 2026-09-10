@@ -67,8 +67,8 @@
   <ItemGroup>
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Resilience\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="FileReader\Fixtures\*.rar" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\Processor.FileReader\schema\output.json"
+    <None Include="ArchiveExpander\Fixtures\*.rar" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Processor.ArchiveExpander\schema\output.json"
           Link="schema\output.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
@@ -93,7 +93,7 @@
     <ProjectReference Include="..\..\Processor.Sample\Processor.Sample.csproj" />
     <ProjectReference Include="..\..\Processor.KafkaImporter\Processor.KafkaImporter.csproj" />
     <ProjectReference Include="..\..\Processor.KafkaExporter\Processor.KafkaExporter.csproj" />
-    <ProjectReference Include="..\..\Processor.FileReader\Processor.FileReader.csproj" />
+    <ProjectReference Include="..\..\Processor.ArchiveExpander\Processor.ArchiveExpander.csproj" />
     <ProjectReference Include="..\..\Orchestrator\Orchestrator.csproj" />
   </ItemGroup>
 
