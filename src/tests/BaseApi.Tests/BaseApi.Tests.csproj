@@ -99,6 +99,7 @@
     <ProjectReference Include="..\..\Processor.ArchiveExpander\Processor.ArchiveExpander.csproj" />
     <ProjectReference Include="..\..\Processor.ArchiveCollapser\Processor.ArchiveCollapser.csproj" />
     <ProjectReference Include="..\..\Processor.FileFetcher\Processor.FileFetcher.csproj" />
+    <ProjectReference Include="..\..\Processor.FilePersister\Processor.FilePersister.csproj" />
     <ProjectReference Include="..\..\Orchestrator\Orchestrator.csproj" />
   </ItemGroup>
 

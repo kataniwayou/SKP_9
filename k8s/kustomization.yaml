@@ -24,3 +24,4 @@ resources:
   - 37-processor-archiveexpander.yaml
   - 38-processor-filefetcher.yaml
   - 39-processor-archivecollapser.yaml
+  - 40-processor-filepersister.yaml

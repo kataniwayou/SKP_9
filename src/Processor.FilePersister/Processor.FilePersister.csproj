@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A concrete processor: the mirror of Processor.FileFetcher. That one turns a path into bytes;
+    this one turns bytes back into a file and reports the path it wrote. Like every other processor
+    here it carries no identity, liveness, broker or Redis code — AddBaseProcessor folds all of it in.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare
+    either here.
+
+    NO archive knowledge of any kind, for the same reason FileFetcher has none: this processor never
+    looks inside a file. Whatever the envelope carries is written byte for byte, and what those bytes
+    mean was settled upstream.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.FilePersister</RootNamespace>
+    <AssemblyName>Processor.FilePersister</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PersistableFile and FileLocator are internal: this processor's construction, not its
+         surface. The tests construct them directly, so the test assembly is named here — matching
+         what FileFetcher and ArchiveExpander do for the same reason. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/
+         folder and NuGet imports it automatically, stamping the hash on THIS assembly — the entry
+         assembly, where the runtime reader looks. A ProjectReference could not flow build targets. -->
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+  </ItemGroup>
+
+</Project>
