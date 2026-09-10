@@ -23,6 +23,17 @@ The two contracts are shared, so the pair is a closed loop:
 | input schema | raw file envelope | `{metadata, content}` tree |
 | output schema | `{metadata, content}` tree | raw file envelope |
 
+**"Shared" means the same schema ROW, not merely the same bytes.** `SchemaEdgeValidator.cs:51`
+compares `parentOut.Value != childIn.Value` — schema **ids**, not definitions — and refuses to publish
+a workflow whose parent output id differs from its child input id. So Expander → Collapser is only a
+wireable edge if both point at one row. Registration therefore creates **two** schema rows for the
+pair, not four: one for the envelope shape (FileFetcher output = Expander input = Collapser output)
+and one for the tree shape (Expander output = Collapser input).
+
+The byte-identical files of §7 are what make registering one row *safe* — they do not achieve it.
+The files exist so each image can carry its own contract for registration and so the tests can pin
+the duplicates against each other; the identity that the orchestrator enforces is the GUID.
+
 It is a plain downstream transform. It has an input and it produces output, so it is **not an edge** —
 neither `BaseImporter` nor `BaseExporter` applies — and it passes through the `executionId` it was
 dispatched with rather than minting one. A transform continues the lineage it was handed.
@@ -458,4 +469,7 @@ Stated so nothing here reads as a promise:
 - **No directory structure.** The document has never carried it; the expander strips it on read.
 - **No schema registration.** It stays a deploy step against the processor identity. Until those rows
   exist, `TryValidate` returns true without decoding anything and **none of the schema constraints in
-  this document are enforced anywhere.**
+  this document are enforced anywhere** — and `SchemaEdgeValidator` passes on a null on either side,
+  so an unregistered pair is also freely miswireable at publish. Registering the two rows of §1 is
+  what turns this design's contracts on; skipping it leaves the processors working and the contracts
+  inert.
