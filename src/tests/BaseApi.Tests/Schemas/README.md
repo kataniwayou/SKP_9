@@ -1,16 +1,50 @@
-# Envelope and tree schemas
+# Envelope, tree, and locator schemas
 
-Two shapes, two files, shared across all three processors in this pipeline rather than owned by any
-one of them:
+Three shapes, three files, shared across the pipeline's processors rather than owned by any one of
+them:
 
 | shape | file | is the contract for |
 |---|---|---|
+| locator | `locator.json` | KafkaImporter output = FileFetcher input |
 | envelope | `envelope.json` | FileFetcher output = ArchiveExpander input = ArchiveCollapser output |
 | tree | `tree.json` | ArchiveExpander output = ArchiveCollapser input |
 
 Each file is registered as a database row against a processor identity — the same file backs both
 ends of a hop, since the processor on either side of it agrees on one shape. Nothing in `src/` reads
-either file directly any more; see [Registration](#registration).
+any of these files directly any more; see [Registration](#registration).
+
+## The locator schema
+
+`locator.json` is the file KafkaImporter puts on the wire and FileFetcher reads back off it — the
+first hop in the pipeline, before there is any file content to carry. `FileFetcherProcessor.ReadPath`
+is the code that consumes this shape; see its comments for the full accept/reject logic.
+
+What it asserts:
+
+- One key, `filePath`, REQUIRED, `additionalProperties: false`. A branch that carries no `filePath`
+  key at all is exactly the case `ReadPath` reports as "the branch carries no filePath".
+- `filePath` is `{ "type": "string", "minLength": 1 }` — a string and non-empty, with no `"null"` in
+  its `type`. The C# record behind it, `FileLocator(string? FilePath)`, declares the property
+  nullable, but that nullability is a DESERIALIZATION concern, not a contract one: `string?` exists so
+  a malformed branch can be caught and turned into a diagnosed `FailedException` instead of an
+  unhandled throw. A valid branch — the thing this schema is a contract for — always carries a
+  present, non-empty `filePath`. `ReadPath`'s own pattern match, `locator?.FilePath is { Length: > 0 }
+  filePath`, treats a null `filePath` and an empty-string `filePath` identically to a missing one —
+  all three fall through to "the branch carries no filePath" — so the schema mirrors that by
+  disallowing all three at once via `required` + non-nullable `type` + `minLength: 1`.
+
+### What it deliberately does not assert
+
+**That `filePath` is absolute.** `ReadPath` additionally requires `Path.IsPathFullyQualified(filePath)`
+and rejects a relative path with a separate reason ("the path is relative, and only an absolute path
+names one location") — but that check is NOT encoded here as a `pattern`. "Absolute" is
+platform-dependent: `C:\orders\a.csv` is fully qualified on Windows and `/orders/a.csv` is fully
+qualified on Linux, and which one is valid depends on where the pod that produced the branch runs, not
+on the schema. A regex trying to approximate `IsPathFullyQualified` would either reject a legal
+absolute path on one platform or admit an illegal relative one on the other — worse than not checking
+at all. This is exactly the kind of gap this codebase documents rather than silently drops:
+`Path.IsPathFullyQualified` stays a runtime check in `FileFetcherProcessor`, and the schema's job stops
+at "a non-empty string is present."
 
 ## The envelope schema
 
@@ -144,7 +178,7 @@ sibling keywords in 2020-12, and note the omitted `additionalProperties`, which 
 
 ## Registration
 
-**Neither schema is registered by the build.** Each is a database row against a processor identity,
+**None of these schemas is registered by the build.** Each is a database row against a processor identity,
 applied as a deploy step. Until it is, the corresponding `OutputSchemaId` is null, `TryValidate`
 returns true without decoding anything, and **nothing enforces entry count or depth anywhere** —
 this file is their only home.
