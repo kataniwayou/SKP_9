@@ -17,10 +17,10 @@ namespace BaseApi.Tests.FileFetcher;
 /// </summary>
 public sealed class FileFetcherSchemaTests
 {
-    // fetcher-output.json, not output.json: ArchiveExpander's output schema owns that name in the
-    // test output. See the link in BaseApi.Tests.csproj.
+    // envelope.json is the fetcher's output shape (and the expander's input shape) — one file per
+    // shape rather than one per processor. See src/tests/BaseApi.Tests/Schemas/README.md.
     private static string Definition()
-        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "fetcher-output.json"));
+        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "envelope.json"));
 
     private static DateTime Stamp => new(2026, 9, 10, 8, 31, 2, DateTimeKind.Utc);
 

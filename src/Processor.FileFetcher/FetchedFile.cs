@@ -21,8 +21,8 @@ namespace Processor.FileFetcher;
 /// <b>Every field is non-nullable because this is the WRITER's view.</b> ArchiveExpander declares
 /// its own reader's copy with every field optional, because a malformed upstream record must be
 /// diagnosed rather than thrown at. The two records describe one JSON document and must stay in
-/// sync; the two registered schema files are what pin them, and the cross-hop test is what enforces
-/// it.
+/// sync; the registered envelope schema is what pins them, and <c>EnvelopeContractTests</c> is what
+/// enforces it.
 /// </para>
 /// </summary>
 /// <param name="SizeBytes">

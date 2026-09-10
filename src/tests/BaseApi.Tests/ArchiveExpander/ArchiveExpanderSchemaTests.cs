@@ -19,7 +19,7 @@ namespace BaseApi.Tests.ArchiveExpander;
 public sealed class ArchiveExpanderSchemaTests
 {
     private static string Definition()
-        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "schema", "output.json"));
+        => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "tree.json"));
 
     private static byte[] Serialize(FileNode node)
         => JsonSerializer.SerializeToUtf8Bytes(node, FileDocument.Options);

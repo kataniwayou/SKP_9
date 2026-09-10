@@ -68,18 +68,11 @@
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Resilience\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="ArchiveExpander\Fixtures\*.rar" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\Processor.ArchiveExpander\schema\output.json"
-          Link="schema\output.json" CopyToOutputDirectory="PreserveNewest" />
-    <!-- fetcher-output.json, not output.json: ArchiveExpander's output schema already links to
-         that name and ArchiveExpanderSchemaTests reads it there. Two files called output.json
-         would collide on one output path and one would silently win. -->
-    <None Include="..\..\Processor.FileFetcher\schema\output.json"
-          Link="schema\fetcher-output.json" CopyToOutputDirectory="PreserveNewest" />
-    <!-- The expander's INPUT schema — the other half of the envelope contract. Linked under its own
-         name so EnvelopeContractTests validates against the REGISTERED file rather than a copy that
-         can drift from it. -->
-    <None Include="..\..\Processor.ArchiveExpander\schema\input.json"
-          Link="schema\input.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The schema definitions, one file per SHAPE rather than one per processor. No processor
+         ships these any more: nothing in src/ can read a schema file, and validation is driven by
+         database rows resolved over the broker. They live here because the tests are their only
+         reader, and they are the source text POSTed when the rows are registered. -->
+    <Content Include="Schemas\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
