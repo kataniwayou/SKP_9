@@ -157,10 +157,15 @@ them -- with one file per shape it would compare a file with itself."
 - Create: `src/Processor.ArchiveCollapser/appsettings.json`
 - Modify: `SK_P.sln`
 - Modify: `src/tests/BaseApi.Tests/BaseApi.Tests.csproj` — add `ProjectReference`
-- Test: `src/tests/BaseApi.Tests/DependencyInjection/ArchiveCollapserHostTests.cs`
 
 **Interfaces:**
 - Produces: `Processor.ArchiveCollapser.ProcessorHost.Create(string[] args, ProcessorIdentityFound identity, Action<IConfigurationBuilder>? configure = null)` returning `IHost`; `Processor.ArchiveCollapser.ArchiveCollapserConfig : ProcessorConfig` with no members.
+
+> **This task must end with a compiling solution and a green suite.** `BaseApi.Tests` gains a
+> `ProjectReference` to this project here, so from this point on every task's tests depend on this
+> project compiling. That is why `ProcessorHost.Create` registers **only the framework services** in
+> this task — the writer, builder and processor registrations, and the DI test that asserts them,
+> belong to Task 7, where the types they name finally exist.
 
 - [ ] **Step 1: Write the csproj**
 
@@ -285,26 +290,19 @@ Copy `src/Processor.ArchiveExpander/appsettings.json` verbatim and **delete the 
 - [ ] **Step 5: Write `ProcessorHost.cs`**
 
 Copy `src/Processor.ArchiveExpander/ProcessorHost.cs` verbatim, then make exactly these changes:
-- namespace and `using` → `Processor.ArchiveCollapser` / `Processor.ArchiveCollapser.Writers`
-- **delete** the `builder.Services.Configure<ArchiveExpanderOptions>(...)` call and its comment
-- replace the three extractor registrations and `FileContentBuilder` with:
+- namespace → `Processor.ArchiveCollapser`; **remove** the `using Processor.ArchiveExpander.Extractors;` line
+- **delete** the `builder.Services.Configure<ArchiveExpanderOptions>(...)` call and its comment — this processor has no options class at all
+- **delete** the three `AddSingleton<IArchiveExtractor, ...>` lines, the `AddSingleton<FileContentBuilder>()` line, and the `AddSingleton<BaseProcessor, ArchiveExpanderProcessor>()` line, replacing all five with this comment and nothing else:
 
 ```csharp
-        // One registration per format. ArchiveBuilder takes them all and selects by the node's
-        // declared extension -- there are no bytes to sniff on the way out, so there is no
-        // CanHandle here and no signature dispatch.
-        //
-        // NO RAR. The format is proprietary and SharpCompress can only read it; a .rar node holding
-        // entries is a failed step with its own message. See ArchiveBuilder.NoWriter.
-        builder.Services.AddSingleton<IArchiveWriter, ZipWriter>();
-        builder.Services.AddSingleton<IArchiveWriter, TarWriter>();
-
-        builder.Services.AddSingleton<ArchiveBuilder>();
-
-        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, ArchiveCollapserProcessor>();
+        // The writers, the builder and the processor itself are registered in Task 7, where those
+        // types exist. Everything above this line is framework wiring -- broker, Redis, health
+        // probes, the schema loop and the liveness loop -- and is complete as it stands.
 ```
 
-This will not compile until Tasks 4-7 land. That is expected; Step 8 below is the first build.
+Keep everything else — `AddBaseConsoleObservability`, the `AddOpenTelemetry().WithMetrics(...)` call, and `AddBaseProcessor` — exactly as the expander has it, including its comments.
+
+**This must compile.** `BaseApi.Tests` gains a `ProjectReference` to this project in Step 6, so a non-compiling project here blocks every later task's tests.
 
 - [ ] **Step 6: Add to the solution and the test project**
 
@@ -318,83 +316,31 @@ In `BaseApi.Tests.csproj`, beside the other processor references:
     <ProjectReference Include="..\..\Processor.ArchiveCollapser\Processor.ArchiveCollapser.csproj" />
 ```
 
-- [ ] **Step 7: Write the failing DI test**
-
-Create `src/tests/BaseApi.Tests/DependencyInjection/ArchiveCollapserHostTests.cs`:
-
-```csharp
-using BaseProcessor.Core.Boot;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
-
-namespace BaseApi.Tests.DependencyInjection;
-
-/// <summary>
-/// The one thing worth asserting about a shell: that its service graph actually resolves. Asserted
-/// without starting a process, which is why ProcessorHost.Create is separate from StartAsync.
-/// </summary>
-public sealed class ArchiveCollapserHostTests
-{
-    private static ProcessorIdentityFound Identity() => new(
-        Id: Guid.Parse("66666666-6666-6666-6666-666666666666"),
-        InputSchemaId: null,
-        OutputSchemaId: null,
-        ConfigSchemaId: null,
-        Name: "archive-collapser",
-        Version: "1.0.0");
-
-    [Fact]
-    public void TheServiceGraphResolves()
-    {
-        using var host = Processor.ArchiveCollapser.ProcessorHost.Create([], Identity());
-
-        var processor = host.Services
-            .GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>();
-
-        Assert.IsType<Processor.ArchiveCollapser.ArchiveCollapserProcessor>(processor);
-    }
-
-    [Fact]
-    public void BothWritersAreRegisteredAndRarIsNot()
-    {
-        using var host = Processor.ArchiveCollapser.ProcessorHost.Create([], Identity());
-
-        var extensions = host.Services
-            .GetServices<Processor.ArchiveCollapser.Writers.IArchiveWriter>()
-            .Select(w => w.Extension)
-            .Order()
-            .ToArray();
-
-        // .rar is absent BY DESIGN and this asserts it stays absent: RAR is proprietary and
-        // SharpCompress can only read it, so a writer for it cannot exist.
-        Assert.Equal([".tar", ".zip"], extensions);
-    }
-}
-```
-
-Check `ProcessorIdentityFound`'s actual constructor order in `src/BaseProcessor.Core/Identity/ProcessorIdentity.cs` before running — if it differs from the above, match the record, do not reorder the record. Copy the shape used by an existing host test under `src/tests/BaseApi.Tests/DependencyInjection/` if one exists.
-
-- [ ] **Step 8: Build — expect failure**
+- [ ] **Step 7: Build and run the full suite**
 
 ```bash
 dotnet build SK_P.sln
+dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
 ```
 
-Expected: FAIL. `ArchiveCollapserProcessor`, `ArchiveBuilder`, `IArchiveWriter`, `ZipWriter` and `TarWriter` do not exist yet. Tasks 3-7 create them; this test is the gate that proves the wiring at the end of Task 7.
+Expected: PASS, with the same count as after Task 1. This task adds a compiling project and a
+`ProjectReference` to it; from here on every task's tests depend on this project building, which is
+why the custom registrations were deferred to Task 7.
 
-- [ ] **Step 9: Commit the skeleton**
+- [ ] **Step 8: Commit the skeleton**
 
 ```bash
 git add -A
-git commit -m "feat(collapser): project skeleton, marker config, DI graph
+git commit -m "feat(collapser): project skeleton, marker config, framework wiring
 
 The step payload holds nothing and that is the design: the depth is a
 property of the document that arrived, so a payload field could only ever
 contradict it. The record exists because BaseProcessor<TConfig> demands a
 TConfig, not because anything reads it.
 
-No SharpCompress and no options class. Does not build until the writers and
-the processor land."
+No SharpCompress, no options class, and no custom registrations yet -- the
+writers, the builder and the processor arrive in Task 7, so this compiles and
+the suite stays green."
 ```
 
 ---
@@ -612,13 +558,7 @@ public sealed class FileNodeReadTests
 dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
 ```
 
-The solution will not build until Task 7. Instead, verify by building just the two projects:
-
-```bash
-dotnet build src/Processor.ArchiveCollapser/Processor.ArchiveCollapser.csproj
-```
-
-Expected: FAIL — `ProcessorHost.cs` references types from Tasks 4-7. **Temporarily comment out the body of `ProcessorHost.Create`'s registrations** to get a clean build of the models, run the four tests above, then uncomment. Do not commit with them commented out.
+Expected: PASS, all four. The solution compiles throughout — Task 2 left `ProcessorHost` with framework wiring only, so nothing here depends on types that do not yet exist.
 
 - [ ] **Step 5: Commit**
 
@@ -1909,6 +1849,88 @@ internal sealed class ArchiveCollapserProcessor(
 }
 ```
 
+- [ ] **Step 3b: Wire the processor into the host and assert the graph resolves**
+
+In `src/Processor.ArchiveCollapser/ProcessorHost.cs`, replace the placeholder comment left by Task 2
+with the real registrations:
+
+```csharp
+        // One registration per format. ArchiveBuilder takes them all and selects by the node's
+        // declared extension -- there are no bytes to sniff on the way out, so there is no
+        // CanHandle here and no signature dispatch.
+        //
+        // NO RAR. The format is proprietary and SharpCompress can only read it; a .rar node holding
+        // entries is a failed step with its own message. See ArchiveBuilder.NoWriter.
+        builder.Services.AddSingleton<IArchiveWriter, ZipWriter>();
+        builder.Services.AddSingleton<IArchiveWriter, TarWriter>();
+
+        builder.Services.AddSingleton<ArchiveBuilder>();
+
+        // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
+        // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
+        // safe only because prefetch is 1.
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, ArchiveCollapserProcessor>();
+```
+
+Add `using Processor.ArchiveCollapser.Writers;` at the top.
+
+Then create `src/tests/BaseApi.Tests/DependencyInjection/ArchiveCollapserHostTests.cs`:
+
+```csharp
+using BaseProcessor.Core.Boot;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace BaseApi.Tests.DependencyInjection;
+
+/// <summary>
+/// The one thing worth asserting about a shell: that its service graph actually resolves. Asserted
+/// without starting a process, which is why ProcessorHost.Create is separate from StartAsync.
+/// </summary>
+public sealed class ArchiveCollapserHostTests
+{
+    private static ProcessorIdentityFound Identity() => new(
+        Id: Guid.Parse("66666666-6666-6666-6666-666666666666"),
+        InputSchemaId: null,
+        OutputSchemaId: null,
+        ConfigSchemaId: null,
+        Name: "archive-collapser",
+        Version: "1.0.0");
+
+    [Fact]
+    public void TheServiceGraphResolves()
+    {
+        using var host = Processor.ArchiveCollapser.ProcessorHost.Create([], Identity());
+
+        var processor = host.Services
+            .GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>();
+
+        Assert.IsType<Processor.ArchiveCollapser.ArchiveCollapserProcessor>(processor);
+    }
+
+    [Fact]
+    public void BothWritersAreRegisteredAndRarIsNot()
+    {
+        using var host = Processor.ArchiveCollapser.ProcessorHost.Create([], Identity());
+
+        var extensions = host.Services
+            .GetServices<Processor.ArchiveCollapser.Writers.IArchiveWriter>()
+            .Select(w => w.Extension)
+            .Order()
+            .ToArray();
+
+        // .rar is absent BY DESIGN and this asserts it stays absent: RAR is proprietary and
+        // SharpCompress can only read it, so a writer for it cannot exist.
+        Assert.Equal([".tar", ".zip"], extensions);
+    }
+}
+```
+
+Check `ProcessorIdentityFound`'s actual constructor order in
+`src/BaseProcessor.Core/Identity/ProcessorIdentity.cs` before running — if it differs from the above,
+match the record, do not reorder the record. Copy the shape used by an existing host test under
+`src/tests/BaseApi.Tests/DependencyInjection/` if one exists.
+
 - [ ] **Step 4: Run the whole suite**
 
 ```bash
@@ -1916,7 +1938,7 @@ dotnet build SK_P.sln
 dotnet test src/tests/BaseApi.Tests/BaseApi.Tests.csproj
 ```
 
-Expected: PASS — including `ArchiveCollapserHostTests` from Task 2, which is the gate proving the DI graph resolves now that every type exists.
+Expected: PASS — including `ArchiveCollapserHostTests` from Step 3b, which is the gate proving the DI graph resolves now that every type exists.
 
 - [ ] **Step 5: Commit**
 
