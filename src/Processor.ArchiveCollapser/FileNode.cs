@@ -6,7 +6,7 @@ namespace Processor.ArchiveCollapser;
 /// <summary>
 /// File info, and nothing derived from the file's contents. <c>DateTime</c> rather than
 /// <c>DateTimeOffset</c> so <c>System.Text.Json</c> renders a UTC instant as <c>...Z</c> rather than
-/// <c>+00:00</c> — the shape the output schema documents.
+/// <c>+00:00</c> — the shape the schema documents.
 /// </summary>
 /// <param name="EntryCount">
 /// How many entries the node holds. Derived from <see cref="FileNode.Content"/> and present for a
@@ -71,10 +71,19 @@ public abstract record FileContent
 /// <param name="Content">
 /// The bytes, the expansion, or null.
 /// <para>
-/// <b>Null means no entries.</b> An archive this processor opened and found empty carries null
-/// rather than an empty array. An archive it did NOT open — because the depth limit stopped it, or
-/// because nothing recognised the format — carries <see cref="FileContent.Bytes"/> like any other
-/// file, because an unexpanded archive is a file.
+/// <b>Null means the document records an archive that expanded to nothing, and this assembly's
+/// answer is to write that format's canonical empty archive</b> — for a zip, the 22-byte EOCD record
+/// <c>ZipExtractor.IsCanonicalEmptyArchive</c> recognises. ArchiveExpander is what turned that empty
+/// archive into null in the first place; writing it back is what closes the loop, rather than
+/// producing, say, an empty plain file — which is not the one archive ArchiveExpander's own
+/// false-HEALTHY guard still calls healthy.
+/// </para>
+/// <para>
+/// <b><see cref="FileContent.Bytes"/> is written back as a plain entry, whatever the node's extension
+/// claims.</b> A node named <c>.zip</c> holding base64 is an archive ArchiveExpander already decided
+/// not to open — a depth limit, an unrecognised format — and this assembly has no way to
+/// second-guess that call and no need to: re-opening it here to re-pack it would be work the
+/// document never asked for.
 /// </para>
 /// <para>
 /// <b>An expanded archive never carries its own bytes as well.</b> The entries ARE its content, and
@@ -84,12 +93,12 @@ public abstract record FileContent
 public sealed record FileNode(FileMetadata Metadata, FileContent? Content);
 
 /// <summary>
-/// Writes <see cref="FileNode"/> as <c>{metadata, content}</c>, with <c>content</c> as a base64
-/// string, an array of nodes, or null.
+/// Maps <see cref="FileNode"/> to and from <c>{metadata, content}</c>, with <c>content</c> as a
+/// base64 string, an array of nodes, or null.
 /// <para>
 /// <b>A hand-written converter rather than <c>[JsonDerivedType]</c>.</b> System.Text.Json's
 /// polymorphic support emits a <c>$type</c> discriminator property, which would appear in the
-/// document and have to be admitted by the output schema — a serializer's implementation detail
+/// document and have to be admitted by the schema — a serializer's implementation detail
 /// leaking into a contract other systems read. Here the JSON value's own type IS the discriminator,
 /// which is what makes the schema expressible as one <c>type: ["string", "array", "null"]</c>.
 /// </para>
@@ -222,8 +231,8 @@ internal static class FileDocument
     /// <summary>
     /// <b>camelCase, pinned explicitly.</b> <c>MessagingJson</c> leaves the naming policy null —
     /// PascalCase — and it governs the <c>ProcessedData</c> envelope, not the bytes inside
-    /// <c>Data</c>. Inheriting its convention here would silently rename every property the output
-    /// schema names.
+    /// <c>Data</c>. Inheriting its convention here would silently rename every property the schema
+    /// names.
     /// <para>
     /// <c>Never</c> ignore: <c>content</c> must be emitted as <c>null</c> on an empty archive rather
     /// than omitted, because the schema requires the key to be present. The converter writes that
