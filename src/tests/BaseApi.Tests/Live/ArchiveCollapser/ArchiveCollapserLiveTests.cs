@@ -55,16 +55,26 @@ public sealed class ArchiveCollapserLiveTests
     /// <summary>
     /// The topic a workflow's KafkaImporter step is wired to drain straight into ArchiveCollapser.
     /// <para>
-    /// A NEW topic, not <see cref="RealStack.KafkaTopic"/>: that one feeds the existing
-    /// FileFetcher/ArchiveExpander workflow, whose first step expects <c>{"filePath": ...}</c>, not
-    /// a FileNode document. ArchiveCollapser's workflow is its own, wired independently by an
-    /// operator the same way that one was — see <c>k8s/README.md</c>.
+    /// <b>No default, on purpose — unset means no such workflow exists.</b> A NEW topic, not
+    /// <see cref="RealStack.KafkaTopic"/>: that one feeds the existing FileFetcher/ArchiveExpander
+    /// workflow, whose first step expects <c>{"filePath": ...}</c>, not a FileNode document.
+    /// Nothing in this repo provisions a topic for ArchiveCollapser's own workflow — an operator
+    /// must wire <c>KafkaImporter → ArchiveCollapser → KafkaExporter</c> and name its topics here,
+    /// the same way <c>SKP_FILEREADER_DEEP_TOPIC</c> names a second FileFetcher/ArchiveExpander
+    /// workflow nobody is obliged to have wired. Defaulting to a concrete name instead of empty
+    /// would let a run against a topic nothing provisions either burn the whole window on
+    /// <c>Assert.True(envelope.HasValue, ...)</c> or throw <c>UnknownTopicOrPart</c> out of
+    /// <see cref="ProduceAsync"/> — both read as an ArchiveCollapser defect rather than what they
+    /// actually are, "no workflow is wired". See <c>k8s/README.md</c>.
     /// </para>
     /// </summary>
-    private static string InTopic => RealStack.Get("SKP_ARCHIVECOLLAPSER_IN_TOPIC", "skp-archivecollapser-in");
+    private static string InTopic => RealStack.Get("SKP_ARCHIVECOLLAPSER_IN_TOPIC", "");
 
-    /// <summary>The topic that workflow's KafkaExporter step publishes ArchiveCollapser's envelope to.</summary>
-    private static string OutTopic => RealStack.Get("SKP_ARCHIVECOLLAPSER_OUT_TOPIC", "skp-archivecollapser-out");
+    /// <summary>
+    /// The topic that workflow's KafkaExporter step publishes ArchiveCollapser's envelope to.
+    /// No default, for the same reason as <see cref="InTopic"/>.
+    /// </summary>
+    private static string OutTopic => RealStack.Get("SKP_ARCHIVECOLLAPSER_OUT_TOPIC", "");
 
     /// <summary>The deployment whose logs carry the processor's own messages.</summary>
     private static string Deployment => RealStack.Get("SKP_ARCHIVECOLLAPSER_DEPLOYMENT", "processor-archivecollapser");
@@ -72,29 +82,33 @@ public sealed class ArchiveCollapserLiveTests
     private static string Namespace => RealStack.Get("SKP_NAMESPACE", "skp");
 
     /// <summary>
+    /// A leaf node — bytes, never entries — shared by <see cref="Document"/> and
+    /// <see cref="UnpackableDocument"/>. <c>byte[]</c> renders as base64 by default, which is the
+    /// same wire form <c>FileContent.Bytes</c> writes.
+    /// </summary>
+    private static object Leaf(string fileName, string text) => new
+    {
+        metadata = new
+        {
+            name = fileName,
+            extension = Path.GetExtension(fileName),
+            sizeBytes = (long)Encoding.UTF8.GetByteCount(text),
+            createdUtc = (DateTime?)null,
+            modifiedUtc = Stamp,
+            entryCount = 0,
+        },
+        content = Encoding.UTF8.GetBytes(text),
+    };
+
+    /// <summary>
     /// A <c>{metadata, content}</c> document with two leaf entries under one zip-named root, built by
     /// hand rather than through <c>Processor.ArchiveCollapser</c>'s own <c>FileNode</c>/
     /// <c>FileNodeConverter</c> types: this suite talks to the pod only at the wire boundary, the
     /// same way <see cref="ArchiveExpander.ArchiveExpanderLiveTests"/> never references
-    /// ArchiveExpander's own <c>FileNode</c> to build the record it produces. <c>byte[]</c> renders
-    /// as base64 by default, which is the same wire form <c>FileContent.Bytes</c> writes.
+    /// ArchiveExpander's own <c>FileNode</c> to build the record it produces.
     /// </summary>
     private static string Document(string name)
     {
-        object Leaf(string fileName, string text) => new
-        {
-            metadata = new
-            {
-                name = fileName,
-                extension = Path.GetExtension(fileName),
-                sizeBytes = (long)Encoding.UTF8.GetByteCount(text),
-                createdUtc = (DateTime?)null,
-                modifiedUtc = Stamp,
-                entryCount = 0,
-            },
-            content = Encoding.UTF8.GetBytes(text),
-        };
-
         var root = new
         {
             metadata = new
@@ -111,6 +125,37 @@ public sealed class ArchiveCollapserLiveTests
                 entryCount = 99,
             },
             content = new object[] { Leaf("a.csv", "id\n"), Leaf("b.csv", "id,name\n") },
+        };
+
+        return JsonSerializer.Serialize(root, DocumentOptions);
+    }
+
+    /// <summary>
+    /// A document that cannot be packed: the root carries entries — content says "I am an
+    /// archive" — but its extension is <c>.csv</c>, which names no writer. <c>ArchiveBuilder.Match</c>
+    /// returns null, <c>Pack</c> throws <c>ArchiveWritingException</c> before any child is built, and
+    /// <c>ArchiveCollapserProcessor</c> wraps that into
+    /// <c>collapsing {FileName} failed: ...</c> — a <c>FailedException</c> path: reported, acked,
+    /// terminal. The mirror of the hermetic
+    /// <c>ProcessorArchiveCollapserTests.AnUnpackableNodeFailsOnTheCollapsingTemplate</c>, but here
+    /// what only the cluster can show is that this is the path taken — a
+    /// <c>NullReferenceException</c> from a programming error would instead surface as a stack
+    /// trace and no failed-step log line, and no hermetic test can tell the two apart.
+    /// </summary>
+    private static string UnpackableDocument(string name)
+    {
+        var root = new
+        {
+            metadata = new
+            {
+                name,
+                extension = ".csv",
+                sizeBytes = 0L,
+                createdUtc = (DateTime?)null,
+                modifiedUtc = Stamp,
+                entryCount = 1,
+            },
+            content = new object[] { Leaf("a.csv", "id\n") },
         };
 
         return JsonSerializer.Serialize(root, DocumentOptions);
@@ -242,10 +287,25 @@ public sealed class ArchiveCollapserLiveTests
         return false;
     }
 
+    /// <summary>
+    /// Both topic vars must be set, together — an in topic with no out topic (or the reverse) is
+    /// still no usable workflow. Same shape as
+    /// <c>ArchiveExpanderLiveTests.ADocumentDeeperThanTheSchemaFailsAndLogsTheDepth</c>'s
+    /// <c>Assert.SkipWhen(DeepTopic.Length == 0, ...)</c>: a workflow nobody has wired defaults to
+    /// absent, and the test skips naming exactly what to set rather than failing confusingly
+    /// against a topic nothing backs.
+    /// </summary>
+    private static void SkipUnlessWorkflowTopicsAreSet() =>
+        Assert.SkipWhen(InTopic.Length == 0 || OutTopic.Length == 0,
+            "set SKP_ARCHIVECOLLAPSER_IN_TOPIC and SKP_ARCHIVECOLLAPSER_OUT_TOPIC to the topics of "
+            + "a workflow wired KafkaImporter -> ArchiveCollapser -> KafkaExporter; nothing in this "
+            + "repo provisions them, so they default to empty rather than a name nothing backs");
+
     [Fact]
     public async Task ADocumentOnTheInTopicBecomesAnEnvelopeOnTheOutTopic()
     {
         RealStack.SkipUnlessEnabled();
+        SkipUnlessWorkflowTopicsAreSet();
 
         // THE WHOLE CHAIN: a document published to the in topic reaches ArchiveCollapser through
         // the wired workflow's KafkaImporter step, crosses RabbitMQ to the pod, and comes out the
@@ -281,5 +341,28 @@ public sealed class ArchiveCollapserLiveTests
             LogContains($"collapsed {name} of 2 entries into", Window),
             $"no 'collapsed {name} of 2 entries into ...' line reached the ArchiveCollapser log "
             + $"within {Window.TotalMinutes:0} minutes");
+    }
+
+    [Fact]
+    public async Task AnUnpackableDocumentProducesNoEnvelopeAndLogsTheFailure()
+    {
+        RealStack.SkipUnlessEnabled();
+        SkipUnlessWorkflowTopicsAreSet();
+
+        // THE SPLIT INVISIBLE IN-PROCESS. A FailedException from ArchiveWritingException is
+        // reported, acked and terminal -- the framework's general catch instead logs a stack trace
+        // with no diagnosable line. ProcessorArchiveCollapserTests.AnUnpackableNodeFailsOnTheCollapsingTemplate
+        // already proves the message text; what only the cluster can show is that a real dispatch
+        // through RabbitMQ takes the FailedException path rather than the general one, and that the
+        // failed step never reaches the out topic.
+        var name = $"orders-{Guid.NewGuid():N}.csv";
+        await ProduceAsync(UnpackableDocument(name));
+
+        Assert.Null(Await(name, Window));
+
+        Assert.True(
+            LogContains($"collapsing {name} failed:", Window),
+            $"the step failed but no 'collapsing {name} failed:' line reached the ArchiveCollapser "
+            + $"log within {Window.TotalMinutes:0} minutes");
     }
 }
