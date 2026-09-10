@@ -343,7 +343,8 @@ public sealed class ArchiveExpanderLiveTests
             $"produce to {topic} did not persist: status was {result.Status}");
     }
 
-    [Fact]
+    [Fact(Skip = "Phase 1 registers every schema id null -- see the ArchiveCollapser design, " +
+                 "section 1.1. Re-armed by phase 2, which registers the two schema rows.")]
     public async Task TheOutputSchemaRowIsRegistered()
     {
         RealStack.SkipUnlessEnabled();
