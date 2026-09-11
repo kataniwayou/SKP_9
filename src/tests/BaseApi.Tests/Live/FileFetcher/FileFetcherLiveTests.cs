@@ -143,17 +143,29 @@ public sealed class FileFetcherLiveTests
 
         var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
-            // providerName rides along exactly as the org's records carry it, and the reader must
-            // ignore it.
-            Value = JsonSerializer.Serialize(new { filePath = path, providerName = "acme-feed" }),
+            // filePath ALONE. This carried providerName = "acme-feed" until 2026-09-11, on the
+            // grounds that the org's records carry it and the reader must ignore it -- true of
+            // FileLocator, which binds case-insensitively and drops unknowns, and false of the
+            // registered schema. file-locator declares additionalProperties: false, so a second key
+            // never reaches the reader: KafkaImporter's OWN output validation refuses the record and
+            // the lineage ends at the first hop, with every test here timing out on a chain that
+            // never ran. Observed as
+            //   warn ProcessedDataHandler: output failed its schema -- reported failed: /providerName:
+            //
+            // The guarantee the old field tested has not been lost, it moved and got stronger: an
+            // unexpected key used to be dropped downstream, and is now refused at the edge.
+            Value = JsonSerializer.Serialize(new { filePath = path }),
         });
 
         Assert.True(result.Status == PersistenceStatus.Persisted,
             $"produce to {RealStack.KafkaTopic} did not persist: status was {result.Status}");
     }
 
-    /// <summary>The first document on the out topic whose root name matches, or null on timeout.</summary>
-    private static JsonElement? Await(string name, TimeSpan timeout)
+    /// <summary>
+    /// The path the file was written to, off the first locator on the out topic naming it --
+    /// or null on timeout. See the matcher below for why this is a path and not a document.
+    /// </summary>
+    private static string? Await(string name, TimeSpan timeout)
     {
         using var consumer = new ConsumerBuilder<Ignore, string>(new ConsumerConfig
         {
@@ -174,10 +186,20 @@ public sealed class FileFetcherLiveTests
             }
 
             var root = JsonDocument.Parse(result.Message.Value).RootElement;
-            if (root.TryGetProperty("metadata", out var metadata)
-                && metadata.GetProperty("name").GetString() == name)
+
+            // THE TERMINAL SHAPE, WHICH IS A LOCATOR AND NOT A DOCUMENT. This matched
+            // metadata.name until 2026-09-11 -- an ArchiveExpander document -- and had not been
+            // able to match anything since the chain stopped ending at the expander. The out topic
+            // carried envelopes once ArchiveCollapser was appended (2026-09-10) and carries
+            // {"filePath"} locators now that FilePersister precedes the exporter. A sink is the only
+            // way onto a topic, its single inputSchemaId is file-locator, and SourceHash is unique
+            // per processor row -- so no workflow can ever put a mid-chain shape on a topic, and
+            // this is the only shape a test can wait for.
+            if (root.TryGetProperty("filePath", out var filePath)
+                && filePath.GetString() is { Length: > 0 } written
+                && Path.GetFileName(written) == name)
             {
-                return root.Clone();
+                return written;
             }
         }
 
