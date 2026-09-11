@@ -79,6 +79,33 @@ returned from stage 8 must fit within the depth the existing tree row already ad
 wants deeper nesting is asking to re-register a frozen row that three other processors point at, and
 that is a change to be made deliberately, once, not discovered by the first handler that needs it.
 
+### 1.3 The division of labour, and where it is enforced
+
+> **The workflow is built for the handler, not the handler for the workflow.** SKNormalizer is the
+> only place provider behaviour is *code*. Every other processor in the chain is generic.
+
+**But genericity lives in the code, not in the wiring.** FileFetcher's path, ArchiveExpander's
+`MaxDepth`, FilePersister's folder are all provider-shaped *values*. A workflow is therefore a
+provider-specific instantiation of generic parts, and **cannot be reused across providers by swapping
+only the handler name** — every payload in the chain is part of that provider's configuration.
+
+What the operator owns, and what checks it:
+
+| operator decision | when a mistake surfaces |
+|---|---|
+| wiring the steps in order | **publish** — `SchemaEdgeValidator` compares row ids and refuses a mismatch |
+| naming a handler that exists | **publish** — the config schema `enum` of §3.1 |
+| naming the handler that matches the *feed* | **dispatch** — nothing can check it; stages 1–2 (§3.2) |
+| the expander's `MaxDepth` | **dispatch** — stage 2, as an opaque leaf where entries were expected |
+
+**`MaxDepth` deserves its own sentence because it is the subtlest of the four.** It decides whether a
+nested archive reaches this processor as `FileContent.Entries` — openable, walkable by `Locate` — or
+as a `FileContent.Bytes` leaf holding opaque base64. A handler that expects to look inside a nested
+archive receives a blob when `MaxDepth` is set too low. That is a legible stage-2 failure rather than
+a crash, but it is entirely the operator's doing, and the number lives in three places at once: the
+expander's payload sets it, the tree row bounds it, and this processor's `LayoutFor` must stay inside
+the same row on the way out.
+
 ---
 
 ## 2. File layout
@@ -142,7 +169,57 @@ operator wiring a workflow against a processor version, and the two drift on exa
 step wired for a handler that this build predates. Listing the available names turns that from a
 guess into a read. This is safe to log: handler names are author constants, never upstream content.
 
-### 3.1 Pod-level options
+### 3.1 The config schema carries an enum, and that moves the check to publish time
+
+**The three messages above are the backstop, not the primary defence.**
+`PayloadConfigSchemaValidator` runs in BaseApi's `OrchestrationService` **at publish**, against each
+processor's registered *config* schema. So SKNormalizer's config schema declares `handler` as a
+string with an **`enum` of exactly the handler names this version carries**:
+
+```json
+{
+  "type": "object",
+  "properties": { "handler": { "type": "string", "enum": ["ProviderA", "ProviderB"] } },
+  "required": ["handler"],
+  "additionalProperties": false
+}
+```
+
+A step naming a handler that does not exist is then **refused at publish**, rather than publishing
+cleanly and failing at 3am on the first dispatch.
+
+**Two consequences, both accepted deliberately.**
+
+**Adding a handler now also means a new config schema row.** A referenced row's definition is frozen,
+so a new provider is: POST a new config schema row, repoint the processor, restart — *on top of*
+rebuild, `kind load` and the SourceHash repoint of §9. Adding a provider gets materially more
+expensive, and in exchange every published workflow is proven to name a handler that exists.
+
+**A startup check must compare the registry to the enum.** `ConfigSchemaConformance.Check` validates
+property names, `required` and types — it does **not** look at `enum` values. A build whose
+`IProviderHandler` registrations disagree with its registered config schema would therefore go ready
+while lying about what it can do, in either direction: a handler present in code and absent from the
+enum is unreachable by any workflow, and a name in the enum with no handler behind it publishes a
+step that cannot run. `ProviderHandlerRegistry` therefore performs its own conformance check against
+the resolved config schema definition and **refuses readiness on a mismatch**, naming both sets.
+
+### 3.2 What no schema can check: right handler, wrong feed
+
+**A data schema constrains structure, never provenance.** All three processors of the chain point at
+the one tree row, and two different providers' workflows use byte-identical rows. Nothing in the
+schema system knows which *feed* a step will carry, so a handler that is wrong-but-plausible for the
+data publishes cleanly and fails only when real content arrives.
+
+That failure lands in stage 1 or stage 2, which makes those two messages **the entire diagnostic for
+the most likely operator mistake**. They are written for that reader: a `Locate` that finds nothing
+reports that this handler recognized no items in this document, and a `Validate` failure reports
+which expectation the content broke — never a bare parse error.
+
+This is a residual risk, not a hole to be closed. Closing it would require the schema to express
+provenance, which would mean one row per provider and would couple the generic processors on either
+side to the provider list.
+
+### 3.3 Pod-level options
 
 ```csharp
 public sealed class SKNormalizerOptions
@@ -384,11 +461,22 @@ line per failed dispatch.
 
 ## 9. Deployment consequences
 
-**A new provider handler is a new processor version.** It is a source change in this project, so the
-project's `SourceHash` moves — and since the fold is project-only, a framework edit would *not* move
-it but this does. The full loop is: add the handler file, register it, rebuild, `kind load`, and
-**repoint the SourceHash**. The repoint is not optional and is the step most likely to be skipped,
-producing a pod that runs the old handler set while the registration claims otherwise.
+**A new provider handler is a new processor version, and it is a six-step loop.** It is a source
+change in this project, so the project's `SourceHash` moves — and since the fold is project-only, a
+framework edit would *not* move it but this does. Adding a provider means:
+
+1. add the handler file and register it in `ProcessorHost.Create`;
+2. **POST a new config schema row** whose `handler` enum includes the new name — the existing row's
+   definition is frozen because it is referenced (§3.1);
+3. rebuild;
+4. `kind load`;
+5. **repoint the SourceHash**;
+6. repoint `ConfigSchemaId` and restart, so the startup conformance check of §3.1 sees the new pair.
+
+**Steps 2 and 6 are the price of the publish-time check, and steps 5 and 6 are the ones most likely
+to be skipped.** A skipped SourceHash repoint produces a pod running the old handler set while
+registration claims otherwise; a skipped `ConfigSchemaId` repoint is caught, because the registry
+refuses readiness when its handler names and the enum disagree.
 
 **The image needs `ffmpeg`.** A Dockerfile change, and the first thing to verify on the first deploy —
 a missing binary surfaces as every item failing conversion, which reads like a content problem.
@@ -397,8 +485,9 @@ a missing binary surfaces as every item failing conversion, which reads like a c
 `SKNormalizer__ConversionTimeoutSeconds` and `SKNormalizer__MaxItemBytes`.
 
 **Registration:** one processor row, with input and output schema both pointed at the existing tree
-row (§1.2). Wiring the step into a published workflow is a separate act, and the edge check will
-refuse it if either id disagrees.
+row (§1.2) and `ConfigSchemaId` pointed at this processor's own config row (§3.1). Wiring the step
+into a published workflow is a separate act, and the edge check will refuse it if either data id
+disagrees while `PayloadConfigSchemaValidator` will refuse it if the handler name is not in the enum.
 
 ---
 
@@ -415,7 +504,16 @@ root with a non-writable extension, a layout past the depth cap, and honest `Siz
 collapser's registered `IArchiveWriter` extensions, pinning the §6 duplication.
 
 **Payload tests.** Null, blank handler, unknown handler — the last asserting the message names the
-available handlers, since that text is the whole diagnostic.
+available handlers, since that text is the whole diagnostic at dispatch.
+
+**Registry/enum conformance.** A registered handler missing from the config schema enum, and an enum
+name with no handler behind it, each refusing readiness and naming both sets. Plus the ordinary
+`ConfigSchemaConformance` case: the config schema declares `handler`, requires it, and types it as a
+string — which that check already covers and which this test pins against a future field.
+
+**A publish-time test** asserting that a workflow naming an absent handler is rejected by
+`PayloadConfigSchemaValidator`, since §3.1 makes that the primary defence and a silently-permissive
+enum would demote it without any other test noticing.
 
 **Envelope tests.** Not JSON, JSON `null`, a root with no name — each mapping to its own reason string.
 
@@ -448,6 +546,11 @@ Each has a seam in this design and no implementation:
 - **Does the existing tree schema row admit the depth handlers will want?** §1.2 assumes reuse. If the
   first realistic layout needs more nesting than the row states, that is a re-registration touching
   three processors and should be decided before implementation rather than during.
+- **Is the publish-time enum worth its cost?** §3.1 buys a publish-time rejection of an absent
+  handler at the price of a new config schema row, a repoint and a restart per provider. The
+  alternative is a plain `{"type":"string"}` and relying on the dispatch-time message of §3. The
+  enum is recommended because the failure it prevents is silent until data flows — but it is the one
+  decision here that adds recurring operational work, so it should be taken knowingly.
 - **Is `MaxItemBytes` the right pod-level bound**, or should the ceiling be on the whole document the
   way the expander bounds total expanded bytes? A document of many small items and a document of one
   huge item fail differently under each.
