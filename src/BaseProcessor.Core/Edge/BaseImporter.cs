@@ -198,8 +198,20 @@ public abstract class BaseImporter<TConfig>(ILogger logger) : BaseProcessor<TCon
                 {
                     item = source.Read(idle);
                 }
-                catch (ImportSourceException)
+                catch (ImportSourceException ex)
                 {
+                    // THE FAULT'S OWN MESSAGE, which until 2026-09-11 was discarded outright: this
+                    // catch did not bind the exception, so the only surviving trace of a source that
+                    // broke mid-batch was the word Faulted inside a parameter on the Information line
+                    // at the end of this method. Nothing said WHAT broke, and nothing could: the
+                    // exception was gone by the time that line was written.
+                    //
+                    // {Imported} is the count so far, and it is the number that decides what to do
+                    // about this: zero means the source never yielded anything, and a non-zero count
+                    // means that many lineages are already downstream and will complete on their own.
+                    logger.LogWarning(ex, "reading from {Source} faulted after {Imported} item(s)",
+                        SourceName(config), imported);
+
                     reason = StopReason.Faulted;
                     break;
                 }
@@ -256,8 +268,19 @@ public abstract class BaseImporter<TConfig>(ILogger logger) : BaseProcessor<TCon
                 {
                     source.Acknowledge(item);
                 }
-                catch (ImportSourceException)
+                catch (ImportSourceException ex)
                 {
+                    // A DISTINCT LINE FROM THE READ FAULT, because it is a distinct failure with a
+                    // distinct consequence. The branch above has already been SENT: this item's
+                    // lineage is downstream and will complete, and the unacknowledged item will be
+                    // read again on the next dispatch. That is the duplicate the comment above
+                    // accepts as the recoverable outcome -- and it is only recoverable by someone who
+                    // can see it happened, which needed this line to exist.
+                    logger.LogWarning(ex,
+                        "acknowledging an item from {Source} faulted after {Imported} item(s); it "
+                        + "will be read again and its branch has already been sent",
+                        SourceName(config), imported);
+
                     reason = StopReason.Faulted;
                     break;
                 }
@@ -279,8 +302,14 @@ public abstract class BaseImporter<TConfig>(ILogger logger) : BaseProcessor<TCon
         }
 
         // "records" rather than "items", because this line predates the base class and an operator's
-        // saved queries and dashboards are matched against this exact text.
-        logger.LogInformation(
+        // saved queries and dashboards are matched against this exact text. THE TEXT IS UNCHANGED by
+        // the level below for the same reason: what was findable by text stays findable by text.
+        //
+        // Warning on Faulted, Information otherwise. {Reason} is a parameter, so a severity filter
+        // could not tell a drained source from a broken one — the same blindness the orchestrator's
+        // {Result} lines had. Drained and Completed are ordinary ends to a batch and stay quiet.
+        logger.Log(
+            reason == StopReason.Faulted ? LogLevel.Warning : LogLevel.Information,
             "consumed {Consumed}/{Requested} records; stopped because {Reason}",
             imported, config.MessageCount, reason);
     }
