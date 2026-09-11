@@ -255,13 +255,25 @@ so a new provider is: POST a new config schema row, repoint the processor, resta
 rebuild, `kind load` and the SourceHash repoint of §9. Adding a provider gets materially more
 expensive, and in exchange every published workflow is proven to name a handler that exists.
 
-**A startup check must compare the registry to the enum.** `ConfigSchemaConformance.Check` validates
-property names, `required` and types — it does **not** look at `enum` values. A build whose
-`IProviderHandler` registrations disagree with its registered config schema would therefore go ready
-while lying about what it can do, in either direction: a handler present in code and absent from the
+**The registry and the enum must be kept in agreement, and the check is a test, not a startup
+hook.** `ConfigSchemaConformance.Check` validates property names, `required` and types — it does
+**not** look at `enum` values. A build whose `IProviderHandler` registrations disagree with its
+registered config schema is wrong in either direction: a handler present in code and absent from the
 enum is unreachable by any workflow, and a name in the enum with no handler behind it publishes a
-step that cannot run. `ProviderHandlerRegistry` therefore performs its own conformance check against
-the resolved config schema definition and **refuses readiness on a mismatch**, naming both sets.
+step that cannot run.
+
+**A runtime check is not available without amending the framework.**
+`ProcessorStartupOrchestrator.ResolveDefinitionsAsync` fetches the config definition, hands it to
+`ConfigSchemaConformance.Check(_processor.ConfigType, …)` and **never stores it** — there is no seam
+a processor can hook. Adding one would amend `BaseProcessor.Core`, which this design does not.
+
+**So the check lives where every other schema check in this repo lives: the test suite.** The
+definition's source text is `src/tests/BaseApi.Tests/Schemas/sknormalizer-config.json`, beside
+`envelope.json`, `tree.json` and `locator.json`, and a test asserts that the registry's handler names
+and that file's `enum` are the same set. Adding a handler and forgetting the enum fails the build,
+which is the realistic drift. What remains uncovered is a *registered row* whose definition differs
+from the checked-in file — the same exposure every schema row in this system already carries, and not
+one this processor can close.
 
 ### 3.2 Per-feed input rows, and what stays in the payload layer
 
@@ -690,8 +702,8 @@ framework edit would *not* move it but this does. Adding a provider means:
 
 **Steps 2 and 6 are the price of the publish-time check, and steps 5 and 6 are the ones most likely
 to be skipped.** A skipped SourceHash repoint produces a pod running the old handler set while
-registration claims otherwise; a skipped `ConfigSchemaId` repoint is caught, because the registry
-refuses readiness when its handler names and the enum disagree.
+registration claims otherwise; a skipped `ConfigSchemaId` repoint leaves the pod
+validating payloads against the old enum, and the new handler is unreachable until it is done.
 
 **The image needs `ffmpeg`.** A Dockerfile change, and the first thing to verify on the first deploy —
 a missing binary surfaces as every item failing conversion, which reads like a content problem.
@@ -726,8 +738,9 @@ caught the rar trap in production instead of in review.
 **Payload tests.** Null, blank handler, unknown handler — the last asserting the message names the
 available handlers, since that text is the whole diagnostic at dispatch.
 
-**Registry/enum conformance.** A registered handler missing from the config schema enum, and an enum
-name with no handler behind it, each refusing readiness and naming both sets. Plus the ordinary
+**Registry/enum conformance.** The registry's handler names and the `enum` in
+`Schemas/sknormalizer-config.json` are the same set — failing when a handler is added without the
+enum, or an enum name has no handler. Plus the ordinary
 `ConfigSchemaConformance` case: the config schema declares `handler`, requires it, and types it as a
 string — which that check already covers and which this test pins against a future field.
 
