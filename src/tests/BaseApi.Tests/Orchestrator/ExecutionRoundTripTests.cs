@@ -108,6 +108,13 @@ public sealed class ExecutionRoundTripTests
         }
     }
 
+    /// <summary>
+    /// <c>StepEntryCondition.Always</c> as the int the projection carries, matching the constant
+    /// <c>StepAdvancement</c> keeps for the same reason: a successor wired this way is dispatched
+    /// whatever its predecessor reported, including Failed.
+    /// </summary>
+    private const int Always = 4;
+
     private static StepL1 Step(Guid id, Guid processor, int condition, string payload, params Guid[] next) =>
         new(id, condition, processor, payload, [.. next]);
 
@@ -517,6 +524,78 @@ public sealed class ExecutionRoundTripTests
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
         Assert.Contains(h.PreLog.Records, e => e.Message.Contains("the entry step completed"));
+    }
+
+    [Fact]
+    public async Task AFailedStepsOwnRecordIsFindableBySeverity()
+    {
+        // The orchestrator's half of an event the processor already logs at Warning. While these two
+        // lines sat at Information a severity sweep found the processor's record of a failure and not
+        // this one, which is worse than finding neither: it reads as a step that failed inside the
+        // processor and was then accepted by the orchestrator.
+        //
+        // B is wired PreviousCompleted, so a Failed outcome matches no successor and A is terminal as
+        // well as entry -- both {Result} lines fire from one delivery, which is the point of asserting
+        // on the count rather than on either line alone.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
+
+        Assert.Equal(2, h.PreLog.Records.Count(
+            e => e.Level == LogLevel.Warning
+                 && e.Message.Contains("completed with Failed", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task ACompletedStepsOwnRecordStaysAtInformation()
+    {
+        // The other half, and the reason the level is conditional rather than simply raised: a green
+        // run must not emit warnings. Every soak in the chaos suite asserts on runs that completed, so
+        // promoting this unconditionally would turn nine passing scenarios into a wall of warnings.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Contains(
+            h.PreLog.Records,
+            e => e.Level == LogLevel.Information
+                 && e.Message.Contains("the entry step completed", StringComparison.Ordinal));
+
+        Assert.DoesNotContain(
+            h.PreLog.Records,
+            e => e.Level == LogLevel.Warning
+                 && e.Message.Contains("the entry step completed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AFailedStepThatAdvancesAnywaySaysSo()
+    {
+        // THE HOLE BETWEEN THE TWO {Result} LINES. Both are conditional on position -- entry or
+        // terminal -- so a failed step in the middle of a graph whose successors accept it left no
+        // orchestrator record of the failure at all: only "advanced 1 successor(s) in Nms", which
+        // reads exactly like a healthy hop.
+        //
+        // B is wired Always, which accepts a failed predecessor by design. That is the wiring worth
+        // seeing rather than swallowing: the workflow dispatches the rest of itself on a step that
+        // produced nothing.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, Always, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
+        await h.Drain();
+
+        Assert.Contains(
+            h.PreLog.Records,
+            e => e.Level == LogLevel.Warning
+                 && e.Message.Contains("advancing 1 successor(s) on a Failed step", StringComparison.Ordinal));
+
+        // The advancement line is still written: the new warning precedes it rather than replacing
+        // it, so the count and the elapsed time survive.
+        Assert.Contains(
+            h.PreLog.Records,
+            e => e.Message.Contains("advanced 1 successor(s) in", StringComparison.Ordinal));
     }
 
     // ---------------------------------------------------------------- the absent-key disposition
