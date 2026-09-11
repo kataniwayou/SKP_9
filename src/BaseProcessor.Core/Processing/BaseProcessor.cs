@@ -40,6 +40,21 @@ public abstract class BaseProcessor
     internal void EndDispatch() => Volatile.Write(ref _dispatch, null);
 
     /// <summary>
+    /// True for an author that deliberately produces no branch, so returning normally IS the end of
+    /// the lineage. False everywhere else, which is every transform and every source.
+    /// <para>
+    /// <b>The pre handler reports a terminal outcome on this, and it must be a property of the CLASS
+    /// rather than an observation of the dispatch.</b> "Sent no branch" looks like the same
+    /// condition and is not: a <c>BaseImporter</c> whose source drained sends no branch either, and
+    /// reporting Completed for it would advance every successor gated on
+    /// <c>PreviousCompleted</c> — dispatching the rest of the workflow on an empty topic. That step
+    /// produced nothing because there was nothing to produce; this one produces nothing because
+    /// producing nothing is what it does.
+    /// </para>
+    /// </summary>
+    internal virtual bool EndsLineage => false;
+
+    /// <summary>
     /// Hands one branch of output to the post queue.
     /// <para>
     /// The framework stamps every id: the dispatch's correlation, workflow, step and processor ids,

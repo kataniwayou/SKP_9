@@ -123,7 +123,9 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
             // The errors are logged and go nowhere else — StepOutcome has no text field, and validator
             // output routinely quotes the fragment of the document that failed, which is exactly what
             // must not reach the orchestrator's projections.
-            _logger.LogInformation(
+            // Warning, matching the input-schema line in the pre handler: both are a step failing,
+            // and severity is what an operator filters on before they know which half broke.
+            _logger.LogWarning(
                 "output failed its schema — reported failed: {SchemaErrors}", string.Join("; ", errors));
 
             // Guid.Empty, not p.EntryId: the write below never ran, so that key does not exist, and
@@ -156,9 +158,22 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
                 CommandFlags.None)
             .ConfigureAwait(false);
 
-        // EntryId travels straight through: the key just written IS the key the successor reads as
-        // its input. One blob, one namespace, no relocation — for a single successor the orchestrator
-        // hands this id on unchanged.
+        // EntryId names the key just written, and the orchestrator does NOT hand it on.
+        // StepOutcomeHandler reads this blob, mints a fresh key per matched successor (Guid.NewGuid,
+        // unconditionally — there is no single-successor shortcut), writes the data there via
+        // NextStepHandoffHandler, and reclaims this one last. So a hop RELOCATES the payload rather
+        // than passing a reference: this key is dead by the time any successor runs, which is why
+        // skp:data:* is empty between dispatches and why observing an intermediate branch means
+        // holding its consumer down.
+        //
+        // It is still reported here because the outcome must name the blob the orchestrator has to
+        // read and then reclaim — this id is a handle for the hop that follows, not the successor's
+        // input key.
+        //
+        // This comment claimed the opposite until 2026-09-11. It was accurate when written in
+        // 93edbcd, where a step's output WAS the key its successor read; 96939c1 introduced the
+        // orchestrator's graph advancement two days later, which had to mint a key per successor to
+        // support fan-out, and left this behind.
         await SendAsync(
             new StepOutcome(p.CorrelationId, p.ExecutionId, p.WorkflowId, p.StepId, p.ProcessorId,
                             p.EntryId, StepResult.Completed), ct).ConfigureAwait(false);
