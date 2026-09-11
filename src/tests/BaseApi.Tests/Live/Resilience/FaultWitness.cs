@@ -97,12 +97,12 @@ internal static class FaultWitness
              Templates.ChannelShutDown, Templates.ConsumptionPaused],
         FaultKind.Processor => [Templates.HostShuttingDown],
 
-        // Templates.HostShuttingDown is deliberately absent here. It is a Microsoft.Hosting.Lifetime
-        // template every service in the deployment emits, and ServiceFor returns null for the
-        // orchestrator (searched unscoped, see below), so matching it here would be satisfied by any
-        // pod's shutdown -- witnessing a fault that never touched the orchestrator at all.
-        // SchedulerShuttingDown alone is enough: Quartz runs nowhere else in this deployment.
-        FaultKind.Orchestrator => [Templates.SchedulerShuttingDown],
+        // The same framework template as the processor, and safe here for the same reason: ServiceFor
+        // scopes it to the orchestrator, so another pod's shutdown cannot satisfy it. It replaced
+        // Quartz's role-unique "Scheduler {0} shutting down." on 2026-09-11 -- see Templates, where
+        // the constant used to live, for why a role-unique template turned out to be the weaker
+        // choice.
+        FaultKind.Orchestrator => [Templates.HostShuttingDown],
         _ => [],
     };
 
@@ -120,12 +120,22 @@ internal static class FaultWitness
     /// <summary>
     /// The service whose records witness this fault, or null to search every service.
     /// <para>
-    /// Only the processor needs one. Its arrival edge is a framework template every service emits,
-    /// so an unscoped match would witness whichever process happened to restart. The orchestrator's
-    /// own edges are role-unique — Quartz and the hydration record run nowhere else — so it is
-    /// searched unscoped, and a filter there would only add a way to be wrong.
+    /// The two worker faults need one and the dependency faults do not. A worker's arrival edge is
+    /// <c>Application is shutting down...</c>, a framework template every service in the deployment
+    /// emits, so an unscoped match would witness whichever process happened to restart. The gate and
+    /// channel records the dependency faults look for are written only by a process actually losing
+    /// that dependency, and any process losing it is evidence the fault landed.
+    /// </para>
+    /// <para>
+    /// The orchestrator was searched unscoped until 2026-09-11, when its arrival edge stopped being
+    /// a role-unique Quartz record and became the framework one. The filter is what makes that
+    /// substitution safe, and is the same mechanism the processor has always used.
     /// </para>
     /// </summary>
-    private static string? ServiceFor(FaultKind kind) =>
-        kind == FaultKind.Processor ? Chaos.ProcessorService : null;
+    private static string? ServiceFor(FaultKind kind) => kind switch
+    {
+        FaultKind.Processor => Chaos.ProcessorService,
+        FaultKind.Orchestrator => Chaos.OrchestratorService,
+        _ => null,
+    };
 }

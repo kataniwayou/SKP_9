@@ -127,8 +127,14 @@ internal static class Templates
     /// <summary>Processor-unique: its startup loops stand down once it is serving.</summary>
     public const string ProcessorLoopsRetired = "processor healthy; startup loops retired";
 
-    /// <summary>Orchestrator-unique: Quartz runs nowhere else in this deployment.</summary>
-    public const string SchedulerShuttingDown = "Scheduler {0} shutting down.";
+    // THE ORCHESTRATOR'S ARRIVAL EDGE IS HostShuttingDown SCOPED TO ITS SERVICE, not Quartz's
+    // "Scheduler {0} shutting down.". That template was witnessed here from 2026-08-22 until
+    // 2026-09-11 and had been unmatchable since 2026-08-31, when src/Orchestrator/appsettings.json
+    // arrived setting "Quartz": "Warning" -- the record is Information, so it stopped being emitted
+    // and S7 could only ever report itself inconclusive. Role-uniqueness was the reason to prefer it
+    // and it is a weaker property than it looks: a template no filter can reach is unique and
+    // useless. A framework template plus a service filter is reachable, and the filter is the same
+    // mechanism S6 already relies on.
 
     /// <summary>Orchestrator-unique: the hydration record no other role writes.</summary>
     public const string OrchestratorHydrated =
