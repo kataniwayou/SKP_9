@@ -13,6 +13,13 @@ namespace BaseProcessor.Core.Processing;
 /// <summary>
 /// Finishes one branch: validate the output, persist it, report the outcome.
 /// <para>
+/// <b>It is not the only place an outcome comes from, and it stopped being so on 2026-09-11.</b> An
+/// author that ends the lineage produces no branch, so this handler never runs for it and its
+/// terminal outcome is reported by <c>ProcessDispatchHandler</c> instead — see
+/// <see cref="BaseProcessor.EndsLineage"/>. The summary above is scoped to a branch, and a sink has
+/// none; read it as "every branch's outcome" rather than "every outcome".
+/// </para>
+/// <para>
 /// <b>Every branch is keyed by an entry id that rides the message body</b>, so a redelivery of THIS
 /// message repeats the sequence exactly — the write rewrites the same key with the same bytes, the
 /// outcome send repeats. That idempotence is what lets this handler use a plain NACK as its whole
@@ -21,16 +28,25 @@ namespace BaseProcessor.Core.Processing;
 /// mints a fresh one — see <see cref="BaseProcessor.SendToPostAsync"/>.
 /// </para>
 /// <para>
-/// <b>The output is written to <c>data:{entryId}</c>, which is the successor's input key
-/// unchanged.</b> One blob, one namespace, no relocation — the orchestrator hands the id straight
-/// through when a step has exactly one successor.
+/// <b>The output is written to <c>data:{entryId}</c>, and the successor does NOT read that key.</b>
+/// <c>StepOutcomeHandler</c> reads this blob, mints a fresh key per matched successor — Guid.NewGuid,
+/// unconditionally, with no single-successor shortcut — writes the data there through
+/// <c>NextStepHandoffHandler</c>, and reclaims this one last. A hop RELOCATES the payload rather than
+/// passing a reference, so this key is dead by the time any successor runs.
 /// </para>
 /// <para>
-/// <b>That makes multi-successor fan-out the orchestrator's problem, not this handler's.</b> Three
-/// successors dispatched against one key means the first one's PRE hop reclaims it and the other two
-/// find it absent and return with no result — two branches lost silently. The orchestrator must copy
-/// the blob into one key per successor under derived ids, or refcount it. Nothing in this assembly
-/// defends against it, by decision rather than by oversight.
+/// <b>Fan-out is therefore the orchestrator's problem, and it is solved there rather than here.</b>
+/// This paragraph used to describe the hazard as open: three successors dispatched against ONE key,
+/// the first one's pre hop reclaiming it, the other two finding it absent and losing their branches
+/// silently. The per-successor mint above is what closed it. Nothing in this assembly defends against
+/// it — still by decision rather than oversight, and now because there is nothing left to defend
+/// against.
+/// </para>
+/// <para>
+/// Both paragraphs claimed the opposite until 2026-09-11, and were accurate when written in 93edbcd,
+/// where a step's output WAS the key its successor read. 96939c1 introduced the orchestrator's graph
+/// advancement two days later and left them behind, along with the call-site comment beside the
+/// outcome send.
 /// </para>
 /// </summary>
 internal sealed class ProcessedDataHandler : IQueueMessageHandler
