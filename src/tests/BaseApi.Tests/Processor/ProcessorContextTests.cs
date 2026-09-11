@@ -61,24 +61,33 @@ public sealed class ProcessorContextTests
 
         var identity = context.Identity!;
         Assert.Equal("{\"type\":\"object\"}", identity.InputDefinition);
-        Assert.Equal("{\"type\":\"string\"}", identity.ConfigDefinition);
         Assert.Null(identity.OutputDefinition);
+
+        // THE CONFIG DEFINITION IS NOT STORED, and offering it a slot here is what made the field look
+        // like it had a consumer. 92a9311 moved the config check into the iteration that fetches the
+        // definition -- ConfigSchemaConformance reads it as a local and nothing reads it afterwards --
+        // so a call naming the config schema id is routed nowhere and must leave the snapshot alone.
+        Assert.Equal(input, identity.InputSchemaId);
+        Assert.Equal(config, identity.ConfigSchemaId);
     }
 
     [Fact]
     public void SetDefinitionFillsEverySlotSharingTheSchemaId()
     {
         // Independent ifs, not else-if: when two roles share one schema id, a single fetch populates
-        // both slots rather than leaving the second null and stalling Gate A.
+        // both slots rather than leaving the second null and stalling Gate A. Input and OUTPUT are the
+        // two slots that remain — config was removed from the snapshot in 92a9311 — and they are the
+        // pair that matters, since a transform whose input and output schemas are the same row is an
+        // ordinary graph rather than a curiosity.
         var shared = Guid.NewGuid();
         var context = new ProcessorContext();
-        context.SetIdentity(Found(input: shared, config: shared));
+        context.SetIdentity(Found(input: shared, output: shared));
 
         context.SetDefinition(shared, "{}");
 
         var identity = context.Identity!;
         Assert.Equal("{}", identity.InputDefinition);
-        Assert.Equal("{}", identity.ConfigDefinition);
+        Assert.Equal("{}", identity.OutputDefinition);
     }
 
     [Fact]

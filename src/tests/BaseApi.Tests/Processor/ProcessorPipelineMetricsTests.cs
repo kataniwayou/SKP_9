@@ -63,7 +63,7 @@ public sealed class ProcessorPipelineMetricsTests
         var whileWaiting = ReadyCount();
 
         context.Identity = new ProcessorIdentity(
-            Guid.NewGuid(), null, null, null, "sample-proc", "1.0.0", null, null, null);
+            Guid.NewGuid(), null, null, null, "sample-proc", "1.0.0", null, null);
 
         // Both directions in one assertion pair: a gauge hard-coded to either value moves by 0 here,
         // and one reading IsHealthy throws out of the observable callback.
