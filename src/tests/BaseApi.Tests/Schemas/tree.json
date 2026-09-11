@@ -1,52 +1,70 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$ref": "#/$defs/depth2",
+  "$ref": "#/$defs/node",
   "$defs": {
-    "depth2": {
+    "node": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["metadata", "content"],
+      "required": [
+        "metadata",
+        "content"
+      ],
       "properties": {
-        "metadata": { "$ref": "#/$defs/metadata" },
         "content": {
-          "type": ["string", "array", "null"],
-          "items": { "$ref": "#/$defs/depth1" }
+          "type": [
+            "string",
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "metadata": {
+          "$ref": "#/$defs/metadata"
         }
-      }
-    },
-    "depth1": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["metadata", "content"],
-      "properties": {
-        "metadata": { "$ref": "#/$defs/metadata" },
-        "content": {
-          "type": ["string", "array", "null"],
-          "items": { "$ref": "#/$defs/depth0" }
-        }
-      }
-    },
-    "depth0": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["metadata", "content"],
-      "properties": {
-        "metadata": { "$ref": "#/$defs/metadata" },
-        "content": { "type": "string" }
-      }
+      },
+      "additionalProperties": false
     },
     "metadata": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "extension", "sizeBytes", "createdUtc", "modifiedUtc", "entryCount"],
+      "required": [
+        "name",
+        "extension",
+        "sizeBytes",
+        "createdUtc",
+        "modifiedUtc",
+        "entryCount"
+      ],
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "extension": { "type": "string" },
-        "sizeBytes": { "type": "integer", "minimum": 0 },
-        "createdUtc": { "type": ["string", "null"] },
-        "modifiedUtc": { "type": ["string", "null"] },
-        "entryCount": { "type": "integer", "minimum": 0 }
-      }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extension": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entryCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modifiedUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
-  }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

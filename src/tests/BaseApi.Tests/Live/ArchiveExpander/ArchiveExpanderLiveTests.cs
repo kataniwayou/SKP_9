@@ -187,22 +187,6 @@ public sealed class ArchiveExpanderLiveTests
     private static string Namespace => RealStack.Get("SKP_NAMESPACE", "skp");
 
     /// <summary>
-    /// The topic feeding a SECOND workflow whose ArchiveExpander step is wired <c>maxDepth: 2</c>.
-    /// <para>
-    /// <b>It is a separate workflow because depth is a step payload, not a message field.</b> One
-    /// wired workflow has one payload, so a test cannot ask for a different depth by producing a
-    /// different record — the depth is decided by the row an operator wrote. Unset by default, and
-    /// the test that needs it skips with instructions rather than failing.
-    /// </para>
-    /// <para>
-    /// <b>The variable keeps its FileReader-era name on purpose.</b> It is documented under
-    /// <c>SKP_FILEREADER_DEEP_TOPIC</c> in <c>k8s/README.md</c>, and renaming it here would silently
-    /// stop reading whatever value an operator already has set for that name.
-    /// </para>
-    /// </summary>
-    private static string DeepTopic => RealStack.Get("SKP_FILEREADER_DEEP_TOPIC", "");
-
-    /// <summary>
     /// This build's source hash, read from the assembly rather than pasted in.
     /// <para>
     /// <c>SourceHash.targets</c> emits it as an <c>AssemblyMetadata</c> attribute, and it changes on
@@ -329,20 +313,6 @@ public sealed class ArchiveExpanderLiveTests
         return false;
     }
 
-    private static async Task ProduceToAsync(string topic, string path)
-    {
-        using var producer = new ProducerBuilder<Null, string>(
-            new ProducerConfig { BootstrapServers = RealStack.KafkaBrokers }).Build();
-
-        var result = await producer.ProduceAsync(topic, new Message<Null, string>
-        {
-            Value = JsonSerializer.Serialize(new { filePath = path, providerName = "acme-feed" }),
-        });
-
-        Assert.True(result.Status == PersistenceStatus.Persisted,
-            $"produce to {topic} did not persist: status was {result.Status}");
-    }
-
     [Fact]
     public async Task TheOutputSchemaRowIsRegistered()
     {
@@ -439,40 +409,26 @@ public sealed class ArchiveExpanderLiveTests
             + "close");
     }
 
-    [Fact]
-    public async Task ADocumentDeeperThanTheSchemaFailsAndLogsTheDepth()
-    {
-        RealStack.SkipUnlessEnabled();
-
-        Assert.SkipWhen(DeepTopic.Length == 0,
-            "set SKP_FILEREADER_DEEP_TOPIC to the input topic of a second workflow whose "
-            + "ArchiveExpander step is wired {\"maxDepth\":2}; depth is a step payload, so this case "
-            + "needs a workflow of its own");
-
-        // THE DESTRUCTIVE FAILURE, and the only one whose diagnosis depends on a log line.
-        //
-        // maxDepth 2 against a baseline schema that admits depth 1: the document is built, then
-        // rejected by the post handler, which reports Failed with EntryId Guid.Empty, acks, and
-        // writes nothing to L2. The step's input was already reclaimed, so the branch is gone with
-        // no key to recover it and no file identity in that failure.
-        //
-        // The disagreement is deliberate -- nothing syncs MaxDepth with the schema -- so this test
-        // is not asserting a bug. It asserts that when an operator raises one without the other,
-        // the evidence needed to work that out is actually present.
-        var name = $"deep-{Guid.NewGuid():N}.zip";
-        var path = SeedBytes(name, ZipOf(
-            ("a.zip", ZipOf(("a.csv", "id\n"u8.ToArray())))));
-
-        await ProduceToAsync(DeepTopic, path);
-
-        Assert.Null(Await(name, Window));
-
-        // Matches the current template: "expanded {FileName} of {SizeBytes} bytes into
-        // {EntryCount} entries, reaching depth {DepthReached} of {MaxDepth}".
-        Assert.True(
-            LogContains("reaching depth 2 of 2", Window),
-            "the document never reached the out topic and the depth line is missing too, so nothing "
-            + "distinguishes a schema rejection from the file never having been fetched at all — "
-            + "which is exactly the gap this line was added to close");
-    }
+    // REMOVED 2026-09-11: ADocumentDeeperThanTheSchemaFailsAndLogsTheDepth.
+    //
+    // It asserted that a depth-2 document is REJECTED by the post handler against a registered
+    // schema admitting depth 1, and that the expander's "reaching depth {DepthReached} of
+    // {MaxDepth}" line is the only place the depth survives to diagnose that rejection. Its premise
+    // was that MaxDepth and the output schema each state a depth and nothing keeps them in sync.
+    //
+    // archive-document v3.0.0 removed the schema's half of that. It is one self-referencing node
+    // admitting any depth, so no document is "deeper than the schema" and the rejection this test
+    // waited for cannot happen -- Assert.Null(Await(...)) would now fail on a document that arrived
+    // exactly as it should. See src/tests/BaseApi.Tests/Schemas/README.md for why the ladder went.
+    //
+    // Not replaced, deliberately: both remaining bounds are covered hermetically.
+    // ArchiveExpanderDepthTests.ADepthOutsideTheSupportedRangeIsARejectedPayload covers a MaxDepth
+    // above MaxSupportedDepth, diagnosed before a file is opened, and
+    // ArchiveBuilderTests.ADocumentDeeperThanMaxSupportedDepthFails covers a document from
+    // elsewhere that is too deep to pack. Neither needs a second workflow or a live cluster --
+    // which is why this one was skipped by default and went stale unnoticed.
+    //
+    // Two members went with it and are not coming back: DeepTopic (SKP_FILEREADER_DEEP_TOPIC, the
+    // second workflow's in-topic) and ProduceToAsync(topic, path), which existed to address it.
+    // SKP_FILEREADER_DEEP_TOPIC is still documented in k8s/README.md and now reads nowhere.
 }
