@@ -98,12 +98,34 @@ data:
       # by running `curl /_cat/indices`; the test helper constant is baked from that probe.
       elasticsearch:
         endpoints:
-          # Compose-internal hostname — resolves to sk-elasticsearch container via default
-          # compose network (Pattern 5: collector inside compose, tests outside via host-DNS).
+          # The in-cluster Service. The comment here used to call this a compose-internal
+          # hostname; the compose stack is retired and the name resolves as a k8s Service in
+          # the skp namespace, which is why it kept working after the move.
           - http://elasticsearch:9200
         mapping:
           mode: none
         # No auth/tls blocks — dev posture per Phase 11 D-12 + sk2_1 lock-in.
+        #
+        # RETRY AND QUEUE ADDED 2026-09-11, BECAUSE WITHOUT THEM A FAILED EXPORT IS A DROP.
+        # This exporter carried endpoints and mapping only, so every failure took the one path
+        # left to it: "Exporting failed. Rejecting data." — 1 to 3 log records, roughly every
+        # 15 seconds, silently gone. It surfaced as whole processor hops missing from a
+        # correlation-id trace while the same pod's overall export rate looked healthy, because
+        # what is lost is whichever records sit in the batch at that moment. Three round-trip
+        # traces lost a different pod's records each time, which is what a random batch drop
+        # looks like and is not what a broken pod or a broken log statement looks like.
+        # `retry`, NOT the standard `retry_on_failure`: this exporter defines its own block and
+        # rejects the common key outright — "'elasticsearchexporter.Config' has invalid keys:
+        # retry_on_failure", which crash-loops the collector rather than being ignored. Worth
+        # knowing, because it means the config is validated and a typo here cannot fail silently.
+        retry:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_retries: 5
+        sending_queue:
+          enabled: true
+          queue_size: 5000
     
     extensions:
       health_check:
