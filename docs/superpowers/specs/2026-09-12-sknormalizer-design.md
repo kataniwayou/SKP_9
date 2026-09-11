@@ -524,15 +524,16 @@ public sealed record OutputLayout(
 ```
 
 `TreeAssembler` turns that into a `FileNode` and is **the only code in this processor that sets a node
-name, sets an extension on an entries-bearing node, or computes `SizeBytes`/`EntryCount`.** It
-enforces, in one place:
+name or sets an extension on an entries-bearing node.** It enforces, in one place:
 
 - no `/` or `\` in any name — rejected, never stripped, matching `ArchiveBuilder.Pack`;
 - a writable archive extension on the root and on every `Folder`;
 - the depth cap, checked against the tree schema row's depth (§1.2) rather than only against
   `ArchiveBuilder.MaxSupportedDepth`, because the row is the tighter bound and fails one hop later
   with far less diagnostic information;
-- honest `SizeBytes` and `EntryCount`, counted from what was built.
+- a **computed** `SizeBytes` on every leaf (its content length) and a **computed** `EntryCount` on
+  every node (its child count), while **carrying** a container's `SizeBytes` and every node's
+  `CreatedUtc`/`ModifiedUtc` through unchanged — see §6.3.
 
 **Because `Folder` *requires* an archive extension as a constructor argument and the assembler checks
 it, a handler cannot express an uncollapsible container.** The rule is enforced by the type plus one
@@ -541,6 +542,31 @@ validator rather than by six handlers each remembering it.
 **The writable-extension list is duplicated** — here and in the collapser's `IArchiveWriter`
 registrations. That is a knowing duplication across process boundaries, pinned by a test that asserts
 the two lists agree (§11).
+
+### 6.3 What the assembler computes, and what it must carry
+
+**An earlier draft of this section said the assembler computes "honest `SizeBytes` and `EntryCount`,
+counted from what was built". That was wrong for containers, and it made this design's own acceptance
+test unpassable.** Corrected here rather than left for an implementer to discover.
+
+**Nothing is packed in this processor.** `ArchiveCollapser` builds the archives; this one emits a
+document. So a container node has no built size to be honest about — and `ArchiveExpander` writes the
+**source archive's byte length** there (`FileContentBuilder.cs:131`), along with `createdUtc` and
+`modifiedUtc` on **every** node it emits (`:98`, `:131`).
+
+| field | container | leaf |
+|---|---|---|
+| `SizeBytes` | **carried** from the layout | **computed** — content length |
+| `EntryCount` | **computed** — child count | **computed** — zero |
+| `CreatedUtc` / `ModifiedUtc` | **carried** | **carried** |
+
+**Computing a container's size as the sum of its children would break byte identity (§7.1), which is
+the strongest statement this phase makes.** It would also be an invented number: the sum of decoded
+entry sizes is not the size of any archive that exists. Carrying the upstream value misleads nobody —
+`ArchiveCollapser` recomputes it from what it actually packs, and `CollapsedFile` records why.
+
+**Dropping timestamps would lose provenance**, not merely fail a test. A downstream consumer reading
+`modifiedUtc` off a standardized file is the reason the envelope carries it at all.
 
 ### 6.1 The default layout preserves the input topology
 
@@ -734,6 +760,11 @@ collapser's registered `IArchiveWriter` extensions, pinning the §6 duplication.
 counts match the input for a two-level document; and a `.rar`-rooted input produces a `.zip`-rooted
 output while every other name and position is unchanged. The second is the test that would have
 caught the rar trap in production instead of in review.
+
+**Metadata preservation (§6.3).** Both timestamps survive on the root, on an interior container and
+on a leaf — pinned to distinct values, since two not-null checks would pass just as happily on a
+transposition. And a container's `SizeBytes` is the one it was given rather than the sum of its
+children.
 
 **Payload tests.** Null, blank handler, unknown handler — the last asserting the message names the
 available handlers, since that text is the whole diagnostic at dispatch.

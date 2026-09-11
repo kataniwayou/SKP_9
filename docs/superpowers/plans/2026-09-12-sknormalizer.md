@@ -235,7 +235,9 @@ git commit -m "feat(sknormalizer): project skeleton and the tree contract"
 
 ### Task 2: `OutputLayout` and `TreeAssembler`
 
-The assembler is the only code in this processor that names a node, sets an extension on an entries-bearing node, or computes `SizeBytes`/`EntryCount`. Because `OutputNode.Folder` *requires* an archive extension and the assembler validates it, a handler cannot express an uncollapsible document.
+The assembler is the only code in this processor that names a node or sets an extension on an entries-bearing node. Because `OutputNode.Folder` *requires* an archive extension and the assembler validates it, a handler cannot express an uncollapsible document.
+
+**It computes two fields and carries the rest.** A **leaf's** `SizeBytes` is its content length and every node's `EntryCount` is its child count — both are facts this code holds, and a wrong value upstream must not propagate as if it were one. A **container's** `SizeBytes` and every node's `CreatedUtc`/`ModifiedUtc` are **carried through unchanged**: nothing is packed here, so there is no built size for a container, and `ArchiveExpander` writes the source archive's byte length plus both timestamps on every node it emits (`FileContentBuilder.cs:98,131`). Inventing different values would make Task 9's byte identity — this phase's acceptance test — impossible to pass.
 
 **Files:**
 - Create: `src/Processor.SKNormalizer/Pipeline/OutputLayout.cs`
@@ -247,8 +249,8 @@ The assembler is the only code in this processor that names a node, sets an exte
 **Interfaces:**
 - Consumes: `FileNode`, `FileMetadata`, `FileContent` from Task 1.
 - Produces:
-  - `public abstract record OutputNode` with `OutputNode.File(string Name, byte[] Content, DateTime? ModifiedUtc)` and `OutputNode.Folder(string Name, string ArchiveExtension, IReadOnlyList<OutputNode> Children)`.
-  - `public sealed record OutputLayout(string RootName, string RootExtension, IReadOnlyList<OutputNode>? Children)`.
+  - `public abstract record OutputNode` with `OutputNode.File(string Name, byte[] Content, DateTime? CreatedUtc, DateTime? ModifiedUtc)` and `OutputNode.Folder(string Name, string ArchiveExtension, long SizeBytes, DateTime? CreatedUtc, DateTime? ModifiedUtc, IReadOnlyList<OutputNode> Children)`.
+  - `public sealed record OutputLayout(string RootName, string RootExtension, long SizeBytes, DateTime? CreatedUtc, DateTime? ModifiedUtc, IReadOnlyList<OutputNode>? Children)`.
   - `internal interface ITreeAssembler { FileNode Assemble(OutputLayout layout); }`
   - `internal sealed class TreeAssembler : ITreeAssembler` with `public const int MaxSupportedDepth = 4;` and `public static readonly IReadOnlyList<string> WritableExtensions = [".tar", ".zip"];`
   - `public sealed class NormalizationException(string message) : Exception(message)`
@@ -269,8 +271,13 @@ public sealed class TreeAssemblerTests
 {
     private static DateTime Stamp => new(2026, 6, 7, 8, 9, 10, DateTimeKind.Utc);
 
+    private static DateTime Born => new(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+
     private static OutputNode.File File(string name, string text)
-        => new(name, Encoding.UTF8.GetBytes(text), Stamp);
+        => new(name, Encoding.UTF8.GetBytes(text), Born, Stamp);
+
+    private static OutputLayout Root(string name, string extension, params OutputNode[] children)
+        => new(name, extension, SizeBytes: 40219, Born, Stamp, children);
 
     private static FileNode Assemble(OutputLayout layout) => new TreeAssembler().Assemble(layout);
 
@@ -279,7 +286,7 @@ public sealed class TreeAssemblerTests
     {
         // ArchiveBuilder.Pack rejects rather than strips, because stripping hides a malformed
         // document. This refuses it one hop earlier, where the message can name the offender.
-        var layout = new OutputLayout("out.zip", ".zip", [File("audio/track01.wav", "x")]);
+        var layout = Root("out.zip", ".zip", File("audio/track01.wav", "x"));
 
         var ex = Assert.Throws<NormalizationException>(() => Assemble(layout));
         Assert.Contains("audio/track01.wav", ex.Message);
@@ -290,7 +297,7 @@ public sealed class TreeAssemblerTests
     [InlineData("/")]
     public void BothSeparatorsAreRejected(string separator)
     {
-        var layout = new OutputLayout("out.zip", ".zip", [File($"a{separator}b.xml", "x")]);
+        var layout = Root("out.zip", ".zip", File($"a{separator}b.xml", "x"));
 
         Assert.Throws<NormalizationException>(() => Assemble(layout));
     }
@@ -300,9 +307,9 @@ public sealed class TreeAssemblerTests
     {
         // The rar rule. ArchiveExpander READS rar; ArchiveCollapser cannot WRITE it, so a faithful
         // topology mirror of a rar-sourced document would walk straight into a collapser refusal.
-        var layout = new OutputLayout(
+        var layout = Root(
             "bundle.rar", ".rar",
-            [new OutputNode.Folder("item01.rar", ".rar", [File("meta.xml", "<m/>")])]);
+            new OutputNode.Folder("item01.rar", ".rar", 512, Born, Stamp, [File("meta.xml", "<m/>")]));
 
         var root = Assemble(layout);
 
@@ -317,9 +324,9 @@ public sealed class TreeAssemblerTests
     [Fact]
     public void AWritableFolderExtensionIsLeftAlone()
     {
-        var layout = new OutputLayout(
+        var layout = Root(
             "bundle.tar", ".tar",
-            [new OutputNode.Folder("item01.zip", ".zip", [File("meta.xml", "<m/>")])]);
+            new OutputNode.Folder("item01.zip", ".zip", 512, Born, Stamp, [File("meta.xml", "<m/>")]));
 
         var root = Assemble(layout);
 
@@ -334,7 +341,7 @@ public sealed class TreeAssemblerTests
     {
         // Only entries-bearing nodes are retargeted. A leaf named .rar is an already-built archive
         // being carried along, exactly as ArchiveBuilder treats it.
-        var root = Assemble(new OutputLayout("out.zip", ".zip", [File("inner.rar", "x")]));
+        var root = Assemble(Root("out.zip", ".zip", File("inner.rar", "x")));
 
         var leaf = Assert.IsType<FileContent.Entries>(root.Content).Value.Single();
         Assert.Equal(".rar", leaf.Metadata.Extension);
@@ -342,10 +349,9 @@ public sealed class TreeAssemblerTests
     }
 
     [Fact]
-    public void SizeBytesAndEntryCountAreCountedFromWhatWasBuilt()
+    public void ALeafsSizeIsItsContentAndEveryEntryCountIsCounted()
     {
-        var root = Assemble(new OutputLayout(
-            "out.zip", ".zip", [File("a.xml", "<a/>"), File("b.xml", "<bb/>")]));
+        var root = Assemble(Root("out.zip", ".zip", File("a.xml", "<a/>"), File("b.xml", "<bb/>")));
 
         Assert.Equal(2, root.Metadata.EntryCount);
 
@@ -356,16 +362,52 @@ public sealed class TreeAssemblerTests
     }
 
     [Fact]
+    public void AContainerKeepsTheSizeItWasGivenRatherThanTheSumOfItsChildren()
+    {
+        // THIS PROCESSOR PACKS NO ARCHIVE, so a container has no "built" size to be honest about.
+        // ArchiveExpander writes the SOURCE ARCHIVE's byte length there (FileContentBuilder.cs:131),
+        // and summing children instead would make byte identity impossible -- which is this phase's
+        // acceptance test. ArchiveCollapser recomputes the number from what it actually packs, so
+        // carrying the upstream value forward misleads nobody.
+        var root = Assemble(Root("out.zip", ".zip", File("a.xml", "<a/>")));
+
+        Assert.Equal(40219, root.Metadata.SizeBytes);
+        Assert.NotEqual(4, root.Metadata.SizeBytes);
+    }
+
+    [Fact]
+    public void TimestampsSurviveOnEveryNode()
+    {
+        // DISTINCT values, deliberately: two NotNull checks would pass just as happily if the
+        // assembler TRANSPOSED CreatedUtc and ModifiedUtc. ArchiveExpander writes both on every node,
+        // so dropping either makes the identity chain test unpassable.
+        var root = Assemble(Root(
+            "out.zip", ".zip",
+            new OutputNode.Folder("inner.zip", ".zip", 99, Born, Stamp, [File("a.xml", "<a/>")])));
+
+        Assert.Equal(Born, root.Metadata.CreatedUtc);
+        Assert.Equal(Stamp, root.Metadata.ModifiedUtc);
+
+        var inner = Assert.IsType<FileContent.Entries>(root.Content).Value.Single();
+        Assert.Equal(Born, inner.Metadata.CreatedUtc);
+        Assert.Equal(Stamp, inner.Metadata.ModifiedUtc);
+
+        var leaf = Assert.IsType<FileContent.Entries>(inner.Content).Value.Single();
+        Assert.Equal(Born, leaf.Metadata.CreatedUtc);
+        Assert.Equal(Stamp, leaf.Metadata.ModifiedUtc);
+    }
+
+    [Fact]
     public void ALayoutDeeperThanTheCapIsRejected()
     {
         OutputNode node = File("leaf.xml", "x");
         for (var i = 0; i < TreeAssembler.MaxSupportedDepth + 1; i++)
         {
-            node = new OutputNode.Folder($"level{i}.zip", ".zip", [node]);
+            node = new OutputNode.Folder($"level{i}.zip", ".zip", 0, Born, Stamp, [node]);
         }
 
         var ex = Assert.Throws<NormalizationException>(
-            () => Assemble(new OutputLayout("out.zip", ".zip", [node])));
+            () => Assemble(Root("out.zip", ".zip", node)));
         Assert.Contains("nests deeper", ex.Message);
     }
 
@@ -375,7 +417,7 @@ public sealed class TreeAssemblerTests
         // ArchiveBuilder treats null as "pack the format's canonical empty archive" and an empty
         // Entries list identically — but the tree schema and the expander both express "expanded to
         // nothing" as null, so this must match.
-        var root = Assemble(new OutputLayout("empty.zip", ".zip", null));
+        var root = Assemble(new OutputLayout("empty.zip", ".zip", 22, Born, Stamp, null));
 
         Assert.Null(root.Content);
         Assert.Equal(0, root.Metadata.EntryCount);
@@ -446,8 +488,16 @@ public abstract record OutputNode
     {
     }
 
-    /// <summary>A leaf. Its bytes are its content, whatever the extension claims.</summary>
-    public sealed record File(string Name, byte[] Content, DateTime? ModifiedUtc) : OutputNode;
+    /// <summary>
+    /// A leaf. Its bytes are its content, whatever the extension claims.
+    /// <para>
+    /// <b>Both timestamps, not just one.</b> ArchiveExpander writes <c>createdUtc</c> and
+    /// <c>modifiedUtc</c> on every node it emits; dropping either here would make the identity chain
+    /// of Task 9 unpassable, and would quietly lose provenance for every real handler too.
+    /// </para>
+    /// </summary>
+    public sealed record File(
+        string Name, byte[] Content, DateTime? CreatedUtc, DateTime? ModifiedUtc) : OutputNode;
 
     /// <summary>
     /// A container.
@@ -458,16 +508,33 @@ public abstract record OutputNode
     /// that cannot be collapsed. An extension naming no writer is retargeted by the assembler.
     /// </para>
     /// </summary>
+    /// <param name="SizeBytes">
+    /// <b>Carried, not computed.</b> This processor packs no archive, so a container has no built
+    /// size — ArchiveExpander puts the source archive's byte length here and ArchiveCollapser
+    /// recomputes it from what it actually packs. Summing children instead would be an invented
+    /// number AND would break byte identity.
+    /// </param>
     public sealed record Folder(
-        string Name, string ArchiveExtension, IReadOnlyList<OutputNode> Children) : OutputNode;
+        string Name,
+        string ArchiveExtension,
+        long SizeBytes,
+        DateTime? CreatedUtc,
+        DateTime? ModifiedUtc,
+        IReadOnlyList<OutputNode> Children) : OutputNode;
 }
 
 /// <summary>
 /// The whole output document. <paramref name="Children"/> null means "expanded to nothing" and
 /// becomes <c>content: null</c> — NOT an empty array, matching how the expander expresses it.
+/// The root's size and timestamps are carried for the reason <see cref="OutputNode.Folder"/> records.
 /// </summary>
 public sealed record OutputLayout(
-    string RootName, string RootExtension, IReadOnlyList<OutputNode>? Children);
+    string RootName,
+    string RootExtension,
+    long SizeBytes,
+    DateTime? CreatedUtc,
+    DateTime? ModifiedUtc,
+    IReadOnlyList<OutputNode>? Children);
 ```
 
 - [ ] **Step 5: Write `ITreeAssembler` and `TreeAssembler`**
@@ -491,9 +558,16 @@ internal interface ITreeAssembler
 namespace Processor.SKNormalizer;
 
 /// <summary>
-/// The ONLY code in this processor that sets a node name, sets an extension on an entries-bearing
-/// node, or computes SizeBytes/EntryCount. Every rule ArchiveCollapser enforces is enforced here
-/// first, where the message can name the offending node.
+/// The ONLY code in this processor that sets a node name or sets an extension on an entries-bearing
+/// node. Every rule ArchiveCollapser enforces is enforced here first, where the message can name the
+/// offending node.
+/// <para>
+/// <b>It COMPUTES a leaf's SizeBytes and every node's EntryCount, and CARRIES everything else.</b>
+/// A leaf's size is its content length and an entry count is the number of children — both are facts
+/// this code holds. A container's size is not: nothing is packed here, so the only number available
+/// is the one upstream wrote, and inventing a different one would break the byte identity that is
+/// this processor's acceptance test. Timestamps are carried for the same reason.
+/// </para>
 /// </summary>
 internal sealed class TreeAssembler : ITreeAssembler
 {
@@ -524,9 +598,9 @@ internal sealed class TreeAssembler : ITreeAssembler
             new FileMetadata(
                 Retarget(layout.RootName, layout.RootExtension, extension),
                 extension,
-                children is null ? 0 : children.Sum(c => c.Metadata.SizeBytes),
-                null,
-                null,
+                layout.SizeBytes,
+                layout.CreatedUtc,
+                layout.ModifiedUtc,
                 children?.Count ?? 0),
             children is null ? null : new FileContent.Entries(children));
     }
@@ -556,7 +630,14 @@ internal sealed class TreeAssembler : ITreeAssembler
         // nodes are retargeted.
         return new FileNode(
             new FileMetadata(
-                name, Path.GetExtension(name), file.Content.LongLength, null, file.ModifiedUtc, 0),
+                name,
+                Path.GetExtension(name),
+                // COMPUTED: a leaf's size is its content, and a wrong value upstream must not
+                // propagate as if it were a fact.
+                file.Content.LongLength,
+                file.CreatedUtc,
+                file.ModifiedUtc,
+                0),
             new FileContent.Bytes(file.Content));
     }
 
@@ -568,7 +649,7 @@ internal sealed class TreeAssembler : ITreeAssembler
 
         return new FileNode(
             new FileMetadata(
-                name, extension, children.Sum(c => c.Metadata.SizeBytes), null, null, children.Count),
+                name, extension, folder.SizeBytes, folder.CreatedUtc, folder.ModifiedUtc, children.Count),
             new FileContent.Entries(children));
     }
 
@@ -1077,6 +1158,7 @@ This is the core. Stages run in a fixed order; the handler decides and shared co
 - Create: `src/Processor.SKNormalizer/Services/XmlMetadataRenderer.cs`
 - Create: `src/Processor.SKNormalizer/Pipeline/NormalizationPipeline.cs`
 - Modify: `src/Processor.SKNormalizer/Handlers/ProviderHandlerBase.cs` (replace `LayoutFor`)
+- Modify: `src/Processor.SKNormalizer/Pipeline/PipelineTypes.cs` (`NormalizedItem` gains `MetadataDocument`)
 - Create: `src/tests/BaseApi.Tests/Support/TranscoderDoubles.cs`
 - Test: `src/tests/BaseApi.Tests/SKNormalizer/NormalizationPipelineTests.cs`
 - Test: `src/tests/BaseApi.Tests/SKNormalizer/XmlMetadataRendererTests.cs`
@@ -1654,9 +1736,14 @@ In `src/Processor.SKNormalizer/Handlers/ProviderHandlerBase.cs`, replace the pla
             }
         }
 
+        // EVERY FIELD CARRIED, not just the name. Size and both timestamps travel with each node,
+        // because preserving topology that loses metadata is not preserving the document.
         return new OutputLayout(
             root.Metadata.Name,
             root.Metadata.Extension,
+            root.Metadata.SizeBytes,
+            root.Metadata.CreatedUtc,
+            root.Metadata.ModifiedUtc,
             root.Content is FileContent.Entries entries
                 ? entries.Value.Select(e => Mirror(e, replacements)).ToList()
                 : null);
@@ -1669,14 +1756,23 @@ In `src/Processor.SKNormalizer/Handlers/ProviderHandlerBase.cs`, replace the pla
             FileContent.Entries entries => new OutputNode.Folder(
                 node.Metadata.Name,
                 node.Metadata.Extension,
+                node.Metadata.SizeBytes,
+                node.Metadata.CreatedUtc,
+                node.Metadata.ModifiedUtc,
                 entries.Value.Select(e => Mirror(e, replacements)).ToList()),
 
             FileContent.Bytes bytes => new OutputNode.File(
-                node.Metadata.Name, bytes.Value, node.Metadata.ModifiedUtc),
+                node.Metadata.Name, bytes.Value, node.Metadata.CreatedUtc, node.Metadata.ModifiedUtc),
 
             // An archive that expanded to nothing. Mirrored as an empty container, which the
             // assembler turns back into the format's canonical empty archive.
-            _ => new OutputNode.Folder(node.Metadata.Name, node.Metadata.Extension, []),
+            _ => new OutputNode.Folder(
+                node.Metadata.Name,
+                node.Metadata.Extension,
+                node.Metadata.SizeBytes,
+                node.Metadata.CreatedUtc,
+                node.Metadata.ModifiedUtc,
+                []),
         };
 ```
 
@@ -1703,7 +1799,7 @@ git commit -m "feat(sknormalizer): the eight-stage pipeline, the renderer, and t
 
 ### Task 5: `FfmpegAudioTranscoder`
 
-> **This task is separable.** Nothing in phase 1 consumes it — `SampleHandler` converts nothing — and its only real test needs the binary. If the first provider handler is far off, cutting this task and shipping the `IAudioTranscoder` seam alone loses nothing and defers untested-in-CI code. The design specifies implementing it, so it is written here; decide before starting.
+> **This task is NOT optional, despite nothing in phase 1 converting audio.** Task 7's `ProcessorHost` registers `IAudioTranscoder → FfmpegAudioTranscoder` and `Configure<SKNormalizerOptions>`, and Task 7's host test asserts the whole graph resolves under Development-mode container validation — so cutting this task breaks Task 7 outright. It also creates `SKNormalizerOptions`, which Task 10's manifest env vars bind to.
 
 **Files:**
 - Create: `src/Processor.SKNormalizer/SKNormalizerOptions.cs`
@@ -2791,6 +2887,7 @@ Create `src/tests/BaseApi.Tests/SKNormalizer/SKNormalizerConfigSchemaTests.cs`:
 ```csharp
 using System.Text;
 using System.Text.Json;
+using BaseProcessor.Core.Startup;
 using BaseProcessor.Core.Validation;
 using Processor.SKNormalizer;
 using Xunit;
@@ -2834,7 +2931,7 @@ public sealed class SKNormalizerConfigSchemaTests
         // the build rather than leaving a replica published UNHEALTHY. camelCase is pinned: the
         // binder is case-insensitive but a JSON Schema property name is not, so only one of
         // {"Handler":...} and {"handler":...} would validate.
-        var problems = ConfigSchemaConformanceProbe.Check(typeof(SKNormalizerConfig), Definition());
+        var problems = ConfigSchemaConformance.Check(typeof(SKNormalizerConfig), Definition());
 
         Assert.Empty(problems);
     }
@@ -2883,7 +2980,7 @@ public sealed class SKNormalizerConfigSchemaTests
 }
 ```
 
-> `ConfigSchemaConformance` is `internal` to `BaseProcessor.Core`. Before writing `ConfigSchemaConformanceProbe`, check whether `BaseProcessor.Core` already names `BaseApi.Tests` in an `InternalsVisibleTo` — the design notes it does so for other types. **If it does**, delete the `ConfigSchemaConformanceProbe` indirection and call `ConfigSchemaConformance.Check` directly. **If it does not**, drop `TheSchemaDescribesTheConfigRecord` entirely rather than adding an `InternalsVisibleTo` to the framework — this plan does not modify `BaseProcessor.Core`, and the startup check still runs in production.
+> `ConfigSchemaConformance` is `internal` to `BaseProcessor.Core` and lives in the `BaseProcessor.Core.Startup` namespace. It is reachable from this test assembly: `BaseProcessor.Core.csproj:14` carries `<InternalsVisibleTo Include="BaseApi.Tests" />` — verified during pre-flight, so call it directly and add no `InternalsVisibleTo` anywhere.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -2943,7 +3040,7 @@ cd C:/Users/UserL/source/repos/SK_P9/src
 dotnet test tests/BaseApi.Tests/BaseApi.Tests.csproj --filter "FullyQualifiedName~SKNormalizerConfigSchemaTests"
 ```
 
-Expected: 6 passed (or 5, if `TheSchemaDescribesTheConfigRecord` was dropped per the Step 1 note).
+Expected: 6 passed.
 
 - [ ] **Step 6: Commit**
 
