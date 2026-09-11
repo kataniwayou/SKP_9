@@ -98,7 +98,7 @@ public static class ProcessorHost
         // call configured rather than replacing it.
         builder.Services.AddOpenTelemetry()
             .WithMetrics(m => m
-                .AddMeter("Processor.SKNormalizer"));
+                .AddMeter(ProcessorPipelineMeter.Name));
 
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
