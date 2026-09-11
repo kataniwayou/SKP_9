@@ -2781,27 +2781,9 @@ public sealed class PassThroughFieldWhitelist : IFieldWhitelist
 }
 ```
 
-- [ ] **Step 4: Fix the meter name in `ProcessorHost.cs`**
+> `Program.cs` and `ProcessorHost.cs` already exist — Task 1 created them as a minimal shell, because `<OutputType>Exe</OutputType>` cannot compile without an entry point, and Task 1's fix round already corrected the meter name to `ProcessorPipelineMeter.Name`. `Program.cs` is complete; leave it alone. You only add registrations to `ProcessorHost.cs`.
 
-`Program.cs` and `ProcessorHost.cs` already exist — Task 1 created them as a minimal shell, because `<OutputType>Exe</OutputType>` cannot compile without an entry point. `Program.cs` is complete and correct; leave it alone.
-
-`ProcessorHost.cs` has one thing to correct. It currently reads:
-
-```csharp
-            .WithMetrics(m => m
-                .AddMeter("Processor.SKNormalizer"));
-```
-
-A string literal there registers a meter name nothing emits to, so the pipeline's instruments would be silently absent from every dashboard. Every sibling processor names the shared constant instead. Change it to:
-
-```csharp
-            .WithMetrics(m => m
-                .AddMeter(ProcessorPipelineMeter.Name));
-```
-
-`ProcessorPipelineMeter` is in `BaseProcessor.Core.Observability`, which the file already imports.
-
-- [ ] **Step 5: Add the registrations to `ProcessorHost.cs`**
+- [ ] **Step 4: Add the registrations to `ProcessorHost.cs`**
 
 The file's `Create` method currently ends with `AddBaseProcessor` then `return builder.Build();` and registers nothing of this processor's own. Insert the following **between** the `AddBaseProcessor` line and `return builder.Build();`:
 
@@ -2835,7 +2817,7 @@ The file's `Create` method currently ends with `AddBaseProcessor` then `return b
         builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, SKNormalizerProcessor>();
 ```
 
-- [ ] **Step 6: Run the host test to verify it passes**
+- [ ] **Step 5: Run the host test to verify it passes**
 
 ```bash
 cd C:/Users/UserL/source/repos/SK_P9/src
@@ -2844,7 +2826,7 @@ dotnet test tests/BaseApi.Tests/BaseApi.Tests.csproj --filter "FullyQualifiedNam
 
 Expected: 3 passed. If `TheServiceGraphResolves` fails on constructibility, a registration is missing above — Development mode validates the whole graph without instantiating anything.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 cd C:/Users/UserL/source/repos/SK_P9
