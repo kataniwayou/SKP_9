@@ -41,6 +41,16 @@ namespace BaseApi.Tests.Live.ArchiveExpander;
 public sealed class ArchiveExpanderLiveTests
 {
     private const string NodeDir = "/mnt/skp-files/in";
+
+    /// <summary>
+    /// Where FilePersister writes, and the only place a test can see what the chain produced.
+    /// <para>
+    /// The out topic carries a path, not content — so an assertion about BYTES has to follow that
+    /// path back to the node. A different directory from <see cref="NodeDir"/> on purpose: writing
+    /// back into the input folder would make the comparison meaningless.
+    /// </para>
+    /// </summary>
+    private const string OutDir = "/mnt/skp-files/out";
     private static string Node => RealStack.Get("SKP_KIND_NODE", "desktop-control-plane");
     private static string OutTopic => RealStack.Get("SKP_KAFKA_OUT_TOPIC", "skp-documents");
 
@@ -60,6 +70,21 @@ public sealed class ArchiveExpanderLiveTests
 
         Run("docker", $"cp \"{local}\" {Node}:{NodeDir}/{name}");
         return $"{NodeDir}/{name}";
+    }
+
+    /// <summary>
+    /// The bytes FilePersister wrote, copied off the node.
+    /// <para>
+    /// <c>docker cp</c> rather than <c>docker exec cat</c>: <see cref="Run"/> deliberately does not
+    /// redirect stdout — see its comment for why a pipe nobody drains is a deadlock — and these are
+    /// archive bytes, which do not survive a text pipe anyway.
+    /// </para>
+    /// </summary>
+    private static byte[] ReadBack(string name)
+    {
+        var local = Path.Combine(Path.GetTempPath(), $"out-{name}");
+        Run("docker", $"cp {Node}:{OutDir}/{name} \"{local}\"");
+        return File.ReadAllBytes(local);
     }
 
     /// <summary>
@@ -107,17 +132,29 @@ public sealed class ArchiveExpanderLiveTests
 
         var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
-            // providerName rides along exactly as the org's records carry it, and the reader must
-            // ignore it. Its absence from the document below is the assertion.
-            Value = JsonSerializer.Serialize(new { filePath = path, providerName = "acme-feed" }),
+            // filePath ALONE. This carried providerName = "acme-feed" until 2026-09-11, on the
+            // grounds that the org's records carry it and the reader must ignore it -- true of
+            // FileLocator, which binds case-insensitively and drops unknowns, and false of the
+            // registered schema. file-locator declares additionalProperties: false, so a second key
+            // never reaches the reader: KafkaImporter's OWN output validation refuses the record and
+            // the lineage ends at the first hop, with every test here timing out on a chain that
+            // never ran. Observed as
+            //   warn ProcessedDataHandler: output failed its schema -- reported failed: /providerName:
+            //
+            // The guarantee the old field tested has not been lost, it moved and got stronger: an
+            // unexpected key used to be dropped downstream, and is now refused at the edge.
+            Value = JsonSerializer.Serialize(new { filePath = path }),
         });
 
         Assert.True(result.Status == PersistenceStatus.Persisted,
             $"produce to {RealStack.KafkaTopic} did not persist: status was {result.Status}");
     }
 
-    /// <summary>The first document on the out topic whose root name matches, or null on timeout.</summary>
-    private static JsonElement? Await(string name, TimeSpan timeout)
+    /// <summary>
+    /// The path the file was written to, off the first locator on the out topic naming it --
+    /// or null on timeout. See the matcher below for why this is a path and not a document.
+    /// </summary>
+    private static string? Await(string name, TimeSpan timeout)
     {
         using var consumer = new ConsumerBuilder<Ignore, string>(new ConsumerConfig
         {
@@ -138,10 +175,20 @@ public sealed class ArchiveExpanderLiveTests
             }
 
             var root = JsonDocument.Parse(result.Message.Value).RootElement;
-            if (root.TryGetProperty("metadata", out var metadata)
-                && metadata.GetProperty("name").GetString() == name)
+
+            // THE TERMINAL SHAPE, WHICH IS A LOCATOR AND NOT A DOCUMENT. This matched
+            // metadata.name until 2026-09-11 -- an ArchiveExpander document -- and had not been
+            // able to match anything since the chain stopped ending at the expander. The out topic
+            // carried envelopes once ArchiveCollapser was appended (2026-09-10) and carries
+            // {"filePath"} locators now that FilePersister precedes the exporter. A sink is the only
+            // way onto a topic, its single inputSchemaId is file-locator, and SourceHash is unique
+            // per processor row -- so no workflow can ever put a mid-chain shape on a topic, and
+            // this is the only shape a test can wait for.
+            if (root.TryGetProperty("filePath", out var filePath)
+                && filePath.GetString() is { Length: > 0 } written
+                && Path.GetFileName(written) == name)
             {
-                return root.Clone();
+                return written;
             }
         }
 
@@ -149,30 +196,57 @@ public sealed class ArchiveExpanderLiveTests
     }
 
     [Fact]
-    public async Task AZipOnTheNodeBecomesADocumentOnTheOutTopic()
+    public async Task AZipOnTheNodeTraversesTheChainAndIsWrittenBack()
     {
         RealStack.SkipUnlessEnabled();
 
         // THE WHOLE CHAIN: a zip seeded onto the node reaches FileFetcher through the mount, becomes
-        // an envelope, crosses to ArchiveExpander, and comes out the far side as a document on the
-        // exporter's out topic. This is what proves the mount, both pods' manifests, and every edge
-        // in between are wired correctly together — no single hermetic suite can, because each one
-        // replaces its own processor's neighbours with an in-process call.
+        // an envelope, is expanded to a document, collapsed back to an envelope, written to the out
+        // folder by FilePersister, and its path published by the exporter. This is what proves the
+        // mount, every pod's manifest, and every edge between them are wired together — no hermetic
+        // suite can, because each one replaces its own processor's neighbours with an in-process call.
+        //
+        // RENAMED FROM AZipOnTheNodeBecomesADocumentOnTheOutTopic, and the rename is the honest part:
+        // this asserts SIX HOPS, not one. It waited for a document and inspected its entryCount and
+        // its content array, which was a claim about ArchiveExpander alone while the expander was the
+        // last step. It has not been since 2026-09-10. A document never reaches a topic now and
+        // cannot: a sink is the only way onto one, its single inputSchemaId is file-locator, and
+        // SourceHash is unique per processor row -- so there is no second exporter identity to give
+        // a different input schema to, and no workflow can end anywhere but here.
+        //
+        // WHAT THAT COSTS, SAID PLAINLY: a failure in the collapser or the persister now surfaces as
+        // an ArchiveExpander failure. When this goes red, read the correlation-id trace before
+        // reading the test name -- the orchestrator's hand-off lines bracket every step, so the hop
+        // that actually broke is visible there and is not visible here.
         var name = $"orders-{Guid.NewGuid():N}.zip";
         var path = SeedZip(name, ("a.csv", "id\n"), ("b.csv", "id,name\n"));
 
         await ProduceAsync(path);
 
-        var doc = Await(name, Window);
-        Assert.True(doc.HasValue, $"no document naming {name} reached {OutTopic} within {Window.TotalMinutes:0} minutes");
+        var written = Await(name, Window);
+        Assert.False(string.IsNullOrEmpty(written),
+            $"no locator naming {name} reached {OutTopic} within {Window.TotalMinutes:0} minutes");
 
-        var root = doc!.Value;
-        Assert.Equal(JsonValueKind.Array, root.GetProperty("content").ValueKind);
-        Assert.Equal(2, root.GetProperty("metadata").GetProperty("entryCount").GetInt32());
-        Assert.Equal(2, root.GetProperty("content").GetArrayLength());
+        // The path is minted by FilePersister from its configured folder and the envelope's file
+        // name -- not folder + name + extension, which would read orders-....zip.zip.
+        Assert.Equal($"{OutDir}/{name}", written);
 
-        // The one field the reader is required to drop.
-        Assert.DoesNotContain("acme", root.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        // The ENTRIES, one layer down, because the topic no longer carries them. Deliberately not a
+        // byte comparison against the seeded file: the chain rebuilds the archive rather than copying
+        // it, so a first pass over an archive this system did not write differs in its container
+        // framing -- platform stamp, compression level -- while every entry's content is identical.
+        // The entries are the claim that survives both.
+        using var archive = new ZipArchive(new MemoryStream(ReadBack(name)), ZipArchiveMode.Read);
+
+        Assert.Equal(["a.csv", "b.csv"], archive.Entries.Select(e => e.Name).Order().ToArray());
+        Assert.Equal("id,name\n", new StreamReader(
+            archive.Entries.Single(e => e.Name == "b.csv").Open()).ReadToEnd());
+
+        // NO providerName ASSERTION. It used to read Assert.DoesNotContain("acme", ...) against the
+        // document, proving the reader dropped a field the producer sent. The producer cannot send
+        // one any more -- file-locator's additionalProperties: false makes the importer refuse the
+        // whole record -- so the assertion would be vacuous. What replaced it is not a test here but
+        // the schema row itself, one hop earlier and binding on every producer rather than this one.
     }
 
     // ---------------------------------------------------------------------------------------
@@ -347,34 +421,23 @@ public sealed class ArchiveExpanderLiveTests
             + "enforces shape, entry count or depth");
     }
 
-    [Fact]
-    public async Task AtTheDefaultDepthANestedZipStaysAFile()
-    {
-        RealStack.SkipUnlessEnabled();
-
-        // The wired ArchiveExpander step omits maxDepth, so this is the default path: the outer zip
-        // is expanded and the inner one is recorded as a file. It pins that splitting FileFetcher out
-        // and adding nesting did not change what an existing workflow produces.
-        var name = $"outer-{Guid.NewGuid():N}.zip";
-        var path = SeedBytes(name, ZipOf(
-            ("inner.zip", ZipOf(("a.csv", "id\n"u8.ToArray()))),
-            ("b.csv", "id,name\n"u8.ToArray())));
-
-        await ProduceAsync(path);
-
-        var doc = Await(name, Window);
-        Assert.True(doc.HasValue, $"no document naming {name} reached {OutTopic} within {Window.TotalMinutes:0} minutes");
-
-        var root = doc!.Value;
-        Assert.Equal(2, root.GetProperty("metadata").GetProperty("entryCount").GetInt32());
-
-        var inner = root.GetProperty("content").EnumerateArray()
-            .Single(e => e.GetProperty("metadata").GetProperty("name").GetString() == "inner.zip");
-
-        // A base64 string, not an array. An archive that was not opened is a file.
-        Assert.Equal(JsonValueKind.String, inner.GetProperty("content").ValueKind);
-        Assert.Equal(0, inner.GetProperty("metadata").GetProperty("entryCount").GetInt32());
-    }
+    // REMOVED 2026-09-11: AtTheDefaultDepthANestedZipStaysAFile.
+    //
+    // It seeded outer.zip containing inner.zip, waited for the document, and asserted inner.zip
+    // arrived as a base64 STRING with entryCount 0 -- an archive the depth limit did not open is a
+    // file. Two independent reasons it cannot be ported:
+    //
+    // Its subject exists only in the intermediate document. By the time anything reaches a topic
+    // ArchiveCollapser has rebuilt the archive, and a rebuilt outer.zip containing inner.zip is
+    // identical whether the inner one was left closed or expanded and repacked. There is nothing
+    // left at the terminal to distinguish the two.
+    //
+    // And its premise was already false. It says "the wired ArchiveExpander step omits maxDepth, so
+    // this is the default path". That step is wired {"maxDepth": 4}. It has been asserting the
+    // default against a step that is not at the default.
+    //
+    // ArchiveExpanderDepthTests covers the depth rule hermetically, against an in-process processor
+    // where the document is still in hand -- which is the only place this claim can be made.
 
     [Fact]
     public async Task ACorruptZipFailsAndLogsTheFileName()
