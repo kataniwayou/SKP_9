@@ -74,57 +74,51 @@ particular feed. ArchiveCollapser reads the same file as its input schema, one h
 - `content` is one key holding one of three things: a base64 string (a file's bytes), an array of
   nodes (what an archive expanded to), or null (an archive that expanded to nothing). It is never
   two keys that can disagree — see `FileContent` for why that pair was collapsed.
-- **Depth two, structurally.** `depth2` may hold an array of `depth1`, `depth1` may hold an array of
-  `depth0`; `depth0`'s `content` is a string and nothing else, so it cannot hold entries. That is the
-  whole depth rule: root, one archive of archives, one archive of leaves — a zip inside a zip, both
-  expanded.
+- **Any depth.** One `node` definition whose `items` point back at itself. A validator resolves the
+  `$ref` only when it has an array element in hand, so it expands exactly as far as the document
+  nests and no further.
 
-## How depth is expressed, and why it is not a keyword
+## Depth is NOT expressed here, and this file used to say the opposite
 
-JSON Schema has no depth keyword, and there is no way to say "at most two levels" without writing
-the levels out. So the bound is a property of the STRUCTURE: N node definitions, each referencing
-the next, and the last one admitting only a string. You read the limit by counting the definitions.
+**This section argued the reverse until 2026-09-11, and the reversal is the point.** It used to hold
+an unrolled ladder — `depth2` → `depth1` → `depth0`, the last admitting only a string — and it
+rejected the self-referencing form in as many words: *"a schema that admits any depth can never tell
+you the depth was wrong."*
 
-To admit a zip whose entries are themselves zips of zips — `MaxDepth: 3` on the step — add a level
-and repoint the root:
+Three things retired that argument.
 
-    "$ref": "#/$defs/depth3",
+**A depth ceiling cannot be exact, so it was never telling you the depth was wrong.** Archive trees
+are ragged: a `.zip` holding `readme.csv` beside `inner.zip` ends one branch at level 2 and its
+sibling at level 3, in one document, at one `MaxDepth`. Every level therefore had to admit
+`["string","array","null"]` so a branch could stop early — which means the ladder only ever caught
+documents that were too DEEP, never ones that were too shallow. It was a ceiling, not a shape.
 
-    "depth3": {
-      "type": "object", "additionalProperties": false,
-      "required": ["metadata", "content"],
-      "properties": {
-        "metadata": { "$ref": "#/$defs/metadata" },
-        "content": { "type": ["string", "array", "null"],
-                     "items": { "$ref": "#/$defs/depth2" } }
-      }
-    },
+**The ceiling was checked twice and the wrong copy was authoritative.** `MaxDepth` is validated into
+`1..ArchiveExpanderConfig.MaxSupportedDepth` before a file is opened; this file re-stated a bound
+nothing kept in sync with it. A step raised past the schema produced a document rejected by the post
+handler with `EntryId: Guid.Empty` and no file name — a depth fault diagnosed as an anonymous
+validation failure one hop later. That is strictly worse than the config validator rejecting it up
+front, by name, with the value it was given.
 
-leaving `depth2`, `depth1` and `depth0` as they are. Each level is the same object with `items`
-pointing one step shallower.
+**Raising it cost a migration every time.** A schema row is frozen once referenced, so every depth
+change meant a new row, both processors repointed, and both restarted — for a number that was
+already enforced elsewhere.
 
-**The alternative — a self-referencing `$ref` admitting any depth — is rejected.** It would validate
-every document this processor can produce, which sounds like a feature and is the opposite: a schema
-that admits any depth can never tell you the depth was wrong. The unrolled form is what makes a
-`MaxDepth` the schema does not expect show up as a validation failure instead of a surprise
-downstream.
+So the bound now lives in exactly one place: `MaxSupportedDepth`, currently 4, checked by the
+expander before any file is opened and again by `ArchiveBuilder` on the way back up. This file states
+the SHAPE and says nothing about how far it nests.
 
-**The widening from depth 1 to depth 2 was a deliberate LOOSENING, and it has a cost.** A depth-1
-document still validates, because `depth1` admits string content — so nothing broke. But a step
-running at `MaxDepth: 1` and producing a shallow document is no longer distinguishable by this
-schema from one that should have gone deeper. The schema now says less about what a given feed
-should look like, which is precisely why per-feed variants exist below.
+**What was given up, stated plainly.** A document deeper than intended is no longer a validation
+failure here. It is a rejected payload at the expander (above `MaxSupportedDepth`), or an
+`ArchiveWritingException` at the collapser naming the node it tripped on (a document from elsewhere),
+or — past roughly 32 node levels — a `JsonSerializerOptions.MaxDepth` fault the collapser reports as
+`the branch is not JSON`. The first two are better diagnoses than this file ever produced. The third
+is worse, and is the reason `MaxSupportedDepth` was brought down to a number well below that wall.
 
-**Nothing keeps `MaxDepth` and this file in sync, and that is deliberate.** The step payload states
-what to expand; this states what a document may look like. When they disagree the document fails
-validation, exactly as a wrong entry count does. Note what that costs before raising either: the post
-handler reports `Failed` with `EntryId: Guid.Empty` and no file path, so the processor logs the depth
-it actually reached in `ProcessAsync` — that log line is where the diagnosis lives.
-
-**The depth here caps every workflow using this processor.** `OutputSchemaId` is a column on the
-processor row, not the step, so there is one output schema per processor identity. A step's
-`MaxDepth` can sit at or below what this file admits, never above it. A feed needing more than the
-baseline allows needs its own processor identity, not just its own payload.
+**One output schema per processor identity still holds.** `OutputSchemaId` is a column on the
+processor row, not the step, so every workflow using ArchiveExpander shares this shape. What changed
+is that sharing a shape no longer means sharing a depth limit — steps differ by `MaxDepth` alone, and
+none of them needs its own processor identity to nest deeper than another.
 
 ## What it cannot assert
 
@@ -135,7 +129,7 @@ construction. `format` and `contentEncoding` are ANNOTATIONS in 2020-12, not ass
 that is ever needed.
 
 **Which of the three `content` forms a given node should have.** `type: ["string", "array", "null"]`
-admits all three at `depth2`, because the root may legitimately be any of them: a plain file, an
+admits all three at every node, because the root may legitimately be any of them: a plain file, an
 expanded archive, or an empty one. A feed that always ships an archive can narrow it — see below.
 
 ## Per-feed variants
@@ -145,35 +139,41 @@ own schema derived from this one. Constrain `content`, never `metadata.entryCoun
 the fact, the count is derived, and pinning the derived field would let a counting bug satisfy a
 rule the content fails.
 
-Always an archive, exactly three entries — the general form, following the file's own rule of
-pointing one step shallower than the root (`depth2` here, so `depth1`):
+Always an archive, exactly three entries. There is one definition to point at now — `node` — rather
+than a level one step shallower than the root, which is the practical difference the recursive form
+makes to a variant:
 
     "content": { "type": "array", "minItems": 3, "maxItems": 3,
-                 "items": { "$ref": "#/$defs/depth1" } }
+                 "items": { "$ref": "#/$defs/node" } }
 
 Dropping `"string"` and `"null"` from the type is what makes it "always an archive": a plain file or
 an empty archive now fails.
 
 One `.wav` and two `.csv`, order-independent. This variant is deliberately NARROWER than the one
 above: a `.wav` or `.csv` entry is always a leaf on the wire, never itself a further archive, so it
-points straight at `depth0` and skips `depth1` on purpose — this is the "always an archive of
-leaves" case, not the general form. Note also that `minContains`/`maxContains` must sit beside
-their OWN `contains`, so two cardinality rules need two subschemas under `allOf`:
+The ladder expressed that by pointing at `depth0`, whose content was string-only; with one
+recursive definition the leaf-ness has to be stated rather than inherited, so the variant declares
+its own `leaf` refinement:
+
+    "leaf": { "$ref": "#/$defs/node", "properties": { "content": { "type": "string" } } }
+
+Note also that `minContains`/`maxContains` must sit beside their OWN `contains`, so two cardinality
+rules need two subschemas under `allOf`:
 
     "content": {
       "type": "array", "minItems": 3, "maxItems": 3,
-      "items": { "$ref": "#/$defs/depth0" },
+      "items": { "$ref": "#/$defs/leaf" },
       "allOf": [
         { "contains": { "$ref": "#/$defs/wav" }, "minContains": 1, "maxContains": 1 },
         { "contains": { "$ref": "#/$defs/csv" }, "minContains": 2, "maxContains": 2 }
       ]
     }
 
-with narrowing definitions that REFINE `depth0` rather than replace it — legal because `$ref` takes
+with narrowing definitions that REFINE `leaf` rather than replace it — legal because `$ref` takes
 sibling keywords in 2020-12, and note the omitted `additionalProperties`, which only ever sees
 `properties` declared in the same schema object:
 
-    "wav": { "$ref": "#/$defs/depth0",
+    "wav": { "$ref": "#/$defs/leaf",
              "properties": { "metadata": { "properties": { "extension": { "const": ".wav" } } } } }
 
 ## Registration

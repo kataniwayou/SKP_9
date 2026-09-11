@@ -124,35 +124,43 @@ public sealed class ArchiveExpanderSchemaTests
     }
 
     [Fact]
-    public void ADocumentNestedDeeperThanTheSchemaAdmitsIsRejected()
+    public void ADocumentNestedFarDeeperThanAnyFeedStillValidates()
     {
-        // THE DEPTH RULE, and it is structural rather than declared: the baseline unrolls to two
-        // levels, so `depth0` admits only a string and an entry carrying its own entries has nowhere
-        // to validate against. One level past the baseline -- root, one archive, one leaf -- now
-        // validates (see ADepthTwoDocumentValidates); this document nests one level past THAT.
+        // THE DEPTH RULE IS THAT THERE ISN'T ONE HERE, and this test is the inversion of the one it
+        // replaced. That test -- ADocumentNestedDeeperThanTheSchemaAdmitsIsRejected -- asserted the
+        // opposite against the unrolled ladder, where depth0 admitted only a string so an entry
+        // carrying its own entries had nowhere to validate.
         //
-        // This is the failure a step whose MaxDepth exceeds the registered schema produces. It is
-        // the contract working — nothing keeps MaxDepth and the schema in sync on purpose — and it
-        // is why ArchiveExpanderProcessor logs the depth it actually reached: this rejection carries no
-        // file path and no payload by the time an operator sees it.
-        var json = """
-            {"metadata":{"name":"o.zip","extension":".zip","sizeBytes":9,"createdUtc":null,
-             "modifiedUtc":null,"entryCount":1},
-             "content":[{"metadata":{"name":"i.zip","extension":".zip","sizeBytes":6,
-               "createdUtc":null,"modifiedUtc":null,"entryCount":1},
-               "content":[{"metadata":{"name":"m.zip","extension":".zip","sizeBytes":3,
-                 "createdUtc":null,"modifiedUtc":null,"entryCount":1},
-                 "content":[{"metadata":{"name":"d.csv","extension":".csv","sizeBytes":3,
-                   "createdUtc":null,"modifiedUtc":null,"entryCount":0},"content":"aWQK"}]}]}]}
-            """;
+        // archive-document v3.0.0 is one self-referencing node. A validator resolves the $ref only
+        // when it has an array element in hand, so the schema expands exactly as far as the document
+        // nests: there is no level at which entries run out of somewhere to go. Depth is bounded by
+        // ArchiveExpanderConfig.MaxSupportedDepth, checked before a file is opened, and by
+        // ArchiveBuilder's own guard on the way back up -- both of which name the value they rejected
+        // and neither of which is this file. See src/tests/BaseApi.Tests/Schemas/README.md.
+        //
+        // Six levels, well past MaxSupportedDepth: the point is that the SCHEMA does not care, so
+        // the fixture is deliberately deeper than anything the expander would be allowed to produce.
+        //
+        // Ordinary escaped strings rather than raw literals: the fragments here both begin and end
+        // on a quote, which is exactly where a """ delimiter stops being unambiguous.
+        const string metadata =
+            "\"extension\":\".zip\",\"sizeBytes\":9,\"createdUtc\":null," +
+            "\"modifiedUtc\":null,\"entryCount\":1";
+
+        var node =
+            "{\"metadata\":{\"name\":\"d.csv\",\"extension\":\".csv\",\"sizeBytes\":3," +
+            "\"createdUtc\":null,\"modifiedUtc\":null,\"entryCount\":0},\"content\":\"aWQK\"}";
+
+        for (var level = 6; level > 0; level--)
+        {
+            node = "{\"metadata\":{\"name\":\"l" + level + ".zip\"," + metadata + "},"
+                 + "\"content\":[" + node + "]}";
+        }
 
         var ok = ProcessorJsonSchemaValidator.TryValidate(
-            Definition(), Encoding.UTF8.GetBytes(json), out var errors);
+            Definition(), Encoding.UTF8.GetBytes(node), out var errors);
 
-        Assert.False(ok);
-        // Proves the DEPTH rule rejected it -- not a metadata typo in this hand-written fixture --
-        // by naming the exact instance location and keyword the validator reported.
-        Assert.Contains("/content/0/content/0/content: type", errors);
+        Assert.True(ok, string.Join("; ", errors));
     }
 
     [Fact]
