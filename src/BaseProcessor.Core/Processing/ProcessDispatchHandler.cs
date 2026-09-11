@@ -203,7 +203,11 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // field, so this line is the only record of WHY the step failed — and the validator's
             // output can quote payload fragments, which is precisely why it belongs in this
             // processor's own logs rather than on the wire and in the orchestrator's projections.
-            _logger.LogInformation(
+            // WARNING, not Information. A failed step is the thing an operator goes looking for, and
+            // while every failure line here sat at Information a severity filter could not find one —
+            // only a text match could. The transform-faulted line below was already Warning; these are
+            // brought up to meet it.
+            _logger.LogWarning(
                 "input failed its schema — reported failed: {SchemaErrors}", string.Join("; ", errors));
 
             await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
@@ -235,7 +239,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // The author's own text, and this line is now the only place it survives — StepOutcome
             // carries no message. Author-authored, so verbatim is safe here exactly as it once was on
             // the wire.
-            _logger.LogInformation("the author reported the step failed: {Reason}", ex.Message);
+            _logger.LogWarning("the author reported the step failed: {Reason}", ex.Message);
 
             await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
         }
@@ -312,6 +316,33 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // measured across their transform and nothing else, which is the number worth having.
         _logger.LogInformation(
             "the step returned after {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+
+        // THE TERMINAL OUTCOME, and it exists because a sink's success was the one disposition nobody
+        // reported. An exporter sends no branch, so the post handler never runs and never sends the
+        // StepOutcome every other completed step reports — while a FAILED export does report, through
+        // the catch chain above. The orchestrator therefore heard about a run only when it went
+        // wrong, and its silence at the end of a trace meant either "finished" or "the records were
+        // lost". Two independent end-of-run markers now exist, on two different pods, which matters
+        // in a deployment that demonstrably drops log records.
+        //
+        // Guid.Empty, NOT d.EntryId, and the difference is not cosmetic. The reclaim above has already
+        // deleted that key: naming it would send StepOutcomeHandler to ReadAsync a blob that is gone,
+        // which takes the duplicate-delivery branch and logs "the execution blob is absent" at
+        // Warning — every successful run ending in a spurious warning. Empty skips the read, data is
+        // empty, and no successor matches, so the orchestrator's existing "the terminal step completed
+        // ... the run ends here" line fires. No new log statement anywhere: that line was already
+        // worded for this event and had never been reachable on the happy path.
+        //
+        // A successor wired AFTER a sink would now be dispatched with Guid.Empty rather than silently
+        // never running. That is a graph an author should not have written, and dispatching it as a
+        // source step — the sentinel the pre handler already implements — is the more honest of the
+        // two failures.
+        if (ran && _processor.EndsLineage)
+        {
+            await SendAsync(
+                new StepOutcome(d.CorrelationId, d.ExecutionId, d.WorkflowId, d.StepId, d.ProcessorId,
+                                Guid.Empty, StepResult.Completed), ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

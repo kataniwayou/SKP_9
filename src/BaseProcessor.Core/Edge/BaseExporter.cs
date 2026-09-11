@@ -55,6 +55,20 @@ public abstract class BaseExporter<TConfig>(ILogger logger) : BaseProcessor<TCon
     private string? _key;
 
     /// <summary>
+    /// A sink ends the lineage, so the pre handler reports the terminal outcome this class's silence
+    /// would otherwise withhold.
+    /// <para>
+    /// <b>Without it the orchestrator hears about a run only when it FAILS.</b> A successful export
+    /// sends no branch, so the post handler never runs, so no <c>StepOutcome</c> is reported and the
+    /// orchestrator's "the run ends here" line never fires — while a failed export reports through
+    /// <c>Failure(...)</c> and does log it. That asymmetry made silence at the end of a trace mean
+    /// either "finished" or "the records were lost", which is the one thing an operator needs it not
+    /// to mean.
+    /// </para>
+    /// </summary>
+    internal override bool EndsLineage => true;
+
+    /// <summary>
     /// What "the same sink" means. It differs from the importer's on purpose and the difference is
     /// worth stating: a producer is not bound to the topic it writes to, so the destination is
     /// deliberately absent from a Kafka exporter's key, while the delivery timeout — fixed at
