@@ -74,20 +74,34 @@ the tree contract, it can reuse the existing tree row on both edges:
 | Expander out → Normalizer in | the tree row |
 | Normalizer out → Collapser in | the same tree row |
 
-**No new schema row is created.** The consequence is a hard constraint on every handler: the layout
-returned from stage 8 must fit within the depth the existing tree row already admits. A handler that
-wants deeper nesting is asking to re-register a frozen row that three other processors point at, and
-that is a change to be made deliberately, once, not discovered by the first handler that needs it.
+**No new schema row is created by default.** The consequence is a hard constraint on every handler:
+the layout returned from stage 8 must fit within the depth the existing tree row already admits. A
+handler that wants deeper nesting is asking to re-register a frozen row that three other processors
+point at, and that is a change to be made deliberately, once, not discovered by the first handler
+that needs it.
+
+**The operator may still choose a per-feed input row, and §3.2 is why they would.** Pointing this
+processor's `InputSchemaId` at a tighter variant — one stating entry counts and layout — turns a
+wrong-feed document into a dispatch-time rejection. It costs a new row and a repoint on **both** sides
+of that edge, since the edge check compares ids; it is a deliberate per-feed act, not the default.
 
 ### 1.3 The division of labour, and where it is enforced
 
-> **The workflow is built for the handler, not the handler for the workflow.** SKNormalizer is the
-> only place provider behaviour is *code*. Every other processor in the chain is generic.
+> **The workflow is shaped for a file structure; the handler is the provider-specific piece within
+> that shape.** SKNormalizer is the only place provider behaviour is *code*. Every other processor in
+> the chain is generic, and so is every other payload in it.
 
-**But genericity lives in the code, not in the wiring.** FileFetcher's path, ArchiveExpander's
-`MaxDepth`, FilePersister's folder are all provider-shaped *values*. A workflow is therefore a
-provider-specific instantiation of generic parts, and **cannot be reused across providers by swapping
-only the handler name** — every payload in the chain is part of that provider's configuration.
+**One workflow design therefore serves every provider that shares a structure.** The behavioural
+payloads in the chain are functions of **file structure, not of provider identity**:
+ArchiveExpander's `MaxDepth` is how deeply the archive nests, and ArchiveCollapser takes no payload
+at all. Two providers whose files nest the same way share every one of those numbers. What remains
+varying — FileFetcher's path, FilePersister's folder — is a **deployment coordinate**, where files
+arrive and where they go, not behaviour. Providers dropping into the same watched location differ in
+nothing but the handler name.
+
+The only pedantic residue: a step payload is fixed at publish, so "swapping the handler" means
+publishing another workflow of the same shape naming a different handler. It is reuse of the design,
+not one running workflow serving many providers.
 
 What the operator owns, and what checks it:
 
@@ -95,7 +109,8 @@ What the operator owns, and what checks it:
 |---|---|
 | wiring the steps in order | **publish** — `SchemaEdgeValidator` compares row ids and refuses a mismatch |
 | naming a handler that exists | **publish** — the config schema `enum` of §3.1 |
-| naming the handler that matches the *feed* | **dispatch** — nothing can check it; stages 1–2 (§3.2) |
+| authoring a per-feed input row | **dispatch** — `ProcessDispatchHandler` validates before the processor is entered (§3.2) |
+| naming the handler that matches the *feed* | **dispatch** — stage 2, for structurally identical providers only (§3.2) |
 | the expander's `MaxDepth` | **dispatch** — stage 2, as an opaque leaf where entries were expected |
 
 **`MaxDepth` deserves its own sentence because it is the subtlest of the four.** It decides whether a
@@ -203,21 +218,33 @@ enum is unreachable by any workflow, and a name in the enum with no handler behi
 step that cannot run. `ProviderHandlerRegistry` therefore performs its own conformance check against
 the resolved config schema definition and **refuses readiness on a mismatch**, naming both sets.
 
-### 3.2 What no schema can check: right handler, wrong feed
+### 3.2 Per-feed input rows, and the small gap they leave
 
-**A data schema constrains structure, never provenance.** All three processors of the chain point at
-the one tree row, and two different providers' workflows use byte-identical rows. Nothing in the
-schema system knows which *feed* a step will carry, so a handler that is wrong-but-plausible for the
-data publishes cleanly and fails only when real content arrives.
+**The operator authors the schemas, and that is the right place for this knowledge.** The operator
+knows what a provider ships and what the customer expects; nothing in this processor does. A per-feed
+tree variant — one that states entry counts and layout rather than merely the generic
+`{metadata, content}` shape — is an anticipated mechanism, not an abuse of one, and pointing this
+processor's `InputSchemaId` at it is how feed expectations become enforceable.
 
-That failure lands in stage 1 or stage 2, which makes those two messages **the entire diagnostic for
-the most likely operator mistake**. They are written for that reader: a `Locate` that finds nothing
-reports that this handler recognized no items in this document, and a `Validate` failure reports
-which expectation the content broke — never a bare parse error.
+**It fires at dispatch, before any handler runs.** `ProcessDispatchHandler` validates `data` against
+`identity.InputDefinition` ahead of entering the processor, fails the step, and logs the validator's
+own error text at Warning. A document from the wrong feed is therefore rejected with a structural
+diagnosis rather than reaching stage 1 and producing a handler's guess at what went wrong.
 
-This is a residual risk, not a hole to be closed. Closing it would require the schema to express
-provenance, which would mean one row per provider and would couple the generic processors on either
-side to the provider list.
+**What remains uncheckable is narrow, and it is narrow for the same reason §1.3 is true.** Precisely
+because one workflow shape serves every provider sharing a structure, a schema describing that
+structure **cannot distinguish those providers from each other**. A per-feed row catches *wrong data
+for this workflow*. It cannot catch *wrong handler for this data* when two providers are structurally
+identical and differ only in what their fields mean — which is exactly the population §1.3 describes.
+
+For that case alone, stage 2 is the only defence, which makes its message the whole diagnostic. It is
+written for that reader: a `Validate` failure names which expectation the content broke, and a
+`Locate` that finds nothing reports that this handler recognized no items in this document — never a
+bare parse error.
+
+Closing even that would require the schema to express provenance rather than structure, which means
+one row per provider and couples the generic processors on either side to the provider list. Not
+worth it for the residue.
 
 ### 3.3 Pod-level options
 
