@@ -11,7 +11,7 @@ consumes, and an `ffmpeg` binary present in the processor image.
 **Scope note.** This document designs the **structure**: the pipeline, the handler seam, the shared
 services, the failure boundary, the deployment consequences. It deliberately does **not** design any
 provider's business. The XML element vocabulary, the per-provider field maps, the ffmpeg argument
-sets and the Redis whitelist's backing store are named as seams and left open — §11 lists them. That
+sets and the Redis whitelist's backing store are named as seams and left open — §12 lists them. That
 is the agreed shape of this phase, not an omission.
 
 ---
@@ -112,8 +112,11 @@ What the operator owns, and what checks it:
 | wiring the steps in order | **publish** — `SchemaEdgeValidator` compares row ids and refuses a mismatch |
 | naming a handler that exists | **publish** — the config schema `enum` of §3.1 |
 | authoring a per-feed input row | **dispatch** — `ProcessDispatchHandler` validates before the processor is entered (§3.2) |
-| naming the handler that matches the *feed* | **dispatch** — stage 2, for structurally identical providers only (§3.2) |
+| naming the handler that matches the *feed* | **never** — a wrong handler over structurally valid data is a silent success (§3.2.1) |
 | the expander's `MaxDepth` | **dispatch** — stage 2, as an opaque leaf where entries were expected |
+
+**The fourth row is the dangerous one, and §3.2.1 is why.** Every other mistake in this table is
+refused by something. That one completes successfully and emits wrong output.
 
 **`MaxDepth` deserves its own sentence because it is the subtlest of the five.** It decides whether a
 nested archive reaches this processor as `FileContent.Entries` — openable, walkable by `Locate` — or
@@ -266,15 +269,41 @@ payload names the interpretation. When two providers are structurally identical 
 what their fields *mean*, no schema describing that structure can tell them apart — and asking one to
 would be asking the contract to encode a payload-layer choice.
 
-So the only residual failure is an **operator naming the wrong handler in a payload**, and it is
-diagnosed where it belongs: at stage 2, in this processor, at dispatch. That makes the stage-2
-message the whole diagnostic for it. It is written for that reader — a `Validate` failure names which
-expectation the content broke, and a `Locate` that finds nothing reports that this handler recognized
-no items in this document, never a bare parse error.
+### 3.2.1 The residual failure is a silent success, not a failed step
 
-This is the correct resting place, not a compromise. Pushing provenance into the schema would mean
-one row per provider and would couple the generic processors on either side to the provider list —
-dissolving exactly the reuse §1.3 describes.
+**This must not be read as "stage 2 catches it."** Sometimes it does. Often it cannot, and the case
+where it cannot is the one this chain is built to serve.
+
+Consider the population §1.3 describes: several providers sharing a file structure, served by one
+workflow design, distinguished only by the handler named in the payload. Substitute one of their
+handlers for another and follow what happens. The input schema passes — the data is structurally what
+it claims to be. `Locate` finds its items, because the layout is the shared one. `Validate` objects to
+nothing, because there is nothing structurally wrong. Stages 3 through 8 run to completion. The output
+schema passes, because the output is structurally a valid tree.
+
+**The step succeeds.** It emits a document standardized under the wrong provider's rules — wrong field
+mapping, wrong constant fields, wrong naming — and every check in the system is satisfied.
+
+**No layer detects this, and none is positioned to.** Not the edge check, which compares row ids. Not
+the input or output schema, which constrain structure and, per §1.4, have no business encoding
+provenance. Not stage 2, whose validation is about content correctness for the provider the handler
+*believes* it is reading. Stage 2 only fires when the two providers' content happens to differ in a
+way the substituted handler notices — which is precisely what structural similarity makes unlikely.
+
+**The observable consequence is a completed workflow with bad output, not an alert.** There is no
+failed step to search for, no Warning line, nothing in the projections that looks wrong. It surfaces
+downstream, from whoever consumes the standardized files.
+
+**The only control is operator discipline**, and that is the honest statement of it. The handler named
+in a payload is an assertion about provenance that no automated check can corroborate. Treating it as
+if stage 2 were a backstop would be trusting a check that is not there.
+
+Pushing provenance into the schema is the alternative, and it is worse: one row per provider,
+coupling the generic processors on either side to the provider list, dissolving exactly the reuse
+§1.3 describes. The trade is deliberate — cheap reuse across structurally identical providers, paid
+for with an unverifiable assertion in the payload.
+
+
 
 ### 3.3 Pod-level options
 
@@ -390,7 +419,7 @@ public sealed record NormalizedItem(
 `SourceItem.Key` is the handler's own identifier for the unit — a basename, a folder name, an index.
 **It exists for failure messages**: a document of forty items whose ninth is malformed is useless to an
 operator unless the message says which. It is derived from upstream content and so is reported in a
-`FailedException` message but never logged from a template of ours; see §8.
+`FailedException` message but never logged from a template of ours; see §9.
 
 ### 5.4 The interface
 
@@ -462,7 +491,7 @@ validator rather than by six handlers each remembering it.
 
 **The writable-extension list is duplicated** — here and in the collapser's `IArchiveWriter`
 registrations. That is a knowing duplication across process boundaries, pinned by a test that asserts
-the two lists agree (§10).
+the two lists agree (§11).
 
 ### 6.1 The default layout preserves the input topology
 
@@ -476,19 +505,75 @@ property: **the output depth equals the input depth**, and the input arrived thr
 the row admits the output by construction. §1.2's depth constraint is satisfied without a handler
 having to think about it.
 
+### 6.2 Artifacts are optional, and the mirror carries leaves through
+
+**The pipeline does not force an XML file into the output.** Stages 3, 4 and 7 build a metadata
+model; whether it is *rendered into the tree* is stage 8's decision. The mirror default walks the
+input tree and, for each leaf, substitutes whatever artifact the pipeline produced for that item —
+**and when a handler produced no artifact, the leaf passes through unchanged.**
+
+**This was forced by the sample handler of §7.1 and is the better design regardless.** A pipeline
+that always emitted an XML file could not express identity, could not express a metadata-only item
+whose metadata needed no restatement, and could not express an item the handler chose to pass
+through. Emission driven by the layout costs nothing and admits all three.
+
 **One exception, and it is a production surprise if it is not written down: `.rar`.** The expander
 *reads* rar; the collapser cannot *write* it — the format is proprietary and readable-only. A
 provider shipping `.rar` archives therefore produces an input tree whose root is named `.rar`, and a
 faithful mirror keeps that name straight into a collapser refusal.
+
+**Why rar cannot simply be written.** RAR is proprietary: RarLab's `unrar` licence permits
+decompression only and explicitly forbids using that source to build a compressor, so no open library
+implements rar writing. SharpCompress reads rar and does not write it, and `RarExtractor`'s own
+comment records it — *"Read-only, and that is the format's limit rather than this class's."* The
+asymmetry is visible in the file layout: the expander has three extractors, the collapser has two
+writers. It is permanent, and no change in this processor can close it.
 
 **So the mirror preserves *topology*, not extensions.** `TreeAssembler` re-targets any container node
 whose extension names no writer to a configured default — `.zip` — and does so in the one place that
 already owns extension rules. A leaf keeps whatever extension its handler gave it; only
 entries-bearing nodes are re-targeted, and only when the source format cannot be written.
 
+**A rar-sourced document therefore cannot round-trip byte-identically**, and that is a property of the
+format rather than a defect here. The output archive is a different container holding the same
+entries.
+
 ---
 
-## 7. The shared services
+## 7. The shipped handler
+
+### 7.1 `SampleHandler` — identity, and the whole seam proven
+
+**This phase ships exactly one handler, and it does the minimum: it returns the input tree
+unchanged.** No XML, no conversion, no renaming. `Locate` returns the items, `Validate` objects to
+nothing, `Map` builds an empty model, `Augment` and `Reconcile` are no-ops, `ProfileFor` returns
+`null` for every item, and `LayoutFor` takes the mirror default — which, by §6.2, carries every leaf
+through untouched.
+
+**It is not a placeholder. It exercises everything structural in one dispatch:** payload validation,
+the config schema enum, handler resolution through the registry, the envelope read, all eight stages
+in order, the assembler's legality rules, serialization through `FileNodeConverter`, and the send on
+the inbound `executionId`. The only things it does not touch are `XmlMetadataRenderer` and
+`FfmpegAudioTranscoder` — the two pieces that are pure provider business and have no design here.
+
+**And it gives the phase a strong acceptance test almost free.** The collapser design already proves
+**byte identity**: ArchiveExpander's input equals ArchiveCollapser's output. Inserting an identity
+normalizer into that chain must leave the property holding. If FileFetcher → Expander → SKNormalizer
+→ Collapser still round-trips byte-identically, the seam is proven end to end — a stronger statement
+than any schema check, for the reason the collapser design gives: a schema asserts a document has the
+right shape, identity asserts it round-tripped losslessly.
+
+**The identity test must use a `.zip` or `.tar` source.** A rar-sourced document cannot round-trip
+byte-identically (§6.1), so using one would fail the test for a reason that is not this processor's
+doing.
+
+**It stays shipped after real handlers arrive.** It is the regression test for the pipeline itself:
+any change to the stages, the assembler or the serialization that breaks identity breaks this first,
+with nothing provider-specific in the way to obscure it.
+
+---
+
+## 8. The shared services
 
 **`IAudioTranscoder` → `FfmpegAudioTranscoder`.** Takes source bytes, a source extension and an
 `AudioProfile`; returns `NormalizedAudio`. Writes the input to a temp file, runs `FfmpegPath` with the
@@ -511,7 +596,7 @@ and 4.
 
 ---
 
-## 8. Failure, and the absence of partial output
+## 9. Failure, and the absence of partial output
 
 **Every business rejection is a failed step. There is no partial output.** Nine good items and one bad
 one produce a failed step, not nine standardized items — confirmed explicitly during design. A
@@ -538,7 +623,7 @@ The envelope reader swallows `JsonException` without including its text, for the
 records: the exception quotes the fragment that failed to parse, and that fragment is upstream content
 that must not reach a log store.
 
-### 8.1 The one success log line
+### 9.1 The one success log line
 
 ```
 normalized {FileName} with {Handler} into {ItemCount} items, {ConvertedCount} converted,
@@ -552,7 +637,7 @@ line per failed dispatch.
 
 ---
 
-## 9. Deployment consequences
+## 10. Deployment consequences
 
 **A new provider handler is a new processor version, and it is a six-step loop.** It is a source
 change in this project, so the project's `SourceHash` moves — and since the fold is project-only, a
@@ -584,7 +669,7 @@ disagrees while `PayloadConfigSchemaValidator` will refuse it if the handler nam
 
 ---
 
-## 10. Testing
+## 11. Testing
 
 **Pipeline, with a fake handler.** Stage order, that stage 7 sees the transcoder's output, that
 `ProfileFor` returning null skips conversion, that a throw from any stage becomes one
@@ -618,13 +703,19 @@ enum would demote it without any other test noticing.
 **`FfmpegAudioTranscoder`** needs the binary and so is a `Category=RealStack` test, not part of the
 hermetic suite.
 
-**A chain test:** expander → normalizer (with a pass-through handler that renames and re-lays-out but
-converts nothing) → collapser, asserting the collapser accepts what the normalizer emits. This is the
-test that would catch a `TreeAssembler` rule drifting away from `ArchiveBuilder`.
+**The identity chain test, and it is the acceptance test for this phase.** FileFetcher → Expander →
+SKNormalizer with `SampleHandler` → Collapser, asserting the byte identity the collapser design
+already proves still holds with this processor inserted. It is the strongest available statement
+about the seam — a schema asserts shape, identity asserts lossless round-trip — and it is what would
+catch a `TreeAssembler` rule drifting away from `ArchiveBuilder`. **Source must be `.zip` or `.tar`:**
+a rar-sourced document cannot round-trip byte-identically (§6.1), for reasons outside this processor.
+
+**A re-targeting chain test:** the same chain with a `.rar` source, asserting the collapser accepts
+the output and the root arrives as `.zip` — identity deliberately not asserted.
 
 ---
 
-## 11. Deliberately deferred
+## 12. Deliberately deferred
 
 Each has a seam in this design and no implementation:
 
@@ -634,12 +725,13 @@ Each has a seam in this design and no implementation:
 2. **The ffmpeg argument sets** — `AudioProfile.Arguments` is the seam; no profile is designed here.
 3. **The Redis field whitelist** — `IFieldWhitelist` is registered as a pass-through. Backing it with
    Redis, and deciding which fields it governs, is later work behind an unchanged interface.
-4. **The provider list itself** — no `<Provider>Handler` is designed. The first real one will test
-   whether the eight stages fit, and §5.2 records the most likely place they won't.
+4. **The provider list itself** — only `SampleHandler` (§7.1) ships, and it is identity. No real
+   provider handler is designed. The first one will test whether the eight stages fit, and §5.2
+   records the most likely place they won't.
 
 ---
 
-## 12. Resolved decisions
+## 13. Resolved decisions
 
 All three questions raised at design time are closed. They are recorded here with what was chosen and
 what was accepted along with it.
@@ -665,7 +757,7 @@ data, output size is unbounded, and an out-of-memory pod at prefetch 1 is a rede
 than a single failure. The mitigation is sizing `MaxExpandedBytes` with conversion headroom, noted in
 the expander's manifest beside the value.
 
-## 13. Open questions
+## 14. Open questions
 
 None blocking. The first real provider handler is what will test whether the eight stages fit; §5.2
 records the most likely place they will not.
