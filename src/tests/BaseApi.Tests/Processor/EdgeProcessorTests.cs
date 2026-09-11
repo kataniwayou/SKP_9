@@ -5,6 +5,7 @@ using BaseProcessor.Core.Edge;
 using BaseProcessor.Core.Processing;
 using Messaging.Contracts;
 using Messaging.Transport;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
 
@@ -89,9 +90,23 @@ public sealed class EdgeProcessorTests
             return _last;
         }
 
+        /// <summary>
+        /// The acknowledge call that throws the seam's declared fault, 1-based, or 0 for none. A
+        /// separate knob from <see cref="ReadThrowsOnCall"/> because the two faults have different
+        /// consequences: a read that fails yields no item, while an acknowledge that fails leaves an
+        /// item whose branch has ALREADY been sent.
+        /// </summary>
+        public int AcknowledgeThrowsOnCall { get; init; }
+
         public void Acknowledge(ImportedItem item)
         {
             Assert.Same(_last, item);
+
+            if (Acknowledged.Count + 1 == AcknowledgeThrowsOnCall)
+            {
+                throw new ImportSourceException("the folder stopped accepting acknowledgements");
+            }
+
             Acknowledged.Add(item.Origin);
         }
 
@@ -212,6 +227,77 @@ public sealed class EdgeProcessorTests
         var (second, _, _) = BuildImporter(bug);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             second.ExecuteAsync([], ImporterPayload(), Guid.Empty, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// <b>The fault's own message survives, and the summary that reports it is findable by severity.</b>
+    /// Until 2026-09-11 the catch did not bind the exception at all: a source that broke mid-batch
+    /// left the word Faulted inside a parameter on an Information line and nothing else, so nothing
+    /// anywhere said what had broken and no severity filter could find that anything had.
+    /// </summary>
+    [Fact]
+    public async Task AReadFaultIsNamedAndTheSummaryIsRaised()
+    {
+        var source = new FakeSource { ReadThrowsOnCall = 2 }.With("a", "b");
+        var (importer, _, log) = BuildImporter(source);
+
+        await importer.ExecuteAsync([], ImporterPayload(), Guid.Empty, CancellationToken.None);
+
+        var fault = log.Records.Single(r => r.Message.Contains("reading from", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Warning, fault.Level);
+        Assert.Contains("after 1 item(s)", fault.Message, StringComparison.Ordinal);
+
+        // The exception rides the record rather than being interpolated: the message a source raises
+        // is arbitrary text, and a body carrying it could only be found by a wildcard.
+        Assert.Equal("the folder went away", Assert.IsType<ImportSourceException>(fault.Exception).Message);
+
+        Assert.Equal(
+            LogLevel.Warning,
+            log.Records.Single(r => r.Message.Contains("stopped because", StringComparison.Ordinal)).Level);
+    }
+
+    /// <summary>
+    /// An acknowledge fault says what a read fault cannot: this item's branch is already downstream,
+    /// and the item itself will be read again. That duplicate is the recoverable outcome the ordering
+    /// was chosen for, and it is only recoverable by someone who can see it happened.
+    /// </summary>
+    [Fact]
+    public async Task AnAcknowledgeFaultSaysTheBranchWasAlreadySent()
+    {
+        var source = new FakeSource { AcknowledgeThrowsOnCall = 2 }.With("a", "b", "c");
+        var (importer, sender, log) = BuildImporter(source);
+
+        await importer.ExecuteAsync([], ImporterPayload(), Guid.Empty, CancellationToken.None);
+
+        var fault = log.Records.Single(r => r.Message.Contains("acknowledging", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Warning, fault.Level);
+        Assert.Contains("its branch has already been sent", fault.Message, StringComparison.Ordinal);
+
+        // Two branches sent, one acknowledgement taken: the claim in the message, asserted rather
+        // than trusted.
+        Assert.Single(source.Acknowledged);
+        await sender.Received(2).SendAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// The half that keeps a healthy importer quiet: draining a source is an ordinary end to a batch,
+    /// and a fire that logs a warning for it would make the level worthless on the only line every
+    /// dispatch writes.
+    /// </summary>
+    [Fact]
+    public async Task ADrainedSourceStaysAtInformation()
+    {
+        var source = new FakeSource().With("a", "b");
+        var (importer, _, log) = BuildImporter(source);
+
+        await importer.ExecuteAsync([], ImporterPayload(), Guid.Empty, CancellationToken.None);
+
+        Assert.Equal(
+            LogLevel.Information,
+            log.Records.Single(r => r.Message.Contains("stopped because", StringComparison.Ordinal)).Level);
+
+        Assert.DoesNotContain(log.Records, r => r.Level == LogLevel.Warning);
     }
 
     /// <summary>
