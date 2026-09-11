@@ -1,7 +1,7 @@
 # Processor.SKNormalizer — a provider-aware standardizing transform
 
 **Date:** 2026-09-12
-**Status:** Designed. Not implemented.
+**Status:** Designed, all decisions resolved. Not implemented.
 **Introduces:** `src/Processor.SKNormalizer/`, `k8s/41-processor-sknormalizer.yaml`.
 **Amends:** nothing. `BaseProcessor.Core` is unchanged; `Processor.ArchiveExpander` and
 `Processor.ArchiveCollapser` are unchanged.
@@ -41,7 +41,8 @@ FileFetcher → ArchiveExpander → SKNormalizer → ArchiveCollapser → FilePe
 `FileContent.Entries` is packed, `null` is packed as the format's empty archive. It never pairs
 entries, never inspects counts, never asks what a node *means*. A handler may therefore emit any
 layout it likes — one flat archive of pairs, a folder per item, a single file — and the collapser
-packs it.
+packs it. **That freedom is deliberately not exercised by default**: §6.1 preserves the input
+topology, and this section records what the contract permits, not what handlers do.
 
 **Four rules are the exception, and §6 makes them unbreakable rather than merely documented:**
 
@@ -74,11 +75,12 @@ the tree contract, it can reuse the existing tree row on both edges:
 | Expander out → Normalizer in | the tree row |
 | Normalizer out → Collapser in | the same tree row |
 
-**No new schema row is created by default.** The consequence is a hard constraint on every handler:
-the layout returned from stage 8 must fit within the depth the existing tree row already admits. A
-handler that wants deeper nesting is asking to re-register a frozen row that three other processors
-point at, and that is a change to be made deliberately, once, not discovered by the first handler
-that needs it.
+**No new schema row is created by default.** The consequence is a constraint on every handler: the
+layout returned from stage 8 must fit within the depth the existing tree row already admits. **§6.1
+satisfies this by construction** — preserving the input topology means the output depth equals the
+input depth, and the input arrived through that same row. A handler that overrode the default to nest
+deeper would be asking to re-register a frozen row that three other processors point at, and that is
+a change to be made deliberately, once, not discovered by the first handler that needs it.
 
 **The operator may still choose a per-feed input row, and §3.2 is why they would.** Pointing this
 processor's `InputSchemaId` at a tighter variant — one stating entry counts and layout — turns a
@@ -281,14 +283,28 @@ public sealed class SKNormalizerOptions
 {
     public string FfmpegPath { get; set; } = "ffmpeg";
     public int ConversionTimeoutSeconds { get; set; } = 300;
-    public long MaxItemBytes { get; set; } = 512L * 1024 * 1024;
 }
 ```
 
 Bound from `SKNormalizer__*` in the manifest, for the reason `ArchiveExpanderOptions.MaxExpandedBytes`
 records: **these are numbers an operator sizes against a container limit, and a workflow author has no
-way to know them.** A conversion timeout and a per-item ceiling are properties of the pod, not of the
-business the step is doing.
+way to know them.**
+
+**There is deliberately no size ceiling here.** The input document already passed ArchiveExpander,
+whose `MaxExpandedBytes` bounds total expanded content, so a second input ceiling in this processor
+would restate an upstream guarantee. A per-item ceiling was considered and dropped: it bounds a peak
+this chain does not produce, and it is one more number an operator has to keep consistent with
+another.
+
+**The consequence, stated so it is accepted rather than discovered: `MaxExpandedBytes` now sizes two
+consumers, not one.** It bounds what the expander produces and, transitively, the working set every
+conversion here operates on — and conversion can *grow* data, since transcoding to a less compressed
+target produces more bytes than it consumed. Nothing bounds output size.
+
+**If a pod does exhaust memory, prefetch 1 makes it a poison loop:** the unacked message is
+redelivered and exhausts memory again. The mitigation is not code, it is sizing — `MaxExpandedBytes`
+must be chosen with conversion headroom in mind, and that note belongs in
+`k8s/37-processor-archiveexpander.yaml` beside the value, not only here.
 
 ---
 
@@ -448,6 +464,28 @@ validator rather than by six handlers each remembering it.
 registrations. That is a knowing duplication across process boundaries, pinned by a test that asserts
 the two lists agree (§10).
 
+### 6.1 The default layout preserves the input topology
+
+**A handler does not reshape the document. Same nesting, same entry count; only contents, names and
+extensions change.** A metadata entry becomes an XML file, an audio entry becomes a converted audio
+file, and both keep their position in the tree.
+
+`ProviderHandlerBase.LayoutFor` therefore **mirrors the input tree** and most handlers will never
+override it. That is the default because it is what the business actually does, and it has a useful
+property: **the output depth equals the input depth**, and the input arrived through the tree row, so
+the row admits the output by construction. §1.2's depth constraint is satisfied without a handler
+having to think about it.
+
+**One exception, and it is a production surprise if it is not written down: `.rar`.** The expander
+*reads* rar; the collapser cannot *write* it — the format is proprietary and readable-only. A
+provider shipping `.rar` archives therefore produces an input tree whose root is named `.rar`, and a
+faithful mirror keeps that name straight into a collapser refusal.
+
+**So the mirror preserves *topology*, not extensions.** `TreeAssembler` re-targets any container node
+whose extension names no writer to a configured default — `.zip` — and does so in the one place that
+already owns extension rules. A leaf keeps whatever extension its handler gave it; only
+entries-bearing nodes are re-targeted, and only when the source format cannot be written.
+
 ---
 
 ## 7. The shared services
@@ -537,7 +575,7 @@ refuses readiness when its handler names and the enum disagree.
 a missing binary surfaces as every item failing conversion, which reads like a content problem.
 
 **The manifest** is `k8s/41-processor-sknormalizer.yaml`, carrying `SKNormalizer__FfmpegPath`,
-`SKNormalizer__ConversionTimeoutSeconds` and `SKNormalizer__MaxItemBytes`.
+`SKNormalizer__ConversionTimeoutSeconds` — and no size ceiling, for the reason §3.3 records.
 
 **Registration:** one processor row, with input and output schema both pointed at the existing tree
 row (§1.2) and `ConfigSchemaId` pointed at this processor's own config row (§3.1). Wiring the step
@@ -557,6 +595,11 @@ root with a non-writable extension, a layout past the depth cap, and honest `Siz
 
 **The writer-list agreement test.** Asserts the assembler's writable-extension list matches the
 collapser's registered `IArchiveWriter` extensions, pinning the §6 duplication.
+
+**Topology preservation (§6.1).** The default `LayoutFor` returns a layout whose nesting and entry
+counts match the input for a two-level document; and a `.rar`-rooted input produces a `.zip`-rooted
+output while every other name and position is unchanged. The second is the test that would have
+caught the rar trap in production instead of in review.
 
 **Payload tests.** Null, blank handler, unknown handler — the last asserting the message names the
 available handlers, since that text is the whole diagnostic at dispatch.
@@ -596,16 +639,33 @@ Each has a seam in this design and no implementation:
 
 ---
 
-## 12. Open questions for review
+## 12. Resolved decisions
 
-- **Does the existing tree schema row admit the depth handlers will want?** §1.2 assumes reuse. If the
-  first realistic layout needs more nesting than the row states, that is a re-registration touching
-  three processors and should be decided before implementation rather than during.
-- **Is the publish-time enum worth its cost?** §3.1 buys a publish-time rejection of an absent
-  handler at the price of a new config schema row, a repoint and a restart per provider. The
-  alternative is a plain `{"type":"string"}` and relying on the dispatch-time message of §3. The
-  enum is recommended because the failure it prevents is silent until data flows — but it is the one
-  decision here that adds recurring operational work, so it should be taken knowingly.
-- **Is `MaxItemBytes` the right pod-level bound**, or should the ceiling be on the whole document the
-  way the expander bounds total expanded bytes? A document of many small items and a document of one
-  huge item fail differently under each.
+All three questions raised at design time are closed. They are recorded here with what was chosen and
+what was accepted along with it.
+
+**The config schema carries an `enum` of handler names (§3.1).** Chosen for the publish-time
+rejection: an operator naming a handler that does not exist is refused while they are still at the
+screen, rather than at the first dispatch after data arrives. **Accepted cost:** every new provider
+needs a new config schema row, a `ConfigSchemaId` repoint and a restart on top of the rebuild and
+SourceHash repoint, and the registry carries its own startup conformance check because
+`ConfigSchemaConformance` does not read enum values.
+
+**Handlers preserve the input topology (§6.1).** A handler does not reshape the document — same
+nesting, same entry count, changed contents, names and extensions. This closes the depth question
+entirely: output depth equals input depth, and the input reached this processor through the tree row,
+so the row admits the output by construction. **Accepted alongside it:** the `.rar` re-targeting rule,
+because the expander reads a format the collapser cannot write, and a faithful mirror would walk a rar
+document straight into a collapser refusal.
+
+**There is no size ceiling in this processor (§3.3).** `ArchiveExpander`'s `MaxExpandedBytes` is the
+single bound, and `MaxItemBytes` is dropped rather than restating an upstream guarantee with a second
+number to keep consistent. **Accepted risk:** that number now sizes two consumers, conversion can grow
+data, output size is unbounded, and an out-of-memory pod at prefetch 1 is a redelivery loop rather
+than a single failure. The mitigation is sizing `MaxExpandedBytes` with conversion headroom, noted in
+the expander's manifest beside the value.
+
+## 13. Open questions
+
+None blocking. The first real provider handler is what will test whether the eight stages fit; §5.2
+records the most likely place they will not.
