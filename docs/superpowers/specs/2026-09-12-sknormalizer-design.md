@@ -141,6 +141,19 @@ data contract to constrain which handler is appropriate would be asking it to en
 choice that lives one layer up. The schema does not care where a document came from; provenance is
 the payload's concern and the handler's, never the contract's.
 
+**The processor's contract is exactly three things**, and nothing in it concerns provenance:
+
+1. **Schema-valid data arrives** — enforced by `ProcessDispatchHandler` before the processor is
+   entered. Not the handler's concern, and not the provider's.
+2. **The named handler's tools are applied** to that data.
+3. **Schema-valid data leaves** — enforced by `ProcessedDataHandler` after the send.
+
+**Two providers whose data is identical but whose work differs are indistinguishable here, and
+correctly so.** The processor did what the payload named, on data that validated, producing data that
+validated. There is nothing left for it to be right or wrong about. Whether the named handler is the
+*intended* business is an assertion made in the payload, and the processor has no standing to
+second-guess it — see §3.2.1 for what that means operationally.
+
 **One processor serves many workflows.** The processor row is registered once; any number of workflow
 steps point at it carrying different handler names — exactly as ArchiveExpander serves many steps
 with different `MaxDepth` values today. **The handler set is a property of the build; which handler
@@ -277,7 +290,7 @@ where it cannot is the one this chain is built to serve.
 Consider the population §1.3 describes: several providers sharing a file structure, served by one
 workflow design, distinguished only by the handler named in the payload. Substitute one of their
 handlers for another and follow what happens. The input schema passes — the data is structurally what
-it claims to be. `Locate` finds its items, because the layout is the shared one. `Validate` objects to
+it claims to be. `Locate` finds its items, because the layout is the shared one. `ValidateContent` objects to
 nothing, because there is nothing structurally wrong. Stages 3 through 8 run to completion. The output
 schema passes, because the output is structurally a valid tree.
 
@@ -294,9 +307,14 @@ way the substituted handler notices — which is precisely what structural simil
 failed step to search for, no Warning line, nothing in the projections that looks wrong. It surfaces
 downstream, from whoever consumes the standardized files.
 
-**The only control is operator discipline**, and that is the honest statement of it. The handler named
-in a payload is an assertion about provenance that no automated check can corroborate. Treating it as
-if stage 2 were a backstop would be trusting a check that is not there.
+**This is not a defect in the processor, and it is important not to file it as one.** Per §1.4 the
+processor's contract was satisfied completely: valid data in, the named handler's tools applied, valid
+data out. It has no standing to second-guess which handler was named, and nothing it could check
+would help. The unverifiable assertion lives in the payload, which is the operator's layer.
+
+**So the only control is operator discipline**, and that is the honest statement of it. The risk is
+recorded here not because this processor could reduce it, but because someone reading this design
+should know the failure presents as a completed workflow rather than an alert.
 
 Pushing provenance into the schema is the alternative, and it is worse: one row per provider,
 coupling the generic processors on either side to the provider list, dissolving exactly the reuse
@@ -371,13 +389,32 @@ and 8 are the clearest expression of that split — the handler returns a *descr
 | # | stage | who | what |
 |---|---|---|---|
 | 1 | `Locate` | handler | finds the units of work in the incoming tree |
-| 2 | `Validate` | handler | rejects content the provider got wrong |
+| 2 | `ValidateContent` | handler | rejects content the provider got wrong |
 | 3 | `Map` | handler | projects source fields into the standard metadata |
 | 4 | `Augment` | handler | adds fields knowable **before** conversion |
 | 5 | `NameFor` | handler | decides output file names |
 | 6 | `ProfileFor` → transcode | handler decides, pipeline runs | ffmpeg |
 | 7 | `Reconcile` | handler | folds what conversion **actually produced** back into the metadata |
 | 8 | `LayoutFor` → assemble | handler decides, pipeline builds | the output tree |
+
+### 5.0 Every stage is about content. None of them touches a schema.
+
+**No stage validates a schema, and none needs to.** Schema validation happens at exactly two points,
+both in the framework and neither reachable from a handler: `ProcessDispatchHandler` validates the
+input against `identity.InputDefinition` **before** the processor is entered, and
+`ProcessedDataHandler` validates the output **after** the send. A handler is handed data that has
+already been proven to fit its contract, and its result is proven again on the way out.
+
+**`ValidateContent` is named that way for this reason.** It checks that the *content* is correct for
+the provider the handler believes it is reading — a missing required field, an audio stream that is
+not what the metadata claims. Plain `Validate` next to a system with two schema-validation points is
+the one name in the interface that could be misread as schema work, and one word removes the
+ambiguity.
+
+**`LayoutFor` is the only stage whose result is schema-relevant**, since a layout that nested too
+deep would fail output validation. That is exactly why §6 puts legality in `TreeAssembler` and §6.1
+preserves topology: **the handler makes a content decision and shared code guarantees the schema
+consequence.** A handler never validates a schema, and it also never has to think about one.
 
 ### 5.1 Why stage 7 exists, and why it is not called `Enrich`
 
@@ -429,7 +466,7 @@ public interface IProviderHandler
     string Name { get; }
 
     IReadOnlyList<SourceItem> Locate(FileNode root);
-    void Validate(SourceItem item);
+    void ValidateContent(SourceItem item);
     StandardMetadata Map(SourceItem item);
     void Augment(StandardMetadata metadata, SourceItem item);
     ItemNames NameFor(StandardMetadata metadata, SourceItem item);
@@ -545,7 +582,7 @@ entries.
 ### 7.1 `SampleHandler` — identity, and the whole seam proven
 
 **This phase ships exactly one handler, and it does the minimum: it returns the input tree
-unchanged.** No XML, no conversion, no renaming. `Locate` returns the items, `Validate` objects to
+unchanged.** No XML, no conversion, no renaming. `Locate` returns the items, `ValidateContent` objects to
 nothing, `Map` builds an empty model, `Augment` and `Reconcile` are no-ops, `ProfileFor` returns
 `null` for every item, and `LayoutFor` takes the mirror default — which, by §6.2, carries every leaf
 through untouched.
