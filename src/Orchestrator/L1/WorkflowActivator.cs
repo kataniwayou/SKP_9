@@ -42,7 +42,14 @@ public sealed class WorkflowActivator(
         var definition = await reader.ReadAsync(workflowId, ct).ConfigureAwait(false);
         if (definition is null)
         {
-            logger.LogInformation(
+            // Warning: an activation announcement that found nothing to activate is work asked for and
+            // not done, and the announcement's sender has no way to learn that. It is reachable
+            // benignly — a start and a delete crossing on the wire leaves this replica reading an L2
+            // that no longer holds the definition — but a benign race and a workflow that was never
+            // projected are the same record here, and the second is a fault nobody would otherwise
+            // see. Raised 2026-09-11 with the {Result} lines in StepOutcomeHandler; if this proves
+            // noisy in normal operation it is the one of that set to reconsider first.
+            logger.LogWarning(
                 "L2 does not hold workflow {WorkflowId}; nothing to activate", workflowId);
             return;
         }

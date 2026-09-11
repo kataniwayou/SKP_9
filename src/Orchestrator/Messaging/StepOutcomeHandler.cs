@@ -248,13 +248,28 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
                 stoppedAt);
         }
 
+        // THE SEVERITY OF A RUN'S OWN RECORD, and it is a variable because both lines that carry
+        // {Result} report a failure whenever the step failed — this is the orchestrator's half of the
+        // event the processor already logs at Warning, and a severity sweep that finds one and not the
+        // other is worse than one that finds neither. Raised on 2026-09-11, applying the reasoning of
+        // 614e688 ("make failures findable") to this side.
+        //
+        // Failed, NOT `!= Completed`. Cancelled is an author ending its own branch deliberately, and
+        // the processor keeps its cancellation line at Information for exactly that reason; promoting
+        // it here would make the two sides disagree again, in the other direction.
+        //
+        // The templates below are untouched. body.text is indexed as a keyword, so every saved query
+        // matching them keeps working and this change is additive: what was findable by text stays
+        // findable by text, and is now findable by level as well.
+        var level = m.Result == StepResult.Failed ? LogLevel.Warning : LogLevel.Information;
+
         // The opening half of a run's record. The fire logs "dispatched an entry step" and then goes
         // quiet, so without this the only evidence an entry step ever finished was a hand-off line
         // naming a successor — and an entry step that is ALSO terminal produced no such line at all.
         // Both halves now name themselves, under the correlation id the fire minted.
         if (entry.Definition.EntryStepIds.Contains(m.StepId))
         {
-            _logger.LogInformation("the entry step completed with {Result}", m.Result);
+            _logger.Log(level, "the entry step completed with {Result}", m.Result);
         }
 
         var selection = StepAdvancement.SelectNext(m.Result, completed, entry.Steps);
@@ -297,12 +312,31 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
         if (selection.Matches.Count == 0)
         {
-            _logger.LogInformation(
+            _logger.Log(level,
                 "the terminal step completed with {Result} — no successor accepts it, the run ends here",
                 m.Result);
         }
         else
         {
+            // A FAILED STEP THAT ADVANCES ANYWAY WAS REPORTED NOWHERE ON THIS SIDE, which is the same
+            // shape as the sink whose success nobody reported: the line below says only how many
+            // successors ran and how long it took, so a mid-run failure left no orchestrator record at
+            // all unless the step happened to be an entry or terminal one. Both {Result} lines above
+            // are conditional on position; this hole sat between them.
+            //
+            // It is also where the entry-condition Always footgun becomes visible. Always accepts a
+            // failed predecessor by design, so a workflow wired that way dispatches the rest of itself
+            // on a step that did not produce anything — which is a decision the author made and worth
+            // seeing, not an error to swallow. Warning, before the advancement line rather than
+            // instead of it: the count and the elapsed time are still the record of what happened.
+            if (m.Result != StepResult.Completed)
+            {
+                _logger.LogWarning(
+                    "advancing {SuccessorCount} successor(s) on a {Result} step — their entry "
+                    + "conditions accept it",
+                    selection.Matches.Count, m.Result);
+            }
+
             _logger.LogInformation(
                 "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
                 selection.Matches.Count, (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
