@@ -2610,8 +2610,7 @@ git commit -m "feat(sknormalizer): the processor, its payload, and two failure c
 - Create: `src/Processor.SKNormalizer/Handlers/SampleHandler.cs`
 - Create: `src/Processor.SKNormalizer/Services/IFieldWhitelist.cs`
 - Create: `src/Processor.SKNormalizer/Services/PassThroughFieldWhitelist.cs`
-- Create: `src/Processor.SKNormalizer/Program.cs`
-- Create: `src/Processor.SKNormalizer/ProcessorHost.cs`
+- Modify: `src/Processor.SKNormalizer/ProcessorHost.cs` (Task 1 created it as a minimal shell — you add the registrations)
 - Test: `src/tests/BaseApi.Tests/DependencyInjection/SKNormalizerHostTests.cs`
 
 **Interfaces:**
@@ -2782,43 +2781,29 @@ public sealed class PassThroughFieldWhitelist : IFieldWhitelist
 }
 ```
 
-- [ ] **Step 4: Write `Program.cs`**
+- [ ] **Step 4: Fix the meter name in `ProcessorHost.cs`**
 
-Copy the expander's verbatim — the comments explain why both signals are registered — changing only the `using`:
+`Program.cs` and `ProcessorHost.cs` already exist — Task 1 created them as a minimal shell, because `<OutputType>Exe</OutputType>` cannot compile without an entry point. `Program.cs` is complete and correct; leave it alone.
+
+`ProcessorHost.cs` has one thing to correct. It currently reads:
 
 ```csharp
-using System.Runtime.InteropServices;
-using Microsoft.Extensions.Hosting;
-using Processor.SKNormalizer;
-
-// The boot resolves identity before building anything, so this is the one place the process can be
-// cancelled while it is still deciding who it is.
-//
-// Both signals are registered, not just Ctrl+C. Until the host exists there is no ConsoleLifetime to
-// answer SIGTERM, and Stage 1 is explicitly allowed to run forever — so a processor waiting on an
-// unregistered row is exactly the pod an operator deletes, and without this it would ignore the
-// request and be killed outright when the grace period expired.
-using var lifetime = new CancellationTokenSource();
-Console.CancelKeyPress += (_, e) => { e.Cancel = true; lifetime.Cancel(); };
-using var term = PosixSignalRegistration.Create(
-    PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; lifetime.Cancel(); });
-
-using var host = await ProcessorHost.StartAsync(args, lifetime.Token);
-await host.WaitForShutdownAsync();
+            .WithMetrics(m => m
+                .AddMeter("Processor.SKNormalizer"));
 ```
 
-- [ ] **Step 5: Write `ProcessorHost.cs`**
+A string literal there registers a meter name nothing emits to, so the pipeline's instruments would be silently absent from every dashboard. Every sibling processor names the shared constant instead. Change it to:
 
-Start from the expander's file — the boot half is identical and its comments are load-bearing:
-
-```bash
-cd C:/Users/UserL/source/repos/SK_P9
-cp src/Processor.ArchiveExpander/ProcessorHost.cs src/Processor.SKNormalizer/ProcessorHost.cs
-sed -i 's/namespace Processor.ArchiveExpander;/namespace Processor.SKNormalizer;/' src/Processor.SKNormalizer/ProcessorHost.cs
-sed -i '/using Processor.ArchiveExpander.Extractors;/d' src/Processor.SKNormalizer/ProcessorHost.cs
+```csharp
+            .WithMetrics(m => m
+                .AddMeter(ProcessorPipelineMeter.Name));
 ```
 
-Then replace the registration block — everything from the `Configure<ArchiveExpanderOptions>` call to the `AddSingleton<...BaseProcessor, ArchiveExpanderProcessor>()` line — with:
+`ProcessorPipelineMeter` is in `BaseProcessor.Core.Observability`, which the file already imports.
+
+- [ ] **Step 5: Add the registrations to `ProcessorHost.cs`**
+
+The file's `Create` method currently ends with `AddBaseProcessor` then `return builder.Build();` and registers nothing of this processor's own. Insert the following **between** the `AddBaseProcessor` line and `return builder.Build();`:
 
 ```csharp
         // The pod's ffmpeg path and conversion timeout, from SKNormalizer__* in the manifest. Both
