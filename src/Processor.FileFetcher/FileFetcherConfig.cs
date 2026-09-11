@@ -38,6 +38,14 @@ namespace Processor.FileFetcher;
 /// </para>
 /// </param>
 public sealed record FileFetcherConfig(
-    IReadOnlyList<string>? AllowedExtensions,
     long MinimumSizeBytes,
-    long MaximumSizeBytes) : ProcessorConfig;
+    long MaximumSizeBytes,
+    // LAST, AND WITH A DEFAULT, so the record states the optionality the processor already behaves
+    // as: ExtensionWhitelist.Resolve treats absent, null and empty alike and widens to ["*.*"].
+    // Without the default the startup conformance check reads this as required -- nullability is a
+    // deserialization concern rather than a contract one, so the signal for optional is the default
+    // -- and the registered row, which makes it optional, disagreed with the type.
+    //
+    // Moved to the end because C# requires optional parameters last. Nothing constructs this
+    // positionally: it is bound from JSON by name, so the order is free.
+    IReadOnlyList<string>? AllowedExtensions = null) : ProcessorConfig;

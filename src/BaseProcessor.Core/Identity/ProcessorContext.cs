@@ -50,8 +50,7 @@ public sealed class ProcessorContext : IProcessorContext
             identity.Name,
             identity.Version,
             InputDefinition: null,
-            OutputDefinition: null,
-            ConfigDefinition: null));
+            OutputDefinition: null));
     }
 
     /// <inheritdoc/>
@@ -74,11 +73,6 @@ public sealed class ProcessorContext : IProcessorContext
         if (schemaId == current.OutputSchemaId)
         {
             updated = updated with { OutputDefinition = definition };
-        }
-
-        if (schemaId == current.ConfigSchemaId)
-        {
-            updated = updated with { ConfigDefinition = definition };
         }
 
         Volatile.Write(ref _identity, updated);

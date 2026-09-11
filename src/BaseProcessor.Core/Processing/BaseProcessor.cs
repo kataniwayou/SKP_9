@@ -55,6 +55,17 @@ public abstract class BaseProcessor
     internal virtual bool EndsLineage => false;
 
     /// <summary>
+    /// The concrete <c>TConfig</c> this author binds its step payload to, so startup can check the
+    /// registered config schema actually describes it.
+    /// <para>
+    /// On the non-generic base because that is what the container resolves and what
+    /// <c>ProcessorStartupOrchestrator</c> can therefore take. The generic subclass supplies the
+    /// answer; nothing else needs to know the type.
+    /// </para>
+    /// </summary>
+    internal abstract Type ConfigType { get; }
+
+    /// <summary>
     /// Hands one branch of output to the post queue.
     /// <para>
     /// The framework stamps every id: the dispatch's correlation, workflow, step and processor ids,

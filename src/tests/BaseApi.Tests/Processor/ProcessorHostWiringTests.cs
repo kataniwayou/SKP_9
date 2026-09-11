@@ -45,6 +45,11 @@ public sealed class ProcessorHostWiringTests
             ["RabbitMq:Password"]       = "guest",
         }).Build();
 
+        // The author. Every real shell registers one -- ProcessorHost.Create does it as the last line
+        // of the graph -- and the framework already depended on it through ProcessDispatchHandler.
+        // ProcessorStartupOrchestrator now does too, because startup checks the resolved config schema
+        // against the record a payload binds to, so it needs the type the author declares.
+        services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, WiringStubAuthor>();
         services.AddBaseProcessor(cfg);
         return services.BuildServiceProvider(validateScopes: true);
     }
@@ -76,6 +81,11 @@ public sealed class ProcessorHostWiringTests
             ["RabbitMq:Password"]       = "guest",
         }).Build();
 
+        // The author. Every real shell registers one -- ProcessorHost.Create does it as the last line
+        // of the graph -- and the framework already depended on it through ProcessDispatchHandler.
+        // ProcessorStartupOrchestrator now does too, because startup checks the resolved config schema
+        // against the record a payload binds to, so it needs the type the author declares.
+        services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, WiringStubAuthor>();
         services.AddBaseProcessor(cfg, Identity);
         return services.BuildServiceProvider(validateScopes: true);
     }
@@ -237,5 +247,16 @@ public sealed class ProcessorHostWiringTests
 
         Assert.NotSame(startup, queueDepth);
         Assert.NotSame(liveness, queueDepth);
+    }
+
+    private sealed record WiringStubConfig : BaseProcessor.Core.Configuration.ProcessorConfig;
+
+    /// <summary>An author that does nothing, present only so the graph can resolve one.</summary>
+    private sealed class WiringStubAuthor
+        : BaseProcessor.Core.Processing.BaseProcessor<WiringStubConfig>
+    {
+        protected override Task ProcessAsync(
+            byte[] data, WiringStubConfig? config, Guid executionId, CancellationToken ct)
+            => Task.CompletedTask;
     }
 }

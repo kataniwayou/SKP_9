@@ -66,7 +66,15 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
     private readonly ProcessorLivenessOptions _options;
     private readonly TimeProvider _clock;
     private readonly ILoopHeartbeat _heartbeat;
+    private readonly Processing.BaseProcessor _processor;
     private readonly ILogger<ProcessorStartupOrchestrator> _logger;
+
+    /// <summary>
+    /// Set once the config schema has been fetched AND found to describe <c>TConfig</c>. It replaces
+    /// reading a stored definition back off the identity, which is the round-trip this field exists
+    /// to remove: the loop already knows the answer at the moment it gets it.
+    /// </summary>
+    private bool _configResolved;
 
     public ProcessorStartupOrchestrator(
         IQueueSender sender,
@@ -78,6 +86,7 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
         IOptions<ProcessorLivenessOptions> options,
         TimeProvider clock,
         ILoopHeartbeat heartbeat,
+        Processing.BaseProcessor processor,
         ILogger<ProcessorStartupOrchestrator> logger)
     {
         _sender     = sender ?? throw new ArgumentNullException(nameof(sender));
@@ -89,6 +98,7 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
         _options    = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _clock      = clock ?? throw new ArgumentNullException(nameof(clock));
         _heartbeat  = heartbeat ?? throw new ArgumentNullException(nameof(heartbeat));
+        _processor  = processor ?? throw new ArgumentNullException(nameof(processor));
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -164,7 +174,46 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
 
                 if (reply is SchemaDefinitionFound found)
                 {
-                    _context.SetDefinition(id, found.Definition);
+                    // THE CONFIG DEFINITION IS CHECKED HERE AND NEVER STORED, which is the whole of
+                    // what it is fetched for. Input and output definitions go onto the identity
+                    // because the pre and post handlers read them on every dispatch; nothing reads a
+                    // config definition after startup. ExecuteAsync needs TConfig and
+                    // SerializerOptions to bind a payload, not the schema it was already validated
+                    // against — BaseApi did that at orchestration start, and the check below is what
+                    // makes that validation mean something by proving the row describes TConfig.
+                    //
+                    // Checked as a local, in the iteration that fetched it. It used to be written to
+                    // the identity and read straight back out two methods later, which is how the
+                    // field came to look like it had no consumer at all.
+                    if (id == identity.ConfigSchemaId)
+                    {
+                        var problems = ConfigSchemaConformance.Check(_processor.ConfigType, found.Definition);
+
+                        if (problems.Count > 0)
+                        {
+                            // Error, not warning: this replica will not serve, and a failure that
+                            // stops work has to be findable by severity alone. Both the row and the
+                            // type are named because the fix is in one of them and the mismatch alone
+                            // does not say which — a row written for the wrong processor and a record
+                            // that grew a property look identical from here.
+                            //
+                            // Returning false leaves the replica published UNHEALTHY rather than
+                            // absent, so ProcessorLivenessValidator refuses to start any workflow
+                            // using this processor, at the API, before a file moves.
+                            _logger.LogError(
+                                "the registered config schema {SchemaId} does not describe {ConfigType}: {Problems}",
+                                id, _processor.ConfigType.Name, string.Join("; ", problems));
+
+                            return false;
+                        }
+
+                        _configResolved = true;
+                    }
+                    else
+                    {
+                        _context.SetDefinition(id, found.Definition);
+                    }
+
                     _logger.LogInformation("definition resolved for schema {SchemaId}", id);
                     break;
                 }
@@ -246,7 +295,9 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
         var entry = ProcessorLivenessEntry.Create(
             inputOutcome:  Outcome(identity.InputSchemaId, identity.InputDefinition),
             outputOutcome: Outcome(identity.OutputSchemaId, identity.OutputDefinition),
-            configOutcome: Outcome(identity.ConfigSchemaId, identity.ConfigDefinition),
+            configOutcome: identity.ConfigSchemaId is null || _configResolved
+                ? SchemaOutcome.Success
+                : SchemaOutcome.Fail,
             timestamp:     _clock.GetUtcNow().UtcDateTime,
             interval:      _options.StartupIntervalSeconds);
 

@@ -88,9 +88,25 @@ public sealed class ProcessorStartupOrchestratorTests
             var endpoint = Substitute.For<IReplyEndpoint>();
             endpoint.QueueName.Returns("proc-reply-pod-1");
 
+            // The author, for its ConfigType alone: startup now checks the resolved config schema
+            // against the record a payload binds to. NoConfig has no properties, so a fixture whose
+            // identity carries no ConfigSchemaId skips the check entirely -- which is the pair the
+            // resolve loop already reads, a null id meaning the role does not apply.
             Orchestrator = new ProcessorStartupOrchestrator(
                 Sender, endpoint, Slot, Context, writer, new InstanceId("pod-1"),
-                options, Clock, Beat, new RecordingLogger<ProcessorStartupOrchestrator>());
+                options, Clock, Beat, new StubAuthor(),
+                new RecordingLogger<ProcessorStartupOrchestrator>());
+        }
+
+        /// <summary>An author that does nothing, present only to supply ConfigType.</summary>
+        private sealed record StubConfig : BaseProcessor.Core.Configuration.ProcessorConfig;
+
+        private sealed class StubAuthor
+            : BaseProcessor.Core.Processing.BaseProcessor<StubConfig>
+        {
+            protected override Task ProcessAsync(
+                byte[] data, StubConfig? config, Guid executionId, CancellationToken ct)
+                => Task.CompletedTask;
         }
 
         public IReadOnlyList<ProcessorLivenessEntry> WrittenEntries() =>

@@ -23,5 +23,4 @@ public sealed record ProcessorIdentity(
     string Name,
     string Version,
     string? InputDefinition,
-    string? OutputDefinition,
-    string? ConfigDefinition);
+    string? OutputDefinition);
