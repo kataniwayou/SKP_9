@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A concrete processor. It consumes the {metadata, content} tree ArchiveExpander produces, hands it
+    to one hardcoded provider handler named on the step payload, and emits a tree of the same
+    contract. Like every other processor here it carries no identity, liveness, broker or Redis code
+    — AddBaseProcessor folds all of it in.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare
+    either here.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.SKNormalizer</RootNamespace>
+    <AssemblyName>Processor.SKNormalizer</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The pipeline, the assembler and the registry are this processor's construction, not its
+         surface. The tests DO construct them directly — a pipeline tested only through the
+         processor cannot be given a deliberately throwing handler — so the test assembly is named
+         here, matching what the sibling processors do for the same reason. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/
+         folder and NuGet imports it automatically, stamping the hash on THIS assembly — the entry
+         assembly, where the runtime reader looks. A ProjectReference could not flow build targets. -->
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+  </ItemGroup>
+
+</Project>
