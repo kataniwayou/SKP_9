@@ -9,6 +9,9 @@ namespace BaseProcessor.Core.Processing;
 /// </summary>
 public abstract class BaseProcessor<TConfig> : BaseProcessor where TConfig : ProcessorConfig
 {
+    /// <inheritdoc/>
+    internal override Type ConfigType => typeof(TConfig);
+
     internal sealed override Task ExecuteAsync(
         byte[] data, string payload, Guid executionId, CancellationToken ct)
     {
