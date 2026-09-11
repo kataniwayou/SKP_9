@@ -113,13 +113,40 @@ What the operator owns, and what checks it:
 | naming the handler that matches the *feed* | **dispatch** — stage 2, for structurally identical providers only (§3.2) |
 | the expander's `MaxDepth` | **dispatch** — stage 2, as an opaque leaf where entries were expected |
 
-**`MaxDepth` deserves its own sentence because it is the subtlest of the four.** It decides whether a
+**`MaxDepth` deserves its own sentence because it is the subtlest of the five.** It decides whether a
 nested archive reaches this processor as `FileContent.Entries` — openable, walkable by `Locate` — or
 as a `FileContent.Bytes` leaf holding opaque base64. A handler that expects to look inside a nested
 archive receives a blob when `MaxDepth` is set too low. That is a legible stage-2 failure rather than
 a crash, but it is entirely the operator's doing, and the number lives in three places at once: the
 expander's payload sets it, the tree row bounds it, and this processor's `LayoutFor` must stay inside
 the same row on the way out.
+
+### 1.4 Two layers: the contract is the processor's, the behaviour is the payload's
+
+> **A schema states what a document must look like. A handler states how to interpret it.** They are
+> different layers, owned by different things, set at different times.
+
+| | belongs to | scope | set at |
+|---|---|---|---|
+| input / output schema | the **processor**, as part of its registered identity | one per processor edge | registration |
+| provider handler | the **payload**, i.e. step configuration | per workflow step | publish |
+
+**This is why a schema not distinguishing providers is correct rather than deficient.** Asking the
+data contract to constrain which handler is appropriate would be asking it to encode a behavioural
+choice that lives one layer up. The schema does not care where a document came from; provenance is
+the payload's concern and the handler's, never the contract's.
+
+**One processor serves many workflows.** The processor row is registered once; any number of workflow
+steps point at it carrying different handler names — exactly as ArchiveExpander serves many steps
+with different `MaxDepth` values today. **The handler set is a property of the build; which handler
+runs is a property of the dispatch.**
+
+**The processor is stateless across dispatches, and §4 is what makes that true.** Nothing about
+handler A survives into a dispatch naming handler B, because the handler is resolved fresh from the
+payload every time. That is not inherited: the concrete processor is a **singleton**, and the
+framework's own note records that per-dispatch state in a field on that instance is safe only because
+prefetch is 1. Hence the rule in §4 that handlers hold no per-item state and that per-dispatch state
+lives in the pipeline's locals — a stateful handler would break this silently.
 
 ---
 
@@ -218,7 +245,7 @@ enum is unreachable by any workflow, and a name in the enum with no handler behi
 step that cannot run. `ProviderHandlerRegistry` therefore performs its own conformance check against
 the resolved config schema definition and **refuses readiness on a mismatch**, naming both sets.
 
-### 3.2 Per-feed input rows, and the small gap they leave
+### 3.2 Per-feed input rows, and what stays in the payload layer
 
 **The operator authors the schemas, and that is the right place for this knowledge.** The operator
 knows what a provider ships and what the customer expects; nothing in this processor does. A per-feed
@@ -231,20 +258,21 @@ processor's `InputSchemaId` at it is how feed expectations become enforceable.
 own error text at Warning. A document from the wrong feed is therefore rejected with a structural
 diagnosis rather than reaching stage 1 and producing a handler's guess at what went wrong.
 
-**What remains uncheckable is narrow, and it is narrow for the same reason §1.3 is true.** Precisely
-because one workflow shape serves every provider sharing a structure, a schema describing that
-structure **cannot distinguish those providers from each other**. A per-feed row catches *wrong data
-for this workflow*. It cannot catch *wrong handler for this data* when two providers are structurally
-identical and differ only in what their fields mean — which is exactly the population §1.3 describes.
+**A per-feed row catches wrong data for this workflow. It does not catch a wrong handler, and it is
+not supposed to.** Per §1.4 those are different layers: the schema constrains the document, the
+payload names the interpretation. When two providers are structurally identical and differ only in
+what their fields *mean*, no schema describing that structure can tell them apart — and asking one to
+would be asking the contract to encode a payload-layer choice.
 
-For that case alone, stage 2 is the only defence, which makes its message the whole diagnostic. It is
-written for that reader: a `Validate` failure names which expectation the content broke, and a
-`Locate` that finds nothing reports that this handler recognized no items in this document — never a
-bare parse error.
+So the only residual failure is an **operator naming the wrong handler in a payload**, and it is
+diagnosed where it belongs: at stage 2, in this processor, at dispatch. That makes the stage-2
+message the whole diagnostic for it. It is written for that reader — a `Validate` failure names which
+expectation the content broke, and a `Locate` that finds nothing reports that this handler recognized
+no items in this document, never a bare parse error.
 
-Closing even that would require the schema to express provenance rather than structure, which means
-one row per provider and couples the generic processors on either side to the provider list. Not
-worth it for the residue.
+This is the correct resting place, not a compromise. Pushing provenance into the schema would mean
+one row per provider and would couple the generic processors on either side to the provider list —
+dissolving exactly the reuse §1.3 describes.
 
 ### 3.3 Pod-level options
 
