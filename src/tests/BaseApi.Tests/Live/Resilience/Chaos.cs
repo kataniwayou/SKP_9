@@ -45,6 +45,17 @@ internal static class Chaos
     /// </para>
     /// </summary>
     public static string ProcessorService => RealStack.Get("SKP_PROCESSOR_SERVICE", "sample-proc-v9");
+
+    /// <summary>
+    /// The orchestrator's OpenTelemetry <c>service.name</c>, which the witness filters on for S7.
+    /// <para>
+    /// Unlike the processor's, this one is a fixed deployment value — <c>Service:Name</c> in the
+    /// orchestrator's own configuration, not a database row — so it moves only when the manifest
+    /// does. Configuration anyway, for the same reason: a name that matches nothing makes the
+    /// scenario inconclusive rather than saying what it could not find.
+    /// </para>
+    /// </summary>
+    public static string OrchestratorService => RealStack.Get("SKP_ORCHESTRATOR_SERVICE", "orchestrator");
 }
 
 /// <summary>
