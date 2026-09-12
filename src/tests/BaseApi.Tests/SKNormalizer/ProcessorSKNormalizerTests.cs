@@ -213,15 +213,18 @@ public sealed class ProcessorSKNormalizerTests
     }
 
     [Fact]
-    public async Task TheSuccessLineCarriesShapeAndNeverContent()
+    public async Task TheSuccessLineCarriesShapeAndNeverEntryContent()
     {
+        // Counts, sizes, the handler name and the ROOT file name are safe -- author constants and
+        // shape, not upstream data. Item keys, field values, metadata and payload fragments are the
+        // things the rule forbids, so this asserts an entry's name and its bytes both stay out.
         var (processor, log) = Build(new Identity());
 
         var sender = Substitute.For<IQueueSender>();
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
 
         await processor.ExecuteAsync(
-            Document(Archive("in.zip", Leaf("a.csv", "id"), Leaf("b.csv", "id"))),
+            Document(Archive("in.zip", Leaf("secret-entry-name.csv", "id"), Leaf("b.csv", "id"))),
             """{"handler":"Sample"}""",
             E,
             CancellationToken.None);
@@ -229,6 +232,8 @@ public sealed class ProcessorSKNormalizerTests
         var entry = Assert.Single(log.Records);
         Assert.Contains("Sample", entry.Message, StringComparison.Ordinal);
         Assert.Contains("2", entry.Message, StringComparison.Ordinal);
+        // An item key -- the thing the rule most specifically forbids -- must not reach the template.
+        Assert.DoesNotContain("secret-entry-name", entry.Message, StringComparison.Ordinal);
         // The bytes of an entry are upstream content and must not reach a template.
         Assert.DoesNotContain("id", entry.Message, StringComparison.Ordinal);
     }
