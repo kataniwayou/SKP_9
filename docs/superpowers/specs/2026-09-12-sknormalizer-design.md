@@ -462,7 +462,8 @@ public sealed record NormalizedAudio(
 public sealed record ItemNames(string MetadataFileName, string AudioFileName);
 
 public sealed record NormalizedItem(
-    SourceItem Source, StandardMetadata Metadata, ItemNames Names, NormalizedAudio? Audio);
+    SourceItem Source, StandardMetadata Metadata, ItemNames Names, NormalizedAudio? Audio,
+    byte[]? MetadataDocument);   // null when the handler produced no metadata — see §6.2
 ```
 
 `SourceItem.Key` is the handler's own identifier for the unit — a basename, a folder name, an index.
@@ -514,13 +515,18 @@ A handler returns a **description** of the output tree; it never constructs a `F
 ```csharp
 public abstract record OutputNode
 {
-    public sealed record File(string Name, byte[] Content, DateTime? ModifiedUtc) : OutputNode;
-    public sealed record Folder(string Name, string ArchiveExtension,
-                                IReadOnlyList<OutputNode> Children) : OutputNode;
+    public sealed record File(
+        string Name, byte[] Content, DateTime? CreatedUtc, DateTime? ModifiedUtc) : OutputNode;
+
+    public sealed record Folder(
+        string Name, string ArchiveExtension, long SizeBytes,
+        DateTime? CreatedUtc, DateTime? ModifiedUtc,
+        IReadOnlyList<OutputNode>? Children) : OutputNode;   // null children => expanded to nothing
 }
 
-public sealed record OutputLayout(
-    string RootName, string RootExtension, IReadOnlyList<OutputNode> Children);
+// The root is a NODE, not a name plus a child list -- see §6.3 for the leaf-root defect the older
+// shape admitted, and why size and timestamps are carried rather than synthesised.
+public sealed record OutputLayout(OutputNode Root);
 ```
 
 `TreeAssembler` turns that into a `FileNode` and is **the only code in this processor that sets a node
@@ -747,6 +753,7 @@ provider claims with measured fact without touching anything else.
 |---|---|---|
 | `durationSeconds` | measured value, **else keep the provider's claim** | re-encoding does not change how long the audio is, so the claim stays true even when a probe could not measure it |
 | `codec`, `bitrateKbps` | measured value, **else nothing** — the provider's claim is discarded | these describe the ENCODING, which the conversion just replaced. Keeping them publishes a wrong fact about the file `<audio><fileName>` now names: an absent element says "unknown", which is true, while a stale one says `pcm_s16le` about a file that is now mp3. |
+| `sampleRateHz`, `channels` | **the provider's claim is kept — and that is knowingly wrong for a converting handler** | Same argument as codec and bitrate: `-ar 22050 -ac 1` is an ordinary normalisation target, and after it a retained `44100` is as false as a retained `pcm_s16le`. **The gap is in the type, not the rule**: `NormalizedAudio` (§5.3) carries `Duration`, `BitrateKbps` and `Codec` and nothing else, so a handler has nothing measured to write. Stated here rather than left silent, because silence is what makes the next author think these two are safe. §12 tracks it. |
 
 **No shipped handler converts yet, so this branch is unreachable — and it is still worth being right
 about**, because `AcmeHandler` (§7.2) is the handler the first converting one will be copied from,
@@ -782,9 +789,19 @@ business; *running* a process is not.
 describes the document; it never writes angle brackets.
 
 **It is the single definition of the document's structure and element order** (§7.3). Because the
-vocabulary is fixed and this is the only code that writes it, "every handler emits the same document"
-is true by construction rather than by discipline — there is no code path by which a handler could
-emit a different shape.
+vocabulary is fixed and this is the only code that writes it, **the document the pipeline renders is
+canonical by construction** — `StandardMetadata`'s named properties make an invented element
+impossible and a misspelled one a compile error, so no handler can cause a differently-shaped
+document to be *rendered*.
+
+**The narrower claim is the true one, and an earlier draft overstated it.** It said "there is no code
+path by which a handler could emit a different shape". There is: stage 8 hands a handler
+`OutputNode.File(name, byte[], …)` with no constraint on the bytes, so a handler can put a
+hand-built XML into the output and nothing notices — the assembler checks names, extensions and
+depth, and output validation checks the *tree* row, not the document inside a leaf. That freedom is
+§6.2's design, not an oversight: whether an artifact enters the tree is the handler's decision.
+What is guaranteed is that a handler which uses the pipeline's rendered document — as every handler
+should — cannot produce a non-canonical one.
 
 **`StandardMetadata` is therefore a fixed-shape type, not a key/value bag.** An earlier draft gave it
 `Set(string, string)` and an ordered element list, which let any handler invent a key, misspell one,
@@ -945,6 +962,9 @@ Each has a seam in this design and no implementation:
    `StandardMetadata` and `XmlMetadataRenderer`. It is shared by every handler: values differ,
    element names and structure never do.
 2. **The ffmpeg argument sets** — `AudioProfile.Arguments` is the seam; no profile is designed here.
+   **Related and newly named:** `NormalizedAudio` carries `Duration`, `BitrateKbps` and `Codec` but
+   not sample rate or channel count, so §7.3's reconciliation rule cannot cover those two fields. The
+   first converting handler will need them; widening the record is the fix.
 3. **The Redis field whitelist** — `IFieldWhitelist` is registered as a pass-through. Backing it with
    Redis, and deciding which fields it governs, is later work behind an unchanged interface.
 4. **The provider list itself** — `SampleHandler` (§7.1, identity) and `AcmeHandler` (§7.2, the
