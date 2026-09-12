@@ -16,7 +16,7 @@
 - **Package versions come from `Directory.Packages.props`.** Never put a `Version=` on a `PackageReference` in this project, except the pinned `VersionOverride="[1.0.0]"` on `BaseProcessor.Core` that every processor carries.
 - **`BaseProcessor.Core` is a `PackageReference`, never a `ProjectReference`** — `SourceHash.targets` ships in the package's `build/` folder and NuGet imports it automatically, stamping the hash on the entry assembly. A ProjectReference cannot flow build targets.
 - **`BaseProcessor.Core` is not modified by this plan.** No task edits `src/BaseProcessor.Core/`.
-- **Log templates carry shape, never content.** Counts, sizes, author constants are safe. File names from upstream, field values, metadata and payload fragments must not reach a log template. Item keys appear only in `FailedException` messages.
+- **Log templates carry shape, never content.** Counts, sizes, author constants **and the root file name** are safe — the spec's §9.1 template is `normalized {FileName} with {Handler} …` and every sibling processor logs its own `{FileName}` the same way. What must NOT reach a log template: **item keys, field values, metadata and payload fragments**. Item keys appear only in `FailedException` messages, where the diagnostic need is acute and the volume is one line per failed dispatch.
 - **Nothing logs before throwing `FailedException`.** `ProcessDispatchHandler` writes the message verbatim at Warning; a log line here emits every failure twice.
 - **camelCase on the wire.** `FileDocument.Options` uses `JsonNamingPolicy.CamelCase`; JSON Schema property names are case-sensitive, so schema files must be camelCase too.
 - **Node names are names, never paths.** No `/` or `\` in any `FileMetadata.Name`.
