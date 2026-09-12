@@ -29,6 +29,7 @@ using AcmeHandler = Processor.SKNormalizer.AcmeHandler;
 using NormalizationPipeline = Processor.SKNormalizer.NormalizationPipeline;
 using TreeAssembler = Processor.SKNormalizer.TreeAssembler;
 using XmlMetadataRenderer = Processor.SKNormalizer.XmlMetadataRenderer;
+using IAudioTranscoder = Processor.SKNormalizer.IAudioTranscoder;
 
 namespace BaseApi.Tests;
 
@@ -138,7 +139,8 @@ public sealed class EnvelopeContractTests : IDisposable
     /// wired in so a test can pass <paramref name="handler"/> to exercise Acme's mapping path
     /// instead, without touching every existing identity-path call site.
     /// </summary>
-    private static async Task<byte[]> Normalize(byte[] document, string handler = "Sample")
+    private static async Task<byte[]> Normalize(
+        byte[] document, string handler = "Sample", IAudioTranscoder? transcoder = null)
     {
         var sender = Substitute.For<IQueueSender>();
         var sends = new List<ProcessedData>();
@@ -148,13 +150,14 @@ public sealed class EnvelopeContractTests : IDisposable
         var normalizer = new SKNormalizerProcessor(
             new RecordingLogger<SKNormalizerProcessor>(),
             new ProviderHandlerRegistry([new SampleHandler(), new AcmeHandler(Clock)]),
-            // Exploding, not a substitute: IAudioTranscoder is internal and cannot be proxied by
-            // NSubstitute, and it must never be called here -- SampleHandler's ProfileFor returns
-            // null for every item, and Acme's tests below carry audio through byte-for-byte too, so
-            // neither handler this registry carries ever transcodes. If this throws, one of them
-            // stopped being pass-through.
+            // Exploding BY DEFAULT, and not a substitute: IAudioTranscoder is internal and cannot
+            // be proxied by NSubstitute. SampleHandler's ProfileFor returns null for every item, so
+            // every Sample test here must never reach a transcoder and this fails loudly if one
+            // does. Acme DOES convert, so its two tests pass a FakeTranscoder explicitly -- keeping
+            // the default exploding is what stops a future pass-through handler regressing quietly.
             new NormalizationPipeline(
-                new TreeAssembler(), new XmlMetadataRenderer(), new ExplodingTranscoder()));
+                new TreeAssembler(), new XmlMetadataRenderer(),
+                transcoder ?? new ExplodingTranscoder()));
 
         normalizer.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
 
@@ -641,9 +644,9 @@ public sealed class EnvelopeContractTests : IDisposable
     }
 
     [Fact]
-    public async Task AcmeStandardizesTheSidecarAndLeavesTheAudioUntouched()
+    public async Task AcmeStandardizesTheSidecarAndConvertsTheAudio()
     {
-        // THE REAL PATH, END TO END: a zip of wav + json in, a zip of wav + xml out, same topology,
+        // THE REAL PATH, END TO END: a zip of wav + json in, a zip of mp3 + xml out, same topology,
         // depth 1. This is the test that would catch the mirror, the assembler, the renderer or the
         // handler drifting apart from each other.
         const string sidecar = """
@@ -659,7 +662,13 @@ public sealed class EnvelopeContractTests : IDisposable
         var envelope = await Fetch(
             "bundle.zip", Zip(("track01.wav", "RIFF-not-really-audio"), ("track01.json", sidecar)), AnyFile);
 
-        var normalized = await Normalize(await Expand(envelope, """{"MaxDepth":1}"""), handler: "Acme");
+        var transcoder = new FakeTranscoder();
+        var normalized = await Normalize(
+            await Expand(envelope, """{"MaxDepth":1}"""), handler: "Acme", transcoder);
+
+        // The wav reached ffmpeg, not the sidecar. Locate's audio-first ordering is the only thing
+        // deciding that, and the pipeline picks the FIRST node carrying bytes.
+        Assert.Equal(".mp3", Assert.Single(transcoder.Calls).TargetExtension);
 
         var root = JsonSerializer.Deserialize<FileNode>(normalized, FileDocument.Options)!;
         var entries = Assert.IsType<FileContent.Entries>(root.Content).Value;
@@ -667,10 +676,13 @@ public sealed class EnvelopeContractTests : IDisposable
         Assert.Equal(".zip", root.Metadata.Extension);
         Assert.Equal(2, entries.Count);
 
-        var audio = entries.Single(e => e.Metadata.Name == "track01.wav");
+        // The CONVERTED bytes under the converted name. The source string must not survive: an
+        // entry named .mp3 holding the original wav is the exact lie LayoutFor guards against.
+        var audio = entries.Single(e => e.Metadata.Name == "track01.mp3");
         Assert.Equal(
-            "RIFF-not-really-audio",
+            "converted",
             Encoding.UTF8.GetString(Assert.IsType<FileContent.Bytes>(audio.Content).Value));
+        Assert.DoesNotContain(entries, e => e.Metadata.Name == "track01.wav");
 
         var xml = Encoding.UTF8.GetString(
             Assert.IsType<FileContent.Bytes>(
@@ -678,7 +690,16 @@ public sealed class EnvelopeContractTests : IDisposable
 
         Assert.Contains("<provider>Acme</provider>", xml, StringComparison.Ordinal);
         Assert.Contains("<title>Nocturne in E-flat</title>", xml, StringComparison.Ordinal);
-        Assert.Contains("<fileName>track01.wav</fileName>", xml, StringComparison.Ordinal);
+        Assert.Contains("<fileName>track01.mp3</fileName>", xml, StringComparison.Ordinal);
+
+        // MEASURED, not claimed: Reconcile overwrites codec and bitrate from what the conversion
+        // reported, so these two describe the entry beside them rather than the input.
+        Assert.Contains("<codec>mp3</codec>", xml, StringComparison.Ordinal);
+        Assert.Contains("<bitrateKbps>192</bitrateKbps>", xml, StringComparison.Ordinal);
+
+        // The sidecar's claim survives untouched, because nothing resampled: ProfileFor names no
+        // -ar and no -ac, which is what keeps this element true.
+        Assert.Contains("<sampleRateHz>44100</sampleRateHz>", xml, StringComparison.Ordinal);
 
         // The sidecar's own name survives only as provenance inside <originalName> -- the archive
         // itself carries no track01.json entry any more. Written as two direct assertions rather
@@ -700,7 +721,8 @@ public sealed class EnvelopeContractTests : IDisposable
         var envelope = await Fetch(
             "bundle.zip", Zip(("track01.wav", "RIFF"), ("track01.json", sidecar)), AnyFile);
 
-        var normalized = await Normalize(await Expand(envelope, """{"MaxDepth":1}"""), handler: "Acme");
+        var normalized = await Normalize(
+            await Expand(envelope, """{"MaxDepth":1}"""), handler: "Acme", new FakeTranscoder());
 
         Assert.True(
             ProcessorJsonSchemaValidator.TryValidate(TreeSchema(), normalized, out var errors),

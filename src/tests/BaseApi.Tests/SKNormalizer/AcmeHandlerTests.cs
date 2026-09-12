@@ -245,7 +245,7 @@ public sealed class AcmeHandlerTests
     }
 
     [Fact]
-    public void TheMetadataFileIsRenamedToXmlAndTheAudioKeepsItsName()
+    public void TheMetadataFileIsRenamedToXmlAndTheAudioToMp3()
     {
         var handler = Handler();
         var item = Assert.Single(handler.Locate(
@@ -254,23 +254,45 @@ public sealed class AcmeHandlerTests
         var names = handler.NameFor(handler.Map(item), item);
 
         Assert.Equal("track01.xml", names.MetadataFileName);
-        Assert.Equal("track01.wav", names.AudioFileName);
+
+        // NOT track01.wav. Stage 6 replaces the bytes, so keeping the source name would put mp3
+        // content in a .wav entry with the XML's <codec> asserting mp3 beside it.
+        Assert.Equal("track01.mp3", names.AudioFileName);
     }
 
     [Fact]
-    public void NothingIsTranscoded()
+    public void TheAudioIsTranscodedToMp3()
     {
-        // The wav passes through untouched, which is why §14's open question -- which node is the
-        // audio -- cannot be answered by accident here: the pipeline's guess never fires.
+        // The codec is asserted, not just the extension: ffmpeg picks an mp3 encoder for a .mp3
+        // output on its own, and which one depends on how the binary in the image was built.
         var handler = Handler();
         var item = Assert.Single(handler.Locate(
             Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
 
-        Assert.Null(handler.ProfileFor(item));
+        var profile = Assert.IsType<AudioProfile>(handler.ProfileFor(item));
+
+        Assert.Equal(".mp3", profile.TargetExtension);
+        Assert.Equal(["-c:a", "libmp3lame", "-b:a", "192k"], profile.Arguments);
     }
 
     [Fact]
-    public void LayoutForEmitsTheAudioUnchangedAndTheRenderedXmlInPlaceOfTheJson()
+    public void TheProfileResamplesNothing()
+    {
+        // Map copies the sidecar's sampleRateHz and channels into the metadata and Reconcile
+        // corrects neither, so an -ar or -ac here would publish two claims about the output that
+        // nothing measured. This test is the guard on that reasoning, not on ffmpeg's syntax.
+        var handler = Handler();
+        var item = Assert.Single(handler.Locate(
+            Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
+
+        var profile = Assert.IsType<AudioProfile>(handler.ProfileFor(item));
+
+        Assert.DoesNotContain("-ar", profile.Arguments);
+        Assert.DoesNotContain("-ac", profile.Arguments);
+    }
+
+    [Fact]
+    public void LayoutForEmitsTheAudioAndTheRenderedXmlInPlaceOfTheJson()
     {
         var handler = Handler();
         var root = Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar));
@@ -288,7 +310,10 @@ public sealed class AcmeHandlerTests
         var children = Assert.IsType<OutputNode.Folder>(layout.Root).Children!;
         Assert.Equal(2, children.Count);
 
-        var audio = Assert.IsType<OutputNode.File>(children.Single(c => c is OutputNode.File { Name: "track01.wav" }));
+        // Named for the conversion by stage 5; carrying the source bytes because this call passes
+        // a null NormalizedAudio -- the arm exercised in full by
+        // LayoutForFallsBackToTheSourceBytesWhenNothingWasConverted below.
+        var audio = Assert.IsType<OutputNode.File>(children.Single(c => c is OutputNode.File { Name: "track01.mp3" }));
         Assert.Equal(Wav, audio.Content);
 
         var xml = Assert.IsType<OutputNode.File>(children.Single(c => c is OutputNode.File { Name: "track01.xml" }));
@@ -298,12 +323,11 @@ public sealed class AcmeHandlerTests
     [Fact]
     public void LayoutForEmitsTheConvertedAudioRatherThanTheSourceBytes()
     {
-        // THE DEFECT THIS TEST EXISTS FOR. AcmeHandler is billed as the template every provider
-        // handler is cloned from (§7.2), and the first clone that adds an mp3 ProfileFor gets a
-        // pipeline that transcodes, a Reconcile that writes the MEASURED codec and bitrate into the
-        // XML, and -- until this was fixed -- a LayoutFor that wrote the ORIGINAL wav bytes into an
-        // entry named track01.mp3. The extension, <codec> and <bitrateKbps> would all lie about the
-        // content, nothing would fail, and the collapser would pack it happily.
+        // THE DEFECT THIS TEST EXISTS FOR, and it is no longer hypothetical: ProfileFor names an
+        // mp3 profile, so the pipeline transcodes, Reconcile writes the MEASURED codec and bitrate
+        // into the XML, and -- until this was fixed -- LayoutFor wrote the ORIGINAL wav bytes into
+        // an entry named track01.mp3. The extension, <codec> and <bitrateKbps> would all lie about
+        // the content, nothing would fail, and the collapser would pack it happily.
         var handler = Handler();
         var root = Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar));
         var item = Assert.Single(handler.Locate(root));
@@ -333,8 +357,9 @@ public sealed class AcmeHandlerTests
     [Fact]
     public void LayoutForFallsBackToTheSourceBytesWhenNothingWasConverted()
     {
-        // The other arm, which is this handler's own: ProfileFor returns null, NormalizedItem.Audio
-        // is null, and the wav must pass through byte-for-byte rather than vanishing.
+        // The other arm. It is no longer this handler's own -- ProfileFor always names a profile
+        // now -- but it stays covered for the metadata-only clone that inherits this LayoutFor, and
+        // because a null NormalizedItem.Audio must never make the audio entry vanish.
         var handler = Handler();
         var root = Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar));
         var item = Assert.Single(handler.Locate(root));
@@ -348,7 +373,7 @@ public sealed class AcmeHandlerTests
 
         var children = Assert.IsType<OutputNode.Folder>(layout.Root).Children!;
         var audio = Assert.IsType<OutputNode.File>(
-            children.Single(c => c is OutputNode.File { Name: "track01.wav" }));
+            children.Single(c => c is OutputNode.File { Name: "track01.mp3" }));
 
         Assert.Equal(Wav, audio.Content);
     }

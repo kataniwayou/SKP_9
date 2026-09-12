@@ -9,11 +9,12 @@ namespace Processor.SKNormalizer;
 /// and this handler pairs them, projects the sidecar into the canonical metadata of the design's
 /// §7.3, and emits the same topology it received with the <c>.json</c> replaced by an <c>.xml</c>.
 /// <para>
-/// <b>It converts no audio, deliberately.</b> <see cref="ProfileFor"/> returns null, so the wav
-/// passes through byte-for-byte. That keeps the design's §14 open question — which node in an item
-/// is the audio — from being answered by accident: with no conversion the pipeline's "first node
-/// carrying bytes" guess never fires, and this handler selects nodes by extension in its own code,
-/// which is where a handler's knowledge belongs.
+/// <b>It converts the audio to mp3.</b> <see cref="ProfileFor"/> names a libmp3lame profile, so the
+/// wav does NOT pass through: stage 6 transcodes it, stage 5 names the entry <c>.mp3</c>, and
+/// <see cref="Reconcile"/> writes the MEASURED codec and bitrate into the metadata. That makes the
+/// design's §14 open question — which node in an item is the audio — load-bearing rather than
+/// theoretical: the pipeline's "first node carrying bytes" guess DOES fire now, and the only reason
+/// it picks the wav rather than the sidecar is the ordering <see cref="Locate"/> imposes.
 /// </para>
 /// <para>
 /// <b>It is the first handler to override <see cref="LayoutFor"/>, and it must.</b> The base mirror
@@ -31,6 +32,14 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
 {
     private const string AudioExtension = ".wav";
     private const string SidecarExtension = ".json";
+
+    /// <summary>
+    /// What <see cref="ProfileFor"/> produces and <see cref="NameFor"/> names. Separate from
+    /// <see cref="AudioExtension"/>, which is what the handler READS: they were the same string
+    /// while nothing transcoded, and folding them into one constant now would make an input rule
+    /// and an output decision impossible to change independently.
+    /// </summary>
+    private const string AudioProfileExtension = ".mp3";
 
     /// <summary>
     /// Cached because constructing options per call is both wasteful and a CA1869 diagnostic. The
@@ -99,9 +108,10 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
             // first is the node ffmpeg is handed. This handler transcodes nothing, so today the order
             // is inert; a clone that adds a ProfileFor inherits this Locate, and most zip writers emit
             // entries alphabetically, which would put track01.json ahead of track01.wav and feed the
-            // SIDECAR to the transcoder. That fails loudly but costs the next author an afternoon, and
-            // encoding the convention here costs nothing. OrderByDescending on a bool is stable, so
-            // everything after the audio keeps the order the archive had.
+            // SIDECAR to the transcoder. That is no longer hypothetical: ProfileFor names an mp3
+            // profile, so this ordering is the ONLY thing standing between ffmpeg and a .json input.
+            // OrderByDescending on a bool is stable, so everything after the audio keeps the order
+            // the archive had.
             .Select(g => new SourceItem(
                 g.Key,
                 g.OrderByDescending(e => IsExtension(e, AudioExtension)).ToList()))
@@ -226,29 +236,55 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
     }
 
     /// <summary>
-    /// Stage 5. The metadata file takes the basename with an <c>.xml</c> extension; the audio keeps
-    /// the name it arrived with, because nothing transcodes it.
+    /// Stage 5. Both output entries take the item's basename: the metadata file with an
+    /// <c>.xml</c> extension, the audio with the <c>.mp3</c> the conversion produces.
+    /// <para>
+    /// <b>The audio does NOT keep the name it arrived with.</b> Stage 6 replaces its bytes, so
+    /// emitting them under <c>track01.wav</c> would name a wav file that holds mp3 — and stage 7
+    /// writes the measured codec and bitrate into the XML beside it, so the extension, the
+    /// <c>&lt;codec&gt;</c> element and the content would all disagree with nothing failing. The
+    /// source node is still looked up here, because an item with no audio is a stage-5 failure
+    /// rather than a silently renamed nothing.
+    /// </para>
     /// </summary>
     public override ItemNames NameFor(StandardMetadata metadata, SourceItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        var audio = Node(item, AudioExtension)
-            ?? throw new NormalizationException(
+        if (Node(item, AudioExtension) is null)
+        {
+            throw new NormalizationException(
                 $"there is no {AudioExtension} audio file to name");
+        }
 
-        return new ItemNames($"{item.Key}.xml", audio.Metadata.Name);
+        return new ItemNames($"{item.Key}.xml", $"{item.Key}{AudioProfileExtension}");
     }
 
-    /// <summary>Stage 6. Null: the audio passes through byte-for-byte.</summary>
-    public override AudioProfile? ProfileFor(SourceItem item) => null;
+    /// <summary>
+    /// Stage 6. Every Acme item's audio is re-encoded to mp3.
+    /// <para>
+    /// <b>The codec is named explicitly rather than inferred from the extension.</b> ffmpeg would
+    /// pick an mp3 encoder for a <c>.mp3</c> output on its own, but which one depends on how the
+    /// binary in the image was built; naming <c>libmp3lame</c> makes the output a property of this
+    /// file rather than of the container.
+    /// </para>
+    /// <para>
+    /// <b>No <c>-ar</c> and no <c>-ac</c>, deliberately.</b> <see cref="Map"/> copies the sidecar's
+    /// sample rate and channel count into the metadata and <see cref="Reconcile"/> corrects neither,
+    /// so resampling here would publish two claims about the output that nothing measured and
+    /// nothing would catch. Bitrate and codec ARE corrected from the probe, which is why changing
+    /// those two is safe.
+    /// </para>
+    /// </summary>
+    public override AudioProfile? ProfileFor(SourceItem item)
+        => new(AudioProfileExtension, ["-c:a", "libmp3lame", "-b:a", "192k"]);
 
     /// <summary>
     /// Stage 7. The audio file name is always folded in — it is a required element and stage 5 is
     /// the only thing that knows it.
     /// <para>
-    /// <b>The measured branch never fires today</b>, since <see cref="ProfileFor"/> returns null.
-    /// It is written anyway: it keeps this handler correct the day a profile is added, and it
+    /// <b>The measured branch is the live one</b>, since <see cref="ProfileFor"/> names an mp3
+    /// profile. The null arm remains reachable only for a clone that converts nothing, and it
     /// documents which three elements are MEASURED fact rather than a provider's claim.
     /// </para>
     /// <para>
@@ -325,9 +361,9 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
                 // (".mp3"), and Reconcile wrote the MEASURED codec and bitrate into the XML beside it.
                 // Emitting the source bytes under that name would make the extension, <codec> and
                 // <bitrateKbps> all lie about the entry's content, with nothing failing and the
-                // collapser packing it happily. The fallback arm is this handler's OWN case:
-                // ProfileFor returns null, no conversion happens, Audio is null, and the wav passes
-                // through byte-for-byte -- and it is also the arm a metadata-only clone will use.
+                // collapser packing it happily. The converted arm is this handler's OWN case now:
+                // ProfileFor names an mp3 profile, so Audio is populated on every item. The fallback
+                // survives for a clone that converts nothing, and for the item stage 6 declined.
                 item.Audio is { } converted ? converted.Content : bytes.Value,
                 audio.Metadata.CreatedUtc,
                 audio.Metadata.ModifiedUtc));
