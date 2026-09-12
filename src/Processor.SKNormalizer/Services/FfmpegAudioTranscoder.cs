@@ -223,7 +223,7 @@ internal sealed partial class FfmpegAudioTranscoder(IOptions<SKNormalizerOptions
 
     private static int? Bitrate(string stderr)
     {
-        var match = BitratePattern().Match(stderr);
+        var match = BitratePattern().Match(OutputSection(stderr));
 
         return match.Success
                && int.TryParse(match.Groups[1].Value, CultureInfo.InvariantCulture, out var parsed)
@@ -233,9 +233,38 @@ internal sealed partial class FfmpegAudioTranscoder(IOptions<SKNormalizerOptions
 
     private static string? Codec(string stderr)
     {
-        var match = CodecPattern().Match(stderr);
+        var match = CodecPattern().Match(OutputSection(stderr));
 
         return match.Success ? match.Groups[1].Value : null;
+    }
+
+    /// <summary>
+    /// Everything from ffmpeg's <c>Output #0</c> banner onwards — <b>the half that describes what
+    /// was WRITTEN</b>.
+    /// <para>
+    /// <b>Scoping is not an optimisation, it is the difference between a fact and a lie.</b> ffmpeg
+    /// prints the input's stream line first, so an unscoped first-match reads the SOURCE:
+    /// converting a 44.1kHz wav to 192k mp3 reported <c>pcm_s16le</c> and <c>1411</c>, which
+    /// <c>AcmeHandler.Reconcile</c> then wrote into the metadata beside a file that is now mp3.
+    /// Observed in a live chain run on 2026-09-12, in the exact shape that handler's own comment
+    /// warns about; it was invisible for as long as no handler named a profile.
+    /// </para>
+    /// <para>
+    /// <b>Duration is deliberately NOT scoped this way.</b> ffmpeg prints <c>Duration:</c> only in
+    /// the input block, and a transcode does not change how long the audio is, so reading it from
+    /// the input is correct rather than a second instance of this bug.
+    /// </para>
+    /// <para>
+    /// Falls back to the whole of stderr when there is no output banner — a conversion that wrote
+    /// nothing has already failed on the missing file, and a null probe is better than a throw from
+    /// a parser.
+    /// </para>
+    /// </summary>
+    private static string OutputSection(string stderr)
+    {
+        var index = stderr.IndexOf("Output #", StringComparison.Ordinal);
+
+        return index < 0 ? stderr : stderr[index..];
     }
 
     // Parsed from stderr rather than by a second ffprobe run: one process per conversion, and the
@@ -243,7 +272,11 @@ internal sealed partial class FfmpegAudioTranscoder(IOptions<SKNormalizerOptions
     [GeneratedRegex(@"Duration:\s*(\d+:\d{2}:\d{2}\.\d+)")]
     private static partial Regex DurationPattern();
 
-    [GeneratedRegex(@"bitrate:\s*(\d+)\s*kb/s")]
+    // NO "bitrate:" PREFIX, because the output block does not use one. The input block reads
+    // "Duration: 00:00:01.50, bitrate: 1411 kb/s"; the output's stream line ends ", 192 kb/s". This
+    // pattern is therefore only correct against OutputSection -- run over the whole of stderr it
+    // matches the input's 1411 through the same trailing "kb/s".
+    [GeneratedRegex(@"(\d+)\s*kb/s")]
     private static partial Regex BitratePattern();
 
     [GeneratedRegex(@"Audio:\s*([a-zA-Z0-9_]+)")]

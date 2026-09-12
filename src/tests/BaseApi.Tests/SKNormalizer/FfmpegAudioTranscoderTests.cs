@@ -59,6 +59,35 @@ public sealed class FfmpegAudioTranscoderTests
 
     [Trait("Category", "RealStack")]
     [Fact]
+    public void ARealConversionProbesTheOUTPUTCodecAndBitrateRatherThanTheInputs()
+    {
+        // NEEDS THE BINARY. THE REGRESSION THIS EXISTS FOR: ffmpeg prints the input's stream line
+        // before the output's, so an unscoped first-match over stderr reported the SOURCE -- a wav
+        // transcoded to 192k mp3 probed as pcm_s16le at 1411 kb/s, and AcmeHandler.Reconcile wrote
+        // both into the metadata beside a file that is now mp3.
+        var transcoder = Build("ffmpeg");
+
+        var wav = transcoder.Transcode(
+            [],
+            ".null",
+            new AudioProfile(".wav", ["-f", "lavfi", "-i", "sine=frequency=440:duration=2"]),
+            CancellationToken.None);
+
+        var mp3 = transcoder.Transcode(
+            wav.Content, ".wav",
+            new AudioProfile(".mp3", ["-c:a", "libmp3lame", "-b:a", "192k"]),
+            CancellationToken.None);
+
+        Assert.Equal("mp3", mp3.Codec);
+        Assert.Equal(192, mp3.BitrateKbps);
+
+        // Duration comes from the INPUT block and that is correct -- a transcode does not change
+        // how long the audio is. Asserted so the fix above cannot be "scope everything".
+        Assert.Equal(2, mp3.Duration?.TotalSeconds ?? 0, 1);
+    }
+
+    [Trait("Category", "RealStack")]
+    [Fact]
     public void ACancellationAfterStartKillsTheChildInsteadOfWaitingItOut()
     {
         // NEEDS THE BINARY. "-re" paces ffmpeg at real time so the 30s duration is genuinely
