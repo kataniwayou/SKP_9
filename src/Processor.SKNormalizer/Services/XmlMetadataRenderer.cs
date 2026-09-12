@@ -74,10 +74,45 @@ internal sealed class XmlMetadataRenderer : IMetadataRenderer
     // upstream content from making the document unparseable for its consumer.
     private static void Text(XmlWriter writer, string name, string? value)
     {
-        if (value is not null)
+        // NULL, EMPTY AND WHITESPACE ARE ONE NOTION OF "UNSET", and they have to be, because
+        // StandardMetadata.MissingRequired() already treats all three as absent. A `is not null`
+        // guard alone disagreed with it: a provider sidecar carrying `"artist": ""` -- routine in
+        // real exports -- rendered <artist></artist>, which §7.3 forbids outright, and for a
+        // REQUIRED element it would have rendered an empty element in a document MissingRequired()
+        // considered incomplete. One rule, in both places.
+        if (string.IsNullOrWhiteSpace(value))
         {
-            writer.WriteElementString(name, value);
+            return;
         }
+
+        // A CONTROL CHARACTER IS A BAD PROVIDER DOCUMENT, NOT A BUG IN US. JSON permits
+        // "title": "Nocturne" and System.Text.Json accepts it, but XmlWriter throws
+        // ArgumentException for every C0 control except tab/CR/LF. §9 has the processor catch
+        // NormalizationException and nothing else, so letting that ArgumentException escape reports
+        // upstream content as an unhandled programming error -- exactly the inversion §9 exists to
+        // prevent. THE VALUE IS NOT IN THE MESSAGE: it is upstream content and a FailedException
+        // message is logged verbatim, so the element name is all the diagnostic an operator gets.
+        for (var i = 0; i < value.Length; i++)
+        {
+            // A well-formed surrogate PAIR is a legal XML character above the BMP, but IsXmlChar
+            // rejects either half on its own. Pairs are stepped over together; a LONE half is not a
+            // character at all and falls through to the check below, which refuses it.
+            if (char.IsHighSurrogate(value[i])
+                && i + 1 < value.Length
+                && char.IsLowSurrogate(value[i + 1]))
+            {
+                i++;
+                continue;
+            }
+
+            if (!XmlConvert.IsXmlChar(value[i]))
+            {
+                throw new NormalizationException(
+                    $"the '{name}' element's value holds a character XML cannot represent");
+            }
+        }
+
+        writer.WriteElementString(name, value);
     }
 
     private static void Stamp(XmlWriter writer, string name, DateTimeOffset? value)

@@ -66,6 +66,59 @@ public sealed class XmlMetadataRendererTests
     }
 
     [Fact]
+    public void AnEmptyStringOptionalIsOmittedRatherThanEmptied()
+    {
+        // `"artist": ""` is routine in real provider exports, and AcmeHandler.Map copies the
+        // sidecar's strings across without normalising them. A `value is not null` guard rendered
+        // that as <artist></artist>, which §7.3 forbids outright -- and which disagreed with
+        // MissingRequired(), which has always treated "" as absent.
+        var metadata = Minimal();
+        metadata.Artist = string.Empty;
+
+        Assert.DoesNotContain("<artist", Render(metadata), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AWhitespaceOnlyOptionalIsOmittedRatherThanEmptied()
+    {
+        // The same rule for the other half of IsNullOrWhiteSpace: <album>   </album> is no more a
+        // known album than an empty one, and MissingRequired() already agrees.
+        var metadata = Minimal();
+        metadata.Album = "   ";
+
+        Assert.DoesNotContain("<album", Render(metadata), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AControlCharacterIsABusinessFailureNamingTheElementAndNotTheValue()
+    {
+        // JSON permits "title": "Nocturne\u0001" and System.Text.Json accepts it, but XmlWriter
+        // throws ArgumentException for every C0 control except tab/CR/LF. §9 has the processor catch
+        // NormalizationException and nothing else, so an escaping ArgumentException reports a bad
+        // PROVIDER DOCUMENT as an unhandled programming error -- the inversion §9 exists to prevent.
+        var metadata = Minimal();
+        metadata.Title = "Nocturne\u0001";
+
+        var ex = Assert.Throws<NormalizationException>(() => Render(metadata));
+
+        Assert.Contains("title", ex.Message, StringComparison.Ordinal);
+        // NEVER THE VALUE. It is upstream content and a FailedException message is logged verbatim.
+        Assert.DoesNotContain("Nocturne", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TabsNewlinesAndAstralCharactersAreStillLegalValues()
+    {
+        // The guard must reject only what XML cannot represent. Tab, CR and LF are legal C0
+        // controls, and a surrogate PAIR is one legal character above the BMP that IsXmlChar
+        // rejects when it sees either half alone -- a naive per-char check would refuse an emoji.
+        var metadata = Minimal();
+        metadata.Title = "Nocturne\tin\nE-flat \U0001F3B5";
+
+        Assert.Contains("\U0001F3B5", Render(metadata), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheRequiredElementsAreAlwaysPresent()
     {
         var xml = Render(Minimal());
