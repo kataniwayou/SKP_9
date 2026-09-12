@@ -741,6 +741,17 @@ handlers that do not exist yet:**
 nowhere before a conversion runs (§5.1); grouping them separately is what lets `Reconcile` overwrite
 provider claims with measured fact without touching anything else.
 
+**What `Reconcile` overwrites differs per field, and the rule is what a transcode actually does.**
+
+| field | after a conversion | why |
+|---|---|---|
+| `durationSeconds` | measured value, **else keep the provider's claim** | re-encoding does not change how long the audio is, so the claim stays true even when a probe could not measure it |
+| `codec`, `bitrateKbps` | measured value, **else nothing** — the provider's claim is discarded | these describe the ENCODING, which the conversion just replaced. Keeping them publishes a wrong fact about the file `<audio><fileName>` now names: an absent element says "unknown", which is true, while a stale one says `pcm_s16le` about a file that is now mp3. |
+
+**No shipped handler converts yet, so this branch is unreachable — and it is still worth being right
+about**, because `AcmeHandler` (§7.2) is the handler the first converting one will be copied from,
+and whatever rule is encoded there becomes the pattern.
+
 **Required, and always present:** `source/provider`, `source/originalName`, `source/ingestedUtc`,
 `descriptive/title`, `audio/fileName`. The system always knows these.
 
