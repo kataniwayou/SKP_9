@@ -30,6 +30,9 @@ public sealed class NormalizationPipelineTests
 
         public AudioProfile? Profile { get; init; }
 
+        /// <summary>What stage 7 was handed, so a test can assert it saw the conversion's output.</summary>
+        public NormalizedAudio? ReconciledAudio { get; private set; }
+
         private void Enter(string stage)
         {
             Stages.Add(stage);
@@ -80,6 +83,8 @@ public sealed class NormalizationPipelineTests
         {
             Enter(nameof(Reconcile));
 
+            ReconciledAudio = audio;
+
             if (audio?.Duration is { } duration)
             {
                 metadata.Set("duration", duration.TotalSeconds.ToString("F0"));
@@ -119,15 +124,25 @@ public sealed class NormalizationPipelineTests
     }
 
     [Fact]
-    public void ReconcileSeesWhatTheTranscoderProduced()
+    public void ReconcileIsHandedTheAudioTheTranscoderProduced()
     {
-        // The whole reason stage 7 exists: duration is knowable nowhere before conversion.
+        // THE WHOLE REASON STAGE 7 EXISTS: duration is knowable nowhere before conversion. An
+        // earlier version of this test asserted only ConvertedCount, which the pipeline increments
+        // BEFORE Reconcile runs -- so it passed just as happily against an implementation calling
+        // Reconcile(metadata, null, names), which is the one thing stage 7 must never see.
         var handler = new RecordingHandler { Profile = new AudioProfile(".mp3", []) };
 
         var result = Pipeline(new FakeTranscoder()).Run(
             Archive("in.zip", Leaf("a.wav", "x")), handler, CancellationToken.None);
 
         Assert.Equal(1, result.ConvertedCount);
+
+        Assert.NotNull(handler.ReconciledAudio);
+
+        var audio = handler.ReconciledAudio;
+        Assert.Equal(TimeSpan.FromSeconds(184), audio.Duration);
+        Assert.Equal(Encoding.UTF8.GetBytes("converted"), audio.Content);
+        Assert.Equal(".mp3", audio.Extension);
     }
 
     [Fact]
