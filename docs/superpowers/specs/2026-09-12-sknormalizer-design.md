@@ -676,6 +676,85 @@ with nothing provider-specific in the way to obscure it.
 
 ---
 
+### 7.2 `AcmeHandler` — the first mapping handler
+
+**One item, two entries: an audio file and its metadata sidecar.** `AcmeHandler` is the shape §5.5
+describes, made concrete. It pairs a `.wav` with the `.json` beside it, maps the JSON into the
+standard metadata of §7.3, passes the audio through **byte-for-byte**, and emits a `.zip` root with
+two entries at depth 1 — the same topology it received, with the `.json` replaced by an `.xml`.
+
+**It converts no audio, and that is deliberate for a first handler.** `ProfileFor` returns null, so
+nothing transcodes. That keeps the open question of §14 — which node in an item is the audio — from
+being answered by accident: with no conversion, the pipeline's "first node carrying bytes" guess
+never fires, and `AcmeHandler` selects nodes by extension in its own code, where a handler's
+knowledge belongs.
+
+**It is the first handler to override `LayoutFor`**, which is exactly the path §6.2 describes: the
+default mirror substitutes nothing, so a handler that emits an artifact builds its own layout from
+the `MetadataDocument`, `Audio` and `Names` its items carry.
+
+**`SampleHandler` stays shipped beside it.** §7.1 makes it the pipeline's own regression test, and
+identity is a property no mapping handler can prove. Two handlers also exercise the registry and the
+config schema `enum` with more than one entry, which is a better test of that machinery than one.
+
+### 7.3 The standardized XML, and why its shape is fixed
+
+> **Every handler emits the same document. Only the values differ — never the element names, never
+> the structure.** The vocabulary below is hardcoded and shared; a provider's peculiarity is
+> expressed by what a handler *puts in* these elements, never by adding its own.
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<metadata>
+  <source>
+    <provider>Acme</provider>
+    <originalName>track01.json</originalName>
+    <ingestedUtc>2026-09-12T04:31:00Z</ingestedUtc>
+  </source>
+  <descriptive>
+    <title>Nocturne in E-flat</title>
+    <artist>Unknown</artist>
+    <album>Field Recordings</album>
+    <recordedUtc>2026-03-04T05:06:07Z</recordedUtc>
+  </descriptive>
+  <audio>
+    <fileName>track01.wav</fileName>
+    <codec>pcm_s16le</codec>
+    <durationSeconds>184.2</durationSeconds>
+    <sampleRateHz>44100</sampleRateHz>
+    <channels>2</channels>
+    <bitrateKbps>1411</bitrateKbps>
+  </audio>
+</metadata>
+```
+
+**The three groups map onto the pipeline's stages, which is what makes the shape defensible for
+handlers that do not exist yet:**
+
+| group | what it holds | which stage fills it |
+|---|---|---|
+| `<source>` | provenance — who sent it, what it was called, when it arrived | `Map` (originalName) and `Augment` (provider, ingestedUtc) |
+| `<descriptive>` | the provider's own metadata | `Map` — this is where per-provider mapping work lives |
+| `<audio>` | per-file fact | `Map` when the provider states it, **corrected by `Reconcile`** when a conversion actually produces it |
+
+**`<audio>` exists as its own group because of stage 7.** Duration, codec and bitrate are knowable
+nowhere before a conversion runs (§5.1); grouping them separately is what lets `Reconcile` overwrite
+provider claims with measured fact without touching anything else.
+
+**Required, and always present:** `source/provider`, `source/originalName`, `source/ingestedUtc`,
+`descriptive/title`, `audio/fileName`. The system always knows these.
+
+**Optional, and OMITTED ENTIRELY when unknown — never emitted empty.** That follows the rule
+`NormalizedAudio` already sets: a probe that could not determine a value must not have one invented
+(§5.3). An empty `<durationSeconds/>` is a claim that the duration is nothing; an absent element is
+the truth.
+
+**Every value is formatted with `CultureInfo.InvariantCulture`, and timestamps as
+`yyyy-MM-ddTHH:mm:ssZ`.** Not cosmetic: a machine whose locale uses a comma decimal separator would
+otherwise render `184,2`, and the same handler would produce different documents on different nodes.
+
+---
+
 ## 8. The shared services
 
 **`IAudioTranscoder` → `FfmpegAudioTranscoder`.** Takes source bytes, a source extension and an
@@ -688,9 +767,32 @@ codec so stage 7 has something to fold. A non-zero exit, a timeout past
 cleans up temp files, and one place is what a test replaces. The ffmpeg *arguments* are a handler's
 business; *running* a process is not.
 
-**`IMetadataRenderer` → `XmlMetadataRenderer`.** `StandardMetadata` → UTF-8 XML bytes. Purely
-mechanical: encoding, declaration, indentation, escaping. A handler describes the document; it never
-writes angle brackets.
+**`IMetadataRenderer` → `XmlMetadataRenderer`.** `StandardMetadata` → UTF-8 XML bytes. A handler
+describes the document; it never writes angle brackets.
+
+**It is the single definition of the document's structure and element order** (§7.3). Because the
+vocabulary is fixed and this is the only code that writes it, "every handler emits the same document"
+is true by construction rather than by discipline — there is no code path by which a handler could
+emit a different shape.
+
+**`StandardMetadata` is therefore a fixed-shape type, not a key/value bag.** An earlier draft gave it
+`Set(string, string)` and an ordered element list, which let any handler invent a key, misspell one,
+or omit one with nothing noticing — the document would still render, just differently from every
+other handler's. Named properties make an invented key impossible and a misspelled one a compile
+error.
+
+**It stays mutable rather than becoming a record**, because its values arrive across three stages
+(`Map`, `Augment`, `Reconcile`) and the handler interface hands the same instance to each. Required
+fields are therefore checked rather than compiler-enforced, once, in the pipeline:
+
+| state after stage 7 | outcome |
+|---|---|
+| every property unset | **no document** — the leaf passes through. This is what keeps `SampleHandler` identity. |
+| some set, a required one missing | `NormalizationException` **naming the missing elements** |
+| complete | rendered |
+
+That tri-state is what replaces the old `IsEmpty` check, and it preserves optional emission (§6.2)
+while making an incomplete document a legible failure instead of a quietly different file.
 
 **`IFieldWhitelist` → `PassThroughFieldWhitelist`.** The seam for the deferred Redis whitelist,
 registered now as a no-op that admits everything and injected into handlers that will need it. It
@@ -828,15 +930,16 @@ the output and the root arrives as `.zip` — identity deliberately not asserted
 
 Each has a seam in this design and no implementation:
 
-1. **The standard XML vocabulary** — what elements the standardized file actually contains.
-   `StandardMetadata` and `XmlMetadataRenderer` hold the shape; the vocabulary is a handler's to
-   state and a later decision to standardize.
+1. ~~**The standard XML vocabulary**~~ — **CLOSED.** Defined in §7.3 and hardcoded into
+   `StandardMetadata` and `XmlMetadataRenderer`. It is shared by every handler: values differ,
+   element names and structure never do.
 2. **The ffmpeg argument sets** — `AudioProfile.Arguments` is the seam; no profile is designed here.
 3. **The Redis field whitelist** — `IFieldWhitelist` is registered as a pass-through. Backing it with
    Redis, and deciding which fields it governs, is later work behind an unchanged interface.
-4. **The provider list itself** — only `SampleHandler` (§7.1) ships, and it is identity. No real
-   provider handler is designed. The first one will test whether the eight stages fit, and §5.2
-   records the most likely place they won't.
+4. **The provider list itself** — `SampleHandler` (§7.1, identity) and `AcmeHandler` (§7.2, the
+   first mapping handler) ship. No handler converts audio yet, so `AudioProfile` and the transcoder
+   remain unexercised by any shipped handler, and §5.2's warning about `NameFor` preceding conversion
+   is still untested in anger.
 
 ---
 
