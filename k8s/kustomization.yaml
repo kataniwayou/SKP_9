@@ -25,3 +25,4 @@ resources:
   - 38-processor-filefetcher.yaml
   - 39-processor-archivecollapser.yaml
   - 40-processor-filepersister.yaml
+  - 41-processor-sknormalizer.yaml
