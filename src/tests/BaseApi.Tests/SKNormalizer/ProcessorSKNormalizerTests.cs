@@ -33,17 +33,6 @@ public sealed class ProcessorSKNormalizerTests
     private static byte[] Document(FileNode node)
         => JsonSerializer.SerializeToUtf8Bytes(node, FileDocument.Options);
 
-    /// <summary>A handler that locates every entry and produces nothing — the Task 7 shape.</summary>
-    private sealed class Identity : ProviderHandlerBase
-    {
-        public override string Name => "Sample";
-
-        public override IReadOnlyList<SourceItem> Locate(FileNode root)
-            => root.Content is FileContent.Entries entries
-                ? entries.Value.Select(e => new SourceItem(e.Metadata.Name, [e])).ToList()
-                : [new SourceItem(root.Metadata.Name, [root])];
-    }
-
     private static (SKNormalizerProcessor Processor, RecordingLogger<SKNormalizerProcessor> Log)
         Build(params IProviderHandler[] handlers)
     {
@@ -63,7 +52,7 @@ public sealed class ProcessorSKNormalizerTests
 
     private static async Task<ProcessedData> Run(byte[] data, string payload)
     {
-        var (processor, _) = Build(new Identity());
+        var (processor, _) = Build(new SampleHandler());
 
         var sender = Substitute.For<IQueueSender>();
         var sends = new List<ProcessedData>();
@@ -78,7 +67,7 @@ public sealed class ProcessorSKNormalizerTests
 
     private static async Task<FailedException> Fails(byte[] data, string payload)
     {
-        var (processor, _) = Build(new Identity());
+        var (processor, _) = Build(new SampleHandler());
 
         var sender = Substitute.For<IQueueSender>();
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
@@ -201,7 +190,7 @@ public sealed class ProcessorSKNormalizerTests
     {
         // ProcessDispatchHandler writes a FailedException's message verbatim, so a line here would
         // emit every failure twice. If this ever fails, a logger call crept into a failure path.
-        var (processor, log) = Build(new Identity());
+        var (processor, log) = Build(new SampleHandler());
 
         var sender = Substitute.For<IQueueSender>();
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
@@ -218,7 +207,7 @@ public sealed class ProcessorSKNormalizerTests
         // Counts, sizes, the handler name and the ROOT file name are safe -- author constants and
         // shape, not upstream data. Item keys, field values, metadata and payload fragments are the
         // things the rule forbids, so this asserts an entry's name and its bytes both stay out.
-        var (processor, log) = Build(new Identity());
+        var (processor, log) = Build(new SampleHandler());
 
         var sender = Substitute.For<IQueueSender>();
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
