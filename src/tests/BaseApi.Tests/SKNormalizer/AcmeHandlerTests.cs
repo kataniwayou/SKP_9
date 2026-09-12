@@ -50,13 +50,48 @@ public sealed class AcmeHandlerTests
     public void AnItemMissingItsSidecarIsRejectedByName()
     {
         // The operator's whole diagnostic: a document of forty items whose ninth is malformed is
-        // useless unless the message says which.
+        // useless unless the message says which. THE KEY IS NOT ASSERTED HERE, because the handler
+        // does not put it there -- NormalizationPipeline prepends "item '{key}': " to every stage
+        // failure, uniformly across handlers, and repeating it in the handler read as
+        // "item 'track01': item 'track01': ...". What this pins is the reason text.
         var handler = Handler();
         var item = Assert.Single(handler.Locate(Archive(Leaf("track01.wav", Wav))));
 
         var ex = Assert.Throws<NormalizationException>(() => handler.ValidateContent(item));
 
-        Assert.Contains("track01", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            "an Acme item needs exactly one .wav and one .json, and this one holds 1 and 0",
+            ex.Message);
+    }
+
+    [Fact]
+    public void AnItemCarryingAnUnexpectedThirdEntryIsRejectedAndTheEntryIsNamed()
+    {
+        // LayoutFor emits one audio and one XML per item, so a third file sharing the basename
+        // would vanish from the output with nothing failing. Silent loss, so it is a failed step.
+        var handler = Handler();
+        var item = Assert.Single(handler.Locate(Archive(
+            Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar), Leaf("track01.txt", "notes"))));
+
+        var ex = Assert.Throws<NormalizationException>(() => handler.ValidateContent(item));
+
+        Assert.Equal(
+            "an Acme item is exactly the .wav and the .json, and this one also holds track01.txt",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ALeafRootIsRejectedRatherThanSilentlyBecomingAnEmptyArchive()
+    {
+        // Returning no items here would send an empty list into LayoutFor, which builds a childless
+        // Folder, which the assembler emits as content: null -- the document's bytes destroyed with
+        // no failed step. That is the defect OutputLayout was reshaped to prevent, and a handler
+        // must not reintroduce it.
+        var handler = Handler();
+
+        var ex = Assert.Throws<NormalizationException>(() => handler.Locate(Leaf("song.mp3", Wav)));
+
+        Assert.Contains("song.mp3", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -79,7 +114,12 @@ public sealed class AcmeHandlerTests
 
         var ex = Assert.Throws<NormalizationException>(() => handler.Map(item));
 
-        Assert.DoesNotContain("secret-value", ex.Message, StringComparison.Ordinal);
+        // EQUALITY, NOT AN ABSENCE. System.Text.Json's own message for this exact input happens not
+        // to contain "secret-value" -- it reads "Expected end of string, but instead reached end of
+        // data. Path: $.title | ..." -- so a DoesNotContain assertion would stay green if someone
+        // appended ex.Message. Pinning the whole string is what makes the no-content rule hold for
+        // every input, and for every handler copied from this one.
+        Assert.Equal("the metadata sidecar is not valid JSON", ex.Message);
     }
 
     [Fact]
