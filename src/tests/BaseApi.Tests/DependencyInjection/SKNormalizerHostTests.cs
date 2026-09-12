@@ -48,7 +48,7 @@ public sealed class SKNormalizerHostTests
 
         var registry = host.Services.GetRequiredService<ProviderHandlerRegistry>();
 
-        Assert.Equal(["Sample"], registry.Names);
+        Assert.Equal(["Acme", "Sample"], registry.Names);
     }
 
     [Fact]

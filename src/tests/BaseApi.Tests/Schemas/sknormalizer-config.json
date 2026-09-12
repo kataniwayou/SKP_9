@@ -6,7 +6,7 @@
     "handler": {
       "type": "string",
       "description": "The provider handler to apply. One of the names this processor version carries.",
-      "enum": ["Sample"]
+      "enum": ["Acme", "Sample"]
     }
   },
   "required": ["handler"],

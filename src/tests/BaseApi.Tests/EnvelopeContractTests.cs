@@ -6,6 +6,7 @@ using BaseProcessor.Core.Validation;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Processor.ArchiveExpander;
 using Processor.ArchiveExpander.Extractors;
@@ -24,6 +25,7 @@ using Processor.ArchiveCollapser.Writers;
 using SKNormalizerProcessor = Processor.SKNormalizer.SKNormalizerProcessor;
 using ProviderHandlerRegistry = Processor.SKNormalizer.ProviderHandlerRegistry;
 using SampleHandler = Processor.SKNormalizer.SampleHandler;
+using AcmeHandler = Processor.SKNormalizer.AcmeHandler;
 using NormalizationPipeline = Processor.SKNormalizer.NormalizationPipeline;
 using TreeAssembler = Processor.SKNormalizer.TreeAssembler;
 using XmlMetadataRenderer = Processor.SKNormalizer.XmlMetadataRenderer;
@@ -123,11 +125,20 @@ public sealed class EnvelopeContractTests : IDisposable
     }
 
     /// <summary>
-    /// The third hop. Runs the real processor with the identity handler -- the one that returns the
-    /// input tree unchanged -- so what this adds to the chain is a pass-through, and any difference
-    /// it introduces is a defect rather than a design choice.
+    /// A fixed instant for <see cref="AcmeHandler"/>'s injected clock, so the <c>&lt;ingestedUtc&gt;</c>
+    /// element it stamps is deterministic across runs rather than merely non-null.
     /// </summary>
-    private static async Task<byte[]> Normalize(byte[] document)
+    private static readonly FakeTimeProvider Clock =
+        new(new DateTimeOffset(2026, 3, 4, 5, 6, 7, TimeSpan.Zero));
+
+    /// <summary>
+    /// The third hop. Defaults to the identity handler -- the one that returns the input tree
+    /// unchanged -- so what this adds to the chain is a pass-through, and any difference it
+    /// introduces is a defect rather than a design choice. Both registered handlers are always
+    /// wired in so a test can pass <paramref name="handler"/> to exercise Acme's mapping path
+    /// instead, without touching every existing identity-path call site.
+    /// </summary>
+    private static async Task<byte[]> Normalize(byte[] document, string handler = "Sample")
     {
         var sender = Substitute.For<IQueueSender>();
         var sends = new List<ProcessedData>();
@@ -136,18 +147,19 @@ public sealed class EnvelopeContractTests : IDisposable
 
         var normalizer = new SKNormalizerProcessor(
             new RecordingLogger<SKNormalizerProcessor>(),
-            new ProviderHandlerRegistry([new SampleHandler()]),
+            new ProviderHandlerRegistry([new SampleHandler(), new AcmeHandler(Clock)]),
             // Exploding, not a substitute: IAudioTranscoder is internal and cannot be proxied by
             // NSubstitute, and it must never be called here -- SampleHandler's ProfileFor returns
-            // null for every item, which is what makes it identity. If this throws, it stopped being
-            // one.
+            // null for every item, and Acme's tests below carry audio through byte-for-byte too, so
+            // neither handler this registry carries ever transcodes. If this throws, one of them
+            // stopped being pass-through.
             new NormalizationPipeline(
                 new TreeAssembler(), new XmlMetadataRenderer(), new ExplodingTranscoder()));
 
         normalizer.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
 
         await normalizer.ExecuteAsync(
-            document, """{"handler":"Sample"}""", E, CancellationToken.None);
+            document, $$"""{"handler":"{{handler}}"}""", E, CancellationToken.None);
 
         return Assert.Single(sends).Data;
     }
@@ -626,5 +638,75 @@ public sealed class EnvelopeContractTests : IDisposable
         Assert.True(
             ProcessorJsonSchemaValidator.TryValidate(TreeSchema(), normalized, out var errors),
             string.Join("; ", errors));
+    }
+
+    [Fact]
+    public async Task AcmeStandardizesTheSidecarAndLeavesTheAudioUntouched()
+    {
+        // THE REAL PATH, END TO END: a zip of wav + json in, a zip of wav + xml out, same topology,
+        // depth 1. This is the test that would catch the mirror, the assembler, the renderer or the
+        // handler drifting apart from each other.
+        const string sidecar = """
+            {
+              "title": "Nocturne in E-flat",
+              "artist": "Unknown",
+              "album": "Field Recordings",
+              "recordedUtc": "2026-03-04T05:06:07Z",
+              "audio": { "file": "track01.wav", "sampleRateHz": 44100, "channels": 2, "durationSeconds": 184.2 }
+            }
+            """;
+
+        var envelope = await Fetch(
+            "bundle.zip", Zip(("track01.wav", "RIFF-not-really-audio"), ("track01.json", sidecar)), AnyFile);
+
+        var normalized = await Normalize(await Expand(envelope, """{"MaxDepth":1}"""), handler: "Acme");
+
+        var root = JsonSerializer.Deserialize<FileNode>(normalized, FileDocument.Options)!;
+        var entries = Assert.IsType<FileContent.Entries>(root.Content).Value;
+
+        Assert.Equal(".zip", root.Metadata.Extension);
+        Assert.Equal(2, entries.Count);
+
+        var audio = entries.Single(e => e.Metadata.Name == "track01.wav");
+        Assert.Equal(
+            "RIFF-not-really-audio",
+            Encoding.UTF8.GetString(Assert.IsType<FileContent.Bytes>(audio.Content).Value));
+
+        var xml = Encoding.UTF8.GetString(
+            Assert.IsType<FileContent.Bytes>(
+                entries.Single(e => e.Metadata.Name == "track01.xml").Content).Value);
+
+        Assert.Contains("<provider>Acme</provider>", xml, StringComparison.Ordinal);
+        Assert.Contains("<title>Nocturne in E-flat</title>", xml, StringComparison.Ordinal);
+        Assert.Contains("<fileName>track01.wav</fileName>", xml, StringComparison.Ordinal);
+
+        // The sidecar's own name survives only as provenance inside <originalName> -- the archive
+        // itself carries no track01.json entry any more. Written as two direct assertions rather
+        // than the brief's Replace-then-DoesNotContain trick: that reads awkwardly once it is
+        // actual code, and this says the same thing plainly.
+        Assert.Contains("<originalName>track01.json</originalName>", xml, StringComparison.Ordinal);
+        Assert.DoesNotContain(entries, e => e.Metadata.Name == "track01.json");
+    }
+
+    [Fact]
+    public async Task TheAcmeOutputSatisfiesTheTreeSchemaAndTheCollapserAcceptsIt()
+    {
+        // Its output schema IS the shared tree row, and the collapser must be able to pack what it
+        // emits -- the two ends of §1.2's reuse claim, for a handler that actually reshapes content.
+        const string sidecar = """
+            {"title":"T","audio":{"file":"track01.wav"}}
+            """;
+
+        var envelope = await Fetch(
+            "bundle.zip", Zip(("track01.wav", "RIFF"), ("track01.json", sidecar)), AnyFile);
+
+        var normalized = await Normalize(await Expand(envelope, """{"MaxDepth":1}"""), handler: "Acme");
+
+        Assert.True(
+            ProcessorJsonSchemaValidator.TryValidate(TreeSchema(), normalized, out var errors),
+            string.Join("; ", errors));
+
+        var collapsed = await Collapse(normalized);
+        Assert.Equal("bundle.zip", JsonDocument.Parse(collapsed).RootElement.GetProperty("fileName").GetString());
     }
 }
