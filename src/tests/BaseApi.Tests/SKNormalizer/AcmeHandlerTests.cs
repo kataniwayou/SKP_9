@@ -47,6 +47,51 @@ public sealed class AcmeHandlerTests
     }
 
     [Fact]
+    public void LocateOrdersTheAudioAheadOfTheSidecar()
+    {
+        // §14 leaves "which node is the audio" to a convention, and the pipeline's stage 6 resolves
+        // it as Nodes.FirstOrDefault(n => n.Content is FileContent.Bytes) -- the FIRST node. Most zip
+        // writers emit entries alphabetically, so track01.json arrives before track01.wav; a clone of
+        // this handler that adds a ProfileFor and inherits this Locate would hand ffmpeg the SIDECAR.
+        // Nothing here converts, so this is invisible at runtime today -- hence the test.
+        var item = Assert.Single(
+            Handler().Locate(Archive(Leaf("track01.json", Sidecar), Leaf("track01.wav", Wav))));
+
+        Assert.Equal("track01.wav", item.Nodes[0].Metadata.Name);
+        Assert.Equal("track01.json", item.Nodes[1].Metadata.Name);
+    }
+
+    [Fact]
+    public void AnArchiveThatExpandedToNothingYieldsNoItems()
+    {
+        // REACHABLE, AND DELIBERATELY KEPT. FileNode.Content is nullable and ArchiveExpander writes
+        // content: null for an archive with no entries, so `is not FileContent.Entries` is true for
+        // a perfectly ordinary empty zip. A previous review called this branch dead by counting
+        // FileContent's two variants and forgetting the null; empty in, empty out is correct, and
+        // only a LEAF root can lose content by returning no items.
+        var empty = new FileNode(new FileMetadata("bundle.zip", ".zip", 22, null, Stamp, 0), null);
+
+        Assert.Empty(Handler().Locate(empty));
+    }
+
+    [Fact]
+    public void AnAudioNodeCarryingNoContentIsRejected()
+    {
+        // Counting by extension is not enough: the expander can emit a node with null content, and
+        // stage 8 emits the audio entry unconditionally. Caught here it is a named failed step;
+        // uncaught it was a file silently missing from the output beside its XML.
+        var handler = Handler();
+        var contentless = new FileNode(
+            new FileMetadata("track01.wav", ".wav", 0, null, Stamp, 0), null);
+
+        var item = Assert.Single(handler.Locate(Archive(contentless, Leaf("track01.json", Sidecar))));
+
+        var ex = Assert.Throws<NormalizationException>(() => handler.ValidateContent(item));
+
+        Assert.Equal("the .wav audio file carries no content", ex.Message);
+    }
+
+    [Fact]
     public void AnItemMissingItsSidecarIsRejectedByName()
     {
         // The operator's whole diagnostic: a document of forty items whose ninth is malformed is
@@ -248,5 +293,63 @@ public sealed class AcmeHandlerTests
 
         var xml = Assert.IsType<OutputNode.File>(children.Single(c => c is OutputNode.File { Name: "track01.xml" }));
         Assert.Equal(document, xml.Content);
+    }
+
+    [Fact]
+    public void LayoutForEmitsTheConvertedAudioRatherThanTheSourceBytes()
+    {
+        // THE DEFECT THIS TEST EXISTS FOR. AcmeHandler is billed as the template every provider
+        // handler is cloned from (§7.2), and the first clone that adds an mp3 ProfileFor gets a
+        // pipeline that transcodes, a Reconcile that writes the MEASURED codec and bitrate into the
+        // XML, and -- until this was fixed -- a LayoutFor that wrote the ORIGINAL wav bytes into an
+        // entry named track01.mp3. The extension, <codec> and <bitrateKbps> would all lie about the
+        // content, nothing would fail, and the collapser would pack it happily.
+        var handler = Handler();
+        var root = Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar));
+        var item = Assert.Single(handler.Locate(root));
+
+        var metadata = handler.Map(item);
+        handler.Augment(metadata, item);
+
+        // What a converting clone would produce: stage 5 names the entry for the target format and
+        // stage 6 hands back the bytes in it.
+        var names = new ItemNames("track01.xml", "track01.mp3");
+        var mp3 = Encoding.UTF8.GetBytes("transcoded-mp3-bytes");
+        var converted = new NormalizedAudio(
+            mp3, ".mp3", mp3.LongLength, TimeSpan.FromSeconds(184), 192, "mp3");
+
+        var layout = handler.LayoutFor(
+            root,
+            [new NormalizedItem(item, metadata, names, converted, Encoding.UTF8.GetBytes("<metadata />"))]);
+
+        var children = Assert.IsType<OutputNode.Folder>(layout.Root).Children!;
+        var audio = Assert.IsType<OutputNode.File>(
+            children.Single(c => c is OutputNode.File { Name: "track01.mp3" }));
+
+        Assert.Equal(mp3, audio.Content);
+        Assert.NotEqual(Wav, audio.Content);
+    }
+
+    [Fact]
+    public void LayoutForFallsBackToTheSourceBytesWhenNothingWasConverted()
+    {
+        // The other arm, which is this handler's own: ProfileFor returns null, NormalizedItem.Audio
+        // is null, and the wav must pass through byte-for-byte rather than vanishing.
+        var handler = Handler();
+        var root = Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar));
+        var item = Assert.Single(handler.Locate(root));
+
+        var metadata = handler.Map(item);
+        handler.Augment(metadata, item);
+        var names = handler.NameFor(metadata, item);
+
+        var layout = handler.LayoutFor(
+            root, [new NormalizedItem(item, metadata, names, null, Encoding.UTF8.GetBytes("<metadata />"))]);
+
+        var children = Assert.IsType<OutputNode.Folder>(layout.Root).Children!;
+        var audio = Assert.IsType<OutputNode.File>(
+            children.Single(c => c is OutputNode.File { Name: "track01.wav" }));
+
+        Assert.Equal(Wav, audio.Content);
     }
 }
