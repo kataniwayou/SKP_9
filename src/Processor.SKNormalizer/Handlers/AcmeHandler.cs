@@ -56,14 +56,36 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
     /// being dropped — stage 2 is where that is reported, and an item silently discarded here would
     /// be a missing file with no failed step behind it.
     /// </para>
-    /// <para>A root that is not an archive yields no items: an Acme document is a bundle.</para>
+    /// <para>
+    /// <b>A LEAF ROOT IS A FAILED STEP, NOT AN EMPTY RESULT.</b> ArchiveExpander emits a
+    /// <c>Bytes</c> root for any fetched file it does not recognise as an archive, and returning
+    /// no items for one would send an empty item list into <see cref="LayoutFor"/>, which builds a
+    /// childless <c>Folder</c>, which the assembler emits as <c>content: null</c> — <b>the
+    /// document's bytes destroyed with no failed step</b>. That is the exact defect
+    /// <c>OutputLayout</c> was reshaped to make unrepresentable, and a handler must not reintroduce
+    /// it. An Acme document is a bundle of paired entries, so a document this handler cannot open
+    /// is a wrong-feed situation and belongs in a failure message naming the root.
+    /// </para>
+    /// <para>
+    /// <b>An archive that expanded to nothing is left alone.</b> Empty in, empty out is correct, and
+    /// only a leaf root can lose content.
+    /// </para>
     /// </summary>
+    /// <exception cref="NormalizationException">The root is a file rather than an archive.</exception>
     public override IReadOnlyList<SourceItem> Locate(FileNode root)
     {
         ArgumentNullException.ThrowIfNull(root);
 
+        if (root.Content is FileContent.Bytes)
+        {
+            throw new NormalizationException(
+                $"'{root.Metadata.Name}' is a file rather than an archive, and an Acme document is "
+                + $"a bundle of {AudioExtension}/{SidecarExtension} pairs");
+        }
+
         if (root.Content is not FileContent.Entries entries)
         {
+            // An archive that expanded to nothing. No items, and nothing to lose.
             return [];
         }
 
@@ -76,8 +98,20 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
     }
 
     /// <summary>
-    /// Stage 2. An Acme item is exactly one audio file and exactly one sidecar. Anything else is the
-    /// provider's mistake, and the message names the item so a forty-item document is diagnosable.
+    /// Stage 2. An Acme item is exactly one audio file and exactly one sidecar — <b>two nodes, no
+    /// more</b>.
+    /// <para>
+    /// <b>A third entry sharing the basename is rejected rather than carried.</b>
+    /// <see cref="LayoutFor"/> emits one audio and one XML per item, so a <c>track01.txt</c> beside
+    /// the pair would simply vanish from the output with nothing failing. Carrying unknown nodes
+    /// through is the other defensible answer; rejecting is right here, because this handler's
+    /// contract IS the pair and a third file means the feed is not what the operator thought.
+    /// </para>
+    /// <para>
+    /// <b>The messages do not name the item.</b> <c>NormalizationPipeline</c> prepends
+    /// <c>item '{key}': </c> to every <see cref="NormalizationException"/> a stage throws, uniformly
+    /// across handlers; repeating it here reads as <c>item 'track01': item 'track01': …</c>.
+    /// </para>
     /// </summary>
     public override void ValidateContent(SourceItem item)
     {
@@ -89,8 +123,19 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
         if (audio != 1 || sidecars != 1)
         {
             throw new NormalizationException(
-                $"item '{item.Key}': an Acme item needs exactly one {AudioExtension} and one "
-                + $"{SidecarExtension}, and this one holds {audio} and {sidecars}");
+                $"an Acme item needs exactly one {AudioExtension} and one {SidecarExtension}, and "
+                + $"this one holds {audio} and {sidecars}");
+        }
+
+        if (item.Nodes.Count != 2)
+        {
+            var unexpected = item.Nodes
+                .Where(n => !IsExtension(n, AudioExtension) && !IsExtension(n, SidecarExtension))
+                .Select(n => n.Metadata.Name);
+
+            throw new NormalizationException(
+                $"an Acme item is exactly the {AudioExtension} and the {SidecarExtension}, and this "
+                + $"one also holds {string.Join(", ", unexpected)}");
         }
     }
 
@@ -104,12 +149,12 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
 
         var sidecar = Node(item, SidecarExtension)
             ?? throw new NormalizationException(
-                $"item '{item.Key}': no {SidecarExtension} metadata sidecar to map");
+                $"there is no {SidecarExtension} metadata sidecar to map");
 
         var bytes = sidecar.Content is FileContent.Bytes content
             ? content.Value
             : throw new NormalizationException(
-                $"item '{item.Key}': its metadata sidecar carries no bytes");
+                "the metadata sidecar carries no bytes");
 
         AcmeSidecar? parsed;
 
@@ -124,13 +169,13 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
             // becomes a FailedException whose message the framework logs verbatim. Report the class
             // of fault, never the content.
             throw new NormalizationException(
-                $"item '{item.Key}': its metadata sidecar is not valid JSON");
+                "the metadata sidecar is not valid JSON");
         }
 
         if (parsed is null)
         {
             throw new NormalizationException(
-                $"item '{item.Key}': its metadata sidecar is JSON null");
+                "the metadata sidecar is JSON null");
         }
 
         return new StandardMetadata
@@ -151,6 +196,7 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
     public override void Augment(StandardMetadata metadata, SourceItem item)
     {
         ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(item);
 
         metadata.Provider = Name;
         metadata.IngestedUtc = clock.GetUtcNow();
@@ -166,7 +212,7 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
 
         var audio = Node(item, AudioExtension)
             ?? throw new NormalizationException(
-                $"item '{item.Key}': no {AudioExtension} audio file to name");
+                $"there is no {AudioExtension} audio file to name");
 
         return new ItemNames($"{item.Key}.xml", audio.Metadata.Name);
     }
@@ -268,13 +314,14 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
             children));
     }
 
+    private static bool IsExtension(FileNode node, string extension)
+        => string.Equals(node.Metadata.Extension, extension, StringComparison.OrdinalIgnoreCase);
+
     private static FileNode? Node(SourceItem item, string extension)
-        => item.Nodes.FirstOrDefault(
-            n => string.Equals(n.Metadata.Extension, extension, StringComparison.OrdinalIgnoreCase));
+        => item.Nodes.FirstOrDefault(n => IsExtension(n, extension));
 
     private static int Count(SourceItem item, string extension)
-        => item.Nodes.Count(
-            n => string.Equals(n.Metadata.Extension, extension, StringComparison.OrdinalIgnoreCase));
+        => item.Nodes.Count(n => IsExtension(n, extension));
 
     /// <summary>
     /// The sidecar, mirrored exactly as Acme ships it. <b>Private and nested</b>: it is this
