@@ -58,8 +58,14 @@ public sealed class NormalizationPipelineTests
         {
             Enter(nameof(Map));
 
-            var metadata = new StandardMetadata();
-            metadata.Set("key", item.Key);
+            var metadata = new StandardMetadata
+            {
+                Provider = "Recording",
+                OriginalName = item.Key,
+                IngestedUtc = new DateTimeOffset(2026, 9, 12, 4, 31, 0, TimeSpan.Zero),
+                Title = item.Key,
+                AudioFileName = item.Key,
+            };
             return metadata;
         }
 
@@ -87,7 +93,7 @@ public sealed class NormalizationPipelineTests
 
             if (audio?.Duration is { } duration)
             {
-                metadata.Set("duration", duration.TotalSeconds.ToString("F0"));
+                metadata.DurationSeconds = duration.TotalSeconds;
             }
         }
 

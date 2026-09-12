@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<metadata>
+  <source>
+    <provider>Acme</provider>
+    <originalName>track01.json</originalName>
+    <ingestedUtc>2026-09-12T04:31:00Z</ingestedUtc>
+  </source>
+  <descriptive>
+    <title>Nocturne in E-flat</title>
+    <artist>Unknown</artist>
+    <album>Field Recordings</album>
+    <recordedUtc>2026-03-04T05:06:07Z</recordedUtc>
+  </descriptive>
+  <audio>
+    <fileName>track01.wav</fileName>
+    <codec>pcm_s16le</codec>
+    <durationSeconds>184.2</durationSeconds>
+    <sampleRateHz>44100</sampleRateHz>
+    <channels>2</channels>
+    <bitrateKbps>1411</bitrateKbps>
+  </audio>
+</metadata>

@@ -73,6 +73,9 @@
          database rows resolved over the broker. They live here because the tests are their only
          reader, and they are the source text POSTed when the rows are registered. -->
     <Content Include="Schemas\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The golden standardized-metadata document. Beside the JSON schemas for the same reason:
+         these files are the contracts, and the tests read them from the output directory. -->
+    <Content Include="Schemas\*.xml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
