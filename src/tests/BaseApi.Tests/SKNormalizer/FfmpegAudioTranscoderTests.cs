@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Processor.SKNormalizer;
 using Xunit;
@@ -54,5 +55,49 @@ public sealed class FfmpegAudioTranscoderTests
         Assert.NotEmpty(source.Content);
         Assert.Equal(".wav", source.Extension);
         Assert.Equal(source.Content.LongLength, source.SizeBytes);
+    }
+
+    [Trait("Category", "RealStack")]
+    [Fact]
+    public void ACancellationAfterStartKillsTheChildInsteadOfWaitingItOut()
+    {
+        // NEEDS THE BINARY. "-re" paces ffmpeg at real time so the 30s duration is genuinely
+        // long-running rather than finishing instantly — a cancellation that is ignored would
+        // otherwise be indistinguishable from a fast conversion.
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromSeconds(1));
+
+        var stopwatch = Stopwatch.StartNew();
+
+        Assert.Throws<OperationCanceledException>(
+            () => Build("ffmpeg").Transcode(
+                [],
+                ".null",
+                new AudioProfile(".wav", ["-re", "-f", "lavfi", "-i", "sine=frequency=440:duration=30"]),
+                cts.Token));
+
+        stopwatch.Stop();
+
+        // Bounded well under the 30s the conversion would take uncancelled — proves the child was
+        // killed rather than run to completion or to the (much larger) default timeout.
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(15),
+            $"expected cancellation to return quickly, took {stopwatch.Elapsed}");
+    }
+
+    [Trait("Category", "RealStack")]
+    [Fact]
+    public void ATimeoutIsReportedAsABusinessFailureNamingTheLimit()
+    {
+        // NEEDS THE BINARY. Same long-running profile as the cancellation test, but here the token
+        // is never cancelled — the timeout is what stops it.
+        var ex = Assert.Throws<NormalizationException>(
+            () => Build("ffmpeg", timeoutSeconds: 1).Transcode(
+                [],
+                ".null",
+                new AudioProfile(".wav", ["-re", "-f", "lavfi", "-i", "sine=frequency=440:duration=30"]),
+                CancellationToken.None));
+
+        Assert.Contains("within 1s", ex.Message, StringComparison.Ordinal);
     }
 }
