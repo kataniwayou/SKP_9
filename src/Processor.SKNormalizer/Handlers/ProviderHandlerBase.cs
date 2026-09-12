@@ -25,6 +25,14 @@ public abstract class ProviderHandlerBase : IProviderHandler
 
     public virtual AudioProfile? ProfileFor(SourceItem item) => null;
 
+    /// <summary>
+    /// Stage 7, default: <b>a no-op, and it must stay one.</b> An obvious "improvement" is to fold
+    /// <c>names.AudioFileName</c> in here, the way <c>AcmeHandler.Reconcile</c> does — but that would
+    /// leave every handler that does not override this with a metadata object that is no longer
+    /// <c>IsUnset</c> and is missing every other required element. <c>SampleHandler</c>'s identity
+    /// pass-through depends on <c>IsUnset</c> staying true, so such a base would silently turn every
+    /// identity dispatch into an incomplete-metadata failed step.
+    /// </summary>
     public virtual void Reconcile(StandardMetadata metadata, NormalizedAudio? audio, ItemNames names)
     {
     }
