@@ -103,6 +103,34 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
+        // The pod's ffmpeg path and conversion timeout, from SKNormalizer__* in the manifest. Both
+        // are numbers an operator sizes against a container limit; a workflow author cannot know
+        // them. There is deliberately no size ceiling — see SKNormalizerOptions.
+        builder.Services.Configure<SKNormalizerOptions>(
+            builder.Configuration.GetSection("SKNormalizer"));
+
+        // ONE REGISTRATION PER PROVIDER, exactly as ArchiveExpander registers one extractor per
+        // format. The registry takes them all and throws at startup on a duplicate name.
+        //
+        // ADDING A LINE HERE IS NOT THE WHOLE JOB: the handler's name must also be added to the
+        // `handler` enum in src/tests/BaseApi.Tests/Schemas/sknormalizer-config.json, a new config
+        // schema row must be POSTed from that file, and the processor's ConfigSchemaId repointed.
+        // SKNormalizerConfigSchemaTests fails the build if the first of those is forgotten.
+        builder.Services.AddSingleton<IProviderHandler, SampleHandler>();
+        builder.Services.AddSingleton<ProviderHandlerRegistry>();
+
+        // The shared machinery. A handler describes; these execute.
+        builder.Services.AddSingleton<ITreeAssembler, TreeAssembler>();
+        builder.Services.AddSingleton<IMetadataRenderer, XmlMetadataRenderer>();
+        builder.Services.AddSingleton<IAudioTranscoder, FfmpegAudioTranscoder>();
+        builder.Services.AddSingleton<IFieldWhitelist, PassThroughFieldWhitelist>();
+        builder.Services.AddSingleton<NormalizationPipeline>();
+
+        // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
+        // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
+        // safe only because prefetch is 1 — and which is why every handler must be stateless too.
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, SKNormalizerProcessor>();
+
         return builder.Build();
     }
 }
