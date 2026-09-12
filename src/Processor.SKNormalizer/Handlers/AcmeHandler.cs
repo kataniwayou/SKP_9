@@ -180,9 +180,14 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
     /// <para>
     /// <b>The measured branch never fires today</b>, since <see cref="ProfileFor"/> returns null.
     /// It is written anyway: it keeps this handler correct the day a profile is added, and it
-    /// documents which three elements are MEASURED fact rather than a provider's claim. A value the
-    /// probe could not determine stays null and does not erase the claim — a probe that found
-    /// nothing must not have a nothing invented for it (§5.3).
+    /// documents which three elements are MEASURED fact rather than a provider's claim.
+    /// </para>
+    /// <para>
+    /// <b>The three do not fold the same way, and the difference is what a transcode does.</b>
+    /// Duration survives one, so a provider's claim stays true when the probe read nothing and the
+    /// claim is kept. Codec and bitrate describe the ENCODING the conversion just replaced, so they
+    /// are overwritten unconditionally: an absent element says "unknown", which is true, while a
+    /// stale one says <c>pcm_s16le</c> about a file that is now mp3.
     /// </para>
     /// </summary>
     public override void Reconcile(StandardMetadata metadata, NormalizedAudio? audio, ItemNames names)
@@ -197,9 +202,15 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
             return;
         }
 
-        metadata.Codec = audio.Codec ?? metadata.Codec;
+        // DURATION SURVIVES A TRANSCODE; CODEC AND BITRATE DO NOT. Re-encoding does not change how
+        // long the audio is, so a provider's duration claim stays true even when the probe could not
+        // measure it -- hence the fallback. But codec and bitrate describe the ENCODING, which the
+        // conversion just replaced: keeping a provider's claim would publish a wrong fact about the
+        // file <audio><fileName> now names. An absent element says "unknown", which is true; a stale
+        // one says "pcm_s16le" about a file that is now mp3.
+        metadata.Codec = audio.Codec;
         metadata.DurationSeconds = audio.Duration?.TotalSeconds ?? metadata.DurationSeconds;
-        metadata.BitrateKbps = audio.BitrateKbps ?? metadata.BitrateKbps;
+        metadata.BitrateKbps = audio.BitrateKbps;
     }
 
     /// <summary>

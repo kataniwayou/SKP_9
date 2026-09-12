@@ -133,6 +133,33 @@ public sealed class AcmeHandlerTests
     }
 
     [Fact]
+    public void ReconcileReplacesTheProvidersEncodingClaimsButKeepsItsDuration()
+    {
+        // The branch no shipped handler reaches yet -- AcmeHandler converts nothing -- but this is
+        // the handler the first converting one will be copied from, so the rule is pinned here.
+        var handler = Handler();
+        var item = Assert.Single(handler.Locate(
+            Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
+
+        var metadata = handler.Map(item);
+        handler.Augment(metadata, item);
+
+        // The sidecar claims 184.2s; it states no codec or bitrate.
+        metadata.Codec = "pcm_s16le";
+        metadata.BitrateKbps = 1411;
+
+        // A conversion that produced a codec but whose probe read no duration or bitrate.
+        handler.Reconcile(
+            metadata,
+            new NormalizedAudio([1, 2, 3], ".mp3", 3, Duration: null, BitrateKbps: null, Codec: "mp3"),
+            handler.NameFor(metadata, item));
+
+        Assert.Equal("mp3", metadata.Codec);
+        Assert.Null(metadata.BitrateKbps);
+        Assert.Equal(184.2, metadata.DurationSeconds);
+    }
+
+    [Fact]
     public void TheMetadataFileIsRenamedToXmlAndTheAudioKeepsItsName()
     {
         var handler = Handler();
