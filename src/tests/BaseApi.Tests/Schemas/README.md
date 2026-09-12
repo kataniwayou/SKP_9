@@ -187,3 +187,18 @@ Note what a failure costs, because it decides where checks belong: the post hand
 `Failed` with `EntryId: Guid.Empty` and acks. Nothing is written to L2 and the step's input was
 already reclaimed, so the branch is gone with no key to recover it and no file path in the log. Every
 check that CAN live in `ProcessAsync` does.
+
+## `sknormalizer-config.json` — a CONFIG schema, not a data shape
+
+The other files here describe documents on the wire. This one describes a **step payload**, and it is
+the only file in this folder whose content must be kept in step with **code**: the `handler` enum must
+name exactly the `IProviderHandler` implementations `Processor.SKNormalizer` registers.
+
+That is what makes `PayloadConfigSchemaValidator` refuse, **at publish**, a workflow naming a handler
+that does not exist. Nothing enforces the agreement at runtime — `ConfigSchemaConformance` does not
+read enum values and the framework exposes no hook — so
+`SKNormalizer/SKNormalizerConfigSchemaTests.TheEnumAndTheRegistryAreTheSameSet` is the whole defence.
+
+**Adding a provider handler therefore means:** register it in `ProcessorHost.Create`, add its name
+here, POST a **new** config schema row from this file (a referenced row's definition is frozen),
+repoint the processor's `ConfigSchemaId`, and restart.
