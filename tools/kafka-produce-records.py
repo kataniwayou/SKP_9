@@ -31,7 +31,9 @@ record names, inside the cluster, and a path nothing backs fails the fetch. Put 
 
 -- and note the fetcher step in the split chain is wired `allowedExtensions: [".zip"]`, so a .dat
 or .txt is rejected by the whitelist before a byte is read. That is why the defaults below name
-.zip files under the directory the chain's fetcher actually reads.
+.zip files under the directory the chain's fetcher actually reads. `tools/make-sample-archives.py`
+builds a conforming archive -- a real wav plus its matching AcmeHandler-shaped JSON sidecar, sharing
+a basename -- so a path seeded here has something real to resolve to on the node.
 
 Keys are camelCase to match ProcessorConfig.SerializerOptions, which is what the rest of the
 pipeline's JSON is written and read with. The bytes are compact UTF-8 with no trailing newline: the
