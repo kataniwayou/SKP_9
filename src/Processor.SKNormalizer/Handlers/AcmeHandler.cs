@@ -93,7 +93,18 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
             .GroupBy(
                 e => Path.GetFileNameWithoutExtension(e.Metadata.Name),
                 StringComparer.OrdinalIgnoreCase)
-            .Select(g => new SourceItem(g.Key, g.ToList()))
+            // AUDIO FIRST, AND THE ORDER IS A CONVENTION RATHER THAN A PREFERENCE. §14 leaves "which
+            // node in an item is the audio" open, and the pipeline's stage 6 answers it with
+            // Nodes.FirstOrDefault(n => n.Content is FileContent.Bytes) -- so the node a handler puts
+            // first is the node ffmpeg is handed. This handler transcodes nothing, so today the order
+            // is inert; a clone that adds a ProfileFor inherits this Locate, and most zip writers emit
+            // entries alphabetically, which would put track01.json ahead of track01.wav and feed the
+            // SIDECAR to the transcoder. That fails loudly but costs the next author an afternoon, and
+            // encoding the convention here costs nothing. OrderByDescending on a bool is stable, so
+            // everything after the audio keeps the order the archive had.
+            .Select(g => new SourceItem(
+                g.Key,
+                g.OrderByDescending(e => IsExtension(e, AudioExtension)).ToList()))
             .ToList();
     }
 
@@ -136,6 +147,18 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
             throw new NormalizationException(
                 $"an Acme item is exactly the {AudioExtension} and the {SidecarExtension}, and this "
                 + $"one also holds {string.Join(", ", unexpected)}");
+        }
+
+        // COUNTING BY EXTENSION IS NOT ENOUGH. FileNode.Content is nullable and the expander can emit
+        // a node with none, so an item can hold exactly one .wav that carries nothing. Stage 8 emits
+        // the audio entry unconditionally, so a contentless node there would be a NullReference or a
+        // silently dropped file; checked HERE it is a named failed step with the item key attached.
+        var audioNode = Node(item, AudioExtension);
+
+        if (audioNode?.Content is not FileContent.Bytes)
+        {
+            throw new NormalizationException(
+                $"the {AudioExtension} audio file carries no content");
         }
     }
 
@@ -280,16 +303,34 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
 
         foreach (var item in items)
         {
-            var audio = Node(item.Source, AudioExtension);
+            // THESE TWO MESSAGES NAME THE ITEM, unlike every other message in this file. Stage 8 runs
+            // OUTSIDE the pipeline's per-item try/catch, so nothing prepends "item '{key}': " here.
+            var audio = Node(item.Source, AudioExtension)
+                ?? throw new NormalizationException(
+                    $"item '{item.Source.Key}': there is no {AudioExtension} audio file to emit");
 
-            if (audio?.Content is FileContent.Bytes bytes)
+            if (audio.Content is not FileContent.Bytes bytes)
             {
-                children.Add(new OutputNode.File(
-                    item.Names.AudioFileName,
-                    bytes.Value,
-                    audio.Metadata.CreatedUtc,
-                    audio.Metadata.ModifiedUtc));
+                // ValidateContent already refused this; the throw is here so the emission below can
+                // be unconditional. Silently skipping the entry was how an audio node with no bytes
+                // used to leave the output an XML with no file beside it.
+                throw new NormalizationException(
+                    $"item '{item.Source.Key}': the {AudioExtension} audio file carries no content");
             }
+
+            children.Add(new OutputNode.File(
+                item.Names.AudioFileName,
+                // THE BYTES THE PIPELINE PRODUCED, NOT THE ONES IT RECEIVED. Stage 6 puts its output
+                // in NormalizedItem.Audio, stage 5 named this entry for what the conversion produces
+                // (".mp3"), and Reconcile wrote the MEASURED codec and bitrate into the XML beside it.
+                // Emitting the source bytes under that name would make the extension, <codec> and
+                // <bitrateKbps> all lie about the entry's content, with nothing failing and the
+                // collapser packing it happily. The fallback arm is this handler's OWN case:
+                // ProfileFor returns null, no conversion happens, Audio is null, and the wav passes
+                // through byte-for-byte -- and it is also the arm a metadata-only clone will use.
+                item.Audio is { } converted ? converted.Content : bytes.Value,
+                audio.Metadata.CreatedUtc,
+                audio.Metadata.ModifiedUtc));
 
             if (item.MetadataDocument is not null)
             {
