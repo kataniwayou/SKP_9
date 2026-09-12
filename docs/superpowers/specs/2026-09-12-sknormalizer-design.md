@@ -560,6 +560,20 @@ document. So a container node has no built size to be honest about — and `Arch
 | `EntryCount` | **computed** — child count | **computed** — zero |
 | `CreatedUtc` / `ModifiedUtc` | **carried** | **carried** |
 
+**Two shapes the first draft of this section did not admit, both found by the whole-branch review:**
+
+**The root may be a leaf, and its bytes must survive.** `ArchiveExpander` emits a `Bytes` root for
+any fetched file that is not a recognised archive — a CSV, an MP3, a PDF. The original `OutputLayout`
+could not express that shape at all, so the mirror produced a container with no children and the
+assembler turned it into an empty archive: **the document's content was silently destroyed, with no
+failed step**. `OutputLayout` therefore carries a root `OutputNode` rather than a name and a child
+list, which makes the shape expressible and the invalid state unrepresentable.
+
+**"Expanded to nothing" is `null` at every depth, not just at the root.** The expander writes
+`content: null` for an archive with no entries. A container whose children are null *or empty* must
+therefore emit `null`, or a document containing a nested empty archive changes representation on the
+way through and byte identity quietly stops holding.
+
 **Computing a container's size as the sum of its children would break byte identity (§7.1), which is
 the strongest statement this phase makes.** It would also be an invented number: the sum of decoded
 entry sizes is not the size of any archive that exists. Carrying the upstream value misleads nobody —
@@ -580,17 +594,31 @@ property: **the output depth equals the input depth**, and the input arrived thr
 the row admits the output by construction. §1.2's depth constraint is satisfied without a handler
 having to think about it.
 
-### 6.2 Artifacts are optional, and the mirror carries leaves through
+### 6.2 Artifacts are optional, and substitution belongs to the handler
 
 **The pipeline does not force an XML file into the output.** Stages 3, 4 and 7 build a metadata
-model; whether it is *rendered into the tree* is stage 8's decision. The mirror default walks the
-input tree and, for each leaf, substitutes whatever artifact the pipeline produced for that item —
-**and when a handler produced no artifact, the leaf passes through unchanged.**
+model, and the pipeline renders it after stage 7 — but whether it *enters the tree* is stage 8's
+decision, and stage 8 belongs to the handler.
 
-**This was forced by the sample handler of §7.1 and is the better design regardless.** A pipeline
-that always emitted an XML file could not express identity, could not express a metadata-only item
-whose metadata needed no restatement, and could not express an item the handler chose to pass
-through. Emission driven by the layout costs nothing and admits all three.
+**The default mirror substitutes nothing. It reproduces the input document exactly** — topology,
+names, extensions, sizes and both timestamps. That is what an identity handler needs, and it is what
+makes §6.1's "output depth equals input depth" true by construction.
+
+**A handler that emits artifacts overrides `LayoutFor` and builds its own layout.** It has
+everything it needs: `LayoutFor` receives `IReadOnlyList<NormalizedItem>`, and each item carries its
+rendered `MetadataDocument`, its converted `Audio` and the `Names` chosen at stage 5.
+
+> **An earlier draft of this section said the default mirror substitutes artifacts per leaf. It did
+> not, and the code that claimed to — a `replacements` dictionary threaded through the recursion and
+> never read — was deleted rather than completed.** Completing it would have required the base class
+> to decide which source node corresponds to which artifact, and that correspondence is exactly the
+> open question §14 records: the pipeline currently picks the audio node by "first node carrying
+> bytes", which a real provider layout may not satisfy. Baking that guess into the shared mirror
+> would have made it a rule every handler inherits. The first real handler should settle it.
+
+**Optionality is still real and still load-bearing.** `NormalizedItem.MetadataDocument` is null when
+the handler produced no metadata, so a handler's own `LayoutFor` can pass a leaf through rather than
+replace it — which is how a metadata-only item, and a deliberate pass-through, are expressed.
 
 **One exception, and it is a production surprise if it is not written down: `.rar`.** The expander
 *reads* rar; the collapser cannot *write* it — the format is proprietary and readable-only. A
@@ -840,5 +868,17 @@ the expander's manifest beside the value.
 
 ## 14. Open questions
 
-None blocking. The first real provider handler is what will test whether the eight stages fit; §5.2
-records the most likely place they will not.
+**Which node in an item is the audio?** `ProfileFor` tells the pipeline *how* to convert but never
+*what*, so `NormalizationPipeline` picks `item.Nodes.FirstOrDefault(n => n.Content is
+FileContent.Bytes)` — the first node carrying bytes. For the canonical item this design describes,
+an audio file plus its metadata sidecar (§5.5), that resolves to whichever node `Locate` happened to
+put first, so a handler must encode "audio first" as an undocumented convention.
+
+**Deliberately left open rather than guessed at.** The fix is either that `ProfileFor` names the
+node it wants converted, or that `SourceItem` distinguishes its audio member — and which is right
+depends on what a real provider's items actually look like. Settling it now would bake a convention
+into the shared pipeline that every later handler inherits. §6.2 records the same reasoning for why
+the default mirror substitutes nothing.
+
+Otherwise nothing blocking. The first real provider handler is what will test whether the eight
+stages fit; §5.2 records the most likely place they will not.
