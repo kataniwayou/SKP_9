@@ -1,29 +1,36 @@
-# processor-archiveexpander — turns a fetched file into one structured document of metadata and
-# content, expanding zip/tar/rar archives to the step's MaxDepth. A downstream transform: it has an
-# input and it produces output, so it is neither an importer nor an exporter. No Service — its only
-# inbound traffic is the kubelet hitting the pod IP for probes.
+# processor-sknormalizer — applies one provider handler, named on the step payload, to the
+# {metadata, content} tree ArchiveExpander produces, and emits a tree of the same contract. A
+# downstream transform: it has an input and it produces output, so it is neither an importer nor an
+# exporter. No Service — its only inbound traffic is the kubelet hitting the pod IP for probes.
 #
 # EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS, exactly as the other processors do.
 # `kubectl rollout status` will time out; that timeout is the expected signal, not a fault.
 #
-# THE MEMORY LIMIT IS HIGHER THAN THE OTHER PROCESSORS' 384Mi, AND THAT IS NOT PADDING. An archive
-# does not cost its own size in flight: the inbound envelope, its base64-decoded content, everything
-# the archive expands to (bounded by ArchiveExpander__MaxExpandedBytes below), the serialized UTF-8
-# document (~1.33x the expanded content), the broker message body (that document base64'd again
-# inside the ProcessedData envelope, ~1.78x), and a full JsonDocument DOM at validation can all
-# coexist — and the work and post consumers are the SAME process, so a dispatch and a branch overlap.
-# Lower ArchiveExpander__MaxExpandedBytes or raise this limit; do not move one without the other.
+# THE MEMORY LIMIT IS 768Mi TO MATCH THE PAIR EITHER SIDE, AND THE ARGUMENT IS THE CONTRACT. This
+# processor's input schema IS ArchiveExpander's output schema, so whatever that pod may legally emit,
+# this one is obliged to hold — and it holds MORE than the collapser does, because a conversion's
+# source and its output are both resident while ffmpeg runs. Sizing it lower means a document the
+# upstream pod may legally emit is one this pod cannot receive, and that failure is an OOM, which is a
+# POISON MESSAGE and not a failed step: the author never returns, the input key is never reclaimed,
+# RabbitMQ requeues the unacked dispatch, and the replacement pod dies the same way. Raise
+# ArchiveExpander's limit and you must raise this one.
 #
-# No intermediate base64 STRING sits alongside those: JsonSerializer.SerializeToUtf8Bytes writes
-# base64 straight into its UTF-8 output buffer at both serialization points, so there is no UTF-16
-# doubling to add on top of the figures above.
+# THERE IS NO SIZE CEILING ENV VAR HERE, DELIBERATELY. ArchiveExpander__MaxExpandedBytes already
+# bounds the document that reaches this pod, and a second ceiling here would restate an upstream
+# guarantee with a second number to keep consistent. What that means in practice: MaxExpandedBytes
+# sizes TWO consumers now, and conversion can GROW data — transcoding to a less compressed target
+# produces more bytes than it consumed. Nothing bounds output size. Size MaxExpandedBytes with
+# conversion headroom.
+#
+# ffmpeg IS IN THIS IMAGE AND IN NO OTHER. If every item fails conversion on a first deploy, check
+# that before checking the data.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: processor-archiveexpander
+  name: processor-sknormalizer
   namespace: skp
   labels:
-    app: processor-archiveexpander
+    app: processor-sknormalizer
     app.kubernetes.io/part-of: skp
 spec:
   replicas: 1
@@ -35,22 +42,22 @@ spec:
       # want ~1.5Gi on the node at once — a single-node kind cluster already running Postgres, Redis,
       # RabbitMQ, Prometheus, Grafana, an OTel collector, BaseApi, the orchestrator and four other
       # processors. Stop-then-start trades a few seconds of throughput for not needing that headroom.
-      # (There is no correctness reason to forbid overlap here: ArchiveExpander consumes from its
+      # (There is no correctness reason to forbid overlap here: ArchiveCollapser consumes from its
       # own RabbitMQ queue as a competing consumer, not a single partition, and there is no volume
       # to contend over any more — this is purely a node-memory budget call.)
       maxSurge: 0
       maxUnavailable: 1
   selector:
     matchLabels:
-      app: processor-archiveexpander
+      app: processor-sknormalizer
   template:
     metadata:
       labels:
-        app: processor-archiveexpander
+        app: processor-sknormalizer
     spec:
       containers:
-        - name: processor-archiveexpander
-          image: processor-archiveexpander:local
+        - name: processor-sknormalizer
+          image: processor-sknormalizer:local
           imagePullPolicy: IfNotPresent
           env:
             # NO Service__Name / Service__Version here, deliberately, and do not add them back.
@@ -83,19 +90,6 @@ spec:
             # rate window at 240s, which is why a sixty-second outage moved no rate panel.
             - name: OTEL_METRIC_EXPORT_INTERVAL
               value: "10000"
-            # The pod's expansion ceiling — the cumulative size of everything an archive expands to,
-            # across every level. NOT the file: FileFetcher bounded that one hop upstream. It moved
-            # here from the step payload because the size of an expansion is a number an operator
-            # sizes against the limit below, and a workflow author has no way to know it.
-            #
-            # This value and the memory limit move together. Do not change one without the other.
-            #
-            # THIS NUMBER NOW SIZES THREE PODS, NOT ONE. It bounds what this pod produces, what
-            # ArchiveCollapser must hold, and — since 2026-09-12 — the working set every conversion
-            # in SKNormalizer operates on. SKNormalizer deliberately carries no ceiling of its own,
-            # so conversion headroom has to be priced in here. Conversion can GROW data.
-            - name: ArchiveExpander__MaxExpandedBytes
-              value: "33554432"
             - name: RabbitMq__Host
               value: rabbitmq
             - name: RabbitMq__Username
@@ -112,6 +106,14 @@ spec:
               value: "redis:6379,abortConnect=false,connectTimeout=5000"
             - name: ConsoleHealth__Port
               value: "8081"
+            # Resolved from PATH; the image installs it. Set this only to point at a build that is
+            # not on PATH.
+            - name: SKNormalizer__FfmpegPath
+              value: "ffmpeg"
+            # Per conversion, not per dispatch. A wedged ffmpeg holds the one prefetched message
+            # forever, so this is what turns a hang into a failed step.
+            - name: SKNormalizer__ConversionTimeoutSeconds
+              value: "300"
           ports:
             - containerPort: 8081
           # Startup flips on the liveness loop's first beat, within moments of the host starting, so
