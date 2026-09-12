@@ -42,50 +42,8 @@ public sealed class ArchiveExpanderLiveTests
 {
     private const string NodeDir = "/mnt/skp-files/in";
 
-    /// <summary>
-    /// Where FilePersister writes, and the only place a test can see what the chain produced.
-    /// <para>
-    /// The out topic carries a path, not content — so an assertion about BYTES has to follow that
-    /// path back to the node. A different directory from <see cref="NodeDir"/> on purpose: writing
-    /// back into the input folder would make the comparison meaningless.
-    /// </para>
-    /// </summary>
-    private const string OutDir = "/mnt/skp-files/out";
     private static string Node => RealStack.Get("SKP_KIND_NODE", "desktop-control-plane");
     private static string OutTopic => RealStack.Get("SKP_KAFKA_OUT_TOPIC", "skp-documents");
-
-    /// <summary>Builds a zip locally and copies it onto the node the FileFetcher pod mounts.</summary>
-    private static string SeedZip(string name, params (string Entry, string Text)[] entries)
-    {
-        var local = Path.Combine(Path.GetTempPath(), name);
-        using (var file = File.Create(local))
-        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
-        {
-            foreach (var (entry, text) in entries)
-            {
-                using var writer = new StreamWriter(archive.CreateEntry(entry).Open());
-                writer.Write(text);
-            }
-        }
-
-        Run("docker", $"cp \"{local}\" {Node}:{NodeDir}/{name}");
-        return $"{NodeDir}/{name}";
-    }
-
-    /// <summary>
-    /// The bytes FilePersister wrote, copied off the node.
-    /// <para>
-    /// <c>docker cp</c> rather than <c>docker exec cat</c>: <see cref="Run"/> deliberately does not
-    /// redirect stdout — see its comment for why a pipe nobody drains is a deadlock — and these are
-    /// archive bytes, which do not survive a text pipe anyway.
-    /// </para>
-    /// </summary>
-    private static byte[] ReadBack(string name)
-    {
-        var local = Path.Combine(Path.GetTempPath(), $"out-{name}");
-        Run("docker", $"cp {Node}:{OutDir}/{name} \"{local}\"");
-        return File.ReadAllBytes(local);
-    }
 
     /// <summary>
     /// Runs a command and waits for it to exit, on purpose not with the void overload of
@@ -195,59 +153,23 @@ public sealed class ArchiveExpanderLiveTests
         return null;
     }
 
-    [Fact]
-    public async Task AZipOnTheNodeTraversesTheChainAndIsWrittenBack()
-    {
-        RealStack.SkipUnlessEnabled();
-
-        // THE WHOLE CHAIN: a zip seeded onto the node reaches FileFetcher through the mount, becomes
-        // an envelope, is expanded to a document, collapsed back to an envelope, written to the out
-        // folder by FilePersister, and its path published by the exporter. This is what proves the
-        // mount, every pod's manifest, and every edge between them are wired together — no hermetic
-        // suite can, because each one replaces its own processor's neighbours with an in-process call.
-        //
-        // RENAMED FROM AZipOnTheNodeBecomesADocumentOnTheOutTopic, and the rename is the honest part:
-        // this asserts SIX HOPS, not one. It waited for a document and inspected its entryCount and
-        // its content array, which was a claim about ArchiveExpander alone while the expander was the
-        // last step. It has not been since 2026-09-10. A document never reaches a topic now and
-        // cannot: a sink is the only way onto one, its single inputSchemaId is file-locator, and
-        // SourceHash is unique per processor row -- so there is no second exporter identity to give
-        // a different input schema to, and no workflow can end anywhere but here.
-        //
-        // WHAT THAT COSTS, SAID PLAINLY: a failure in the collapser or the persister now surfaces as
-        // an ArchiveExpander failure. When this goes red, read the correlation-id trace before
-        // reading the test name -- the orchestrator's hand-off lines bracket every step, so the hop
-        // that actually broke is visible there and is not visible here.
-        var name = $"orders-{Guid.NewGuid():N}.zip";
-        var path = SeedZip(name, ("a.csv", "id\n"), ("b.csv", "id,name\n"));
-
-        await ProduceAsync(path);
-
-        var written = Await(name, Window);
-        Assert.False(string.IsNullOrEmpty(written),
-            $"no locator naming {name} reached {OutTopic} within {Window.TotalMinutes:0} minutes");
-
-        // The path is minted by FilePersister from its configured folder and the envelope's file
-        // name -- not folder + name + extension, which would read orders-....zip.zip.
-        Assert.Equal($"{OutDir}/{name}", written);
-
-        // The ENTRIES, one layer down, because the topic no longer carries them. Deliberately not a
-        // byte comparison against the seeded file: the chain rebuilds the archive rather than copying
-        // it, so a first pass over an archive this system did not write differs in its container
-        // framing -- platform stamp, compression level -- while every entry's content is identical.
-        // The entries are the claim that survives both.
-        using var archive = new ZipArchive(new MemoryStream(ReadBack(name)), ZipArchiveMode.Read);
-
-        Assert.Equal(["a.csv", "b.csv"], archive.Entries.Select(e => e.Name).Order().ToArray());
-        Assert.Equal("id,name\n", new StreamReader(
-            archive.Entries.Single(e => e.Name == "b.csv").Open()).ReadToEnd());
-
-        // NO providerName ASSERTION. It used to read Assert.DoesNotContain("acme", ...) against the
-        // document, proving the reader dropped a field the producer sent. The producer cannot send
-        // one any more -- file-locator's additionalProperties: false makes the importer refuse the
-        // whole record -- so the assertion would be vacuous. What replaced it is not a test here but
-        // the schema row itself, one hop earlier and binding on every producer rather than this one.
-    }
+    // MOVED 2026-09-13: AZipOnTheNodeTraversesTheChainAndIsWrittenBack ->
+    // BaseApi.Tests.Live.Chain.ChainLiveTests.AnAcmeBundleTraversesTheChainAndIsWrittenBack.
+    //
+    // It asserted SEVEN hops from a file named after one processor, so a refusal anywhere in the
+    // chain was reported as an ArchiveExpander failure. The comment it carried said as much -- "a
+    // failure in the collapser or the persister now surfaces as an ArchiveExpander failure" -- and
+    // on 2026-09-12 that came true with a step it did not list: SKNormalizer refused the seeded
+    // archive, and the suite reported this test failing after five minutes, naming the wrong
+    // processor and the reason nowhere.
+    //
+    // Two things changed with the move, neither of them about the expander. Its fixture is an Acme
+    // bundle now, because the chain carries an SKNormalizer step wired {"handler":"Acme"} and a zip
+    // of CSVs is correctly refused by it. And its assertions are about the TRANSFORMATION rather
+    // than preservation: a chain with a normalizer in it cannot return the entries it was given.
+    //
+    // What stayed here is what is actually about this processor: the registered output schema row,
+    // and the corrupt-archive failure line.
 
     // ---------------------------------------------------------------------------------------
     // Nested expansion, live. The hermetic suite proves the depth logic against an in-process
