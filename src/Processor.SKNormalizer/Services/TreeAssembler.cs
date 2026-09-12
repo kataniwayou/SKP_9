@@ -33,13 +33,14 @@ internal sealed class TreeAssembler : ITreeAssembler
         ArgumentNullException.ThrowIfNull(layout);
 
         var extension = Writable(layout.RootExtension);
+        var rootName = Check(layout.RootName);
         var children = layout.Children is null
             ? null
             : layout.Children.Select(c => Build(c, depth: 1)).ToList();
 
         return new FileNode(
             new FileMetadata(
-                Retarget(layout.RootName, layout.RootExtension, extension),
+                Retarget(rootName, layout.RootExtension, extension),
                 extension,
                 layout.SizeBytes,
                 layout.CreatedUtc,

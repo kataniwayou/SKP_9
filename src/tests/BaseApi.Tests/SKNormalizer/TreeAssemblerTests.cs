@@ -40,6 +40,22 @@ public sealed class TreeAssemblerTests
         Assert.Throws<NormalizationException>(() => Assemble(layout));
     }
 
+    [Theory]
+    [InlineData("/")]
+    [InlineData("\\")]
+    public void ARootNameCarryingAPathSeparatorIsRejected(string separator)
+    {
+        // THE ROOT IS THE NAME THAT TRAVELS FURTHEST: ArchiveCollapser copies it into the outbound
+        // envelope's fileName and FilePersister turns that into a path. FilePersister.SafeName does
+        // reject separators, so this is about the diagnostic rather than the exposure -- caught here,
+        // the message names the node; caught there, it is a malformed-envelope failure three hops
+        // from the code that produced it.
+        var layout = new OutputLayout(
+            $"out{separator}bundle.zip", ".zip", 40219, Born, Stamp, [File("a.xml", "<a/>")]);
+
+        Assert.Throws<NormalizationException>(() => Assemble(layout));
+    }
+
     [Fact]
     public void AFolderNamedWithANonWritableExtensionIsRetargetedToZip()
     {
