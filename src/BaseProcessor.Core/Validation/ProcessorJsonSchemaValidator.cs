@@ -140,19 +140,63 @@ public static class ProcessorJsonSchemaValidator
     /// discipline still holds, against a log rather than a projection: an operator's log store is not
     /// a place to put a payload either.
     /// </para>
+    /// <para>
+    /// <b>A KEYWORD IS NOT ALWAYS THERE, AND AN ENTRY WITHOUT ONE SAYS NOTHING.</b> The library keys
+    /// its <c>Errors</c> dictionary by keyword for most failures, but reports an
+    /// <c>additionalProperties</c> violation under the EMPTY key — so a document carrying one unknown
+    /// property used to flatten to <c>"/providerName: "</c>, a pointer, a colon and nothing. A live
+    /// run on 2026-09-12 logged a rejected record as <c>": required; /path: "</c>, which names no rule
+    /// at either location. <see cref="Keyword"/> fills the gap from <c>EvaluationPath</c>, the pointer
+    /// into the SCHEMA that located the failing subschema — schema vocabulary by construction, so it
+    /// carries no instance data and the discipline above is untouched.
+    /// </para>
+    /// <para>
+    /// <b>What this still does not say.</b> For <c>required</c>, the MISSING PROPERTY'S NAME lives in
+    /// the discarded message ("Required properties [filePath] are not present") and nowhere else the
+    /// results expose. Those names come from the schema, not the instance, so quoting them would be
+    /// safe — but only for this keyword, and deciding that per keyword is the version-pinned
+    /// allow-list the paragraph above rejects. So <c>required</c> still reports the rule and the
+    /// location without the name, and that is a knowing trade rather than an oversight.
+    /// </para>
     /// </summary>
     private static List<string> Flatten(EvaluationResults results)
     {
         var flat = (results.Details ?? [])
             .Where(d => d.Errors is { Count: > 0 })
-            .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Key}"))
+            .SelectMany(d => d.Errors!.Select(
+                kv => $"{d.InstanceLocation}: {Keyword(kv.Key, d.EvaluationPath.ToString())}"))
             .ToList();
 
         if (flat.Count == 0 && results.Errors is { Count: > 0 })
         {
-            flat = results.Errors.Select(kv => $"{results.InstanceLocation}: {kv.Key}").ToList();
+            flat = results.Errors
+                .Select(kv =>
+                    $"{results.InstanceLocation}: {Keyword(kv.Key, results.EvaluationPath.ToString())}")
+                .ToList();
         }
 
         return flat;
+    }
+
+    /// <summary>
+    /// The keyword the library reported, or — when it reported none — the last segment of the
+    /// evaluation path, which is the keyword that located the failing subschema.
+    /// <para>
+    /// <c>EvaluationPath</c> is a pointer into the schema document (<c>/additionalProperties</c>,
+    /// <c>/properties/filePath/minLength</c>), so every segment is schema vocabulary. It can no more
+    /// carry a payload value than the schema itself can.
+    /// </para>
+    /// </summary>
+    private static string Keyword(string reported, string evaluationPath)
+    {
+        if (!string.IsNullOrEmpty(reported))
+        {
+            return reported;
+        }
+
+        var segments = evaluationPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        // An empty keyword at the schema root is the whole document failing rather than one rule.
+        return segments.Length > 0 ? segments[^1] : "schema";
     }
 }

@@ -63,13 +63,34 @@ pointer and a colon, saying that `/providerName` is wrong but not that it is *un
 is the keyword, and **the name of the missing property is in the dropped `kv.Value`.** A reader
 sees that something required is missing at the root and is not told that it is `filePath`.
 
-**Wanted:** format `{kv.Key}: {kv.Value}` (or just `kv.Value`, which usually embeds the keyword),
-and keep the pointer. The fix is one line and turns `: required; /path: ` into something like
-`required: Required properties [filePath] are not present; /path: unevaluated`.
-
 **Blocked a verdict:** no, but only because the suite controls the input and already knows which
 property it corrupted. An operator reading this line cold could not tell a missing `filePath` from
 a missing anything-else, which is precisely the diagnosis the line exists to provide.
+
+### Resolution — fixed 2026-09-12, but not the way this entry first proposed
+
+**The original recommendation here was to format `kv.Value`. That was wrong, and acting on it would
+have introduced a data leak.** `Flatten`'s remarks say why, and the reasoning holds: several keywords
+embed the offending *instance value* in their message — `minimum` renders "-999888 should be at least
+18" — so the library's text is discarded wholesale rather than per-keyword, because which keywords do
+this is a property of the library version. A test now pins that discipline
+(`AnInstanceValueNeverReachesTheErrorText`).
+
+The real defect was narrower. Probing the evaluation results showed the empty keyword is always an
+`additionalProperties` violation, and that the keyword is recoverable from `EvaluationPath` — a
+pointer into the **schema** (`/additionalProperties`), which is schema vocabulary and cannot carry
+instance data:
+
+| case | before | after |
+|---|---|---|
+| extra key | `/providerName: ` | `/providerName: additionalProperties` |
+| missing required | `: required; /path: ` | `: required; /path: additionalProperties` |
+
+Every entry now names a rule. **What is still missing is the name of the missing required property**
+(`filePath`), which lives only in the discarded message. Those names come from the schema rather than
+the instance, so quoting them would be safe — but only for that one keyword, and deciding it per
+keyword is exactly the version-pinned allow-list the original reasoning rejects. Left as a knowing
+trade, recorded in the code.
 
 ---
 

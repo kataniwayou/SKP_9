@@ -10,6 +10,11 @@ public sealed class ProcessorJsonSchemaValidatorTests
         {"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}
         """;
 
+    /// <summary>The registered file-locator shape: one required key, nothing else allowed.</summary>
+    private const string Locator = """
+        {"type":"object","required":["filePath"],"properties":{"filePath":{"type":"string","minLength":1}},"additionalProperties":false}
+        """;
+
     private static byte[] Utf8(string s) => Encoding.UTF8.GetBytes(s);
 
     [Fact]
@@ -118,5 +123,47 @@ public sealed class ProcessorJsonSchemaValidatorTests
         Assert.Null(thrown);
         Assert.False(ProcessorJsonSchemaValidator.TryValidate(definition, Utf8("""{"a":"x"}"""), out var errors));
         Assert.NotEmpty(errors);
+    }
+
+    [Fact]
+    public void AnUnknownPropertyIsReportedAsTheRuleThatRefusedIt()
+    {
+        // THE REGRESSION THIS EXISTS FOR. The library reports an additionalProperties violation under
+        // the EMPTY keyword, so this used to flatten to "/providerName: " -- a pointer, a colon, and
+        // nothing. A live run on 2026-09-12 logged a rejected Kafka record exactly that way.
+        Assert.False(ProcessorJsonSchemaValidator.TryValidate(
+            Locator, Utf8("""{"filePath":"/x.zip","providerName":"acme"}"""), out var errors));
+
+        Assert.Equal(["/providerName: additionalProperties"], errors);
+    }
+
+    [Fact]
+    public void AMissingRequiredPropertyAndAnUnknownOneAreBothNamedByRule()
+    {
+        // The second half of the same live rejection, which read ": required; /path: ".
+        Assert.False(ProcessorJsonSchemaValidator.TryValidate(
+            Locator, Utf8("""{"path":"/x.zip"}"""), out var errors));
+
+        Assert.Contains(": required", errors);
+        Assert.Contains("/path: additionalProperties", errors);
+
+        // The missing property's name is NOT here, and that is deliberate: it lives only in the
+        // library's message text, which is discarded wholesale because other keywords embed instance
+        // values in theirs. See Flatten's remarks.
+        Assert.DoesNotContain(errors, e => e.Contains("filePath", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AnInstanceValueNeverReachesTheErrorText()
+    {
+        // The discipline the fix above had to preserve. `minimum` renders "-999888 should be at least
+        // 18" in the library's own message; none of that may reach a log store.
+        const string bounded = """{"type":"object","properties":{"age":{"type":"integer","minimum":18}}}""";
+
+        Assert.False(ProcessorJsonSchemaValidator.TryValidate(
+            bounded, Utf8("""{"age":-999888}"""), out var errors));
+
+        Assert.Equal(["/age: minimum"], errors);
+        Assert.DoesNotContain(errors, e => e.Contains("999888", StringComparison.Ordinal));
     }
 }
