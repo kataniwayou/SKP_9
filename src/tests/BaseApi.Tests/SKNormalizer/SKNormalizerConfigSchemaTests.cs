@@ -2,6 +2,10 @@ using System.Text;
 using System.Text.Json;
 using BaseProcessor.Core.Startup;
 using BaseProcessor.Core.Validation;
+using Messaging.Contracts;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Processor.SKNormalizer;
 using Xunit;
 
@@ -9,6 +13,11 @@ namespace BaseApi.Tests.SKNormalizer;
 
 public sealed class SKNormalizerConfigSchemaTests
 {
+    private static readonly ProcessorIdentityFound Identity = new(
+        Guid.Parse("77777777-7777-7777-7777-777777777777"),
+        InputSchemaId: null, OutputSchemaId: null, ConfigSchemaId: null,
+        Name: "sk-normalizer", Version: "1.0.0");
+
     private static string Definition()
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "sknormalizer-config.json"));
 
@@ -22,9 +31,32 @@ public sealed class SKNormalizerConfigSchemaTests
             .Select(e => e.GetString()!)
             .ToList();
 
-    /// <summary>Every handler this build registers, resolved the way ProcessorHost registers them.</summary>
+    /// <summary>
+    /// The handlers THIS BUILD ACTUALLY REGISTERS, read out of the real composition root.
+    /// <para>
+    /// <b>Not a literal, and that is the whole point.</b> A hand-written list here would only ever
+    /// catch drift between the enum and itself — the mistake this test exists to catch is someone
+    /// adding an AddSingleton&lt;IProviderHandler, …&gt; to ProcessorHost and forgetting the enum, and a
+    /// literal cannot see that happen.
+    /// </para>
+    /// </summary>
     private static IReadOnlyList<string> Registered()
-        => new ProviderHandlerRegistry([new SampleHandler()]).Names;
+    {
+        using var host = ProcessorHost.Create(
+            ["--environment", "Development"],
+            Identity,
+            cfg => cfg.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Service:Name"]            = "processor",
+                ["Service:Version"]         = "0.0.0",
+                ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
+                ["RabbitMq:Host"]           = "localhost",
+                ["RabbitMq:Username"]       = "guest",
+                ["RabbitMq:Password"]       = "guest",
+            }));
+
+        return host.Services.GetRequiredService<ProviderHandlerRegistry>().Names;
+    }
 
     [Fact]
     public void TheEnumAndTheRegistryAreTheSameSet()
