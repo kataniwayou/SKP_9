@@ -116,7 +116,7 @@ public sealed class ProviderHandlerBaseTests
         var root = Archive("bundle.zip", 100, leaf);
 
         var metadata = new StandardMetadata();
-        metadata.Set("key", "a.wav");
+        metadata.Title = "a.wav";
 
         var item = new NormalizedItem(
             new SourceItem("a.wav", [leaf]),

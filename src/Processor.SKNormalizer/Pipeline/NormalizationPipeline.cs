@@ -59,12 +59,23 @@ internal sealed class NormalizationPipeline(
 
             handler.Reconcile(metadata, audio, names);          // 7
 
-            // Rendered HERE, after stage 7, so stage 8 places bytes rather than rendering them.
-            // ARTIFACT EMISSION IS OPTIONAL: empty metadata renders to null, and stage 8 decides
-            // whether anything enters the tree at all -- the base mirror emits nothing. A pipeline
-            // that always emitted XML could not express identity, a metadata-only item, or a
-            // deliberate pass-through.
-            var document = metadata.IsEmpty ? null : renderer.Render(metadata);
+            // ARTIFACT EMISSION IS OPTIONAL, AND INCOMPLETENESS IS A FAILURE. Three states, not two:
+            // a handler that populated nothing gets no document and its leaf passes through (that is
+            // what keeps an identity handler possible); a handler that populated SOME of it and left
+            // a required element unset is a bug reported by name rather than a quietly different
+            // file; anything else renders.
+            byte[]? document = null;
+
+            if (!metadata.IsUnset)
+            {
+                if (metadata.MissingRequired() is { Count: > 0 } missing)
+                {
+                    throw new NormalizationException(
+                        $"the standardized metadata is missing {string.Join(", ", missing)}");
+                }
+
+                document = renderer.Render(metadata);
+            }
 
             return new NormalizedItem(item, metadata, names, audio, document);
         }
