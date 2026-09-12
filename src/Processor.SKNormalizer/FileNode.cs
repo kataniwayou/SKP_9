@@ -61,22 +61,24 @@ public abstract record FileContent
 /// One node of the document, and the shape is identical at every level so the schema is a single
 /// self-referencing definition.
 /// <para>
-/// <b>This file is a deliberate duplicate of <c>Processor.ArchiveExpander/FileNode.cs</c>.</b> The
-/// two describe one JSON document across two assemblies that must not reference each other — the
-/// same arrangement, for the same reason, as <c>FetchedFile</c> between FileFetcher and
-/// ArchiveExpander. <c>EnvelopeContractTests</c> is what catches a divergence, by running both real
-/// processors back to back.
+/// <b>This file is a deliberate duplicate of the same type in <c>Processor.ArchiveExpander</c> and
+/// <c>Processor.ArchiveCollapser</c>.</b> Three assemblies that must not reference each other
+/// describe one JSON document — the same arrangement, for the same reason, as <c>FetchedFile</c>
+/// between FileFetcher and ArchiveExpander. This processor sits between the other two and both
+/// reads and writes the document, so a divergence here breaks the chain in either direction.
+/// <c>EnvelopeContractTests</c> is what catches one, by running all three real processors back to
+/// back.
 /// </para>
 /// </summary>
 /// <param name="Content">
 /// The bytes, the expansion, or null.
 /// <para>
-/// <b>Null means the document records an archive that expanded to nothing, and this assembly's
-/// answer is to write that format's canonical empty archive</b> — for a zip, the 22-byte EOCD record
-/// <c>ZipExtractor.IsCanonicalEmptyArchive</c> recognises. ArchiveExpander is what turned that empty
-/// archive into null in the first place; writing it back is what closes the loop, rather than
-/// producing, say, an empty plain file — which is not the one archive ArchiveExpander's own
-/// false-HEALTHY guard still calls healthy.
+/// <b>Null means the document records an archive that expanded to nothing, and this assembly
+/// carries that through as null.</b> Nothing is packed here — ArchiveCollapser is what later turns
+/// null into the format's canonical empty archive. <c>TreeAssembler</c> therefore emits null for a
+/// container with no children AT EVERY DEPTH, including the root: writing an empty array instead
+/// would change the representation the expander chose, and byte identity through this processor
+/// would stop holding for any document containing a nested empty archive.
 /// </para>
 /// <para>
 /// <b><see cref="FileContent.Bytes"/> is written back as a plain entry, whatever the node's extension
@@ -109,9 +111,9 @@ public sealed class FileNodeConverter : JsonConverter<FileNode>
     private const string ContentName = "content";
 
     /// <summary>
-    /// The inverse, and here it is the TEST convenience rather than the production path: a test
-    /// builds a FileNode tree and serializes it to produce the document this processor consumes.
-    /// ArchiveExpander is the assembly that writes these for real.
+    /// The inverse, and here it is a PRODUCTION path too: what this processor sends is a document
+    /// of the same contract it received, so every dispatch serializes the tree the assembler built.
+    /// Tests also use it to construct an input document.
     /// </summary>
     public override void Write(Utf8JsonWriter writer, FileNode value, JsonSerializerOptions options)
     {
@@ -150,9 +152,9 @@ public sealed class FileNodeConverter : JsonConverter<FileNode>
     }
 
     /// <summary>
-    /// <b>The production path.</b> This processor only ever READS documents -- it is handed one and
-    /// packs it back into an archive -- which is the exact reverse of ArchiveExpander, where this
-    /// method exists only so a test can round-trip.
+    /// <b>The production path, and so is <c>Write</c>.</b> This processor is handed a document and
+    /// emits a document of the same contract, so unlike either neighbour it needs both directions in
+    /// production: ArchiveExpander only writes and ArchiveCollapser only reads.
     /// </summary>
     public override FileNode Read(
         ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
