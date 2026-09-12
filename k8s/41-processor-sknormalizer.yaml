@@ -33,18 +33,29 @@ metadata:
     app: processor-sknormalizer
     app.kubernetes.io/part-of: skp
 spec:
-  replicas: 1
+  # Two, for the same reason processor-sample runs two: a processor is a competing consumer on its
+  # OWN work queue, so replicas divide the work rather than duplicating it, and the two register
+  # under one processor id as separate liveness keys. It costs ffmpeg nothing — the binary is baked
+  # into the image, so each replica gets its own at /usr/bin/ffmpeg and starts its own child process
+  # per conversion, with its own temp directory. Nothing is shared and nothing contends.
+  #
+  # WHAT DOES NOT DIVIDE IS THE BLAST RADIUS OF ONE OVERSIZED DOCUMENT. SKNormalizerOptions sets no
+  # input ceiling on purpose, so a document that exceeds the 768Mi limit below OOMs its pod, is
+  # redelivered, and now has a SECOND replica to land on — the redelivery loop moves rather than
+  # staying put, which is a wider outage and a harder one to read. The mitigation is still sizing.
+  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
       # maxSurge 0, and this is sized memory, not caution for its own sake: this pod's limit is
-      # 768Mi, double every other processor's 384Mi, so a surge briefly running two of them would
-      # want ~1.5Gi on the node at once — a single-node kind cluster already running Postgres, Redis,
+      # 768Mi, double every other processor's 384Mi, so surging past the replica count would want
+      # ~2.3Gi on the node at once — a single-node kind cluster already running Postgres, Redis,
       # RabbitMQ, Prometheus, Grafana, an OTel collector, BaseApi, the orchestrator and four other
-      # processors. Stop-then-start trades a few seconds of throughput for not needing that headroom.
-      # (There is no correctness reason to forbid overlap here: ArchiveCollapser consumes from its
+      # processors. With two replicas and maxUnavailable 1 this is no longer a stop-then-start:
+      # one replica keeps consuming throughout, so the gap the single-replica note accepted is gone.
+      # (There is no correctness reason to forbid overlap here: this processor consumes from its
       # own RabbitMQ queue as a competing consumer, not a single partition, and there is no volume
-      # to contend over any more — this is purely a node-memory budget call.)
+      # to contend over — this is purely a node-memory budget call.)
       maxSurge: 0
       maxUnavailable: 1
   selector:
