@@ -18,6 +18,15 @@ using Xunit;
 using ArchiveBuilder = Processor.ArchiveCollapser.ArchiveBuilder;
 using ArchiveCollapserProcessor = Processor.ArchiveCollapser.ArchiveCollapserProcessor;
 using Processor.ArchiveCollapser.Writers;
+// Aliased for the reason the collapser's types are: Processor.SKNormalizer declares its own
+// FileNode/FileContent/FileDocument -- a deliberate duplicate -- and a blanket import would make
+// every existing unqualified use of those names in this file ambiguous.
+using SKNormalizerProcessor = Processor.SKNormalizer.SKNormalizerProcessor;
+using ProviderHandlerRegistry = Processor.SKNormalizer.ProviderHandlerRegistry;
+using SampleHandler = Processor.SKNormalizer.SampleHandler;
+using NormalizationPipeline = Processor.SKNormalizer.NormalizationPipeline;
+using TreeAssembler = Processor.SKNormalizer.TreeAssembler;
+using XmlMetadataRenderer = Processor.SKNormalizer.XmlMetadataRenderer;
 
 namespace BaseApi.Tests;
 
@@ -105,6 +114,36 @@ public sealed class EnvelopeContractTests : IDisposable
         expander.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
 
         await expander.ExecuteAsync(envelope, payload, E, CancellationToken.None);
+
+        return Assert.Single(sends).Data;
+    }
+
+    /// <summary>
+    /// The third hop. Runs the real processor with the identity handler -- the one that returns the
+    /// input tree unchanged -- so what this adds to the chain is a pass-through, and any difference
+    /// it introduces is a defect rather than a design choice.
+    /// </summary>
+    private static async Task<byte[]> Normalize(byte[] document)
+    {
+        var sender = Substitute.For<IQueueSender>();
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var normalizer = new SKNormalizerProcessor(
+            new RecordingLogger<SKNormalizerProcessor>(),
+            new ProviderHandlerRegistry([new SampleHandler()]),
+            // Exploding, not a substitute: IAudioTranscoder is internal and cannot be proxied by
+            // NSubstitute, and it must never be called here -- SampleHandler's ProfileFor returns
+            // null for every item, which is what makes it identity. If this throws, it stopped being
+            // one.
+            new NormalizationPipeline(
+                new TreeAssembler(), new XmlMetadataRenderer(), new ExplodingTranscoder()));
+
+        normalizer.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
+
+        await normalizer.ExecuteAsync(
+            document, """{"handler":"Sample"}""", E, CancellationToken.None);
 
         return Assert.Single(sends).Data;
     }
@@ -471,5 +510,65 @@ public sealed class EnvelopeContractTests : IDisposable
         // envelope built from a document with a null nested timestamp.
         Assert.True(ProcessorJsonSchemaValidator.TryValidate(EnvelopeSchema(), collapsed, out var errors),
                     string.Join("; ", errors));
+    }
+
+    [Fact]
+    public async Task TheIdentityHandlerLeavesTheDocumentByteIdentical()
+    {
+        // THE NARROW CLAIM, checked before the wide one. If this fails, the chain test below fails
+        // too and it is far harder to say why.
+        var envelope = await Fetch("orders.zip", Zip(("a.csv", "id"), ("b.csv", "id,name")), AnyFile);
+        var document = await Expand(envelope, """{"MaxDepth":1}""");
+
+        Assert.Equal(document, await Normalize(document));
+    }
+
+    [Fact]
+    public async Task ANestedDocumentSurvivesTheMirror()
+    {
+        // Depth 2 exercises the mirror's recursion and the assembler's Folder path, which the flat
+        // case never touches. NestedZip is the fixture this file already uses for nesting.
+        var envelope = await Fetch("orders.zip", NestedZip(), AnyFile);
+        var document = await Expand(envelope, """{"MaxDepth":2}""");
+
+        Assert.Equal(document, await Normalize(document));
+    }
+
+    [Fact]
+    public async Task TheChainStillRoundTripsWithTheNormalizerInserted()
+    {
+        // THE ACCEPTANCE TEST FOR THIS PROCESSOR. A schema asserts a document has the right shape;
+        // identity asserts it round-tripped losslessly, which is the stronger statement -- and it is
+        // what catches a TreeAssembler rule drifting away from ArchiveBuilder.
+        //
+        // The source is a .zip DELIBERATELY. A rar-sourced document cannot round-trip
+        // byte-identically -- ArchiveExpander reads rar and ArchiveCollapser cannot write it, because
+        // RarLab's unrar licence permits decompression only -- so using one would fail this test for
+        // a reason that is not this processor's doing.
+        //
+        // COMPARED AGAINST COLLAPSE-WITHOUT, not against the original archive: the collapser rebuilds
+        // the zip, so its bytes need not equal the input's. What must hold is that inserting this
+        // processor changes nothing, and that is exactly what this compares.
+        var envelope = await Fetch("orders.zip", Zip(("a.csv", "id"), ("b.csv", "id,name")), AnyFile);
+        var document = await Expand(envelope, """{"MaxDepth":1}""");
+
+        var withNormalizer = await Collapse(await Normalize(document));
+        var without = await Collapse(document);
+
+        Assert.Equal(ContentOf(without), ContentOf(withNormalizer));
+    }
+
+    [Fact]
+    public async Task WhatTheNormalizerSendsSatisfiesTheTreeSchema()
+    {
+        // Its output schema IS the tree row -- the same one the expander writes and the collapser
+        // reads -- so this is the check that the reused row actually admits what this processor
+        // emits. See the design's section 1.2.
+        var envelope = await Fetch("orders.zip", Zip(("a.csv", "id")), AnyFile);
+        var normalized = await Normalize(await Expand(envelope, """{"MaxDepth":1}"""));
+
+        Assert.True(
+            ProcessorJsonSchemaValidator.TryValidate(TreeSchema(), normalized, out var errors),
+            string.Join("; ", errors));
     }
 }
