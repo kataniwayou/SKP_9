@@ -42,19 +42,4 @@ public sealed class StandardMetadata
 
         _elements.Add(new KeyValuePair<string, string>(name, value));
     }
-
-    public bool TryGet(string name, out string value)
-    {
-        foreach (var element in _elements)
-        {
-            if (element.Key.Equals(name, StringComparison.Ordinal))
-            {
-                value = element.Value;
-                return true;
-            }
-        }
-
-        value = string.Empty;
-        return false;
-    }
 }
