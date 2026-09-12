@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 
@@ -107,6 +108,28 @@ internal sealed partial class FfmpegAudioTranscoder(IOptions<SKNormalizerOptions
 
         using var process = new Process { StartInfo = info };
 
+        // Event-based draining, not ReadToEnd: the runtime pumps both streams on its own threads, so
+        // a child that fills stdout while we would otherwise be blocked reading stderr (or the
+        // reverse) can never deadlock either side.
+        var stderr = new StringBuilder();
+        var stdout = new StringBuilder();
+
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is not null)
+            {
+                stderr.AppendLine(e.Data);
+            }
+        };
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not null)
+            {
+                stdout.AppendLine(e.Data);
+            }
+        };
+
         try
         {
             process.Start();
@@ -120,9 +143,12 @@ internal sealed partial class FfmpegAudioTranscoder(IOptions<SKNormalizerOptions
                 $"could not start '{_options.FfmpegPath}': {ex.Message}");
         }
 
-        // Read before waiting: a full stderr pipe deadlocks a process that is still writing to it.
-        var stderr = process.StandardError.ReadToEnd();
-        _ = process.StandardOutput.ReadToEnd();
+        // A cancelled token must reach the child, not just be checked before it exists — otherwise
+        // cancellation is ignored for the entire length of the conversion.
+        using var cancelKill = ct.Register(() => Kill(process));
+
+        process.BeginErrorReadLine();
+        process.BeginOutputReadLine();
 
         if (!process.WaitForExit(TimeSpan.FromSeconds(_options.ConversionTimeoutSeconds)))
         {
@@ -132,13 +158,23 @@ internal sealed partial class FfmpegAudioTranscoder(IOptions<SKNormalizerOptions
                 $"the conversion did not finish within {_options.ConversionTimeoutSeconds}s");
         }
 
+        // The no-argument overload, even though the process has already exited: with the
+        // event-based API this is what guarantees the async output handlers have finished flushing
+        // before the builders below are read.
+        process.WaitForExit();
+
+        // Distinguish "we killed it because the caller cancelled" from a genuine non-zero exit —
+        // otherwise a cancellation surfaces as a confusing NormalizationException instead of an
+        // OperationCanceledException.
+        ct.ThrowIfCancellationRequested();
+
         if (process.ExitCode != 0)
         {
             throw new NormalizationException(
-                $"the conversion failed with exit code {process.ExitCode}: {Tail(stderr)}");
+                $"the conversion failed with exit code {process.ExitCode}: {Tail(stderr.ToString())}");
         }
 
-        return stderr;
+        return stderr.ToString();
     }
 
     private static void Kill(Process process)
@@ -161,7 +197,15 @@ internal sealed partial class FfmpegAudioTranscoder(IOptions<SKNormalizerOptions
     {
         var lines = stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        return lines.Length == 0 ? "no output" : string.Join(" | ", lines.TakeLast(3));
+        var joined = lines.Length == 0 ? "no output" : string.Join(" | ", lines.TakeLast(3));
+
+        // Bounded by bytes too, not just lines: ffmpeg's stderr can carry upstream content inline
+        // (ID3 tags and similar) on a single unbounded line, and this string reaches a
+        // NormalizationException message the framework logs verbatim — upstream content must not
+        // reach a log store unbounded, the same constraint the envelope readers apply.
+        const int maxLength = 500;
+
+        return joined.Length > maxLength ? $"{joined[..maxLength]}…" : joined;
     }
 
     private static string Extension(string extension)
