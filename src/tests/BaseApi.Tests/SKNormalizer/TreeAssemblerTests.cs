@@ -2,6 +2,10 @@ using System.Text;
 using Processor.ArchiveCollapser.Writers;
 using Processor.SKNormalizer;
 using Xunit;
+// Aliased rather than imported wholesale: Processor.ArchiveCollapser declares its own
+// FileNode/FileContent -- a deliberate duplicate of this processor's -- and a blanket using would
+// make every unqualified use of those names in this file ambiguous.
+using ArchiveBuilder = Processor.ArchiveCollapser.ArchiveBuilder;
 
 namespace BaseApi.Tests.SKNormalizer;
 
@@ -15,7 +19,7 @@ public sealed class TreeAssemblerTests
         => new(name, Encoding.UTF8.GetBytes(text), Born, Stamp);
 
     private static OutputLayout Root(string name, string extension, params OutputNode[] children)
-        => new(name, extension, SizeBytes: 40219, Born, Stamp, children);
+        => new(new OutputNode.Folder(name, extension, SizeBytes: 40219, Born, Stamp, children));
 
     private static FileNode Assemble(OutputLayout layout) => new TreeAssembler().Assemble(layout);
 
@@ -50,8 +54,8 @@ public sealed class TreeAssemblerTests
         // reject separators, so this is about the diagnostic rather than the exposure -- caught here,
         // the message names the node; caught there, it is a malformed-envelope failure three hops
         // from the code that produced it.
-        var layout = new OutputLayout(
-            $"out{separator}bundle.zip", ".zip", 40219, Born, Stamp, [File("a.xml", "<a/>")]);
+        var layout = new OutputLayout(new OutputNode.Folder(
+            $"out{separator}bundle.zip", ".zip", 40219, Born, Stamp, [File("a.xml", "<a/>")]));
 
         Assert.Throws<NormalizationException>(() => Assemble(layout));
     }
@@ -171,10 +175,69 @@ public sealed class TreeAssemblerTests
         // ArchiveBuilder treats null as "pack the format's canonical empty archive" and an empty
         // Entries list identically — but the tree schema and the expander both express "expanded to
         // nothing" as null, so this must match.
-        var root = Assemble(new OutputLayout("empty.zip", ".zip", 22, Born, Stamp, null));
+        var root = Assemble(
+            new OutputLayout(new OutputNode.Folder("empty.zip", ".zip", 22, Born, Stamp, null)));
 
         Assert.Null(root.Content);
         Assert.Equal(0, root.Metadata.EntryCount);
+    }
+
+    [Fact]
+    public void AnEmptyChildListIsNullContentToo()
+    {
+        // NULL AND EMPTY MUST NOT DIFFER. A handler mirroring an input `content: null` has no way to
+        // say "null" other than by handing back no children, and the two must land in the same
+        // place or the representation changes on the way through.
+        var root = Assemble(
+            new OutputLayout(new OutputNode.Folder("empty.zip", ".zip", 22, Born, Stamp, [])));
+
+        Assert.Null(root.Content);
+        Assert.Equal(0, root.Metadata.EntryCount);
+    }
+
+    [Fact]
+    public void AnInteriorEmptyArchiveIsNullContentAtDepthToo()
+    {
+        // The root case above held from the start; THE INTERIOR ONE DID NOT, and nothing noticed
+        // because the nesting fixture used by the chain tests contains no empty archive. A document
+        // holding one would change representation and byte identity would quietly stop holding.
+        var root = Assemble(Root(
+            "out.zip", ".zip",
+            new OutputNode.Folder("inner.zip", ".zip", 22, Born, Stamp, [])));
+
+        var inner = Assert.IsType<FileContent.Entries>(root.Content).Value.Single();
+
+        Assert.Null(inner.Content);
+        Assert.Equal(0, inner.Metadata.EntryCount);
+    }
+
+    [Fact]
+    public void ALeafRootKeepsItsBytesInsteadOfBecomingAnEmptyArchive()
+    {
+        // THE SHAPE THAT DESTROYED DATA. ArchiveExpander emits a bytes root for any fetched file it
+        // does not recognise as an archive -- a CSV, an MP3, a PDF -- and the earlier OutputLayout
+        // could not express it at all, so such a document left here as a childless container and was
+        // written out as an empty 22-byte zip. No failed step, no warning, the bytes gone.
+        var root = Assemble(new OutputLayout(File("report.csv", "id,name")));
+
+        Assert.Equal("report.csv", root.Metadata.Name);
+        Assert.Equal(".csv", root.Metadata.Extension);
+        Assert.Equal(7, root.Metadata.SizeBytes);
+        Assert.Equal(0, root.Metadata.EntryCount);
+        Assert.Equal(Born, root.Metadata.CreatedUtc);
+        Assert.Equal(Stamp, root.Metadata.ModifiedUtc);
+        Assert.Equal(
+            Encoding.UTF8.GetBytes("id,name"),
+            Assert.IsType<FileContent.Bytes>(root.Content).Value);
+    }
+
+    [Fact]
+    public void ALeafRootNameCarryingAPathSeparatorIsRejected()
+    {
+        // The root name rule applies to a leaf root as much as to a container root: it is still the
+        // name ArchiveCollapser copies into the outbound envelope's fileName.
+        Assert.Throws<NormalizationException>(
+            () => Assemble(new OutputLayout(File("sub/report.csv", "id"))));
     }
 
     [Fact]
@@ -188,5 +251,11 @@ public sealed class TreeAssemblerTests
         Assert.Equal(
             writers.Select(w => w.Extension).Order().ToArray(),
             TreeAssembler.WritableExtensions.Order().ToArray());
+
+        // THE DEPTH CONSTANT IS THE SAME KIND OF DUPLICATION and nothing pinned it. Both count the
+        // same thing -- levels of nesting below the root -- so a change to one without the other
+        // means this processor either refuses a document the collapser would have packed, or accepts
+        // one it will refuse a hop later with far less diagnostic.
+        Assert.Equal(ArchiveBuilder.MaxSupportedDepth, TreeAssembler.MaxSupportedDepth);
     }
 }

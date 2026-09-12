@@ -28,25 +28,16 @@ internal sealed class TreeAssembler : ITreeAssembler
     /// <summary>Where a container whose format cannot be written is retargeted.</summary>
     public const string DefaultArchiveExtension = ".zip";
 
+    /// <summary>
+    /// <b>The root is built by the same code as every other node</b>, because it is the same kind of
+    /// thing: a leaf root is a plain file that must survive untouched, and a container root obeys
+    /// exactly the rules a nested container obeys. Depth 0 is the root, so the cap admits it.
+    /// </summary>
     public FileNode Assemble(OutputLayout layout)
     {
         ArgumentNullException.ThrowIfNull(layout);
 
-        var extension = Writable(layout.RootExtension);
-        var rootName = Check(layout.RootName);
-        var children = layout.Children is null
-            ? null
-            : layout.Children.Select(c => Build(c, depth: 1)).ToList();
-
-        return new FileNode(
-            new FileMetadata(
-                Retarget(rootName, layout.RootExtension, extension),
-                extension,
-                layout.SizeBytes,
-                layout.CreatedUtc,
-                layout.ModifiedUtc,
-                children?.Count ?? 0),
-            children is null ? null : new FileContent.Entries(children));
+        return Build(layout.Root, depth: 0);
     }
 
     private FileNode Build(OutputNode node, int depth)
@@ -89,12 +80,24 @@ internal sealed class TreeAssembler : ITreeAssembler
     {
         var extension = Writable(folder.ArchiveExtension);
         var name = Retarget(Check(folder.Name), folder.ArchiveExtension, extension);
-        var children = folder.Children.Select(c => Build(c, depth + 1)).ToList();
+
+        // NULL AND EMPTY ARE THE SAME THING HERE, at every depth including the root: the tree schema
+        // and ArchiveExpander both express "this archive expanded to nothing" as content: null, so
+        // emitting an empty array instead would change the representation of any document holding a
+        // nested empty archive -- and byte identity would stop holding for it.
+        var children = folder.Children is null or { Count: 0 }
+            ? null
+            : folder.Children.Select(c => Build(c, depth + 1)).ToList();
 
         return new FileNode(
             new FileMetadata(
-                name, extension, folder.SizeBytes, folder.CreatedUtc, folder.ModifiedUtc, children.Count),
-            new FileContent.Entries(children));
+                name,
+                extension,
+                folder.SizeBytes,
+                folder.CreatedUtc,
+                folder.ModifiedUtc,
+                children?.Count ?? 0),
+            children is null ? null : new FileContent.Entries(children));
     }
 
     private static string Check(string name)

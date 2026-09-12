@@ -35,15 +35,22 @@ public sealed record ItemNames(string MetadataFileName, string AudioFileName);
 
 /// <summary>
 /// One item, carried through the pipeline and handed to stage 8.
+/// <para>
+/// <b><see cref="MetadataDocument"/>, <see cref="Audio"/> and <see cref="Names"/> are the input to a
+/// HANDLER'S OWN stage 8, not to the base mirror.</b> <c>ProviderHandlerBase.LayoutFor</c>
+/// reproduces the input document and substitutes nothing; a handler that emits artifacts overrides
+/// <c>LayoutFor</c> and builds its layout out of these three members. That is why they are carried
+/// here rather than consumed by shared code.
+/// </para>
 /// </summary>
 /// <param name="MetadataDocument">
 /// The rendered metadata, or <b>null when the handler produced none</b>. Rendered by the pipeline
 /// after stage 7, so stage 8 receives bytes it can place rather than a model it would have to render
 /// itself — a handler never writes angle brackets.
 /// <para>
-/// <b>Null is the mechanism that makes an identity handler expressible</b>: the mirror carries a leaf
-/// through unchanged when its item produced no artifact. It is also how a metadata-only item and a
-/// deliberate pass-through are expressed.
+/// <b>Null is how a metadata-only item and a deliberate pass-through are expressed</b>: a handler's
+/// own <c>LayoutFor</c> passes the source leaf through rather than replacing it when its item
+/// produced no artifact.
 /// </para>
 /// </param>
 public sealed record NormalizedItem(
