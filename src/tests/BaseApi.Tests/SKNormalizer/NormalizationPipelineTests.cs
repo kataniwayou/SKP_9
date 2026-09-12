@@ -30,8 +30,18 @@ public sealed class NormalizationPipelineTests
 
         public AudioProfile? Profile { get; init; }
 
+        /// <summary>
+        /// Which of the three states <see cref="Map"/> leaves the metadata in. The default is
+        /// COMPLETE, which is why the incomplete arm of the pipeline's tri-state was unreachable
+        /// from this file and could be deleted without a single test noticing.
+        /// </summary>
+        public MetadataShape Shape { get; init; } = MetadataShape.Complete;
+
         /// <summary>What stage 7 was handed, so a test can assert it saw the conversion's output.</summary>
         public NormalizedAudio? ReconciledAudio { get; private set; }
+
+        /// <summary>What stage 8 was handed, so a test can read each item's MetadataDocument.</summary>
+        public IReadOnlyList<NormalizedItem> LaidOut { get; private set; } = [];
 
         private void Enter(string stage)
         {
@@ -58,15 +68,29 @@ public sealed class NormalizationPipelineTests
         {
             Enter(nameof(Map));
 
-            var metadata = new StandardMetadata
+            return Shape switch
             {
-                Provider = "Recording",
-                OriginalName = item.Key,
-                IngestedUtc = new DateTimeOffset(2026, 9, 12, 4, 31, 0, TimeSpan.Zero),
-                Title = item.Key,
-                AudioFileName = item.Key,
+                // Nothing populated at all: the identity handler's shape.
+                MetadataShape.Unset => new StandardMetadata(),
+
+                // SOME of it populated, two required elements left unset. A handler bug, and the
+                // pipeline must name the elements rather than emit a quietly different document.
+                MetadataShape.Incomplete => new StandardMetadata
+                {
+                    Provider = "Recording",
+                    IngestedUtc = new DateTimeOffset(2026, 9, 12, 4, 31, 0, TimeSpan.Zero),
+                    Title = item.Key,
+                },
+
+                _ => new StandardMetadata
+                {
+                    Provider = "Recording",
+                    OriginalName = item.Key,
+                    IngestedUtc = new DateTimeOffset(2026, 9, 12, 4, 31, 0, TimeSpan.Zero),
+                    Title = item.Key,
+                    AudioFileName = item.Key,
+                },
             };
-            return metadata;
         }
 
         public override void Augment(StandardMetadata metadata, SourceItem item)
@@ -100,8 +124,17 @@ public sealed class NormalizationPipelineTests
         public override OutputLayout LayoutFor(FileNode root, IReadOnlyList<NormalizedItem> items)
         {
             Enter(nameof(LayoutFor));
+            LaidOut = items;
             return base.LayoutFor(root, items);
         }
+    }
+
+    /// <summary>The three states of the pipeline's artifact decision, as a fake can produce them.</summary>
+    private enum MetadataShape
+    {
+        Unset,
+        Incomplete,
+        Complete,
     }
 
     private static NormalizationPipeline Pipeline(IAudioTranscoder transcoder)
@@ -199,6 +232,69 @@ public sealed class NormalizationPipelineTests
                 CancellationToken.None));
 
         Assert.Single(handler.Stages, s => s == nameof(handler.Map));
+    }
+
+    // ---- The artifact decision's three states, asserted directly. ----
+    //
+    // These three existed only transitively through chain tests before, and the INCOMPLETE arm not
+    // at all: the whole suite stayed green with the pipeline's missing-required check deleted. That
+    // arm is the mechanism this phase turns on, so it gets a test that fails when it goes.
+
+    [Fact]
+    public void AnUnsetMetadataProducesNoDocumentAndTheItemStillFlowsThrough()
+    {
+        // What keeps an identity handler possible: nothing populated means no artifact, and the
+        // item is carried to stage 8 rather than being rejected.
+        var handler = new RecordingHandler { Shape = MetadataShape.Unset };
+
+        var result = Pipeline(new ExplodingTranscoder()).Run(
+            Archive("in.zip", Leaf("a.wav", "x")), handler, CancellationToken.None);
+
+        Assert.Equal(1, result.ItemCount);
+
+        var item = Assert.Single(handler.LaidOut);
+        Assert.Null(item.MetadataDocument);
+        Assert.True(item.Metadata.IsUnset);
+    }
+
+    [Fact]
+    public void AnIncompleteMetadataFailsAndNamesEveryMissingElementByItsXmlPath()
+    {
+        // A handler that populated SOME of the document and left a required element unset is a bug,
+        // and §8 requires the failure to say WHICH elements -- by their XML path, because the
+        // operator reading it is looking at an XML document, not at StandardMetadata.
+        var handler = new RecordingHandler { Shape = MetadataShape.Incomplete };
+
+        var ex = Assert.Throws<NormalizationException>(
+            () => Pipeline(new ExplodingTranscoder()).Run(
+                Archive("in.zip", Leaf("ninth.wav", "x")), handler, CancellationToken.None));
+
+        Assert.Contains("source/originalName", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("audio/fileName", ex.Message, StringComparison.Ordinal);
+        // The item key too: this is a per-item failure and goes through the same prepend.
+        Assert.Contains("ninth.wav", ex.Message, StringComparison.Ordinal);
+
+        // NO ARTIFACT AND NO STAGE 8. An incomplete document must be a failed step, never a quietly
+        // different file.
+        Assert.DoesNotContain(nameof(handler.LayoutFor), handler.Stages, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void ACompleteMetadataIsRenderedAndCarriedOnTheItem()
+    {
+        var handler = new RecordingHandler { Shape = MetadataShape.Complete };
+
+        Pipeline(new ExplodingTranscoder()).Run(
+            Archive("in.zip", Leaf("a.wav", "x")), handler, CancellationToken.None);
+
+        var item = Assert.Single(handler.LaidOut);
+        Assert.NotNull(item.MetadataDocument);
+
+        // The rendered bytes, not a placeholder: the same thing the renderer produces for this
+        // metadata, so a pipeline that handed stage 8 anything else fails here.
+        Assert.Equal(
+            new XmlMetadataRenderer().Render(item.Metadata),
+            item.MetadataDocument);
     }
 
     [Fact]
