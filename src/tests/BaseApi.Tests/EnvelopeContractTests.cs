@@ -110,7 +110,11 @@ public sealed class EnvelopeContractTests : IDisposable
         var expander = new ArchiveExpanderProcessor(
             new RecordingLogger<ArchiveExpanderProcessor>(),
             new FileContentBuilder(
-                [new ZipExtractor()], Options.Create(new ArchiveExpanderOptions())));
+                // Rar is registered alongside zip because one test below drives a rar-sourced
+                // document through the whole chain; every other test's fixture is a zip, which
+                // matches nothing in the rar extractor and is unaffected.
+                [new ZipExtractor(), new RarExtractor()],
+                Options.Create(new ArchiveExpanderOptions())));
         expander.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
 
         await expander.ExecuteAsync(envelope, payload, E, CancellationToken.None);
@@ -556,6 +560,58 @@ public sealed class EnvelopeContractTests : IDisposable
         var without = await Collapse(document);
 
         Assert.Equal(ContentOf(without), ContentOf(withNormalizer));
+    }
+
+    [Fact]
+    public async Task APlainFileSurvivesTheNormalizerByteIdentically()
+    {
+        // THE SHAPE THAT WAS SILENTLY EMPTIED. ArchiveExpander emits a BYTES root for any fetched
+        // file it does not recognise as an archive, and the mirror handled only an entries root -- so
+        // a CSV arrived here and left as a childless container, which the chain wrote out as an empty
+        // 22-byte zip. A completed workflow, no failed step, no warning, and the file destroyed.
+        //
+        // Every other identity test in this file starts from a .zip, which is exactly why none of
+        // them saw it.
+        var envelope = await Fetch("report.csv", Encoding.UTF8.GetBytes("id,name,role"), AnyFile);
+        var document = await Expand(envelope, """{"MaxDepth":1}""");
+
+        Assert.Equal(document, await Normalize(document));
+    }
+
+    [Fact]
+    public async Task ARarSourcedDocumentSurvivesTheChainAndArrivesAsAZip()
+    {
+        // NOT byte identity, and that is the format rather than a defect here: ArchiveExpander READS
+        // rar and ArchiveCollapser cannot WRITE it -- RarLab's unrar licence permits decompression
+        // only -- so the output is a different container holding the same entries. What must hold is
+        // that the collapser ACCEPTS what this processor emits, which the mirror's faithful ".rar"
+        // root would have made impossible without TreeAssembler's retargeting.
+        var fixture = await File.ReadAllBytesAsync(
+            Path.Combine(AppContext.BaseDirectory, "ArchiveExpander", "Fixtures", "three-entries.rar"),
+            TestContext.Current.CancellationToken);
+
+        var envelope = await Fetch("bundle.rar", fixture, AnyFile);
+        var document = await Expand(envelope, """{"MaxDepth":1}""");
+
+        var normalized = await Normalize(document);
+
+        Assert.Equal(
+            ".zip",
+            JsonDocument.Parse(normalized).RootElement
+                .GetProperty("metadata").GetProperty("extension").GetString());
+        Assert.Equal(
+            "bundle.zip",
+            JsonDocument.Parse(normalized).RootElement
+                .GetProperty("metadata").GetProperty("name").GetString());
+
+        // The collapser accepting it is the whole point: an unretargeted .rar root is a refusal.
+        var collapsed = await Collapse(normalized);
+
+        Assert.True(ProcessorJsonSchemaValidator.TryValidate(EnvelopeSchema(), collapsed, out var errors),
+                    string.Join("; ", errors));
+        Assert.Equal(
+            "bundle.zip",
+            JsonDocument.Parse(collapsed).RootElement.GetProperty("fileName").GetString());
     }
 
     [Fact]

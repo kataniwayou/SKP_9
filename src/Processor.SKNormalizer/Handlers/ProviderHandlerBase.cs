@@ -30,17 +30,22 @@ public abstract class ProviderHandlerBase : IProviderHandler
     }
 
     /// <summary>
-    /// Stage 8, default: <b>preserve the input topology</b>. Same nesting, same entry count; only
-    /// contents, names and extensions change. Most handlers never override this.
+    /// Stage 8, default: <b>reproduce the input document exactly</b>. Same nesting, same entry
+    /// count, same names, extensions, sizes and both timestamps. Nothing is substituted. Most
+    /// handlers never override this.
     /// <para>
-    /// <b>It satisfies the output schema by construction.</b> Output depth equals input depth, and
-    /// the input arrived through the same registered row — so no handler has to think about the
-    /// row's depth.
+    /// <b>That is precisely what an identity handler needs</b>, and it is what makes §6.1's "output
+    /// depth equals input depth" true by construction: the input arrived through the same registered
+    /// row, so the row admits the output without any handler having to think about depth.
     /// </para>
     /// <para>
-    /// <b>A leaf with no artifact passes through unchanged.</b> That is what makes an identity
-    /// handler expressible, and it is also how a metadata-only item and a deliberate pass-through
-    /// are expressed.
+    /// <b>This default emits no artifacts, deliberately.</b> A handler that produces metadata or
+    /// converted audio overrides <c>LayoutFor</c> and builds its own layout from the
+    /// <see cref="NormalizedItem"/> list it is handed — each item carries its rendered
+    /// <c>MetadataDocument</c>, its <c>Audio</c> and the <c>Names</c> chosen at stage 5. Substituting
+    /// here instead would require this base class to decide which source node corresponds to which
+    /// artifact, and that correspondence is an open question (the design's §14) that the first real
+    /// provider handler should settle rather than inherit.
     /// </para>
     /// </summary>
     public virtual OutputLayout LayoutFor(FileNode root, IReadOnlyList<NormalizedItem> items)
@@ -48,33 +53,14 @@ public abstract class ProviderHandlerBase : IProviderHandler
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(items);
 
-        // Keyed on the node the item was located from, so a substitution lands in the position the
-        // source occupied rather than being appended somewhere.
-        var replacements = new Dictionary<FileNode, NormalizedItem>();
-
-        foreach (var item in items)
-        {
-            foreach (var node in item.Source.Nodes)
-            {
-                replacements[node] = item;
-            }
-        }
-
-        // EVERY FIELD CARRIED, not just the name. Size and both timestamps travel with each node,
-        // because preserving topology that loses metadata is not preserving the document.
-        return new OutputLayout(
-            root.Metadata.Name,
-            root.Metadata.Extension,
-            root.Metadata.SizeBytes,
-            root.Metadata.CreatedUtc,
-            root.Metadata.ModifiedUtc,
-            root.Content is FileContent.Entries entries
-                ? entries.Value.Select(e => Mirror(e, replacements)).ToList()
-                : null);
+        return new OutputLayout(Mirror(root));
     }
 
-    private static OutputNode Mirror(
-        FileNode node, IReadOnlyDictionary<FileNode, NormalizedItem> replacements)
+    /// <summary>
+    /// EVERY FIELD CARRIED, not just the name. Size and both timestamps travel with each node,
+    /// because preserving topology that loses metadata is not preserving the document.
+    /// </summary>
+    private static OutputNode Mirror(FileNode node)
         => node.Content switch
         {
             FileContent.Entries entries => new OutputNode.Folder(
@@ -83,19 +69,23 @@ public abstract class ProviderHandlerBase : IProviderHandler
                 node.Metadata.SizeBytes,
                 node.Metadata.CreatedUtc,
                 node.Metadata.ModifiedUtc,
-                entries.Value.Select(e => Mirror(e, replacements)).ToList()),
+                entries.Value.Select(Mirror).ToList()),
 
+            // A LEAF, AT ANY DEPTH INCLUDING THE ROOT. The expander emits a bytes root for every
+            // fetched file it does not recognise as an archive -- a CSV, an MP3, a PDF -- and those
+            // bytes are the whole document. Mirroring one as a childless container is what silently
+            // turned such a document into an empty zip.
             FileContent.Bytes bytes => new OutputNode.File(
                 node.Metadata.Name, bytes.Value, node.Metadata.CreatedUtc, node.Metadata.ModifiedUtc),
 
-            // An archive that expanded to nothing. Mirrored as an empty container, which the
-            // assembler turns back into the format's canonical empty archive.
+            // An archive that expanded to nothing. Mirrored as a container with NULL children, which
+            // the assembler emits as content: null -- the same representation it arrived in.
             _ => new OutputNode.Folder(
                 node.Metadata.Name,
                 node.Metadata.Extension,
                 node.Metadata.SizeBytes,
                 node.Metadata.CreatedUtc,
                 node.Metadata.ModifiedUtc,
-                []),
+                null),
         };
 }

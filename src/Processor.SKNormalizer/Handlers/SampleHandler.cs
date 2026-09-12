@@ -41,7 +41,8 @@ public sealed class SampleHandler : ProviderHandlerBase
     }
 
     // Everything else takes the base default: no content objection, empty metadata, no augmentation,
-    // no profile, no reconciliation, and the topology-preserving mirror. Empty metadata means
-    // RenderMetadata returns null and the mirror carries every leaf through unchanged — which is
-    // identity, by construction rather than by special case.
+    // no profile, no reconciliation, and the input-preserving mirror. The mirror substitutes nothing
+    // and reproduces the document it was given, so identity falls out by construction rather than by
+    // special case — including for a document whose root is a plain file rather than an archive,
+    // which Locate already handles above.
 }

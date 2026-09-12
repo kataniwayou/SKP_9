@@ -60,9 +60,10 @@ internal sealed class NormalizationPipeline(
             handler.Reconcile(metadata, audio, names);          // 7
 
             // Rendered HERE, after stage 7, so stage 8 places bytes rather than rendering them.
-            // ARTIFACT EMISSION IS OPTIONAL: empty metadata renders to null, and the mirror carries
-            // the leaf through unchanged. A pipeline that always emitted XML could not express
-            // identity, a metadata-only item, or a deliberate pass-through.
+            // ARTIFACT EMISSION IS OPTIONAL: empty metadata renders to null, and stage 8 decides
+            // whether anything enters the tree at all -- the base mirror emits nothing. A pipeline
+            // that always emitted XML could not express identity, a metadata-only item, or a
+            // deliberate pass-through.
             var document = metadata.IsEmpty ? null : renderer.Render(metadata);
 
             return new NormalizedItem(item, metadata, names, audio, document);
