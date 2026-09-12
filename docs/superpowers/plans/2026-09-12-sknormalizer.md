@@ -1158,7 +1158,6 @@ This is the core. Stages run in a fixed order; the handler decides and shared co
 - Create: `src/Processor.SKNormalizer/Services/XmlMetadataRenderer.cs`
 - Create: `src/Processor.SKNormalizer/Pipeline/NormalizationPipeline.cs`
 - Modify: `src/Processor.SKNormalizer/Handlers/ProviderHandlerBase.cs` (replace `LayoutFor`)
-- Modify: `src/Processor.SKNormalizer/Pipeline/PipelineTypes.cs` (`NormalizedItem` gains `MetadataDocument`)
 - Create: `src/tests/BaseApi.Tests/Support/TranscoderDoubles.cs`
 - Test: `src/tests/BaseApi.Tests/SKNormalizer/NormalizationPipelineTests.cs`
 - Test: `src/tests/BaseApi.Tests/SKNormalizer/XmlMetadataRendererTests.cs`
@@ -1170,7 +1169,7 @@ This is the core. Stages run in a fixed order; the handler decides and shared co
   - `internal interface IMetadataRenderer { byte[] Render(StandardMetadata metadata); }`
   - `internal sealed class XmlMetadataRenderer : IMetadataRenderer`
   - `internal sealed record NormalizationResult(FileNode Document, int ItemCount, int ConvertedCount)`
-  - `NormalizedItem` gains `byte[]? MetadataDocument` — amend `Pipeline/PipelineTypes.cs` from Task 3
+  - **Note:** `NormalizedItem` already carries `byte[]? MetadataDocument` — Task 3 created it that way. Do not add the field; just populate it.
   - `internal sealed class NormalizationPipeline` with `NormalizationResult Run(FileNode root, IProviderHandler handler, CancellationToken ct)`
 
 - [ ] **Step 1: Write the failing renderer test**
