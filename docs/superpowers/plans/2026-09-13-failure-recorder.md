@@ -1686,12 +1686,27 @@ state. **Without `SKP_REALSTACK=1` they SKIP**, which is not a failing state and
 
 - [ ] **Step 3: Seed the mid-chain failure and run the first test**
 
-```bash
-python tools/make-sample-archives.py
-```
+**The seeding mechanism, which `FileFetcherLiveTests` already implements** — read that file and
+reuse its `SeedZip` and `ProduceAsync` helpers rather than inventing new ones. It is two steps, and
+both are required:
 
-Then place a D5-shaped archive — entries sharing a basename that are **not** exactly one `.wav` plus
-one `.json` — in the folder FileFetcher reads (`/mnt/skp-files/in` on the node), and run:
+1. **Put the file on the node.** The path in the record is opened *inside the cluster*, so a path
+   nothing backs fails the fetch:
+   `docker cp ./some.zip desktop-control-plane:/mnt/skp-files/in/file-001.zip`
+2. **Produce one record naming it** to `skp-paths`:
+   `{"filePath": "/mnt/skp-files/in/file-001.zip"}` — **exactly that one key.** The registered
+   `file-locator` schema declares `required: ["filePath"]` with `additionalProperties: false`, so a
+   second key is refused by the importer's own output validation and the lineage ends at hop 1 with
+   a schema rejection rather than reaching the normalizer. That would produce a failure record, but
+   from the wrong step, and the test would pass for the wrong reason.
+
+**The D5 shape:** a `.zip` whose entries do not form exactly one `.wav` plus one `.json` per
+basename. `SeedZip(name, ("a.csv", "id
+"))` is enough — `AcmeHandler.Locate` groups it into one
+item and `ValidateContent` refuses it with `holds 0 and 0`. The chain's FileFetcher step admits
+`.zip` only, so the seed must be a real zip.
+
+Run:
 
 ```bash
 SKP_REALSTACK=1 src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe \
