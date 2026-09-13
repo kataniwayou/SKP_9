@@ -1271,9 +1271,10 @@ Run:
 ```bash
 curl -s -X POST http://localhost:18080/api/v1/orchestration/stop \
   -H 'Content-Type: application/json' \
-  -d '{"workflowId":"1a56b3ca-e276-4815-87fa-5c2f48ab6dad"}'
+  -d '"1a56b3ca-e276-4815-87fa-5c2f48ab6dad"'
 ```
-Expected: 200. A running workflow holds a projection; editing its graph underneath it is the
+Expected: **202**, not 200 — both orchestration endpoints answer 202, and both take a RAW
+JSON GUID STRING as the body rather than an object. A running workflow holds a projection; editing its graph underneath it is the
 situation the base notices and warns about, and it is avoidable by stopping first.
 
 - [ ] **Step 2: Null the exporter's input schema**
@@ -1444,10 +1445,10 @@ Expected: `9`.
 ```bash
 curl -s -i -X POST http://localhost:18080/api/v1/orchestration/start \
   -H 'Content-Type: application/json' \
-  -d '{"workflowId":"1a56b3ca-e276-4815-87fa-5c2f48ab6dad"}' | head -1
+  -d '"1a56b3ca-e276-4815-87fa-5c2f48ab6dad"' | head -1
 ```
 
-Expected: **200**. A 422 naming a schema edge means an edge whose parent output and child input are
+Expected: **202**. A 422 naming a schema edge means an edge whose parent output and child input are
 both non-null and unequal — recheck Step 2 landed and that the recorder row's schema ids are null. A
 422 naming a cycle means step 8 or 9 points back into the chain.
 
@@ -1458,11 +1459,14 @@ The regression that Step 2 could have caused:
 ```bash
 curl -s -X POST http://localhost:18080/api/v1/orchestration/start \
   -H 'Content-Type: application/json' \
-  -d '{"workflowId":"a5498df6-1522-4098-ad65-f4aff4998988"}' | head -1
+  -d '"a5498df6-1522-4098-ad65-f4aff4998988"' | head -1
 ```
 
-Expected: 200, and a subsequent run of `kafka-import-export` completes as before. The nulled input
-schema removed a check, not a capability.
+**Do NOT run this if `kafka-import-export` is already projected** — starting a running workflow is
+not the check it looks like. Verify instead that its Redis projection key `skp:a5498df6-…` still
+exists and that it is still completing runs. The nulled input schema removed a check, not a
+capability; what proves that is a record actually traversing the exporter, which the live test in
+Task 7 is what finally supplies.
 
 - [ ] **Step 10: Record the ids**
 
