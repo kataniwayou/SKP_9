@@ -207,8 +207,12 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // while every failure line here sat at Information a severity filter could not find one —
             // only a text match could. The transform-faulted line below was already Warning; these are
             // brought up to meet it.
+            // The schema id, for the reason its twin in ProcessedDataHandler carries one: the edge is
+            // a shared row that gets re-pointed, so the errors alone cannot say whether the document
+            // was wrong or the contract moved under it.
             _logger.LogWarning(
-                "input failed its schema — reported failed: {SchemaErrors}", string.Join("; ", errors));
+                "input failed its schema {InputSchemaId} — reported failed: {SchemaErrors}",
+                identity.InputSchemaId, string.Join("; ", errors));
 
             await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
             return;

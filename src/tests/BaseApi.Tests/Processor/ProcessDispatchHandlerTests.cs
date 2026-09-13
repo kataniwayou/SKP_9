@@ -233,7 +233,18 @@ public sealed class ProcessDispatchHandlerTests
         // The validator's errors used to ride the wire. They are logged instead, because that output
         // quotes the fragment of the document that failed — and this line is now the only record of
         // why the step failed at all.
-        Assert.Contains(h.Log.Records, r => r.Message.Contains("failed its schema", StringComparison.Ordinal));
+        var rejection = Assert.Single(
+            h.Log.Records, r => r.Message.Contains("failed its schema", StringComparison.Ordinal));
+
+        // THE SCHEMA ID IS ON THE LINE. An edge is a row id on the shared processor row and gets
+        // re-pointed; without the id, a rejection cannot distinguish a wrong document from a moved
+        // contract, which is exactly the attribution the schema-compatibility suite could not make
+        // on 2026-09-12.
+        Assert.Contains("88888888-8888-8888-8888-888888888888", rejection.Message, StringComparison.Ordinal);
+
+        // The rule, not a bare pointer: the library reports an additionalProperties violation under
+        // the empty keyword, and ProcessorJsonSchemaValidator fills it from the evaluation path.
+        Assert.Contains("/number: type", rejection.Message, StringComparison.Ordinal);
     }
 
     [Fact]
