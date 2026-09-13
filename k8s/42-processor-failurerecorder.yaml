@@ -1,0 +1,116 @@
+# processor-failurerecorder — records THAT a step failed and where to look. Wired on
+# entryCondition: PreviousFailed from every step of filefetcher-archiveexpander-chain, and out to a
+# second kafka-exporter step on skp-failures. A downstream transform: it has an input and it
+# produces output, so it is neither an importer nor an exporter.
+# No Service — its only inbound traffic is the kubelet hitting the pod IP for probes.
+#
+# EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS, exactly as the other processors do.
+# `kubectl rollout status` will time out; that timeout is the expected signal, not a fault.
+#
+# THE MEMORY LIMIT IS 768Mi AND IT IS NOT ABOUT WHAT THIS PROCESSOR DOES. It builds a record of a
+# few hundred bytes and could run in a fraction of that. What sizes it is what it is HANDED: a hop
+# relocates its payload, so the orchestrator copies the failed step's input into a fresh key and
+# this pod's pre handler reads the whole thing into memory before the transform is entered — and
+# then the transform ignores it. A failed archive-expander or sk-normalizer step means up to ~45 MB
+# of document arriving here. Sizing this lower would turn a failed step into an OOM, which is a
+# POISON MESSAGE and not a failed step: the author never returns, the input key is never reclaimed,
+# RabbitMQ requeues the unacked dispatch, and the replacement pod dies the same way. The processor
+# that exists to report failures must not be the one that cannot survive them.
+#
+# THERE ARE NO ENV VARS BEYOND THE SHARED FIVE, deliberately. This processor has no ceiling, no
+# path, no endpoint and no payload of its own — everything it records arrives on the dispatch or
+# from the clock.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor-failurerecorder
+  namespace: skp
+  labels:
+    app: processor-failurerecorder
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxSurge 0, matching archivecollapser and for the same reason: this pod's limit is 768Mi,
+      # double the smaller processors', so a surge briefly running two of them would want ~1.5Gi at
+      # once on a single-node kind cluster already running Postgres, Redis, RabbitMQ, Prometheus,
+      # Grafana, an OTel collector, BaseApi, the orchestrator and six other processors.
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: processor-failurerecorder
+  template:
+    metadata:
+      labels:
+        app: processor-failurerecorder
+    spec:
+      containers:
+        - name: processor-failurerecorder
+          image: processor-failurerecorder:local
+          imagePullPolicy: IfNotPresent
+          env:
+            # NO Service__Name / Service__Version here, deliberately, and do not add them back.
+            # A processor takes its service.name and service.version from its database row, resolved
+            # before the host is built so they can reach the OTel resource, and that row wins over
+            # configuration unconditionally.
+            #
+            # The replica identity that names this pod's liveness key, its reply queue, and the
+            # service.instance.id on its telemetry. All three must be the same string, which is why
+            # it is resolved once from the downward API rather than three times from three defaults.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            # The collector already running in this namespace. Without it the SDK still works and
+            # export simply fails quietly, so this is an enrichment rather than a dependency.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+            # 10s, against a 15s Prometheus scrape. Exporting faster than the scrape makes the
+            # effective resolution the scrape interval; exporting at exactly the scrape interval
+            # aliases and leaves some scrapes with nothing new.
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: "10000"
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_USER }
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+            - name: ConnectionStrings__Redis
+              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            - name: ConsoleHealth__Port
+              value: "8081"
+          ports:
+            - containerPort: 8081
+          # Startup flips on the liveness loop's first beat, within moments of the host starting, so
+          # this passes long before discovery does. It is deliberately not gated on identity: a
+          # processor waiting on an unregistered row is starting correctly, however long that takes.
+          startupProbe:
+            httpGet: { path: /health/startup, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Readiness is identity resolution. It stays red until the processor row exists, and no
+          # restart will help — which is exactly why this is readiness and not liveness.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8081 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          # Liveness is the loops still turning, and nothing else. A broker that is down must not
+          # restart this pod: the startup loop is designed to retry against it forever, and a restart
+          # only throws away the backoff progress.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8081 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests: { memory: "256Mi" }
+            limits:   { memory: "768Mi" }
