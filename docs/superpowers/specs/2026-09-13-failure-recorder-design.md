@@ -259,7 +259,35 @@ assignments to restate what one query already returns is not worth the surface.
 
 Total added: **2 steps, 2 assignments, 1 processor row, 1 topic.**
 
-### 6.4 The topic
+### 6.4 The workflow after the change
+
+Nine steps, nine assignments. Steps 7 and 9 are **two step rows on the one `kafka-exporter`
+processor row**, differing only in their assignment payload — which is why the topic lives in the
+payload while the broker lives in configuration: an address is not a workflow author's to choose, a
+topic is.
+
+| # | step | processor row | entryCondition | assignment payload |
+|---|---|---|---|---|
+| 1 | import paths | `kafka-importer` | 4 Always (entry) | `{"topic":"skp-paths","messageCount":25,"consumerGroup":"skp-splitchain","idleTimeoutSeconds":10}` |
+| 2 | fetch file | `file-fetcher` | 1 PreviousCompleted | `{"allowedExtensions":[".zip"],"minimumSizeBytes":0,"maximumSizeBytes":33554432}` |
+| 3 | expand archive | `archive-expander` | 1 PreviousCompleted | `{"maxDepth":4}` |
+| 4 | normalize | `sk-normalizer` | 1 PreviousCompleted | `{"handler":"Acme"}` |
+| 5 | collapse archive | `archive-collapser` | 1 PreviousCompleted | `{}` |
+| 6 | persist file | `file-persister` | 1 PreviousCompleted | `{"folderPath":"/mnt/skp-files/out"}` |
+| 7 | export document | `kafka-exporter` | 1 PreviousCompleted | `{"topic":"skp-documents","deliveryTimeoutSeconds":30}` |
+| **8** | **record failure** | **`failure-recorder`** | **2 PreviousFailed** | **`{}`** |
+| **9** | **export failure** | **`kafka-exporter`** | **1 PreviousCompleted** | **`{"topic":"skp-failures","deliveryTimeoutSeconds":30}`** |
+
+Steps 1–7 are unchanged; 8 and 9 are new. Every one of steps 1–7 gains step 8 in its `nextStepIds`
+alongside the successor it already had, and step 8's `nextStepIds` is `[9]`.
+
+**Step 9 is `PreviousCompleted`, not `PreviousFailed`** — it runs when the *recorder* completed, which
+is the normal case. Its predecessor is step 8, not the step that failed.
+
+**Two steps on one processor row is the ordinary arrangement here, not a new capability.**
+`v8-fanout-proof` runs 10 steps on the single `sample-proc-v9` row today, and `simple-abc` runs 3.
+
+### 6.5 The topic
 
 `skp-failures`, on the same broker as `skp-paths` and `skp-documents` — `Kafka__BrokerList` is
 `skp-kafka:9092`, the dev broker from `tools/kafka-dev-broker.ps1`, a container on the kind network
