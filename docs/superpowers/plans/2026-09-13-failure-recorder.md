@@ -288,6 +288,16 @@ Then in `src/tests/BaseApi.Tests/BaseApi.Tests.csproj`, beside the other process
     <ProjectReference Include="..\..\Processor.FailureRecorder\Processor.FailureRecorder.csproj" />
 ```
 
+Then regenerate the lock file, or restore fails rather than updating it:
+
+```bash
+dotnet restore src/tests/BaseApi.Tests/BaseApi.Tests.csproj --force-evaluate
+```
+
+`Directory.Build.props` sets `RestorePackagesWithLockFile=true` and this project already has a
+`packages.lock.json`, so a new reference makes the lock stale and restore reports NU1004 instead of
+picking the reference up. It is the same guard `scripts/pack-all.sh` documents for a repacked library.
+
 - [ ] **Step 4: Write the failing tests**
 
 Create `src/tests/BaseApi.Tests/FailureRecorder/ProcessorFailureRecorderTests.cs`:
@@ -1137,12 +1147,17 @@ Nothing in this repo creates Kafka topics. The broker is the dev container from
 from the pods.
 
 ```bash
-docker exec skp-kafka /opt/kafka/bin/kafka-topics.sh \
+MSYS_NO_PATHCONV=1 docker exec skp-kafka /opt/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --list | grep -x skp-failures \
-  || docker exec skp-kafka /opt/kafka/bin/kafka-topics.sh \
+  || MSYS_NO_PATHCONV=1 docker exec skp-kafka /opt/kafka/bin/kafka-topics.sh \
        --bootstrap-server localhost:9092 --create --topic skp-failures \
        --partitions 1 --replication-factor 1
 ```
+
+**`MSYS_NO_PATHCONV=1` is required and is not decoration.** Git Bash rewrites the leading-slash
+argument before docker sees it. `tools/kafka-dev-broker.ps1` is written in pwsh for exactly this
+reason and says so beside its own `docker exec`: the equivalent one-liner in a bash session needs the
+prefix. The image is `apache/kafka:3.9.1`, where `/opt/kafka/bin/kafka-topics.sh` is the right path.
 
 Expected: `skp-failures` listed, either because it already existed or because it was just created.
 **A missing topic does not fail at subscribe time** — it surfaces on the first read or write, which
@@ -1154,6 +1169,7 @@ Run:
 ```bash
 kind load docker-image processor-failurerecorder:local --name desktop
 ```
+
 Expected: `Image: "processor-failurerecorder:local" with ID ... not yet present on node "desktop-control-plane", loading...`
 
 Note: the kubectl context may say `docker-desktop`; the cluster is `kind`. Loading into the wrong
