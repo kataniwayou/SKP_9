@@ -11,9 +11,7 @@
   -->
 
   <PropertyGroup>
-    <!-- NO OutputType here yet, deliberately. It becomes an Exe in the same change that adds
-         Program.cs: an Exe with no entry point is CS5001, so declaring it before the entry point
-         exists would leave a commit that cannot build. -->
+    <OutputType>Exe</OutputType>
     <RootNamespace>Processor.FailureRecorder</RootNamespace>
     <AssemblyName>Processor.FailureRecorder</AssemblyName>
   </PropertyGroup>
