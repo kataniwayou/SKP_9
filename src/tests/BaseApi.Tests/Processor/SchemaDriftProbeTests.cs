@@ -33,11 +33,15 @@ public sealed class SchemaDriftProbeTests
     {
         public int Sends { get; private set; }
 
+        /// <summary>The last body sent, so a test can assert what the probe actually asked for.</summary>
+        public object? LastBody { get; private set; }
+
         public Task SendAsync<T>(
             string queue, string type, T body, CancellationToken ct,
             string? replyTo = null, string? correlationId = null)
         {
             Sends++;
+            LastBody = body;
             if (reply is not null)
             {
                 slot.Publish(reply);
@@ -62,9 +66,20 @@ public sealed class SchemaDriftProbeTests
         public string Get() => "abc123";
     }
 
+    /// <summary>
+    /// Supplies the instance id the probe asks with. Null is the shared-row case — what every
+    /// processor deployed as a Deployment sends.
+    /// </summary>
+    private sealed class FixedInstance(string? instanceId) : IProcessorInstanceIdProvider
+    {
+        public string? Get() => instanceId;
+    }
+
     private sealed class Harness
     {
-        public Harness(object? reply, Guid? input = null, Guid? output = null, Guid? config = null)
+        public Harness(
+            object? reply, Guid? input = null, Guid? output = null, Guid? config = null,
+            string? instanceId = null)
         {
             var slot = new ReplySlot<object>();
             Sender = new ScriptedSender(slot, reply);
@@ -77,7 +92,8 @@ public sealed class SchemaDriftProbeTests
             var replies = new StubReplyEndpoint();
 
             Probe = new SchemaDriftProbe(
-                Sender, replies, slot, context, new FixedHash(), new OpenGate(),
+                Sender, replies, slot, context, new FixedHash(), new FixedInstance(instanceId),
+                new OpenGate(),
                 Options.Create(new ProcessorLivenessOptions { RequestTimeoutSeconds = 1 }),
                 new FakeTimeProvider(), Log);
         }
@@ -85,6 +101,42 @@ public sealed class SchemaDriftProbeTests
         public SchemaDriftProbe Probe { get; }
         public ScriptedSender Sender { get; }
         public RecordingLogger<SchemaDriftProbe> Log { get; }
+    }
+
+    /// <summary>
+    /// The probe must re-ask with the pair the boot loop resolved with, not with the hash alone.
+    /// Asking by hash alone would drift-check whichever row that hash happens to return — for a
+    /// StatefulSet replica, a sibling's registration — and then report a mismatch against schemas
+    /// this processor never adopted, or a clean bill of health against them.
+    /// </summary>
+    [Fact]
+    public async Task TheProbeAsksWithTheConfiguredInstanceId()
+    {
+        var h = new Harness(
+            new ProcessorIdentityFound(P, Input, Output, Config, "sample", "1.0.0"),
+            instanceId: "fetcher-1");
+
+        await h.Probe.CheckOnceAsync(TestContext.Current.CancellationToken);
+
+        var asked = Assert.IsType<GetProcessorBySourceHash>(h.Sender.LastBody);
+        Assert.Equal("abc123", asked.SourceHash);
+        Assert.Equal("fetcher-1", asked.InstanceId);
+    }
+
+    /// <summary>
+    /// And sends nothing where nothing is configured, which is what leaves every processor already
+    /// deployed asking exactly the question it asks today.
+    /// </summary>
+    [Fact]
+    public async Task TheProbeAsksWithoutAnInstanceIdWhenNoneIsConfigured()
+    {
+        var h = new Harness(new ProcessorIdentityFound(P, Input, Output, Config, "sample", "1.0.0"));
+
+        await h.Probe.CheckOnceAsync(TestContext.Current.CancellationToken);
+
+        var asked = Assert.IsType<GetProcessorBySourceHash>(h.Sender.LastBody);
+        Assert.Equal("abc123", asked.SourceHash);
+        Assert.Null(asked.InstanceId);
     }
 
     private sealed class StubReplyEndpoint : IReplyEndpoint

@@ -65,6 +65,10 @@ public sealed class SchemaDriftProbe : BackgroundService
     private readonly ReplySlot<object> _slot;
     private readonly IProcessorContext _context;
     private readonly ISourceHashProvider _sourceHash;
+    // The same seam the boot loop asked with. Both must ask about the same row, or this probe would
+    // drift-check a registration the running processor never adopted — reporting a mismatch against
+    // schemas that belong to a sibling replica, or a clean bill of health against them.
+    private readonly IProcessorInstanceIdProvider _instanceId;
     private readonly IStartupGate _gate;
     private readonly ProcessorLivenessOptions _options;
     private readonly TimeProvider _clock;
@@ -76,6 +80,7 @@ public sealed class SchemaDriftProbe : BackgroundService
         ReplySlot<object> slot,
         IProcessorContext context,
         ISourceHashProvider sourceHash,
+        IProcessorInstanceIdProvider instanceId,
         IStartupGate gate,
         IOptions<ProcessorLivenessOptions> options,
         TimeProvider clock,
@@ -86,6 +91,7 @@ public sealed class SchemaDriftProbe : BackgroundService
         _slot       = slot ?? throw new ArgumentNullException(nameof(slot));
         _context    = context ?? throw new ArgumentNullException(nameof(context));
         _sourceHash = sourceHash ?? throw new ArgumentNullException(nameof(sourceHash));
+        _instanceId = instanceId ?? throw new ArgumentNullException(nameof(instanceId));
         _gate       = gate ?? throw new ArgumentNullException(nameof(gate));
         _options    = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _clock      = clock ?? throw new ArgumentNullException(nameof(clock));
@@ -211,7 +217,7 @@ public sealed class SchemaDriftProbe : BackgroundService
             await _sender.SendAsync(
                 ProcessorQueues.IdentityQuery,
                 MessageTypes.GetProcessorBySourceHash,
-                new GetProcessorBySourceHash(_sourceHash.Get()),
+                new GetProcessorBySourceHash(_sourceHash.Get(), _instanceId.Get()),
                 ct,
                 _replies.QueueName,
                 correlationId).ConfigureAwait(false);

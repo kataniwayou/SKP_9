@@ -133,6 +133,13 @@ public static class BaseProcessorServiceCollectionExtensions
         // TryAdd, so a host that pins its own — a test, or Stage 1's own registration if the two
         // containers are ever merged — still wins.
         services.TryAddSingleton<Identity.ISourceHashProvider, Identity.AssemblyMetadataSourceHashProvider>();
+        // Its partner, for the same consumer and the same reason: SchemaDriftProbe must re-ask the
+        // identity query with the pair the boot loop resolved with, not with the hash alone.
+        // Constructed from the IConfiguration this method was handed, not resolved from the container.
+        // IConfiguration is not a registered service here — the processor host passes its config in
+        // rather than publishing it — so the by-type form throws at the first resolve.
+        services.TryAddSingleton<Identity.IProcessorInstanceIdProvider>(
+            _ => new Identity.ConfigurationProcessorInstanceIdProvider(cfg));
         // Resolved once and shared, so the liveness key, the reply queue and the telemetry's
         // service.instance.id all name this replica identically. TryAdd, so a host that pins a
         // deterministic id — a test, say — wins.

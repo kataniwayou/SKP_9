@@ -10,7 +10,8 @@ namespace BaseApi.Service.Features.Processor;
 /// unconfigured processors, must not be empty when present.
 /// <para>
 /// Two things are deliberately left to the database. A duplicate source hash is caught by the unique
-/// index and becomes a 409. A well-formed but non-existent schema id is caught by the foreign key and
+/// index and becomes a 409 — but a duplicate hash alone no longer is, since the uniqueness rule is now
+/// the pair with InstanceId. A well-formed but non-existent schema id is caught by the foreign key and
 /// becomes a 422, with the exception mapper recovering the offending column name from the constraint.
 /// </para>
 /// </summary>
@@ -24,6 +25,14 @@ public sealed class ProcessorCreateDtoValidator : AbstractValidator<ProcessorCre
             .NotEmpty()
             .Matches(@"^[a-f0-9]{64}$")
             .WithMessage("SourceHash must be a lowercase SHA-256 hex string (64 chars, [a-f0-9]).");
+
+        // Length only. The value is a pod name chosen by whoever wrote the manifest, so any format
+        // rule here would be this codebase guessing at Kubernetes' naming — and a guess that is
+        // wrong refuses a legitimate registration. Blank is accepted and normalizes to null on the
+        // entity, which is the "shared by every replica" case rather than an error.
+        RuleFor(x => x.InstanceId)
+            .MaximumLength(200)
+            .WithMessage("InstanceId must be 200 characters or fewer.");
 
         When(x => x.InputSchemaId.HasValue, () =>
         {
@@ -62,6 +71,14 @@ public sealed class ProcessorUpdateDtoValidator : AbstractValidator<ProcessorUpd
             .NotEmpty()
             .Matches(@"^[a-f0-9]{64}$")
             .WithMessage("SourceHash must be a lowercase SHA-256 hex string (64 chars, [a-f0-9]).");
+
+        // Length only. The value is a pod name chosen by whoever wrote the manifest, so any format
+        // rule here would be this codebase guessing at Kubernetes' naming — and a guess that is
+        // wrong refuses a legitimate registration. Blank is accepted and normalizes to null on the
+        // entity, which is the "shared by every replica" case rather than an error.
+        RuleFor(x => x.InstanceId)
+            .MaximumLength(200)
+            .WithMessage("InstanceId must be 200 characters or fewer.");
 
         When(x => x.InputSchemaId.HasValue, () =>
         {
