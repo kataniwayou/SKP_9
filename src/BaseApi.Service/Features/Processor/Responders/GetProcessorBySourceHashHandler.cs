@@ -6,7 +6,8 @@ using Messaging.Contracts;
 namespace BaseApi.Service.Features.Processor.Responders;
 
 /// <summary>
-/// Answers a processor identity lookup by source hash.
+/// Answers a processor identity lookup by source hash and, when the asking pod carries one, instance
+/// id.
 /// <para>
 /// <b>A miss is an answer, not a fault.</b> The lookup throws not-found, which is caught here and
 /// turned into the not-found reply shape, so the caller pattern-matches on two ordinary answers
@@ -28,6 +29,11 @@ internal sealed class GetProcessorBySourceHashHandler : IRpcHandler
     /// <c>GetSchemaDefinitionHandler.Reject</c>: an unbound field defaults rather than throwing, and a
     /// not-found reply for one is indistinguishable from a processor that is simply not registered
     /// yet — which the caller retries forever.
+    /// <para>
+    /// <b>Only the hash is checked.</b> An absent instance id is the ordinary shape of this request,
+    /// not a malformed one — it asks for the row a build's replicas share — so it cannot be told apart
+    /// from an unbound one, and refusing it would refuse every processor deployed as a Deployment.
+    /// </para>
     /// </summary>
     internal static RpcReply? Reject(GetProcessorBySourceHash request)
         => string.IsNullOrWhiteSpace(request.SourceHash)
@@ -49,7 +55,7 @@ internal sealed class GetProcessorBySourceHashHandler : IRpcHandler
 
         try
         {
-            var p = await _processors.GetBySourceHashAsync(request.SourceHash, ct);
+            var p = await _processors.GetBySourceHashAsync(request.SourceHash, request.InstanceId, ct);
 
             return new RpcReply(
                 MessageTypes.ProcessorIdentityFound,

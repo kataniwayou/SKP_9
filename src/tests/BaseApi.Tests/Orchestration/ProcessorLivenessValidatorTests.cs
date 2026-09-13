@@ -36,7 +36,7 @@ public sealed class ProcessorLivenessValidatorTests
         {
             var snapshot = new WorkflowGraphSnapshot(NullLogger<WorkflowGraphSnapshot>.Instance);
             snapshot.Processors[ProcessorId] = new ProcessorReadDto(
-                ProcessorId, "sample", "1.0.0", null, "abc", null, null, null,
+                ProcessorId, "sample", "1.0.0", null, "abc", null, null, null, null,
                 Now, Now, null, null);
             return snapshot;
         }

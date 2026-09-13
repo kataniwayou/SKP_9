@@ -37,11 +37,17 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
     /// entry assembly — a value only a concrete processor's build emits. Overriding it is what makes
     /// the loop reachable at all from anything that is not itself a processor.
     /// </param>
+    /// <param name="instanceId">
+    /// Which registration under that hash to ask for. Null takes the default, which reads
+    /// <c>Processor:InstanceId</c> from configuration and yields null when it is unset — the shared
+    /// row every replica of a Deployment resolves.
+    /// </param>
     public BrokerIdentityBootstrap(
         IConfiguration cfg,
         ILoggerFactory logs,
         TimeProvider clock,
-        ISourceHashProvider? sourceHash = null)
+        ISourceHashProvider? sourceHash = null,
+        IProcessorInstanceIdProvider? instanceId = null)
     {
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(logs);
@@ -79,6 +85,18 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
             services.AddSingleton(sourceHash);
         }
 
+        if (instanceId is null)
+        {
+            // From the cfg this constructor was handed; see the host registration for why the
+            // by-type form cannot work here either.
+            services.AddSingleton<IProcessorInstanceIdProvider>(
+                _ => new ConfigurationProcessorInstanceIdProvider(cfg));
+        }
+        else
+        {
+            services.AddSingleton(instanceId);
+        }
+
         _services = services.BuildServiceProvider();
     }
 
@@ -104,11 +122,18 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
     /// <inheritdoc/>
     public async Task<ProcessorIdentityFound> ResolveAsync(CancellationToken ct)
     {
-        var hash    = _services.GetRequiredService<ISourceHashProvider>().Get();
+        var hash     = _services.GetRequiredService<ISourceHashProvider>().Get();
+        var instance = _services.GetRequiredService<IProcessorInstanceIdProvider>().Get();
         var sender  = _services.GetRequiredService<IQueueSender>();
         var replies = _services.GetRequiredService<IReplyEndpoint>();
         var slot    = _services.GetRequiredService<ReplySlot<object>>();
         var delay   = TimeSpan.FromSeconds(1);
+
+        // Rendered once for the log lines below. A null instance id is the common case and means the
+        // shared row, so it is spelled out rather than left as an empty hole in the message — an
+        // operator reading "instance " with nothing after it cannot tell an unset value from a
+        // logging bug, and this is the branch they read when a pod is stuck.
+        var instanceLabel = instance ?? "(shared — no instance id set)";
 
         // Stated once, unconditionally, before the first ask -- deliberately not from a branch.
         // Every waiting line below repeats the hash, so an operator reading a log mid-wait no longer
@@ -119,8 +144,8 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
         // shipped assembly carry different hashes -- visible from the pod's own side rather than by
         // unpacking its image.
         _logger.LogInformation(
-            "resolving identity for source hash {Hash}; asking {Queue}",
-            hash, ProcessorQueues.IdentityQuery);
+            "resolving identity for source hash {Hash}, instance {Instance}; asking {Queue}",
+            hash, instanceLabel, ProcessorQueues.IdentityQuery);
 
         // Read once, before the first ask, so every line below reports the wait as the operator
         // experiences it — from the moment the processor started asking, not from the last attempt.
@@ -130,7 +155,7 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
         {
             ct.ThrowIfCancellationRequested();
 
-            var reply = await AskAsync(sender, replies, slot, hash, ct).ConfigureAwait(false);
+            var reply = await AskAsync(sender, replies, slot, hash, instance, ct).ConfigureAwait(false);
 
             // One read per pass, shared by both waiting branches: two reads would let the two lines
             // of a single pass disagree, and under a FakeTimeProvider a read is also what advances
@@ -148,25 +173,31 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
             {
                 case ProcessorIdentityFound found:
                     _logger.LogInformation(
-                        "identity resolved: processor {ProcessorId} ({Name} {Version})",
-                        found.Id, found.Name, found.Version);
+                        "identity resolved: processor {ProcessorId} ({Name} {Version}) for instance {Instance}",
+                        found.Id, found.Name, found.Version, instanceLabel);
                     return found;
 
                 // The API answered and said no. Nothing is broken in the deployment — the row this
-                // build's hash names has not been registered — so the remedy names the hash rather
-                // than a service.
+                // build's hash and instance id name has not been registered — so the remedy names
+                // that pair rather than a service.
+                //
+                // The instance id belongs in the remedy, not just the diagnosis. Matching never falls
+                // back, so for a pod carrying one, "register a processor against this hash" is advice
+                // that produces a shared row the pod will go on ignoring forever — it would read as
+                // though the remedy had been applied and had not worked.
                 case ProcessorIdentityNotFound when escalated:
                     _logger.LogError(
-                        "still no processor registered for source hash {Hash} after {Waited:c}; "
-                        + "register a processor against this hash, or deploy the build whose hash is "
-                        + "already registered. retrying in {Delay}",
-                        hash, waited, delay);
+                        "still no processor registered for source hash {Hash}, instance {Instance} "
+                        + "after {Waited:c}; register a processor against this hash carrying exactly "
+                        + "this instance id, or deploy the build whose hash is already registered. "
+                        + "retrying in {Delay}",
+                        hash, instanceLabel, waited, delay);
                     break;
                 case ProcessorIdentityNotFound:
                     _logger.LogInformation(
-                        "no processor registered for source hash {Hash} after {Waited:c}; "
-                        + "retrying in {Delay}",
-                        hash, waited, delay);
+                        "no processor registered for source hash {Hash}, instance {Instance} after "
+                        + "{Waited:c}; retrying in {Delay}",
+                        hash, instanceLabel, waited, delay);
                     break;
 
                 // Nobody answered at all. THIS is the branch a processor deployed before the API
@@ -185,19 +216,19 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
                     {
                         _logger.LogError(
                             "nothing has answered on {Queue} for {Waited:c} while asking for source "
-                            + "hash {Hash} — that queue is served by the BaseApi service "
-                            + "(deployment baseapi-service); check that it is deployed and running. "
-                            + "retrying in {Delay}",
-                            ProcessorQueues.IdentityQuery, waited, hash, delay);
+                            + "hash {Hash}, instance {Instance} — that queue is served by the BaseApi "
+                            + "service (deployment baseapi-service); check that it is deployed and "
+                            + "running. retrying in {Delay}",
+                            ProcessorQueues.IdentityQuery, waited, hash, instanceLabel, delay);
                     }
                     else
                     {
                         _logger.LogWarning(
                             "nothing answered on {Queue} after {Waited:c} while asking for source "
-                            + "hash {Hash} — that queue is served by the BaseApi service "
-                            + "(deployment baseapi-service), which may not be up yet. retrying in "
-                            + "{Delay}",
-                            ProcessorQueues.IdentityQuery, waited, hash, delay);
+                            + "hash {Hash}, instance {Instance} — that queue is served by the BaseApi "
+                            + "service (deployment baseapi-service), which may not be up yet. "
+                            + "retrying in {Delay}",
+                            ProcessorQueues.IdentityQuery, waited, hash, instanceLabel, delay);
                     }
 
                     break;
@@ -218,7 +249,7 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
     /// </summary>
     private async Task<object?> AskAsync(
         IQueueSender sender, IReplyEndpoint replies, ReplySlot<object> slot, string hash,
-        CancellationToken ct)
+        string? instance, CancellationToken ct)
     {
         // One fresh id per request, the same as the startup orchestrator's ask. The serving side
         // echoes it onto the reply and names it at every drop and failure site, and those query
@@ -235,7 +266,7 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
             await sender.SendAsync(
                 ProcessorQueues.IdentityQuery,
                 MessageTypes.GetProcessorBySourceHash,
-                new GetProcessorBySourceHash(hash),
+                new GetProcessorBySourceHash(hash, instance),
                 ct,
                 replies.QueueName,
                 correlationId).ConfigureAwait(false);

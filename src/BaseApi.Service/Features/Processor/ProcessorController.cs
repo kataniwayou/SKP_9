@@ -29,10 +29,17 @@ public sealed class ProcessorsController :
     }
 
     /// <summary>
-    /// Returns the single processor whose source hash matches the route segment. There is no
-    /// route-level format validation, so an off-format hash simply misses and 404s through the
-    /// not-found handler.
+    /// Returns the single processor whose source hash matches the route segment and whose instance id
+    /// matches <paramref name="instanceId"/>. There is no route-level format validation, so an
+    /// off-format hash simply misses and 404s through the not-found handler.
     /// </summary>
+    /// <param name="sourceHash">The lowercase 64-hex build identity from the route segment.</param>
+    /// <param name="instanceId">
+    /// The replica to resolve. Omitted — which is how every caller predating per-replica registration
+    /// calls this — selects the row shared by every replica of the build, so those callers are
+    /// unaffected. Supplying one that names no row is a 404 rather than a fall back to the shared row.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
     /// <remarks>
     /// <b>The route segment must be lowercase.</b> Matching is byte-for-byte against the stored value,
     /// which the create-side validator constrains to a lowercase 64-character hex string, so an
@@ -42,6 +49,7 @@ public sealed class ProcessorsController :
     [HttpGet("by-source-hash/{sourceHash}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<ProcessorReadDto>> GetBySourceHash(string sourceHash, CancellationToken ct)
-        => Ok(await _processorService.GetBySourceHashAsync(sourceHash, ct));
+    public async Task<ActionResult<ProcessorReadDto>> GetBySourceHash(
+        string sourceHash, [FromQuery] string? instanceId, CancellationToken ct)
+        => Ok(await _processorService.GetBySourceHashAsync(sourceHash, instanceId, ct));
 }

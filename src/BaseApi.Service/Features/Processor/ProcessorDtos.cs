@@ -12,6 +12,7 @@ public sealed record ProcessorCreateDto(
     string Version,
     string? Description,
     string SourceHash,
+    string? InstanceId,
     Guid? InputSchemaId,
     Guid? OutputSchemaId,
     Guid? ConfigSchemaId) : IBaseDto;
@@ -25,6 +26,7 @@ public sealed record ProcessorUpdateDto(
     string Version,
     string? Description,
     string SourceHash,
+    string? InstanceId,
     Guid? InputSchemaId,
     Guid? OutputSchemaId,
     Guid? ConfigSchemaId) : IBaseDto;
@@ -40,6 +42,7 @@ public sealed record ProcessorReadDto(
     string Version,
     string? Description,
     string SourceHash,
+    string? InstanceId,
     Guid? InputSchemaId,
     Guid? OutputSchemaId,
     Guid? ConfigSchemaId,
