@@ -93,12 +93,33 @@ public static class ErrorHandlingServiceCollectionExtensions
         // caller learns that.
         var level = status == StatusCodes.Status404NotFound ? LogLevel.Information : LogLevel.Warning;
 
-        // Title, not Detail. Detail carries the gate's own message — ids, field names, a cycle path —
-        // which would make body.text unique per refusal, and it is indexed as a keyword, so a body
-        // carrying variable text can only be found by a wildcard. Title is the small bounded set, and
-        // Detail rides the record as an attribute where its cardinality costs nothing.
-        logger.Log(level, "the request was refused with {StatusCode}: {Title}", status,
-            ctx.ProblemDetails.Title);
+        // WHAT THE CALLER WAS TOLD, MINUS WHAT THE OPERATOR WAS NOT. Until 2026-09-13 this line
+        // carried the status and the title and nothing else, while the RESPONSE carried the detail,
+        // the gate, the offending ids and a correlation id. So a refusal could be proven to have
+        // happened and nothing more: not which workflow, not which gate, not which rule. Worse, the
+        // natural query — filter by the workflow you just tried to start — matched nothing at all,
+        // making a refusal indistinguishable from a request that never arrived.
+        //
+        // Exception.Data is the channel for the domain's own tags because this assembly cannot see
+        // the domain's exception types: BaseApi.Core must not reference BaseApi.Service. The service
+        // tags gate and workflowId there for exactly this reason.
+        var data = ctx.Exception?.Data;
+
+        // Title, not Detail, in the MESSAGE. Detail carries ids, field names, a cycle path, which
+        // would make body.text unique per refusal — and it is indexed as a keyword, so a body
+        // carrying variable text can only be found by a wildcard. Title is the small bounded set.
+        // Detail rides as an ATTRIBUTE, where its cardinality costs nothing. That was always the
+        // stated intent of this line; it simply was not what the code did.
+        logger.Log(
+            level,
+            "the request was refused with {StatusCode}: {Title} [gate={Gate} workflow={WorkflowId} "
+            + "correlation={CorrelationId}] {Detail}",
+            status,
+            ctx.ProblemDetails.Title,
+            data?["gate"],
+            data?["workflowId"],
+            ctx.ProblemDetails.Extensions.TryGetValue("correlationId", out var corr) ? corr : null,
+            ctx.ProblemDetails.Detail);
     }
 
     /// <summary>

@@ -37,6 +37,12 @@ public sealed class OrchestrationValidationException : Exception
         Gate = gate;
         Title = title;
         Offending = offending;
+
+        // ALSO ON Exception.Data, which is what the refusal log reads. The problem-details customizer
+        // in BaseApi.Core writes that line and cannot see this type — the two assemblies must not
+        // reference each other — so Data is the only channel that crosses. Same mechanism the
+        // transport faults already use for redisOp and brokerOp.
+        Data["gate"] = gate;
     }
 
     /// <summary>Cycle gate — the workflow step graph contains a cycle.</summary>

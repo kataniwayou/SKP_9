@@ -79,9 +79,24 @@ public sealed class OrchestrationService
         using var snapshot = await _loader.LoadL1Async(new[] { workflowId }, ct);
 
         // The gate order is locked: cycle, then schema edge, then payload against config schema.
-        _cycleDetector.Validate(snapshot);
-        _schemaEdgeValidator.Validate(snapshot);
-        _payloadConfigSchemaValidator.Validate(snapshot);
+        //
+        // WHICH WORKFLOW WAS REFUSED IS TAGGED HERE, because the gates do not know. A gate sees a
+        // snapshot and throws about the step, edge or assignment it found; nothing in the exception
+        // says which start request that was. The refusal log is written by the problem-details
+        // customizer, so without this a 422 reaches the log store with no WorkflowId at all -- and a
+        // query filtered by workflow, which is the obvious query, returns NOTHING for a refused
+        // start. Indistinguishable from a request that was never made.
+        try
+        {
+            _cycleDetector.Validate(snapshot);
+            _schemaEdgeValidator.Validate(snapshot);
+            _payloadConfigSchemaValidator.Validate(snapshot);
+        }
+        catch (OrchestrationValidationException ex)
+        {
+            ex.Data["workflowId"] = workflowId;
+            throw;
+        }
 
         // A dead or stale processor throws OrchestrationValidationException (gate
         // "processorLiveness") and propagates past this catch to the 422 handler. Only a transport
@@ -93,6 +108,12 @@ public sealed class OrchestrationService
         catch (RedisException ex)
         {
             ex.Data["redisOp"] = "ProcessorLiveness";
+            throw;
+        }
+        catch (OrchestrationValidationException ex)
+        {
+            // The liveness gate refuses too, and it is outside the block above.
+            ex.Data["workflowId"] = workflowId;
             throw;
         }
 
