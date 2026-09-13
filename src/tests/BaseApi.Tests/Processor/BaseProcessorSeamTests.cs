@@ -29,6 +29,9 @@ public sealed class BaseProcessorSeamTests
 
         public Task Send(byte[] data, Guid executionId) => SendToPostAsync(data, executionId, CancellationToken.None);
         public Guid NextExecution() => NewExecutionId();
+
+        /// <summary>What an author sees when it reads the dispatch's correlation id.</summary>
+        public Guid Correlation => CorrelationId;
     }
 
     private static (Probe Processor, IQueueSender Sender) Build(
@@ -250,5 +253,26 @@ public sealed class BaseProcessorSeamTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => processor.Send(Encoding.UTF8.GetBytes("{}"), E));
+    }
+
+    [Fact]
+    public async Task TheAuthorSeesTheDispatchesCorrelationId()
+    {
+        var seen = Guid.Empty;
+        var (processor, _) = Build((_, _, _, p) => { seen = p.Correlation; return Task.CompletedTask; });
+
+        await processor.ExecuteAsync([], "", Guid.Empty, CancellationToken.None);
+
+        Assert.Equal(C, seen);
+    }
+
+    [Fact]
+    public void ReadingTheCorrelationIdOutsideADispatchThrows()
+    {
+        // Current already enforces this for the send helpers; the accessor inherits it rather than
+        // returning a stale id from a pooled thread's previous dispatch.
+        var processor = new Probe((_, _, _, _) => Task.CompletedTask);
+
+        Assert.Throws<InvalidOperationException>(() => processor.Correlation);
     }
 }
