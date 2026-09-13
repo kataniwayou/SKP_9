@@ -40,6 +40,27 @@ public sealed class ProcessorFailureRecorderTests
         return Assert.Single(sends);
     }
 
+    /// <summary>
+    /// Like <see cref="Run"/>, but hands back the logger too -- for the one test that needs to read
+    /// the shape the processor logs rather than the envelope it sends.
+    /// </summary>
+    private static async Task<(ProcessedData Sent, RecordingLogger<FailureRecorderProcessor> Log)> RunLogging(
+        byte[] data, Guid executionId, string payload = "")
+    {
+        var sender = Substitute.For<IQueueSender>();
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var log = new RecordingLogger<FailureRecorderProcessor>();
+        var processor = new FailureRecorderProcessor(log, new FakeTimeProvider(Now));
+        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+
+        await processor.ExecuteAsync(data, payload, executionId, CancellationToken.None);
+
+        return (Assert.Single(sends), log);
+    }
+
     private static JsonElement Record(ProcessedData sent) => JsonDocument.Parse(sent.Data).RootElement;
 
     [Fact]
@@ -121,5 +142,19 @@ public sealed class ProcessorFailureRecorderTests
         var record = Record(await Run(cargo, E));
 
         Assert.Equal(3, record.EnumerateObject().Count());
+    }
+
+    [Fact]
+    public async Task TheLogLineForAnEntryStepFailureCarriesNoExecutionIdAtAll()
+    {
+        // A prose sentinel in the structured attribute would defeat the same distinction the record
+        // itself preserves by omitting the field. The rendered message is what RecordingLogger keeps,
+        // so it is what this asserts against.
+        var (_, log) = await RunLogging([], Guid.Empty);
+
+        var line = Assert.Single(log.Records, r => r.Message.Contains("recorded a failed step"));
+
+        Assert.DoesNotContain("none", line.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("execution", line.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

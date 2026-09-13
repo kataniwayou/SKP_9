@@ -48,11 +48,26 @@ internal sealed class FailureRecorderProcessor(
 
         // Ids only, never the cargo. RecordedExecutionId rather than ExecutionId: the dispatch scope
         // already carries an ExecutionId attribute, and reusing the name would collide with it on
-        // the record -- and for an entry-step failure the scope omits it while this line still has
-        // something to say.
-        logger.LogInformation(
-            "recorded a failed step: correlation {RecordedCorrelationId}, execution {RecordedExecutionId}",
-            record.CorrelationId, record.ExecutionId ?? "(none — the step that failed was an entry step)");
+        // the record.
+        //
+        // TWO TEMPLATES, NOT ONE WITH A SENTINEL. A prose stand-in for the absent id -- "(none)" --
+        // would put text into a structured attribute, which is precisely what FailureRecord refuses
+        // to do on the wire: an operator filtering `exists: RecordedExecutionId` to find the
+        // entry-step failures would match every record instead. Absence has to be absence here too,
+        // which is the same rule ExecutionLogScope follows when it omits an empty id rather than
+        // rendering zeros.
+        if (record.ExecutionId is { } execution)
+        {
+            logger.LogInformation(
+                "recorded a failed step: correlation {RecordedCorrelationId}, execution {RecordedExecutionId}",
+                record.CorrelationId, execution);
+        }
+        else
+        {
+            logger.LogInformation(
+                "recorded a failed step that had no lineage: correlation {RecordedCorrelationId}",
+                record.CorrelationId);
+        }
 
         await SendToPostAsync(
             JsonSerializer.SerializeToUtf8Bytes(record, FailureRecordJson.Options),

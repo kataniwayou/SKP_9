@@ -139,7 +139,7 @@ One JSON document, a few hundred bytes:
 |---|---|---|---|
 | `correlationId` | `BaseProcessor.CorrelationId` (§5) | **32 hex, no dashes** | `CorrelationKeys.Render` |
 | `executionId` | `ProcessAsync` parameter | dashed `"D"`, omitted when `Guid.Empty` | absent for a hop-1 failure |
-| `recordedAtUtc` | `DateTimeOffset.UtcNow` | ISO-8601 | see below |
+| `recordedAtUtc` | `TimeProvider.GetUtcNow()` | ISO-8601 | see below |
 
 **`correlationId` MUST be rendered `"N"`.** Elasticsearch holds it as 32 hex characters with no
 dashes — `CorrelationKeys.Render` is what puts it there — while every other id is dashed `"D"`. A

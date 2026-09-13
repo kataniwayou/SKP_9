@@ -17,9 +17,9 @@
 # RabbitMQ requeues the unacked dispatch, and the replacement pod dies the same way. The processor
 # that exists to report failures must not be the one that cannot survive them.
 #
-# THERE ARE NO ENV VARS BEYOND THE SHARED FIVE, deliberately. This processor has no ceiling, no
-# path, no endpoint and no payload of its own — everything it records arrives on the dispatch or
-# from the clock.
+# THERE ARE NO ENV VARS BEYOND the shared eight every processor here carries, deliberately. This
+# processor has no ceiling, no path, no endpoint and no payload of its own — everything it records
+# arrives on the dispatch or from the clock.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
