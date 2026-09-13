@@ -151,9 +151,17 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
             //
             // The id and not the name: ProcessorIdentity carries ids and definitions, and the name
             // would have to be threaded through the identity RPC to reach here.
-            _logger.LogWarning(
-                "output failed its schema {OutputSchemaId} — reported failed: {SchemaErrors}",
-                identity.OutputSchemaId, string.Join("; ", errors));
+            //
+            // Scoped, not templated. Appending {Result} to this line would change body.text, which is
+            // indexed as a keyword — a saved query already matching this line would stop matching. The
+            // scope surfaces the same StepResult at attributes.Result instead, the field the
+            // orchestrator's own Result-bearing lines already populate.
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed)))
+            {
+                _logger.LogWarning(
+                    "output failed its schema {OutputSchemaId} — reported failed: {SchemaErrors}",
+                    identity.OutputSchemaId, string.Join("; ", errors));
+            }
 
             // Guid.Empty, not p.EntryId: the write below never ran, so that key does not exist, and
             // naming it would send the orchestrator to reclaim a key that was never written. The step's
@@ -206,9 +214,13 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
                             p.EntryId, StepResult.Completed), ct).ConfigureAwait(false);
 
         // Every id rides the open scope, so the template carries none of them — and never the data,
-        // since this line is about the delivery rather than its content.
-        _logger.LogInformation(
-            "branch completed in {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        // since this line is about the delivery rather than its content. Result rides the same way:
+        // this branch reached here only by succeeding, so the scope is unconditionally Completed.
+        using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Completed)))
+        {
+            _logger.LogInformation(
+                "branch completed in {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        }
     }
 
     private Task SendAsync(StepOutcome outcome, CancellationToken ct)

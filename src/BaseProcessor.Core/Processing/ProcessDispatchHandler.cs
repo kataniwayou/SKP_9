@@ -210,9 +210,16 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // The schema id, for the reason its twin in ProcessedDataHandler carries one: the edge is
             // a shared row that gets re-pointed, so the errors alone cannot say whether the document
             // was wrong or the contract moved under it.
-            _logger.LogWarning(
-                "input failed its schema {InputSchemaId} — reported failed: {SchemaErrors}",
-                identity.InputSchemaId, string.Join("; ", errors));
+            // Scoped rather than templated, matching every outcome-bearing line below: appending
+            // {Result} here would change body.text, which is indexed as a keyword and would break
+            // any saved query already matching this line. The scope surfaces the same value at
+            // attributes.Result instead, alongside the orchestrator's own Result-bearing lines.
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed)))
+            {
+                _logger.LogWarning(
+                    "input failed its schema {InputSchemaId} — reported failed: {SchemaErrors}",
+                    identity.InputSchemaId, string.Join("; ", errors));
+            }
 
             await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
             return;
@@ -242,14 +249,20 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         {
             // The author's own text, and this line is now the only place it survives — StepOutcome
             // carries no message. Author-authored, so verbatim is safe here exactly as it once was on
-            // the wire.
-            _logger.LogWarning("the author reported the step failed: {Reason}", ex.Message);
+            // the wire. Scoped, not templated — see the input-schema rejection above for why.
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed)))
+            {
+                _logger.LogWarning("the author reported the step failed: {Reason}", ex.Message);
+            }
 
             await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
         }
         catch (CancelledException ex)
         {
-            _logger.LogInformation("the author cancelled the branch: {Reason}", ex.Message);
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Cancelled)))
+            {
+                _logger.LogInformation("the author cancelled the branch: {Reason}", ex.Message);
+            }
 
             await SendAsync(Failure(d, StepResult.Cancelled), ct).ConfigureAwait(false);
         }
@@ -275,7 +288,10 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // with a fixed constant on the wire to keep that out of the orchestrator's projections.
             // With no text field on StepOutcome at all, the constant is gone and the pairing is
             // structural rather than a rule anyone has to remember.
-            _logger.LogWarning(ex, "the transform faulted — reporting the step failed");
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed)))
+            {
+                _logger.LogWarning(ex, "the transform faulted — reporting the step failed");
+            }
 
             await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
         }
@@ -341,6 +357,14 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // never running. That is a graph an author should not have written, and dispatching it as a
         // source step — the sentinel the pre handler already implements — is the more honest of the
         // two failures.
+        //
+        // NO OutcomeLogScope HERE, DELIBERATELY. This branch logs nothing at all — see the comment on
+        // "the step returned after {ElapsedMs}ms" above, which fires unconditionally including for
+        // this Completed sink outcome, and see the module comment: no new log statement was added on
+        // this path because none was missing. This Completed outcome is recorded on the ORCHESTRATOR
+        // side instead — StepOutcomeHandler's own "the terminal step completed with {Result}" line —
+        // so a reader who expects a scope beside every StepResult.Completed here should not read its
+        // absence as an oversight.
         if (ran && _processor.EndsLineage)
         {
             await SendAsync(

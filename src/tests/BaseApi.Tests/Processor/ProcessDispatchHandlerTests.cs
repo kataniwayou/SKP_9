@@ -534,6 +534,87 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
+    public async Task ScopesTheInputSchemaRejectionAsFailed()
+    {
+        // The orchestrator emits Result as a message-template parameter on its own outcome-bearing
+        // lines. A processor's schema rejection has to reach attributes.Result the same way but
+        // WITHOUT touching body.text — body.text is indexed as a keyword, and appending {Result} to
+        // this template would break a saved query already matching it. A log scope is the only
+        // channel that adds the structured field without touching the rendered text.
+        var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"""{"number":"seven"}""");
+        var probe = new Probe((_, _) => Task.CompletedTask);
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        var resultScopes = h.Log.Scopes.Where(s => s.ContainsKey(OutcomeLogScope.Result)).ToList();
+        var resultScope = Assert.Single(resultScopes);
+        Assert.Equal(nameof(StepResult.Failed), resultScope[OutcomeLogScope.Result]);
+    }
+
+    [Fact]
+    public async Task ScopesAnAuthorsFailureAsFailed()
+    {
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) => throw new FailedException("order total below minimum"));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        var resultScopes = h.Log.Scopes.Where(s => s.ContainsKey(OutcomeLogScope.Result)).ToList();
+        var resultScope = Assert.Single(resultScopes);
+        Assert.Equal(nameof(StepResult.Failed), resultScope[OutcomeLogScope.Result]);
+    }
+
+    [Fact]
+    public async Task ScopesAnAuthorsCancellationAsCancelled()
+    {
+        // Cancelled gets its own value, distinct from Failed — the whole reason StepResult carries a
+        // third member rather than folding this into Failed.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) => throw new CancelledException("below threshold"));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        var resultScopes = h.Log.Scopes.Where(s => s.ContainsKey(OutcomeLogScope.Result)).ToList();
+        var resultScope = Assert.Single(resultScopes);
+        Assert.Equal(nameof(StepResult.Cancelled), resultScope[OutcomeLogScope.Result]);
+    }
+
+    [Fact]
+    public async Task ScopesAFrameworkCaughtFaultAsFailed()
+    {
+        // The general catch — "the transform faulted" — falls through to the same Failed outcome as
+        // FailedException, and must carry the same scope.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) => throw new InvalidOperationException("boom"));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        var resultScopes = h.Log.Scopes.Where(s => s.ContainsKey(OutcomeLogScope.Result)).ToList();
+        var resultScope = Assert.Single(resultScopes);
+        Assert.Equal(nameof(StepResult.Failed), resultScope[OutcomeLogScope.Result]);
+    }
+
+    [Fact]
+    public async Task OpensExactlyOneResultScopeWhenAStepFails()
+    {
+        // "the step returned after {ElapsedMs}ms" fires on every path out of the try/catch, including
+        // every catch block — so it must stay unscoped, or a failed step would carry two, contradictory
+        // attributes.Result values (Failed from the catch, Completed if this line were scoped too).
+        // Asserting exactly one Result scope for the whole dispatch is what pins that.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) => throw new FailedException("nope"));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.Single(h.Log.Scopes, s => s.ContainsKey(OutcomeLogScope.Result));
+    }
+
+    [Fact]
     public async Task NeverPutsDataOrConfigInALogMessage()
     {
         var h = new Harness();

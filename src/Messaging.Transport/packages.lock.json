@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "MVTBuVmFVgvxxwYcaQQb34hmK0IUeqlHEssIteMKQ/Vd7WHdb/CqF4WSNQ0szv7f0ejWWfUzBPs42Uy1MS0H9g=="
+        "contentHash": "n44UdCQwZ8lBsyIDaGIUNBTNP+InOoqNE4skdaIOMYHHEdRD++VWGalZ1EkjNIQUbCtgAn6CAkyGJIvOygWCsg=="
       },
       "Microsoft.Extensions.Hosting.Abstractions": {
         "type": "Direct",
