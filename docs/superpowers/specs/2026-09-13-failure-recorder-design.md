@@ -229,8 +229,27 @@ feature does not otherwise touch, and it is the reason this design amends a shar
 ### 6.3 Steps
 
 **One shared diagnostic step**, not one per parent. All six chain steps plus the entry step point at
-it with `entryCondition: PreviousFailed`; it points at one new `kafka-exporter` step whose assignment
-names `skp-failures`.
+it with `entryCondition: PreviousFailed`; it points at one new step on the **existing**
+`kafka-exporter` processor row, whose assignment payload names the topic:
+
+```json
+{ "topic": "skp-failures", "deliveryTimeoutSeconds": 30 }
+```
+
+The row is shared with chain step 7 (`skp-documents`); only the assignment differs, because the
+topic is a step's to choose and the broker is not.
+
+**Keep the timeout at 30, matching chain step 7.** `KafkaExporterProcessor.CacheKey` is the delivery
+timeout and nothing else — the topic is deliberately excluded, since a producer is not bound to one —
+so two steps sharing a timeout share one cached producer, and two steps differing in it build and
+hold two, paying a connection and a metadata fetch for nothing.
+
+**Both exporter steps share one work queue.** Dispatches are addressed to
+`processor-{processorId}-work`, so the failures step and the documents step land on the same replicas
+at a prefetch of one, and a burst of failures competes with normal exports for that lane. Acceptable
+— failures are rare and an export is milliseconds — but it is a coupling that did not exist before.
+If it ever matters the answer is more exporter replicas, not a second processor row:
+`uq_processor_source_hash` forbids one for the same binary.
 
 Per-parent steps were considered so that each payload could name the guarded `stepId`/`processorId` —
 the one identity the hand-off does not convey, since `NextStepHandoff` carries the *successor's* step
