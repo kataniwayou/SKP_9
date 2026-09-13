@@ -30,6 +30,32 @@ public abstract class BaseProcessor
         Volatile.Read(ref _dispatch) ?? throw new InvalidOperationException(
             "No dispatch is open. BeginDispatch must run before the seam helpers — this is a framework wiring fault.");
 
+    /// <summary>
+    /// The correlation id of the dispatch currently being handled.
+    /// <para>
+    /// <b>Read-only, and that is the whole of the concession.</b> The ids are otherwise withheld from
+    /// authors so that none of them can be STAMPED on outgoing work — <see cref="SendToPostAsync"/>
+    /// takes every id from <see cref="DispatchState"/> and none from the author, and that is
+    /// unchanged. Reading is not forging.
+    /// </para>
+    /// <para>
+    /// <b>Only the correlation id is exposed.</b> WorkflowId, StepId and ProcessorId stay private:
+    /// they are static and can reach an author through its step payload if they are ever wanted,
+    /// while exposing them invites routing decisions nothing in this system needs.
+    /// </para>
+    /// <para>
+    /// It exists for <c>Processor.FailureRecorder</c>, which runs on a failed step's behalf and must
+    /// name something an operator can query. An entry step's dispatch carries
+    /// <see cref="Guid.Empty"/> as its execution id, so the correlation id — minted once per fire by
+    /// the orchestrator — is the only key that is present on every dispatch.
+    /// </para>
+    /// <para>
+    /// Throws outside a dispatch, inheriting <see cref="Current"/>'s guard: a pooled thread must not
+    /// hand back the previous dispatch's id.
+    /// </para>
+    /// </summary>
+    protected Guid CorrelationId => Current.CorrelationId;
+
     /// <summary>Framework entry point, supplied by <see cref="BaseProcessor{TConfig}"/>.</summary>
     internal abstract Task ExecuteAsync(byte[] data, string payload, Guid executionId, CancellationToken ct);
 
