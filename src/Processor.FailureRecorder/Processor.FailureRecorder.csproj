@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A concrete processor with the smallest job in the solution: it records THAT a step failed and
+    where to look, and nothing else. It queries nothing, parses nothing, and ignores the input it is
+    handed.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare
+    either here.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.FailureRecorder</RootNamespace>
+    <AssemblyName>Processor.FailureRecorder</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- FailureRecord and the processor are internal: this processor's construction, not its
+         surface. The tests construct them directly. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/
+         folder and NuGet imports it automatically, stamping the hash on THIS assembly. A
+         ProjectReference could not flow build targets, and the processor would never match its row. -->
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+  </ItemGroup>
+
+</Project>
