@@ -712,10 +712,16 @@ public sealed class FailureRecorderHostTests
     public void TheClockComesFromTheFrameworkRatherThanThisShell()
     {
         // AddBaseProcessor already does TryAddSingleton(TimeProvider.System), so this shell registers
-        // no clock of its own. Asserted so that a later edit adding one is a deliberate act.
+        // no clock of its own.
+        //
+        // GetServices, NOT GetRequiredService, and the difference is the whole test. .NET DI accepts
+        // repeated registrations of one service type and hands back the LAST — so resolving one and
+        // asserting it is non-null passes just as happily when this shell has added a second clock
+        // beside the framework's. Counting is what makes a later duplicate registration fail here
+        // rather than pass silently.
         using var host = Build();
 
-        Assert.NotNull(host.Services.GetRequiredService<TimeProvider>());
+        Assert.Single(host.Services.GetServices<TimeProvider>());
     }
 }
 ```
