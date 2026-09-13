@@ -229,7 +229,9 @@ services beyond a clock, no parsing of the input it is handed.
   -->
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- NO OutputType here yet, deliberately. It becomes an Exe in the same change that adds
+         Program.cs: an Exe with no entry point is CS5001, so declaring it before the entry point
+         exists would leave a commit that cannot build. -->
     <RootNamespace>Processor.FailureRecorder</RootNamespace>
     <AssemblyName>Processor.FailureRecorder</AssemblyName>
   </PropertyGroup>
@@ -606,7 +608,7 @@ Run:
 dotnet build SK_P.sln -v q
 src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-class "*ProcessorFailureRecorderTests*"
 ```
-Expected: all nine PASS (six facts, one theory with four cases, counted as the runner reports them).
+Expected: all 11 PASS — seven facts plus one theory with four cases.
 
 - [ ] **Step 10: Run the whole hermetic suite**
 
@@ -642,6 +644,7 @@ Everything needed to run the processor as a pod. Split from Task 2 because a rev
 composition root without rejecting the transform.
 
 **Files:**
+- Modify: `src/Processor.FailureRecorder/Processor.FailureRecorder.csproj` (add `OutputType`)
 - Create: `src/Processor.FailureRecorder/Program.cs`
 - Create: `src/Processor.FailureRecorder/ProcessorHost.cs`
 - Create: `src/Processor.FailureRecorder/Dockerfile`
@@ -842,7 +845,21 @@ public static class ProcessorHost
 }
 ```
 
-- [ ] **Step 4: Write the entry point**
+- [ ] **Step 4: Flip the project to an executable**
+
+In `src/Processor.FailureRecorder/Processor.FailureRecorder.csproj`, replace the placeholder comment
+in the PropertyGroup with the real declaration — it travels with the entry point below, because an
+`Exe` with no `Main` is CS5001:
+
+```xml
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.FailureRecorder</RootNamespace>
+    <AssemblyName>Processor.FailureRecorder</AssemblyName>
+  </PropertyGroup>
+```
+
+- [ ] **Step 5: Write the entry point**
 
 `src/Processor.FailureRecorder/Program.cs`:
 
@@ -867,7 +884,7 @@ using var host = await ProcessorHost.StartAsync(args, lifetime.Token);
 await host.WaitForShutdownAsync();
 ```
 
-- [ ] **Step 5: Write the Dockerfile**
+- [ ] **Step 6: Write the Dockerfile**
 
 `src/Processor.FailureRecorder/Dockerfile`:
 
@@ -914,7 +931,7 @@ EXPOSE 8081
 ENTRYPOINT ["dotnet", "Processor.FailureRecorder.dll"]
 ```
 
-- [ ] **Step 6: Build and run the host tests**
+- [ ] **Step 7: Build and run the host tests**
 
 Run:
 ```bash
@@ -923,7 +940,7 @@ src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-class "*Fail
 ```
 Expected: both PASS.
 
-- [ ] **Step 7: Build the image**
+- [ ] **Step 8: Build the image**
 
 Run from the repo root:
 ```bash
@@ -931,7 +948,7 @@ docker build -f src/Processor.FailureRecorder/Dockerfile -t processor-failurerec
 ```
 Expected: a successful build ending in `naming to docker.io/library/processor-failurerecorder:local`.
 
-- [ ] **Step 8: Run the whole hermetic suite**
+- [ ] **Step 9: Run the whole hermetic suite**
 
 Run:
 ```bash
@@ -939,7 +956,7 @@ src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe
 ```
 Expected: **0 failed, exit 0.**
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/Processor.FailureRecorder/Program.cs src/Processor.FailureRecorder/ProcessorHost.cs src/Processor.FailureRecorder/Dockerfile src/tests/BaseApi.Tests/DependencyInjection/FailureRecorderHostTests.cs
