@@ -91,14 +91,24 @@ public sealed class ProcessorHostWiringTests
     }
 
     [Fact]
-    public async Task TheHostGraphCarriesNoSourceHashProvider()
+    public async Task TheSourceHashProviderIsHereBecauseSomethingNowReadsIt()
     {
-        // The hash answers "which row is mine", and that is settled before this container exists —
-        // Stage 1 owns it and registers its own. A copy here would resolve for nobody while reading
-        // like a live dependency, which is how a graph accumulates wiring nobody dares delete.
+        // INVERTED 2026-09-13, and the invariant it guarded is intact. This asserted the graph carried
+        // NO ISourceHashProvider, because "the hash answers 'which row is mine', that is settled
+        // before this container exists, and a copy here would resolve for nobody while reading like a
+        // live dependency — which is how a graph accumulates wiring nobody dares delete."
+        //
+        // The rule was never "this type is banned", it was "no wiring without a consumer". It has one
+        // now: SchemaDriftProbe re-asks the identity query for process life, and that query is keyed
+        // by source hash — there is no get-by-id. So the test keeps the rule by asserting BOTH halves
+        // together; the provider may only be here for as long as something resolves it.
         await using var sp = Build();
 
-        Assert.Null(sp.GetService<ISourceHashProvider>());
+        Assert.NotNull(sp.GetService<ISourceHashProvider>());
+
+        Assert.Contains(
+            sp.GetServices<IHostedService>(),
+            h => h is BaseProcessor.Core.Startup.SchemaDriftProbe);
     }
 
     [Fact]

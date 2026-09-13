@@ -31,4 +31,18 @@ public sealed class ProcessorLivenessOptions
     /// (<c>BackoffCap × StaleFactor</c>), since a loop at the cap must not read as wedged.</summary>
     [ConfigurationKeyName("BackoffCap")]
     public int BackoffCapSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// How often <see cref="Startup.SchemaDriftProbe"/> re-asks whether this processor's registered
+    /// schema edges still match the ones this replica resolved at boot (default 300). <b>Zero
+    /// disables it.</b>
+    /// <para>
+    /// Five minutes rather than the heartbeat's ten seconds: a re-point is an operator action, not an
+    /// event stream, and this costs an RPC per replica per interval. It only has to be shorter than
+    /// the time someone would spend puzzled by a workflow that published cleanly and behaves as
+    /// though it did not.
+    /// </para>
+    /// </summary>
+    [ConfigurationKeyName("SchemaDriftCheck")]
+    public int SchemaDriftCheckSeconds { get; set; } = 300;
 }
