@@ -192,11 +192,11 @@ public sealed class ChainLiveTests
     /// <para>
     /// <b>It matches by FILE NAME, which bounds what it can catch.</b> The processors' own business
     /// failures name the file in their message ("normalizing {name} failed: …", "extracting {name}
-    /// failed: …"), so those are caught. A SCHEMA rejection is not: <c>output failed its schema —
-    /// reported failed: {SchemaErrors}</c> carries no file name, no schema id and no execution id in
-    /// its text, so it cannot be attributed to this test's file and still falls through to the
-    /// window. See <c>docs/testing/schema-compatibility-live/LOGGING-GAPS.md</c> G1/G2 — closing
-    /// those would let this check cover schema refusals too.
+    /// failed: …"), so those are caught. A SCHEMA rejection is not: since 2026-09-13 it names the
+    /// schema it validated against, but it still carries no FILE NAME and no execution id in its
+    /// text, so it cannot be attributed to this test's file and falls through to the window. See
+    /// <c>docs/testing/schema-compatibility-live/LOGGING-GAPS.md</c> — G1 and G2 are closed; what
+    /// would let this check cover schema refusals is a lineage key in the message itself.
     /// </para>
     /// </summary>
     private static ChainOutcome AwaitOutcome(string name, TimeSpan timeout)

@@ -35,6 +35,23 @@ still needs a lookup.
 **Blocked a verdict:** no — timestamps plus the suite's own mutation log closed the gap, but the
 attribution is circumstantial rather than logged.
 
+### Resolution — fixed 2026-09-13
+
+Both rejection sites now name the schema they validated against:
+
+```
+output failed its schema {OutputSchemaId} — reported failed: {SchemaErrors}
+input  failed its schema {InputSchemaId}  — reported failed: {SchemaErrors}
+```
+
+`identity.OutputSchemaId` / `identity.InputSchemaId` were already in scope at both sites, so this is
+a log-template change, not a plumbing one.
+
+**The name and version are still absent, deliberately.** `ProcessorIdentity` carries ids and
+definitions only; a name would have to be threaded through the identity RPC and its contract, which
+is a larger change than this gap warrants. The id plus one lookup answers "which row", which was the
+question that could not be answered at all before.
+
 ---
 
 ## G2 — base — the rejection reason is discarded, only the pointer and keyword survive

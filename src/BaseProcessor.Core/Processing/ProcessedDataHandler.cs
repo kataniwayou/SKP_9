@@ -141,8 +141,19 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
             // must not reach the orchestrator's projections.
             // Warning, matching the input-schema line in the pre handler: both are a step failing,
             // and severity is what an operator filters on before they know which half broke.
+            // THE SCHEMA ID IS ON THE LINE, and it is not decoration. A schema edge is a row id on
+            // the PROCESSOR row, shared by every workflow that uses this processor, and re-pointing
+            // it is a routine act -- so "which schema refused this" has a different answer at
+            // different times, and the errors alone cannot distinguish a document that is wrong from
+            // an edge that was moved. Found while running the schema-compatibility suite on
+            // 2026-09-12, where attributing a rejection meant correlating timestamps against a
+            // separate record of what the edge pointed at that minute.
+            //
+            // The id and not the name: ProcessorIdentity carries ids and definitions, and the name
+            // would have to be threaded through the identity RPC to reach here.
             _logger.LogWarning(
-                "output failed its schema — reported failed: {SchemaErrors}", string.Join("; ", errors));
+                "output failed its schema {OutputSchemaId} — reported failed: {SchemaErrors}",
+                identity.OutputSchemaId, string.Join("; ", errors));
 
             // Guid.Empty, not p.EntryId: the write below never ran, so that key does not exist, and
             // naming it would send the orchestrator to reclaim a key that was never written. The step's
