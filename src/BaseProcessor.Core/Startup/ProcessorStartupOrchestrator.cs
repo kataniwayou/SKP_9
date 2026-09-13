@@ -114,7 +114,7 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
     {
         // Identity arrived before this host existed: Stage 1 resolved it so the OTel resource could
         // carry it, and the container was seeded with the answer. What used to be Loop A is gone.
-        _ = _context.Identity
+        var identity = _context.Identity
             ?? throw new InvalidOperationException(
                 "the orchestrator started without a seeded identity — AddBaseProcessor(cfg, identity) " +
                 "is what supplies it, and the two-stage boot is what calls that overload.");
@@ -128,7 +128,24 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
             return;   // shutdown
         }
 
-        _logger.LogInformation("all schema definitions resolved");
+        // THE SCHEMAS THIS REPLICA WILL ENFORCE UNTIL IT RESTARTS, named in one line.
+        //
+        // A schema edge is a row id on the shared processor row, and re-pointing it is routine — but
+        // a running pod resolved its definitions HERE, at boot, and never looks again. So between a
+        // re-point and a restart the published contract and the ENFORCED contract differ, and every
+        // log line in that window looks healthy. Observed on 2026-09-12: both sides of an edge were
+        // moved to a tightened schema, the workflow started, and a document violating it completed
+        // the chain end to end. Nothing was wrong with the validation — the pods were enforcing what
+        // they had cached, and no line anywhere said which schemas those were.
+        //
+        // This is the line that answers it. It does not close the divergence — noticing a re-point
+        // would mean re-reading the row, which this loop deliberately does not do — but it makes the
+        // window diagnosable instead of invisible: compare these ids against the processor row and
+        // the disagreement is the answer.
+        _logger.LogInformation(
+            "all schema definitions resolved; this replica enforces input={InputSchemaId} "
+            + "output={OutputSchemaId} config={ConfigSchemaId} until it restarts",
+            identity.InputSchemaId, identity.OutputSchemaId, identity.ConfigSchemaId);
 
         // NOTE: the dispatch endpoint bind belongs here, before the latch flips. See the type remarks.
         _context.MarkHealthy();
@@ -146,7 +163,15 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
 
         // A null id means the role does not apply — a source processor has no input schema — so it is
         // skipped without a request rather than waited on.
-        foreach (var schemaId in new[] { identity.InputSchemaId, identity.OutputSchemaId, identity.ConfigSchemaId })
+        // Paired with the ROLE, because an id alone does not say which edge it belongs to — and a
+        // processor whose input and output point at the same row (SKNormalizer does) logs the same
+        // id twice with nothing to tell the two apart.
+        foreach (var (role, schemaId) in new[]
+                 {
+                     ("input", identity.InputSchemaId),
+                     ("output", identity.OutputSchemaId),
+                     ("config", identity.ConfigSchemaId),
+                 })
         {
             if (schemaId is not { } id)
             {
@@ -214,12 +239,13 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
                         _context.SetDefinition(id, found.Definition);
                     }
 
-                    _logger.LogInformation("definition resolved for schema {SchemaId}", id);
+                    _logger.LogInformation(
+                        "definition resolved for {Role} schema {SchemaId}", role, id);
                     break;
                 }
 
                 _logger.LogInformation(
-                    "schema {SchemaId} not available yet; retrying in {Delay}", id, delay);
+                    "{Role} schema {SchemaId} not available yet; retrying in {Delay}", role, id, delay);
                 delay = await BackoffAsync(delay, ct).ConfigureAwait(false);
             }
         }
