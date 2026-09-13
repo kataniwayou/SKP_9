@@ -148,6 +148,30 @@ provable from ES only as "a 422 refusal occurred on `/api/v1/orchestration/start
 Attributing it to this workflow rests on the suite being the only caller. On a busy API that
 inference would not hold.
 
+### Resolution — fixed 2026-09-13
+
+The refusal line now carries what the response always had. Verified live:
+
+```
+the request was refused with 422: Assignment payload does not conform to its config schema
+  [gate=payloadConfigSchema workflow=9a3d2a6b-… correlation=0876355a…]
+  Assignment '53e67e7a-…' payload does not conform to its config schema.
+
+attributes: Gate, WorkflowId, CorrelationId, StatusCode, Title, Detail
+```
+
+**The query that mattered now works.** Filtering by `attributes.WorkflowId` for the workflow someone
+just failed to start returned *nothing* before — a refusal was indistinguishable from a request that
+never arrived. It returns the refusal now.
+
+`Exception.Data` is the channel for the domain's tags, because `BaseApi.Core` writes this line and
+cannot see `BaseApi.Service`'s exception types. The gate is tagged in
+`OrchestrationValidationException`'s single private constructor, so a gate added later cannot forget;
+the workflow id is tagged by `OrchestrationService`, which is the only place that knows it.
+
+Detail now rides as an attribute rather than being dropped — which the old comment already claimed
+was happening, and was not.
+
 ---
 
 ## G4 — orchestrator / BaseApi — a deliberate 422 also logs as an unhandled exception at Error
@@ -168,6 +192,16 @@ log a known refusal at the severity `Refusal` already uses.
 
 **Blocked a verdict:** no. It is noise, but it is noise in the exact severity band an operator
 watches.
+
+### Resolution — fixed 2026-09-13
+
+`Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware` is set to `None` in the API's
+`appsettings.json`. Verified live: triggering the same 422 now produces **zero** Error-level lines
+from `baseapi`, where it previously produced one per refusal.
+
+**Nothing is lost for real faults.** `FallbackExceptionHandler` claims every unhandled exception and
+logs it at Error *with the exception and the path* — strictly more than the middleware's fixed
+sentence carried. This removes a duplicate, not a record.
 
 ---
 
