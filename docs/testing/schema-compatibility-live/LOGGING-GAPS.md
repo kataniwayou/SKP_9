@@ -278,6 +278,27 @@ knows which is which — it has the `FileContent` discriminator in hand.
 **Blocked a verdict:** no. I distinguished them from the expander's `DepthReached` attribute
 (`1 of 1` vs `2 of 4`) on the preceding line — which works only because the expander logs well.
 
+### Resolution — fixed 2026-09-13
+
+`ValidateContent` now appends an inventory of what the item actually holds, so the counts are no
+longer the whole message. Verified live against the same file at both depths:
+
+| `maxDepth` | message tail |
+|---|---|
+| 1 | `'inner.zip' is a file` |
+| 4 | `'inner.zip' is a folder of 2 entries — an item's nodes must be files, and a nested pair is not reachable because items are grouped from the document's root only` |
+
+The expanded case now states the dead end outright: raising the depth cannot help, because `Locate`
+groups the document's ROOT entries only. That was the fact an operator previously had to infer from
+reading the handler's source.
+
+Entry names are reported, never content — the same names the unexpected-entry message alongside it
+already carried.
+
+**Unlike G1, G2 and G5, this one is concrete** (`Processor.SKNormalizer`), so it moved that
+processor's SourceHash (`f4d07679…` → `440940c6…`) and needed the registered row re-pointed and only
+its own image rebuilt.
+
 ---
 
 ## Not a gap: what the logs did well

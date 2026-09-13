@@ -27,6 +27,15 @@ public sealed class AcmeHandlerTests
     private static FileNode Leaf(string name, string text)
         => Leaf(name, Encoding.UTF8.GetBytes(text));
 
+    /// <summary>
+    /// A nested archive the expander DID open: an entry whose own content is entries. Distinct from
+    /// <see cref="Archive"/>, which builds the document root.
+    /// </summary>
+    private static FileNode Folder(string name, params FileNode[] entries)
+        => new(
+            new FileMetadata(name, Path.GetExtension(name), 4096, null, Stamp, entries.Length),
+            new FileContent.Entries(entries));
+
     private static FileNode Archive(params FileNode[] entries)
         => new(
             new FileMetadata("bundle.zip", ".zip", 4096, null, Stamp, entries.Length),
@@ -105,8 +114,40 @@ public sealed class AcmeHandlerTests
         var ex = Assert.Throws<NormalizationException>(() => handler.ValidateContent(item));
 
         Assert.Equal(
-            "an Acme item needs exactly one .wav and one .json, and this one holds 1 and 0",
+            "an Acme item needs exactly one .wav and one .json, and this one holds 1 and 0: "
+            + "'track01.wav' is a file",
             ex.Message);
+    }
+
+    [Fact]
+    public void AnUnexpandedArchiveAndAnExpandedOneAreDistinguishable()
+    {
+        // THE DEFECT THIS PINS. A document whose root holds one inner.zip reports "holds 0 and 0" at
+        // every depth, and the two depths need OPPOSITE responses: at maxDepth 1 the expander left it
+        // closed and raising the depth is the fix; at maxDepth 4 it is open, holds exactly the pair
+        // this handler wants, and no depth will ever help because items are grouped from the root
+        // only. Both live runs on 2026-09-12 logged the same sentence.
+        var handler = Handler();
+
+        var closed = Assert.Single(handler.Locate(Archive(Leaf("inner.zip", "PK-not-opened"))));
+        var opened = Assert.Single(handler.Locate(Archive(
+            Folder("inner.zip", Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar)))));
+
+        var closedMessage = Assert.Throws<NormalizationException>(
+            () => handler.ValidateContent(closed)).Message;
+        var openedMessage = Assert.Throws<NormalizationException>(
+            () => handler.ValidateContent(opened)).Message;
+
+        // Both still report the counts -- the rule has not changed -- but they no longer read alike.
+        Assert.Contains("holds 0 and 0", closedMessage, StringComparison.Ordinal);
+        Assert.Contains("holds 0 and 0", openedMessage, StringComparison.Ordinal);
+        Assert.NotEqual(closedMessage, openedMessage);
+
+        Assert.EndsWith("'inner.zip' is a file", closedMessage, StringComparison.Ordinal);
+
+        // And the expanded one says why raising maxDepth cannot help.
+        Assert.Contains("'inner.zip' is a folder of 2 entries", openedMessage, StringComparison.Ordinal);
+        Assert.Contains("grouped from the document's root only", openedMessage, StringComparison.Ordinal);
     }
 
     [Fact]
