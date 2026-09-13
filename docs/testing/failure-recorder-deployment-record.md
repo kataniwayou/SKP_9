@@ -16,7 +16,7 @@ reconstructible only from a scratch directory that is not part of the repository
 |---|---|
 | id | `e0b98ffc-e95d-4fee-a407-cc53fb66914a` |
 | name | `failure-recorder` |
-| sourceHash | `49d9d1dd986439d5afaff495abc6140f378c0660dfcf299274b6c6a92a59cec6` |
+| sourceHash | `ab61472514e78199ca25ed17276369c738447626df1bd443b63f8cd94b8f212a` (repointed 2026-09-13; was `49d9d1dd98…`) |
 | inputSchemaId / outputSchemaId / configSchemaId | all **null** |
 
 All three nulls are load-bearing, not laziness. The seven parents that fan into this processor carry
@@ -89,6 +89,45 @@ different value silently builds and holds a second.
 - Nothing else was started or stopped. The five workflows projected before this work
   (`filefetcher-archiveexpander-chain`, `simple-abc`, `v8-fanout-proof`, `v8-fanout-proof-clone`,
   `kafka-import-export`) are all still projected; `sc-chain` was stopped before and remains stopped.
+
+## 4a. The redeploy of 2026-09-13, and the one row that needed repointing
+
+Commit `283cc00` added the `Result` attribute to processor-side log records. That is framework code
+shipped as a NuGet package, so it was inert until every processor was rebuilt from the repacked
+packages and redeployed. All **eight** were: the seven chain processors plus `failure-recorder`.
+`processor-sample` was deliberately left alone.
+
+**Only `failure-recorder` needed its `SourceHash` repointed, and the reason is worth remembering.**
+The hash folds a project's OWN sources, not its package dependencies — verified by rebuilding
+`Processor.FileFetcher`, whose hash came back byte-identical to its registered row despite consuming
+a changed `BaseProcessor.Core`. The recorder was the exception because its own
+`FailureRecorderProcessor.cs` had changed in `98a46b3` *after* its image was built and its row
+registered. Every other processor needed nothing.
+
+**A rollout that reports "exceeded its progress deadline" here is usually a stale row, not a broken
+image.** That is exactly what happened: the pod sat `0/1 READY` logging "still no processor
+registered for source hash ab614725…", `kubectl rollout status` gave up at 300s, and the same pod
+went ready seconds after the row was repointed.
+
+**Verified live afterwards**, since a green deploy proves nothing on its own: a seeded failure ran
+the chain end to end and `attributes.Result` now appears on `ProcessedDataHandler` (`Completed`) and
+`ProcessDispatchHandler` (`Failed`) records. Before the redeploy that field existed only on
+`Orchestrator.Messaging.StepOutcomeHandler` records.
+
+## 4b. `skp-paths` has two competing consumers — demonstrated, not theorised
+
+One seeded record, `{"filePath": "/mnt/skp-files/in/resultproof.zip"}`, was processed **twice**:
+
+- at 17:00:05 by `kafka-import-export`, consumer group `skp-kafkaimporter`, which exported it
+  straight out as 49 bytes;
+- at 17:00:20 by `filefetcher-archiveexpander-chain`, consumer group `skp-splitchain`, which fetched,
+  expanded, failed at the normalizer, and produced a failure record.
+
+Different consumer groups on one topic each receive their own copy, so **every path published to
+`skp-paths` is handled by both workflows**. Nothing breaks, and this predates the work recorded here
+— but anyone reasoning about "what happened to that file" needs to know one record yields two
+lineages under two correlation ids. `skp-paths-sc` (group `skp-sc`, the stopped `sc-chain`) is a
+third subscriber, currently inert.
 
 ## 5. Two API facts that cost time and are documented nowhere else
 
