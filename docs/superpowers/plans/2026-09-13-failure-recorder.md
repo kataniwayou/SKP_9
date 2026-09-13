@@ -1645,7 +1645,13 @@ public sealed class FailureRecorderLiveTests
         var warnings = await WarningsAsync("ExecutionId", execution);
 
         Assert.Contains(warnings, w => w.Contains("the author reported the step failed"));
-        Assert.Contains(warnings, w => w.Contains("no successor accepts it"));
+
+        // NOT "no successor accepts it" — that is StepOutcomeHandler's TERMINAL-step line, logged
+        // only when a step has no successor at all. It was the right expectation before this plan
+        // wired the PreviousFailed edge, and asserting it now would assert the wiring is ABSENT.
+        // The failing step HAS a successor, so the outcome takes the other branch of the same
+        // method, and this line is the proof the edge fired.
+        Assert.Contains(warnings, w => w.Contains("advancing 1 successor(s) on a Failed step"));
     }
 
     [Fact]
