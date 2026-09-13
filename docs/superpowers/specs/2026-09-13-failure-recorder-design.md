@@ -154,7 +154,27 @@ separate two failure pairs inside one lineage (§8.2); it is not a clock to orde
 which omits empty ids so that "does not apply" stays distinguishable from "is the zero guid". A
 consumer must be written for an absent field, not a sentinel.
 
-### 4.5 Failure modes of the recorder itself
+### 4.5 It opens a lineage when there was none
+
+```csharp
+var lineage = executionId == Guid.Empty ? NewExecutionId() : executionId;
+await SendToPostAsync(document, lineage, ct);
+```
+
+A transform normally continues the lineage it was handed and never mints one. This processor is the
+exception, and only for hop 1: an importer failure carries `ExecutionId == Guid.Empty`, and passing
+that on would dispatch the exporter step as an **entry** step, where `BaseExporter`'s first guard
+throws — *"it ends a lineage and cannot open one… dispatched as an entry step, with no execution to
+export"*. The record would never reach `skp-failures`, for exactly the failure class that most needs
+it.
+
+**The minted id is the recorder's own branch lineage and is NOT what the record reports.**
+`executionId` in the record stays absent (§4.4), because the field describes the *failed step's*
+lineage, and a step that failed before opening one has none. The two must not be conflated: one is a
+fact about the failure, the other is plumbing so the export can happen at all. The record's
+`correlationId` is what ties the minted branch back to the fire.
+
+### 4.6 Failure modes of the recorder itself
 
 It has no business logic, so it has none of its own beyond the framework's. It never throws
 `FailedException`.
