@@ -257,12 +257,30 @@ Item 2 (the id on the validation line) is G1, fixed the same day. Together they 
 compare what the boot line says this replica holds against the processor row, and a disagreement IS
 the answer.
 
-**Item 3 — noticing a re-point while running — is deliberately not done.** Nothing re-reads the
-processor row after startup; the liveness heartbeat writes to Redis and never asks BaseApi. Detecting
-a change would mean a new RPC on a timer, and then a decision this gap cannot make on its own: does a
-changed edge make the replica unhealthy, re-resolve in place, or only warn? That is a behavioural
-change with a failure mode of its own (flapping on a transient), not a logging fix. **The divergence
-window is now diagnosable, not closed.**
+**Item 3 — noticing a re-point while running — done 2026-09-13, as a WARNING.**
+`SchemaDriftProbe` re-asks the identity query every `Processor:SchemaDriftCheck` seconds (default
+300, zero disables) and reports each edge whose registered id no longer matches the one this replica
+resolved at boot. Verified live by re-pointing SKNormalizer's input edge under two running replicas:
+
+```
+the registered input schema has changed since this replica resolved it: enforcing e33f8079-…,
+registered is ef246bdb-… — this replica keeps enforcing what it resolved at boot, and only a
+restart applies the change
+```
+
+Both replicas reported it within one interval. That is the exact scenario that produced the silent
+false PASS above; it now announces itself.
+
+**It warns rather than acting, and the restraint is deliberate.** Going unhealthy is not expressible
+— `MarkHealthy` is one-way and the work-queue consumer opens once and never closes, so there is no
+"stop serving" state to enter, and inventing one would let a transient RPC failure take a healthy
+fleet out of service. Re-resolving in place is worse than the problem: it would change what validates
+a document mid-flight, so two documents in one batch could be judged against different contracts with
+nothing recording which. A restart is the mechanism, and it is an operator's decision.
+
+One registration changed with it: `ISourceHashProvider` is now in the processor container, which a
+test previously asserted it was NOT. That rule was "no wiring without a consumer", not "this type is
+banned" — the probe is the consumer, and the test now asserts both halves together.
 
 ---
 

@@ -120,9 +120,19 @@ public static class BaseProcessorServiceCollectionExtensions
 
         // Hosted purely so the container constructs it; see the type's own remarks.
         services.AddHostedService<ProcessorPipelineMetricsHost>();
-        // No ISourceHashProvider here. The hash answers one question — "which row is mine" — and that
-        // is settled before this container exists; Stage 1 registers its own inside the boot. A copy
-        // here would resolve for nobody while reading like a live dependency.
+        // ISourceHashProvider, ADDED 2026-09-13, and the comment it replaces said the opposite for a
+        // good reason at the time: the hash answers "which row is mine", that is settled before this
+        // container exists, Stage 1 registers its own inside the boot, and a copy here "would resolve
+        // for nobody while reading like a live dependency".
+        //
+        // It has a live consumer now. SchemaDriftProbe re-asks the identity query for the lifetime of
+        // the process, and that query is keyed by source hash — there is no get-by-id. The provider
+        // reads the ENTRY assembly, which is the same assembly in both containers, so the two resolve
+        // to the same value rather than to two opinions.
+        //
+        // TryAdd, so a host that pins its own — a test, or Stage 1's own registration if the two
+        // containers are ever merged — still wins.
+        services.TryAddSingleton<Identity.ISourceHashProvider, Identity.AssemblyMetadataSourceHashProvider>();
         // Resolved once and shared, so the liveness key, the reply queue and the telemetry's
         // service.instance.id all name this replica identically. TryAdd, so a host that pins a
         // deterministic id — a test, say — wins.
@@ -155,6 +165,12 @@ public static class BaseProcessorServiceCollectionExtensions
             sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(StartupLoop)));
         services.AddHostedService(sp => ActivatorUtilities.CreateInstance<ProcessorLivenessHeartbeat>(
             sp, sp.GetRequiredKeyedService<ILoopHeartbeat>(LivenessLoop)));
+
+        // NO ILoopHeartbeat, unlike the two loops above, and that is deliberate. A heartbeat exists so
+        // a wedged loop gets the process restarted; this one is a diagnostic whose failure costs a
+        // missed warning, and restarting a healthy processor because a periodic identity query went
+        // quiet would be a worse outcome than the gap it reports.
+        services.AddHostedService<Startup.SchemaDriftProbe>();
 
         AddProcessorHealthChecks(services);
 
