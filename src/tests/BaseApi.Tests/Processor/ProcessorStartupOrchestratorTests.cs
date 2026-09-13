@@ -63,6 +63,7 @@ public sealed class ProcessorStartupOrchestratorTests
         public FakeTimeProvider Clock { get; } = new();
         public ScriptedSender Sender { get; }
         public ProcessorStartupOrchestrator Orchestrator { get; }
+        public RecordingLogger<ProcessorStartupOrchestrator> Log { get; }
 
         /// <param name="identity">
         /// Seeded before the orchestrator exists, the way the two-stage boot seeds the container. Null
@@ -92,10 +93,11 @@ public sealed class ProcessorStartupOrchestratorTests
             // against the record a payload binds to. NoConfig has no properties, so a fixture whose
             // identity carries no ConfigSchemaId skips the check entirely -- which is the pair the
             // resolve loop already reads, a null id meaning the role does not apply.
+            Log = new RecordingLogger<ProcessorStartupOrchestrator>();
             Orchestrator = new ProcessorStartupOrchestrator(
                 Sender, endpoint, Slot, Context, writer, new InstanceId("pod-1"),
                 options, Clock, Beat, new StubAuthor(),
-                new RecordingLogger<ProcessorStartupOrchestrator>());
+                Log);
         }
 
         /// <summary>An author that does nothing, present only to supply ConfigType.</summary>
@@ -150,6 +152,39 @@ public sealed class ProcessorStartupOrchestratorTests
         Assert.True(h.Context.IsHealthy);
         Assert.Equal("{\"type\":\"object\"}", h.Context.Identity!.InputDefinition);
         Assert.Equal([ProcessorQueues.SchemaQuery], h.Sender.Sent.Select(s => s.Queue));
+    }
+
+    [Fact]
+    public async Task SaysWhichSchemasThisReplicaWillEnforce()
+    {
+        // THE GAP THIS CLOSES. A pod resolves its definitions here, at boot, and never looks again.
+        // Re-pointing a schema edge is routine, so between a re-point and a restart the PUBLISHED
+        // contract and the ENFORCED one differ -- and on 2026-09-12 a document violating a tightened
+        // schema completed a chain end to end with every log line looking healthy, because no line
+        // anywhere said which schemas the pods were actually holding.
+        var input = Guid.NewGuid();
+        var config = Guid.NewGuid();
+        var h = new Harness(
+            Found(input: input, config: config),
+            new SchemaDefinitionFound("{\"type\":\"object\"}"),
+            new SchemaDefinitionFound("{}"));   // StubConfig has no properties, so an empty schema conforms
+
+        await h.Orchestrator.RunStartupAsync(TestContext.Current.CancellationToken);
+
+        var summary = Assert.Single(
+            h.Log.Records, r => r.Message.Contains("this replica enforces", StringComparison.Ordinal));
+
+        Assert.Contains(input.ToString(), summary.Message, StringComparison.Ordinal);
+        Assert.Contains(config.ToString(), summary.Message, StringComparison.Ordinal);
+
+        // THE ROLE, not just the id. SKNormalizer points input and output at the same row, so an id
+        // on its own logs twice with nothing to tell the two edges apart.
+        Assert.Contains(
+            h.Log.Records,
+            r => r.Message.Contains("definition resolved for input schema", StringComparison.Ordinal));
+        Assert.Contains(
+            h.Log.Records,
+            r => r.Message.Contains("definition resolved for config schema", StringComparison.Ordinal));
     }
 
     [Fact]

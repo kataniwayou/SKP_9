@@ -207,6 +207,29 @@ recorded "a tightened schema is not enforced" as a finding about validation, whi
 not stop the suite — the restart was enough — but this is the gap most likely to mislead someone
 reading these logs in production.
 
+### Resolution — items 1 and 2 fixed 2026-09-13; item 3 is a behaviour change and is NOT done
+
+`ProcessorStartupOrchestrator` now ends Loop B with the line the gap asked for:
+
+```
+all schema definitions resolved; this replica enforces input={InputSchemaId}
+output={OutputSchemaId} config={ConfigSchemaId} until it restarts
+```
+
+and each per-schema line names its ROLE, which it did not before — an id alone is ambiguous for a
+processor whose input and output point at the same row, which SKNormalizer's do.
+
+Item 2 (the id on the validation line) is G1, fixed the same day. Together they close the diagnosis:
+compare what the boot line says this replica holds against the processor row, and a disagreement IS
+the answer.
+
+**Item 3 — noticing a re-point while running — is deliberately not done.** Nothing re-reads the
+processor row after startup; the liveness heartbeat writes to Redis and never asks BaseApi. Detecting
+a change would mean a new RPC on a timer, and then a decision this gap cannot make on its own: does a
+changed edge make the replica unhealthy, re-resolve in place, or only warn? That is a behavioural
+change with a failure mode of its own (flapping on a transient), not a logging fix. **The divergence
+window is now diagnosable, not closed.**
+
 ---
 
 ## G6 — orchestrator — a schema-edge refusal names the steps but never the schemas
