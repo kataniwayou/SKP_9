@@ -284,6 +284,38 @@ public sealed class ProcessedDataHandlerTests
     }
 
     [Fact]
+    public async Task ScopesTheOutputSchemaRejectionAsFailed()
+    {
+        // Same reasoning as the pre handler's input-schema rejection: {Result} cannot join the
+        // template because body.text is indexed as a keyword, so the value has to arrive as a scope
+        // instead, landing on attributes.Result the way the orchestrator's own lines do.
+        var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");
+
+        await h.Build().HandleAsync(Body(Branch(E, """{"number":"seven"}""")), CancellationToken.None);
+
+        var resultScope = Assert.Single(h.Log.Scopes, s => s.ContainsKey(OutcomeLogScope.Result));
+        Assert.Equal(nameof(StepResult.Failed), resultScope[OutcomeLogScope.Result]);
+    }
+
+    [Fact]
+    public async Task ScopesTheSuccessLineAsCompletedWithoutChangingItsText()
+    {
+        // Two assertions in one test on purpose: the scope carries the new structured field, and the
+        // rendered message is pinned byte-for-byte to what it was before this change — proving the
+        // template itself was never touched, which is the whole constraint this feature works under.
+        var h = new Harness();
+
+        await h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None);
+
+        var resultScope = Assert.Single(h.Log.Scopes, s => s.ContainsKey(OutcomeLogScope.Result));
+        Assert.Equal(nameof(StepResult.Completed), resultScope[OutcomeLogScope.Result]);
+
+        var completedRecord = Assert.Single(
+            h.Log.Records, r => r.Message.Contains("branch completed in", StringComparison.Ordinal));
+        Assert.Matches(@"^branch completed in \d+ms$", completedRecord.Message);
+    }
+
+    [Fact]
     public async Task LetsAFailedResultSendEscapeRatherThanAcknowledging()
     {
         var h = new Harness();
