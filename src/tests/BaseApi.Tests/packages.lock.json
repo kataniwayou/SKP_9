@@ -683,6 +683,12 @@
           "SharpCompress": "[1.0.0, )"
         }
       },
+      "processor.failurerecorder": {
+        "type": "Project",
+        "dependencies": {
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]"
+        }
+      },
       "processor.filefetcher": {
         "type": "Project",
         "dependencies": {
