@@ -145,7 +145,7 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
         {
             throw new NormalizationException(
                 $"an Acme item needs exactly one {AudioExtension} and one {SidecarExtension}, and "
-                + $"this one holds {audio} and {sidecars}");
+                + $"this one holds {audio} and {sidecars}: {Inventory(item)}");
         }
 
         if (item.Nodes.Count != 2)
@@ -390,6 +390,44 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
             root.Metadata.ModifiedUtc,
             children));
     }
+
+    /// <summary>
+    /// What the item actually holds, node by node — the counts alone cannot separate two different
+    /// situations that produce the same numbers.
+    /// <para>
+    /// <b>THE CASE THIS EXISTS FOR.</b> A document whose root holds one <c>inner.zip</c> reports
+    /// "holds 0 and 0" at EVERY depth, and the two depths need opposite responses. At
+    /// <c>maxDepth: 1</c> the expander left the inner archive closed, so it arrives as a FILE and
+    /// raising the depth is the fix. At <c>maxDepth: 4</c> it is opened, arrives as a FOLDER holding
+    /// exactly the pair this handler wants, and no depth will ever help — <see cref="Locate"/> groups
+    /// the document's ROOT entries only, so a nested pair is not reachable at all. Observed live on
+    /// 2026-09-12, where both runs logged the same sentence and only the expander's
+    /// "reaching depth {DepthReached} of {MaxDepth}" line one hop upstream told them apart.
+    /// </para>
+    /// <para>
+    /// Entry names only, never content. They are the same names the unexpected-entry message above
+    /// already reports, and a name is what an operator needs to find the file.
+    /// </para>
+    /// </summary>
+    private static string Inventory(SourceItem item)
+        => string.Join(", ", item.Nodes.Select(Describe));
+
+    /// <summary>One node, said plainly. See <see cref="Inventory"/> for why the distinction matters.</summary>
+    private static string Describe(FileNode node) => node.Content switch
+    {
+        // A folder is the dead end: nesting cannot be normalised, whatever the depth.
+        FileContent.Entries entries =>
+            $"'{node.Metadata.Name}' is a folder of {entries.Value.Count} entr"
+            + $"{(entries.Value.Count == 1 ? "y" : "ies")} — an item's nodes must be files, and a "
+            + "nested pair is not reachable because items are grouped from the document's root only",
+
+        // A file with the wrong extension. If it is named like an archive, the expander left it
+        // closed and a higher maxDepth would open it -- said as a hint rather than a diagnosis,
+        // because this handler does not know which extensions the expander can open.
+        FileContent.Bytes => $"'{node.Metadata.Name}' is a file",
+
+        _ => $"'{node.Metadata.Name}' carries no content",
+    };
 
     private static bool IsExtension(FileNode node, string extension)
         => string.Equals(node.Metadata.Extension, extension, StringComparison.OrdinalIgnoreCase);
