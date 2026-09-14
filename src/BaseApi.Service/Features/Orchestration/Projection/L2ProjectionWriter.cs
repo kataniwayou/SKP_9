@@ -7,7 +7,7 @@ namespace BaseApi.Service.Features.Orchestration.Projection;
 
 /// <summary>
 /// Writes one workflow definition into the projection store: the root, its entry in the parent index,
-/// and one key per step.
+/// one key per step, and one key per projected cache dictionary and its entries.
 /// <para>
 /// <b>The write is an overwrite, and the whole graph goes in one batch.</b> Writing the keys
 /// individually would let a failure leave a root pointing at steps that were never written — a graph
@@ -48,6 +48,14 @@ internal sealed class L2ProjectionWriter
 
         var steps = workflow.Steps ?? new List<StepL1>();
 
+        // Deduplicated by root: the junction's composite key already prevents a repeat, but the
+        // writer should not depend on a constraint two layers away — and a repeat here would put the
+        // same root in the record twice, making the stop path delete it twice.
+        var caches = (workflow.Caches ?? new List<CacheL1>())
+            .GroupBy(c => c.Root, StringComparer.Ordinal)
+            .Select(g => g.First())
+            .ToList();
+
         // Recorded from the same list the step keys are written from, in this method, so the root
         // cannot describe a key set the write did not produce. Deriving it anywhere else — from the
         // entry steps, or by walking successors — would let the two drift, and a step missing from
@@ -56,7 +64,12 @@ internal sealed class L2ProjectionWriter
             EntryStepIds: workflow.EntryStepIds ?? new List<Guid>(),
             StepIds: steps.Select(s => s.StepId).ToList(),
             Cron: workflow.Cron,
-            Liveness: liveness);
+            Liveness: liveness,
+            // Recorded from the same list the cache keys are written from, in this method, so the
+            // root cannot name a dictionary the write did not produce — the same rule the step ids
+            // above follow, and for the same reason: a root missing from this list is a set of keys
+            // nothing will ever delete.
+            CacheRoots: caches.Select(c => c.Root).ToList());
 
         var db = _multiplexer.GetDatabase();
         var batch = db.CreateBatch();
@@ -84,6 +97,24 @@ internal sealed class L2ProjectionWriter
             writes.Add(batch.StringSetAsync(
                 L2ProjectionKeys.Step(workflow.WorkflowId, step.StepId),
                 JsonSerializer.Serialize(projection, MessagingJson.Options)));
+        }
+
+        foreach (var cache in caches)
+        {
+            var items = cache.Items ?? new Dictionary<string, string>();
+
+            // The key list goes at the cache root, so an operator reading one key sees the
+            // dictionary's contents by name, and so cleanup can remove the entries without a scan.
+            writes.Add(batch.StringSetAsync(
+                L2ProjectionKeys.Cache(workflow.WorkflowId, cache.Root),
+                JsonSerializer.Serialize(items.Keys.ToList(), MessagingJson.Options)));
+
+            foreach (var (key, value) in items)
+            {
+                writes.Add(batch.StringSetAsync(
+                    L2ProjectionKeys.CacheEntry(workflow.WorkflowId, cache.Root, key),
+                    value));
+            }
         }
 
         batch.Execute();
