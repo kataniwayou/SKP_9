@@ -35,35 +35,73 @@ sha256 — because there is only ever one document, not two producers kept in st
 
 ## 2. The processor rows
 
+**Final state.** Every schema edge this work touched is back where it started; only the two identity
+fields on `sk-normalizer` are genuinely changed.
+
 | row | field | before | after |
 |---|---|---|---|
 | `sk-normalizer` `1673b377-…` | `sourceHash` | `6dd9967793…` | `0b6759dd7740417ae77dd7d294df997816989f6b3331a1465eebf90b42a9b12c` |
 | | `configSchemaId` | `b243856f-…` | `7f6e4ecd-095b-4ffa-83eb-94a1506fe5f4` |
-| | `inputSchemaId` | `e33f8079` (archive-document) | **null** |
-| | `outputSchemaId` | `e33f8079` (archive-document) | **null** |
-| `archive-collapser` `76146a07-…` | `inputSchemaId` | `e33f8079` (archive-document) | **null** |
-| `file-persister` `c046fb57-…` | `inputSchemaId` | `f495b02e` (file-envelope) | **null** |
+| | `inputSchemaId` | `e33f8079` (archive-document) | `e33f8079` — nulled, then restored |
+| | `outputSchemaId` | `e33f8079` (archive-document) | `e33f8079` — nulled, then restored |
+| `archive-collapser` `76146a07-…` | `inputSchemaId` | `e33f8079` (archive-document) | `e33f8079` — nulled, then restored |
+| `file-persister` `c046fb57-…` | `inputSchemaId` | `f495b02e` (file-envelope) | `f495b02e` — nulled, then restored |
 
-`file-fetcher` was considered and **left alone**. Every other field on all three rows is unchanged;
-each call was a GET-then-resend, because **`PUT` replaces the row** and a partial body silently wipes
-`name`, `version`, `description` and `sourceHash`.
+`file-fetcher` was considered twice and **left alone throughout**. Every other field on all three
+rows is unchanged; each call was a GET-then-resend, because **`PUT` replaces the row** and a partial
+body silently wipes `name`, `version`, `description` and `sourceHash`.
 
-**None of the four nulls was required, and that is worth writing down.** Every edge already matched
-(`archive-document → archive-document` on both normalizer steps, `file-envelope` into the persister),
-and `SchemaEdgeValidator` passes on a null on *either* side, so no edge could have failed. They were
-asked for deliberately, as a statement that the sk-normalizer row's shape now depends on its payload:
-one handler emits a container, the other a leaf.
+**The nulls are recorded rather than erased, because logs from that window will not make sense
+without them.** Between the first deploy and the restoration the four edges were null, deliberately:
+a statement that the `sk-normalizer` row's shape depends on its payload, since one handler emits a
+container and the other a leaf.
 
-**The output null costs something the three input nulls do not.** In this system the *producing* side
-is what validates — D2 and D3 were caught at the importer, S1 at the expander — while consumer-side
-input validation has never fired in a live suite. Nulling `sk-normalizer`'s `outputSchemaId` removes
-the check that its document is a well-formed `archive-document` before it reaches the next queue. A
-malformed document from either handler now travels on and fails at the collapser, or packs wrong
-without failing at all.
+### Why the original values are the only ones that fit
+
+Not a preference — the id gate forces it. `SchemaEdgeValidator` compares row **ids**, not schema
+content, so each edge admits exactly the parent's output row, or null:
+
+- `archive-expander` out is `e33f8079`, so `sk-normalizer` in must be `e33f8079` or null.
+- The AlphaBeta step's parent is the Acme step, on the **same row**, so `sk-normalizer` in must equal
+  its own out.
+- The collapser's two parents are both that row, so its in must be `e33f8079` too; its child is the
+  persister, so its out must be `f495b02e`.
+
+A tighter schema is attractive and unusable. Both handlers refuse a leaf root, so an input requiring
+`content` to be an array would catch that mis-feed at publish instead of in the handler — but a new
+row is refused by the id gate even when its definition is byte-identical. That is finding **F1**,
+where `archive-document-twin` was refused against a verified-identical source.
+
+### What `archive-document` has to admit, and does
+
+Validated offline against the live definition, then confirmed live (§5). `content` is
+`["string","array","null"]`, which is what makes the whole fork expressible:
+
+| document | edge | |
+|---|---|---|
+| folder of `.wav` + `.json` | expander out → Acme in | VALID |
+| folder of `.mp3` + `.xml` | Acme out → AlphaBeta in | VALID |
+| **leaf root** — the XML alone, `content` a base64 string | AlphaBeta out → collapser in | VALID |
+| `content: null` — archive expanded to nothing | any | VALID |
+
+`file-envelope` is stricter — six required fields, `additionalProperties: false` — and still admits
+both branches, because the envelope *shape* does not vary: only `extension` differs (`.zip` vs
+`.xml`) and it is an unconstrained string.
+
+### The one null that cost something
+
+Of the four, **only `sk-normalizer`'s output removed a control that fires.** In this system the
+*producing* side validates — D2 and D3 were caught at the importer, S1 at the expander — while
+consumer-side input validation has never fired in a live suite. While it was null a malformed
+document from either handler would have travelled on and failed at the collapser, or packed wrong
+without failing at all. The collapser's and persister's outputs were never nulled and kept enforcing
+throughout.
 
 **A changed edge is not enforced until the pod restarts.** `processor-sknormalizer`,
-`processor-archivecollapser` and `processor-filepersister` were all rolled for exactly this reason;
-processors resolve schema definitions once at startup and never re-read them.
+`processor-archivecollapser` and `processor-filepersister` were rolled for both the nulling and the
+restoration; processors resolve schema definitions once at startup and never re-read them. The
+restoration's logs say so rather than implying it — `definition resolved for input schema e33f8079…`
+and `for output schema e33f8079…` on the normalizer, and the matching lines on the other two.
 
 ## 3. The workflow wiring
 
@@ -84,8 +122,10 @@ holds 10.
 **202**. Without it the edits sit in the database and the running projection never sees them.
 
 **Undo:** remove `556d5234-…` from the Acme step's `nextStepIds`, remove `325fe0ac-…` from the
-workflow's `assignmentIds`, delete the assignment, delete the step, restore the four schema ids in §2,
-roll the three deployments, then republish.
+workflow's `assignmentIds`, delete the assignment, then delete the step. **The schema edges in §2 are
+already at their original values and need nothing** — they were nulled and restored within this same
+day's work. Roll nothing for the undo either: removing a step changes no processor's edges. Republish
+with `POST /orchestration/start` or the running projection keeps dispatching the deleted step.
 
 ## 4. The image
 
@@ -106,6 +146,22 @@ One bundle (`both-1e5c47529766.zip`, one `track01.wav` + `track01.json` pair) se
 
 The XML says `<provider>Acme</provider>`, `<codec>mp3</codec>` and `<bitrateKbps>192</bitrateKbps>`,
 which is correct: Acme wrote it, and AlphaBeta copied it without touching a byte.
+
+### Re-proved after the schema edges were restored, 09:03Z
+
+`gated-d0b4159c4d09.zip`, same fixture, with all four edges back in force. Both files landed in 16
+seconds; the standalone XML is again sha256-identical to the copy in the archive (619 bytes), and
+`skp-documents` carries both records.
+
+Three things this run proves that the first could not:
+
+- **The publish gate accepts the restored set** — `POST /orchestration/start` answered 202, where a
+  mismatched edge is a 422 naming the pair.
+- **The pods resolved the definitions**, from their own logs, not inferred from a green rollout.
+- **A leaf root passes producer-side output validation.** This was the genuinely open question: with
+  `sk-normalizer` out enforcing `archive-document`, the XML-alone document — whose `content` is a
+  base64 string rather than an array — went through. The offline validation said it would; this is
+  the live system agreeing.
 
 ## 6. Two things to know before this meets a real feed
 
