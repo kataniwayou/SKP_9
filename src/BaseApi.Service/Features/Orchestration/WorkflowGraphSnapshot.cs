@@ -1,4 +1,5 @@
 using BaseApi.Service.Features.Assignment;
+using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
 using BaseApi.Service.Features.Step;
@@ -8,17 +9,17 @@ using Microsoft.Extensions.Logging;
 namespace BaseApi.Service.Features.Orchestration;
 
 /// <summary>
-/// Transient in-memory read model of a workflow graph: five flat dictionaries projecting the
+/// Transient in-memory read model of a workflow graph: six flat dictionaries projecting the
 /// requested workflows' entities, built inside the orchestration service and discarded at the end of
 /// the request through a <c>using</c> declaration.
 /// <para>
-/// <b>Disposal contract:</b> <see cref="Dispose"/> is idempotent — it clears all five dictionaries,
+/// <b>Disposal contract:</b> <see cref="Dispose"/> is idempotent — it clears all six dictionaries,
 /// flips <see cref="IsDisposed"/>, and logs at the moment of disposal. The snapshot owns the injected
 /// logger, passed by the loader, so that line lives exactly where disposal happens.
 /// </para>
 /// <para>
 /// The logger is a positional member but not a data member: it is a dependency, and it does not
-/// participate in value equality over the five dictionaries. The dictionary references are
+/// participate in value equality over the six dictionaries. The dictionary references are
 /// init-only, so <see cref="Dispose"/> mutates their contents rather than nulling the references,
 /// which the compiler would reject. <see cref="IsDisposed"/> is a separate mutable property, not a
 /// positional member.
@@ -43,6 +44,7 @@ internal sealed record WorkflowGraphSnapshot(ILogger<WorkflowGraphSnapshot> Logg
     public Dictionary<Guid, StepReadDto>       Steps       { get; init; } = new();
     public Dictionary<Guid, ProcessorReadDto>  Processors  { get; init; } = new();
     public Dictionary<Guid, SchemaReadDto>     Schemas     { get; init; } = new();
+    public Dictionary<Guid, CacheReadDto>      Caches      { get; init; } = new();
 
     public bool IsDisposed { get; private set; }
 
@@ -54,6 +56,7 @@ internal sealed record WorkflowGraphSnapshot(ILogger<WorkflowGraphSnapshot> Logg
         Steps.Clear();
         Processors.Clear();
         Schemas.Clear();
+        Caches.Clear();
         IsDisposed = true;
         Logger.LogDebug("L1 snapshot disposed");
     }

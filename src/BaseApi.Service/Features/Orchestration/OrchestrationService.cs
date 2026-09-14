@@ -1,5 +1,7 @@
+using System.Text.Json;
 using BaseApi.Core.Exceptions;
 using BaseApi.Core.Persistence;
+using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Orchestration.Loading;
 using BaseApi.Service.Features.Orchestration.Validation;
 using BaseApi.Service.Features.Workflow;
@@ -185,13 +187,36 @@ public sealed class OrchestrationService
                 .FirstOrDefault(a => a.StepId == step.Id)?.Payload ?? string.Empty,
             NextStepIds: step.NextStepIds ?? new List<Guid>())).ToList();
 
+        // Resolved here, while both sides of the junction are in hand, so the consumer never has to
+        // know the junction exists — the same reason the assignment payload is resolved above.
+        //
+        // A cache id naming no loaded row is skipped rather than throwing. The foreign key makes
+        // that unreachable, and turning an impossible state into a failed start would refuse a
+        // workflow for a reason no operator could act on.
+        var caches = (workflow.CacheIds ?? new List<Guid>())
+            .Select(id => snapshot.Caches.TryGetValue(id, out var dto) ? dto : null)
+            .Where(dto => dto is not null)
+            .Select(dto => new CacheL1(
+                dto!.Root,
+                JsonSerializer.Deserialize<Dictionary<string, string>>(dto.Items)
+                    ?? new Dictionary<string, string>()))
+            .ToList();
+
         return new WorkflowL1(
             WorkflowId: workflowId,
             EntryStepIds: workflow.EntryStepIds ?? new List<Guid>(),
             Cron: workflow.CronExpression,
             Steps: steps,
-            Caches: new List<CacheL1>());
+            Caches: caches);
     }
+
+    /// <summary>
+    /// Exposes <see cref="ToDefinition"/> to the test assembly. The method is static and pure, and
+    /// reaching it through a constructed service would mean supplying eight dependencies none of
+    /// which it touches.
+    /// </summary>
+    internal static WorkflowL1 ToDefinitionForTests(WorkflowGraphSnapshot snapshot, Guid workflowId)
+        => ToDefinition(snapshot, workflowId);
 
     /// <summary>
     /// Rejects an empty id, then verifies the workflow row exists. An empty id raises a validation
