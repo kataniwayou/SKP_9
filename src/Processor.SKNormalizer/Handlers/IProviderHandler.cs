@@ -42,7 +42,7 @@ public interface IProviderHandler
     StandardMetadata Map(SourceItem item);
 
     /// <summary>Stage 4. Adds fields knowable BEFORE conversion.</summary>
-    void Augment(StandardMetadata metadata, SourceItem item);
+    void Augment(StandardMetadata metadata, SourceItem item, IFieldWhitelist whitelist);
 
     /// <summary>
     /// Stage 5. Decides output names. Runs before conversion because the transcoder needs a target

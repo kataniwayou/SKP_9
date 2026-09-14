@@ -1,4 +1,5 @@
 using System.Text.Json;
+using StackExchange.Redis;
 using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Processing;
 using Microsoft.Extensions.Logging;
@@ -8,7 +9,8 @@ namespace Processor.SKNormalizer;
 internal sealed class SKNormalizerProcessor(
     ILogger<SKNormalizerProcessor> logger,
     ProviderHandlerRegistry registry,
-    NormalizationPipeline pipeline)
+    NormalizationPipeline pipeline,
+    IConnectionMultiplexer multiplexer)
     : BaseProcessor<SKNormalizerConfig>
 {
     protected override async Task ProcessAsync(
@@ -16,13 +18,14 @@ internal sealed class SKNormalizerProcessor(
     {
         // Config first: it is the cheapest check and it depends on nothing else.
         var handler = Resolve(config);
+        var whitelist = WhitelistFor(config);
         var root = ReadDocument(data);
 
         NormalizationResult result;
 
         try
         {
-            result = pipeline.Run(root, handler, ct);
+            result = pipeline.Run(root, handler, whitelist, ct);
         }
         catch (NormalizationException ex)
         {
@@ -59,6 +62,21 @@ internal sealed class SKNormalizerProcessor(
         // a transform, not a source, so the lineage it was handed is the lineage it continues.
         await SendToPostAsync(document, executionId, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Builds this dispatch's whitelist from the address on the step payload.
+    /// <para>
+    /// <b>A missing address is not refused here.</b> Only a handler that gates a field needs one,
+    /// and Sample and AlphaBeta do not — refusing at this point would fail every step of theirs for
+    /// a field their payloads have no reason to carry. The unconfigured whitelist defers the
+    /// complaint to the first lookup, which happens only inside a handler that actually wants a
+    /// list.
+    /// </para>
+    /// </summary>
+    private IFieldWhitelist WhitelistFor(SKNormalizerConfig? config)
+        => string.IsNullOrWhiteSpace(config?.CacheAddress)
+            ? new UnconfiguredFieldWhitelist()
+            : new RedisFieldWhitelist(multiplexer, config.CacheAddress);
 
     private IProviderHandler Resolve(SKNormalizerConfig? config)
     {

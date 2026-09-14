@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using BaseProcessor.Core.Processing;
 
 namespace Processor.SKNormalizer;
 
@@ -225,14 +226,60 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
         };
     }
 
-    /// <summary>Stage 4. The two things knowable without reading anything: who, and when.</summary>
-    public override void Augment(StandardMetadata metadata, SourceItem item)
+    /// <summary>
+    /// Stage 4. The two things knowable without reading anything — who, and when — and the artist
+    /// gate.
+    /// <para>
+    /// <b>The artist is checked against the workflow's whitelist, and a miss ends the branch.</b>
+    /// The dictionary maps the artist as the provider wrote it to the form this system publishes, so
+    /// a hit both admits the item and replaces <c>&lt;descriptive&gt;&lt;artist&gt;</c> with the
+    /// canonical spelling. A miss is <see cref="CancelledException"/> rather than
+    /// <see cref="FailedException"/>: an unapproved artist is a document this workflow is not meant
+    /// to carry, not a document it could not read, and the two deserve different outcomes on the
+    /// step.
+    /// </para>
+    /// <para>
+    /// <b>The raw artist is in the exception message and in no log template of ours.</b> The
+    /// framework writes an author's cancel reason verbatim, which is the one place upstream content
+    /// is allowed to reach a log — the operator needs the rejected name to decide whether to add it
+    /// to the list, and that decision is the entire purpose of the gate.
+    /// </para>
+    /// <para>
+    /// <b>An absent artist cancels too — the gate fails closed.</b> Artist is optional in the
+    /// standardized document, so a sidecar may legitimately omit it, and before the gate existed
+    /// such a document normalized fine. It no longer does: a gate that admits every document
+    /// carrying nothing to check is one that any upstream bypasses by dropping the field.
+    /// </para>
+    /// </summary>
+    public override void Augment(StandardMetadata metadata, SourceItem item, IFieldWhitelist whitelist)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(whitelist);
 
         metadata.Provider = Name;
         metadata.IngestedUtc = clock.GetUtcNow();
+
+        if (string.IsNullOrWhiteSpace(metadata.Artist))
+        {
+            // FAIL CLOSED. Artist is optional in the standardized document, so this is a shape the
+            // handler accepted before the gate existed — but a gate that waves through the documents
+            // carrying no value to check is a gate anyone bypasses by omitting the field. An absent
+            // artist is reported as its own cancel rather than folded into the message below,
+            // because "you did not name an artist" and "the artist you named is not approved" send
+            // an operator to two different places.
+            throw new CancelledException(
+                "the metadata sidecar names no artist, and this workflow publishes only whitelisted "
+                + "artists");
+        }
+
+        if (!whitelist.TryGet(metadata.Artist, out var approved) || string.IsNullOrWhiteSpace(approved))
+        {
+            throw new CancelledException(
+                $"artist '{metadata.Artist}' is not on this workflow's whitelist");
+        }
+
+        metadata.Artist = approved;
     }
 
     /// <summary>

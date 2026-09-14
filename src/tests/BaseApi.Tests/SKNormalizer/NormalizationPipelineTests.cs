@@ -93,7 +93,8 @@ public sealed class NormalizationPipelineTests
             };
         }
 
-        public override void Augment(StandardMetadata metadata, SourceItem item)
+        public override void Augment(
+            StandardMetadata metadata, SourceItem item, IFieldWhitelist whitelist)
             => Enter(nameof(Augment));
 
         public override ItemNames NameFor(StandardMetadata metadata, SourceItem item)
@@ -146,7 +147,7 @@ public sealed class NormalizationPipelineTests
         var handler = new RecordingHandler { Profile = new AudioProfile(".mp3", ["-b:a", "192k"]) };
 
         Pipeline(new FakeTranscoder()).Run(
-            Archive("in.zip", Leaf("a.wav", "x")), handler, CancellationToken.None);
+            Archive("in.zip", Leaf("a.wav", "x")), handler, FieldWhitelists.AdmitAll, CancellationToken.None);
 
         Assert.Equal(
             [
@@ -172,7 +173,7 @@ public sealed class NormalizationPipelineTests
         var handler = new RecordingHandler { Profile = new AudioProfile(".mp3", []) };
 
         var result = Pipeline(new FakeTranscoder()).Run(
-            Archive("in.zip", Leaf("a.wav", "x")), handler, CancellationToken.None);
+            Archive("in.zip", Leaf("a.wav", "x")), handler, FieldWhitelists.AdmitAll, CancellationToken.None);
 
         Assert.Equal(1, result.ConvertedCount);
 
@@ -191,7 +192,7 @@ public sealed class NormalizationPipelineTests
         var handler = new RecordingHandler { Profile = null };
 
         var result = Pipeline(new ExplodingTranscoder()).Run(
-            Archive("in.zip", Leaf("a.txt", "x")), handler, CancellationToken.None);
+            Archive("in.zip", Leaf("a.txt", "x")), handler, FieldWhitelists.AdmitAll, CancellationToken.None);
 
         Assert.Equal(1, result.ItemCount);
         Assert.Equal(0, result.ConvertedCount);
@@ -212,7 +213,7 @@ public sealed class NormalizationPipelineTests
 
         var ex = Assert.Throws<NormalizationException>(
             () => Pipeline(new FakeTranscoder()).Run(
-                Archive("in.zip", Leaf("ninth.wav", "x")), handler, CancellationToken.None));
+                Archive("in.zip", Leaf("ninth.wav", "x")), handler, FieldWhitelists.AdmitAll, CancellationToken.None));
 
         Assert.Contains("ninth.wav", ex.Message, StringComparison.Ordinal);
         Assert.Contains("refused it", ex.Message, StringComparison.Ordinal);
@@ -229,6 +230,7 @@ public sealed class NormalizationPipelineTests
             () => Pipeline(new FakeTranscoder()).Run(
                 Archive("in.zip", Leaf("a.wav", "x"), Leaf("b.wav", "y")),
                 handler,
+                FieldWhitelists.AdmitAll,
                 CancellationToken.None));
 
         Assert.Single(handler.Stages, s => s == nameof(handler.Map));
@@ -248,7 +250,7 @@ public sealed class NormalizationPipelineTests
         var handler = new RecordingHandler { Shape = MetadataShape.Unset };
 
         var result = Pipeline(new ExplodingTranscoder()).Run(
-            Archive("in.zip", Leaf("a.wav", "x")), handler, CancellationToken.None);
+            Archive("in.zip", Leaf("a.wav", "x")), handler, FieldWhitelists.AdmitAll, CancellationToken.None);
 
         Assert.Equal(1, result.ItemCount);
 
@@ -267,7 +269,7 @@ public sealed class NormalizationPipelineTests
 
         var ex = Assert.Throws<NormalizationException>(
             () => Pipeline(new ExplodingTranscoder()).Run(
-                Archive("in.zip", Leaf("ninth.wav", "x")), handler, CancellationToken.None));
+                Archive("in.zip", Leaf("ninth.wav", "x")), handler, FieldWhitelists.AdmitAll, CancellationToken.None));
 
         Assert.Contains("source/originalName", ex.Message, StringComparison.Ordinal);
         Assert.Contains("audio/fileName", ex.Message, StringComparison.Ordinal);
@@ -285,7 +287,7 @@ public sealed class NormalizationPipelineTests
         var handler = new RecordingHandler { Shape = MetadataShape.Complete };
 
         Pipeline(new ExplodingTranscoder()).Run(
-            Archive("in.zip", Leaf("a.wav", "x")), handler, CancellationToken.None);
+            Archive("in.zip", Leaf("a.wav", "x")), handler, FieldWhitelists.AdmitAll, CancellationToken.None);
 
         var item = Assert.Single(handler.LaidOut);
         Assert.NotNull(item.MetadataDocument);
@@ -306,7 +308,7 @@ public sealed class NormalizationPipelineTests
 
         var ex = Assert.Throws<NormalizationException>(
             () => Pipeline(new FakeTranscoder()).Run(
-                Archive("in.zip", Leaf("a.wav", "x")), handler, CancellationToken.None));
+                Archive("in.zip", Leaf("a.wav", "x")), handler, FieldWhitelists.AdmitAll, CancellationToken.None));
 
         Assert.DoesNotContain("item '", ex.Message, StringComparison.Ordinal);
     }

@@ -45,7 +45,10 @@ public sealed class ProcessorSKNormalizerTests
             // and nothing in these tests should ever convert — SampleHandler's ProfileFor returns
             // null for every item. If this throws, the handler stopped being identity.
             new NormalizationPipeline(
-                new TreeAssembler(), new XmlMetadataRenderer(), new ExplodingTranscoder()));
+                new TreeAssembler(), new XmlMetadataRenderer(), new ExplodingTranscoder()),
+            // These tests drive SampleHandler, which consults no whitelist, so the store is never
+            // read. Supplied because the processor builds one per dispatch regardless of handler.
+            new InMemoryL2().Multiplexer);
 
         return (processor, log);
     }

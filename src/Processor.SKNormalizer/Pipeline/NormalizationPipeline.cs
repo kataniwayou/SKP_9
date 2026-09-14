@@ -11,7 +11,8 @@ internal sealed record NormalizationResult(FileNode Document, int ItemCount, int
 internal sealed class NormalizationPipeline(
     ITreeAssembler assembler, IMetadataRenderer renderer, IAudioTranscoder transcoder)
 {
-    public NormalizationResult Run(FileNode root, IProviderHandler handler, CancellationToken ct)
+    public NormalizationResult Run(
+        FileNode root, IProviderHandler handler, IFieldWhitelist whitelist, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(handler);
@@ -27,7 +28,7 @@ internal sealed class NormalizationPipeline(
         {
             // STOPS AT THE FIRST FAILURE. No partial output and no partial work: continuing would
             // burn a transcode for a document already doomed to be a failed step.
-            normalized.Add(Normalize(item, handler, ct, ref converted));
+            normalized.Add(Normalize(item, handler, whitelist, ct, ref converted));
         }
 
         // Stage 8. The handler describes; the assembler builds and enforces every rule
@@ -38,7 +39,8 @@ internal sealed class NormalizationPipeline(
     }
 
     private NormalizedItem Normalize(
-        SourceItem item, IProviderHandler handler, CancellationToken ct, ref int converted)
+        SourceItem item, IProviderHandler handler, IFieldWhitelist whitelist,
+        CancellationToken ct, ref int converted)
     {
         try
         {
@@ -47,7 +49,7 @@ internal sealed class NormalizationPipeline(
             handler.ValidateContent(item);                      // 2
 
             var metadata = handler.Map(item);                   // 3
-            handler.Augment(metadata, item);                    // 4
+            handler.Augment(metadata, item, whitelist);         // 4
 
             var names = handler.NameFor(metadata, item);        // 5
             var audio = Convert(item, handler, ct);             // 6
