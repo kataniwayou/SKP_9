@@ -123,4 +123,23 @@ public sealed class CacheProjectionCleanupTests
         Assert.False(l2.Has(L2ProjectionKeys.Root(W)));
         Assert.False(l2.Has(L2ProjectionKeys.CacheEntry(W, "other-list", "beta")));
     }
+
+    [Fact]
+    public async Task ALastCacheRootAlreadyGoneDoesNotStopTheRestOfTheRemoval()
+    {
+        // Same gap, opposite end: the loop must not rely on an early exit that happens to work only
+        // when the missing root comes first. Deleting the last-registered root instead exercises the
+        // per-iteration continue rather than a break or short-circuit that would still pass the
+        // first-root variant of this test.
+        var l2 = await ProjectedAsync(
+            new CacheL1("sk-whitelist", new() { ["acme"] = "1" }),
+            new CacheL1("other-list", new() { ["beta"] = "2" }));
+
+        await l2.Db.KeyDeleteAsync(L2ProjectionKeys.Cache(W, "other-list"));
+
+        await CleanAsync(l2);
+
+        Assert.False(l2.Has(L2ProjectionKeys.Root(W)));
+        Assert.False(l2.Has(L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "acme")));
+    }
 }
