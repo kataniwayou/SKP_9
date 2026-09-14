@@ -1268,9 +1268,12 @@ public sealed class CacheKeyTests
         // The compatibility guarantee cleanup depends on: an in-flight workflow projected by the
         // previous writer has no cacheRoots field at all, and must deserialize to null rather than
         // throwing, so its graph can still be removed.
+        // The liveness names are timestamp/interval/status — see LivenessProjection's
+        // JsonPropertyName attributes. Inventing them here would make this test pass against a
+        // record that never round-trips.
         const string legacy = """
             {"entryStepIds":[],"stepIds":[],"cron":null,
-             "liveness":{"LastSeenUtc":"2026-08-21T12:00:00Z","IntervalSeconds":0,"Status":"Pending"}}
+             "liveness":{"timestamp":"2026-08-21T12:00:00Z","interval":0,"status":"Pending"}}
             """;
 
         var root = System.Text.Json.JsonSerializer.Deserialize<WorkflowRootProjection>(
@@ -1325,29 +1328,33 @@ In `src/Messaging.Contracts/Projections/L2ProjectionKeys.cs`, add these two memb
 
 In `src/Messaging.Contracts/Projections/WorkflowRootProjection.cs`, add the parameter after `Liveness` and document why the key list is not here:
 
+**A doc comment cannot sit inside a positional parameter list** — it is a compile error. The
+rationale goes in a `<param>` tag on the record declaration, above the existing `<summary>`:
+
 ```csharp
+/// <param name="CacheRoots">
+/// The roots of every dictionary this workflow projected — names only. Nothing else records which
+/// roots exist for a workflow, and discovering them with a SCAN is the walk this design refuses
+/// everywhere else.
+/// <para>
+/// <b>The keys under each root are recorded at that root, not here, and that split is
+/// deliberate.</b> The step-key list lives here because a step key names its successors, so a
+/// missing one strands everything beyond it. A cache root names nothing — its key list is a flat
+/// leaf — so keeping it at the root costs one extra read at stop and buys the property the flat key
+/// layout exists for: an operator reading one key sees the dictionary's contents by name.
+/// </para>
+/// <para>Null for a root written before caches existed, and read as empty.</para>
+/// </param>
 public sealed record WorkflowRootProjection(
     [property: JsonPropertyName("entryStepIds")] List<Guid> EntryStepIds,
     [property: JsonPropertyName("stepIds")]      List<Guid> StepIds,
     [property: JsonPropertyName("cron")]         string? Cron,
     [property: JsonPropertyName("liveness")]     LivenessProjection Liveness,
-    /// <summary>
-    /// The roots of every dictionary this workflow projected — names only. Nothing else records
-    /// which roots exist for a workflow, and discovering them with a SCAN is the walk this design
-    /// refuses everywhere else.
-    /// <para>
-    /// <b>The keys under each root are recorded at that root, not here, and that split is
-    /// deliberate.</b> The step-key list lives here because a step key names its successors, so a
-    /// missing one strands everything beyond it. A cache root names nothing — its key list is a flat
-    /// leaf — so keeping it at the root costs one extra read at stop and buys the property the flat
-    /// key layout exists for: an operator reading one key sees the dictionary's contents by name.
-    /// </para>
-    /// <para>
-    /// Null for a root written before caches existed, and read as empty.
-    /// </para>
-    /// </summary>
     [property: JsonPropertyName("cacheRoots")]   List<string>? CacheRoots = null);
 ```
+
+The default `= null` keeps every existing `new WorkflowRootProjection(...)` call site compiling,
+including the one in Task 7's legacy-root test.
 
 - [ ] **Step 5: Add `CacheL1` and hang it off `WorkflowL1`**
 
