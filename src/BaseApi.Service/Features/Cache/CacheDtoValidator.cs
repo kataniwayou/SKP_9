@@ -14,7 +14,10 @@ namespace BaseApi.Service.Features.Cache;
 /// </summary>
 internal static class CacheRules
 {
-    public const int MaxItemsBytes = 1_048_576; // roughly 1 MB, matching AssignmentEntity.Payload
+    // FluentValidation's MaximumLength counts characters, not bytes -- the name says what this
+    // actually measures. The limit itself is unchanged: roughly 1 MB of characters, matching
+    // AssignmentEntity.Payload.
+    public const int MaxItemsChars = 1_048_576;
 
     public const int MaxRootLength = 200;
 
@@ -113,8 +116,8 @@ public sealed class CacheCreateDtoValidator : AbstractValidator<CacheCreateDto>
         RuleFor(x => x.Items)
             .Cascade(CascadeMode.Stop)
             .NotEmpty()
-            .MaximumLength(CacheRules.MaxItemsBytes)
-            .WithMessage($"Items must be at most {CacheRules.MaxItemsBytes} characters.")
+            .MaximumLength(CacheRules.MaxItemsChars)
+            .WithMessage($"Items must be at most {CacheRules.MaxItemsChars} characters.")
             .Custom((items, ctx) => CacheRules.CheckItems(items, ctx, nameof(CacheCreateDto.Items)));
     }
 }
@@ -136,8 +139,8 @@ public sealed class CacheUpdateDtoValidator : AbstractValidator<CacheUpdateDto>
         RuleFor(x => x.Items)
             .Cascade(CascadeMode.Stop)
             .NotEmpty()
-            .MaximumLength(CacheRules.MaxItemsBytes)
-            .WithMessage($"Items must be at most {CacheRules.MaxItemsBytes} characters.")
+            .MaximumLength(CacheRules.MaxItemsChars)
+            .WithMessage($"Items must be at most {CacheRules.MaxItemsChars} characters.")
             .Custom((items, ctx) => CacheRules.CheckItems(items, ctx, nameof(CacheUpdateDto.Items)));
     }
 }
