@@ -118,6 +118,7 @@ public static class ProcessorHost
         // SKNormalizerConfigSchemaTests fails the build if the first of those is forgotten.
         builder.Services.AddSingleton<IProviderHandler, SampleHandler>();
         builder.Services.AddSingleton<IProviderHandler, AcmeHandler>();
+        builder.Services.AddSingleton<IProviderHandler, AlphaBetaHandler>();
         builder.Services.AddSingleton<ProviderHandlerRegistry>();
 
         // The shared machinery. A handler describes; these execute.

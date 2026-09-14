@@ -48,7 +48,9 @@ public sealed class SKNormalizerHostTests
 
         var registry = host.Services.GetRequiredService<ProviderHandlerRegistry>();
 
-        Assert.Equal(["Acme", "Sample"], registry.Names);
+        // Ordinal order, which is what ProviderHandlerRegistry sorts by so an unknown-handler
+        // rejection message is stable between failures.
+        Assert.Equal(["Acme", "AlphaBeta", "Sample"], registry.Names);
     }
 
     [Fact]
