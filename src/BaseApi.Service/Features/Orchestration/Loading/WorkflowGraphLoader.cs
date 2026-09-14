@@ -1,6 +1,7 @@
 using BaseApi.Core.Mapping;
 using BaseApi.Core.Persistence;
 using BaseApi.Service.Features.Assignment;
+using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
@@ -27,6 +28,7 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
     private readonly IEntityMapper<StepEntity,       StepCreateDto,       StepUpdateDto,       StepReadDto>       _stepMapper;
     private readonly IEntityMapper<AssignmentEntity, AssignmentCreateDto, AssignmentUpdateDto, AssignmentReadDto> _assignmentMapper;
     private readonly IEntityMapper<WorkflowEntity,   WorkflowCreateDto,   WorkflowUpdateDto,   WorkflowReadDto>   _workflowMapper;
+    private readonly IEntityMapper<CacheEntity,      CacheCreateDto,      CacheUpdateDto,      CacheReadDto>      _cacheMapper;
 
     public WorkflowGraphLoader(
         BaseDbContext db,
@@ -35,7 +37,8 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
         IEntityMapper<ProcessorEntity,  ProcessorCreateDto,  ProcessorUpdateDto,  ProcessorReadDto>  processorMapper,
         IEntityMapper<StepEntity,       StepCreateDto,       StepUpdateDto,       StepReadDto>       stepMapper,
         IEntityMapper<AssignmentEntity, AssignmentCreateDto, AssignmentUpdateDto, AssignmentReadDto> assignmentMapper,
-        IEntityMapper<WorkflowEntity,   WorkflowCreateDto,   WorkflowUpdateDto,   WorkflowReadDto>   workflowMapper)
+        IEntityMapper<WorkflowEntity,   WorkflowCreateDto,   WorkflowUpdateDto,   WorkflowReadDto>   workflowMapper,
+        IEntityMapper<CacheEntity,      CacheCreateDto,      CacheUpdateDto,      CacheReadDto>      cacheMapper)
     {
         _db               = db               ?? throw new ArgumentNullException(nameof(db));
         _logger           = logger           ?? throw new ArgumentNullException(nameof(logger));
@@ -44,6 +47,7 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
         _stepMapper       = stepMapper       ?? throw new ArgumentNullException(nameof(stepMapper));
         _assignmentMapper = assignmentMapper ?? throw new ArgumentNullException(nameof(assignmentMapper));
         _workflowMapper   = workflowMapper   ?? throw new ArgumentNullException(nameof(workflowMapper));
+        _cacheMapper      = cacheMapper      ?? throw new ArgumentNullException(nameof(cacheMapper));
     }
 
     /// <summary>
@@ -70,6 +74,11 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
         var assignmentLookup = wfAssignmentRows.GroupBy(j => j.WorkflowId)
             .ToDictionary(g => g.Key, g => g.Select(j => j.AssignmentId).ToList());
 
+        var cacheRows = await _db.Set<WorkflowCaches>().AsNoTracking()
+            .Where(j => workflowIds.Contains(j.WorkflowId)).ToListAsync(ct);
+        var cacheLookup = cacheRows.GroupBy(j => j.WorkflowId)
+            .ToDictionary(g => g.Key, g => g.Select(j => j.CacheId).ToList());
+
         // Stage 2 — breadth-first step traversal over the next-step junction, terminating on cycles.
         var allEntryStepIds = entryLookup.Values.SelectMany(x => x).Distinct().ToList();
         var (stepEntities, nextStepLookup) = await LoadStepsBreadthFirstAsync(allEntryStepIds, ct);
@@ -89,12 +98,17 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
         var assignments = await _db.Set<AssignmentEntity>().AsNoTracking()
             .Where(a => assignmentIds.Contains(a.Id)).ToListAsync(ct);
 
+        var cacheIds = cacheLookup.Values.SelectMany(x => x).Distinct().ToList();
+        var caches = await _db.Set<CacheEntity>().AsNoTracking()
+            .Where(c => cacheIds.Contains(c.Id)).ToListAsync(ct);
+
         // Stage 4 — map each entity, then enrich the collections that live only on the junctions.
         var snapshot = new WorkflowGraphSnapshot(_logger);
 
         foreach (var s in schemas)     snapshot.Schemas[s.Id]     = _schemaMapper.ToRead(s);
         foreach (var p in processors)  snapshot.Processors[p.Id]  = _processorMapper.ToRead(p);
         foreach (var a in assignments) snapshot.Assignments[a.Id] = _assignmentMapper.ToRead(a);
+        foreach (var c in caches)      snapshot.Caches[c.Id]      = _cacheMapper.ToRead(c);
 
         foreach (var st in stepEntities)
         {
@@ -105,10 +119,11 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
 
         foreach (var wf in workflows)
         {
-            var dto = _workflowMapper.ToRead(wf);                              // both collections come back null
+            var dto = _workflowMapper.ToRead(wf);                              // all three collections come back null
             var entry = entryLookup.GetValueOrDefault(wf.Id) ?? new List<Guid>();
             var asg   = assignmentLookup.GetValueOrDefault(wf.Id) ?? new List<Guid>();
-            snapshot.Workflows[wf.Id] = dto with { EntryStepIds = entry, AssignmentIds = asg };
+            var cch   = cacheLookup.GetValueOrDefault(wf.Id) ?? new List<Guid>();
+            snapshot.Workflows[wf.Id] = dto with { EntryStepIds = entry, AssignmentIds = asg, CacheIds = cch };
         }
 
         return snapshot;
