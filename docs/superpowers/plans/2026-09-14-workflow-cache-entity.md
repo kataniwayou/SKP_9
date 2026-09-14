@@ -20,7 +20,7 @@
 - **`Items` cap: 1 048 576 characters**, matching `AssignmentEntity.Payload`.
 - **`Root` max length: 200.**
 - **No TTL on any L2 key, ever.** Reclaim is explicit on stop.
-- **Test commands.** Build: `dotnet build src/tests/BaseApi.Tests/BaseApi.Tests.csproj -c Debug --nologo`. Run one class: `src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-class "<FQN>"`. Run one method: `--filter-method "<FQN>.<Method>"`. Full hermetic suite: `--filter-not-namespace "BaseApi.Tests.Live*"`. **Do not use `dotnet test`** — it reports counts only and hides which tests failed. The `--filter "Category!=…"` form is silently ignored by this runner; the `--filter-class` / `--filter-not-namespace` options above are the ones it actually implements.
+- **Test commands.** Build: `dotnet build src/tests/BaseApi.Tests/BaseApi.Tests.csproj -c Debug --nologo`. Run one class: `src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-class "<FQN>"`. Run one method: `--filter-method "<FQN>.<Method>"`. Full hermetic suite: `--filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"` — **both**, because they exclude overlapping but different sets (measured 2026-09-14 via `--list-tests`: the trait alone leaves ~30 `Live` tests in, the namespace alone leaves trait-tagged tests outside `Live/` in, and the two simple filters AND together without error). `--filter-class` and `--filter-method` need **fully-qualified** names; a bare class name matches zero tests and exits 0, which looks exactly like a pass. **Do not use `dotnet test`** — it reports counts only and hides which tests failed. The `--filter "Category!=…"` form is silently ignored by this runner; the `--filter-class` / `--filter-not-namespace` options above are the ones it actually implements.
 
 ---
 
@@ -725,7 +725,7 @@ Expected: PASS, 15 tests, exit code 0.
 - [ ] **Step 11: Run the full hermetic suite to verify nothing regressed**
 
 ```bash
-src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-namespace "BaseApi.Tests.Live*"
+src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"
 ```
 
 Expected: 0 failed, exit code 0. Read the shape — zero failures and a clean exit — not a remembered total; the count only grows.
@@ -1115,7 +1115,7 @@ Expected: PASS, 7 tests.
 - [ ] **Step 9: Run the full hermetic suite**
 
 ```bash
-src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-namespace "BaseApi.Tests.Live*"
+src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"
 ```
 
 Expected: 0 failed, exit code 0. `DeletePolicyTests.NoForeignKeyInTheModelNullsOutItsColumnOnDelete` covers the new foreign keys automatically and must still pass.
@@ -1173,7 +1173,7 @@ Expected: `No changes have been made to the model since the last migration.`
 
 ```bash
 dotnet build src/tests/BaseApi.Tests/BaseApi.Tests.csproj -c Debug --nologo
-src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-namespace "BaseApi.Tests.Live*"
+src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"
 ```
 
 Expected: 0 failed, exit code 0.
@@ -1423,7 +1423,7 @@ Expected: PASS, 5 tests.
 - [ ] **Step 9: Run the full hermetic suite**
 
 ```bash
-src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-namespace "BaseApi.Tests.Live*"
+src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"
 ```
 
 Expected: 0 failed, exit code 0.
@@ -1723,7 +1723,7 @@ Expected: PASS, 6 tests.
 - [ ] **Step 8: Run the full hermetic suite**
 
 ```bash
-src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-namespace "BaseApi.Tests.Live*"
+src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"
 ```
 
 Expected: 0 failed, exit code 0. The DI container is exercised by the startup tests — a missing
@@ -1956,7 +1956,7 @@ Expected: PASS, 7 tests.
 - [ ] **Step 5: Run the full hermetic suite**
 
 ```bash
-src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-namespace "BaseApi.Tests.Live*"
+src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"
 ```
 
 Expected: 0 failed, exit code 0.
@@ -2183,7 +2183,7 @@ Expected: PASS, 6 tests.
 - [ ] **Step 5: Run the full hermetic suite**
 
 ```bash
-src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-namespace "BaseApi.Tests.Live*"
+src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"
 ```
 
 Expected: 0 failed, exit code 0. `StartStopIdempotencyTests` is the one to watch: it runs the whole
@@ -2324,7 +2324,7 @@ Expected: PASS, 3 tests.
 - [ ] **Step 5: Run the full hermetic suite**
 
 ```bash
-src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-namespace "BaseApi.Tests.Live*"
+src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe --filter-not-trait "Category=RealStack" --filter-not-namespace "BaseApi.Tests.Live*"
 ```
 
 Expected: 0 failed, exit code 0.
