@@ -107,6 +107,12 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
                 stepId, step.EntryCondition, step.ProcessorId, step.Payload, step.NextStepIds));
         }
 
+        // Caches is always empty here, permanently, not as a stub. This read-back exists to activate and
+        // schedule a workflow -- entry steps, cron, steps -- and nothing on that path ever consumes a
+        // dictionary. A cache root is its own set of L2 keys, addressed directly by the processor that
+        // needs it via the full address handed to it in its step payload; this record never carries the
+        // data. Populating this list would mean an extra Redis read on every single activation to hydrate
+        // something nothing downstream of this method reads.
         return new WorkflowL1(
             workflowId, root.EntryStepIds ?? new List<Guid>(), root.Cron, steps, new List<CacheL1>());
     }
