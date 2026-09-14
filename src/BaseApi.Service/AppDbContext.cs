@@ -1,5 +1,6 @@
 using BaseApi.Core.Persistence;
 using BaseApi.Service.Features.Assignment;
+using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
 using BaseApi.Service.Features.Step;
@@ -9,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace BaseApi.Service;
 
 /// <summary>
-/// The application's context: five entity sets and three junction sets.
+/// The application's context: six entity sets and three junction sets.
 /// <para>
 /// The ordering inside <c>OnModelCreating</c> is load-bearing — see the comment there.
 /// </para>
@@ -19,6 +20,7 @@ public sealed class AppDbContext : BaseDbContext
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     public DbSet<SchemaEntity> Schemas => Set<SchemaEntity>();
+    public DbSet<CacheEntity> Caches => Set<CacheEntity>();
     public DbSet<ProcessorEntity> Processors => Set<ProcessorEntity>();
     public DbSet<StepEntity> Steps => Set<StepEntity>();
     public DbSet<AssignmentEntity> Assignments => Set<AssignmentEntity>();
