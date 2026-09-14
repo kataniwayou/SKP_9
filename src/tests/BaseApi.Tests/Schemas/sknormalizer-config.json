@@ -7,6 +7,10 @@
       "type": "string",
       "description": "The provider handler to apply. One of the names this processor version carries.",
       "enum": ["Acme", "AlphaBeta", "Sample"]
+    },
+    "cacheAddress": {
+      "type": ["string", "null"],
+      "description": "The full L2 address of one projected dictionary for whitelist lookups. Declared in the schema because ConfigSchemaConformance checks record shape at startup, so every property on the config record must be described here even before any payload sets it."
     }
   },
   "required": ["handler"],
