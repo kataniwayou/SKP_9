@@ -250,20 +250,20 @@
         </defs>
 
         <!-- the bypass arc: Acme's other successor, straight to the collapser -->
-        <path class="edge-ok" d="M 691 120 L 691 74 L 1075 74 L 1075 114" marker-end="url(#ar-ok)"></path>
-        <text class="lbl-schema" x="883" y="66" text-anchor="middle">archive-document — the container branch</text>
-        <text class="lbl-out" x="883" y="100" text-anchor="middle">→ acme-&lt;guid&gt;.zip</text>
+        <path class="edge-ok" d="M 691 120 L 691 68 L 1075 68 L 1075 114" marker-end="url(#ar-ok)"></path>
+        <text class="lbl-schema" x="883" y="60" text-anchor="middle">archive-document — the container branch</text>
+        <text class="lbl-out" x="883" y="86" text-anchor="middle">→ acme-&lt;guid&gt;.zip</text>
 
         <!-- inbound topic -->
-        <rect class="topic-pill" x="40" y="36" width="150" height="32"></rect>
-        <text class="topic-txt" x="115" y="57" text-anchor="middle">skp-paths</text>
-        <line class="edge-ok" x1="115" y1="68" x2="115" y2="114" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-note" x="200" y="57" text-anchor="start">group skp-splitchain · 25 msgs · idle 10s</text>
+        <rect class="topic-pill" x="40" y="20" width="150" height="32"></rect>
+        <text class="topic-txt" x="115" y="41" text-anchor="middle">skp-paths</text>
+        <line class="edge-ok" x1="115" y1="52" x2="115" y2="114" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-note" x="200" y="41" text-anchor="start">group skp-splitchain · 25 msgs · idle 10s</text>
 
         <!-- outbound topic -->
-        <rect class="topic-pill" x="1384" y="36" width="150" height="32"></rect>
-        <text class="topic-txt" x="1459" y="57" text-anchor="middle">skp-documents</text>
-        <line class="edge-ok" x1="1459" y1="120" x2="1459" y2="74" marker-end="url(#ar-ok)"></line>
+        <rect class="topic-pill" x="1384" y="20" width="150" height="32"></rect>
+        <text class="topic-txt" x="1459" y="41" text-anchor="middle">skp-documents</text>
+        <line class="edge-ok" x1="1459" y1="120" x2="1459" y2="58" marker-end="url(#ar-ok)"></line>
         <text class="lbl-note" x="1372" y="96" text-anchor="end">ends lineage · two records per input</text>
 
         <!-- hop boxes -->
@@ -334,41 +334,41 @@
 
         <!-- happy-path edges, labelled with the document each hop hands over -->
         <line class="edge-ok" x1="190" y1="163" x2="226" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-schema" x="208" y="147" text-anchor="middle">file-locator</text>
+        <text class="lbl-schema" x="208" y="110" text-anchor="middle">file-locator</text>
         <circle class="gate" cx="208" cy="163" r="4"></circle>
 
         <line class="edge-ok" x1="382" y1="163" x2="418" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-schema" x="400" y="147" text-anchor="middle">file-envelope</text>
+        <text class="lbl-schema" x="400" y="110" text-anchor="middle">file-envelope</text>
         <circle class="gate" cx="400" cy="163" r="4"></circle>
 
         <line class="edge-ok" x1="574" y1="163" x2="610" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-schema" x="592" y="147" text-anchor="middle">archive-document</text>
+        <text class="lbl-schema" x="592" y="110" text-anchor="middle">archive-document</text>
 
         <line class="edge-ok" x1="766" y1="163" x2="802" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-schema" x="784" y="147" text-anchor="middle">archive-document</text>
+        <text class="lbl-schema" x="784" y="110" text-anchor="middle">archive-document</text>
 
         <line class="edge-ok" x1="958" y1="163" x2="994" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-schema" x="976" y="147" text-anchor="middle">the XML alone</text>
+        <text class="lbl-schema" x="976" y="110" text-anchor="middle">the XML alone</text>
         <text class="lbl-out" x="976" y="228" text-anchor="middle">→ track01.xml</text>
 
         <line class="edge-ok" x1="1150" y1="163" x2="1186" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-schema" x="1168" y="147" text-anchor="middle">file-envelope</text>
+        <text class="lbl-schema" x="1168" y="110" text-anchor="middle">file-envelope</text>
 
         <line class="edge-ok" x1="1342" y1="163" x2="1378" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-schema" x="1360" y="147" text-anchor="middle">file-locator</text>
+        <text class="lbl-schema" x="1360" y="110" text-anchor="middle">file-locator</text>
 
         <!-- failure bus -->
         <line class="edge-fail" x1="115" y1="206" x2="115" y2="296"></line>
         <line class="edge-fail" x1="307" y1="206" x2="307" y2="296"></line>
         <line class="edge-fail" x1="499" y1="206" x2="499" y2="296"></line>
         <line class="edge-fail" x1="691" y1="206" x2="691" y2="296"></line>
-        <line class="edge-fail" x1="883" y1="240" x2="883" y2="296"></line>
+        <line class="edge-fail" x1="883" y1="206" x2="883" y2="296"></line>
         <line class="edge-fail" x1="1075" y1="206" x2="1075" y2="296"></line>
         <line class="edge-fail" x1="1267" y1="206" x2="1267" y2="296"></line>
         <line class="edge-fail" x1="1459" y1="206" x2="1459" y2="296"></line>
         <line class="edge-fail" x1="115" y1="296" x2="1459" y2="296"></line>
-        <text class="lbl-fail" x="40" y="262" text-anchor="start">all nine steps, including both sinks</text>
-        <text class="lbl-note" x="40" y="280" text-anchor="start">entryCondition 2 · PreviousFailed</text>
+        <text class="lbl-fail" x="40" y="324" text-anchor="start">all nine steps, including both sinks</text>
+        <text class="lbl-note" x="40" y="342" text-anchor="start">entryCondition 2 · PreviousFailed</text>
 
         <line class="edge-fail" x1="595" y1="296" x2="595" y2="334" marker-end="url(#ar-fail)"></line>
 
