@@ -41,8 +41,22 @@ namespace Messaging.Contracts.Projections;
 /// </param>
 /// <param name="Cron">The cron expression, or null when the workflow is not scheduled.</param>
 /// <param name="Liveness">Freshness of the projection, stamped by the writer.</param>
+/// <param name="CacheRoots">
+/// The roots of every dictionary this workflow projected — names only. Nothing else records which
+/// roots exist for a workflow, and discovering them with a SCAN is the walk this design refuses
+/// everywhere else.
+/// <para>
+/// <b>The keys under each root are recorded at that root, not here, and that split is
+/// deliberate.</b> The step-key list lives here because a step key names its successors, so a
+/// missing one strands everything beyond it. A cache root names nothing — its key list is a flat
+/// leaf — so keeping it at the root costs one extra read at stop and buys the property the flat key
+/// layout exists for: an operator reading one key sees the dictionary's contents by name.
+/// </para>
+/// <para>Null for a root written before caches existed, and read as empty.</para>
+/// </param>
 public sealed record WorkflowRootProjection(
     [property: JsonPropertyName("entryStepIds")] List<Guid> EntryStepIds,
     [property: JsonPropertyName("stepIds")]      List<Guid> StepIds,
     [property: JsonPropertyName("cron")]         string? Cron,
-    [property: JsonPropertyName("liveness")]     LivenessProjection Liveness);
+    [property: JsonPropertyName("liveness")]     LivenessProjection Liveness,
+    [property: JsonPropertyName("cacheRoots")]   List<string>? CacheRoots = null);

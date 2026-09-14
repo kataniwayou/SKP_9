@@ -73,7 +73,7 @@ public sealed class ExecutionRoundTripTests
 
         public Harness(params StepL1[] steps)
         {
-            Store.Set(W, new WorkflowL1(W, [A], "* * * * *", [.. steps]), Guid.NewGuid());
+            Store.Set(W, new WorkflowL1(W, [A], "* * * * *", [.. steps], []), Guid.NewGuid());
         }
 
         public IQueueMessageHandler Pre => new StepOutcomeHandler(Store, L2.Multiplexer, Bus, PreLog);

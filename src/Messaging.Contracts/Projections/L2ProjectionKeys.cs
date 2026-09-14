@@ -17,6 +17,8 @@ namespace Messaging.Contracts.Projections;
 ///   <item><description>PerInstance: <c>{Prefix}proc:{processorId}:{instanceId}</c> — the per-replica liveness key</description></item>
 ///   <item><description>InstanceIndex: <c>{Prefix}proc:{processorId}</c> — the per-processor instance-index SET key</description></item>
 ///   <item><description>ExecutionData: <c>{Prefix}data:{guid}</c> — the blob for both roles</description></item>
+///   <item><description>Cache: <c>{Prefix}{workflowId}:cache:{root}</c> — the key holding one projected dictionary's key list</description></item>
+///   <item><description>CacheEntry: <c>{Prefix}{workflowId}:cache:{root}:{key}</c> — one entry of that dictionary</description></item>
 /// </list>
 /// </summary>
 public static class L2ProjectionKeys
@@ -28,6 +30,31 @@ public static class L2ProjectionKeys
     public static string Root(Guid workflowId) => $"{Prefix}{workflowId:D}";
 
     public static string Step(Guid workflowId, Guid stepId) => $"{Prefix}{workflowId:D}:{stepId:D}";
+
+    /// <summary>
+    /// The cache root: the key holding the JSON array of key names in one projected dictionary.
+    /// <para>
+    /// <b>This is the first key to place a literal segment after the workflow id.</b> Every other
+    /// discriminator in this scheme — <c>proc:</c>, <c>data:</c> — sits immediately after the
+    /// prefix. It cannot collide with <see cref="Step"/>, because <c>cache</c> is not a GUID, and
+    /// keeping a workflow's keys contiguous under one scan prefix is worth more here than symmetry
+    /// with the other two.
+    /// </para>
+    /// <para>
+    /// <paramref name="root"/> is interpolated verbatim, which is safe because the cache validator
+    /// refuses a root containing a colon — the one character that could forge another address.
+    /// </para>
+    /// </summary>
+    public static string Cache(Guid workflowId, string root)
+        => $"{Prefix}{workflowId:D}:cache:{root}";
+
+    /// <summary>
+    /// One entry of a projected dictionary: exactly <see cref="Cache"/> followed by the key. The two
+    /// must stay in that relationship, because cleanup reads the key list from the cache root and
+    /// rebuilds every entry key from it.
+    /// </summary>
+    public static string CacheEntry(Guid workflowId, string root, string key)
+        => $"{Cache(workflowId, root)}:{key}";
 
     /// <summary>The per-instance processor-liveness key. <paramref name="instanceId"/> is the
     /// already-resolved pod identity — a plain string, not a Guid.</summary>

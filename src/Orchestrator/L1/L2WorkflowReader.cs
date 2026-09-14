@@ -107,7 +107,8 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
                 stepId, step.EntryCondition, step.ProcessorId, step.Payload, step.NextStepIds));
         }
 
-        return new WorkflowL1(workflowId, root.EntryStepIds ?? new List<Guid>(), root.Cron, steps);
+        return new WorkflowL1(
+            workflowId, root.EntryStepIds ?? new List<Guid>(), root.Cron, steps, new List<CacheL1>());
     }
 
     /// <summary>

@@ -41,7 +41,7 @@ public sealed class WorkflowFireJobTests
 
     private sealed class Harness
     {
-        private WorkflowL1 _definition = new(W, [], EveryHour, []);
+        private WorkflowL1 _definition = new(W, [], EveryHour, [], []);
 
         public IQueueSender Sender { get; } = Substitute.For<IQueueSender>();
 
@@ -91,7 +91,8 @@ public sealed class WorkflowFireJobTests
                 entries.Select(e => e.StepId).ToList(),
                 EveryHour,
                 entries.Select(e => new StepL1(
-                    e.StepId, e.EntryCondition, e.ProcessorId, Config, [])).ToList());
+                    e.StepId, e.EntryCondition, e.ProcessorId, Config, [])).ToList(),
+                []);
 
             Store.Set(workflowId, _definition, JobId);
             return this;

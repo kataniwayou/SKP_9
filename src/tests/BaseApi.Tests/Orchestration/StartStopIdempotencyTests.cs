@@ -145,7 +145,8 @@ public sealed class StartStopIdempotencyTests
         Cron: Cron,
         Steps: stepIds
             .Select(id => new StepL1(id, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []))
-            .ToList());
+            .ToList(),
+        Caches: []);
 
     /// <summary>
     /// A definition as text, for comparing two of them. <c>WorkflowL1</c> is a record whose members
