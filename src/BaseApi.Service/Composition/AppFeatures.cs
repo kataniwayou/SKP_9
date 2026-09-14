@@ -1,4 +1,5 @@
 using BaseApi.Service.Features.Assignment;
+using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
@@ -24,6 +25,7 @@ internal static class AppFeatures
     public static IServiceCollection AddAppFeatures(this IServiceCollection services)
     {
         services.AddSchemaFeature();
+        services.AddCacheFeature();
         services.AddProcessorFeature();
         services.AddStepFeature();
         services.AddAssignmentFeature();
