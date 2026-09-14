@@ -138,15 +138,20 @@ public sealed class StartStopIdempotencyTests
     private static byte[] Body<T>(T message) =>
         JsonSerializer.SerializeToUtf8Bytes(message, MessagingJson.Options);
 
-    /// <summary>A workflow whose first step is its entry, with one step key per id given.</summary>
-    private static WorkflowL1 Definition(params Guid[] stepIds) => new(
+    /// <summary>A workflow whose first step is its entry, with one step key per id given and the given
+    /// caches. <c>params</c> must be the last parameter, so this is the overload the cacheless one
+    /// below delegates to rather than an optional parameter on it.</summary>
+    private static WorkflowL1 Definition(Guid[] stepIds, List<CacheL1> caches) => new(
         WorkflowId: W,
         EntryStepIds: [stepIds[0]],
         Cron: Cron,
         Steps: stepIds
             .Select(id => new StepL1(id, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []))
             .ToList(),
-        Caches: []);
+        Caches: caches);
+
+    /// <summary>A workflow whose first step is its entry, with one step key per id given.</summary>
+    private static WorkflowL1 Definition(params Guid[] stepIds) => Definition(stepIds, []);
 
     /// <summary>
     /// A definition as text, for comparing two of them. <c>WorkflowL1</c> is a record whose members
@@ -240,6 +245,45 @@ public sealed class StartStopIdempotencyTests
         Assert.Empty(c.L2.Keys());
         Assert.Empty(c.L2.Members(L2ProjectionKeys.ParentIndex()));
         Assert.Equal(afterFirst, c.L2.Snapshot());
+    }
+
+    [Fact]
+    public async Task AWorkflowWithCachesConvergesOnRestartAndStopRemovesEveryCacheKey()
+    {
+        // Every other test in this file uses Definition's cacheless overload, so none of them ever
+        // writes or deletes a cache key — a cleanup that finds the roots but misses the entries would
+        // pass every one of them. This is the one that actually exercises a cache-bearing workflow
+        // through start, restart, and stop over one store.
+        var caches = new List<CacheL1>
+        {
+            new("sk-whitelist", new() { ["acme"] = "1", ["beta"] = "2" }),
+        };
+        var c = new Chain();
+
+        await c.ApiStartAsync(Definition([S1, S2], caches));
+
+        // The write actually happened, so the assertions below are about convergence and removal,
+        // not about a write that silently produced nothing.
+        Assert.True(c.L2.Has(L2ProjectionKeys.Cache(W, "sk-whitelist")));
+        Assert.True(c.L2.Has(L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "acme")));
+        Assert.True(c.L2.Has(L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "beta")));
+
+        var afterFirst = c.L2.Snapshot();
+
+        // Convergence: starting the same cache-bearing definition again must leave the same key
+        // space, not a growing one.
+        await c.ApiStartAsync(Definition([S1, S2], caches));
+
+        Assert.Equal(afterFirst, c.L2.Snapshot());
+
+        await c.ApiStopAsync(W);
+
+        // Complete removal: the assertion that would fail if L2Cleanup went back to deleting only the
+        // root and step keys. Reverting that change leaves both the cache root key and its two
+        // CacheEntry keys untouched by the stop, so L2.Keys() would still hold all three and the
+        // ":cache:" filter below would catch them.
+        Assert.DoesNotContain(c.L2.Keys(), k => k.Contains(":cache:"));
+        Assert.Empty(c.L2.Keys());
     }
 
     [Fact]
