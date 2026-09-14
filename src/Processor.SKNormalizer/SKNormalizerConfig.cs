@@ -3,24 +3,29 @@ using BaseProcessor.Core.Configuration;
 namespace Processor.SKNormalizer;
 
 /// <summary>
-/// The step payload, and it holds exactly one field.
+/// The step payload this processor binds.
 /// <para>
-/// <b>Everything else a provider needs is IN the handler</b> — that is the whole point of compiling
-/// them in. A payload naming field maps or ffmpeg arguments would be a second, weaker place to
-/// express what the handler already states in code, and the two would drift.
+/// <b><see cref="CacheAddress"/> is declared and deliberately unread.</b> It is the seam for the
+/// whitelist behaviour: the full L2 address of one projected dictionary —
+/// <c>skp:{workflowId}:cache:{root}</c> — which the handler will later append a name to. The
+/// operator authors it; nothing rewrites a payload to supply it.
 /// </para>
 /// <para>
-/// <b>The registered config schema declares this field with an <c>enum</c> of the handler names this
-/// build carries</b>, so <c>PayloadConfigSchemaValidator</c> refuses a workflow naming an absent
-/// handler AT PUBLISH — while the operator is still at the screen. The rejection in
-/// <c>SKNormalizerProcessor</c> is the backstop, not the primary defence. The source text is
-/// <c>src/tests/BaseApi.Tests/Schemas/sknormalizer-config.json</c>.
+/// It is declared ahead of the behaviour because <c>ProcessorConfig.SerializerOptions</c> leaves
+/// <c>UnmappedMemberHandling</c> at Skip: a payload carrying the property against a record that does
+/// not declare it binds silently to nothing, which is indistinguishable from a whitelist that
+/// matches nothing.
 /// </para>
 /// <para>
-/// <b>No default, and that is why the schema must REQUIRE it.</b>
-/// <c>ConfigSchemaConformance</c> reads the presence of a default parameter value as the signal for
-/// optionality — not nullability — so a positional parameter without one must appear in the schema's
-/// <c>required</c> array or startup fails.
+/// <b>When the behaviour ships, a null here is a payload defect, not a cache miss.</b> Reporting it
+/// as a miss would cancel every document of a step whose address was simply forgotten, which reads
+/// in the logs exactly like a correctly-configured empty whitelist.
+/// </para>
+/// <para>
+/// Authoring it in a payload will also require SKNormalizer's config schema to declare it. Every
+/// config schema in the chain sets <c>additionalProperties: false</c>, and schema definitions are
+/// frozen — so that is a new schema row, both sides re-pointed, and a restart. Nothing here triggers
+/// it; the day an operator writes the property does.
 /// </para>
 /// </summary>
-public sealed record SKNormalizerConfig(string Handler) : ProcessorConfig;
+public sealed record SKNormalizerConfig(string Handler, string? CacheAddress = null) : ProcessorConfig;
