@@ -22,10 +22,15 @@ namespace Processor.SKNormalizer;
 /// in the logs exactly like a correctly-configured empty whitelist.
 /// </para>
 /// <para>
-/// Authoring it in a payload will also require SKNormalizer's config schema to declare it. Every
-/// config schema in the chain sets <c>additionalProperties: false</c>, and schema definitions are
-/// frozen — so that is a new schema row, both sides re-pointed, and a restart. Nothing here triggers
-/// it; the day an operator writes the property does.
+/// <b>Declaring this property is by itself enough to require the config schema to declare it too,
+/// and that is not obvious.</b> <c>ConfigSchemaConformance.Check</c> compares the shape of this
+/// record against the schema definition — not against any payload — and it runs in two places:
+/// <c>SKNormalizerConfigSchemaTests</c>, and <c>ProcessorStartupOrchestrator</c> at startup against
+/// the live schema row. So the cost arrives with the property, not with the first operator who
+/// authors it. The in-repo fixture is updated alongside this file; the live schema row must be
+/// replaced before a build carrying this property is deployed, or the replica fails conformance and
+/// publishes UNHEALTHY. Definitions are frozen, so replacing it means POSTing a new row, re-pointing
+/// both sides, and restarting.
 /// </para>
 /// </summary>
 public sealed record SKNormalizerConfig(string Handler, string? CacheAddress = null) : ProcessorConfig;
