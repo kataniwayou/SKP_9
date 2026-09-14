@@ -882,6 +882,11 @@ Content-Type: application/json
 
 Record the returned id as `<asg:sk-normalizer-sample-assignment>`.
 
+**This payload is incomplete on purpose, and step 7b finishes it.** The Acme handler needs a
+`cacheAddress`, and that address embeds the workflow id — which does not exist until step 7. There
+is no ordering that lets you write it here: the assignment must exist before the workflow that
+references it, and the address must exist after. Step 7b is the second half.
+
 ### 6.7 `split-archivecollapser-assignment` → step `split-archivecollapser`
 
 ```http
@@ -951,6 +956,37 @@ Content-Type: application/json
 Record the returned id as `<asg:split-exporter-cfg>`.
 
 
+## Step 6b — create the artist whitelist cache
+
+`sk-normalizer`'s Acme handler gates the artist on a whitelist and publishes the whitelist's value
+rather than the provider's. A workflow that names no cache still starts, but every Acme item on it
+then fails with a payload defect — see §6.6 and C6.
+
+The dictionary is key/value: the key is the artist exactly as the provider's sidecar writes it, the
+value is the spelling the standardized XML will carry.
+
+```http
+POST /api/v1/caches
+Content-Type: application/json
+
+{
+  "name": "chain-artist-whitelist",
+  "version": "1.0.0",
+  "description": "Artists this chain is allowed to publish. Key is the artist as the provider wrote it; value is the spelling the standardized XML carries.",
+  "root": "chain-artists",
+  "items": "{\"SKP Live Suite\": \"SKP Live Suite (Approved)\"}"
+}
+```
+
+Record the returned id as `<cache:chain-artists>`, and the root as `chain-artists`.
+
+**`root` is unique across the whole table**, not per workflow, and it is the half of the L2 address
+an operator types. A duplicate is a `409` naming `root`.
+
+**No colon in the root or in any key.** The address is built by concatenation, so root `a` with key
+`b:c` and root `a:b` with key `c` are the same string — one dictionary would answer for the other.
+The API refuses both at create and update.
+
 ## Step 7 — create the workflow
 
 `POST /api/v1/workflows`. Both id lists are junction writes, so every step and assignment above must already exist.
@@ -978,11 +1014,46 @@ Content-Type: application/json
     "<asg:split-filepersister-cfg>",
     "<asg:split-exporter-cfg>"
   ],
+  "cacheIds": [
+    "<cache:chain-artists>"
+  ],
   "cronExpression": "5,35 * * * * *"
 }
 ```
 
 Record the returned id as `<workflow>`.
+
+`cacheIds` is a third junction beside `entryStepIds` and `assignmentIds`. Every cache it names is
+projected into L2 when the workflow starts and removed when it stops.
+
+## Step 7b — stamp the whitelist address onto the Acme payload
+
+Now that `<workflow>` exists, the address can be written. It is
+`skp:{workflowId}:cache:{root}` — here, `skp:<workflow>:cache:chain-artists`.
+
+```http
+PUT /api/v1/assignments/<asg:sk-normalizer-sample-assignment>
+Content-Type: application/json
+
+{
+  "name": "sk-normalizer-sample-assignment",
+  "version": "1.0.0",
+  "description": "handler Acme, gated on the chain-artists whitelist.",
+  "stepId": "<step:sk-normalizer-sample>",
+  "payload": "{\"handler\": \"Acme\", \"cacheAddress\": \"skp:<workflow>:cache:chain-artists\"}"
+}
+```
+
+**`cacheAddress` must be declared in the processor's config schema or the replica will not start.**
+`ConfigSchemaConformance` compares the *shape of the config record* against the schema at startup,
+not against any payload, so `sk-normalizer-config-v2` (§2.8) is the version that carries it. A build
+of `sk-normalizer` whose `SKNormalizerConfig` has the property, pointed at a schema that does not
+declare it, fails conformance and publishes UNHEALTHY — and `ProcessorLivenessValidator` then
+refuses every workflow using it.
+
+**The other `sk-normalizer` step needs no address.** §6.8 runs the AlphaBeta handler, which consults
+no whitelist. A missing address is only a defect for a handler that reaches for a list, which is why
+that step keeps running with a bare `{"handler": "AlphaBeta"}`.
 
 ## Step 8 — start the workflow
 
@@ -1049,7 +1120,7 @@ check the edge sets by name. Confirm specifically:
 gate, the payload gate and the liveness gate all accepted the graph you built. Nothing short of
 that check exercises all four.
 
-## Appendix C — the five ways this fails
+## Appendix C — the six ways this fails
 
 **C1. `422` naming a mismatched schema edge.** The schema-edge gate compares the parent
 processor's `outputSchemaId` against the child processor's `inputSchemaId` and demands they are
@@ -1084,6 +1155,38 @@ that reason. Always send the integer.
 **C5. `409` on a processor create.** `sourceHash` is unique among rows with no `instanceId`.
 You get this by creating `sk-normalizer` twice, because two steps use it. Eight processor rows,
 ten steps.
+
+**C6. The chain starts, validates, fires on its cron — and nothing happens.** No error anywhere,
+and every pod healthy. The entry step is a Kafka importer, so a chain with an unreachable broker
+simply has nothing to import; the importer logs `1/1 brokers are down` at rdkafka's own level and
+retries forever, which is by design and is easy to read past.
+
+On a kind cluster the specific trap is address family, not reachability. The dev broker container
+joins the `kind` network with both an IPv4 and an IPv6 address, Docker's embedded DNS answers with
+the IPv6 one, and the pod network has no IPv6 route — so the client resolves the name successfully
+and then cannot route to it. The symptom is `Failed to connect to broker at [skp-kafka.kind]:9092:
+Network is unreachable`, and the word that matters is *unreachable* rather than *refused*: refused
+would mean nothing is listening, unreachable means nothing can get there.
+
+Confirm it by comparing what the container has with what the pod resolves:
+
+```
+docker inspect skp-kafka --format '{{range .NetworkSettings.Networks}}IPv4={{.IPAddress}} IPv6={{.GlobalIPv6Address}}{{end}}'
+kubectl exec -n skp deploy/processor-kafkaimporter -- getent hosts skp-kafka
+```
+
+Pin the IPv4 on the two pods that talk to the broker. `hostAliases` fixes both the bootstrap address
+and the `INTERNAL` listener the broker advertises afterwards, which a `Kafka__BrokerList` edit would
+not:
+
+```
+kubectl patch deploy processor-kafkaimporter -n skp --type=json   -p '[{"op":"add","path":"/spec/template/spec/hostAliases","value":[{"ip":"<ipv4>","hostnames":["skp-kafka","skp-kafka.kind"]}]}]'
+```
+
+…and the same for `processor-kafkaexporter`. **The address is the container's current IPv4 and it
+changes when the container is recreated**, which is why this is a documented step rather than a line
+in `k8s/34-processor-kafkaimporter.yaml`: a manifest carrying a stale IP would fail exactly like the
+IPv6 case, with a different cause.
 
 ## Appendix D — one inconsistency, reproduced deliberately
 
