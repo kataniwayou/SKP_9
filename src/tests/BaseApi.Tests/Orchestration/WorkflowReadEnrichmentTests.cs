@@ -46,7 +46,7 @@ public sealed class WorkflowReadEnrichmentTests : IAsyncLifetime
 
     private async Task<Guid> CreateAsync(string name, List<Guid> entry, List<Guid>? assignments)
     {
-        var dto = new WorkflowCreateDto(name, "1.0.0", null, entry, assignments, null);
+        var dto = new WorkflowCreateDto(name, "1.0.0", null, entry, assignments, null, null);
         return (await _service.CreateAsync(dto, TestContext.Current.CancellationToken)).Id;
     }
 
@@ -103,7 +103,7 @@ public sealed class WorkflowReadEnrichmentTests : IAsyncLifetime
         // reads as the input having been dropped, and invites a retry that duplicates the workflow,
         // which nothing in the schema prevents.
         var created = await _service.CreateAsync(
-            new WorkflowCreateDto("wf-created", "1.0.0", null, [_entryStep], [_assignmentA], null),
+            new WorkflowCreateDto("wf-created", "1.0.0", null, [_entryStep], [_assignmentA], null, null),
             TestContext.Current.CancellationToken);
 
         Assert.Equal([_entryStep], created.EntryStepIds!);
@@ -117,7 +117,7 @@ public sealed class WorkflowReadEnrichmentTests : IAsyncLifetime
         // rather than the old.
         var updated = await _service.UpdateAsync(
             _bound,
-            new WorkflowUpdateDto("wf-bound", "1.0.0", null, [_otherEntryStep], [_assignmentB], null),
+            new WorkflowUpdateDto("wf-bound", "1.0.0", null, [_otherEntryStep], [_assignmentB], null, null),
             TestContext.Current.CancellationToken);
 
         Assert.Equal([_otherEntryStep], updated.EntryStepIds!);
@@ -135,7 +135,7 @@ public sealed class WorkflowReadEnrichmentTests : IAsyncLifetime
         await _service.UpdateAsync(
             _bound,
             new WorkflowUpdateDto(read.Name, read.Version, read.Description,
-                                  read.EntryStepIds!, read.AssignmentIds, read.CronExpression),
+                                  read.EntryStepIds!, read.AssignmentIds, null, read.CronExpression),
             TestContext.Current.CancellationToken);
 
         var after = await _service.GetByIdAsync(_bound, TestContext.Current.CancellationToken);

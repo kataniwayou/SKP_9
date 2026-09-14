@@ -21,7 +21,7 @@ public sealed class NullCollectionCascadeTests
     public void WorkflowCreateReportsANullEntryStepCollectionRatherThanThrowing()
     {
         var result = new WorkflowCreateDtoValidator()
-            .Validate(new WorkflowCreateDto("wf", "1.0.0", null, null!, null, null));
+            .Validate(new WorkflowCreateDto("wf", "1.0.0", null, null!, null, null, null));
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.PropertyName == nameof(WorkflowCreateDto.EntryStepIds));
@@ -31,7 +31,7 @@ public sealed class NullCollectionCascadeTests
     public void WorkflowUpdateReportsANullEntryStepCollectionRatherThanThrowing()
     {
         var result = new WorkflowUpdateDtoValidator()
-            .Validate(new WorkflowUpdateDto("wf", "1.0.0", null, null!, null, null));
+            .Validate(new WorkflowUpdateDto("wf", "1.0.0", null, null!, null, null, null));
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.PropertyName == nameof(WorkflowUpdateDto.EntryStepIds));
@@ -65,7 +65,7 @@ public sealed class NullCollectionCascadeTests
         // The cascade change must stop the chain only on failure — a well-formed DTO still runs every
         // rule and still passes.
         Assert.True(new WorkflowCreateDtoValidator()
-            .Validate(new WorkflowCreateDto("wf", "1.0.0", null, [Guid.NewGuid()], null, "0 0 * * *")).IsValid);
+            .Validate(new WorkflowCreateDto("wf", "1.0.0", null, [Guid.NewGuid()], null, null, "0 0 * * *")).IsValid);
 
         Assert.True(new SchemaCreateDtoValidator()
             .Validate(new SchemaCreateDto("sch", "1.0.0", null, """{"type":"object"}""")).IsValid);
@@ -77,7 +77,7 @@ public sealed class NullCollectionCascadeTests
         // Cascade.Stop must not swallow the later predicates: a present-but-invalid collection is still
         // rejected by the rule that follows the null check.
         var result = new WorkflowCreateDtoValidator()
-            .Validate(new WorkflowCreateDto("wf", "1.0.0", null, [Guid.Empty], null, null));
+            .Validate(new WorkflowCreateDto("wf", "1.0.0", null, [Guid.Empty], null, null, null));
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.ErrorMessage.Contains("Guid.Empty"));

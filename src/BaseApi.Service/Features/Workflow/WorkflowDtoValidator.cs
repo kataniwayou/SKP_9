@@ -42,6 +42,12 @@ public sealed class WorkflowCreateDtoValidator : AbstractValidator<WorkflowCreat
             .Must(ids => ids is null || ids.All(id => id != Guid.Empty))
             .WithMessage("AssignmentIds must not contain Guid.Empty.");
 
+        RuleFor(x => x.CacheIds)
+            .Must(ids => ids is null || ids.Distinct().Count() == ids.Count)
+            .WithMessage("CacheIds must be unique when present.")
+            .Must(ids => ids is null || ids.All(id => id != Guid.Empty))
+            .WithMessage("CacheIds must not contain Guid.Empty.");
+
         RuleFor(x => x.CronExpression)
             .Must(BeValidStandardCron)
             .When(x => !string.IsNullOrWhiteSpace(x.CronExpression))
@@ -93,6 +99,12 @@ public sealed class WorkflowUpdateDtoValidator : AbstractValidator<WorkflowUpdat
             .WithMessage("AssignmentIds must be unique when present.")
             .Must(ids => ids is null || ids.All(id => id != Guid.Empty))
             .WithMessage("AssignmentIds must not contain Guid.Empty.");
+
+        RuleFor(x => x.CacheIds)
+            .Must(ids => ids is null || ids.Distinct().Count() == ids.Count)
+            .WithMessage("CacheIds must be unique when present.")
+            .Must(ids => ids is null || ids.All(id => id != Guid.Empty))
+            .WithMessage("CacheIds must not contain Guid.Empty.");
 
         RuleFor(x => x.CronExpression)
             .Must(BeValidStandardCron)
