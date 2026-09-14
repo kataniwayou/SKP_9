@@ -116,7 +116,7 @@ public sealed class MessageIdHeadersTests
         // It is the one record satisfying the interface with a computed property rather than a
         // positional parameter, because the id it reports is nested inside the definition.
         var start = new StartOrchestration(
-            new WorkflowL1(Guid.Parse(Wf), [], null, []));
+            new WorkflowL1(Guid.Parse(Wf), [], null, [], []));
 
         var stamped = new Dictionary<string, object?>();
         MessageIdHeaders.Stamp(stamped, start);
@@ -133,7 +133,7 @@ public sealed class MessageIdHeadersTests
         // properties -- without [JsonIgnore] the body grows a second workflowId beside the one nested
         // in workflow, on a message whose producer and consumer are rolled out separately.
         var json = System.Text.Json.JsonSerializer.Serialize(
-            new StartOrchestration(new WorkflowL1(Guid.Parse(Wf), [], null, [])),
+            new StartOrchestration(new WorkflowL1(Guid.Parse(Wf), [], null, [], [])),
             MessagingJson.Options);
 
         // Counted, not absent: the NESTED WorkflowL1 serializes a workflowId of its own and always

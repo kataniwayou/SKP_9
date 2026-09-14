@@ -189,7 +189,8 @@ public sealed class OrchestrationService
             WorkflowId: workflowId,
             EntryStepIds: workflow.EntryStepIds ?? new List<Guid>(),
             Cron: workflow.CronExpression,
-            Steps: steps);
+            Steps: steps,
+            Caches: new List<CacheL1>());
     }
 
     /// <summary>

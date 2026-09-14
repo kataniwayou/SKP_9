@@ -39,7 +39,7 @@ public sealed class L1ReapServiceTests
 
         public Harness Holding(Guid workflowId, TimeSpan? stoppedAgo = null)
         {
-            Store.Set(workflowId, new WorkflowL1(workflowId, [], null, []), Guid.NewGuid());
+            Store.Set(workflowId, new WorkflowL1(workflowId, [], null, [], []), Guid.NewGuid());
 
             if (stoppedAgo is { } ago)
             {

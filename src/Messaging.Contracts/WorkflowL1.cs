@@ -27,11 +27,13 @@ namespace Messaging.Contracts;
 /// set on a later clean walks outward from exactly these.</param>
 /// <param name="Cron">The five-field cron expression, or null when the workflow is not scheduled.</param>
 /// <param name="Steps">Every step in the validated graph, one entry per L2 step key to be written.</param>
+/// <param name="Caches">Every dictionary this workflow projects into L2 for the duration of a run.</param>
 public sealed record WorkflowL1(
     Guid WorkflowId,
     List<Guid> EntryStepIds,
     string? Cron,
-    List<StepL1> Steps);
+    List<StepL1> Steps,
+    List<CacheL1> Caches);
 
 /// <summary>
 /// One step of a <see cref="WorkflowL1"/> — the flat projection of a step plus its resolved payload

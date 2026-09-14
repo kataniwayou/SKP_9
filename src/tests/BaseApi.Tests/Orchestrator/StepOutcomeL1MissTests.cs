@@ -35,7 +35,7 @@ public sealed class StepOutcomeL1MissTests
         var steps = stepIds
             .Select(id => new StepL1(id, 0, Guid.NewGuid(), "{}", []))
             .ToList();
-        store.Set(Workflow, new WorkflowL1(Workflow, [.. stepIds.Take(1)], "0/30 * * * * ?", steps), Guid.NewGuid());
+        store.Set(Workflow, new WorkflowL1(Workflow, [.. stepIds.Take(1)], "0/30 * * * * ?", steps, []), Guid.NewGuid());
         return store;
     }
 

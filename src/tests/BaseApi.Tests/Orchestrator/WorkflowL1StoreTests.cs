@@ -24,7 +24,7 @@ public sealed class WorkflowL1StoreTests
     private static readonly DateTimeOffset T0 =
         new(2026, 8, 25, 12, 0, 0, TimeSpan.Zero);
 
-    private static WorkflowL1 Definition(Guid workflowId) => new(workflowId, [], null, []);
+    private static WorkflowL1 Definition(Guid workflowId) => new(workflowId, [], null, [], []);
 
     private static WorkflowL1Store Holding(params Guid[] workflowIds)
     {
@@ -88,7 +88,7 @@ public sealed class WorkflowL1StoreTests
         // that ever stopped holding, marking would silently become O(steps) on every stop.
         var steps = new List<StepL1> { new(V, 0, Guid.NewGuid(), "{}", []) };
         var store = new WorkflowL1Store();
-        store.Set(W, new WorkflowL1(W, [V], null, steps), Guid.NewGuid());
+        store.Set(W, new WorkflowL1(W, [V], null, steps, []), Guid.NewGuid());
         Assert.True(store.TryGetActive(W, out var before));
 
         store.MarkDeleted(W, T0);
