@@ -125,7 +125,9 @@ public static class ProcessorHost
         builder.Services.AddSingleton<ITreeAssembler, TreeAssembler>();
         builder.Services.AddSingleton<IMetadataRenderer, XmlMetadataRenderer>();
         builder.Services.AddSingleton<IAudioTranscoder, FfmpegAudioTranscoder>();
-        builder.Services.AddSingleton<IFieldWhitelist, PassThroughFieldWhitelist>();
+        // NOT REGISTERED, AND THAT IS THE DESIGN. A whitelist reads the address on the STEP
+        // PAYLOAD, so it differs per dispatch and there is no single instance to register;
+        // SKNormalizerProcessor builds one per message from the config it was handed.
         builder.Services.AddSingleton<NormalizationPipeline>();
 
         // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching

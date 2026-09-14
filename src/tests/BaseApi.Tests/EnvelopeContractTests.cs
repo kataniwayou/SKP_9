@@ -139,6 +139,9 @@ public sealed class EnvelopeContractTests : IDisposable
     /// wired in so a test can pass <paramref name="handler"/> to exercise Acme's mapping path
     /// instead, without touching every existing identity-path call site.
     /// </summary>
+    /// <summary>The whitelist address these tests hand the normalizer; shape only, nothing reads it.</summary>
+    private const string CacheAddress = "skp:11111111-1111-1111-1111-111111111111:cache:envelope-tests";
+
     private static async Task<byte[]> Normalize(
         byte[] document, string handler = "Sample", IAudioTranscoder? transcoder = null)
     {
@@ -146,6 +149,13 @@ public sealed class EnvelopeContractTests : IDisposable
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        // Acme now gates the artist on the workflow's whitelist, so this hop needs a store and an
+        // address. Seeded with the fixture's own artist mapped to itself: these tests assert the
+        // ENVELOPE contract, and canonicalisation is AcmeHandlerTests' business, so the identity
+        // mapping keeps every existing assertion meaning exactly what it meant before the gate.
+        var l2 = new InMemoryL2();
+        await l2.Db.StringSetAsync($"{CacheAddress}:Unknown", "Unknown");
 
         var normalizer = new SKNormalizerProcessor(
             new RecordingLogger<SKNormalizerProcessor>(),
@@ -157,12 +167,15 @@ public sealed class EnvelopeContractTests : IDisposable
             // the default exploding is what stops a future pass-through handler regressing quietly.
             new NormalizationPipeline(
                 new TreeAssembler(), new XmlMetadataRenderer(),
-                transcoder ?? new ExplodingTranscoder()));
+                transcoder ?? new ExplodingTranscoder()),
+            l2.Multiplexer);
 
         normalizer.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
 
         await normalizer.ExecuteAsync(
-            document, $$"""{"handler":"{{handler}}"}""", E, CancellationToken.None);
+            document,
+            $$"""{"handler":"{{handler}}","cacheAddress":"{{CacheAddress}}"}""",
+            E, CancellationToken.None);
 
         return Assert.Single(sends).Data;
     }
@@ -715,7 +728,7 @@ public sealed class EnvelopeContractTests : IDisposable
         // Its output schema IS the shared tree row, and the collapser must be able to pack what it
         // emits -- the two ends of §1.2's reuse claim, for a handler that actually reshapes content.
         const string sidecar = """
-            {"title":"T","audio":{"file":"track01.wav"}}
+            {"title":"T","artist":"Unknown","audio":{"file":"track01.wav"}}
             """;
 
         var envelope = await Fetch(

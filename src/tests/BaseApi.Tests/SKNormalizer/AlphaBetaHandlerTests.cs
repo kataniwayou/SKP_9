@@ -57,7 +57,7 @@ public sealed class AlphaBetaHandlerTests
         var pipeline = new NormalizationPipeline(
             new TreeAssembler(), new XmlMetadataRenderer(), new FakeTranscoder());
 
-        return pipeline.Run(root, handler, CancellationToken.None).Document;
+        return pipeline.Run(root, handler, FieldWhitelists.AdmitAll, CancellationToken.None).Document;
     }
 
     /// <summary>
@@ -211,7 +211,7 @@ public sealed class AlphaBetaHandlerTests
         var item = Assert.Single(Handler().Locate(AcmeUpstream()));
 
         var metadata = Handler().Map(item);
-        Handler().Augment(metadata, item);
+        Handler().Augment(metadata, item, FieldWhitelists.AdmitAll);
         Handler().Reconcile(metadata, null, Handler().NameFor(metadata, item));
 
         Assert.True(metadata.IsUnset);

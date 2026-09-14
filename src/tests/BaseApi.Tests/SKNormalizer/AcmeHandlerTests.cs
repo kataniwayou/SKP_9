@@ -1,4 +1,5 @@
 using System.Text;
+using BaseProcessor.Core.Processing;
 using Microsoft.Extensions.Time.Testing;
 using Processor.SKNormalizer;
 using Xunit;
@@ -236,7 +237,7 @@ public sealed class AcmeHandlerTests
             Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
 
         var metadata = handler.Map(item);
-        handler.Augment(metadata, item);
+        handler.Augment(metadata, item, FieldWhitelists.AdmitAll);
 
         Assert.Equal("Acme", metadata.Provider);
         Assert.Equal(new DateTimeOffset(2026, 9, 12, 4, 31, 0, TimeSpan.Zero), metadata.IngestedUtc);
@@ -252,7 +253,7 @@ public sealed class AcmeHandlerTests
             Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
 
         var metadata = handler.Map(item);
-        handler.Augment(metadata, item);
+        handler.Augment(metadata, item, FieldWhitelists.AdmitAll);
         handler.Reconcile(metadata, null, handler.NameFor(metadata, item));
 
         Assert.Empty(metadata.MissingRequired());
@@ -268,7 +269,7 @@ public sealed class AcmeHandlerTests
             Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
 
         var metadata = handler.Map(item);
-        handler.Augment(metadata, item);
+        handler.Augment(metadata, item, FieldWhitelists.AdmitAll);
 
         // The sidecar claims 184.2s; it states no codec or bitrate.
         metadata.Codec = "pcm_s16le";
@@ -340,7 +341,7 @@ public sealed class AcmeHandlerTests
         var item = Assert.Single(handler.Locate(root));
 
         var metadata = handler.Map(item);
-        handler.Augment(metadata, item);
+        handler.Augment(metadata, item, FieldWhitelists.AdmitAll);
         var names = handler.NameFor(metadata, item);
         var document = Encoding.UTF8.GetBytes("<metadata />");
 
@@ -374,7 +375,7 @@ public sealed class AcmeHandlerTests
         var item = Assert.Single(handler.Locate(root));
 
         var metadata = handler.Map(item);
-        handler.Augment(metadata, item);
+        handler.Augment(metadata, item, FieldWhitelists.AdmitAll);
 
         // What a converting clone would produce: stage 5 names the entry for the target format and
         // stage 6 hands back the bytes in it.
@@ -406,7 +407,7 @@ public sealed class AcmeHandlerTests
         var item = Assert.Single(handler.Locate(root));
 
         var metadata = handler.Map(item);
-        handler.Augment(metadata, item);
+        handler.Augment(metadata, item, FieldWhitelists.AdmitAll);
         var names = handler.NameFor(metadata, item);
 
         var layout = handler.LayoutFor(
@@ -417,5 +418,102 @@ public sealed class AcmeHandlerTests
             children.Single(c => c is OutputNode.File { Name: "track01.mp3" }));
 
         Assert.Equal(Wav, audio.Content);
+    }
+
+    [Fact]
+    public void AWhitelistedArtistIsReplacedByItsCanonicalForm()
+    {
+        // THE WHOLE POINT OF TryGet OVER A PREDICATE. The dictionary maps the artist as the provider
+        // wrote it to the spelling this system publishes, so a hit does not merely admit the item —
+        // it rewrites the field the XML will carry.
+        var handler = Handler();
+        var item = Assert.Single(handler.Locate(
+            Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
+
+        var metadata = handler.Map(item);
+        handler.Augment(metadata, item, FieldWhitelists.Mapping(("Unknown", "Anonymous Artist")));
+
+        Assert.Equal("Anonymous Artist", metadata.Artist);
+    }
+
+    [Fact]
+    public void AnArtistThatIsNotListedCancelsTheBranch()
+    {
+        var handler = Handler();
+        var item = Assert.Single(handler.Locate(
+            Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
+
+        var metadata = handler.Map(item);
+
+        var ex = Assert.Throws<CancelledException>(
+            () => handler.Augment(metadata, item, FieldWhitelists.Empty));
+
+        // CANCELLED, NOT FAILED, and the distinction is the design: an unapproved artist is a
+        // document this workflow is not meant to carry, not one it could not read.
+        Assert.Contains("Unknown", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("whitelist", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AStepWithNoCacheAddressFailsRatherThanCancelling()
+    {
+        // The failure that must NOT look like an empty whitelist. A step whose payload forgot its
+        // address would otherwise cancel every document, which reads in the logs exactly like a
+        // correctly-configured list that matches nothing.
+        var handler = Handler();
+        var item = Assert.Single(handler.Locate(
+            Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
+
+        var metadata = handler.Map(item);
+
+        var ex = Assert.Throws<FailedException>(
+            () => handler.Augment(metadata, item, new UnconfiguredFieldWhitelist()));
+
+        Assert.Contains("cacheAddress", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASidecarWithNoArtistCancelsBecauseTheGateFailsClosed()
+    {
+        // Artist is optional in the standardized document, so this shape normalized fine before the
+        // gate existed. It cancels now, deliberately: a gate that admits documents carrying nothing
+        // to check is one that is bypassed by dropping the field.
+        const string noArtist = """
+            {
+              "title": "Nocturne in E-flat",
+              "album": "Field Recordings",
+              "recordedUtc": "2026-03-04T05:06:07Z",
+              "audio": { "file": "track01.wav", "sampleRateHz": 44100, "channels": 2, "durationSeconds": 184.2 }
+            }
+            """;
+
+        var handler = Handler();
+        var item = Assert.Single(handler.Locate(
+            Archive(Leaf("track01.wav", Wav), Leaf("track01.json", noArtist))));
+
+        var metadata = handler.Map(item);
+
+        var ex = Assert.Throws<CancelledException>(
+            () => handler.Augment(metadata, item, FieldWhitelists.Empty));
+
+        Assert.Contains("no artist", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheCanonicalArtistIsWhatReachesTheXml()
+    {
+        // The end of the requirement: the whitelist's VALUE is what the rendered document carries.
+        var handler = Handler();
+        var item = Assert.Single(handler.Locate(
+            Archive(Leaf("track01.wav", Wav), Leaf("track01.json", Sidecar))));
+
+        var metadata = handler.Map(item);
+        handler.Augment(metadata, item, FieldWhitelists.Mapping(("Unknown", "Anonymous Artist")));
+        handler.Reconcile(metadata, null, handler.NameFor(metadata, item));
+
+        var xml = Encoding.UTF8.GetString(new XmlMetadataRenderer().Render(metadata));
+
+        Assert.Contains("<artist>Anonymous Artist</artist>", xml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<artist>Unknown</artist>", xml, StringComparison.Ordinal);
     }
 }

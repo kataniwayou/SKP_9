@@ -54,12 +54,17 @@ public sealed class SKNormalizerHostTests
     }
 
     [Fact]
-    public void TheWhitelistIsRegisteredAsAPassThrough()
+    public void TheWhitelistIsDeliberatelyNotRegistered()
     {
-        // The seam for the deferred Redis whitelist. Registered now so turning it on later is a
-        // registration swap rather than a reshaping of stages 3 and 4.
+        // IT USED TO BE, AS A PASS-THROUGH, AND THAT STOPPED BEING RIGHT WHEN IT GREW A BACKING
+        // STORE. A whitelist reads the address on the STEP PAYLOAD, so two steps of one workflow can
+        // want two different dictionaries and a third can want none — there is no single instance a
+        // container could hand out. SKNormalizerProcessor builds one per dispatch instead.
+        //
+        // Asserted rather than simply deleted: a registration re-added here would resolve for every
+        // dispatch and quietly serve one workflow's list to another.
         using var host = Build();
 
-        Assert.True(host.Services.GetRequiredService<IFieldWhitelist>().Allows("anything"));
+        Assert.Null(host.Services.GetService<IFieldWhitelist>());
     }
 }

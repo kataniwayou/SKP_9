@@ -39,6 +39,18 @@ internal sealed class InMemoryL2
 
         Db.CreateBatch().Returns(batch);
 
+        // THE SYNCHRONOUS READ, STUBBED HERE RATHER THAN IN Wire BECAUSE IT DOES NOT EXIST ON
+        // IDatabaseAsync — a batch has no synchronous surface, only IDatabase does.
+        // RedisFieldWhitelist reads through it: the normalization pipeline is synchronous across all
+        // seven of its stages, so a whitelist lookup inside stage 4 cannot await without making the
+        // handler interface async. Left unstubbed, NSubstitute answers RedisValue.Null for every key
+        // and a seeded whitelist behaves exactly like an empty one — the failure hardest to tell
+        // from a working gate.
+        Db.StringGet(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(ci => _strings.TryGetValue(ci.ArgAt<RedisKey>(0).ToString(), out var value)
+                ? (RedisValue)value
+                : RedisValue.Null);
+
         Multiplexer = Substitute.For<IConnectionMultiplexer>();
         Multiplexer.GetDatabase().Returns(Db);
     }
@@ -119,6 +131,7 @@ internal sealed class InMemoryL2
             .Returns(ci => _strings.TryGetValue(ci.ArgAt<RedisKey>(0).ToString(), out var value)
                 ? (RedisValue)value
                 : RedisValue.Null);
+
 
         target.KeyExistsAsync(Arg.Any<RedisKey>())
             .Returns(ci => _strings.ContainsKey(ci.ArgAt<RedisKey>(0).ToString()));
