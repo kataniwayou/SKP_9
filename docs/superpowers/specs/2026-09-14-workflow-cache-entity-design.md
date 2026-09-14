@@ -277,14 +277,19 @@ is not. `ProcessorConfig.SerializerOptions` sets only `PropertyNameCaseInsensiti
 be silently discarded, and one carrying it after this change binds. Declaring it now means the
 behaviour change later is a handler edit, not a contract edit.
 
-**The deferred cost, stated so it is not a surprise later.** Every config schema in the live chain
-sets `"additionalProperties": false`, SKNormalizer's included — `required: ["handler"]`, nothing else
-permitted (`docs/rebuild-filefetcher-archiveexpander-chain.md:203`). The day an operator authors
-`cacheAddress` into a step payload, `PayloadConfigSchemaValidator` refuses it until that config
-schema declares the property — and schema definitions are frozen, so that means POSTing a new row,
-re-pointing both sides and restarting. Because three schema rows serve five processors, re-pointing
-one can disturb an unrelated published workflow. **None of that lands in this change**, because
-nothing authors the property yet. It lands once, per processor, when the whitelist behaviour ships.
+**The cost, and when it actually lands.** Every config schema in the live chain sets
+`"additionalProperties": false`, SKNormalizer's included — `required: ["handler"]`, nothing else
+permitted (`docs/rebuild-filefetcher-archiveexpander-chain.md:203`). `ConfigSchemaConformance.Check`
+compares the *shape of the config record* against that definition — not against any payload — and it
+runs in `SKNormalizerConfigSchemaTests`, and in `ProcessorStartupOrchestrator` at startup against the
+live schema row. So the cost arrives with `CacheAddress` itself, in this change, not later when the
+whitelist behaviour ships: the in-repo fixture
+(`src/tests/BaseApi.Tests/Schemas/sknormalizer-config.json`) is updated here to declare
+`cacheAddress` alongside `handler`, and the live schema row must be replaced — POSTing a new row,
+re-pointing both sides, and restarting, since definitions are frozen — before a build carrying the
+property is deployed, or the replica fails startup conformance and publishes UNHEALTHY. Because
+three schema rows serve five processors, re-pointing one can disturb an unrelated published
+workflow.
 
 `BaseProcessor.Core`, `ProcessDispatchHandler`, `BaseProcessorOfT` and the other nine processors are
 untouched.

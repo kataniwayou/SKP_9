@@ -50,8 +50,13 @@ internal sealed class L2ProjectionWriter
 
         // Deduplicated by root: the junction's composite key already prevents a repeat, but the
         // writer should not depend on a constraint two layers away — and a repeat here would put the
-        // same root in the record twice, making the stop path delete it twice.
+        // same root in the record twice, making the stop path delete it twice. A blank or
+        // whitespace-only root is filtered out for the same reason L2Cleanup skips one when it reads
+        // CacheRoots back: unreachable today, because CacheRules.CheckRoot rejects it at validation
+        // and CacheEntity.Root trims on assignment, but if one were ever written here, cleanup would
+        // never find it to delete — a key with no root left to reach it.
         var caches = (workflow.Caches ?? new List<CacheL1>())
+            .Where(c => !string.IsNullOrWhiteSpace(c.Root))
             .GroupBy(c => c.Root, StringComparer.Ordinal)
             .Select(g => g.First())
             .ToList();

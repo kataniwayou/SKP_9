@@ -199,10 +199,18 @@ Content-Type: application/json
 {
   "name": "sk-normalizer-config-v2",
   "version": "2.0.0",
-  "description": "SKNormalizer step payload: which provider handler to apply. Supersedes sk-normalizer-config 1.0.0, whose enum predates AlphaBeta; a referenced definition cannot be edited, so a new handler needs a new row. The enum is exactly the handlers this build registers, so a workflow naming an absent handler is refused at publish rather than failing at dispatch.",
-  "definition": "{\"type\": \"object\", \"title\": \"SKNormalizer step payload\", \"$schema\": \"https://json-schema.org/draft/2020-12/schema\", \"required\": [\"handler\"], \"properties\": {\"handler\": {\"enum\": [\"Acme\", \"AlphaBeta\", \"Sample\"], \"type\": \"string\", \"description\": \"The provider handler to apply. One of the names this processor version carries.\"}}, \"additionalProperties\": false}"
+  "description": "SKNormalizer step payload: which provider handler to apply. Supersedes sk-normalizer-config 1.0.0, whose enum predates AlphaBeta; a referenced definition cannot be edited, so a new handler needs a new row. The enum is exactly the handlers this build registers, so a workflow naming an absent handler is refused at publish rather than failing at dispatch. Also declares cacheAddress, unread by this build, because ConfigSchemaConformance checks the config record's shape, not any payload -- the property has to be described here as soon as it exists on the record.",
+  "definition": "{\"type\": \"object\", \"title\": \"SKNormalizer step payload\", \"$schema\": \"https://json-schema.org/draft/2020-12/schema\", \"required\": [\"handler\"], \"properties\": {\"handler\": {\"enum\": [\"Acme\", \"AlphaBeta\", \"Sample\"], \"type\": \"string\", \"description\": \"The provider handler to apply. One of the names this processor version carries.\"}, \"cacheAddress\": {\"type\": [\"string\", \"null\"], \"description\": \"The full L2 address of one projected dictionary for whitelist lookups. Nothing reads it yet. Declared in the schema because ConfigSchemaConformance checks record shape at startup, so every property on the config record must be described here even before any payload sets it.\"}}, \"additionalProperties\": false}"
 }
 ```
+
+A deployment carrying the `CacheAddress` property on `SKNormalizerConfig` needs this schema row —
+`ConfigSchemaConformance.Check` compares the record's shape against the definition, not against any
+payload, so the property has to be declared here the moment it exists on the record, before any
+operator authors it into a step. If this row is already live without `cacheAddress`, it cannot be
+edited: definitions are frozen, so the fix is a new schema row, both sides re-pointed to it (the
+processor's `configSchemaId` and the workflow steps naming the old one), and a restart. Skip that and
+the replica fails startup conformance against the old row and publishes UNHEALTHY.
 
 Record the returned id as `<sk-normalizer-config-v2>`.
 
