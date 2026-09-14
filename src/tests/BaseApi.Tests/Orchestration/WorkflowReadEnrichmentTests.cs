@@ -7,11 +7,11 @@ using Xunit;
 namespace BaseApi.Tests.Orchestration;
 
 /// <summary>
-/// The read path must return both junction-backed collections. They live in
-/// <c>workflow_entry_steps</c> and <c>workflow_assignments</c> rather than on the entity, so the
-/// mapper cannot supply them and hard-codes null; without an enrichment step every read reports a
-/// workflow as having no entry steps and no assignments, and a client that reads-then-writes
-/// destroys the bindings it just failed to see.
+/// The read path must return all three junction-backed collections. They live in
+/// <c>workflow_entry_steps</c>, <c>workflow_assignments</c> and <c>workflow_caches</c> rather than on
+/// the entity, so the mapper cannot supply them and hard-codes null; without an enrichment step every
+/// read reports a workflow as having no entry steps, no assignments and no caches, and a client that
+/// reads-then-writes destroys the bindings it just failed to see.
 /// </summary>
 public sealed class WorkflowReadEnrichmentTests : IAsyncLifetime
 {
@@ -99,9 +99,9 @@ public sealed class WorkflowReadEnrichmentTests : IAsyncLifetime
     [Fact]
     public async Task CreateEchoesBackWhatWasPersisted()
     {
-        // The response to a POST that supplied both collections must not report them as absent — that
-        // reads as the input having been dropped, and invites a retry that duplicates the workflow,
-        // which nothing in the schema prevents.
+        // The response to a POST that supplied the entry-step and assignment collections must not
+        // report them as absent — that reads as the input having been dropped, and invites a retry
+        // that duplicates the workflow, which nothing in the schema prevents.
         var created = await _service.CreateAsync(
             new WorkflowCreateDto("wf-created", "1.0.0", null, [_entryStep], [_assignmentA], null, null),
             TestContext.Current.CancellationToken);
@@ -113,8 +113,8 @@ public sealed class WorkflowReadEnrichmentTests : IAsyncLifetime
     [Fact]
     public async Task UpdateReflectsTheReplacedCollections()
     {
-        // Update is remove-and-replace on both junctions, so the response has to show the new sets
-        // rather than the old.
+        // Update is remove-and-replace on the entry-step and assignment junctions, so the response has
+        // to show the new sets rather than the old.
         var updated = await _service.UpdateAsync(
             _bound,
             new WorkflowUpdateDto("wf-bound", "1.0.0", null, [_otherEntryStep], [_assignmentB], null, null),

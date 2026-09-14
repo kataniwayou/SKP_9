@@ -9,7 +9,8 @@ namespace BaseApi.Service.Features.Workflow;
 /// Create-side validator. Including the shared base validator absorbs the name, version and
 /// description rules. The workflow-specific rules are: the entry-step collection must be present,
 /// non-empty, unique and free of empty ids; the assignment collection, when present, must be unique
-/// and free of empty ids; and the cron expression, when present, must parse.
+/// and free of empty ids; the cache collection, when present, must be unique and free of empty ids;
+/// and the cron expression, when present, must parse.
 /// <para>
 /// A well-formed but non-existent step id is not caught here — it surfaces as a foreign-key violation
 /// from Postgres and becomes a 422.

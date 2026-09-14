@@ -77,12 +77,15 @@ internal sealed class L2Cleanup
         // Read the key list from each cache root, exactly as the step key set is read from the
         // workflow root: the write recorded what it wrote, so removal is one read per dictionary
         // rather than a scan. A cache root that is already gone contributes nothing — its entries
-        // are unreachable, and aborting here would strand every key after it.
+        // are unreachable, and aborting here would strand every key after it. The whitespace check is
+        // defence-in-depth: CacheRules.CheckRoot rejects blank and whitespace roots and CacheEntity.Root
+        // trims on assignment, so no writer can produce one — but this reads a root name back out of
+        // stored JSON, which is exactly where an upstream guard should not be trusted blindly.
         var cacheKeys = new List<RedisKey>();
 
         foreach (var cacheRoot in (root?.CacheRoots ?? new List<string>()).Distinct(StringComparer.Ordinal))
         {
-            if (string.IsNullOrEmpty(cacheRoot))
+            if (string.IsNullOrWhiteSpace(cacheRoot))
             {
                 continue;
             }

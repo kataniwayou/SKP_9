@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace BaseApi.Service.Composition;
 
 /// <summary>
-/// Aggregates the five per-entity feature registrations and the orchestration feature into one call,
+/// Aggregates the six per-entity feature registrations and the orchestration feature into one call,
 /// invoked from the composition root after the base API registration. Each per-entity extension
 /// registers its concrete service plus the abstract-base alias its empty-body controller injects.
 /// The orchestration extension is simpler, because its controller injects the concrete service
