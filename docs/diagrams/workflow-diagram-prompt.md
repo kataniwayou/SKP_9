@@ -16,6 +16,12 @@ a step ledger table with each step's processor, entryCondition and real
 assignment payload, and a short notes section for what the picture can't
 carry.
 
+A step has three outcomes, not two. Read the processor source for every
+step you draw and find its Cancelled paths as well as its failure ones,
+then show where a cancel goes — which, if no successor's entryCondition
+admits it, is nowhere. Note any cache or whitelist address a payload
+carries and say what is projected at it.
+
 Flag anything you find where the stored metadata contradicts the live rows.
 
 Before publishing, render the page in a browser and MEASURE the SVG with
@@ -25,7 +31,7 @@ text overlaps another text or sits over a node box, that no line crosses a
 label, and that nothing escapes the viewBox. Screenshot both themes.
 ```
 
-## The three lines that earn their place
+## The four lines that earn their place
 
 **"Don't trust the docs or the stored description."** `filefetcher-archiveexpander-chain`'s own
 `description` field still reads `KafkaImporter -> FileFetcher -> ArchiveExpander -> ArchiveCollapser
@@ -37,6 +43,13 @@ line the drawing follows the description and silently loses two features.
 a check rather than a picture. On the first run it caught assignment `42c5abdd…`, named
 `sk-normalizer-sample-assignment` and described as "handler Sample: identity", carrying
 `{"handler": "Acme"}`.
+
+**"A step has three outcomes, not two."** Added 2026-09-15. The first drawing showed hop 4 as a
+plain success box with a dashed failure edge, which is what the workflow rows say. The processor
+source says otherwise: `AcmeHandler.Augment` throws `CancelledException` when the artist misses the
+whitelist or is absent, and since every successor is `entryCondition 1 · Completed`, that branch
+stops without taking either drawn edge. A cancel is invisible in the API rows — it exists only in
+the handler — so a drawing sourced from the live graph alone will always miss it.
 
 **"MEASURE the SVG with getBBox."** Added 2026-09-14, after a reader spotted that hop 4b's dashed
 failure edge started 34px below the box it belongs to. Measuring the *rendered* page then found
@@ -64,6 +77,10 @@ horizontal scroller and you will review a cropped drawing.
 
 The assertions worth running, all against `getBBox()` on the live DOM:
 
+Test a `path` with its own segments, not its bbox: the bypass arc's bounding box swallows two labels
+it never touches, and a bbox-only check reports three collisions that are not there. Split the `d`
+into segments and test each.
+
 | check | what a failure means |
 |---|---|
 | each vertical `.edge-fail` starts at the bottom edge of the box above it | an edge floating free of its node |
@@ -72,6 +89,9 @@ The assertions worth running, all against `getBBox()` on the live DOM:
 | no line crosses a text bbox | a rule struck through a caption |
 | `svg.getBBox()` stays inside the `viewBox` | clipped content at the edges |
 | `documentElement.scrollWidth <= clientWidth` | the page scrolls sideways |
+| every gate dot lies on a real edge segment and over no text | a marker floating beside its edge |
+| each vertical stub starts at its box's bottom edge, bus drops excepted | same defect as the failure edges |
+| no `.facts` cell leaves dead columns in its row | an odd fact count paints a grey band |
 
 Then screenshot with `data-theme="dark"` set on the root as well as the default, and look at both.
 
@@ -95,3 +115,17 @@ Then screenshot with `data-theme="dark"` set on the root as well as the default,
 | workflow | page | artifact |
 |---|---|---|
 | `filefetcher-archiveexpander-chain` | [`filefetcher-archiveexpander-chain.html`](filefetcher-archiveexpander-chain.html) | https://claude.ai/code/artifact/da7795b5-c70c-4da4-bcdb-8dff262ad359 |
+
+Redrawn 2026-09-15 from a fresh live capture and republished to the same URL (version 4). What the
+redraw changed, beyond the cancelled stub the prompt now asks for:
+
+- **Hop 4's payload** gained `cacheAddress`, and the workflow gained a cache row.
+- **Four schema edges came back.** The page had said "2 of 8 enforced"; live it is 7 of 8, the one
+  still open being `kafka-exporter`, which declares no input schema. Gate dots on six edges plus the
+  bypass arc.
+- **The processor count was wrong.** "7 (two used twice)" does not reconcile with ten steps — there
+  are eight rows. Nobody caught it by reading; it fell out of counting the live rows.
+
+The lesson for the next redraw: a count in the facts strip is a claim, and the capture script should
+print every number the page states so the two can be diffed. Three of the six facts were stale here
+after one day.

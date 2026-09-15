@@ -2,9 +2,12 @@
   filefetcher-archiveexpander-chain — workflow schematic
   Published artifact: https://claude.ai/code/artifact/da7795b5-c70c-4da4-bcdb-8dff262ad359
 
-  Captured live from http://localhost:18080/api/v1 on 2026-09-14, AFTER the AlphaBeta step was
-  wired: the workflow row 1a56b3ca-e276-4815-87fa-5c2f48ab6dad, its 10 steps, 10 assignments and
+  Captured live from http://localhost:18080/api/v1 on 2026-09-15, AFTER the AlphaBeta step was
+  wired, the four nulled schema edges were restored, and the Acme artist gate shipped: the workflow
+  row 1a56b3ca-e276-4815-87fa-5c2f48ab6dad, its 10 steps, 10 assignments, its one cache row and
   every processor row they reach.
+  The cancelled outcome on hop 4 is NOT in those rows — it lives in AcmeHandler.Augment, and was
+  read from the processor source. A drawing taken from the API alone will miss it.
   A SNAPSHOT, not a live view — every payload and schema edge in here is a value a REST PUT
   can change without touching this file.
 
@@ -121,6 +124,9 @@
     color: var(--muted);
   }
   .fact dd { margin: 0; font-family: var(--mono); font-size: 13px; word-break: break-all; }
+  .fact dd.plain { word-break: normal; }
+  /* the last fact spans the row it starts, so an odd count leaves no dead cells */
+  .facts .fact:last-child { grid-column: 1 / -1; }
 
   figure { margin: 0; display: flex; flex-direction: column; gap: 14px; }
   .scroller {
@@ -143,6 +149,9 @@
   .n-cfg-fail { fill: var(--fail); font-family: var(--mono); font-size: 10.5px; }
   .edge-ok { stroke: var(--ok); stroke-width: 1.6; fill: none; }
   .edge-fail { stroke: var(--fail); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+  .edge-cancel { stroke: var(--muted); stroke-width: 1.4; fill: none; stroke-dasharray: 2 4; stroke-linecap: round; }
+  .stop-bar { stroke: var(--muted); stroke-width: 2.2; }
+  .lbl-cancel { fill: var(--muted); font-family: var(--sans); font-size: 11.5px; font-weight: 600; }
   .gate { fill: var(--sheet); stroke: var(--ok); stroke-width: 2; }
   .mk-ok { fill: var(--ok); }
   .mk-fail { fill: var(--fail); }
@@ -203,6 +212,7 @@
   }
   .ec.ok { color: var(--ok); border-color: var(--ok); }
   .ec.f { color: var(--fail); border-color: var(--fail); }
+  .ec.c { color: var(--muted); border-color: var(--muted); }
   tr.failrow td { background: var(--fail-soft); }
   tr.forkrow td { background: var(--ok-soft); }
 
@@ -232,14 +242,15 @@
       <div class="fact"><dt>Cron</dt><dd>5,35 * * * * *</dd></div>
       <div class="fact"><dt>Entry step</dt><dd>split-importer</dd></div>
       <div class="fact"><dt>Steps / assignments</dt><dd>10 / 10</dd></div>
-      <div class="fact"><dt>Processor rows</dt><dd>7 (two used twice)</dd></div>
-      <div class="fact"><dt>Schema edges enforced</dt><dd>2 of 8</dd></div>
+      <div class="fact"><dt>Processor rows</dt><dd>8 (two used twice)</dd></div>
+      <div class="fact"><dt>Schema edges enforced</dt><dd>7 of 8</dd></div>
+      <div class="fact"><dt>Workflow cache</dt><dd class="plain">chain-artists · one artist, projected to L2 for the run and deleted on stop</dd></div>
     </dl>
   </header>
 
   <figure>
     <div class="scroller">
-      <svg viewBox="0 0 1580 520" role="img" aria-label="The chain runs left to right from the Kafka importer to the Kafka exporter. At the normalizer it forks: the Acme step passes its output both to a second normalizer step running the AlphaBeta handler and, by an arc over the row, straight to the archive collapser. Both branches rejoin at that collapser. Every step also has a dashed failure edge down to a shared record-failure step, which hands off to a second exporter writing the skp-failures topic. Only the first two schema edges are still enforced.">
+      <svg viewBox="0 0 1580 520" role="img" aria-label="The chain runs left to right from the Kafka importer to the Kafka exporter. At the normalizer it forks: the Acme step passes its output both to a second normalizer step running the AlphaBeta handler and, by an arc over the row, straight to the archive collapser. Both branches rejoin at that collapser. Every step also has a dashed failure edge down to a shared record-failure step, which hands off to a second exporter writing the skp-failures topic. The Acme step carries a third, dotted stub that ends in a stop bar: a cancelled document goes nowhere. Seven of the eight schema edges are enforced.">
         <defs>
           <marker id="ar-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <polygon class="mk-ok" points="0,1 10,5 0,9"></polygon>
@@ -253,6 +264,7 @@
         <path class="edge-ok" d="M 691 120 L 691 68 L 1075 68 L 1075 114" marker-end="url(#ar-ok)"></path>
         <text class="lbl-schema" x="883" y="60" text-anchor="middle">archive-document — the container branch</text>
         <text class="lbl-out" x="883" y="86" text-anchor="middle">→ acme-&lt;guid&gt;.zip</text>
+        <circle class="gate" cx="1075" cy="95" r="4"></circle>
 
         <!-- inbound topic -->
         <rect class="topic-pill" x="40" y="20" width="150" height="32"></rect>
@@ -343,16 +355,20 @@
 
         <line class="edge-ok" x1="574" y1="163" x2="610" y2="163" marker-end="url(#ar-ok)"></line>
         <text class="lbl-schema" x="592" y="110" text-anchor="middle">archive-document</text>
+        <circle class="gate" cx="592" cy="163" r="4"></circle>
 
         <line class="edge-ok" x1="766" y1="163" x2="802" y2="163" marker-end="url(#ar-ok)"></line>
         <text class="lbl-schema" x="784" y="110" text-anchor="middle">archive-document</text>
+        <circle class="gate" cx="784" cy="163" r="4"></circle>
 
         <line class="edge-ok" x1="958" y1="163" x2="994" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-schema" x="976" y="110" text-anchor="middle">the XML alone</text>
+        <text class="lbl-schema" x="976" y="110" text-anchor="middle">archive-document</text>
+        <circle class="gate" cx="976" cy="163" r="4"></circle>
         <text class="lbl-out" x="976" y="228" text-anchor="middle">→ track01.xml</text>
 
         <line class="edge-ok" x1="1150" y1="163" x2="1186" y2="163" marker-end="url(#ar-ok)"></line>
         <text class="lbl-schema" x="1168" y="110" text-anchor="middle">file-envelope</text>
+        <circle class="gate" cx="1168" cy="163" r="4"></circle>
 
         <line class="edge-ok" x1="1342" y1="163" x2="1378" y2="163" marker-end="url(#ar-ok)"></line>
         <text class="lbl-schema" x="1360" y="110" text-anchor="middle">file-locator</text>
@@ -362,6 +378,12 @@
         <line class="edge-fail" x1="307" y1="206" x2="307" y2="296"></line>
         <line class="edge-fail" x1="499" y1="206" x2="499" y2="296"></line>
         <line class="edge-fail" x1="691" y1="206" x2="691" y2="296"></line>
+
+        <!-- hop 4's third outcome: a cancel no successor admits, so the branch stops here -->
+        <line class="edge-cancel" x1="655" y1="206" x2="655" y2="246"></line>
+        <line class="stop-bar" x1="643" y1="246" x2="667" y2="246"></line>
+        <text class="lbl-cancel" x="632" y="238" text-anchor="end">Cancelled · outcome 3</text>
+        <text class="lbl-note" x="632" y="254" text-anchor="end">no successor admits it</text>
         <line class="edge-fail" x1="883" y1="206" x2="883" y2="296"></line>
         <line class="edge-fail" x1="1075" y1="206" x2="1075" y2="296"></line>
         <line class="edge-fail" x1="1267" y1="206" x2="1267" y2="296"></line>
@@ -395,22 +417,26 @@
         <text class="lbl-note" x="1160" y="388" text-anchor="start">ends lineage</text>
 
         <!-- legend -->
-        <line class="edge-ok" x1="40" y1="478" x2="86" y2="478" marker-end="url(#ar-ok)"></line>
-        <text class="legend-txt" x="96" y="482" text-anchor="start">Completed — entryCondition 1 (hop 1 is 4, Always)</text>
-        <line class="edge-fail" x1="450" y1="478" x2="496" y2="478" marker-end="url(#ar-fail)"></line>
-        <text class="legend-txt" x="506" y="482" text-anchor="start">Failed — entryCondition 2</text>
-        <circle class="gate" cx="800" cy="478" r="4"></circle>
-        <text class="legend-txt" x="814" y="482" text-anchor="start">the schema edge is still enforced — the other six are not</text>
+        <line class="edge-ok" x1="40" y1="466" x2="86" y2="466" marker-end="url(#ar-ok)"></line>
+        <text class="legend-txt" x="96" y="470" text-anchor="start">Completed — entryCondition 1 (hop 1 is 4, Always)</text>
+        <line class="edge-fail" x1="450" y1="466" x2="496" y2="466" marker-end="url(#ar-fail)"></line>
+        <text class="legend-txt" x="506" y="470" text-anchor="start">Failed — entryCondition 2</text>
+
+        <line class="edge-cancel" x1="40" y1="496" x2="80" y2="496"></line>
+        <line class="stop-bar" x1="80" y1="488" x2="80" y2="504"></line>
+        <text class="legend-txt" x="96" y="500" text-anchor="start">Cancelled — entryCondition 3, which no step in this workflow declares</text>
+        <circle class="gate" cx="800" cy="496" r="4"></circle>
+        <text class="legend-txt" x="814" y="500" text-anchor="start">schema edge enforced — seven of the eight now are</text>
       </svg>
     </div>
-    <figcaption>Read across for the round trip, down for the failure path. Hop 4 names <span class="m">three</span> successors: the collapser by the arc over the row, hop 4b beside it, and <span class="m">record-failure</span> on a failed outcome — <span class="m">StepAdvancement.SelectNext</span> collects every successor whose entry condition matches, so both Completed branches are dispatched, each with its own freshly minted key. Hops 4 and 4b are the <em>same processor row</em> under two payloads; 5, 6 and 7 are single steps serving both branches, which is why the exporter emits two records per input.</figcaption>
+    <figcaption>Read across for the round trip, down for the failure path, and nowhere for a cancel. Hop 4 names <span class="m">three</span> successors: the collapser by the arc over the row, hop 4b beside it, and <span class="m">record-failure</span> on a failed outcome — <span class="m">StepAdvancement.SelectNext</span> collects every successor whose entry condition matches, so both Completed branches are dispatched, each with its own freshly minted key. Hops 4 and 4b are the <em>same processor row</em> under two payloads; 5, 6 and 7 are single steps serving both branches, which is why the exporter emits two records per input. The dotted stub under hop 4 is its <em>third</em> outcome: the artist gate cancels, and because a cancel matches neither <span class="m">1 · Completed</span> nor <span class="m">2 · Failed</span>, that document is not collapsed, not persisted, and not recorded as a failure either.</figcaption>
   </figure>
 
   <section>
     <h2>Step ledger</h2>
     <div class="scroller" style="padding:16px 18px">
       <table>
-        <caption>The ten steps as registered, with the assignment payload each carries.</caption>
+        <caption>The ten steps as registered, with the assignment payload and the schema row each carries. Entry is the condition a step demands of its predecessor; hop 4 carries a second badge because it is the only step that can itself end <span class="m">Cancelled</span>.</caption>
         <thead>
           <tr><th>Hop</th><th>Step</th><th>Processor</th><th>Entry</th><th>Payload</th><th>In → Out schema</th></tr>
         </thead>
@@ -443,9 +469,9 @@
             <td class="hop">4</td>
             <td><span class="proc">sk-normalizer-sample</span><br><code>56fca87f…</code></td>
             <td>sk-normalizer</td>
-            <td><span class="ec ok">1 · Completed</span></td>
-            <td><code>{"handler": "Acme"}</code></td>
-            <td><code>null → null</code></td>
+            <td><span class="ec ok">1 · Completed</span><br><span class="ec c">can end 3 · Cancelled</span></td>
+            <td><code>{"handler": "Acme",<br> "cacheAddress": "skp:1a56b3ca…:cache:chain-artists"}</code></td>
+            <td><code>archive-document → archive-document</code></td>
           </tr>
           <tr class="forkrow">
             <td class="hop">4b</td>
@@ -453,7 +479,7 @@
             <td>sk-normalizer <em>(same row)</em></td>
             <td><span class="ec ok">1 · Completed</span></td>
             <td><code>{"handler": "AlphaBeta"}</code></td>
-            <td><code>null → null</code></td>
+            <td><code>archive-document → archive-document</code></td>
           </tr>
           <tr>
             <td class="hop">5</td>
@@ -461,7 +487,7 @@
             <td>archive-collapser</td>
             <td><span class="ec ok">1 · Completed</span></td>
             <td><code>{}</code></td>
-            <td><code>null → file-envelope</code></td>
+            <td><code>archive-document → file-envelope</code></td>
           </tr>
           <tr>
             <td class="hop">6</td>
@@ -469,7 +495,7 @@
             <td>file-persister</td>
             <td><span class="ec ok">1 · Completed</span></td>
             <td><code>{"folderPath": "/mnt/skp-files/out"}</code></td>
-            <td><code>null → file-locator</code></td>
+            <td><code>file-envelope → file-locator</code></td>
           </tr>
           <tr>
             <td class="hop">7</td>
@@ -508,16 +534,24 @@
         <p>AlphaBeta lifts the XML Acme has <em>already</em> rendered, so it carries <code>PreviousCompleted</code> and an Acme failure skips it. A parallel branch off the expander would redo the whole provider mapping — and would still run after its sibling had failed.</p>
       </div>
       <div class="note">
+        <h3>The cancel is in the handler, not in the graph</h3>
+        <p>Acme gates the artist on a whitelist projected into L2 at the address its payload names — <span class="m">skp:1a56b3ca…:cache:chain-artists</span>, written when the workflow starts and deleted when it stops. An artist that is not on the list, <em>or no artist at all</em>, ends the branch as <strong>Cancelled</strong>: an unapproved document is one this chain is not meant to carry, not one it could not read. <strong>Nothing in the API rows says this can happen</strong> — the outcome exists only in <code>AcmeHandler.Augment</code>, which is why the stub is drawn from the source and not from the graph. Only Acme reads a list; 4b carries no <code>cacheAddress</code> and needs none.</p>
+      </div>
+      <div class="note">
+        <h3>An empty whitelist and a missing one are different failures</h3>
+        <p>A root projected as <code>[]</code> is a list that approves nobody and cancels each document. A root that was never projected — the workflow names no such cache, or the address is a typo — is a <strong>Failed</strong> step saying so. The writer stores the empty dictionary explicitly to keep those two apart, since in the logs they otherwise read identically.</p>
+      </div>
+      <div class="note">
         <h3>The two XMLs are one document</h3>
         <p>4b renders nothing: it passes Acme's bytes through untouched. <strong>Verified live — the standalone <code>track01.xml</code> is sha256-identical to the copy inside the zip.</strong> Not "kept in step with"; the same bytes.</p>
       </div>
       <div class="note">
-        <h3>Six of eight schema edges are now open</h3>
-        <p>Nulling <code>sk-normalizer</code> on both sides plus the collapser's and persister's inputs leaves only the two edges before the normalizer enforced. The <strong>output</strong> null is the one that costs: in this system the producing side is what validates, and consumer-side input checks have never fired live.</p>
+        <h3>Seven of eight schema edges are enforced again</h3>
+        <p>The four ids nulled on 2026-09-14 — <code>sk-normalizer</code> on both sides, the collapser's and the persister's inputs — were restored the same day, and the drawing's gate dots follow. The one still open is the last: <code>kafka-exporter</code> declares no input schema, so nothing checks what the persister hands it. <strong>The normalizer's input is forced to equal its own output</strong>, because <code>SchemaEdgeValidator</code> compares row ids and 4b's parent is 4 — the same row. A tighter input is refused even when its definition is byte-identical.</p>
       </div>
       <div class="note">
         <h3>The stored description is two features stale</h3>
-        <p>The workflow row still reads <span class="m">“KafkaImporter → FileFetcher → ArchiveExpander → ArchiveCollapser → FilePersister → KafkaExporter”</span>. It has never mentioned <strong>sk-normalizer</strong>, added at hop 4, nor the AlphaBeta fork. The steps above are the truth.</p>
+        <p>The workflow row still reads <span class="m">“KafkaImporter → FileFetcher → ArchiveExpander → ArchiveCollapser → FilePersister → KafkaExporter”</span>. It has never mentioned <strong>sk-normalizer</strong>, added at hop 4, nor the AlphaBeta fork, nor the cache the workflow now names. The steps above are the truth.</p>
       </div>
       <div class="note">
         <h3>track01.xml is not one file per run</h3>
@@ -531,7 +565,7 @@
   </section>
 
   <footer>
-    Read live from <span class="m">/api/v1/workflows/1a56b3ca…</span>, its ten steps and ten assignments, on 2026-09-14 after the AlphaBeta step was wired and the chain re-projected. Ids abbreviated to their first block; schema names resolved from <span class="m">/api/v1/schemas</span>.
+    Read live from <span class="m">/api/v1/workflows/1a56b3ca…</span>, its ten steps, ten assignments, eight processor rows and one cache row, on 2026-09-15. The cancelled outcome was read from <span class="m">Processor.SKNormalizer/Handlers/AcmeHandler.cs</span>, which no API row mentions. Ids abbreviated to their first block; schema names resolved from <span class="m">/api/v1/schemas</span>. Geometry measured with <span class="m">getBBox</span> on the rendered page, both themes.
   </footer>
 
 </div>
