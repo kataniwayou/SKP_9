@@ -80,7 +80,16 @@
     gap: 40px;
   }
 
-  .titleblock { display: flex; flex-direction: column; gap: 18px; }
+  /* One column by default; at width the lead sits beside the title instead of
+     leaving the right half of the sheet empty. */
+  .titleblock { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  @media (min-width: 900px) {
+    .titleblock { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); column-gap: 48px; }
+    .eyebrow { grid-area: 1 / 1; }
+    h1 { grid-area: 2 / 1; }
+    .standfirst { grid-area: 2 / 2; align-self: end; max-width: none; }
+    .facts { grid-area: 3 / 1 / auto / -1; }
+  }
   .eyebrow {
     font-family: var(--sans);
     font-size: 12px;
@@ -136,7 +145,10 @@
     padding: 8px;
   }
   .scroller svg { display: block; min-width: 940px; width: 100%; height: auto; }
-  figcaption { color: var(--muted); font-size: 14px; max-width: 68ch; }
+  /* Set in columns rather than one 68ch measure, so the caption fills the sheet
+     instead of ending halfway across it. */
+  figcaption { color: var(--muted); font-size: 14px; max-width: none; columns: 30em; column-gap: 48px; }
+  @media (max-width: 899px) { figcaption { columns: auto; max-width: 68ch; } }
 
   .node-box { fill: var(--sheet); stroke: var(--rule); stroke-width: 1.4; }
   .node-box-fork { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.4; }
