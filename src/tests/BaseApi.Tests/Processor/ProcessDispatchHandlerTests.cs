@@ -210,6 +210,50 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
+    public async Task LetsAStoreFaultRAISED_BY_THE_AUTHOR_EscapeRatherThanReportingAFailedStep()
+    {
+        // THE SAME RULE AS THE TWO TESTS ABOVE, ONE LAYER IN. Those cover the framework's OWN Redis
+        // calls — the blob read and the reclaim — which sit outside the catch chain and therefore
+        // escape already. An author's transform sits INSIDE it, so a store fault raised there used to
+        // land in the general catch and be reported as StepFailed: a business outcome that never
+        // happened, with the delivery acknowledged and the work gone.
+        //
+        // Authors touch the store legitimately — RedisFieldWhitelist reads a projected dictionary on
+        // the hot path — so this is not a hypothetical. Escaping lets DeliveryClassifier return
+        // RequeueAndTrip: the delivery is requeued and the L2 gate pauses consumption until the store
+        // is healthy, which is the disposition the system already defines for exactly this fault.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) =>
+            throw new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
+
+        await Assert.ThrowsAsync<RedisConnectionException>(
+            () => h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None));
+
+        // No outcome was sent. A StepFailed here would be the lie.
+        Assert.Empty(h.Sender.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task StillReportsAFailedStepForAnOrdinaryAuthorFault()
+    {
+        // The other side of the same boundary: only STORE faults escape. An ordinary bug in the
+        // author's transform is still a failed step, because retrying it forever would park the
+        // pipeline on a defect no redelivery can fix.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        var probe = new Probe((_, _) => throw new InvalidOperationException("author bug"));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.NotNull(sent);
+        Assert.Equal(StepResult.Failed, sent!.Result);
+    }
+
+    [Fact]
     public async Task ReportsAnInputThatFailsItsSchema()
     {
         var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");

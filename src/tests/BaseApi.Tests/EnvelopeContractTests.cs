@@ -155,6 +155,11 @@ public sealed class EnvelopeContractTests : IDisposable
         // ENVELOPE contract, and canonicalisation is AcmeHandlerTests' business, so the identity
         // mapping keeps every existing assertion meaning exactly what it meant before the gate.
         var l2 = new InMemoryL2();
+
+        // BOTH KEYS, and the root is not optional. RedisFieldWhitelist reads the cache root once to
+        // tell "this dictionary was never projected" (a deterministic failure) from "this artist is
+        // not on it" (a cancel) — so seeding only the entry makes the whole address look unprojected.
+        await l2.Db.StringSetAsync(CacheAddress, """["Unknown"]""");
         await l2.Db.StringSetAsync($"{CacheAddress}:Unknown", "Unknown");
 
         var normalizer = new SKNormalizerProcessor(

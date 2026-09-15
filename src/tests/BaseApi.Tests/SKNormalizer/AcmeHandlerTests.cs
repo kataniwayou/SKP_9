@@ -1,4 +1,5 @@
 using System.Text;
+using BaseApi.Tests.Support;
 using BaseProcessor.Core.Processing;
 using Microsoft.Extensions.Time.Testing;
 using Processor.SKNormalizer;
@@ -515,5 +516,46 @@ public sealed class AcmeHandlerTests
 
         Assert.Contains("<artist>Anonymous Artist</artist>", xml, StringComparison.Ordinal);
         Assert.DoesNotContain("<artist>Unknown</artist>", xml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnAddressWithNoProjectedDictionaryFailsRatherThanCancelling()
+    {
+        // THE GAP THIS CLOSES. A wrong address, or a workflow that names no cache, used to answer
+        // every lookup with a miss — cancelling every document, which in the logs is
+        // indistinguishable from a whitelist that approves nobody. The writer always stores the cache
+        // root (an empty dictionary is "[]", not nothing), so an absent root is proof the dictionary
+        // was never projected rather than evidence about any artist.
+        var l2 = new InMemoryL2();
+        var whitelist = new RedisFieldWhitelist(l2.Multiplexer, "skp:w:cache:absent");
+
+        var ex = Assert.Throws<FailedException>(() => whitelist.TryGet("SKP Live Suite", out _));
+
+        Assert.Contains("no whitelist is projected", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnEmptyProjectedDictionaryMissesRatherThanFailing()
+    {
+        // The other side of the same line: "[]" is a whitelist that approves nobody, which is a
+        // legitimate configuration and must stay a miss.
+        var l2 = new InMemoryL2();
+        await l2.Db.StringSetAsync("skp:w:cache:empty", "[]");
+        var whitelist = new RedisFieldWhitelist(l2.Multiplexer, "skp:w:cache:empty");
+
+        Assert.False(whitelist.TryGet("SKP Live Suite", out var value));
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public async Task APresentDictionaryReturnsTheCanonicalValue()
+    {
+        var l2 = new InMemoryL2();
+        await l2.Db.StringSetAsync("skp:w:cache:list", """["SKP Live Suite"]""");
+        await l2.Db.StringSetAsync("skp:w:cache:list:SKP Live Suite", "SKP Live Suite (Approved)");
+        var whitelist = new RedisFieldWhitelist(l2.Multiplexer, "skp:w:cache:list");
+
+        Assert.True(whitelist.TryGet("SKP Live Suite", out var value));
+        Assert.Equal("SKP Live Suite (Approved)", value);
     }
 }
