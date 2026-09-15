@@ -266,6 +266,25 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
 
             await SendAsync(Failure(d, StepResult.Cancelled), ct).ConfigureAwait(false);
         }
+        catch (Exception ex) when (BaseConsole.Core.Gating.L2FaultClassifier.IsTransient(ex))
+        {
+            // MUST sit above the general catch, and it is the AUTHOR'S store faults this catches.
+            // The framework's own Redis calls — the input blob read and the reclaim — already sit
+            // outside this chain for the same reason. An author's transform sits inside it, and
+            // authors touch the store legitimately: a whitelist lookup on the hot path is one read
+            // away from the store being down.
+            //
+            // Reporting one as StepFailed acknowledges the delivery and records a business outcome
+            // that never happened — the step did not decide anything, its dependency was absent.
+            // Escaping hands the exception to DeliveryClassifier, which answers RequeueAndTrip:
+            // requeue the delivery AND pause consumption on the L2 gate until the store is healthy.
+            // That is the disposition this system already defines for this fault; the only thing
+            // missing was letting the fault reach it.
+            //
+            // Only STORE faults. An ordinary author bug still reports a failed step below, because a
+            // defect no redelivery can fix would otherwise park the pipeline on itself forever.
+            throw;
+        }
         catch (TransientSendException)
         {
             // MUST sit above the general catch. A branch that could not be sent is recoverable by
