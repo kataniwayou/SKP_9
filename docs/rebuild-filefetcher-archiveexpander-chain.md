@@ -421,7 +421,7 @@ Content-Type: application/json
   "name": "file-persister",
   "version": "1.0.0",
   "description": "writes the envelope's file into a configured folder and reports the absolute path; the mirror of file-fetcher",
-  "sourceHash": "f34b8ebf7132db2519e67408b07329221381cee5de2a70e3940703fb64156581",
+  "sourceHash": "584ebcbe83f6d68a7881e809639777e053d9ba1f5519d2fe37718f4687ade662",
   "instanceId": null,
   "inputSchemaId": "<file-envelope>",
   "outputSchemaId": "<file-locator>",

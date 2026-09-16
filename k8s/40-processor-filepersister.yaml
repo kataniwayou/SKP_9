@@ -24,6 +24,11 @@
 # layer — a file that reports a path and is gone at the next restart. The volume creating it on the
 # HOST side is the correct place for that to happen.
 #
+# THE FILE IS WRITTEN IN TWO STAGES, and the mount is why. See FilePersister__TempExtension below:
+# bytes land as <name>.skp and are renamed onto <name>, so nothing watching this folder can open a
+# file that is still being written. A stray .skp left here is debris from a pod killed mid-write; the
+# next dispatch for that name overwrites it, and nothing else reads it.
+#
 # THE MEMORY LIMIT IS 512Mi, MATCHING FileFetcher, AND FOR THE SAME REASON RUN BACKWARDS. The
 # envelope arrives base64'd inside a ProcessedData message, is decoded to the raw bytes, and both
 # coexist with a JsonDocument DOM at input validation — and the work and post consumers are the SAME
@@ -121,8 +126,22 @@ spec:
             # rate window at 240s, which is why a sixty-second outage moved no rate panel.
             - name: OTEL_METRIC_EXPORT_INTERVAL
               value: "10000"
-            # The pod's ceiling. A step payload naming more than this fails by name rather than
-            # being clamped — see FileFetcherOptions.
+            # THE STAGING SUFFIX, AND THE REASON THIS MOUNT NEEDS ONE.
+            # A write into a hostPath volume is not instantaneous. A single-stage write truncates the
+            # destination the moment it opens it, so for as long as the bytes are in flight this
+            # folder holds a file that already has its final name and does not yet have its content —
+            # and anything watching the folder can open it and read a truncated file with nothing
+            # afterwards to say so. The processor therefore writes {fileName}.skp first and renames
+            # it onto the final name, which within one directory is an atomic rename: a watcher sees
+            # the final name either absent or complete.
+            #
+            # SET EXPLICITLY THOUGH IT MATCHES THE CODE DEFAULT, because the value has to agree with
+            # whatever ignores it on the other side of this mount, and a number that has to agree
+            # with something belongs where both halves can be read. Anything unusable — empty, a
+            # separator — falls back to skp rather than failing the step: the suffix's only job is to
+            # be a name a watcher skips, and one typo here must not stop every dispatch.
+            - name: FilePersister__TempExtension
+              value: "skp"
             - name: RabbitMq__Host
               value: rabbitmq
             - name: RabbitMq__Username

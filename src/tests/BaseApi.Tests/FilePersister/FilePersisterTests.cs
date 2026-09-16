@@ -62,21 +62,25 @@ public sealed class FilePersisterTests : IDisposable
         return JsonSerializer.SerializeToUtf8Bytes(body);
     }
 
-    private Task<List<ProcessedData>> Persist(byte[] envelope, string? payload = null)
-        => PersistWith(envelope, payload ?? Payload());
+    private Task<List<ProcessedData>> Persist(
+        byte[] envelope, string? payload = null, FilePersisterOptions? options = null)
+        => PersistWith(envelope, payload ?? Payload(), options);
 
     /// <summary>
     /// The raw call, so a test can pass a NULL step payload — which is a different case than a
     /// malformed one and cannot be reached through the defaulting overload above.
     /// </summary>
-    private async Task<List<ProcessedData>> PersistWith(byte[] envelope, string? payload)
+    private async Task<List<ProcessedData>> PersistWith(
+        byte[] envelope, string? payload, FilePersisterOptions? options = null)
     {
         var sender = Substitute.For<IQueueSender>();
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        var processor = new FilePersisterProcessor(new RecordingLogger<FilePersisterProcessor>());
+        var processor = new FilePersisterProcessor(
+            new RecordingLogger<FilePersisterProcessor>(),
+            Options.Create(options ?? new FilePersisterOptions()));
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
 
         // payload! because the NULL case is exactly what one test here exercises: ExecuteAsync
@@ -171,6 +175,128 @@ public sealed class FilePersisterTests : IDisposable
             out var errors);
 
         Assert.True(ok, string.Join("; ", errors));
+    }
+
+    // ---- the two-stage write ------------------------------------------------------------------
+
+    /// <summary>
+    /// Blocks the staging write by putting a DIRECTORY where the staging file must go, so that the
+    /// first stage fails and the second never runs.
+    /// <para>
+    /// <b>This is how every test below proves WHICH name the first stage uses.</b> There is no seam
+    /// to observe a rename through — it is two statements inside one method — so the staging name is
+    /// pinned by making that exact name unwritable and watching the step fail. A test that named the
+    /// wrong suffix would see the write succeed.
+    /// </para>
+    /// </summary>
+    private void BlockStaging(string stagingName)
+        => Directory.CreateDirectory(Path.Combine(_out, stagingName));
+
+    [Fact]
+    public async Task AFailedWriteLeavesTheExistingFileUntouched()
+    {
+        // THE POINT OF THE WHOLE FEATURE, stated as the thing an operator would notice. A single
+        // stage truncates the destination the instant it opens it, so a write that dies partway
+        // leaves a file that has the right name, the wrong length, and no sign anything went wrong.
+        // Staging means the destination is not opened at all until every byte is on disk.
+        var destination = Path.Combine(_out, "orders.csv");
+        File.WriteAllBytes(destination, [9, 9, 9, 9, 9, 9]);
+
+        BlockStaging("orders.csv.skp");
+
+        await Assert.ThrowsAsync<FailedException>(() => Persist(Envelope("orders.csv", [1, 2, 3])));
+
+        Assert.Equal<byte[]>([9, 9, 9, 9, 9, 9], File.ReadAllBytes(destination));
+    }
+
+    [Fact]
+    public async Task TheFailureNamesTheFinalPathAndNotTheStagingOne()
+    {
+        // An operator searching "writing {path} failed:" is searching for the path the WORKFLOW
+        // names, so the prefix must carry the final path however far into the write the fault
+        // happened. The OS reason after it is verbatim and may name the staging file instead — that
+        // is not a leak, it is how the two stages are told apart, and it is the only signal saying
+        // whether the bytes or the rename were refused.
+        BlockStaging("orders.csv.skp");
+
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => Persist(Envelope("orders.csv", [1, 2, 3])));
+
+        Assert.Contains(
+            $"writing {Path.Combine(_out, "orders.csv")} failed:", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NoStagingFileSurvivesASuccessfulWrite()
+    {
+        // Pins the second stage as a MOVE and not a copy. A copy would pass every other test here
+        // and quietly fill a mounted volume with a second copy of everything it ever wrote.
+        await Persist(Envelope("orders.csv", [1, 2, 3]));
+
+        Assert.Equal(
+            [Path.Combine(_out, "orders.csv")],
+            Directory.GetFileSystemEntries(_out));
+    }
+
+    [Fact]
+    public async Task ALeftoverStagingFileFromAnEarlierCrashIsOverwritten()
+    {
+        // A pod killed mid-write leaves its staging file behind, and nothing collects it. The next
+        // dispatch for that file name must write straight through it rather than failing forever on
+        // debris from a run nobody remembers.
+        File.WriteAllBytes(Path.Combine(_out, "orders.csv.skp"), [7, 7, 7, 7, 7, 7, 7]);
+
+        await Persist(Envelope("orders.csv", [1, 2, 3]));
+
+        Assert.Equal<byte[]>([1, 2, 3], File.ReadAllBytes(Path.Combine(_out, "orders.csv")));
+        Assert.Equal(
+            [Path.Combine(_out, "orders.csv")],
+            Directory.GetFileSystemEntries(_out));
+    }
+
+    // ---- the staging suffix -------------------------------------------------------------------
+
+    [Fact]
+    public async Task AConfiguredExtensionNamesTheStagingFile()
+    {
+        BlockStaging("orders.csv.part");
+
+        await Assert.ThrowsAsync<FailedException>(
+            () => Persist(Envelope("orders.csv", [1, 2, 3]),
+                          options: new FilePersisterOptions { TempExtension = "part" }));
+    }
+
+    [Fact]
+    public async Task ALeadingDotOnTheConfiguredExtensionIsTolerated()
+    {
+        // "part" and ".part" are the same instruction. An operator who writes the dot has not
+        // configured a staging file called "orders.csv..part".
+        BlockStaging("orders.csv.part");
+
+        await Assert.ThrowsAsync<FailedException>(
+            () => Persist(Envelope("orders.csv", [1, 2, 3]),
+                          options: new FilePersisterOptions { TempExtension = ".part" }));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(".")]
+    [InlineData("sub/part")]
+    [InlineData("sub\\part")]
+    public async Task AnUnusableConfiguredExtensionFallsBackToSkp(string configured)
+    {
+        // SILENTLY, and that is a decision. The alternative — failing the step — turns one operator
+        // typo in a manifest into every dispatch failing, to protect a value whose only job is to be
+        // a name a watcher ignores. The fallback still stages; it just stages under the name the
+        // rest of this system documents. A separator is in this list because the suffix is joined to
+        // a name that was already checked for separators, and a suffix must not be the way one gets
+        // back in.
+        BlockStaging("orders.csv.skp");
+
+        await Assert.ThrowsAsync<FailedException>(
+            () => Persist(Envelope("orders.csv", [1, 2, 3]),
+                          options: new FilePersisterOptions { TempExtension = configured }));
     }
 
     // ---- the pair -----------------------------------------------------------------------------
