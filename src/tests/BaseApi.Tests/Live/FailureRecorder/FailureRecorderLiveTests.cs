@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using BaseApi.Tests.Live.Resilience;
 using Confluent.Kafka;
 using Xunit;
 
@@ -34,10 +35,26 @@ public sealed class FailureRecorderLiveTests
     private static string ElasticUrl => RealStack.Get("SKP_ES_URL", "http://localhost:19200");
 
     /// <summary>
-    /// Reads whatever lands on the failures topic between now and the deadline.
+    /// Waits for the record this test's seed produces, then keeps reading briefly in case it
+    /// produced more than one.
     /// <para>
     /// A fresh group id per call, with <c>AutoOffsetReset.Latest</c>: this test must see what ITS
     /// failure produced, not the backlog of every failure since the topic was created.
+    /// </para>
+    /// <para>
+    /// <b>It waits for the record rather than reading for a fixed span, and that is a fix rather
+    /// than a tidy-up.</b> This used to collect for exactly 90s and return whatever had arrived. The
+    /// measured seed-to-record latency on this cluster runs to about 90s — the entry step is cron
+    /// driven on <c>5,35 * * * * *</c>, so a seed can wait most of a fire interval before it is even
+    /// imported — which made the window a coin flip against the very thing it was timing. Two
+    /// consecutive records landed at 08:42:05.62 and 08:43:35.33, each a fraction AFTER the 90s
+    /// deadline of the test that seeded it, and the same test passed an hour earlier purely on
+    /// timing. A test whose verdict is a race reports nothing.
+    /// </para>
+    /// <para>
+    /// <b>The settle read after the first record is what keeps <c>Assert.Single</c> meaningful.</b>
+    /// Returning on the first message would make a duplicate record — one seed recorded twice —
+    /// silently pass, and that is a real failure mode this class should catch.
     /// </para>
     /// </summary>
     private static List<JsonElement> Drain(TimeSpan window)
@@ -54,6 +71,7 @@ public sealed class FailureRecorderLiveTests
 
         var records = new List<JsonElement>();
         var deadline = DateTime.UtcNow + window;
+        var settle = TimeSpan.FromSeconds(10);
 
         while (DateTime.UtcNow < deadline)
         {
@@ -61,6 +79,13 @@ public sealed class FailureRecorderLiveTests
             if (result?.Message?.Value is { Length: > 0 } value)
             {
                 records.Add(JsonDocument.Parse(value).RootElement.Clone());
+
+                // First one in: stop waiting for the pipeline and start the short settle instead, so
+                // the deadline bounds how long we wait for a record rather than how long we read.
+                if (records.Count == 1)
+                {
+                    deadline = DateTime.UtcNow + settle;
+                }
             }
         }
 
@@ -267,7 +292,7 @@ public sealed class FailureRecorderLiveTests
 
             // Same fresh-group, Latest drain the two tests above use: this sees only the failure
             // this seed produced, not the topic's backlog.
-            var records = Drain(TimeSpan.FromSeconds(90));
+            var records = Drain(TimeSpan.FromMinutes(4));
             var record = Assert.Single(records);
 
             // This is the D5/mid-chain shape (SKNormalizer refuses a non-Acme item), so, like
@@ -304,88 +329,235 @@ public sealed class FailureRecorderLiveTests
     {
         RealStack.SkipUnlessEnabled();
 
-        // The D5 shape: an archive whose entries are not exactly one .wav + one .json pair, which
-        // AcmeHandler.ValidateContent refuses. Seeded (see Step 3) where FileFetcher picks it up.
-        // The chain fires on 5,35 * * * * *, so one fire is at most 30s away; 90s covers that plus
-        // the chain's own hops plus slack.
-        var records = Drain(TimeSpan.FromSeconds(90));
-
-        var record = Assert.Single(records);
-
-        // "N" — 32 hex, no dashes — which is the form Elasticsearch holds, and the reason the query
-        // below matches at all.
-        var correlation = record.GetProperty("correlationId").GetString()!;
-        Assert.Equal(32, correlation.Length);
-        Assert.DoesNotContain('-', correlation);
-
-        // "D", dashed, and present because the step that failed had a lineage.
-        Assert.True(record.TryGetProperty("executionId", out var executionId));
-        var execution = executionId.GetString()!;
-        Assert.True(Guid.TryParse(execution, out _));
-
-        Assert.True(record.TryGetProperty("recordedAtUtc", out _));
-
-        // The pointer resolves: the lineage it names ends in two WARN lines — one from the processor
-        // carrying the reason, one from the orchestrator routing the failure onward.
+        // SEEDS ITS OWN FAILURE, and that arrangement is the point rather than a convenience. This
+        // test used to drain the topic and wait for a failure some human had arranged out of band,
+        // so with nobody seeding it failed by default -- and a test that is red in the steady state
+        // cannot report a regression, because the red is already there. TheRecordLeadsToTheFileThat
+        // Failed in this same file always did it this way; this one now follows it.
         //
-        // CORRECTED FROM THE BRIEF: the brief expected "no successor accepts it", which is
-        // StepOutcomeHandler's TERMINAL-step line (src/Orchestrator/Messaging/StepOutcomeHandler.cs,
-        // "the terminal step completed with {Result} — no successor accepts it, the run ends here")
-        // — logged only when a step has NO successor at all. That was true before Task 6 wired the
-        // PreviousFailed edge; it is no longer true now. The normalizer step this test fails now HAS
-        // a successor (FailureRecorder), so its outcome takes the other branch in the same method:
-        // "advancing {SuccessorCount} successor(s) on a {Result} step — their entry conditions
-        // accept it". Asserting the brief's original text would assert the wiring is ABSENT — the
-        // opposite of what Task 6 shipped and what this whole test exists to prove. Verified against
-        // both the source (StepOutcomeHandler.cs:333-336) and the live index: querying
-        // logs-generic.otel-default for the literal phrase "no successor accepts it" returns 0 hits
-        // for this run's ExecutionId, while "advancing 1 successor(s) on a Failed step" is present.
-        var warnings = await WarningsAsync("ExecutionId", execution);
+        // The D5 shape: an archive whose entries are not exactly one .wav + one .json pair, which
+        // AcmeHandler.ValidateContent refuses. SeedArchive builds exactly that -- one a.csv entry
+        // groups to 0 .wav and 0 .json -- and puts it where FileFetcher opens it.
+        var name = $"midchain-{Guid.NewGuid():N}.zip";
+        var path = SeedArchive(name);
 
-        Assert.Contains(warnings, w => w.Contains("the author reported the step failed"));
-        Assert.Contains(warnings, w => w.Contains("advancing 1 successor(s) on a Failed step"));
+        try
+        {
+            await ProduceAsync(path);
+
+            // The chain fires on 5,35 * * * * *, so one fire is at most 30s away; 90s covers that
+            // plus the chain's own hops plus slack.
+            var records = Drain(TimeSpan.FromMinutes(4));
+
+            var record = Assert.Single(records);
+
+            // "N" -- 32 hex, no dashes -- which is the form Elasticsearch holds, and the reason the
+            // query below matches at all.
+            var correlation = record.GetProperty("correlationId").GetString()!;
+            Assert.Equal(32, correlation.Length);
+            Assert.DoesNotContain('-', correlation);
+
+            // "D", dashed, and present because the step that failed had a lineage.
+            Assert.True(record.TryGetProperty("executionId", out var executionId));
+            var execution = executionId.GetString()!;
+            Assert.True(Guid.TryParse(execution, out _));
+
+            Assert.True(record.TryGetProperty("recordedAtUtc", out _));
+
+            // The pointer resolves: the lineage it names ends in two WARN lines -- one from the
+            // processor carrying the reason, one from the orchestrator routing the failure onward.
+            //
+            // CORRECTED FROM THE BRIEF: the brief expected "no successor accepts it", which is
+            // StepOutcomeHandler's TERMINAL-step line -- logged only when a step has NO successor at
+            // all. That was true before Task 6 wired the PreviousFailed edge; it is no longer true.
+            // The normalizer step this test fails now HAS a successor (FailureRecorder), so its
+            // outcome takes the other branch in the same method: "advancing {SuccessorCount}
+            // successor(s) on a {Result} step". Asserting the brief's original text would assert the
+            // wiring is ABSENT -- the opposite of what this test exists to prove.
+            var warnings = await WarningsAsync("ExecutionId", execution);
+
+            Assert.Contains(warnings, w => w.Contains("the author reported the step failed"));
+            Assert.Contains(warnings, w => w.Contains("advancing 1 successor(s) on a Failed step"));
+        }
+        finally
+        {
+            // Unconditional: a seed left on the node fails the chain again on its next tick, every
+            // 30s, forever -- whether or not the assertions above passed.
+            Cleanup(path);
+        }
     }
 
     [Fact]
     public async Task AnEntryStepFailureProducesARecordWithNoLineage()
     {
-        RealStack.SkipUnlessEnabled();
-
-        // Step 3 points the importer's assignment at a topic it will never be assigned, so Open
-        // returns false within the idle timeout and the step fails before opening any lineage.
-        var records = Drain(TimeSpan.FromSeconds(90));
-
-        var record = Assert.Single(records);
-
-        // OMITTED, not zeroed: "the failed step had no lineage" must stay distinguishable from
-        // "this field was not populated". This assertion is what fails if FailureRecordJson ever
-        // loses WhenWritingNull.
-        Assert.False(record.TryGetProperty("executionId", out _));
-
-        var correlation = record.GetProperty("correlationId").GetString()!;
-        Assert.Equal(32, correlation.Length);
-
-        // It still resolves — by correlation rather than execution, which is the entire reason the
-        // accessor in Task 1 exists.
+        // GATED BEHIND THE SECOND SWITCH, and not because it is slow. This test BREAKS the live
+        // chain: it repoints the entry step at a topic nothing publishes to, and until it is put
+        // back the chain fails on every fire, twice a minute. The finally below restores it on every
+        // ordinary path -- including a failed assertion -- but a killed process runs no finally, and
+        // what it leaves behind is a cluster that looks broken with nothing pointing at the cause.
         //
-        // CORRECTED FROM THE BRIEF: the brief expected "was not ready within", which is
-        // BaseImporter's message for the OTHER way an importer can fail to open — Open() returning
-        // false after librdkafka quietly times out waiting for a partition assignment (see
-        // src/BaseProcessor.Core/Edge/BaseImporter.cs, "{SourceName(config)} was not ready within
-        // {idle}"). That is what happens against a topic that EXISTS but is never assigned to this
-        // group. It is not what happens here: "skp-nothing-publishes-here" does not exist at all, so
-        // librdkafka surfaces UnknownTopicOrPart as an exception during WaitForAssignment, which
-        // Open() lets through and BaseImporter converts on the OTHER branch — the catch around
-        // source.Open(idle) — into "opening {SourceName(config)} failed: {ex.Message}". Both branches
-        // fail the step before any lineage opens (Rent/Open happens before the read loop that mints
-        // an execution id), so the record's shape — no executionId — is exactly what the brief
-        // predicted; only the wording of the WARN line differs. Confirmed against the live index: the
-        // three WARN lines for this run's CorrelationId are "the author reported the step failed:
-        // opening skp-nothing-publishes-here failed: UnknownTopicOrPart", "the entry step completed
-        // with Failed", and "advancing 1 successor(s) on a Failed step — their entry conditions
-        // accept it" — no line anywhere contains "was not ready within".
-        var warnings = await WarningsAsync("CorrelationId", correlation);
+        // That is exactly the hazard Chaos exists to require consent for: someone exporting
+        // SKP_REALSTACK=1 is asking to READ the cluster, not to take a step of it down. Same
+        // reasoning as Chaos.SkipUnlessEnabled, different sentence, because this breaks an
+        // assignment rather than pausing Redis or scaling a StatefulSet.
+        Assert.SkipUnless(Chaos.Enabled,
+            "set SKP_REALSTACK=1 and SKP_CHAOS=1 to run this one; it repoints the live KafkaImporter "
+            + "assignment at a topic nothing publishes to, and the chain fails on every fire until "
+            + "it is restored");
 
-        Assert.Contains(warnings, w => w.Contains("opening skp-nothing-publishes-here failed"));
+        // Self-driving, for the reason AMidChainFailureProducesARecordNamingItsLineage now gives:
+        // a test that waits for a situation a human was supposed to arrange is red whenever nobody
+        // arranged it, and a permanently red test reports nothing.
+        var (assignment, row) = await ImporterAssignmentAsync();
+        var original = row.GetProperty("payload").GetString()!;
+
+        // Only the topic moves. Restoring the payload this test READ, rather than one it composed,
+        // is what keeps a restore from quietly rewriting messageCount or the consumer group.
+        await PutPayloadAsync(assignment, row, WithTopic(original, "skp-nothing-publishes-here"));
+
+        try
+        {
+            // RE-PROJECTED, and without this the test quietly proves nothing. A running workflow
+            // reads its assignments from the L2 projection written when it STARTED, not from the row
+            // -- so editing the row alone leaves the importer happily consuming skp-paths, and the
+            // drain below times out against a chain that never failed. Measured: the importer logged
+            // "consumed 0/25 records; stopped because Drained" throughout, never once naming the
+            // broken topic. Stop/start is what republishes the projection.
+            await RestartWorkflowAsync();
+
+            // Open returns false within the idle timeout and the step fails before opening any
+            // lineage.
+            var records = Drain(TimeSpan.FromMinutes(4));
+
+            var record = Assert.Single(records);
+
+            // OMITTED, not zeroed: "the failed step had no lineage" must stay distinguishable from
+            // "this field was not populated". This assertion is what fails if FailureRecordJson ever
+            // loses WhenWritingNull.
+            Assert.False(record.TryGetProperty("executionId", out _));
+
+            var correlation = record.GetProperty("correlationId").GetString()!;
+            Assert.Equal(32, correlation.Length);
+
+            // It still resolves — by correlation rather than execution, which is the entire reason the
+            // accessor in Task 1 exists.
+            //
+            // CORRECTED FROM THE BRIEF: the brief expected "was not ready within", which is
+            // BaseImporter's message for the OTHER way an importer can fail to open — Open() returning
+            // false after librdkafka quietly times out waiting for a partition assignment (see
+            // src/BaseProcessor.Core/Edge/BaseImporter.cs, "{SourceName(config)} was not ready within
+            // {idle}"). That is what happens against a topic that EXISTS but is never assigned to this
+            // group. It is not what happens here: "skp-nothing-publishes-here" does not exist at all, so
+            // librdkafka surfaces UnknownTopicOrPart as an exception during WaitForAssignment, which
+            // Open() lets through and BaseImporter converts on the OTHER branch — the catch around
+            // source.Open(idle) — into "opening {SourceName(config)} failed: {ex.Message}". Both branches
+            // fail the step before any lineage opens (Rent/Open happens before the read loop that mints
+            // an execution id), so the record's shape — no executionId — is exactly what the brief
+            // predicted; only the wording of the WARN line differs. Confirmed against the live index: the
+            // three WARN lines for this run's CorrelationId are "the author reported the step failed:
+            // opening skp-nothing-publishes-here failed: UnknownTopicOrPart", "the entry step completed
+            // with Failed", and "advancing 1 successor(s) on a Failed step — their entry conditions
+            // accept it" — no line anywhere contains "was not ready within".
+            var warnings = await WarningsAsync("CorrelationId", correlation);
+
+            Assert.Contains(warnings, w => w.Contains("opening skp-nothing-publishes-here failed"));
+        }
+        finally
+        {
+            // Unconditional, and the whole reason the break above is safe to perform from a test:
+            // the assignment goes back to the payload this test read, whether the assertions passed,
+            // failed, or threw. A broken entry step fails every fire until it is put back.
+            await PutPayloadAsync(assignment, row, original);
+
+            // And the projection with it -- restoring the row alone would leave the RUNNING workflow
+            // still importing from the broken topic, which is the same trap the break above had to
+            // work around, in the direction that matters more.
+            await RestartWorkflowAsync();
+        }
+    }
+
+    /// <summary>The chain this class fails on purpose.</summary>
+    private static string ChainWorkflowId =>
+        RealStack.Get("SKP_CHAIN_WORKFLOW_ID", "1a56b3ca-e276-4815-87fa-5c2f48ab6dad");
+
+    /// <summary>
+    /// Stops and starts the chain, which is how an assignment edit reaches a RUNNING workflow: the
+    /// orchestrator projects assignments into L2 at start and reads them from there afterwards.
+    /// </summary>
+    private static async Task RestartWorkflowAsync()
+    {
+        using var http = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl) };
+
+        foreach (var verb in new[] { "stop", "start" })
+        {
+            var response = await http.PostAsync(
+                $"/api/v1/orchestration/{verb}",
+                new StringContent($"\"{ChainWorkflowId}\"", Encoding.UTF8, "application/json"));
+
+            Assert.True(response.IsSuccessStatusCode,
+                $"POST /api/v1/orchestration/{verb} returned {(int)response.StatusCode}");
+        }
+
+        // 202 means accepted, not applied -- the projection write is handed to a durable queue. The
+        // drain that follows has minutes of slack, so a short settle is enough to keep the next fire
+        // from reading a half-written projection.
+        await Task.Delay(TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>The entry step whose assignment names the topic the chain imports from.</summary>
+    private static string ImporterStepId =>
+        RealStack.Get("SKP_IMPORTER_STEP_ID", "ab9d8741-c109-4457-a090-d76e1ca64a97");
+
+    /// <summary>
+    /// The importer's assignment row, found by the step it is attached to rather than by a recorded
+    /// id -- an id would go stale the first time the chain is rebuilt, and this file would then break
+    /// an assignment belonging to something else.
+    /// </summary>
+    private static async Task<(string Id, JsonElement Row)> ImporterAssignmentAsync()
+    {
+        using var http = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl) };
+        using var all = JsonDocument.Parse(await http.GetStringAsync("/api/v1/assignments"));
+
+        var row = all.RootElement.EnumerateArray()
+            .Single(a => a.GetProperty("stepId").GetString() == ImporterStepId);
+
+        // Cloned: the document is disposed at the end of this method and an un-cloned element dies
+        // with it.
+        return (row.GetProperty("id").GetString()!, row.Clone());
+    }
+
+    /// <summary>
+    /// The same payload with a different topic. Rewriting one field rather than composing a whole
+    /// payload is what lets the restore put back a messageCount and consumer group this test never
+    /// had to know.
+    /// </summary>
+    private static string WithTopic(string payload, string topic)
+    {
+        var fields = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload)!;
+        fields["topic"] = JsonSerializer.SerializeToElement(topic);
+        return JsonSerializer.Serialize(fields);
+    }
+
+    /// <summary>PUTs the row back with a different payload, and asserts the API accepted it.</summary>
+    private static async Task PutPayloadAsync(string id, JsonElement row, string payload)
+    {
+        using var http = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl) };
+
+        var body = JsonSerializer.Serialize(new
+        {
+            name = row.GetProperty("name").GetString(),
+            version = row.GetProperty("version").GetString(),
+            description = row.TryGetProperty("description", out var d) ? d.GetString() : null,
+            stepId = row.GetProperty("stepId").GetString(),
+            payload,
+        });
+
+        var response = await http.PutAsync(
+            $"/api/v1/assignments/{id}", new StringContent(body, Encoding.UTF8, "application/json"));
+
+        // Asserted rather than ignored: a restore that silently 400s leaves the chain broken, and
+        // the next person to look would see a failing cluster and a passing test run.
+        Assert.True(response.IsSuccessStatusCode,
+            $"PUT /api/v1/assignments/{id} returned {(int)response.StatusCode}");
     }
 }
