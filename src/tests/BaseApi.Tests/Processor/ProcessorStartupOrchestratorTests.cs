@@ -65,6 +65,10 @@ public sealed class ProcessorStartupOrchestratorTests
         public ProcessorStartupOrchestrator Orchestrator { get; }
         public RecordingLogger<ProcessorStartupOrchestrator> Log { get; }
 
+        /// <param name="script">
+        /// The replies the fake broker hands back, in order, standing in for what discovery would
+        /// have answered.
+        /// </param>
         /// <param name="identity">
         /// Seeded before the orchestrator exists, the way the two-stage boot seeds the container. Null
         /// builds the one shape the boot is supposed to make impossible, which is what the guard test

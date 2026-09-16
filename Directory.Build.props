@@ -19,6 +19,16 @@
     <!-- Mapperly analyzer codes. RMG089 defaults to Info severity, which TreatWarningsAsErrors
          does not catch, so it must be listed explicitly. -->
     <WarningsAsErrors>$(WarningsAsErrors);RMG007;RMG012;RMG020;RMG089</WarningsAsErrors>
+
+    <!-- Suppressed repo-wide, because TreatWarningsAsErrors above turns every one of these into a
+         build failure on any machine that generates documentation files or restores from a feed
+         this one does not have.
+
+         CS1591 (no XML comment on a public member) is off because documenting a member is a choice
+         here, not a requirement. CS1573 is deliberately NOT in this list: it fires only on a member
+         that documents SOME of its parameters and not all, which is a half-finished comment rather
+         than an absent one, and that stays an error. -->
+    <NoWarn>$(NoWarn);CS1591;NU1803;NU1602;NU1603</NoWarn>
   </PropertyGroup>
 
 </Project>

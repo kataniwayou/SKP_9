@@ -24,6 +24,8 @@ namespace BaseConsole.Core.DependencyInjection;
 /// </summary>
 public static class ConsolePreflightServiceCollectionExtensions
 {
+    /// <param name="services">The container the preflight checks are registered into.</param>
+    /// <param name="cfg">Configuration the checks read their endpoints and timeouts from.</param>
     /// <param name="logEnvironment">
     /// Whether this service logs the masked environment block. True for every host that builds one
     /// host and starts it; false for the processor, whose stage 1 has already logged the same block

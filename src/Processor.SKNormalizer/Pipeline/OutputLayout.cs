@@ -36,6 +36,10 @@ public abstract record OutputNode
     /// recomputes it from what it actually packs. Summing children instead would be an invented
     /// number AND would break byte identity.
     /// </param>
+    /// <param name="Name">The folder's name in the output tree.</param>
+    /// <param name="ArchiveExtension">The extension the folder is repacked under.</param>
+    /// <param name="CreatedUtc">Creation stamp carried from the source, or null.</param>
+    /// <param name="ModifiedUtc">Modification stamp carried from the source, or null.</param>
     /// <param name="Children">
     /// <b>Null OR empty means "expanded to nothing", and both become <c>content: null</c></b> — not
     /// an empty array. The expander expresses an archive with no entries as null at every depth, so

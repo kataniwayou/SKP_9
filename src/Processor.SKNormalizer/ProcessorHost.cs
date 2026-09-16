@@ -21,6 +21,18 @@ public static class ProcessorHost
     /// <summary>
     /// The production entry point: probes, then identity, then a host built around the answer.
     /// </summary>
+    /// <param name="args">
+    /// The process arguments, forwarded to the host builder so the standard configuration providers
+    /// that read them keep working.
+    /// </param>
+    /// <param name="ct">
+    /// Cancels the identity wait. Stage 1 retries forever by design -- an unregistered processor is
+    /// waiting correctly, not failing -- so this is the only thing that ends it early.
+    /// </param>
+    /// <param name="configure">
+    /// Extra configuration applied before the host is built. Null in production; a test uses it to
+    /// point the shell at its own broker and Redis.
+    /// </param>
     /// <param name="bootstrap">
     /// Stage 1. Null uses the real broker; a test passes its own so the sequence can be exercised
     /// without one.

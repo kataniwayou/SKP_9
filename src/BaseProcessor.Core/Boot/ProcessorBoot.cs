@@ -35,6 +35,10 @@ public static class ProcessorBoot
     /// The boot sequence's console factory, shared with the identity bootstrap so Stage 1's two
     /// voices — what discovery is doing and what the kubelet is being told — land in one stream.
     /// </param>
+    /// <param name="ct">
+    /// Cancels the identity wait. Stage 1 retries without limit by design, so this is the only thing
+    /// that ends it before an answer arrives.
+    /// </param>
     public static async Task<IHost> StartAsync(
         int probePort,
         IIdentityBootstrap bootstrap,

@@ -8,7 +8,7 @@ namespace Messaging.Transport;
 /// has attached to them, on a loop.
 /// <para>
 /// The loop itself lives in <see cref="QueueStatsProbe"/> and is shared with
-/// <see cref="DeadLetterDepthProbe"/>. What this class adds is the queue list's meaning, the second
+/// <c>DeadLetterDepthProbe</c>. What this class adds is the queue list's meaning, the second
 /// value, and a much shorter interval.
 /// </para>
 /// <para>
@@ -105,7 +105,7 @@ public sealed class QueueDepthProbe : QueueStatsProbe
     /// Publishes the reading, and says out loud the one thing in it an operator cannot infer from
     /// anywhere else.
     /// <para>
-    /// <b>Why this belongs here and not on <see cref="DeadLetterDepthProbe"/>.</b> A dead-letter
+    /// <b>Why this belongs here and not on <c>DeadLetterDepthProbe</c>.</b> A dead-letter
     /// queue has no consumer by design; warning about it would be warning that the system works. A
     /// LIVE queue with no consumer is the opposite — every message on it is work that will not run —
     /// and the count has been read on this loop all along, reported to Prometheus and never once

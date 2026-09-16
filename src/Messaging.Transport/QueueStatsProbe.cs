@@ -7,7 +7,7 @@ namespace Messaging.Transport;
 
 /// <summary>
 /// Reads what the broker says about a fixed list of queues, on a loop, and hands each reading to a
-/// subclass to publish. The shared half of <see cref="DeadLetterDepthProbe"/> and
+/// subclass to publish. The shared half of <c>DeadLetterDepthProbe</c> and
 /// <see cref="QueueDepthProbe"/>.
 /// <para>
 /// <b>One loop, two probes, deliberately.</b> The two ask the same question of the broker and

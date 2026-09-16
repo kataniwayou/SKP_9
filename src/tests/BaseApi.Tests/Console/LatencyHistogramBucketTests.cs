@@ -149,10 +149,4 @@ public sealed class LatencyHistogramBucketTests
 
         Assert.NotEqual(999, EgressMeter.LatencySecondsBoundaries()[0]);
     }
-
-    /// <summary>
-    /// Reads explicit bucket boundaries off exported histograms. The SDK exposes them only through a
-    /// metric point's <c>GetHistogramBuckets</c> enumerator, whose last entry is the +Inf overflow
-    /// bucket -- that one is not a configured boundary and is dropped.
-    /// </summary>
 }

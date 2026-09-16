@@ -9,7 +9,7 @@ namespace BaseProcessor.Core.Processing;
 /// <b>The dispatch's own entry id is not here, and its absence is load-bearing information.</b> It
 /// used to be, as the seed a branch's derived id was built from. Branch ids are now minted with
 /// <see cref="Guid.NewGuid"/>, so nothing in the seam reads it — and the reclaim that <i>does</i> read
-/// it takes it straight off the <see cref="Messaging.Contracts.ProcessDispatch"/> in
+/// it takes it straight off the <c>ProcessDispatch</c> in
 /// <see cref="ProcessDispatchHandler"/>, never from here. Carrying it anyway would leave a field that
 /// looks like it feeds the ids on the way out, which is exactly what it no longer does.
 /// </para>

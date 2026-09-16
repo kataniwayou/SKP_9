@@ -21,7 +21,7 @@ namespace BaseApi.Tests.Orchestrator;
 /// <b>Driven by routing rather than by calling the next handler directly.</b> The point of the two
 /// hops is that they are separate deliveries; a test that hands one handler's return value to the
 /// other would prove the pair works while assuming away the queue between them. <see cref="Bus"/>
-/// captures what was sent and to where, and <see cref="Drain"/> feeds it back through the handler
+/// captures what was sent and to where, and <c>Drain</c> feeds it back through the handler
 /// registered for that type — the same dispatch the gated consumer performs.
 /// </para>
 /// </summary>

@@ -39,7 +39,7 @@ namespace BaseConsole.Core.DependencyInjection;
 /// that documentation.
 /// </para>
 /// <para>
-/// <b>The connection is eager and synchronous, not lazy.</b> <see cref="ConnectionMultiplexer.Connect"/>
+/// <b>The connection is eager and synchronous, not lazy.</b> <c>ConnectionMultiplexer.Connect</c>
 /// runs at resolution time on the resolving thread and blocks on the network round-trip — it does not
 /// defer to first use. Even with <c>AbortOnConnectFail = false</c>, <c>Connect</c> still blocks for up
 /// to <c>ConnectTimeout</c> (the manifests set 5000ms) before returning against a dead Redis, so startup
@@ -78,7 +78,7 @@ public static class ConsoleRedisServiceCollectionExtensions
     /// Registers the projection-store gate, its probe, and one gated consumer bound to
     /// <paramref name="queue"/>.
     /// <para>
-    /// The queue must already be declared by an <see cref="Messaging.Transport.IRabbitMqTopology"/>
+    /// The queue must already be declared by an <c>IRabbitMqTopology</c>
     /// unit. The consumer deliberately does not declare it: a paused consumer declares nothing, and a
     /// send arriving in that window would address a queue that does not exist — which the broker
     /// discards while still confirming, so the sender is told the message was accepted.

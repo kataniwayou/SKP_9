@@ -25,6 +25,11 @@ internal sealed record FaultSchedule(
 /// rather than left in it. Not an obligation failure on their own; surfaced so a reader can see what
 /// was excluded and why, rather than have the run count quietly shrink.
 /// </param>
+/// <param name="Runs">Every run the soak judged, with its classification.</param>
+/// <param name="Window">The fault window the soak injected.</param>
+/// <param name="Metrics">The metric values sampled across the soak, by name.</param>
+/// <param name="StartedAt">When the soak began.</param>
+/// <param name="StoppedAt">When the soak stopped.</param>
 internal sealed record SoakResult(
     IReadOnlyList<RunClassification> Runs,
     FaultWindow Window,

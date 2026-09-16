@@ -76,6 +76,10 @@ internal sealed class ElasticLogReader
     /// Records matching any of a set of templates, unfiltered by workflow, and scoped to the given
     /// service. See the four-argument overload for why the service filter exists.
     /// </summary>
+    /// <param name="templates">The message templates to match; a record matching any of them is returned.</param>
+    /// <param name="from">Start of the time range, inclusive.</param>
+    /// <param name="to">End of the time range, inclusive.</param>
+    /// <param name="ct">Cancels the query.</param>
     /// <param name="service">
     /// The <c>service.name</c> to scope to, or null for every service.
     /// </param>

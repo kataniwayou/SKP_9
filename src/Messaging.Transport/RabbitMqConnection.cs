@@ -83,6 +83,12 @@ public sealed class RabbitMqConnection : IAsyncDisposable
     private readonly SemaphoreSlim _init = new(1, 1);
     private IConnection? _connection;
 
+    /// <param name="options">Broker endpoint and credentials.</param>
+    /// <param name="topologies">
+    /// Every topology unit declared in this process. They run once per connection, so a queue this
+    /// connection sends to is declared before anything addresses it.
+    /// </param>
+    /// <param name="logger">Where connection and recovery transitions are reported.</param>
     /// <param name="clientName">
     /// What the broker reports for this connection. Defaulted rather than required so the three
     /// tests that construct this type directly keep compiling; the DI registrations pass it
