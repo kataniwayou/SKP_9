@@ -98,11 +98,19 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // NO Configure<T> here, and that is the mirror's one structural difference from FileFetcher.
+        // The staging suffix a write is landed under before it is renamed onto its final name. A pod
+        // option and not a step payload field: which suffix the watcher on a folder ignores is a
+        // fact about the deployment that folder belongs to, not a choice a workflow author makes,
+        // and the registered file-persister-config row is additionalProperties:false, so putting it
+        // in the payload would have cost a new schema row and a re-point of both sides of a
+        // published workflow to carry a value nobody would vary.
+        //
+        // STILL NO CEILING HERE, and that part of the mirror's asymmetry with FileFetcher stands.
         // That processor binds a pod ceiling because it is the boundary where bytes ENTER the system
         // and an operator must be able to cap what a container will hold. These bytes were already
         // capped there, one whole workflow ago; a second ceiling on the way out would be a number
         // that can disagree with the first.
+        builder.Services.Configure<FilePersisterOptions>(builder.Configuration.GetSection("FilePersister"));
 
         // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
         // the seam's design: per-dispatch state lives in a plain field on this one instance, which is

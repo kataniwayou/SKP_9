@@ -2,6 +2,7 @@ using System.Text.Json;
 using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Processing;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Processor.FilePersister;
 
@@ -23,7 +24,8 @@ namespace Processor.FilePersister;
 /// folders, so metadata drift is outside what this processor owes anyone.
 /// </para>
 /// </summary>
-internal sealed class FilePersisterProcessor(ILogger<FilePersisterProcessor> logger)
+internal sealed class FilePersisterProcessor(
+    ILogger<FilePersisterProcessor> logger, IOptions<FilePersisterOptions> options)
     : BaseProcessor<FilePersisterConfig>
 {
     protected override async Task ProcessAsync(
@@ -38,7 +40,7 @@ internal sealed class FilePersisterProcessor(ILogger<FilePersisterProcessor> log
 
         var path = Path.Combine(folder, name);
 
-        Write(path, file.Content!);
+        Write(path, file.Content!, options.Value.TempExtension);
 
         // The SHAPE and the destination, never the content. The bytes are upstream data and stay out
         // of every template in this system.
@@ -184,27 +186,112 @@ internal sealed class FilePersisterProcessor(ILogger<FilePersisterProcessor> log
     private static readonly char[] SeparatorChars = ['/', '\\'];
 
     /// <summary>
-    /// The write. Every IO fault is a failed step regardless of cause, for the reason
+    /// The write, in two stages: the bytes land under a staging name and are then moved onto the
+    /// final one. Every IO fault is a failed step regardless of cause, for the reason
     /// <c>FileFetcherProcessor.Read</c> gives: there is no requeue path here — the framework requeues
     /// only <c>TransientSendException</c>, which can arise solely from <c>SendToPostAsync</c> — so
     /// classifying the fault would change nothing about the disposition.
     /// <para>
-    /// <b>An existing file is overwritten</b>, which is what <c>File.WriteAllBytes</c> does and what
-    /// this processor wants: re-running a workflow over the same input must land in the same state,
-    /// exactly as re-running FileFetcher reads the same file twice. Refusing would make the second
-    /// run of any workflow a failure.
+    /// <b>The two stages exist because a write into a mounted volume is not instantaneous.</b> A
+    /// single <c>WriteAllBytes</c> truncates the destination the moment it opens it, so for as long
+    /// as the bytes are in flight the folder holds a file that already has its final name and does
+    /// not yet have its content. Anything watching that folder can open it and read a truncated
+    /// file, and nothing about the result looks wrong afterwards. Staging moves that window onto a
+    /// name the watcher is configured to ignore.
+    /// </para>
+    /// <para>
+    /// <b>The staging file is in the SAME folder, and that is load-bearing rather than tidy.</b> One
+    /// directory is one filesystem, so <see cref="File.Move(string, string, bool)"/> is
+    /// <c>rename(2)</c> on Linux and <c>MoveFileEx(MOVEFILE_REPLACE_EXISTING)</c> on Windows —
+    /// atomic, so a watcher sees the final name either absent or complete. Staging through a system
+    /// temp directory would cross the volume boundary, degrade the move to copy-then-delete, and
+    /// reopen the exact window this method exists to close.
+    /// </para>
+    /// <para>
+    /// <b>An existing file is overwritten</b>, which is why the move passes <c>overwrite: true</c>
+    /// and is not optional: re-running a workflow over the same input must land in the same state,
+    /// exactly as re-running FileFetcher reads the same file twice, and a bare <c>File.Move</c>
+    /// throws when the destination exists. A staging file left by an earlier crash is overwritten
+    /// too, by <c>WriteAllBytes</c>, because nothing collects that debris and a dispatch must not
+    /// fail forever on a run nobody remembers.
     /// </para>
     /// </summary>
-    private static void Write(string path, byte[] content)
+    private static void Write(string path, byte[] content, string configuredSuffix)
     {
+        var staging = $"{path}.{StagingSuffix(configuredSuffix)}";
+
         try
         {
-            File.WriteAllBytes(path, content);
+            File.WriteAllBytes(staging, content);
+            File.Move(staging, path, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                       or NotSupportedException)
         {
+            Discard(staging);
+
+            // THE FINAL PATH, not the staging one, because that is the path the workflow names and
+            // the one an operator searches. The OS reason is kept verbatim and may itself name the
+            // staging file — that is diagnosis, and it is how the two stages are told apart.
             throw Unwritable(path, ex.Message);
+        }
+    }
+
+    /// <summary>The staging suffix when configuration does not supply a usable one.</summary>
+    private const string DefaultSuffix = "skp";
+
+    /// <summary>
+    /// The configured suffix, normalised, or <see cref="DefaultSuffix"/>.
+    /// <para>
+    /// <b>Every unusable value falls back silently, and that is a decision rather than an
+    /// oversight.</b> Failing the step instead would turn one typo in a manifest into every dispatch
+    /// failing, to defend a value whose only job is to be a name a watcher ignores. The fallback
+    /// still stages — it stages under the name the rest of this system documents — so the property
+    /// that matters is never lost, which is the difference between this and the folder path, where
+    /// guessing would put a file somewhere nobody is looking.
+    /// </para>
+    /// <para>
+    /// <b>A separator is rejected for the reason <see cref="SafeName"/> exists.</b> The suffix is
+    /// appended to a name that has already been checked for separators, and a suffix must not be the
+    /// way one gets back in — <c>"../x"</c> here would stage outside the folder and then rename into
+    /// it, which is a shorter route to the same escape.
+    /// </para>
+    /// </summary>
+    private static string StagingSuffix(string? configured)
+    {
+        // A leading dot is tolerated: "part" and ".part" are the same instruction, and an operator
+        // who writes the dot has not asked for a file called "orders.csv..part".
+        var suffix = configured?.Trim().TrimStart('.') ?? string.Empty;
+
+        if (suffix.Length == 0
+            || suffix.IndexOfAny(SeparatorChars) >= 0
+            || suffix.IndexOf(' ') >= 0)
+        {
+            return DefaultSuffix;
+        }
+
+        return suffix;
+    }
+
+    /// <summary>
+    /// The staging file, removed on a best-effort basis after a failure.
+    /// <para>
+    /// <b>Hygiene, not correctness.</b> A staging file that survives is already wearing a name
+    /// nothing downstream reads, so leaving one loses nothing — but this folder is a mounted volume
+    /// that nobody sweeps, and a recurring fault would fill it. A failure to delete is swallowed
+    /// because the step is failing already and the reason it is failing is the one worth reporting.
+    /// </para>
+    /// </summary>
+    private static void Discard(string staging)
+    {
+        try
+        {
+            File.Delete(staging);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                      or NotSupportedException)
+        {
+            // Deliberately empty. See the summary.
         }
     }
 
