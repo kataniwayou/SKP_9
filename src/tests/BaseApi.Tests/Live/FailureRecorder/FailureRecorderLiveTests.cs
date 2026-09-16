@@ -35,62 +35,97 @@ public sealed class FailureRecorderLiveTests
     private static string ElasticUrl => RealStack.Get("SKP_ES_URL", "http://localhost:19200");
 
     /// <summary>
-    /// Waits for the record this test's seed produces, then keeps reading briefly in case it
-    /// produced more than one.
+    /// A consumer that is ALREADY LISTENING on the failures topic, so a record written moments later
+    /// cannot slip past it.
     /// <para>
-    /// A fresh group id per call, with <c>AutoOffsetReset.Latest</c>: this test must see what ITS
-    /// failure produced, not the backlog of every failure since the topic was created.
+    /// <b>This exists because subscribing after the seed is produced loses the record.</b> The drain
+    /// used to be one call made AFTER ProduceAsync: it subscribed with AutoOffsetReset.Latest, and a
+    /// fresh consumer group waits out group.initial.rebalance.delay.ms -- 3s, which the dev broker
+    /// keeps on purpose -- before it is assigned a partition. "Latest" is pinned AT ASSIGNMENT, so
+    /// anything written during that window is skipped, permanently, and the poll then runs to its
+    /// deadline and reports that nothing ever arrived.
     /// </para>
     /// <para>
-    /// <b>It waits for the record rather than reading for a fixed span, and that is a fix rather
-    /// than a tidy-up.</b> This used to collect for exactly 90s and return whatever had arrived. The
-    /// measured seed-to-record latency on this cluster runs to about 90s — the entry step is cron
-    /// driven on <c>5,35 * * * * *</c>, so a seed can wait most of a fire interval before it is even
-    /// imported — which made the window a coin flip against the very thing it was timing. Two
-    /// consecutive records landed at 08:42:05.62 and 08:43:35.33, each a fraction AFTER the 90s
-    /// deadline of the test that seeded it, and the same test passed an hour earlier purely on
-    /// timing. A test whose verdict is a race reports nothing.
-    /// </para>
-    /// <para>
-    /// <b>The settle read after the first record is what keeps <c>Assert.Single</c> meaningful.</b>
-    /// Returning on the first message would make a duplicate record — one seed recorded twice —
-    /// silently pass, and that is a real failure mode this class should catch.
+    /// <b>It hid for as long as the chain was slower than the rebalance.</b> Measured on 2026-09-16,
+    /// the records for two consecutive runs landed at 13:04:05 and 13:09:05 -- about five seconds
+    /// after each test began -- while both drains polled a further five minutes and saw nothing.
+    /// Earlier the same day, when the chain answered in ninety seconds, the same tests passed. Widening
+    /// the deadline cannot fix it: the record is missed before the wait even starts, which is why
+    /// four minutes and five minutes failed identically.
     /// </para>
     /// </summary>
-    private static List<JsonElement> Drain(TimeSpan window)
+    private sealed class FailureDrain : IDisposable
     {
-        using var consumer = new ConsumerBuilder<Ignore, string>(new ConsumerConfig
+        private readonly IConsumer<Ignore, string> _consumer;
+
+        private FailureDrain(IConsumer<Ignore, string> consumer) => _consumer = consumer;
+
+        /// <summary>
+        /// Subscribes and returns only once the broker has actually assigned a partition, which is
+        /// the whole point: the caller seeds AFTER this returns.
+        /// </summary>
+        public static FailureDrain Start()
         {
-            BootstrapServers = RealStack.KafkaBrokers,
-            GroupId = $"failure-recorder-test-{Guid.NewGuid():N}",
-            AutoOffsetReset = AutoOffsetReset.Latest,
-            EnableAutoCommit = false,
-        }).Build();
-
-        consumer.Subscribe(FailuresTopic);
-
-        var records = new List<JsonElement>();
-        var deadline = DateTime.UtcNow + window;
-        var settle = TimeSpan.FromSeconds(10);
-
-        while (DateTime.UtcNow < deadline)
-        {
-            var result = consumer.Consume(TimeSpan.FromSeconds(2));
-            if (result?.Message?.Value is { Length: > 0 } value)
+            var consumer = new ConsumerBuilder<Ignore, string>(new ConsumerConfig
             {
-                records.Add(JsonDocument.Parse(value).RootElement.Clone());
+                BootstrapServers = RealStack.KafkaBrokers,
+                GroupId = $"failure-recorder-test-{Guid.NewGuid():N}",
+                AutoOffsetReset = AutoOffsetReset.Latest,
+                EnableAutoCommit = false,
+            }).Build();
 
-                // First one in: stop waiting for the pipeline and start the short settle instead, so
-                // the deadline bounds how long we wait for a record rather than how long we read.
-                if (records.Count == 1)
-                {
-                    deadline = DateTime.UtcNow + settle;
-                }
+            consumer.Subscribe(FailuresTopic);
+
+            // Polling is what drives the join; Assignment stays empty until the coordinator answers.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+            while (DateTime.UtcNow < deadline && consumer.Assignment.Count == 0)
+            {
+                consumer.Consume(TimeSpan.FromMilliseconds(500));
             }
+
+            Assert.True(consumer.Assignment.Count > 0,
+                $"no partition of {FailuresTopic} was assigned within 60s, so a record written after "
+                + "this point could not have been observed");
+
+            return new FailureDrain(consumer);
         }
 
-        consumer.Close();
-        return records;
+        /// <summary>
+        /// Reads until the record arrives, then keeps reading briefly in case the seed produced more
+        /// than one.
+        /// <para>
+        /// <b>The settle read is what keeps <c>Assert.Single</c> meaningful.</b> Returning on the
+        /// first message would let a duplicate record -- one seed recorded twice -- pass silently.
+        /// </para>
+        /// </summary>
+        public List<JsonElement> Collect(TimeSpan window)
+        {
+            var records = new List<JsonElement>();
+            var deadline = DateTime.UtcNow + window;
+            var settle = TimeSpan.FromSeconds(10);
+
+            while (DateTime.UtcNow < deadline)
+            {
+                var result = _consumer.Consume(TimeSpan.FromSeconds(2));
+                if (result?.Message?.Value is { Length: > 0 } value)
+                {
+                    records.Add(JsonDocument.Parse(value).RootElement.Clone());
+
+                    if (records.Count == 1)
+                    {
+                        deadline = DateTime.UtcNow + settle;
+                    }
+                }
+            }
+
+            return records;
+        }
+
+        public void Dispose()
+        {
+            _consumer.Close();
+            _consumer.Dispose();
+        }
     }
 
     /// <summary>
@@ -309,11 +344,14 @@ public sealed class FailureRecorderLiveTests
 
         try
         {
+            // LISTENING FIRST. The chain answers in seconds, so a drain started after the produce
+            // can be assigned its partition only after the record is already written -- see
+            // FailureDrain.
+            using var drain = FailureDrain.Start();
+
             await ProduceAsync(path);
 
-            // Same fresh-group, Latest drain the two tests above use: this sees only the failure
-            // this seed produced, not the topic's backlog.
-            var records = Drain(TimeSpan.FromMinutes(4));
+            var records = drain.Collect(TimeSpan.FromMinutes(5));
             var record = Assert.Single(records);
 
             // This is the D5/mid-chain shape (SKNormalizer refuses a non-Acme item), so, like
@@ -364,11 +402,14 @@ public sealed class FailureRecorderLiveTests
 
         try
         {
+            // LISTENING FIRST. The chain answers in seconds, so a drain started after the produce
+            // can be assigned its partition only after the record is already written -- see
+            // FailureDrain.
+            using var drain = FailureDrain.Start();
+
             await ProduceAsync(path);
 
-            // The chain fires on 5,35 * * * * *, so one fire is at most 30s away; 90s covers that
-            // plus the chain's own hops plus slack.
-            var records = Drain(TimeSpan.FromMinutes(4));
+            var records = drain.Collect(TimeSpan.FromMinutes(5));
 
             var record = Assert.Single(records);
 
@@ -429,6 +470,10 @@ public sealed class FailureRecorderLiveTests
         // Self-driving, for the reason AMidChainFailureProducesARecordNamingItsLineage now gives:
         // a test that waits for a situation a human was supposed to arrange is red whenever nobody
         // arranged it, and a permanently red test reports nothing.
+        // LISTENING FIRST, for the reason FailureDrain gives: the break below fails the very next
+        // fire, and a drain started afterwards would be assigned its partition too late to see it.
+        using var drain = FailureDrain.Start();
+
         var (assignment, row) = await ImporterAssignmentAsync();
         var original = row.GetProperty("payload").GetString()!;
 
@@ -448,7 +493,7 @@ public sealed class FailureRecorderLiveTests
 
             // Open returns false within the idle timeout and the step fails before opening any
             // lineage.
-            var records = Drain(TimeSpan.FromMinutes(4));
+            var records = drain.Collect(TimeSpan.FromMinutes(5));
 
             var record = Assert.Single(records);
 
