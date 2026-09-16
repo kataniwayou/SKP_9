@@ -161,7 +161,22 @@ public sealed class FailureRecorderLiveTests
     /// the returned bodies in C# is what actually works.
     /// </para>
     /// </summary>
-    private static async Task<List<string>> LinesAsync(string field, string value)
+    /// <param name="field">The attribute to scope the lineage by -- ExecutionId or CorrelationId.</param>
+    /// <param name="value">The id to match.</param>
+    /// <param name="mustContain">
+    /// Text one returned line has to carry before the lineage counts as arrived.
+    /// <para>
+    /// <b>Polling until the result is merely NON-EMPTY is not enough, and this parameter is the
+    /// fix.</b> A lineage lands in Elasticsearch a line at a time: the first query can return four
+    /// of its lines while the one this test needs -- the importer's, the only line anywhere carrying
+    /// the absolute path -- is still in flight. Returning on the first non-empty page then asserts
+    /// against a half-indexed lineage and fails with the right id and the wrong lines. It was
+    /// invisible while Drain read for a fixed ninety seconds, because that span happened to give the
+    /// exporter enough slack; a drain that returns as soon as its record arrives took the slack away
+    /// and left the bug.
+    /// </para>
+    /// </param>
+    private static async Task<List<string>> LinesAsync(string field, string value, string? mustContain = null)
     {
         using var http = new HttpClient { BaseAddress = new Uri(ElasticUrl) };
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
@@ -190,9 +205,15 @@ public sealed class FailureRecorderLiveTests
 
             if (hits.GetArrayLength() > 0)
             {
-                return hits.EnumerateArray()
+                var lines = hits.EnumerateArray()
                     .Select(h => h.GetProperty("_source").GetProperty("body").GetProperty("text").GetString() ?? "")
                     .ToList();
+
+                if (mustContain is null
+                    || lines.Exists(l => l.Contains(mustContain, StringComparison.Ordinal)))
+                {
+                    return lines;
+                }
             }
 
             await Task.Delay(TimeSpan.FromSeconds(3));
@@ -305,7 +326,7 @@ public sealed class FailureRecorderLiveTests
             // filter -- the importer's line is Information, not Warning). Asserting the EXACT path,
             // not merely "some line mentions a zip": the operator's question is which file broke,
             // and only the exact string answers it.
-            var byExecution = await LinesAsync("ExecutionId", executionId);
+            var byExecution = await LinesAsync("ExecutionId", executionId, path);
             Assert.Contains(byExecution, line => line.Contains(path, StringComparison.Ordinal));
 
             // RESOLUTION #2: by correlation id. For THIS failure it is redundant with #1, since a
@@ -313,7 +334,7 @@ public sealed class FailureRecorderLiveTests
             // shows a real failure that has ONLY a correlation id (Rent/Open happens before an
             // execution id is minted), so correlation-only resolution has to work independently of
             // execution-id resolution, not merely as a side effect of it.
-            var byCorrelation = await LinesAsync("CorrelationId", correlationId);
+            var byCorrelation = await LinesAsync("CorrelationId", correlationId, path);
             Assert.Contains(byCorrelation, line => line.Contains(path, StringComparison.Ordinal));
         }
         finally
