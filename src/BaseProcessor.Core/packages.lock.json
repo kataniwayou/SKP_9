@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "nzCq0ddYHGXK15xnXkaxxZqYXvqYl78pUX5cV+UgAAKffHmtPDKGEEC4hEw9UfJroWLCaxKes7TzIFYxoPrHsw==",
+        "contentHash": "nzhGBiznj+G36Cn8eZRHHperplTEXnB3ga708clWHedfc0AkNgM6UDFA9JZyChe+L1kO5LPe0YKy5iVKUIIODg==",
         "dependencies": {
           "Messaging.Contracts": "[1.0.0]",
           "Messaging.Transport": "[1.0.0]",
