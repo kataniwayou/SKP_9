@@ -2,6 +2,7 @@ namespace Processor.ArchiveCollapser.Writers;
 
 /// <summary>One entry to place in an archive.</summary>
 /// <param name="Name">The entry's file name. Never a path -- ArchiveBuilder rejects a separator.</param>
+/// <param name="Content">The entry's bytes, written verbatim.</param>
 /// <param name="ModifiedUtc">Null where the source document recorded none.</param>
 public sealed record ArchiveEntry(string Name, byte[] Content, DateTime? ModifiedUtc);
 

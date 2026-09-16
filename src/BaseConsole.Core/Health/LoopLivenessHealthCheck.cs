@@ -23,8 +23,10 @@ public sealed class LoopLivenessHealthCheck : IHealthCheck
     private readonly string _loop;
     private readonly TimeProvider _clock;
 
+    /// <param name="heartbeat">The heartbeat whose last beat this check reads.</param>
     /// <param name="window">How long without a beat before this loop reads as dead.</param>
     /// <param name="loop">Loop name, surfaced in the description so a failure says which loop died.</param>
+    /// <param name="clock">Time source, so a test can age a beat without waiting.</param>
     public LoopLivenessHealthCheck(
         ILoopHeartbeat heartbeat, TimeSpan window, string loop, TimeProvider clock)
     {

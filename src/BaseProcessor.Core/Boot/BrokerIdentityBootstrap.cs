@@ -32,6 +32,12 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
     private readonly ILogger<BrokerIdentityBootstrap> _logger;
     private readonly TimeProvider _clock;
 
+    /// <param name="cfg">Configuration supplying the broker address and the instance id.</param>
+    /// <param name="logs">
+    /// The console factory Stage 1 logs through. Console only, deliberately: no OTel provider exists
+    /// until the host is built, which is after this has answered.
+    /// </param>
+    /// <param name="clock">Time source for the retry backoff, so a test need not wait it out.</param>
     /// <param name="sourceHash">
     /// The code identity to ask about. Null takes the default, which reads the hash embedded on the
     /// entry assembly — a value only a concrete processor's build emits. Overriding it is what makes

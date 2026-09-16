@@ -23,7 +23,7 @@ namespace BaseConsole.Core.Messaging;
 /// than close with a lock: the missed park is still read on the next pass.
 /// </para>
 /// <para>
-/// A static, like <see cref="Messaging.Transport.DispatchedQueues"/>, because the raiser and the
+/// A static, like <c>DispatchedQueues</c>, because the raiser and the
 /// reader are in different assemblies and threading a seam between them would buy nothing -- there
 /// is one dead-letter probe per process.
 /// </para>

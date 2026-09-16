@@ -17,7 +17,7 @@ namespace BaseApi.Tests.Console;
 /// <b>Reflection, not a test subclass.</b> <see cref="DeadLetterDepthProbe"/> is sealed and
 /// <c>WaitAsync</c> is <c>protected</c>, so there is no seam to call it through directly. The
 /// alternative -- running the whole <c>ExecuteAsync</c> loop against a real or fake broker connection
-/// -- would test the passive-declare plumbing <see cref="QueueStatsProbeHeartbeatTests"/> already
+/// -- would test the passive-declare plumbing <c>QueueStatsProbeHeartbeatTests</c> already
 /// covers and say nothing more about this contract. Invoking the protected method directly tests the
 /// exact code that ships, with nothing reimplemented in the test.
 /// </para>

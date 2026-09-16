@@ -28,6 +28,13 @@ namespace BaseApi.Tests.Live.Resilience;
 /// id <c>ExecutionLogScope</c> therefore omits rather than zeroes -- so null here means "this
 /// dispatch had no input key", never "the attribute was lost".
 /// </param>
+/// <param name="Timestamp">When the record was written.</param>
+/// <param name="Template">The message template, which is what a template-scoped query matches on.</param>
+/// <param name="Body">The rendered message text.</param>
+/// <param name="CorrelationId">The dispatch's correlation id, or null where the scope carried none.</param>
+/// <param name="Result">The step result the line reported, or null for a line that reports none.</param>
+/// <param name="Service">The emitting <c>service.name</c>.</param>
+/// <param name="Scope">The emitting logger's scope name.</param>
 internal sealed record LogRecord(
     DateTimeOffset Timestamp,
     string Template,

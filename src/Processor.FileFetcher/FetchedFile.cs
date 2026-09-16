@@ -25,10 +25,15 @@ namespace Processor.FileFetcher;
 /// enforces it.
 /// </para>
 /// </summary>
+/// <param name="FileName">The file's own name, extension included. Never a path.</param>
+/// <param name="Extension">The extension, carried separately so a reader need not parse the name.</param>
 /// <param name="SizeBytes">
 /// <c>FileInfo.Length</c>, not <c>Content.Length</c>. For a whole file they agree, and the former is
 /// the number the dry inspection already reported to an operator.
 /// </param>
+/// <param name="CreatedUtc">Creation stamp from the source filesystem, or null when it had none.</param>
+/// <param name="ModifiedUtc">Modification stamp from the source filesystem, or null when it had none.</param>
+/// <param name="Content">The file's bytes, exactly as read.</param>
 internal sealed record FetchedFile(
     string FileName,
     string Extension,

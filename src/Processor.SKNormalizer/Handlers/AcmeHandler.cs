@@ -505,6 +505,9 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
     /// is actually present, so a sidecar naming a file the bundle does not contain cannot rename
     /// anything. It is mapped so the shape documents what Acme sends.
     /// </param>
+    /// <param name="SampleRateHz">The sidecar's own claim, carried through untouched.</param>
+    /// <param name="Channels">The sidecar's own claim, carried through untouched.</param>
+    /// <param name="DurationSeconds">The sidecar's own claim, carried through untouched.</param>
     private sealed record AcmeSidecarAudio(
         [property: JsonPropertyName("file")] string? File,
         int? SampleRateHz,

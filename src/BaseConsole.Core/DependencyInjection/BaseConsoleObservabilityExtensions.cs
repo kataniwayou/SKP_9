@@ -26,6 +26,23 @@ namespace BaseConsole.Core.DependencyInjection;
 public static class BaseConsoleObservabilityExtensions
 {
     /// <summary>
+    /// The first of resolved, configured or default that actually says something. Whitespace is not
+    /// something — see the call site for the failure that distinction exists to prevent.
+    /// </summary>
+    /// <param name="resolved">The identity resolved at runtime, which wins when it says anything.</param>
+    /// <param name="configured">The configured value, used when nothing was resolved.</param>
+    /// <param name="fallback">The last resort, used when neither of the others says anything.</param>
+    private static string Fallback(string? resolved, string? configured, string fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            return resolved;
+        }
+
+        return string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+    }
+
+    /// <summary>
     /// Takes the host builder rather than the service collection, because
     /// <c>builder.Logging.AddOpenTelemetry</c> needs the <see cref="ILoggingBuilder"/> surface. The
     /// host builder exposes both logging and services.
@@ -45,6 +62,14 @@ public static class BaseConsoleObservabilityExtensions
     /// dropped this library but kept the shape would still be a <c>worker</c>.
     /// </para>
     /// </param>
+    /// <param name="defaultServiceName">
+    /// What <c>service.name</c> becomes when neither a resolved identity nor configuration supplies
+    /// one. Required rather than optional, and required of BOTH callers: this helper is shared by the
+    /// orchestrator and every processor, so it cannot know which role it is registering — a default
+    /// invented here would be wrong for one of them, and an optional one would let a caller omit its
+    /// own name by accident and inherit the other's.
+    /// </param>
+    /// <param name="defaultServiceVersion">The matching <c>service.version</c> fallback.</param>
     /// <param name="serviceName">
     /// The resolved role name. Null falls back to <c>Service:Name</c> in configuration.
     /// <para>
@@ -61,28 +86,6 @@ public static class BaseConsoleObservabilityExtensions
     /// <c>ProcessorId</c> rides: it is the only value that identifies a processor exactly, because
     /// name and version are unconstrained columns and two different builds can share them.
     /// </param>
-    /// <summary>
-    /// The first of resolved, configured or default that actually says something. Whitespace is not
-    /// something — see the call site for the failure that distinction exists to prevent.
-    /// </summary>
-    private static string Fallback(string? resolved, string? configured, string fallback)
-    {
-        if (!string.IsNullOrWhiteSpace(resolved))
-        {
-            return resolved;
-        }
-
-        return string.IsNullOrWhiteSpace(configured) ? fallback : configured;
-    }
-
-    /// <param name="defaultServiceName">
-    /// What <c>service.name</c> becomes when neither a resolved identity nor configuration supplies
-    /// one. Required rather than optional, and required of BOTH callers: this helper is shared by the
-    /// orchestrator and every processor, so it cannot know which role it is registering — a default
-    /// invented here would be wrong for one of them, and an optional one would let a caller omit its
-    /// own name by accident and inherit the other's.
-    /// </param>
-    /// <param name="defaultServiceVersion">The matching <c>service.version</c> fallback.</param>
     public static IHostApplicationBuilder AddBaseConsoleObservability(
         this IHostApplicationBuilder builder,
         IConfiguration cfg,

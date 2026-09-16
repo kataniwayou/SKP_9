@@ -63,6 +63,9 @@ public sealed class EnvelopeContractTests : IDisposable
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "tree.json"));
 
     /// <summary>Runs the real fetcher and returns the single branch it sent.</summary>
+    /// <param name="name">The temp file's name, which becomes the envelope's fileName.</param>
+    /// <param name="content">The bytes written to the temp file.</param>
+    /// <param name="payload">The step payload handed to the fetcher.</param>
     /// <param name="createdUtc">
     /// When given, stamped onto the temp file before the fetcher inspects it, so a test can pin
     /// <c>CreatedUtc</c> to a known value rather than merely asserting it is non-null.
@@ -136,7 +139,7 @@ public sealed class EnvelopeContractTests : IDisposable
     /// The third hop. Defaults to the identity handler -- the one that returns the input tree
     /// unchanged -- so what this adds to the chain is a pass-through, and any difference it
     /// introduces is a defect rather than a design choice. Both registered handlers are always
-    /// wired in so a test can pass <paramref name="handler"/> to exercise Acme's mapping path
+    /// wired in so a test can pass <c>handler</c> to exercise Acme's mapping path
     /// instead, without touching every existing identity-path call site.
     /// </summary>
     /// <summary>The whitelist address these tests hand the normalizer; shape only, nothing reads it.</summary>

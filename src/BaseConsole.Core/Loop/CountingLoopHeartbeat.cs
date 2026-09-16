@@ -34,6 +34,7 @@ public sealed class CountingLoopHeartbeat : ILoopHeartbeat
     private readonly ILoopHeartbeat _inner;
     private readonly string _loopName;
 
+    /// <param name="inner">The heartbeat this one wraps and forwards every beat to.</param>
     /// <param name="loop">
     /// The loop's key, matching the one its keyed <see cref="ILoopHeartbeat"/> registration and its
     /// <c>LoopLivenessHealthCheck</c> already use, so a rate panel and a failing probe name the same

@@ -8,6 +8,11 @@ namespace Processor.SKNormalizer;
 /// <c>DateTimeOffset</c> so <c>System.Text.Json</c> renders a UTC instant as <c>...Z</c> rather than
 /// <c>+00:00</c> — the shape the schema documents.
 /// </summary>
+/// <param name="Name">The node's file name, including its extension.</param>
+/// <param name="Extension">The node's extension, carried separately so a reader need not parse the name.</param>
+/// <param name="SizeBytes">The node's size as measured upstream. Carried, never enforced here.</param>
+/// <param name="CreatedUtc">Creation stamp from the source filesystem, or null when it had none.</param>
+/// <param name="ModifiedUtc">Modification stamp from the source filesystem, or null when it had none.</param>
 /// <param name="EntryCount">
 /// How many entries the node holds. Derived from <see cref="FileNode.Content"/> and present for a
 /// reader's convenience — the SCHEMA constrains the array, never this, because a counting bug here
@@ -92,6 +97,7 @@ public abstract record FileContent
 /// holding both would double the blob for no consumer.
 /// </para>
 /// </param>
+/// <param name="Metadata">The node's own description: name, extension, size and stamps.</param>
 public sealed record FileNode(FileMetadata Metadata, FileContent? Content);
 
 /// <summary>
