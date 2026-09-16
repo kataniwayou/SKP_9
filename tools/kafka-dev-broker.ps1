@@ -84,11 +84,18 @@ function Start-Broker {
         Write-Host "$Name already exists; use -Reset for a clean one"
     }
     else {
+        # THE ADVERTISED LISTENERS ARGUMENT IS QUOTED AND THE OTHERS ARE NOT, on purpose: it is the
+        # only one that interpolates. PowerShell does not expand the ${Name} form in a BARE
+        # argument, so unquoted it reached Kafka as the literal text "INTERNAL://${Name}:9092" and
+        # the broker exited 1 with "Unable to parse ... to a broker endpoint" -- which reads as a
+        # broken image rather than a quoting slip until you read the container's log.
+        # (The comment lives here rather than beside the argument because a comment inside a
+        # backtick continuation ends the statement, and -e becomes a command.)
         docker run -d --name $Name --network kind -p 19092:19092 `
             -e KAFKA_NODE_ID=1 `
             -e KAFKA_PROCESS_ROLES=broker,controller `
             -e KAFKA_LISTENERS=INTERNAL://:9092,EXTERNAL://:19092,CONTROLLER://:9093 `
-            -e KAFKA_ADVERTISED_LISTENERS=INTERNAL://${Name}:9092,EXTERNAL://localhost:19092 `
+            -e "KAFKA_ADVERTISED_LISTENERS=INTERNAL://${Name}:9092,EXTERNAL://localhost:19092" `
             -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT `
             -e KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL `
             -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER `
