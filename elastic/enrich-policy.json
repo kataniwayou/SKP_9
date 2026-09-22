@@ -1,0 +1,7 @@
+{
+  "match": {
+    "indices": "skp-entity-names",
+    "match_field": "entity_id",
+    "enrich_fields": ["entity_name", "entity_kind"]
+  }
+}
