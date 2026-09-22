@@ -752,9 +752,15 @@ with a real **Other** bucket rather than a silent truncation, which keeps the ta
 its arc is DROPPED, not shortened: with the default hole and a truncating legend,
 `Unapproved Sim Artist` rendered nowhere at all — no outer label on its half of the donut, and
 `Unapprove...` in the legend — while the shorter `SKP Live Suite` opposite it rendered fine. The
-panel therefore runs `truncateLegend: false`, `maxLegendLines: 3` and a smaller hole
-(`emptySizeRatio: 0.15`) to widen the rings. The first two are the durable guarantee, since a name
-long enough to be dropped from its arc can always arrive; the hole size only buys headroom.
+panel therefore puts its legend **underneath**, one line per entry, and runs a smaller hole
+(`emptySizeRatio: 0.15`) to widen the rings.
+
+Position is what makes the legend trustworthy, not the truncation setting. A side legend has one
+column of width, so one line per entry must ellipsise — and an ellipsised legend beside a dropped
+in-arc label is how a value comes to appear nowhere at all. Underneath, a line has the whole row,
+so the full name renders. Both pies on this board are laid out that way, at `w:48 h:22`: the bottom
+legend costs vertical space, which shortens the radius, which drops the long label from its arc
+again — and the extra height buys it back.
 
 **It is an aggregation-based visualization, not Lens, and that is forced.** A Lens partition chart
 exposes exactly two dimension groups, "Slice by" and "Metric" — verified in the editor on 8.15.5.
