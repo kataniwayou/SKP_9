@@ -1539,3 +1539,26 @@ Recorded so a later reader knows these were weighed during planning, not overloo
 - **Emitting `WorkflowName`/`StepName`/`ProcessorName` from `BaseProcessor.Core`** (§6.4). It would retire the lookup index, the policy, the sync script and the whole staleness window. It is a code change across two projects plus a redeploy of every processor, and it is the better end state. The enrich fields are named `skp.*_name` precisely so that switching to it later is a data-view change rather than a dashboard rewrite.
 - **A second dashboard** carrying the five panels declined in §12 — a failure-reason terms table, failure ratio over time, a heartbeat tile, step-duration percentiles from `attributes.ElapsedMs`, and a lineage funnel on unique `CorrelationId` per step. They belong to a second dashboard if the first proves useful.
 - **Automating the saved-object import.** The repo's posture is hand-import (§8), matching Grafana. Task 5 Step 9 proves the export round-trips through the import API, which is the part that actually protects the work; wrapping that call in a script would be a second source of truth for which objects exist.
+
+---
+
+## Execution record — 2026-09-22
+
+All six tasks executed and committed (`43a431b`, `254caed`, `9c031f8`, `359f65f`, `fdcf339`, `e5a158e`). Five deviations from the plan as written, each for a reason found during execution:
+
+1. **The kind node cannot pull from `docker.elastic.co`**, and both `kind load` paths fail on Docker Desktop's containerd image store. The working sequence is `docker save --platform linux/amd64` before `kind load image-archive`; it is recorded in the header of `k8s/24-kibana.yaml`.
+
+2. **Check 5's witness key was wrong in the design** — `(StepId, ExecutionId)` reports ~15 false duplicates per 10 minutes on a healthy run, because the chain fans out. Corrected to `(StepId, ExecutionId, EntryId)`; §4.2 and §9 of the spec were updated. Terminal-`Completed` records carry no `EntryId` and are guarded instead by a new per-processor assertion in check 4.
+
+3. **Task 5 was built through the saved-objects API, not the Lens editor**, then verified by rendering each object in headless Playwright — which is the guarantee the plan actually wanted ("renders with data", not "imports clean"). The export round-trips: all five objects deleted and re-imported from `elastic/kibana-export.ndjson`.
+
+4. **The drilldown uses `OPEN_IN_DISCOVER_DRILLDOWN`** carrying filters, query and time range, rather than targeting the saved search object by id. Verified: clicking a slice opens Discover pre-filtered with a matching hit count. The saved search ships as its own deliverable.
+
+5. **The defect experiment left residue.** Running the deliberately-wrong pipeline flagged 4 terminal-`Cancelled` records, and enrichment is forward-only, so they would have kept check 5 red on any wide window. Removed with a targeted `_update_by_query` that unsets only `skp.outcome_record`; log content untouched.
+
+**Measured, not estimated:** 1290 counted records over 43 consecutive cycles — exactly `30 × 43`, every processor matching its §4.4 row, and 1118:129:43 = exactly 26:3:1. `logs@custom` runs on 100% of documents at 0.0264 ms/doc with zero failures.
+
+**Two checks outstanding, both about traffic rather than the dashboard:**
+
+- **check 2** needs the feed running. `tools/simulate-endless-feed.py` was stopped by the host's low-memory reaper during this session and was deliberately not restarted.
+- **check 9** needs a second workflow driven. Only `filefetcher-archiveexpander-chain` has produced enriched records, so the genericity claim is unproven on data even though the dashboard is keyed on workflow name throughout.
