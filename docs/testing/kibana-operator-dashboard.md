@@ -1,7 +1,12 @@
 # Kibana operator dashboard — operator notes
 
 Design: `docs/superpowers/specs/2026-09-22-kibana-operator-dashboard-design.md`.
-Objects: `elastic/`. Install order and re-sync instructions: `elastic/README.md`.
+Objects: `elastic/`. Install and regeneration: `elastic/README.md`.
+
+**Amended 2026-09-22.** The Elasticsearch side of this dashboard is gone — no ingest
+pipeline, no enrich policy, no lookup index, no sync script. Names are now rendered by the
+data view, and §13 of the design is the argument. Three of the notes below changed
+materially as a result; they are marked where they did.
 
 ## Opening it
 
@@ -19,7 +24,7 @@ use the panel's drill-down to open the same selection in Discover.
 **Why step and not processor.** `sk-normalizer` serves two steps in this chain (the Acme and
 AlphaBeta branches) and `kafka-exporter` serves two (`export-outcome` and `split-exporter`), so a
 per-processor split collapses four steps into two bars and hides which one is failing. Ten steps,
-ten bars. `skp.processor_name` is still a column in the Discover drill-down when you want it.
+ten bars. `attributes.ProcessorId` is still a column in the Discover drill-down when you want it, and it renders as a processor name there too.
 
 **The bars are ordered by when each step first fired**, not by volume, so a cluster reads
 left-to-right roughly in pipeline order. That order is derived from the data -- a hidden
@@ -37,9 +42,10 @@ stop the dashboard being generic.
 bars per time bucket only resolve when there are few buckets on screen. Roughly ten buckets is the
 comfortable limit: at a 5-minute range each cluster is clearly separated and you can read the
 5-5-4-3-3-3-2-2-2-1 shape straight off the chart, while at 25 minutes the same chart is a picket
-fence of 3-pixel bars. The stored default range is 1 hour, which is deliberately wide enough to
-land inside the enriched window and span several cron ticks -- so treat the opening view as "is
-anything wrong", then drag-select on the chart or narrow the time picker to actually read it. The
+fence of 3-pixel bars. The stored default range is 1 hour, which is wide enough to span several cron ticks -- so treat
+the opening view as "is anything wrong", then drag-select on the chart or narrow the time picker to
+actually read it. It no longer has anything to do with staying inside an enriched window; there is
+no such window any more. The
 Step control is the other way in: pick two or three steps and the clusters get their width back.
 
 ## What a healthy run looks like
@@ -93,42 +99,55 @@ otherwise — silently, with no error. In Discover, filter structurally on `attr
 text-matching `body.text`, and reach for `wildcard` only when you must hunt free text:
 
 ```
-attributes.Result: "Failed" and skp.processor_name: "sk-normalizer"      <- works
+attributes.Result: "Failed" and attributes.ProcessorId: "1673b377-..."   <- works
+attributes.Result: "Failed" and attributes.ProcessorId: "sk-normalizer"  <- ZERO HITS (see 3)
 body.text: "cancelled"                                                    <- zero hits, always
 body.text: *cancelled*                                                    <- works, slowly
 ```
 
-**2. Enrichment is forward-only, and the window opened when the pipeline was installed.**
-Documents indexed before then keep their raw GUIDs and carry no `skp.*` fields at all — they are
-not merely unnamed, they are *uncounted*, because `skp.outcome_record` is stamped at ingest time.
-Widening the time range past the install date does not show you more history; it shows you the same
-records in an emptier chart. The dashboard's stored range is the last 1 hour for this reason, and
-there is no reindex planned.
-
-**3. A workflow published after the last sync shows GUIDs in the controls.** Enrich reads a
-point-in-time snapshot of the lookup index. Fix it with:
+**2. Names are rendered, not stored — so free text needs the GUID.** CHANGED. The panels aggregate
+on `attributes.WorkflowId`, `attributes.StepId` and `attributes.ProcessorId`, and the data view
+substitutes `{name}_{version}` when Kibana draws. The name exists **only at render time**. It is not
+a field, so you cannot filter or search on it:
 
 ```
-python tools/sync-entity-names.py
+attributes.StepId: "split-importer_1.0.0"     <- ZERO HITS. There is no such value in the index
+attributes.StepId: "ab9d8741-c109-..."        <- works. Copy the id out of the Step control
 ```
 
-Records indexed *before* that sync keep their GUIDs — see point 2. Run the sync right after
-publishing, not after noticing. Nothing runs it automatically: not a cron, and **not a dashboard
-refresh**. A refresh only re-queries what is already indexed.
+This is a real regression against the design that came before, which wrote enriched name fields you
+could query. It buys the removal of every Elasticsearch-side object, and it was taken deliberately.
 
-## What the ingest pipeline costs
+**3. All history is covered now, and a rename rewrites it.** CHANGED, and it replaces two notes that
+said the opposite. The previous design enriched documents at index time, so anything indexed before
+the pipeline was installed carried raw GUIDs, was uncounted, and could never be recovered without a
+reindex. Formatting happens at read time, so **every record ever written is labelled**, however old.
 
-Measured 2026-09-22 over a timed 75-second window: `logs@custom` is invoked on **100% of documents**
-(721 of 721 that `logs@default-pipeline` handled) at **0.0264 ms per document**, with zero failures.
-The first reading after installation looks ~20x worse; that is one-off painless compilation, and the
-counter does not move again. Re-measure at any time with:
+The cost is the mirror image. The lookup is a flat map applied to all of time and `Version` is
+mutable on the same row, so `{name}_{version}` means *what this entity is called now*, not what it
+was called when the record was written. Bump a step's version and every historical bar for it
+relabels.
+
+**4. A workflow must have been started once for its names to exist.** The pairs come from records
+`OrchestrationService` writes at start time. The cron does **not** come through that path — it fires
+from the orchestrator against an ids-only projection — so a workflow started last week emitted its
+pairs last week, once. Regenerate the lookup and re-import after publishing or renaming anything:
 
 ```
-curl -s 'http://localhost:19200/_nodes/stats/ingest' | python -c "import json,sys; p=list(json.load(sys.stdin)['nodes'].values())[0]['ingest']['pipelines']['logs@custom']; print('%.4f ms/doc over %s docs, failed=%s' % (p['time_in_millis']/max(p['count'],1), p['count'], p['failed']))"
+python elastic/generate-field-formatters.py
 ```
 
-Watch `failed` as much as the timing: a pipeline that starts failing does not drop documents (the
-`on_failure` handler passes them through with `skp.enrich_error`), but it does stop counting them.
+If a workflow's last start has aged out of the index, its ids render as raw GUIDs until it is
+started again. An unmapped id always renders as **itself**, never blank — the formatters omit
+`unknownKeyValue` precisely so that two unlabelled steps cannot collapse into one legend bucket.
+
+## There is no ingest pipeline to cost
+
+REMOVED. This section used to record that `logs@custom` ran on 100% of documents at 0.0264 ms each,
+and told you to watch its `failed` counter because a failing pipeline stops counting records even
+though it never drops them. Both the pipeline and the enrich policy behind it have been deleted from
+the cluster, so there is nothing on the ingest path belonging to this dashboard and nothing to
+measure. The formatting it replaced costs nothing at index time because it happens when you look.
 
 ## The counts are an observability signal, not an accounting ledger
 

@@ -192,7 +192,7 @@ by-product. `simple-abc` can be stopped again through `POST /api/v1/orchestratio
 
 ---
 
-## Task 3: The counting rule moves into the dashboard query
+## Task 3: The counting rule moves into the dashboard query — DONE 2026-09-22
 
 **Files:**
 - Modify: `elastic/kibana-export.ndjson` — dashboard-level query
@@ -203,13 +203,13 @@ by-product. `simple-abc` can be stopped again through `POST /api/v1/orchestratio
 - Consumes: the ten-step outcome coverage Task 1 produces.
 - Produces: a dashboard whose counted set is defined once, in its own KQL, with `skp.outcome_record` referenced nowhere.
 
-- [ ] **Step 1: Port the fixture before deleting its home**
+- [x] **Step 1: Port the fixture before deleting its home**
 
 `elastic/simulate-outcome-classification.json` is twelve documents, one per template of §4, and **three of them are the rarely-fired failure paths that never appear in live traffic.** Once the pipeline goes, `_simulate` is not available to test them. Write `elastic/classification-fixture.json` as the same twelve documents plus their expected verdicts, and a check that bulk-indexes them into a scratch index, runs the §13.4 KQL against it, asserts the verdicts, and deletes the index.
 
 Without this, those three failure paths return to being unverified — which is precisely the defect §4 was written to prevent.
 
-- [ ] **Step 2: Set the dashboard query**
+- [x] **Step 2: Set the dashboard query**
 
 ```
 attributes.Result:* and not resource.attributes.service.name:"orchestrator"
@@ -219,13 +219,13 @@ Dashboard-level, once. The controls respect it (`ignoreQuery: false`) — **exce
 
 §6.6's objection to this is measured false: `attributes.{OriginalFormat}` escapes as `attributes.\{OriginalFormat\}` and §4.1 written directly as KQL returned 1,110 against the flag's 1,110. It is recorded here because the claim is stated confidently in the superseded section and will be re-derived otherwise.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Fixture check passes on all twelve. Then live: the dashboard total over N cycles equals `30 × N` and each processor matches its §4.4 row, with the pipeline flag no longer referenced anywhere in the export (`grep skp.outcome_record elastic/` returns nothing but the files Task 6 deletes).
 
 ---
 
-## Task 4: Names by field formatter
+## Task 4: Names by field formatter — DONE 2026-09-22
 
 **Files:**
 - Create: `elastic/generate-field-formatters.py`
@@ -235,65 +235,65 @@ Fixture check passes on all twelve. Then live: the dashboard total over N cycles
 - Consumes: the `{EntityId, EntityName}` records of Task 2, plus the processor pairing that already exists on every processor record (`resource.attributes.ProcessorId` + `resource.attributes.service.name`).
 - Produces: a data view whose `attributes.WorkflowId`, `attributes.StepId` and `attributes.ProcessorId` fields render as `{name}_{version}`.
 
-- [ ] **Step 1: Settle `unknownKeyValue` by experiment — before anything else**
+- [x] **Step 1: Settle `unknownKeyValue` by experiment — before anything else**
 
 An id absent from the map must render as **its GUID**, not blank. Blank is worse than no formatter: a newly published entity would silently disappear from the legend rather than showing an unreadable-but-present bar. This is untested (§13.2) and it decides whether the design is usable, so it comes first.
 
 Map two ids, leave the rest unmapped, publish, render headless, read the legend. If no `unknownKeyValue` setting produces the GUID, stop and report — the rest of this task depends on the answer.
 
-- [ ] **Step 2: Write the generator**
+- [x] **Step 2: Write the generator**
 
 Reads the pairs out of ES (**not** from the BaseApi — §13.2 drops that dependency deliberately, because the API may not be reachable from wherever this is run), emits the `fieldFormats` block, and writes it into the data view object in `elastic/kibana-export.ndjson`. Its output is committed; it is a build step, not a runtime dependency.
 
-- [ ] **Step 3: Re-point controls and panels at raw ids**
+- [x] **Step 3: Re-point controls and panels at raw ids**
 
 Three controls — Workflow / Step / Outcome — on `attributes.WorkflowId`, `attributes.StepId`, `attributes.Result`. No Processor control. Bins split on `attributes.ProcessorId`.
 
 **The two entity controls need `ignoreQuery: true` and `ignoreTimerange: true`** so every published step appears whether or not it ran. Without them the Task 2 records that supply the options are filtered out by the Task 3 query, and vanish from the list once the orchestration-start line scrolls out of the time range (§13.2).
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Render headless and read back. Both the options list and the Lens legend must show `{name}_{version}`; this was verified in principle on this exact Kibana version, so a failure here is an error in the export, not a limitation. Then: a step that has never run appears in the dropdown, and an unmapped id shows its GUID.
 
 ---
 
-## Task 5: The verification tool matches §13.7
+## Task 5: The verification tool matches §13.7 — DONE 2026-09-22
 
 **Files:**
 - Modify: `tools/verify-kibana-dashboard.py`
 
-- [ ] **Step 1: Delete checks 2 and 3**
+- [x] **Step 1: Delete checks 2 and 3**
 
 Both test enrichment that no longer exists. Deleting a check is the kind of change that hides a regression, so each deletion carries a one-line comment naming the §13 section that retired it.
 
-- [ ] **Step 2: Strengthen check 5**
+- [x] **Step 2: Strengthen check 5**
 
 `(StepId, ExecutionId, EntryId)` across **10 of 10** steps. The uncovered-slice paragraph goes. In its place: a step that is both an entry step and a terminal step has `EntryId == Guid.Empty`, which `ExecutionLogScope` omits, so it is uncheckable — no workflow in the cluster has one, a one-step workflow would, and check 4's per-processor assertion is the guard (§13.3).
 
 Keep the three-field key. The two-field version reported ~15 false duplicates per 10 minutes on a healthy run; the chain fans out and one step legitimately completes several times inside one `ExecutionId`.
 
-- [ ] **Step 3: Re-key the expected tables**
+- [x] **Step 3: Re-key the expected tables**
 
 `PER_CYCLE_BY_STEP`, `PER_CYCLE_BY_PROCESSOR` and `VALIDATION_WORKFLOW` all become `{name}_{version}`. Read the current versions off the live rows rather than assuming `_1.0.0`.
 
-- [ ] **Step 4: Add the three new checks**
+- [x] **Step 4: Add the three new checks**
 
 The fixture check (Task 3), the `unknownKeyValue` check (Task 4), and the never-run-step-in-dropdown check (Task 4).
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Full run. Expect **11 of 12** — check 9 still fails for want of a second driven workflow, and that is a traffic gap, not a dashboard defect. Five of the six workflows have crons but are stopped; a workflow with neither a cron nor an explicit start logs nothing and looks broken, so start one explicitly if check 9 is to be closed.
 
 ---
 
-## Task 6: Cut `elastic/` down — last, never earlier
+## Task 6: Cut `elastic/` down — last, never earlier — DONE 2026-09-22
 
 **Files:**
 - Delete: `elastic/logs-custom-pipeline.json`, `elastic/enrich-policy.json`, `elastic/entity-names-index.json`, `elastic/simulate-outcome-classification.json`, `tools/sync-entity-names.py`
 - Rewrite: `elastic/README.md`
 - Modify: `docs/testing/kibana-operator-dashboard.md`
 
-- [ ] **Step 1: Confirm both replacements are live before deleting anything**
+- [x] **Step 1: Confirm both replacements are live before deleting anything**
 
 Two things must have moved or they are lost:
 
@@ -302,19 +302,19 @@ Two things must have moved or they are lost:
 
 If either is outstanding, stop. Deleting these files while the cluster's dashboard still runs on them breaks a working dashboard and leaves no way to rebuild it.
 
-- [ ] **Step 2: Remove the live ES objects too**
+- [x] **Step 2: Remove the live ES objects too**
 
 `logs@custom`, the `skp-entity-lookup` enrich policy and the `skp-entity-names` index exist **only in cluster state** — a rebuild restores Kibana from kustomize but not these. Delete them in reverse install order (pipeline, then policy, then index); ES rejects a policy deletion while a pipeline still names it.
 
-- [ ] **Step 3: Rewrite `elastic/README.md`**
+- [x] **Step 3: Rewrite `elastic/README.md`**
 
 The install order it documents — index, policy, execute, pipeline — is exactly what is being removed, and it is the file most likely to be read by someone rebuilding on the org cluster. It becomes: import the NDJSON, run the generator, nothing else.
 
-- [ ] **Step 4: Update the operator notes**
+- [x] **Step 4: Update the operator notes**
 
 `docs/testing/kibana-operator-dashboard.md` — the §4.4 tables and the zoom guidance, plus two new caveats that did not exist under the old design: free-text search now needs GUIDs, and a version bump relabels history (§13.2). Both are honest regressions and both belong where an operator will hit them.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Full verification run after the deletions, from a cold Kibana import, to prove the dashboard stands on the NDJSON and the generator alone.
 
@@ -402,6 +402,55 @@ width, complete and legible. The export is now 264.9 KB.
 Still true, and still the reason a link is not the answer: `file:///C:/...` will not load from a page
 served over http, so the local path cannot be a panel source or a link target whichever route is
 taken.
+---
+
+## Execution record for tasks 3-6
+
+**All nine checks pass**, measured on a window containing only records indexed after every
+Elasticsearch object was deleted: 6 cycles, 180 records against 180 expected, 0 duplicate triples,
+**0 records skipped for want of an EntryId**, 156:18:6 Completed:Failed:Cancelled which is exactly
+26:3:1 per cycle, and both workflows present. Check 9 passes for the first time since the dashboard
+was built.
+
+### What the cluster no longer holds
+
+`logs@custom`, the `skp-entity-lookup` enrich policy and the `skp-entity-names` index (58 rows) were
+deleted in that order — the pipeline first, because Elasticsearch refuses to delete a policy a
+pipeline still names. Confirmed 404 / `{"policies":[]}` / 404. Two minutes later, **zero** records
+carried `skp.outcome_record` or `skp.step_name`, and the dashboard was re-imported cold and verified
+against that unenriched data.
+
+### Three things the plan got wrong, corrected in flight
+
+**`ignoreQuery` and `ignoreTimerange` are not sufficient on their own.** §13.2 said they would make
+every published step appear in the dropdown. A dropdown is populated from one field's values, the
+Step control reads `attributes.StepId`, and the pairs were being written under a generic `EntityId`
+— so a never-run step still had no record carrying a `StepId`. The BaseApi now writes the id under
+the same field name the execution records use. Without that change the setting does nothing useful.
+
+**The versions are not uniform.** `PER_CYCLE_BY_PROCESSOR` keys had to be read off the live rows:
+`kafka-importer_2.2.0` and `kafka-exporter_1.2.0`, not the `_1.0.0` a guess would have produced.
+
+**KQL cannot be evaluated from a script.** §13.7's new check was specified as "the KQL rule returns
+the count the fixture predicts". There is no Kibana endpoint that evaluates a KQL string on demand
+— `/internal/search/ese` takes query DSL. Check 10 therefore runs the DSL equivalent against the
+fixture and check 11 pins the KQL text, with the render showing it produces the expected series.
+The limitation is stated in the check's own docstring rather than papered over.
+
+### `unknownKeyValue`, settled
+
+Omitting it renders an unmapped id as its **own GUID**. Verified by publishing a map with
+`split-exporter` deliberately removed: it came back as `9cae7b00-…` beside twelve named siblings.
+Setting it to a string would render every unmapped entity as that one string, collapsing two
+unlabelled steps into a single legend bucket. Open item 4 of §13.9 is closed.
+
+### Equivalence with the design it replaces
+
+Over ten minutes the new rule counted 630 records and the old flag 755. The 125-record gap is
+**entirely** the orchestrator's terminal-step template, with nothing counted by the new rule alone
+— the predicted difference, and the reason the flag had to go: the pipeline also stamped the new
+processor-side terminal line, so the old rule had begun counting terminal steps twice.
+
 ---
 
 ## Out of scope
