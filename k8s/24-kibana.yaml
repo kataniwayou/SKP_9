@@ -1,0 +1,154 @@
+# ============================================================================
+# kibana — log exploration UI for the operator dashboard (ClusterIP Service + Deployment).
+# ============================================================================
+# Like 23-grafana.yaml this has NO compose ancestor, so the header records decisions
+# rather than a port record.
+#
+# IMAGE PIN — 8.15.5, patch-exact, and it MUST equal the Elasticsearch version. Kibana
+# refuses to start against a different ES minor and says so in one line at boot.
+# Upgrade the two together or not at all.
+#
+# GETTING THE IMAGE ONTO THE NODE. The kind node cannot pull this from docker.elastic.co
+# — every attempt dies as "short read: expected N bytes but got 0: unexpected EOF" after
+# several retries, while a host `docker pull` of the same tag succeeds. So it is host-pulled
+# and side-loaded. The obvious two commands BOTH fail: `kind load docker-image` and
+# `kind load image-archive` of a plain `docker save` both report
+# "ctr: content digest sha256:… not found", because Docker Desktop's containerd image
+# store writes the multi-arch manifest LIST as the archive's index while saving only the
+# amd64 blobs, so ctr chases a manifest that is not in the tar. The working sequence pins
+# the platform at SAVE time, which makes the index a plain single-platform manifest:
+#
+#   docker pull --platform linux/amd64 docker.elastic.co/kibana/kibana:8.15.5
+#   docker save --platform linux/amd64 -o kibana-amd64.tar docker.elastic.co/kibana/kibana:8.15.5
+#   kind load image-archive kibana-amd64.tar --name desktop
+#
+# The tag on the node is the real one, so this manifest stays pinned to the official image
+# and kubelet never re-pulls it.
+#
+# ELASTICSEARCH IS NOT MANIFESTED HERE, DELIBERATELY. ES 8.15.5 runs in this namespace
+# from an out-of-band apply; there is no manifest for it in k8s/. This file adds Kibana
+# BESIDE that, and adopting ES into k8s/ is a separate decision about what k8s/ owns.
+# So this manifest depends on a Service it does not declare, which the design calls out
+# as a known asymmetry and not an oversight.
+#
+# NO PERSISTENCE VOLUME, AND UNLIKE GRAFANA THAT COSTS NOTHING. Kibana keeps its saved
+# objects in the .kibana* indices INSIDE Elasticsearch, not on local disk, so a pod
+# recreate loses no dashboard. There is no emptyDir here because there is nothing to
+# put in one.
+#
+# THE THREE ENCRYPTION KEYS ARE FIXED, NOT GENERATED. Without them Kibana mints a random
+# key at every boot, logs three warnings, and any saved object with an encrypted field
+# becomes unreadable after a restart. They are plain values for the same reason the
+# Grafana admin password is: the in-cluster ES and Prometheus are both unauthenticated,
+# everything is ClusterIP behind a loopback port-forward, and auth hardening is out of
+# scope. Putting them in skp-dev-secrets would imply a security property this posture
+# does not have.
+#
+# AUTH POSTURE (accepted, not mitigated) — Elasticsearch security is off on this cluster,
+# so Kibana needs no credentials and presents no login. Identical to the Grafana posture.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: skp
+  labels:
+    app: kibana
+    app.kubernetes.io/part-of: skp
+spec:
+  # ClusterIP (default) — host reach is the 127.0.0.1:15601 forward in port-forward-realstack.ps1.
+  selector:
+    app: kibana
+  ports:
+    - port: 5601
+      targetPort: 5601
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: skp
+  labels:
+    app: kibana
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      securityContext:
+        # the official image already defaults to uid 1000 (kibana); pinning it makes that
+        # explicit so the container can never silently run as root — same rule as grafana's 472.
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 1000
+      containers:
+        - name: kibana
+          image: docker.elastic.co/kibana/kibana:8.15.5
+          ports:
+            - containerPort: 5601
+          env:
+            # bare Service DNS; the ES Service is out-of-band but its name is stable
+            - name: ELASTICSEARCH_HOSTS
+              value: "http://elasticsearch:9200"
+            - name: SERVER_NAME
+              value: "kibana"
+            # 0.0.0.0, or Kibana binds loopback INSIDE the container and the probe never passes
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            # the browser reaches Kibana through the host forward, and generated links
+            # (drill-downs, shared URLs) must point there rather than at the Service DNS
+            - name: SERVER_PUBLICBASEURL
+              value: "http://localhost:15601"
+            # fixed dev keys — see THE THREE ENCRYPTION KEYS in the header. 32 chars each.
+            - name: XPACK_SECURITY_ENCRYPTIONKEY
+              value: "skpdevkibanasecurity000000000000"
+            - name: XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY
+              value: "skpdevkibanasavedobjects00000000"
+            - name: XPACK_REPORTING_ENCRYPTIONKEY
+              value: "skpdevkibanareporting00000000000"
+            # no outbound calls from a dev cluster (same rule as grafana's analytics pair)
+            - name: TELEMETRY_ENABLED
+              value: "false"
+            - name: TELEMETRY_OPTIN
+              value: "false"
+            # Kibana's node process sizes its heap from the cgroup and will happily exceed the
+            # 1536Mi limit and OOMKill. Cap it under the limit.
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1024"
+          # /api/status returns 200 with {"status":{"overall":{"level":"available"}}} once the
+          # saved-objects migration has finished. Probe trio matches 23-grafana.yaml.
+          startupProbe:
+            # 60 × 5s = a 300s budget. Kibana's first boot runs a saved-objects migration
+            # against ES and is minutes, not seconds — an order of magnitude past Grafana's ~9s.
+            httpGet:
+              path: /api/status
+              port: 5601
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: 5601
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: 5601
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            # memory-only — there is no `cpu` key anywhere in k8s/ and this is not the place to
+            # introduce one. Kibana 8.15 idles well above Grafana; the node heap is capped at
+            # 1024Mi above and the limit leaves headroom over it for the rest of the process.
+            requests:
+              memory: "512Mi"
+            limits:
+              memory: "1536Mi"

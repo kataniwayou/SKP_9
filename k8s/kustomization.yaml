@@ -16,6 +16,7 @@ resources:
   - 20-otel-collector.yaml
   - 21-prometheus.yaml
   - 23-grafana.yaml
+  - 24-kibana.yaml
   - 30-baseapi-service.yaml
   - 33-processor-sample.yaml
   - 34-processor-kafkaimporter.yaml

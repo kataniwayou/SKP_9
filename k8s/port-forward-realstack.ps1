@@ -51,7 +51,8 @@ $forwards = @(
     @{ svc = "otel-collector"; local = 18889; remote = 8889 },
     @{ svc = "redis";          local = 6380;  remote = 6379 },
     @{ svc = "elasticsearch";  local = 19200; remote = 9200 },
-    @{ svc = "prometheus";     local = 19090; remote = 9090 }
+    @{ svc = "prometheus";     local = 19090; remote = 9090 },
+    @{ svc = "kibana";         local = 15601; remote = 5601 }
 )
 
 $stateFile = Join-Path ([IO.Path]::GetTempPath()) "skp-port-forwards.pid"
