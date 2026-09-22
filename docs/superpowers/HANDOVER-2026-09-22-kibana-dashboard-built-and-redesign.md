@@ -214,6 +214,72 @@ Two implementation notes:
 5. **Free-text search regresses** under the formatter approach: names exist only at render time, so
    an operator filtering in KQL or Discover must type the GUID.
 
+## Two more tasks the user asked for
+
+### 6. Delete the redundant files in `elastic/`
+
+**Not yet — every one of them is live today.** The dashboard in the cluster is driven by the
+pipeline and policy these files define, so deleting them now breaks a working dashboard and leaves
+no way to rebuild it. This is a task for **after** the redesign lands.
+
+What `elastic/` holds now, and what happens to each:
+
+| file | fate under the redesign |
+| --- | --- |
+| `logs-custom-pipeline.json` | **delete** — there is no ingest pipeline any more |
+| `enrich-policy.json` | **delete** — no enrich policy |
+| `entity-names-index.json` | **delete** — no lookup index |
+| `simulate-outcome-classification.json` | **delete** — it is the pipeline's test fixture |
+| `kibana-export.ndjson` | **keep** — it becomes the whole deliverable |
+| `README.md` | **rewrite** — the install order it documents is the thing being removed |
+
+Two things that must move somewhere before those deletions, or they are lost:
+
+- The **classification rule** currently lives in `logs-custom-pipeline.json`. Under the redesign it
+  becomes the dashboard-level KQL query. Until that query exists and is verified, the pipeline file
+  is the only definition.
+- `simulate-outcome-classification.json` is a real test — twelve documents, one per template of §4,
+  with the expected classification tabulated in the plan. If the rule moves to KQL it needs an
+  equivalent test, or the three rarely-fired failure templates go back to being unverified.
+
+Also delete the now-unused `tools/sync-entity-names.py` at the same time, and strip the ES-object
+install steps from `elastic/README.md`.
+
+### 7. Can the chain diagram be embedded in the dashboard?
+
+Target: `docs/diagrams/filefetcher-archiveexpander-chain.html` — 33 KB, self-contained, three inline
+`<svg>` blocks, no external scripts. It was captured live from the API on 2026-09-15 and its header
+records that provenance.
+
+**Established this session, against the live Kibana 8.15.5:**
+
+- **`links` panel: available** (`links` is an allowed saved-object type). It renders a list of links,
+  it does not embed content.
+- **Image panel: probably available.** `image` is not an allowed saved-object type, but
+  `POST /api/files/find` returns **200**, so the Files plugin that backs the Image embeddable is
+  present. Confirm in the UI before planning around it.
+- **There is no iframe or raw-HTML panel in Kibana**, and the Markdown/Text panel sanitizes HTML, so
+  inline `<svg>` will not render through it. A straight embed of this file is not available.
+- **`file:///C:/...` will not load** from a page served at `http://localhost:15601`. Browsers block
+  file-scheme subresources and navigation from an http origin, so the local path cannot be used as a
+  link target or a panel source regardless of which panel type is chosen.
+
+So the realistic options, in the order I would try them:
+
+1. **Render the diagram to an image and use the Image panel.** Keeps it visually on the dashboard.
+   Costs the diagram's interactivity, and the image becomes a second copy that drifts from the HTML.
+2. **Serve the HTML over http and add a `links` panel** pointing at it — one click away rather than
+   embedded, but it stays a single source. Needs somewhere to serve it from; nothing in `k8s/` does
+   that today.
+3. **Re-author as a Vega visualisation.** A true dashboard panel, but it is a hand-drawn schematic
+   and this is a substantial rewrite.
+4. **Leave it out and link it from `docs/testing/kibana-operator-dashboard.md`.** Cheapest, and the
+   operator notes are already the place a reader is sent.
+
+Worth deciding what the diagram is *for* on the dashboard before picking: if it is orientation for a
+newcomer, option 4 is enough; if it is meant to be read beside the bars while diagnosing, option 1 or
+2 earn their cost.
+
 ## How to work on this
 
 Browser automation used the `playwright-skill` in **headless** mode (the host was low on memory).
