@@ -117,10 +117,13 @@ spec:
               value: "redis:6379,abortConnect=false,connectTimeout=5000"
             - name: ConsoleHealth__Port
               value: "8081"
-            # Resolved from PATH; the image installs it. Set this only to point at a build that is
-            # not on PATH.
+            # ABSOLUTE, and it names where the Dockerfile installs the binary vendored under
+            # vendor/ffmpeg/. A bare "ffmpeg" would also resolve -- /usr/local/bin is on PATH -- but
+            # the two fail differently: with a path, a broken image says "could not start
+            # '/usr/local/bin/ffmpeg'" and an operator knows which file to look for, where a PATH
+            # lookup leaves them guessing which of several a container might have found.
             - name: SKNormalizer__FfmpegPath
-              value: "ffmpeg"
+              value: "/usr/local/bin/ffmpeg"
             # Per conversion, not per dispatch. A wedged ffmpeg holds the one prefetched message
             # forever, so this is what turns a hang into a failed step.
             - name: SKNormalizer__ConversionTimeoutSeconds

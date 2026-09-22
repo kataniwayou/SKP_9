@@ -19,6 +19,11 @@
 *.pdb binary
 *.snk binary
 *.pfx binary
+# The vendored ffmpeg has NO EXTENSION, so none of the rules above reach it and `* text=auto` is
+# the only thing standing between a 78MB executable and CRLF normalisation on a Windows checkout.
+# text=auto does sniff content and would probably leave it alone; "probably" is not a guarantee
+# worth taking on the one file the SKNormalizer image cannot start without.
+vendor/ffmpeg/** binary
 # Diff settings
 *.cs diff=csharp
 *.csproj diff=xml
