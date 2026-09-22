@@ -53,6 +53,10 @@ VALIDATION_WORKFLOW = "filefetcher-archiveexpander-chain_1.0.0"
 # templates live traffic never produces.
 COUNTED_KQL = 'attributes.Result:* and not resource.attributes.service.name:"orchestrator"'
 
+# The dashboard that owns COUNTED_KQL. Named so check 11 can say "this one states the rule"
+# rather than "there is one dashboard".
+OUTCOMES_DASHBOARD = "skp-operator-outcomes"
+
 
 class Checks:
     """Collects results so one failure does not hide the checks after it."""
@@ -415,11 +419,17 @@ def check_11_export_states_the_rule_once(checks):
     except Exception as exc:  # noqa: BLE001
         return checks.report(11, "Export states the rule once", False, f"{type(exc).__name__}: {exc}")
 
-    queries, unknown_keys, option_scope = [], [], []
+    queries, unknown_keys, option_scope = {}, [], []
+    filters_by_dashboard = {}
     for obj in objects:
         if obj.get("type") == "dashboard":
             source = json.loads(obj["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
-            queries.append(source.get("query", {}).get("query", ""))
+            # KEYED BY DASHBOARD, not appended, since 2026-09-22c. The export carries a second
+            # dashboard now (skp-whitelist-verdicts), which states a DIFFERENT rule over a
+            # DIFFERENT atom -- one record per whitelist lookup rather than one per step outcome.
+            # A flat list made "the rule is stated once" and "there is exactly one dashboard" the
+            # same assertion, and only the first of those was ever the point.
+            queries[obj["id"]] = source.get("query", {}).get("query", "")
             # THE CONTROLS IGNORE THE QUERY but NOT the time range, so their option lists are
             # what is relevant to the window on screen - 2 workflows and 13 steps over 15 minutes
             # here, 6 and 40 over 30 days. Ignoring the time range as well was tried and reverted:
@@ -430,6 +440,7 @@ def check_11_export_states_the_rule_once(checks):
             #
             # It admits a record that carries a Result or is a naming record, which is a SUPERSET
             # of the counted set - so it bounds the dropdowns without moving a single count.
+            filters_by_dashboard[obj["id"]] = source.get("filter", [])
             for flt in source.get("filter", []):
                 option_scope.append(json.dumps(flt.get("query", {}), sort_keys=True))
         if obj.get("type") == "index-pattern":
@@ -443,9 +454,23 @@ def check_11_export_states_the_rule_once(checks):
 
     scoped = any('"attributes.EntityName"' in f and '"attributes.Result"' in f
                  for f in option_scope)
-    ok = queries == [COUNTED_KQL] and not unknown_keys and stale == 0 and scoped
+
+    # The outcomes dashboard states the rule, and no other object may restate it -- that second
+    # half is what the original flat comparison was really enforcing, and it is kept explicitly.
+    states_rule = queries.get(OUTCOMES_DASHBOARD) == COUNTED_KQL
+    restated = sorted(i for i, q in queries.items()
+                      if i != OUTCOMES_DASHBOARD and COUNTED_KQL in q)
+
+    # EVERY dashboard's controls must be bounded, not just the outcomes one: an unbounded Workflow
+    # dropdown lists every id in the window whether or not the board can say anything about it.
+    unbounded = sorted(i for i, f in filters_by_dashboard.items() if not f)
+
+    ok = (states_rule and not restated and not unbounded
+          and not unknown_keys and stale == 0 and scoped)
     return checks.report(11, "Export states the rule once", ok,
-                         f"dashboard_query_matches={queries == [COUNTED_KQL]}, "
+                         f"dashboard_query_matches={states_rule}, "
+                         f"rule_restated_by={restated or 'none'}, "
+                         f"dashboards_with_unbounded_controls={unbounded or 'none'}, "
                          f"stale_enrichment_references={stale}, "
                          f"formatters_setting_unknownKeyValue={unknown_keys or 'none'}, "
                          f"control_options_bounded={scoped}")
