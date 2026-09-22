@@ -320,8 +320,13 @@ def check_9_generic_across_workflows(checks, es_url, kibana_url, window, names):
     The UI half -- selecting a second workflow and watching the panels repopulate -- is a click and
     lives in the operator notes. What is checkable here is the precondition that makes it work.
     """
+    # skp-outcome-records is GONE. It was a saved search nothing opened: the pie's drilldown is an
+    # OPEN_IN_DISCOVER_DRILLDOWN, which always opens the panel's own data view and cannot be pointed
+    # at a saved search - verified in the drilldown edit form, which offers only a name, a trigger
+    # and open-in-new-tab, and in the create form, which offers only Go to Dashboard, Open in
+    # Discover and Go to URL. The dashboard held no reference to it either.
     expected_objects = {"skp-logs", "skp-outcomes-bins", "skp-outcomes-pie",
-                        "skp-outcome-records", "skp-operator-outcomes"}
+                        "skp-operator-outcomes"}
     try:
         found = requests.get(
             f"{kibana_url}/api/saved_objects/_find"

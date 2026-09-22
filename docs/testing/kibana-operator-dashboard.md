@@ -215,5 +215,6 @@ related objects*) and confirm the five fixed ids survive:
 python -c "import json;print(sorted(json.loads(l)['id'] for l in open('kibana/kibana-export.ndjson',encoding='utf-8') if l.strip() and 'exportedCount' not in l))"
 ```
 
-Expected: `['skp-logs', 'skp-operator-outcomes', 'skp-outcome-records', 'skp-outcomes-bins', 'skp-outcomes-pie']`.
+Expected: `['skp-logs', 'skp-operator-outcomes', 'skp-outcomes-bins', 'skp-outcomes-pie']`.
+The saved search `skp-outcome-records` was deleted — nothing could open it (§7.4 of the design).
 The ids are fixed on purpose — check 9 asserts on them, and a generated UUID breaks every re-import.

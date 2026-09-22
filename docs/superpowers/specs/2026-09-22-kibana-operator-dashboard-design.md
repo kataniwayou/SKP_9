@@ -14,7 +14,7 @@ The dashboard is **generic**. It is not built for `filefetcher-archiveexpander-c
 
 ## 2. Scope
 
-**In:** a Kibana 8.15.5 deployment; an ingest-time enrichment pipeline that resolves entity GUIDs to names and marks outcome records; a lookup index and enrich policy fed from the BaseApi REST routes by a new `tools/` script (§11); one data view; one dashboard with four controls, a bins chart, a pie, and a drill-down to a saved search.
+**In:** a Kibana 8.15.5 deployment; an ingest-time enrichment pipeline that resolves entity GUIDs to names and marks outcome records; a lookup index and enrich policy fed from the BaseApi REST routes by a new `tools/` script (§11); one data view; one dashboard with four controls, a bins chart, a pie, and a drill-down to Discover (§7.4 — the original wording said "to a saved search", which Kibana cannot do).
 
 **Out:** every idea raised during design and then withdrawn — failure-reason table, failure-ratio panel, heartbeat tile, duration percentiles, lineage funnel. None of them is in this dashboard. They are recorded in §12 only so a later reader knows they were considered and declined, not forgotten.
 
@@ -267,9 +267,35 @@ Lens pie, terms on `attributes.Result`, same filters. Exactly three slices (§3.
 
 ### 7.4 Drill-down
 
-Slice click filters the dashboard in place, which is Lens default behaviour. In addition, a dashboard drilldown opens a saved Discover search carrying the active filters and time range.
+> **Corrected 2026-09-22.** The two paragraphs below described a drill-down to a saved search. **No
+> such drill-down exists, and Kibana 8.15.5 cannot build one.** This is a correction to the design,
+> not a gap in the build.
 
-Saved search columns: `@timestamp`, `skp.processor_name`, `skp.step_name`, `attributes.Result`, `attributes.Reason`, `attributes.ExecutionId`, `body.text`.
+Slice click filters the dashboard in place, which is Lens default behaviour. In addition, the pie
+carries an `OPEN_IN_DISCOVER_DRILLDOWN` which opens Discover in a new tab, **carrying the active
+filters, the dashboard query and the time range** — verified by following it: it arrives with the
+clicked slice as a phrase filter, the `entities, not archaeology` filter, the counting query, the
+data view `skp-logs`, and the dashboard's time range.
+
+**It cannot open a saved search, and the original wording asked for something the platform does not
+offer.** Verified in the UI: the drill-down's edit form contains only a name, a trigger and an
+"open in new tab" checkbox — no target, no column list — and the create form offers exactly three
+types, `Go to Dashboard`, `Open in Discover` and `Go to URL`. Nothing in that set targets a saved
+search. The only route would be a `Go to URL` drill-down with the filters, query and time range
+hand-templated into a rison string, which trades a working drill-down for a hand-maintained URL that
+rots silently when a field is renamed.
+
+**Consequence: the saved search was deleted.** `skp-outcome-records` shipped in the export,
+was referenced by nothing, and could not be reached from the dashboard. Its column list
+(`skp.processor_name`, `skp.step_name`, …) had also been left naming enriched fields that no longer
+exist. An operator following the drill-down lands in Discover with `@timestamp` and
+`attributes.Result` and adds the columns they want; the field names to reach for are
+`attributes.ProcessorId`, `attributes.StepId`, `attributes.Reason` and `attributes.ExecutionId`,
+which render as names through the data view's formatters.
+
+The drill-down's menu label still reads "Open Outcome records in Discover". It is left as it is: it
+describes the records it opens, which is accurate, and there is no longer a saved object of that
+name for it to be confused with.
 
 **A note for whoever uses Discover here.** Every string in this index is mapped `keyword` by the `all_strings_to_keywords` dynamic template. `match` and `match_phrase` need the *entire* field value and silently return zero hits otherwise. Free-text hunting needs `wildcard`, and structured filtering on `attributes.*` should be preferred over text matching on `body.text`.
 
@@ -282,7 +308,7 @@ Saved search columns: `@timestamp`, `skp.processor_name`, `skp.step_name`, `attr
 | 3 | `tools/sync-entity-names.py` | BaseApi REST → `skp-entity-names`, then re-execute the policy (§11) |
 | 4 | `kibana/enrich-policy.json` | `skp-entity-lookup`, match on `entity_id` |
 | 5 | `kibana/logs-custom-pipeline.json` | the `logs@custom` body of §6.5 |
-| 6 | `kibana/kibana-export.ndjson` | data view, 2 Lens panels, saved search, dashboard |
+| 6 | `kibana/kibana-export.ndjson` | data view, 2 Lens panels, dashboard. **The saved search was deleted — see §7.4** |
 | 7 | `docs/testing/kibana-operator-dashboard.md` | operator notes, including §4.4 and the keyword caveat |
 
 Kibana saved objects are exported as NDJSON and imported by hand, matching how the Grafana dashboards are handled in this repo — hand-edited JSON, hand-imported, no provisioning ConfigMap.
