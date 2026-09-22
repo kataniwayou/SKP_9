@@ -13,7 +13,7 @@ The dashboard is **generic**. It is not built for `filefetcher-archiveexpander-c
 
 ## 2. Scope
 
-**In:** a Kibana 8.15.5 deployment; an ingest-time enrichment pipeline that resolves entity GUIDs to names and marks outcome records; a lookup index and enrich policy fed from Postgres by a new `tools/` script; one data view; one dashboard with four controls, a bins chart, a pie, and a drill-down to a saved search.
+**In:** a Kibana 8.15.5 deployment; an ingest-time enrichment pipeline that resolves entity GUIDs to names and marks outcome records; a lookup index and enrich policy fed from the BaseApi REST routes by a new `tools/` script (§11); one data view; one dashboard with four controls, a bins chart, a pie, and a drill-down to a saved search.
 
 **Out:** every idea raised during design and then withdrawn — failure-reason table, failure-ratio panel, heartbeat tile, duration percentiles, lineage funnel. None of them is in this dashboard. They are recorded in §12 only so a later reader knows they were considered and declined, not forgotten.
 
@@ -144,7 +144,7 @@ Per cycle of five files, the counted set yields **30** outcomes — 26 Completed
 ## 5. Architecture
 
 ```
-Postgres (workflows, steps, processors)
+BaseApi REST  /api/v1/{workflows,steps,processors}
         │  tools/sync-entity-names.py   (on demand, and after any publish)
         ▼
   skp-entity-names            ── enrich policy: skp-entity-lookup ──┐
@@ -262,7 +262,7 @@ Saved search columns: `@timestamp`, `skp.processor_name`, `skp.step_name`, `attr
 |---|---|---|
 | 1 | `k8s/24-kibana.yaml` | Kibana 8.15.5, service, `ELASTICSEARCH_HOSTS`, resources, probes |
 | 2 | `k8s/kustomization.yaml` | add the new manifest |
-| 3 | `tools/sync-entity-names.py` | Postgres → `skp-entity-names`, then re-execute the policy |
+| 3 | `tools/sync-entity-names.py` | BaseApi REST → `skp-entity-names`, then re-execute the policy (§11) |
 | 4 | `elastic/enrich-policy.json` | `skp-entity-lookup`, match on `entity_id` |
 | 5 | `elastic/logs-custom-pipeline.json` | the `logs@custom` body of §6.5 |
 | 6 | `elastic/kibana-export.ndjson` | data view, 2 Lens panels, saved search, dashboard |
