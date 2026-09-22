@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" role="img" aria-label="Three steps in a line. A cron fires simple-stepA every thirty seconds; A hands to B, B hands to C, and C has no successor so the run ends there. All three run on the same processor, sample-proc-v9. No schema edges are enforced and no step declares a failure branch.">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1580 330" role="img" aria-label="Three steps in a line on one processor. The entry step makes its own input, hands to a second step, which hands to a third; nothing accepts the third step's output so the run ends there. No schema edges are enforced and no step declares a failure branch.">
   <style>
     :root {
     --ground: #EEF0EC;
@@ -31,8 +31,6 @@
     .mk-ok { fill: var(--ok); }
     .lbl-note { fill: var(--muted); font-family: var(--sans); font-size: 11.5px; }
     .lbl-out { fill: var(--ink); font-family: var(--mono); font-size: 11px; }
-    .topic-pill { fill: none; stroke: var(--ink); stroke-width: 1.2; }
-    .topic-txt { fill: var(--ink); font-family: var(--mono); font-size: 12px; }
     .legend-txt { fill: var(--muted); font-family: var(--sans); font-size: 12px; }
   </style>
 
@@ -42,11 +40,8 @@
           </marker>
         </defs>
 
-        <!-- the trigger: no inbound topic, a cron -->
-        <rect class="topic-pill" x="40" y="20" width="190" height="32"></rect>
-        <text class="topic-txt" x="135" y="41" text-anchor="middle">cron 10,40 * * * * *</text>
-        <line class="edge-ok" x1="135" y1="52" x2="135" y2="114" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-note" x="245" y="41" text-anchor="start">every 30s - one run per tick</text>
+        <!-- No inbound topic pill: this workflow consumes nothing. -->
+        <text class="lbl-note" x="40" y="41" text-anchor="start">entry step · no inbound topic — the processor makes its own input</text>
 
         <g>
           <rect class="node-box" x="40" y="120" width="150" height="86"></rect>
@@ -56,31 +51,36 @@
           <text class="n-step" x="115" y="179" text-anchor="middle">simple-stepA<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="115" y="195" text-anchor="middle">label Step_A</text>
         </g>
-        <line class="edge-ok" x1="190" y1="163" x2="280" y2="163" marker-end="url(#ar-ok)"></line>
+
+        <line class="edge-ok" x1="190" y1="163" x2="226" y2="163" marker-end="url(#ar-ok)"></line>
 
         <g>
-          <rect class="node-box" x="280" y="120" width="150" height="86"></rect>
-          <circle class="hop-disc" cx="298" cy="138" r="12"></circle>
-          <text class="hop-num" x="298" y="142" text-anchor="middle">2</text>
-          <text class="n-proc" x="355" y="162" text-anchor="middle">sample-proc-v9<tspan class="n-proc-ver">_1.5.0</tspan></text>
-          <text class="n-step" x="355" y="179" text-anchor="middle">simple-stepB<tspan class="n-step-ver">_1.0.0</tspan></text>
-          <text class="n-cfg" x="355" y="195" text-anchor="middle">label Step_B</text>
+          <rect class="node-box" x="232" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="250" cy="138" r="12"></circle>
+          <text class="hop-num" x="250" y="142" text-anchor="middle">2</text>
+          <text class="n-proc" x="307" y="162" text-anchor="middle">sample-proc-v9<tspan class="n-proc-ver">_1.5.0</tspan></text>
+          <text class="n-step" x="307" y="179" text-anchor="middle">simple-stepB<tspan class="n-step-ver">_1.0.0</tspan></text>
+          <text class="n-cfg" x="307" y="195" text-anchor="middle">label Step_B</text>
         </g>
-        <line class="edge-ok" x1="430" y1="163" x2="520" y2="163" marker-end="url(#ar-ok)"></line>
+
+        <line class="edge-ok" x1="382" y1="163" x2="418" y2="163" marker-end="url(#ar-ok)"></line>
 
         <g>
-          <rect class="node-box" x="520" y="120" width="150" height="86"></rect>
-          <circle class="hop-disc" cx="538" cy="138" r="12"></circle>
-          <text class="hop-num" x="538" y="142" text-anchor="middle">3</text>
-          <text class="n-proc" x="595" y="162" text-anchor="middle">sample-proc-v9<tspan class="n-proc-ver">_1.5.0</tspan></text>
-          <text class="n-step" x="595" y="179" text-anchor="middle">simple-stepC<tspan class="n-step-ver">_1.0.0</tspan></text>
-          <text class="n-cfg" x="595" y="195" text-anchor="middle">label Step_C</text>
+          <rect class="node-box" x="424" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="442" cy="138" r="12"></circle>
+          <text class="hop-num" x="442" y="142" text-anchor="middle">3</text>
+          <text class="n-proc" x="499" y="162" text-anchor="middle">sample-proc-v9<tspan class="n-proc-ver">_1.5.0</tspan></text>
+          <text class="n-step" x="499" y="179" text-anchor="middle">simple-stepC<tspan class="n-step-ver">_1.0.0</tspan></text>
+          <text class="n-cfg" x="499" y="195" text-anchor="middle">label Step_C</text>
         </g>
-        <line class="edge-ok" x1="670" y1="163" x2="748" y2="163" marker-end="url(#ar-ok)"></line>
-        <text class="lbl-note" x="756" y="159" text-anchor="start">no successor accepts it</text>
-        <text class="lbl-note" x="756" y="175" text-anchor="start">the run ends here</text>
 
-        <text class="lbl-out" x="40" y="236" text-anchor="start">3 outcomes per cycle, one per step, all Completed - measured over 40 cycles</text>
-        <text class="legend-txt" x="40" y="258" text-anchor="start">entryCondition 4 - Always, on all three steps: a successor is dispatched whatever the predecessor reported</text>
-        <text class="legend-txt" x="40" y="276" text-anchor="start">no schema edges enforced - the processor declares neither an input nor an output schema, so nothing is validated between hops</text>
+        <line class="edge-ok" x1="574" y1="163" x2="626" y2="163" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-note" x="636" y="167" text-anchor="start">ends lineage · no successor accepts it</text>
+
+        <text class="lbl-out" x="40" y="236" text-anchor="start">3 outcomes per cycle · one per step · all Completed — measured over 40 cycles</text>
+
+        <!-- Legend, at the chain's coordinates so the two line up when flipped between. -->
+        <line class="edge-ok" x1="40" y1="276" x2="86" y2="276" marker-end="url(#ar-ok)"></line>
+        <text class="legend-txt" x="96" y="280" text-anchor="start">Completed — entryCondition 4, Always, on all three steps: a successor is dispatched whatever the predecessor reported</text>
+        <text class="legend-txt" x="40" y="310" text-anchor="start">No failure edge and no schema edge is drawn because none exists: the processor declares neither an input nor an output schema, and no step routes a failure</text>
 </svg>
