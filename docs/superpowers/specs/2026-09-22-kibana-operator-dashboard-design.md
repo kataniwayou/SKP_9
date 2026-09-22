@@ -834,6 +834,28 @@ for the isolation. That trade was made deliberately in favour of reading them to
 blanking proves worse in practice than the side-by-side is worth, moving this panel back to its own
 dashboard is a panel move and a query revert, not a rebuild.
 
+### 14.6 The same nesting, applied to Outcome distribution
+
+Added 2026-09-23, on the reading that if a donut can carry "which value" under "which verdict", it
+can carry **which step** under **which outcome**. `skp-outcomes-pie` gains `attributes.StepId` as a
+second Slice by: inner ring the outcome, outer ring the steps that reached it. It stays a Lens
+panel — it needs no split, only a second dimension, which Lens does have.
+
+It pays for itself on the first read. Over 24h: **Cancelled is 100% `sk-normalizer-sample`** — the
+whitelist rejections — so the inner Cancelled slice and the whitelist row at the bottom of the board
+are now visibly the same event, one step apart. Failed is exactly three steps in equal thirds, the
+feed's three failure shapes.
+
+**Size is load-bearing here, not cosmetic.** The panel went from 3 slices to 16, and the two lessons
+from §14.4 both bit again: a sector label that does not fit its arc is dropped, and the legend must
+not truncate. At `w:24` only four outer labels rendered and the three Failed thirds — the exact
+question the ring was added to answer — were unlabelled. At `w:48 h:22` every slice is labelled,
+including each Failed third and the Cancelled step, because arc LENGTH scales with radius while the
+angle does not. The row order is therefore diagram, bins, Outcome distribution, whitelist.
+
+`otherBucket` stays on for the step ring even though the registry bounds the step count: a step
+added tomorrow must show its weight rather than vanish from a chart whose slices still sum to 100%.
+
 ### 14.5 Known limits
 
 - **Forward-looking only.** The 1265 whitelist cancels already in the store carry none of these
