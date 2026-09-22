@@ -132,14 +132,44 @@ you import into Kibana.
 python tools/verify-kibana-dashboard.py
 ```
 
-## Regenerating the diagram panel
+## The diagram panel, and how it follows the selection
 
-The chain diagram is a PNG data URI inside a markdown panel, because Kibana has no panel that takes
-the diagram's HTML and a data URI needs no server to host it. The raster is generated, never
-hand-edited:
+The panel shows **the diagram of the workflow you have selected**, and nothing when there isn't one.
+
+It is a **TSVB markdown** panel, not the plain Markdown panel, and that is the whole mechanism. A
+Markdown panel runs no query, so it cannot react to anything. TSVB runs one, so it honours the
+Workflow control, the filter and the time range. Splitting that query by `attributes.WorkflowId`
+makes each series label the id itself, and the template turns the id into a filename:
 
 ```
-python kibana/build-diagram-panel.py
+{{#each _all}}![](http://<base>/{{label}}.png){{/each}}
 ```
 
-Re-run it after editing `docs/diagrams/filefetcher-archiveexpander-chain.html`, then re-import.
+**Nothing renders when there is no diagram, by two independent routes.** A workflow with no records
+in the window produces no series, so the loop runs zero times. A workflow with records but no file
+gets a 404 — and because the alt text is deliberately **empty**, a broken image collapses to
+nothing. With alt text it would show a placeholder icon and the alt string.
+
+Regenerate after editing any diagram, then re-import the export and re-apply the manifest:
+
+```
+python kibana/build-diagram-panels.py --base-url http://localhost:18097
+kubectl apply --server-side -f k8s/25-diagrams.yaml
+```
+
+`--server-side` is not optional: the ConfigMap is ~370 KB, which overflows the
+`last-applied-configuration` annotation a client-side apply writes (262144 bytes). That is also why
+`25-diagrams.yaml` is not in `kustomization.yaml`.
+
+**The images are served, not embedded**, which is what lets the filename vary with the selection. A
+data URI is fixed at build time. `k8s/25-diagrams.yaml` is a generated ConfigMap of PNGs behind an
+nginx, reachable on `localhost:18097`; **the operator's browser fetches them, not Kibana**, so it
+must be reachable from wherever the dashboard is opened and `--base-url` must match.
+
+**Filenames are workflow ids, so they change per cluster.** The registry in the build script is
+keyed by workflow *name*, which survives a rebuild; the id is resolved at build time from the same
+naming records the formatters use. Rebuild the graph elsewhere and re-run the script.
+
+**With no workflow selected and several in range the diagrams stack**, and the panel scrolls rather
+than hiding the ones after the first. Selecting a workflow collapses it to one.
+

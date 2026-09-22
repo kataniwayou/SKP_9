@@ -17,6 +17,9 @@ resources:
   - 21-prometheus.yaml
   - 23-grafana.yaml
   - 24-kibana.yaml
+  # NOTE: 25-diagrams.yaml is NOT listed. Its ConfigMap is ~370 KB, which overflows the
+  # last-applied-configuration annotation that a client-side apply writes (262144 byte limit).
+  # Apply it on its own with --server-side:  kubectl apply --server-side -f k8s/25-diagrams.yaml
   - 30-baseapi-service.yaml
   - 33-processor-sample.yaml
   - 34-processor-kafkaimporter.yaml

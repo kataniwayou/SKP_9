@@ -634,6 +634,35 @@ These records carry no `Result`, so the counted set of §13.4 cannot pick them u
 | `unknownKeyValue` renders a new entity blank | **retired** — omitting it renders the raw GUID, verified |
 | The formatter map must be regenerated after a publish | **new** — the same staleness shape the enrich policy had, but the failure is a raw GUID in a legend rather than a confidently wrong name |
 
+### 13.10 The diagram panel follows the workflow selection
+
+Added 2026-09-22, after the static diagram was already on the dashboard. The panel now renders the
+diagram **of the selected workflow**, and nothing when that workflow has none.
+
+The static panel could not do this: a Markdown panel runs no query, so it cannot see a control. A
+**TSVB markdown** panel does run one, and splitting it by `attributes.WorkflowId` makes each series
+label the id, which the template turns into `<workflowId>.png`.
+
+**Vega was tried first and rejected on evidence.** Its image mark treats even a `data:` URI as
+external and refuses with *"External URLs are not enabled. Add vis_type_vega.enableExternalUrls:
+true to kibana.yml"*. That is a server config change — on an org-owned Kibana it is a request, which
+is the dependency class this whole amendment removes.
+
+**The images are served over http rather than embedded**, and that is forced: a data URI is fixed at
+build time and cannot vary with a selection. `k8s/25-diagrams.yaml` is a generated ConfigMap of PNGs
+behind nginx. The cost is real and is the one thing this adds to the deployment — **the operator's
+browser fetches the image, not Kibana**, so it must be reachable from wherever the dashboard is
+opened.
+
+**Filenames are workflow ids, which are cluster-specific**, so the build resolves them from the same
+naming records the formatters use, keyed by workflow name. A rebuilt graph needs a re-run.
+
+Two ways nothing renders, both tested: no records in the window means no series and no markdown at
+all; a missing file means a 404, and with **empty alt text** a broken image collapses to nothing.
+
+`docs/diagrams/simple-abc.html` was authored for this, from the live API: three steps in a line on
+one processor, entryCondition 4 throughout, no schema edges, 3 Completed per cycle.
+
 ### 13.9 Unknowns about the target cluster — unanswered
 
 Stated to the user and still open. Each one can invalidate part of this amendment:

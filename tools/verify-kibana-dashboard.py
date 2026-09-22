@@ -25,6 +25,7 @@ RUN THIS FROM POWERSHELL against live port-forwards:
     python tools/verify-kibana-dashboard.py
 """
 import argparse
+import glob
 import json
 import re
 import os
@@ -42,7 +43,7 @@ EXPORT = os.path.join(ROOT, "kibana", "kibana-export.ndjson")
 # Beside this script, not in kibana/: kibana/ is what gets imported into Kibana, and these 13
 # documents are synthetic test data that never leaves a scratch index.
 FIXTURE = os.path.join(ROOT, "tools", "classification-fixture.json")
-DIAGRAM = os.path.join(ROOT, "kibana", "filefetcher-archiveexpander-chain.svg")
+DIAGRAMS_DIR = os.path.join(ROOT, "kibana", "diagrams")
 
 # The chain this dashboard is VALIDATED against, not the one it is built for (spec section 1).
 VALIDATION_WORKFLOW = "filefetcher-archiveexpander-chain_1.0.0"
@@ -492,16 +493,22 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names):
     in the window cannot be checked this way and is reported as unverified rather than passed.
     """
     try:
-        svg = open(DIAGRAM, encoding="utf-8").read()
-        # <text class="n-step">split-importer<tspan class="n-step-ver">_1.0.0</tspan></text>
-        def labels(cls):
-            out = []
-            for m in re.finditer(r'<text class="%s"[^>]*>([^<]*)(?:<tspan[^>]*>([^<]*)</tspan>)?' % cls, svg):
-                out.append((m.group(1) or "") + (m.group(2) or ""))
-            return out
-        diagram_steps = labels("n-step")
-        diagram_procs = labels("n-proc")
-        pairs = list(zip(diagram_steps, diagram_procs))
+        # EVERY diagram, not just the chain's. Each workflow now has its own, and a rename in any of
+        # them desyncs that workflow's panel from its bars just as silently.
+        diagram_steps, diagram_procs, pairs = [], [], []
+        for svg_path in sorted(glob.glob(os.path.join(DIAGRAMS_DIR, "*.svg"))):
+            svg = open(svg_path, encoding="utf-8").read()
+
+            # <text class="n-step">split-importer<tspan class="n-step-ver">_1.0.0</tspan></text>
+            def labels(cls, _svg=svg):
+                out = []
+                for m in re.finditer(r'<text class="%s"[^>]*>([^<]*)(?:<tspan[^>]*>([^<]*)</tspan>)?' % cls, _svg):
+                    out.append((m.group(1) or "") + (m.group(2) or ""))
+                return out
+            steps, procs = labels("n-step"), labels("n-proc")
+            diagram_steps += steps
+            diagram_procs += procs
+            pairs += list(zip(steps, procs))
     except Exception as exc:  # noqa: BLE001
         return checks.report(13, "Diagram agrees with the dashboard", False, f"{type(exc).__name__}: {exc}")
 
