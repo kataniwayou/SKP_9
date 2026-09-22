@@ -40,16 +40,16 @@ and `pkill` does not exist on this machine.
 | artifact | what |
 | --- | --- |
 | `k8s/24-kibana.yaml` | Kibana 8.15.5, ClusterIP, pinned to the ES version |
-| `elastic/logs-custom-pipeline.json` | `logs@custom` — 3 enrich lookups + the `skp.outcome_record` rule |
-| `elastic/enrich-policy.json`, `elastic/entity-names-index.json` | the GUID→name lookup |
-| `elastic/simulate-outcome-classification.json` | 12-document fixture; the pipeline's test suite |
-| `elastic/kibana-export.ndjson` | data view, 2 Lens panels, saved search, dashboard |
+| `kibana/logs-custom-pipeline.json` | `logs@custom` — 3 enrich lookups + the `skp.outcome_record` rule |
+| `kibana/enrich-policy.json`, `kibana/entity-names-index.json` | the GUID→name lookup |
+| `kibana/simulate-outcome-classification.json` | 12-document fixture; the pipeline's test suite |
+| `kibana/kibana-export.ndjson` | data view, 2 Lens panels, saved search, dashboard |
 | `tools/sync-entity-names.py` | BaseApi REST → lookup index → re-execute policy |
 | `tools/verify-kibana-dashboard.py` | §9 checks 1–7 and 9, executable |
 
 **Live ES objects that exist only in cluster state, not in `k8s/`:** the `logs@custom` pipeline, the
 `skp-entity-lookup` enrich policy, and the `skp-entity-names` index. A cluster rebuild restores
-Kibana from kustomize but **not** these. `elastic/README.md` has the install order, and the order
+Kibana from kustomize but **not** these. `kibana/README.md` has the install order, and the order
 is load-bearing (ES rejects an `enrich` processor naming a policy that does not exist).
 
 Dashboard: `http://localhost:15601` → Dashboards → **SKP — workflow step outcomes**.
@@ -198,7 +198,7 @@ Two implementation notes:
 - the dashboard query, the control group's ignore settings, the data view's `fieldFormats`
 - `tools/verify-kibana-dashboard.py` — `PER_CYCLE_BY_STEP` keys, `PER_CYCLE_BY_PROCESSOR`,
   `VALIDATION_WORKFLOW` all become `{name}_{version}`
-- `elastic/` shrinks to the Kibana export plus a formatter generator
+- `kibana/` shrinks to the Kibana export plus a formatter generator
 - `docs/testing/kibana-operator-dashboard.md` — the §4.4 tables and the zoom guidance
 
 ## Open items
@@ -206,7 +206,7 @@ Two implementation notes:
 1. ~~**Write the spec amendment and the plan.**~~ **Done 2026-09-22.** Spec §13 amends
    §§4.1, 4.2, 4.3, 6.1, 6.3, 6.5, 6.6, 7.1 and 9, each of which now carries a banner pointing
    at it. The plan is `docs/superpowers/plans/2026-09-22-kibana-dashboard-offline-redesign.md`,
-   six tasks, with the `elastic/` cleanup of item 6 below as its Task 6 and the diagram question
+   six tasks, with the `kibana/` cleanup of item 6 below as its Task 6 and the diagram question
    of item 7 as a deferred decision carrying a pre-committed default. **Nothing is implemented.**
 2. **check 9** needs a second workflow driven. Five workflows are stopped.
 3. **Org-cluster unknowns**, stated to the user and unanswered: whether Kibana is already provided,
@@ -219,13 +219,13 @@ Two implementation notes:
 
 ## Two more tasks the user asked for
 
-### 6. Delete the redundant files in `elastic/`
+### 6. Delete the redundant files in `kibana/`
 
 **Not yet — every one of them is live today.** The dashboard in the cluster is driven by the
 pipeline and policy these files define, so deleting them now breaks a working dashboard and leaves
 no way to rebuild it. This is a task for **after** the redesign lands.
 
-What `elastic/` holds now, and what happens to each:
+What `kibana/` holds now, and what happens to each:
 
 | file | fate under the redesign |
 | --- | --- |
@@ -246,7 +246,7 @@ Two things that must move somewhere before those deletions, or they are lost:
   equivalent test, or the three rarely-fired failure templates go back to being unverified.
 
 Also delete the now-unused `tools/sync-entity-names.py` at the same time, and strip the ES-object
-install steps from `elastic/README.md`.
+install steps from `kibana/README.md`.
 
 ### 7. Can the chain diagram be embedded in the dashboard?
 

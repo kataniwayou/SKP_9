@@ -1,4 +1,4 @@
-# elastic/
+# kibana/
 
 Everything the operator dashboard needs, and **nothing that lives in Elasticsearch**.
 
@@ -47,7 +47,7 @@ workflow is started, carrying the id under the same field name the execution rec
 Regenerate after publishing or renaming anything, then re-import:
 
 ```
-python elastic/generate-field-formatters.py
+python kibana/generate-field-formatters.py
 ```
 
 **A workflow must have been started at least once for its entities to have names.** Those records
@@ -100,7 +100,7 @@ the diagram's HTML and a data URI needs no server to host it. The raster is gene
 hand-edited:
 
 ```
-python elastic/build-diagram-panel.py
+python kibana/build-diagram-panel.py
 ```
 
 Re-run it after editing `docs/diagrams/filefetcher-archiveexpander-chain.html`, then re-import.

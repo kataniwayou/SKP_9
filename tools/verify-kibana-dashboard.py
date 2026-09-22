@@ -37,8 +37,8 @@ DEFAULT_KIBANA = "http://localhost:15601"
 DATA_STREAM = "logs-generic.otel-default"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXPORT = os.path.join(ROOT, "elastic", "kibana-export.ndjson")
-FIXTURE = os.path.join(ROOT, "elastic", "classification-fixture.json")
+EXPORT = os.path.join(ROOT, "kibana", "kibana-export.ndjson")
+FIXTURE = os.path.join(ROOT, "kibana", "classification-fixture.json")
 
 # The chain this dashboard is VALIDATED against, not the one it is built for (spec section 1).
 VALIDATION_WORKFLOW = "filefetcher-archiveexpander-chain_1.0.0"

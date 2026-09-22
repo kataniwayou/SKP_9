@@ -280,9 +280,9 @@ Saved search columns: `@timestamp`, `skp.processor_name`, `skp.step_name`, `attr
 | 1 | `k8s/24-kibana.yaml` | Kibana 8.15.5, service, `ELASTICSEARCH_HOSTS`, resources, probes |
 | 2 | `k8s/kustomization.yaml` | add the new manifest |
 | 3 | `tools/sync-entity-names.py` | BaseApi REST → `skp-entity-names`, then re-execute the policy (§11) |
-| 4 | `elastic/enrich-policy.json` | `skp-entity-lookup`, match on `entity_id` |
-| 5 | `elastic/logs-custom-pipeline.json` | the `logs@custom` body of §6.5 |
-| 6 | `elastic/kibana-export.ndjson` | data view, 2 Lens panels, saved search, dashboard |
+| 4 | `kibana/enrich-policy.json` | `skp-entity-lookup`, match on `entity_id` |
+| 5 | `kibana/logs-custom-pipeline.json` | the `logs@custom` body of §6.5 |
+| 6 | `kibana/kibana-export.ndjson` | data view, 2 Lens panels, saved search, dashboard |
 | 7 | `docs/testing/kibana-operator-dashboard.md` | operator notes, including §4.4 and the keyword caveat |
 
 Kibana saved objects are exported as NDJSON and imported by hand, matching how the Grafana dashboards are handled in this repo — hand-edited JSON, hand-imported, no provisioning ConfigMap.
@@ -405,7 +405,7 @@ Decisions taken:
 
 A **writer still has to exist.** Kibana cannot derive a formatter from log records by itself; some
 tool reads the id-to-name pairs out of the index and emits the `fieldFormats` block. That is a
-generator over `elastic/`, not a live dependency — it runs when entities change, and its output is
+generator over `kibana/`, not a live dependency — it runs when entities change, and its output is
 committed.
 
 Where the pairs come from: **a processor id-to-name pairing already exists on every processor
@@ -510,7 +510,7 @@ one of them is now known to be false:
   four Kibana objects — is satisfied by the dashboard query, which the controls already respect
   (`ignoreQuery: false`). The single place moves from the pipeline to the dashboard.
 
-**What must move before `elastic/` is cut down.** `simulate-outcome-classification.json` is a real
+**What must move before `kibana/` is cut down.** `simulate-outcome-classification.json` is a real
 test: twelve documents, one per template of §4, with the expected classification tabulated in the
 plan. Three of those templates are the rarely-fired failure paths that §4 exists to protect. If the
 rule moves to KQL it needs an equivalent test — the twelve documents indexed into a scratch index and

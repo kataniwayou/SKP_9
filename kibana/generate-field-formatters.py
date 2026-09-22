@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Writes the id -> name lookup into the data view's field formatters, in elastic/kibana-export.ndjson.
+Writes the id -> name lookup into the data view's field formatters, in kibana/kibana-export.ndjson.
 
 WHAT REPLACED WHAT. The dashboard used to read enriched name fields (skp.step_name and friends)
 that an Elasticsearch ingest pipeline wrote at index time, fed by an enrich policy over a lookup
@@ -47,7 +47,7 @@ it may not be reachable from wherever this is run.
 
 Run after publishing or renaming anything, then re-import the export.
 
-    python elastic/generate-field-formatters.py
+    python kibana/generate-field-formatters.py
 """
 import argparse
 import json
@@ -57,7 +57,7 @@ import sys
 import requests
 
 ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXPORT = os.path.join(ROOT, "elastic", "kibana-export.ndjson")
+EXPORT = os.path.join(ROOT, "kibana", "kibana-export.ndjson")
 
 DEFAULT_ES  = "http://localhost:19200"
 DATA_STREAM = "logs-generic.otel-default"

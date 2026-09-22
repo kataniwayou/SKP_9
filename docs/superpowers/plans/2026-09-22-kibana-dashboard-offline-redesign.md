@@ -4,7 +4,7 @@
 
 **Goal:** Make the operator dashboard run on an Elasticsearch cluster this project does not own — no ingest pipeline, no enrich policy, no lookup index, no privilege beyond read — without losing a single thing the built dashboard does today.
 
-**Architecture:** Two independent halves. **Half 2** makes every step log its own outcome, including terminal ones, which collapses the counted set to a single property test that can live in the dashboard's own KQL query. **Half 1** puts human-readable names back by aggregating on raw ids and mapping id to `{name}_{version}` in a data-view `static_lookup` field formatter, applied at render time. What remains in `elastic/` is one NDJSON export and a generator that writes the formatter block.
+**Architecture:** Two independent halves. **Half 2** makes every step log its own outcome, including terminal ones, which collapses the counted set to a single property test that can live in the dashboard's own KQL query. **Half 1** puts human-readable names back by aggregating on raw ids and mapping id to `{name}_{version}` in a data-view `static_lookup` field formatter, applied at render time. What remains in `kibana/` is one NDJSON export and a generator that writes the formatter block.
 
 **Tech Stack:** C# / .NET 8 (`BaseProcessor.Core`, `BaseApi.Service`), Elasticsearch 8.15.5 read-only, Kibana 8.15.5 saved objects, Python 3 with `requests` (stdlib + `requests` only — **there is no pytest in this environment and this plan does not introduce one**), kubectl/kind, `playwright-skill` headless for the two render checks.
 
@@ -16,8 +16,8 @@
 
 ## Global Constraints
 
-- **The order of the halves is not free.** Half 2 (Tasks 1, 3) must land before the `elastic/` deletions of Task 6, because the ingest pipeline is currently the only written definition of the counting rule. Half 1 (Tasks 2, 4) can land in either order relative to Half 2.
-- **Nothing is deleted from `elastic/` until its replacement is verified.** Every file there is live today; the dashboard in the cluster is driven by the pipeline and policy they define. Deleting them early breaks a working dashboard and leaves no way to rebuild it.
+- **The order of the halves is not free.** Half 2 (Tasks 1, 3) must land before the `kibana/` deletions of Task 6, because the ingest pipeline is currently the only written definition of the counting rule. Half 1 (Tasks 2, 4) can land in either order relative to Half 2.
+- **Nothing is deleted from `kibana/` until its replacement is verified.** Every file there is live today; the dashboard in the cluster is driven by the pipeline and policy they define. Deleting them early breaks a working dashboard and leaves no way to rebuild it.
 - **Task 1 is a framework edit.** `BaseProcessor.Core` is consumed by the processors **as an extracted package**, so a rebuild without a repack tests the old code and goes green while the change is absent. Repack before believing any test result.
 - **A framework edit moves no processor `SourceHash`.** The fold is project-only, so registration rows stay valid and no re-registration is needed. **Executed 2026-09-22: this is ONE image, not five.** The changed branch is guarded by `_processor.EndsLineage`, and `BaseExporter` is the only class that sets it — `Processor.KafkaExporter` is the repo's only sink, and it serves both of the two missing steps. Every other processor image carries an older framework build with no behavioural difference on this path; they get the new binary at their next routine rebuild.
 - **Repacking `BaseProcessor.Core` invalidates ten `packages.lock.json` files** with NU1403, "the package is different than the last restore". `dotnet restore --force-evaluate` refreshes them and the result is committed. The Dockerfiles do **not** copy processor lock files, so an image build restores unlocked and succeeds while a local build still fails — do not read a green `docker build` as evidence the lock files are fine.
@@ -37,14 +37,14 @@
 |---|---|
 | `src/BaseProcessor.Core/Processing/ProcessDispatchHandler.cs` | *modify* — the terminal branch gains an `OutcomeLogScope` line of its own (§13.3). The long comment explaining why there is no scope there is now wrong and must be rewritten, not deleted. |
 | `src/BaseApi.Service/Features/Orchestration/OrchestrationService.cs` | *modify* — emit `{EntityId, EntityName}` per entity between validation and `SendAsync` (§13.6). |
-| `elastic/kibana-export.ndjson` | *modify* — dashboard-level KQL query, three controls with `ignoreQuery`/`ignoreTimerange`, data view `fieldFormats`, panels re-pointed at raw id fields. Becomes the whole deliverable. |
-| `elastic/generate-field-formatters.py` | **new** — reads id→name pairs out of ES, writes the `fieldFormats` block into the data view saved object. The only thing that replaces `sync-entity-names.py`. |
-| `elastic/classification-fixture.json` | **new** — the twelve documents of `simulate-outcome-classification.json`, re-purposed as a KQL fixture rather than a pipeline `_simulate` body (§13.5). |
-| `elastic/README.md` | *rewrite* — the install order it documents is the thing being removed. |
-| `elastic/logs-custom-pipeline.json` | **delete** — Task 6, not before. |
-| `elastic/enrich-policy.json` | **delete** — Task 6. |
-| `elastic/entity-names-index.json` | **delete** — Task 6. |
-| `elastic/simulate-outcome-classification.json` | **delete** — Task 6, once Task 3 has an equivalent. |
+| `kibana/kibana-export.ndjson` | *modify* — dashboard-level KQL query, three controls with `ignoreQuery`/`ignoreTimerange`, data view `fieldFormats`, panels re-pointed at raw id fields. Becomes the whole deliverable. |
+| `kibana/generate-field-formatters.py` | **new** — reads id→name pairs out of ES, writes the `fieldFormats` block into the data view saved object. The only thing that replaces `sync-entity-names.py`. |
+| `kibana/classification-fixture.json` | **new** — the twelve documents of `simulate-outcome-classification.json`, re-purposed as a KQL fixture rather than a pipeline `_simulate` body (§13.5). |
+| `kibana/README.md` | *rewrite* — the install order it documents is the thing being removed. |
+| `kibana/logs-custom-pipeline.json` | **delete** — Task 6, not before. |
+| `kibana/enrich-policy.json` | **delete** — Task 6. |
+| `kibana/entity-names-index.json` | **delete** — Task 6. |
+| `kibana/simulate-outcome-classification.json` | **delete** — Task 6, once Task 3 has an equivalent. |
 | `tools/sync-entity-names.py` | **delete** — Task 6. |
 | `tools/verify-kibana-dashboard.py` | *modify* — checks 2 and 3 go, check 5 covers 10 of 10, three new checks, all name keys become `{name}_{version}` (§13.7). |
 | `docs/testing/kibana-operator-dashboard.md` | *modify* — §4.4 tables, the zoom guidance, and two new caveats: GUID-only free-text search, and a version bump relabelling history. |
@@ -195,8 +195,8 @@ by-product. `simple-abc` can be stopped again through `POST /api/v1/orchestratio
 ## Task 3: The counting rule moves into the dashboard query — DONE 2026-09-22
 
 **Files:**
-- Modify: `elastic/kibana-export.ndjson` — dashboard-level query
-- Create: `elastic/classification-fixture.json`
+- Modify: `kibana/kibana-export.ndjson` — dashboard-level query
+- Create: `kibana/classification-fixture.json`
 - Modify: `tools/verify-kibana-dashboard.py`
 
 **Interfaces:**
@@ -205,7 +205,7 @@ by-product. `simple-abc` can be stopped again through `POST /api/v1/orchestratio
 
 - [x] **Step 1: Port the fixture before deleting its home**
 
-`elastic/simulate-outcome-classification.json` is twelve documents, one per template of §4, and **three of them are the rarely-fired failure paths that never appear in live traffic.** Once the pipeline goes, `_simulate` is not available to test them. Write `elastic/classification-fixture.json` as the same twelve documents plus their expected verdicts, and a check that bulk-indexes them into a scratch index, runs the §13.4 KQL against it, asserts the verdicts, and deletes the index.
+`kibana/simulate-outcome-classification.json` is twelve documents, one per template of §4, and **three of them are the rarely-fired failure paths that never appear in live traffic.** Once the pipeline goes, `_simulate` is not available to test them. Write `kibana/classification-fixture.json` as the same twelve documents plus their expected verdicts, and a check that bulk-indexes them into a scratch index, runs the §13.4 KQL against it, asserts the verdicts, and deletes the index.
 
 Without this, those three failure paths return to being unverified — which is precisely the defect §4 was written to prevent.
 
@@ -221,15 +221,15 @@ Dashboard-level, once. The controls respect it (`ignoreQuery: false`) — **exce
 
 - [x] **Step 3: Verify**
 
-Fixture check passes on all twelve. Then live: the dashboard total over N cycles equals `30 × N` and each processor matches its §4.4 row, with the pipeline flag no longer referenced anywhere in the export (`grep skp.outcome_record elastic/` returns nothing but the files Task 6 deletes).
+Fixture check passes on all twelve. Then live: the dashboard total over N cycles equals `30 × N` and each processor matches its §4.4 row, with the pipeline flag no longer referenced anywhere in the export (`grep skp.outcome_record kibana/` returns nothing but the files Task 6 deletes).
 
 ---
 
 ## Task 4: Names by field formatter — DONE 2026-09-22
 
 **Files:**
-- Create: `elastic/generate-field-formatters.py`
-- Modify: `elastic/kibana-export.ndjson` — data view `fieldFormats`, controls, panel split fields
+- Create: `kibana/generate-field-formatters.py`
+- Modify: `kibana/kibana-export.ndjson` — data view `fieldFormats`, controls, panel split fields
 
 **Interfaces:**
 - Consumes: the `{EntityId, EntityName}` records of Task 2, plus the processor pairing that already exists on every processor record (`resource.attributes.ProcessorId` + `resource.attributes.service.name`).
@@ -243,7 +243,7 @@ Map two ids, leave the rest unmapped, publish, render headless, read the legend.
 
 - [x] **Step 2: Write the generator**
 
-Reads the pairs out of ES (**not** from the BaseApi — §13.2 drops that dependency deliberately, because the API may not be reachable from wherever this is run), emits the `fieldFormats` block, and writes it into the data view object in `elastic/kibana-export.ndjson`. Its output is committed; it is a build step, not a runtime dependency.
+Reads the pairs out of ES (**not** from the BaseApi — §13.2 drops that dependency deliberately, because the API may not be reachable from wherever this is run), emits the `fieldFormats` block, and writes it into the data view object in `kibana/kibana-export.ndjson`. Its output is committed; it is a build step, not a runtime dependency.
 
 - [x] **Step 3: Re-point controls and panels at raw ids**
 
@@ -286,11 +286,11 @@ Full run. Expect **11 of 12** — check 9 still fails for want of a second drive
 
 ---
 
-## Task 6: Cut `elastic/` down — last, never earlier — DONE 2026-09-22
+## Task 6: Cut `kibana/` down — last, never earlier — DONE 2026-09-22
 
 **Files:**
-- Delete: `elastic/logs-custom-pipeline.json`, `elastic/enrich-policy.json`, `elastic/entity-names-index.json`, `elastic/simulate-outcome-classification.json`, `tools/sync-entity-names.py`
-- Rewrite: `elastic/README.md`
+- Delete: `kibana/logs-custom-pipeline.json`, `kibana/enrich-policy.json`, `kibana/entity-names-index.json`, `kibana/simulate-outcome-classification.json`, `tools/sync-entity-names.py`
+- Rewrite: `kibana/README.md`
 - Modify: `docs/testing/kibana-operator-dashboard.md`
 
 - [x] **Step 1: Confirm both replacements are live before deleting anything**
@@ -306,7 +306,7 @@ If either is outstanding, stop. Deleting these files while the cluster's dashboa
 
 `logs@custom`, the `skp-entity-lookup` enrich policy and the `skp-entity-names` index exist **only in cluster state** — a rebuild restores Kibana from kustomize but not these. Delete them in reverse install order (pipeline, then policy, then index); ES rejects a policy deletion while a pipeline still names it.
 
-- [x] **Step 3: Rewrite `elastic/README.md`**
+- [x] **Step 3: Rewrite `kibana/README.md`**
 
 The install order it documents — index, policy, execute, pipeline — is exactly what is being removed, and it is the file most likely to be read by someone rebuilding on the org cluster. It becomes: import the NDJSON, run the generator, nothing else.
 
@@ -363,7 +363,7 @@ styling lives in the document's `<style>` at line 22, so it is not standalone as
 
 **Recommended: the 2x PNG data URI.** It is the only route that survives the move to the offline
 org cluster without new infrastructure — the whole diagram travels inside
-`elastic/kibana-export.ndjson`, with no origin to serve it from, no CORS, and nothing to keep
+`kibana/kibana-export.ndjson`, with no origin to serve it from, no CORS, and nothing to keep
 running. The http-URL route is better-looking and single-sourced, but nothing in `k8s/` serves
 static files today, and standing something up there is a larger change than the diagram is worth.
 
@@ -372,7 +372,7 @@ is generated from the committed HTML. A build step regenerates it; nobody hand-e
 
 ### How it was built
 
-`elastic/build-diagram-panel.py`, one command, nothing hand-maintained downstream:
+`kibana/build-diagram-panel.py`, one command, nothing hand-maintained downstream:
 
 ```
 docs/diagrams/...chain.html   the source of truth, captured from the live API 2026-09-15

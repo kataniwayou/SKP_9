@@ -33,12 +33,12 @@
 | `k8s/24-kibana.yaml` | Kibana 8.15.5 Service + Deployment. Nothing else; no ES, no saved objects. |
 | `k8s/kustomization.yaml` | *modify* — add `24-kibana.yaml` after `23-grafana.yaml`. |
 | `k8s/port-forward-realstack.ps1` | *modify* — add the eighth forward, `kibana 15601:5601`. |
-| `elastic/README.md` | What lives in `elastic/`, and the exact install order (index → policy → execute → pipeline). The pipeline is useless before the policy exists. |
-| `elastic/entity-names-index.json` | Mapping for `skp-entity-names`: three `keyword` fields. Separate from the policy because the index must exist before the policy can name it. |
-| `elastic/enrich-policy.json` | `skp-entity-lookup`, `match` on `entity_id`. |
-| `elastic/logs-custom-pipeline.json` | The `logs@custom` body of §6.5. The single source of truth for what an outcome record is. |
-| `elastic/simulate-outcome-classification.json` | `_ingest/pipeline/_simulate` fixture: one document per template of §4, plus an unmatched-GUID document and a `Result`-less one. This is the test suite for the pipeline. |
-| `elastic/kibana-export.ndjson` | Data view, 2 Lens panels, saved search, dashboard. Hand-imported. |
+| `kibana/README.md` | What lives in `kibana/`, and the exact install order (index → policy → execute → pipeline). The pipeline is useless before the policy exists. |
+| `kibana/entity-names-index.json` | Mapping for `skp-entity-names`: three `keyword` fields. Separate from the policy because the index must exist before the policy can name it. |
+| `kibana/enrich-policy.json` | `skp-entity-lookup`, `match` on `entity_id`. |
+| `kibana/logs-custom-pipeline.json` | The `logs@custom` body of §6.5. The single source of truth for what an outcome record is. |
+| `kibana/simulate-outcome-classification.json` | `_ingest/pipeline/_simulate` fixture: one document per template of §4, plus an unmatched-GUID document and a `Result`-less one. This is the test suite for the pipeline. |
+| `kibana/kibana-export.ndjson` | Data view, 2 Lens panels, saved search, dashboard. Hand-imported. |
 | `tools/sync-entity-names.py` | BaseApi REST → `skp-entity-names` → re-execute the policy. On demand and after any publish. |
 | `tools/verify-kibana-dashboard.py` | §9 checks 1–7 and 9, executable. Check 8 stays manual (a UI click). |
 | `docs/testing/kibana-operator-dashboard.md` | Operator notes: the §4.4 healthy shape, the keyword caveat, the forward-only window, and the best-effort-log caveat of §10. |
@@ -337,9 +337,9 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 The pipeline of Task 3 cannot be created before the policy it references exists — Elasticsearch rejects an `enrich` processor naming an unknown policy. So the lookup comes first.
 
 **Files:**
-- Create: `elastic/README.md`
-- Create: `elastic/entity-names-index.json`
-- Create: `elastic/enrich-policy.json`
+- Create: `kibana/README.md`
+- Create: `kibana/entity-names-index.json`
+- Create: `kibana/enrich-policy.json`
 - Create: `tools/sync-entity-names.py`
 - Modify: `tools/verify-kibana-dashboard.py`
 
@@ -394,7 +394,7 @@ Expected: `[FAIL] check 2a: Lookup populated - ...` — the index does not exist
 
 - [ ] **Step 3: Write the two ES object bodies**
 
-`elastic/entity-names-index.json` — the request body for `PUT skp-entity-names`:
+`kibana/entity-names-index.json` — the request body for `PUT skp-entity-names`:
 
 ```json
 {
@@ -412,7 +412,7 @@ Expected: `[FAIL] check 2a: Lookup populated - ...` — the index does not exist
 }
 ```
 
-`elastic/enrich-policy.json` — the request body for `PUT _enrich/policy/skp-entity-lookup`:
+`kibana/enrich-policy.json` — the request body for `PUT _enrich/policy/skp-entity-lookup`:
 
 ```json
 {
@@ -548,8 +548,8 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--api-url", default=DEFAULT_API)
     parser.add_argument("--es-url", default=DEFAULT_ES)
-    parser.add_argument("--index-body", default="elastic/entity-names-index.json")
-    parser.add_argument("--policy-body", default="elastic/enrich-policy.json")
+    parser.add_argument("--index-body", default="kibana/entity-names-index.json")
+    parser.add_argument("--policy-body", default="kibana/enrich-policy.json")
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--dry-run", action="store_true",
                         help="read the API and print the rows; touch nothing in Elasticsearch")
@@ -579,10 +579,10 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 5: Write `elastic/README.md`**
+- [ ] **Step 5: Write `kibana/README.md`**
 
 ````markdown
-# elastic/
+# kibana/
 
 Hand-applied Elasticsearch and Kibana objects for the operator dashboard. Nothing here is
 provisioned by kustomize — the same posture as `grafana/dashboards/*.json`, which are
@@ -614,7 +614,7 @@ After any edit, run the fixture before applying:
 ```
 curl -s -H 'Content-Type: application/json' \
   -XPOST 'http://localhost:19200/_ingest/pipeline/_simulate' \
-  --data-binary @elastic/simulate-outcome-classification.json
+  --data-binary @kibana/simulate-outcome-classification.json
 ```
 
 ## Changing the enrich policy
@@ -644,7 +644,7 @@ Expected from the test: `[PASS] check 2a: Lookup populated - workflow: api=6 ind
 - [ ] **Step 7: Commit**
 
 ```bash
-git add elastic/README.md elastic/entity-names-index.json elastic/enrich-policy.json tools/sync-entity-names.py tools/verify-kibana-dashboard.py
+git add kibana/README.md kibana/entity-names-index.json kibana/enrich-policy.json tools/sync-entity-names.py tools/verify-kibana-dashboard.py
 git commit -m "feat(elastic): entity-name lookup index and enrich policy, fed from the BaseApi
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
@@ -657,8 +657,8 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 The load-bearing task. The classification rule of §4.1 is implemented exactly once, here, and the fixture is written before the pipeline so the rule is tested rather than asserted.
 
 **Files:**
-- Create: `elastic/simulate-outcome-classification.json`
-- Create: `elastic/logs-custom-pipeline.json`
+- Create: `kibana/simulate-outcome-classification.json`
+- Create: `kibana/logs-custom-pipeline.json`
 - Modify: `tools/verify-kibana-dashboard.py`
 
 **Interfaces:**
@@ -667,7 +667,7 @@ The load-bearing task. The classification rule of §4.1 is implemented exactly o
 
 - [ ] **Step 1: Write the failing test — the simulate fixture**
 
-Create `elastic/simulate-outcome-classification.json`. Twelve documents: one per template of §4 (nine), plus an unmatched-GUID document and a `Result`-less one. The GUIDs are real ids from this cluster, so the expected names are real too — replace them with the output of `python tools/sync-entity-names.py --dry-run` if they have changed.
+Create `kibana/simulate-outcome-classification.json`. Twelve documents: one per template of §4 (nine), plus an unmatched-GUID document and a `Result`-less one. The GUIDs are real ids from this cluster, so the expected names are real too — replace them with the output of `python tools/sync-entity-names.py --dry-run` if they have changed.
 
 The em dash in the templates that carry one is written `—` rather than literally, so the file survives an editor that is not UTF-8. The exact template strings come from `src/tests/BaseApi.Tests/Live/Resilience/Templates.cs`, which is where they are already centralised — copy them from there rather than retyping them.
 
@@ -753,14 +753,14 @@ Documents 1 and 11 together are spec check 3: the unmatched one must come back p
 ```bash
 curl -s -H 'Content-Type: application/json' \
   -XPOST 'http://localhost:19200/_ingest/pipeline/_simulate' \
-  --data-binary @elastic/simulate-outcome-classification.json
+  --data-binary @kibana/simulate-outcome-classification.json
 ```
 
 Expected: an error, `pipeline with id [logs@custom] does not exist`. Nothing is classified yet.
 
 - [ ] **Step 3: Write the pipeline**
 
-Create `elastic/logs-custom-pipeline.json`:
+Create `kibana/logs-custom-pipeline.json`:
 
 ```json
 {
@@ -865,7 +865,7 @@ Two smaller notes for whoever edits this next. The `_tmp_*` targets are removed 
 ```bash
 curl -s -H 'Content-Type: application/json' \
   -XPUT 'http://localhost:19200/_ingest/pipeline/logs@custom' \
-  --data-binary @elastic/logs-custom-pipeline.json
+  --data-binary @kibana/logs-custom-pipeline.json
 ```
 
 Expected: `{"acknowledged":true}`. A `policy [skp-entity-lookup] does not exist` here means Task 2 Step 6 was skipped.
@@ -875,7 +875,7 @@ Expected: `{"acknowledged":true}`. A `policy [skp-entity-lookup] does not exist`
 ```bash
 curl -s -H 'Content-Type: application/json' \
   -XPOST 'http://localhost:19200/_ingest/pipeline/_simulate' \
-  --data-binary @elastic/simulate-outcome-classification.json > /tmp/simulated.json
+  --data-binary @kibana/simulate-outcome-classification.json > /tmp/simulated.json
 
 python -c "import json; docs=json.load(open('/tmp/simulated.json'))['docs']; [print(i, 'outcome_record=' + str(d['doc']['_source'].get('skp',{}).get('outcome_record')), 'names=' + str({k:v for k,v in d['doc']['_source'].get('skp',{}).items() if k.endswith('_name')})) for i,d in enumerate(docs,1)]"
 ```
@@ -984,7 +984,7 @@ Expected: checks 1, 2a, 2 and 3 all PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add elastic/logs-custom-pipeline.json elastic/simulate-outcome-classification.json tools/verify-kibana-dashboard.py
+git add kibana/logs-custom-pipeline.json kibana/simulate-outcome-classification.json tools/verify-kibana-dashboard.py
 git commit -m "feat(elastic): logs@custom enriches names and marks step-outcome records
 
 The counted set is a scope prefix plus the terminal-step Completed template, per
@@ -1149,7 +1149,7 @@ A check that has never gone red is not a test. Install a deliberately wrong pipe
 ```bash
 python -c "
 import json
-p = json.load(open('elastic/logs-custom-pipeline.json', encoding='utf-8'))
+p = json.load(open('kibana/logs-custom-pipeline.json', encoding='utf-8'))
 condition = p['processors'][6]['set']['if']
 assert \" && result == 'Completed'\" in condition, 'the condition moved; find it before editing'
 p['processors'][6]['set']['if'] = condition.replace(\" && result == 'Completed'\", '')
@@ -1175,7 +1175,7 @@ The duplicated pairs are sk-normalizer's cancelled steps, witnessed once by the 
 ```bash
 curl -s -H 'Content-Type: application/json' \
   -XPUT 'http://localhost:19200/_ingest/pipeline/logs@custom' \
-  --data-binary @elastic/logs-custom-pipeline.json
+  --data-binary @kibana/logs-custom-pipeline.json
 rm /tmp/defective-pipeline.json
 ```
 
@@ -1204,7 +1204,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ## Task 5: The dashboard
 
 **Files:**
-- Create: `elastic/kibana-export.ndjson`
+- Create: `kibana/kibana-export.ndjson`
 - Modify: `tools/verify-kibana-dashboard.py`
 
 **Interfaces:**
@@ -1334,14 +1334,14 @@ Save as `SKP — workflow step outcomes`, custom ID `skp-operator-outcomes`.
 
 - [ ] **Step 8: Export**
 
-Stack Management → Saved Objects → select the dashboard → **Export**, with *"Include related objects"* ticked. Save the download as `elastic/kibana-export.ndjson`.
+Stack Management → Saved Objects → select the dashboard → **Export**, with *"Include related objects"* ticked. Save the download as `kibana/kibana-export.ndjson`.
 
 Confirm the five ids are in the file:
 
 ```bash
 python -c "
 import json
-ids = [json.loads(l)['id'] for l in open('elastic/kibana-export.ndjson', encoding='utf-8')
+ids = [json.loads(l)['id'] for l in open('kibana/kibana-export.ndjson', encoding='utf-8')
        if l.strip() and 'exportedCount' not in l]
 print(sorted(ids))
 "
@@ -1355,7 +1355,7 @@ An export that cannot be re-imported is not a deliverable, and the hand-import p
 
 ```bash
 curl -s -XPOST 'http://localhost:15601/api/saved_objects/_import?overwrite=true' \
-  -H 'kbn-xsrf: true' -F file=@elastic/kibana-export.ndjson
+  -H 'kbn-xsrf: true' -F file=@kibana/kibana-export.ndjson
 ```
 
 Expected: `"success":true` and `"successCount":5`. Open the dashboard afterwards and confirm both panels still render data rather than an empty frame.
@@ -1371,7 +1371,7 @@ Expected: checks 1, 2a, 2, 3, 4, 5, 6, 7 and 9 all PASS, and check 6's detail na
 - [ ] **Step 11: Commit**
 
 ```bash
-git add elastic/kibana-export.ndjson tools/verify-kibana-dashboard.py
+git add kibana/kibana-export.ndjson tools/verify-kibana-dashboard.py
 git commit -m "feat(elastic): operator dashboard saved objects - controls, bins, pie, drilldown
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
@@ -1397,7 +1397,7 @@ Create `docs/testing/kibana-operator-dashboard.md`:
 # Kibana operator dashboard — operator notes
 
 Design: `docs/superpowers/specs/2026-09-22-kibana-operator-dashboard-design.md`.
-Objects: `elastic/`. Install order and re-sync instructions: `elastic/README.md`.
+Objects: `kibana/`. Install order and re-sync instructions: `kibana/README.md`.
 
 ## Opening it
 
@@ -1496,7 +1496,7 @@ Check 5 is the one to care about. It asserts that no `(StepId, ExecutionId)` pai
 one counted record, which is what stops a step being tallied two or three times across the nine
 templates that carry `attributes.Result`. It is exact and has no tolerance. If it ever goes red
 after a framework change, read §4 of the design before changing anything — particularly the
-orchestrator half of the condition in `elastic/logs-custom-pipeline.json`, which is the half that
+orchestrator half of the condition in `kibana/logs-custom-pipeline.json`, which is the half that
 is **not** maintained automatically by the scope prefix.
 `````
 
@@ -1550,7 +1550,7 @@ All six tasks executed and committed (`43a431b`, `254caed`, `9c031f8`, `359f65f`
 
 2. **Check 5's witness key was wrong in the design** — `(StepId, ExecutionId)` reports ~15 false duplicates per 10 minutes on a healthy run, because the chain fans out. Corrected to `(StepId, ExecutionId, EntryId)`; §4.2 and §9 of the spec were updated. Terminal-`Completed` records carry no `EntryId` and are guarded instead by a new per-processor assertion in check 4.
 
-3. **Task 5 was built through the saved-objects API, not the Lens editor**, then verified by rendering each object in headless Playwright — which is the guarantee the plan actually wanted ("renders with data", not "imports clean"). The export round-trips: all five objects deleted and re-imported from `elastic/kibana-export.ndjson`.
+3. **Task 5 was built through the saved-objects API, not the Lens editor**, then verified by rendering each object in headless Playwright — which is the guarantee the plan actually wanted ("renders with data", not "imports clean"). The export round-trips: all five objects deleted and re-imported from `kibana/kibana-export.ndjson`.
 
 4. **The drilldown uses `OPEN_IN_DISCOVER_DRILLDOWN`** carrying filters, query and time range, rather than targeting the saved search object by id. Verified: clicking a slice opens Discover pre-filtered with a matching hit count. The saved search ships as its own deliverable.
 

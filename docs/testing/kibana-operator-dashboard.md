@@ -1,7 +1,7 @@
 # Kibana operator dashboard — operator notes
 
 Design: `docs/superpowers/specs/2026-09-22-kibana-operator-dashboard-design.md`.
-Objects: `elastic/`. Install and regeneration: `elastic/README.md`.
+Objects: `kibana/`. Install and regeneration: `kibana/README.md`.
 
 **Amended 2026-09-22.** The Elasticsearch side of this dashboard is gone — no ingest
 pipeline, no enrich policy, no lookup index, no sync script. Names are now rendered by the
@@ -134,7 +134,7 @@ from the orchestrator against an ids-only projection — so a workflow started l
 pairs last week, once. Regenerate the lookup and re-import after publishing or renaming anything:
 
 ```
-python elastic/generate-field-formatters.py
+python kibana/generate-field-formatters.py
 ```
 
 If a workflow's last start has aged out of the index, its ids render as raw GUIDs until it is
@@ -201,18 +201,18 @@ instead, by check 4's per-processor assertion: a terminal outcome counted twice 
 kafka-exporter at ~10 per cycle against its expected 5.
 
 If check 5 ever goes red after a framework change, read §4 of the design before changing anything —
-particularly the orchestrator half of the condition in `elastic/logs-custom-pipeline.json`, which is
+particularly the orchestrator half of the condition in `kibana/logs-custom-pipeline.json`, which is
 the half that is **not** maintained automatically by the scope prefix.
 
 ## Editing the panels
 
-The saved objects in `elastic/kibana-export.ndjson` were authored through the saved-objects API, not
+The saved objects in `kibana/kibana-export.ndjson` were authored through the saved-objects API, not
 the Lens editor, and then verified by rendering each one. If you change them in the UI, re-export
 over that file (Stack Management → Saved Objects → select the dashboard → Export, with *Include
 related objects*) and confirm the five fixed ids survive:
 
 ```
-python -c "import json;print(sorted(json.loads(l)['id'] for l in open('elastic/kibana-export.ndjson',encoding='utf-8') if l.strip() and 'exportedCount' not in l))"
+python -c "import json;print(sorted(json.loads(l)['id'] for l in open('kibana/kibana-export.ndjson',encoding='utf-8') if l.strip() and 'exportedCount' not in l))"
 ```
 
 Expected: `['skp-logs', 'skp-operator-outcomes', 'skp-outcome-records', 'skp-outcomes-bins', 'skp-outcomes-pie']`.

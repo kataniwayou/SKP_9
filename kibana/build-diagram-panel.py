@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rebuilds the chain-diagram panel inside elastic/kibana-export.ndjson.
+Rebuilds the chain-diagram panel inside kibana/kibana-export.ndjson.
 
 WHY THIS EXISTS AT ALL. The dashboard shows a step-outcome bar per step, labelled with a step name,
 and a reader who does not already know the workflow cannot tell from the bars what feeds what. The
@@ -38,7 +38,7 @@ diagram it depicts:
 
 Re-run this after any edit to the HTML. Nothing downstream is hand-maintained.
 
-    python elastic/build-diagram-panel.py
+    python kibana/build-diagram-panel.py
 
 Needs a Chromium binary. It finds the one Playwright installed; pass --chrome to point elsewhere.
 """
@@ -55,7 +55,7 @@ import tempfile
 ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML   = os.path.join(ROOT, "docs", "diagrams", "filefetcher-archiveexpander-chain.html")
 SVG    = os.path.join(ROOT, "docs", "diagrams", "filefetcher-archiveexpander-chain.svg")
-EXPORT = os.path.join(ROOT, "elastic", "kibana-export.ndjson")
+EXPORT = os.path.join(ROOT, "kibana", "kibana-export.ndjson")
 
 DASHBOARD_ID = "skp-operator-outcomes"
 PANEL_INDEX  = "p3"
@@ -167,7 +167,10 @@ def markdown_panel(png_bytes):
     return {
         "version": "8.15.5",
         "type": "visualization",
-        "gridData": {"x": 0, "y": 32, "w": PANEL_W, "h": PANEL_H, "i": PANEL_INDEX},
+        # y=0: THE DIAGRAM IS THE FIRST THING ON THE DASHBOARD. The bars are labelled per step, and
+        # a reader who does not already know the workflow cannot interpret them until they know what
+        # feeds what. Orientation first, then the data it makes readable.
+        "gridData": {"x": 0, "y": 0, "w": PANEL_W, "h": PANEL_H, "i": PANEL_INDEX},
         "panelIndex": PANEL_INDEX,
         "title": "The chain - what feeds what",
         "embeddableConfig": {"savedVis": {
@@ -207,9 +210,24 @@ def main():
         if obj.get("type") == "dashboard" and obj.get("id") == DASHBOARD_ID:
             panels = [p for p in json.loads(obj["attributes"]["panelsJSON"])
                       if p.get("panelIndex") != PANEL_INDEX]
-            panels.append(panel)
+
+            # THE OTHER PANELS ARE RE-FLOWED, not left where they were. The diagram sits at the top,
+            # so everything else has to start below it -- and their offset depends on PANEL_H, which
+            # changes whenever the drawing's aspect ratio does. Hardcoding their y values here would
+            # mean a silent overlap the next time the diagram got taller.
+            #
+            # Their RELATIVE order and spacing is preserved: the topmost existing panel is pinned
+            # directly under the diagram and the rest keep their gaps. This script owns its own
+            # panel's position and nothing else's.
+            if panels:
+                top = min(p["gridData"]["y"] for p in panels)
+                for other in panels:
+                    other["gridData"]["y"] += PANEL_H - top
+
+            panels.insert(0, panel)
             obj["attributes"]["panelsJSON"] = json.dumps(panels)
             wrote = True
+            print("layout  diagram at y=0, %d panel(s) re-flowed below it" % len(panels[1:]))
         lines.append(json.dumps(obj))
 
     if not wrote:
