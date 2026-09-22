@@ -755,12 +755,19 @@ its arc is DROPPED, not shortened: with the default hole and a truncating legend
 panel therefore puts its legend **underneath**, one line per entry, and runs a smaller hole
 (`emptySizeRatio: 0.15`) to widen the rings.
 
-Position is what makes the legend trustworthy, not the truncation setting. A side legend has one
-column of width, so one line per entry must ellipsise — and an ellipsised legend beside a dropped
-in-arc label is how a value comes to appear nowhere at all. Underneath, a line has the whole row,
-so the full name renders. Both pies on this board are laid out that way, at `w:48 h:22`: the bottom
-legend costs vertical space, which shortens the radius, which drops the long label from its arc
-again — and the extra height buys it back.
+What makes a legend trustworthy is the width a line gets, not the truncation flag. One line per
+entry must ellipsise whenever the name is wider than the space — and an ellipsised legend beside a
+dropped in-arc label is how a value comes to appear nowhere at all. There are two ways to give a
+line enough width, and this board uses one of each:
+
+- **Whitelist pies** put the legend **underneath**, where a line has the whole row. Four entries,
+  nothing clipped.
+- **Outcome distribution** keeps it on the **right** and widens the column instead
+  (`legendSize: xlarge`). Twenty entries, none clipped, no scrollbar — and the donut keeps the
+  height a bottom legend would have taken.
+
+Both panels are `w:48 h:22`, and that height is not cosmetic: a shorter panel shortens the radius,
+which drops the longest value from its arc. Measured on both.
 
 **It is an aggregation-based visualization, not Lens, and that is forced.** A Lens partition chart
 exposes exactly two dimension groups, "Slice by" and "Metric" — verified in the editor on 8.15.5.
