@@ -320,7 +320,7 @@ Full verification run after the deletions, from a cold Kibana import, to prove t
 
 ---
 
-## Task 7: Embed the chain block diagram — it IS possible
+## Task 7: Embed the chain block diagram — DONE 2026-09-22
 
 **Reopened and re-decided 2026-09-22, after the user said the diagram is vital to understanding the
 workflow.** The earlier conclusion — that a straight embed is unavailable, so link it from the
@@ -370,15 +370,34 @@ static files today, and standing something up there is a larger change than the 
 Drift is the real cost and it is manageable: the PNG is **generated** from the committed SVG, which
 is generated from the committed HTML. A build step regenerates it; nobody hand-edits the raster.
 
-### What remains to do
+### How it was built
 
-- [ ] Generate the PNG from the SVG as a committed build step, not by hand (the SVG extraction and
-      the 2x render are both scripted already — they live in the session scratchpad and need moving
-      into `elastic/`).
-- [ ] Size the panel. At 48 columns wide the image is ~1870px and its aspect is 2.96:1, so it needs
-      about **h=21**; the probe used h=18 and clipped the bottom of the failure row.
-- [ ] Add it to `elastic/kibana-export.ndjson` as a by-value markdown panel and re-verify by render.
-- [ ] Delete the scratch dashboard `skp-diagram-probe` from Kibana.
+`elastic/build-diagram-panel.py`, one command, nothing hand-maintained downstream:
+
+```
+docs/diagrams/...chain.html   the source of truth, captured from the live API 2026-09-15
+  |  extract_svg()            strips the page, inlines the 24 rules the drawing uses (50 dropped)
+  v
+docs/diagrams/...chain.svg    committed, self-contained, 14.5 KB
+  |  render_png()             headless Chrome, --force-device-scale-factor=2
+  v
+base64 PNG -> the dashboard's by-value markdown panel   (191 KB raw, 254 KB encoded)
+```
+
+The renderer reads `file://` happily, so **the build step needs no web server** — the http server
+used during the experiment was only needed because the browser *automation* tool refuses the file
+protocol. That is a policy in the tool, not in Chrome.
+
+By-value rather than a saved visualization: by-reference would add a saved object whose only content
+is one image, needing a fixed id of its own to survive re-import — one more thing to collide with in
+a shared Space, for no gain, since nothing else will reuse it.
+
+**`h=21`, and the first attempt at `h=18` clipped the failure row** — the outcome-recorder and its
+exporter, which is the half of the diagram a reader consults when something has gone wrong. At 48
+columns the image is ~1870px against a 3.04:1 drawing, so it needs ~615px plus a row for the title.
+
+Verified by rendering the real dashboard after importing: the panel sits below the pie at full
+width, complete and legible. The export is now 264.9 KB.
 
 Still true, and still the reason a link is not the answer: `file:///C:/...` will not load from a page
 served over http, so the local path cannot be a panel source or a link target whichever route is
