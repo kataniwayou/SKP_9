@@ -1,7 +1,8 @@
 # Kibana Operator Dashboard — Generic Workflow Step Outcomes
 
 **Date:** 2026-09-22
-**Status:** Design agreed, awaiting review before planning
+**Status:** Built and deployed (§1-§12). **§13 amends it** - the Elasticsearch half is
+replaced for an org-owned cluster; agreed and experimentally verified, not yet implemented.
 
 ## 1. Goal
 
@@ -85,6 +86,8 @@ Spanning nine templates is right for **searching** and fatal for **counting**: a
 
 ### 4.1 The subset
 
+> **Superseded by §13** — the two-clause rule collapses to one.
+
 A record is counted if **either**:
 
 - its `scope.name` starts with **`BaseProcessor.Core.Processing.`** and it carries `attributes.Result` — any template, any `Result`; **or**
@@ -99,6 +102,8 @@ The second clause must still name a template, because all three orchestrator tem
 **Also excluded: terminal-step records whose `Result` is not `Completed`.** This qualifier is not tidiness, it is a correctness fix found during spec review — see §4.2.
 
 ### 4.2 Why the terminal-step template is in, and why only its Completed half
+
+> **Superseded by §13** — the terminal template is no longer counted at all.
 
 A step that hands on no output never emits `branch completed`. Measured: **8 of the chain's 10 steps** appear in the processor-emitted set; the two missing are both `kafka-exporter` steps, and `kafka-exporter` contributes **zero** processor-emitted records.
 
@@ -116,6 +121,8 @@ The generic rule behind the qualifier: **`Failed` and `Cancelled` are always emi
 Measured, no step is witnessed twice under this rule: the 8 `StepId`s in the processor-emitted set and the 2 in the terminal-Completed set do not overlap. §9 check 5 is the regression test for that, and it is the check that caught this defect when it was deliberately reinstated during implementation. **Note that "witnessed twice" is per `(StepId, ExecutionId, EntryId)`, not per `(StepId, ExecutionId)`** — the same fan-out that gives file-persister two outcomes per cycle gives it two records under one `ExecutionId`, legitimately. See §9 check 5.
 
 ### 4.3 Consequence: the split field is `ProcessorId`, not `service.name`
+
+> **Superseded by §13** — the first of its two arguments no longer applies.
 
 Two reasons, both measured:
 
@@ -165,6 +172,8 @@ processors ──OTLP──► otel-collector ──► logs@default-pipeline �
 
 ### 6.1 Why it is in Elasticsearch and not in Kibana
 
+> **Superseded by §13** — the field-formatter option dismissed here is the chosen design.
+
 Kibana 8.15 cannot join. The alternatives were examined and rejected:
 
 - **Data view static-lookup field formatter** — display only. It changes how a value renders; it does not create a field the Controls panel or an aggregation can use. Hand-maintained per field.
@@ -191,6 +200,8 @@ An unmatched id leaves the document intact rather than failing it — verified w
 
 ### 6.3 The two honest limits
 
+> **Superseded by §13** — both limits are retired; two different ones replace them.
+
 **Enrichment applies only to newly indexed documents.** Everything already in the index keeps its GUIDs, and no reindex is planned. The dashboard is useful from the day the pipeline is installed, forward only. An operator looking at a range that predates installation sees GUIDs in the legend.
 
 **Enrich reads a point-in-time snapshot of the lookup index.** Adding a row is not enough — the policy must be re-executed, which rebuilds the internal `.enrich-*` index. A workflow published after the last sync shows GUIDs until `tools/sync-entity-names.py` runs. This is why the sync script re-executes the policy as its final step rather than leaving it to the operator.
@@ -200,6 +211,8 @@ An unmatched id leaves the document intact rather than failing it — verified w
 Emitting `WorkflowName`, `StepName` and `ProcessorName` as log attributes alongside the ids, in `BaseProcessor.Core` and the orchestrator's `StepOutcomeHandler`. Then there is no lookup index, no policy, no sync script and no staleness window. It is a code change across two projects and a redeploy of every processor, which is why it is not in this slice — but it is the better end state, and the enrich fields are named `skp.*_name` so that a later switch is a data-view change rather than a dashboard rewrite.
 
 ### 6.5 `logs@custom`
+
+> **Superseded by §13** — there is no ingest pipeline.
 
 Created, not edited: nothing managed is modified, and an Elasticsearch upgrade that replaces `logs@default-pipeline` keeps calling `logs@custom` because the call is part of the stock pipeline. Processors, in order:
 
@@ -213,6 +226,8 @@ Created, not edited: nothing managed is modified, and an Elasticsearch upgrade t
 
 ### 6.6 `skp.outcome_record`
 
+> **Superseded by §13** — there is no flag, and the KQL-quoting claim here is false.
+
 The flag exists so the dashboard's filter is `skp.outcome_record: true` rather than a template match. Two reasons:
 
 - `attributes.{OriginalFormat}` does not quote reliably in KQL. The braces are a field-name character, and every dashboard filter, control and saved search would have to be written as raw Query DSL to avoid them.
@@ -221,6 +236,8 @@ The flag exists so the dashboard's filter is `skp.outcome_record: true` rather t
 ## 7. The dashboard
 
 ### 7.1 Controls
+
+> **Superseded by §13** — three controls, aggregating on ids with a render-time formatter.
 
 A Kibana Controls panel, all four options-list, all reading enriched name fields:
 
@@ -272,6 +289,8 @@ Kibana saved objects are exported as NDJSON and imported by hand, matching how t
 
 ## 9. Verification
 
+> **Superseded by §13** — two checks deleted, one strengthened, three added.
+
 Against the running simulator, which produces a known outcome mix every 30 seconds:
 
 1. **Kibana reaches ES** — status green, data view resolves, document count non-zero.
@@ -313,3 +332,230 @@ Short enough that an operator opening it lands inside the enriched window (§6.3
 ## 12. Declined during design
 
 Recorded so a later reader knows these were weighed and dropped, not overlooked: a failure-reason terms table, a failure-ratio-over-time panel, a heartbeat tile for "the workflow has stopped", step-duration percentiles from `attributes.ElapsedMs`, and a lineage funnel on unique `CorrelationId` per step. The dashboard is deliberately the five things asked for and nothing more; these belong to a second one if the first proves useful.
+
+---
+
+## 13. Amendment 2026-09-22b — the org-cluster redesign
+
+**Status:** agreed with the user and verified by experiment against the live cluster on 2026-09-22.
+Not yet implemented. The dashboard described by §1–§12 is built, deployed and passing 8 of its 9
+checks; this amendment replaces the Elasticsearch half of it and leaves the Kibana half standing.
+
+Sections superseded by this one: **§4.1, §4.2, §4.3, §6.1, §6.3, §6.5, §6.6, §7.1, §9.** Each carries
+a banner pointing here. They are kept rather than rewritten because the arguments in them are the
+reason this amendment is shaped the way it is, and a reader who only sees the conclusion cannot tell
+which parts were load-bearing.
+
+### 13.1 Why the design changes
+
+The system is being ported to an **offline machine where Elasticsearch belongs to the organisation**,
+not to this project. That turns three previously-free assumptions into costs:
+
+- `manage_pipeline` and `manage_enrich` are cluster privileges. On someone else's cluster they are a
+  request, not a given.
+- **`logs@custom` is a single cluster-wide slot**, shared with every other team that ships logs
+  through the stock `logs` template. §6.5's argument that it is "unclaimed" was true of *this*
+  cluster and is exactly the kind of thing that is not true of a shared one. Claiming it is not a
+  small ask, and two teams cannot both hold it.
+- An enrich policy plus its lookup index plus the sync script is three more objects a stranger's
+  cluster has to carry, each of which has to be restored after any rebuild and none of which lives
+  in `k8s/`.
+
+The replacement **removes every Elasticsearch object**: no ingest pipeline, no enrich policy, no
+lookup index, no sync script. What remains is a Kibana saved-object export and a change to what the
+services log. It requires no Elasticsearch privilege beyond read, and it does not claim any shared
+slot.
+
+The two halves below are independent. Either can ship without the other.
+
+### 13.2 Half 1 — names, via a Kibana data-view field formatter
+
+Panels and controls aggregate on the **raw id** (`attributes.StepId`, `attributes.WorkflowId`). A
+`static_lookup` entry in the data view's `fieldFormats` maps id to label, applied at render time.
+
+**§6.1 dismissed this option, and that dismissal is wrong for this design.** Its objection was that a
+formatter "does not create a field the Controls panel or an aggregation can use". That is true and it
+is irrelevant here, because under this design nothing aggregates on the name — the aggregation runs
+on the id and only the *rendering* of each bucket changes.
+
+**Verified by experiment on the live Kibana 8.15.5:** both the options-list control and the Lens
+legend honour the formatter. Two real GUIDs were mapped and the rest left unmapped;
+`split-filefetcher` rendered as its name while unmapped ids stayed raw, in the dropdown and in the
+legend both.
+
+Two consequences, one of them a genuine improvement over the design it replaces:
+
+- **It covers all history.** Formatting happens at read time, so the forward-only limitation of
+  §6.3 — records indexed before installation keep their GUIDs forever — simply disappears.
+- **Free-text search regresses.** Names exist only at render time, so an operator filtering in KQL
+  or hunting in Discover must type the GUID. §7.4's keyword caveat is now joined by this one.
+
+Decisions taken:
+
+- **The label is `{name}_{version}`**, in the dropdown and in the panel legend alike.
+- **The map is sourced from Elasticsearch, not from the BaseApi**:
+  `BaseApi --emits logs--> ES --reader--> Kibana data view formatter`. This drops the BaseApi
+  dependency at sync time, which matters on a machine where the API may not be reachable from
+  wherever the formatter is generated.
+- **Three dropdowns: Workflow / Step / Outcome.** The Processor control is removed (it already was,
+  in the built dashboard).
+
+A **writer still has to exist.** Kibana cannot derive a formatter from log records by itself; some
+tool reads the id-to-name pairs out of the index and emits the `fieldFormats` block. That is a
+generator over `elastic/`, not a live dependency — it runs when entities change, and its output is
+committed.
+
+Where the pairs come from: **a processor id-to-name pairing already exists on every processor
+record** (`resource.attributes.ProcessorId` + `resource.attributes.service.name`). Workflows and
+steps have **no such pairing anywhere** — `WorkflowFireJob` logs ids only. So Half 1 needs a new log
+line, in `OrchestrationService`, emitting `{EntityId, EntityName}` per entity at start time. See
+§13.6.
+
+**The known wart, stated and accepted.** A formatter is a flat id-to-string map applied to *all*
+history, and `Version` is mutable on the same row (`StepUpdateDto` carries it). A version bump
+therefore **relabels every historical record**. `{name}_{version}` means "what this entity is called
+now", not "what it was called when the record was written". That is a real loss of fidelity and it is
+accepted deliberately: the alternative is an as-of join, which is the enrich design being removed.
+
+**The control group needs `ignoreQuery: true` and `ignoreTimerange: true`** so that every published
+step appears in the dropdown whether or not it ran. Without them the entity records that supply the
+options are filtered out by the counting query, and vanish from the list once the orchestration-start
+line scrolls out of the selected time range.
+
+**Untested:** `unknownKeyValue` behaviour for an id absent from the map. Get it wrong and a newly
+published entity renders **blank** rather than showing its GUID, which is worse than no formatter at
+all. This must be settled by experiment before the formatter is published.
+
+### 13.3 Half 2 — counting, by making exporters unexceptional
+
+§4.1's counted set needs **two** clauses for exactly one reason: **terminal-step success is invisible
+on the processor side.** An exporter sends no branch, so the post handler never runs and no
+`branch completed` is ever emitted. `ProcessDispatchHandler` says so in as many words —
+*"NO OutcomeLogScope HERE, DELIBERATELY … recorded on the ORCHESTRATOR side instead"*.
+
+**The decision: every step reports its own outcome, exporters included.** The terminal branch of
+`ProcessDispatchHandler` gains an `OutcomeLogScope.BuildScope(StepResult.Completed)` scope around a
+log line of its own. Then:
+
+- the counted set collapses to **one clause** — `attributes.Result` present on a record whose
+  emitter is not the orchestrator;
+- `skp.outcome_record` is no longer needed, so **the ingest pipeline is not needed**;
+- **check 5 covers 10 of 10 steps**, because a processor-emitted outcome sits inside the handler's
+  ambient `ExecutionLogScope.BuildScope(d)` and therefore carries `d.EntryId`;
+- §4.3's **first** argument — that a terminal outcome would otherwise land under `orchestrator` —
+  evaporates. Its **second** still stands: `service.name` merges `sk-normalizer`'s two steps and
+  `kafka-exporter`'s two steps, so the split field remains an id, now formatted per §13.2.
+
+**Verified:** `service.name != orchestrator` today yields 925 records over **8** of 10 steps.
+The two missing are `export-outcome` and `split-exporter` — precisely the gap this change closes.
+
+Two implementation notes, both of which have been got wrong once already:
+
+- **Use `d.EntryId` for the log scope.** The `Guid.Empty` in that branch is about the `StepOutcome`
+  **message**, not the log: it stops `StepOutcomeHandler` reading a blob the reclaim just deleted and
+  logging a spurious warning. That is a messaging concern and it must not shape what the log records.
+  The scope at `ProcessDispatchHandler.cs:56` already carries `d.EntryId`; a new line inside the
+  terminal branch inherits it with no new argument.
+- **Keep the orchestrator's line.** Its source comment is right that it gives "two independent
+  end-of-run markers on two different pods, which matters in a deployment that demonstrably drops log
+  records" (§10's last risk row). Under the new rule it simply is not counted. Deleting it would
+  trade a redundancy that costs nothing for a single point of failure in the one place §10 says
+  records are actually lost.
+
+**One residual gap, smaller than the one it replaces.** A step that is *both* an entry step and a
+terminal step has `d.EntryId == Guid.Empty` — it produced its own input, so there is no key — and
+`ExecutionLogScope` omits an empty Guid rather than writing zeros. Such a step is uncheckable by
+check 5, exactly as kafka-exporter is today. No workflow in the cluster has one; a one-step workflow
+would. Check 4's per-processor assertion is the guard, as it is now.
+
+### 13.4 The new counted set — replaces §4.1
+
+A record is counted if it carries `attributes.Result` **and** its emitter is not the orchestrator.
+
+Written as the dashboard-level KQL query:
+
+```
+attributes.Result:* and not resource.attributes.service.name:"orchestrator"
+```
+
+The structural argument of §4.1 survives intact and gets simpler: it is still a **property test, not
+a template list**, so a new framework failure path is counted the day it ships. What changes is that
+the exception carved out for terminal steps is gone, because there is no longer anything exceptional
+about them.
+
+`scope.name` prefix versus `service.name` — either expresses "not the orchestrator". The
+`service.name` form is preferred because it survives a namespace rename in `BaseProcessor.Core` and
+because it is the field an operator already recognises.
+
+### 13.5 Where the rule lives — replaces §6.6
+
+In the **dashboard-level query**, once. §6.6 argued for a pipeline-stamped flag on two grounds, and
+one of them is now known to be false:
+
+- **"`attributes.{OriginalFormat}` does not quote reliably in KQL" is wrong.** Verified: it escapes
+  as `attributes.\{OriginalFormat\}`. §4.1 written directly as KQL returns **1,110** against the
+  flag's **1,110** — braces, em dash and all.
+- The second ground — that the definition should live in one place rather than being restated across
+  four Kibana objects — is satisfied by the dashboard query, which the controls already respect
+  (`ignoreQuery: false`). The single place moves from the pipeline to the dashboard.
+
+**What must move before `elastic/` is cut down.** `simulate-outcome-classification.json` is a real
+test: twelve documents, one per template of §4, with the expected classification tabulated in the
+plan. Three of those templates are the rarely-fired failure paths that §4 exists to protect. If the
+rule moves to KQL it needs an equivalent test — the twelve documents indexed into a scratch index and
+the KQL run against them — or those three paths go back to being unverified, which is the specific
+defect §4 was written to prevent.
+
+### 13.6 What emits the name pairs
+
+`src/BaseApi.Service/Features/Orchestration/OrchestrationService.cs`, between validation (~line 108)
+and `SendAsync` (~line 130) — the window where `WorkflowGraphSnapshot` still holds
+`WorkflowReadDto`, `StepReadDto` and `ProcessorReadDto`, each carrying `Name` and `Version`
+(confirmed: all three records declare both, and the snapshot exposes all three dictionaries).
+
+**Not the orchestrator's handler.** `WorkflowL1` / `StepL1` are ids-only; the names do not survive
+the projection. The BaseApi is the last place they exist.
+
+One record per entity: `{EntityId, EntityName}` where `EntityName` is `{name}_{version}` per §13.2.
+
+### 13.7 Verification — amends §9
+
+| check | change |
+|---|---|
+| 1 | unchanged |
+| 2 | **deleted** — there is no enrichment to land |
+| 3 | **deleted** — there is no lookup to miss |
+| 4 | unchanged in shape; `PER_CYCLE_BY_STEP` and `PER_CYCLE_BY_PROCESSOR` keys become `{name}_{version}` |
+| 5 | **strengthened to 10 of 10 steps** (§13.3). The uncovered-slice paragraph is deleted; the entry-and-terminal caveat replaces it |
+| 6 | unchanged — every processor still has a bin, now via the formatter |
+| 7 | unchanged — 26:3:1 per cycle |
+| 8 | unchanged — still the one manual click |
+| 9 | unchanged, and **still failing** for want of a second driven workflow |
+| **new** | the KQL rule returns the count the twelve-document fixture predicts (§13.5) |
+| **new** | an unmapped id renders as its GUID, not blank (§13.2's `unknownKeyValue`) |
+| **new** | every published step appears in the Step dropdown, including one that has never run |
+
+### 13.8 Risks this amendment adds or retires
+
+| risk | status |
+|---|---|
+| Enrich policy goes stale after a publish | **retired** — no policy |
+| Ingest pipeline error drops documents | **retired** — no pipeline |
+| Historical data has no enriched fields | **retired** — read-time formatting covers all history |
+| `logs@custom` contended on a shared cluster | **retired** — not claimed |
+| A version bump relabels history | **new**, accepted (§13.2) |
+| Free-text search must use GUIDs | **new**, accepted (§13.2) |
+| `unknownKeyValue` renders a new entity blank | **new**, untested — settle before publishing |
+| The formatter map must be regenerated after a publish | **new** — the same staleness shape the enrich policy had, but the failure is a raw GUID in a legend rather than a confidently wrong name |
+
+### 13.9 Unknowns about the target cluster — unanswered
+
+Stated to the user and still open. Each one can invalidate part of this amendment:
+
+1. Is Kibana already provided, and at what version? §13.2 is verified on 8.15.5 only.
+2. Are **data-view edits permitted**? The whole of Half 1 is a data-view edit. If they are not, the
+   names have to come back into the records themselves.
+3. Which **Space** the dashboard lands in — saved-object ids are fixed on purpose, and they collide
+   on an import into a Space that already holds them.
+4. Is the data stream `logs-generic.otel-default`, and is `all_strings_to_keywords` in force? Every
+   field name in the export assumes the first; §7.4 assumes the second.

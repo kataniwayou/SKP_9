@@ -203,8 +203,11 @@ Two implementation notes:
 
 ## Open items
 
-1. **Write the spec amendment and the plan.** The user asked for this and then asked for a handover
-   instead, so it is the next action.
+1. ~~**Write the spec amendment and the plan.**~~ **Done 2026-09-22.** Spec §13 amends
+   §§4.1, 4.2, 4.3, 6.1, 6.3, 6.5, 6.6, 7.1 and 9, each of which now carries a banner pointing
+   at it. The plan is `docs/superpowers/plans/2026-09-22-kibana-dashboard-offline-redesign.md`,
+   six tasks, with the `elastic/` cleanup of item 6 below as its Task 6 and the diagram question
+   of item 7 as a deferred decision carrying a pre-committed default. **Nothing is implemented.**
 2. **check 9** needs a second workflow driven. Five workflows are stopped.
 3. **Org-cluster unknowns**, stated to the user and unanswered: whether Kibana is already provided,
    whether data-view edits are permitted, the Kibana version, the Space, and whether the data stream
