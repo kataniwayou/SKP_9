@@ -21,6 +21,15 @@ AlphaBeta branches) and `kafka-exporter` serves two (`export-outcome` and `split
 per-processor split collapses four steps into two bars and hides which one is failing. Ten steps,
 ten bars. `skp.processor_name` is still a column in the Discover drill-down when you want it.
 
+**Zoom in to read it.** The bins panel is full width with the pie beneath it, but ten clustered
+bars per time bucket only resolve when there are few buckets on screen. Roughly ten buckets is the
+comfortable limit: at a 5-minute range each cluster is clearly separated and you can read the
+5-5-4-3-3-3-2-2-2-1 shape straight off the chart, while at 25 minutes the same chart is a picket
+fence of 3-pixel bars. The stored default range is 1 hour, which is deliberately wide enough to
+land inside the enriched window and span several cron ticks -- so treat the opening view as "is
+anything wrong", then drag-select on the chart or narrow the time picker to actually read it. The
+Step control is the other way in: pick two or three steps and the clusters get their width back.
+
 ## What a healthy run looks like
 
 There is **no expected profile encoded anywhere in the dashboard**, deliberately — it presents the
