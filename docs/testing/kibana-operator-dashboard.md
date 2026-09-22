@@ -21,6 +21,18 @@ AlphaBeta branches) and `kafka-exporter` serves two (`export-outcome` and `split
 per-processor split collapses four steps into two bars and hides which one is failing. Ten steps,
 ten bars. `skp.processor_name` is still a column in the Discover drill-down when you want it.
 
+**The bars are ordered by when each step first fired**, not by volume, so a cluster reads
+left-to-right roughly in pipeline order. That order is derived from the data -- a hidden
+`min(@timestamp)` the terms aggregation sorts on -- never from a hardcoded step list, so a
+different workflow orders itself with no edit. Measured stable across 3m, 7m and 12m windows.
+
+Two steps sit earlier than the graph would put them, and that is real rather than a glitch:
+`record-outcome` lands third and `export-outcome` fifth, because a file that fails at the fetch
+short-circuits straight to them within milliseconds. "First fired" is earliest arrival across all
+branches, not depth in the workflow graph. Strict graph order would mean reading `nextStepIds`
+from the API and pinning a step list into the panel, which is exactly the hardcoding that would
+stop the dashboard being generic.
+
 **Zoom in to read it.** The bins panel is full width with the pie beneath it, but ten clustered
 bars per time bucket only resolve when there are few buckets on screen. Roughly ten buckets is the
 comfortable limit: at a 5-minute range each cluster is clearly separated and you can read the
