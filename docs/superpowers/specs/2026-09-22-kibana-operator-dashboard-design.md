@@ -813,18 +813,19 @@ filter drawn from this panel excludes every record the other two panels count, a
 Lens version behaved identically on a slice click; it merely offered the Discover drilldown as an
 alternative that sidestepped it.
 
-**The Step control blanks it, and that is the same cause seen from the other side.** Measured
-2026-09-23: selecting `simple-stepC_1.0.0` — a step that gates on nothing — leaves this panel
-reading "No results found", because a verdict record carries the StepId of *its* step and no other.
-The requirement "the whitelist row always shows every (step, list) pie regardless of the Step
-dropdown" therefore cannot be met while the panel shares a dashboard with that control: Kibana
-applies every dashboard filter to every panel, the aggregation-based panel's menu offers no
-filter opt-out (Settings is title and description only), and Lens's per-layer "ignore global
-filters" is both unavailable here and all-or-nothing — it would drop the Workflow scoping too.
+**The Step control filters this panel too, and that is a decision, not an oversight.** Decided
+2026-09-23 after the alternatives were measured. Selecting a step narrows the row to that step's
+pies; selecting none shows every (step, list) pair. Selecting a step that gates on nothing —
+`simple-stepC_1.0.0`, say — leaves the panel reading **"No results found"**, which is correct and
+will look like a broken board to anyone who does not know why. That is the accepted cost.
 
-Three ways out, none free: move this panel back to its own dashboard, which is exactly the design
-§14.3 replaced; drop the Step control from this board, which costs the outcome panels their main
-affordance; or accept the coupling.
+The alternative was rejected on price, not on preference. Kibana applies every dashboard filter to
+every panel; a panel cannot opt out. The aggregation-based panel's menu offers title and
+description only, and Lens's per-layer "ignore global filters" is unavailable here — Lens cannot
+draw N pies at all — and is all-or-nothing anyway, so it would drop the Workflow scoping with it.
+Honouring Workflow while ignoring Step is not expressible for one panel on a shared dashboard. The
+only ways to get it were a separate dashboard (the design §14.3 replaced) or dropping the Step
+control from this board (the outcome panels' main affordance). Both cost more than the coupling.
 
 So the two atoms sit side by side and can be *read* together, but they cannot cross-filter each
 other. An operator who clicks a slice must clear the filter to get the outcome panels back. The
