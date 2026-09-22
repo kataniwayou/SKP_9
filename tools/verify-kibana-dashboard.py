@@ -150,6 +150,22 @@ PER_CYCLE_BY_PROCESSOR = {
 }
 PER_CYCLE_BY_RESULT = {"Completed": 26, "Failed": 3, "Cancelled": 1}
 
+# The TEN steps the bins chart draws, measured 2026-09-22 over 18 cycles. They sum to the same 30
+# per cycle as PER_CYCLE_BY_PROCESSOR: splitting by step rather than processor separates the two
+# steps sk-normalizer serves and the two kafka-exporter serves, which a processor split collapses.
+PER_CYCLE_BY_STEP = {
+    "split-filefetcher": 5,
+    "split-importer": 5,
+    "split-archiveexpander": 4,
+    "export-outcome": 3,
+    "record-outcome": 3,
+    "sk-normalizer-sample": 3,
+    "split-archivecollapser": 2,
+    "split-exporter": 2,
+    "split-filepersister": 2,
+    "sk-normalizer-alphabeta": 1,
+}
+
 
 def _counted_query(window, workflow=None):
     filters = [
@@ -289,20 +305,25 @@ def check_7_pie_matches_bins(checks, es_url, window):
                          f"only_three_values={only_three} ratio_ok={ratios_ok}")
 
 
-def check_6_every_processor_has_a_bin(checks, es_url, window):
-    """All eight participating processors appear, including the terminal-step-only kafka-exporter.
+def check_6_every_step_has_a_bin(checks, es_url, window):
+    """All TEN steps appear as their own series, which is what the bins chart draws.
 
-    kafka-exporter is the one that proves the terminal-step clause of spec 4.1 is doing its job:
-    it emits ZERO processor-side records, so without that clause its bin is simply absent and an
-    operator reads a working export step as a dead one.
+    Split on step rather than processor: sk-normalizer serves two steps (the Acme and AlphaBeta
+    branches) and kafka-exporter serves two (export-outcome and split-exporter), so a
+    per-processor view collapses four steps into two bars and hides which one is failing.
+
+    The terminal-step-only steps still matter most here. split-exporter and export-outcome emit
+    ZERO processor-side records, so without the terminal clause of spec 4.1 their bars are simply
+    absent and an operator reads a working export step as a dead one.
     """
     try:
-        by_processor = _terms(es_url, "skp.processor_name", window, VALIDATION_WORKFLOW)
+        by_step = _terms(es_url, "skp.step_name", window, VALIDATION_WORKFLOW)
     except Exception as exc:  # noqa: BLE001
-        return checks.report(6, "Every processor has a bin", False, f"{type(exc).__name__}: {exc}")
-    missing = [p for p in PER_CYCLE_BY_PROCESSOR if by_processor.get(p, 0) == 0]
-    return checks.report(6, "Every processor has a bin", not missing,
-                         f"{len(by_processor)} series present, missing={missing or 'none'}")
+        return checks.report(6, "Every step has a bin", False, f"{type(exc).__name__}: {exc}")
+    missing = [s for s in PER_CYCLE_BY_STEP if by_step.get(s, 0) == 0]
+    return checks.report(6, "Every step has a bin", not missing,
+                         f"{len(by_step)}/{len(PER_CYCLE_BY_STEP)} series present, "
+                         f"missing={missing or 'none'}")
 
 
 def check_9_generic_across_workflows(checks, es_url, kibana_url, window):
@@ -353,7 +374,7 @@ def main():
     check_4_totals_match_the_cycle(checks, args.es_url, args.window)
     check_5_one_witness_per_step(checks, args.es_url, args.window)
     check_7_pie_matches_bins(checks, args.es_url, args.window)
-    check_6_every_processor_has_a_bin(checks, args.es_url, args.window)
+    check_6_every_step_has_a_bin(checks, args.es_url, args.window)
     check_9_generic_across_workflows(checks, args.es_url, args.kibana_url, args.window)
 
     print()

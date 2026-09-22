@@ -11,10 +11,15 @@ Objects: `elastic/`. Install order and re-sync instructions: `elastic/README.md`
 
 Then `http://localhost:15601` → Dashboards → **SKP — workflow step outcomes**. There is no login.
 
-Pick a workflow in the first control. Processor, Step and Outcome then offer only values present
-under it. The bins chart is one coloured series per processor over time; the pie is the outcome
-distribution for the same selection. Click a pie slice to filter the dashboard in place, or use the
-panel's drill-down to open the same selection in Discover.
+Pick a workflow in the first control. Step and Outcome then offer only values present under it.
+The bins chart is one bar per STEP, clustered side by side at each time bucket; the pie is the
+outcome distribution for the same selection. Click a pie slice to filter the dashboard in place, or
+use the panel's drill-down to open the same selection in Discover.
+
+**Why step and not processor.** `sk-normalizer` serves two steps in this chain (the Acme and
+AlphaBeta branches) and `kafka-exporter` serves two (`export-outcome` and `split-exporter`), so a
+per-processor split collapses four steps into two bars and hides which one is failing. Ten steps,
+ten bars. `skp.processor_name` is still a column in the Discover drill-down when you want it.
 
 ## What a healthy run looks like
 
@@ -27,6 +32,23 @@ For the one workflow this was validated against, `filefetcher-archiveexpander-ch
 26 Completed, 3 Failed, 1 Cancelled. Measured over 43 consecutive cycles on 2026-09-22, the totals
 were exact, not approximate: 1290 counted records, 1118 Completed / 129 Failed / 43 Cancelled.
 
+Per STEP, which is what the bins chart draws — ten bars summing to 30:
+
+| step | per cycle | processor |
+|---|---|---|
+| split-filefetcher | 5 | file-fetcher |
+| split-importer | 5 | kafka-importer |
+| split-archiveexpander | 4 | archive-expander |
+| export-outcome | 3 | kafka-exporter |
+| record-outcome | 3 | outcome-recorder |
+| sk-normalizer-sample | 3 | sk-normalizer |
+| split-archivecollapser | 2 | archive-collapser — runs once per normalizer branch |
+| split-exporter | 2 | kafka-exporter |
+| split-filepersister | 2 | file-persister |
+| sk-normalizer-alphabeta | 1 | sk-normalizer |
+
+Rolled up per processor, which is what check 4 asserts:
+
 | processor | per cycle | breakdown |
 |---|---|---|
 | kafka-importer | 5 | 5 Completed |
@@ -34,7 +56,7 @@ were exact, not approximate: 1290 counted records, 1118 Completed / 129 Failed /
 | archive-expander | 4 | 3 Completed, 1 Failed |
 | sk-normalizer | 4 | 2 Completed, 1 Failed, 1 Cancelled |
 | outcome-recorder | 3 | 3 Completed |
-| archive-collapser | 2 | 2 Completed — runs once per normalizer branch |
+| archive-collapser | 2 | 2 Completed |
 | file-persister | 2 | 2 Completed |
 | kafka-exporter | 5 | terminal-step Completed only: 2 documents + 3 failure exports |
 
