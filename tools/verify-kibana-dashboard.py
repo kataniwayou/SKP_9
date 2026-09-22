@@ -38,7 +38,9 @@ DATA_STREAM = "logs-generic.otel-default"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPORT = os.path.join(ROOT, "kibana", "kibana-export.ndjson")
-FIXTURE = os.path.join(ROOT, "kibana", "classification-fixture.json")
+# Beside this script, not in kibana/: kibana/ is what gets imported into Kibana, and these 13
+# documents are synthetic test data that never leaves a scratch index.
+FIXTURE = os.path.join(ROOT, "tools", "classification-fixture.json")
 
 # The chain this dashboard is VALIDATED against, not the one it is built for (spec section 1).
 VALIDATION_WORKFLOW = "filefetcher-archiveexpander-chain_1.0.0"

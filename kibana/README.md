@@ -32,7 +32,6 @@ now needs read access and nothing else.
 | `kibana-export.ndjson` | the whole deliverable — data view, 2 Lens panels, saved search, dashboard |
 | `generate-field-formatters.py` | writes the id → `{name}_{version}` lookup into the data view |
 | `build-diagram-panel.py` | regenerates the chain diagram panel from the committed HTML |
-| `classification-fixture.json` | the counted-set test: 13 documents, one per template |
 
 ## How names work
 
@@ -86,8 +85,11 @@ The orchestrator still emits its own end-of-run line and that is deliberate: two
 on two different pods is the only mitigation there is for a deployment that demonstrably drops log
 records. It is simply not counted.
 
-After changing the rule, run the fixture — it is the only coverage the three rarely-fired failure
-templates get:
+After changing the rule, run the checks. Check 10 runs it against `tools/classification-fixture.json`
+— 13 synthetic documents, one per template — which is the only coverage the three rarely-fired
+failure paths get, since they never appear in live traffic. The fixture lives beside the check
+rather than here: nothing in this directory is test data, and nothing in it is anything but what
+you import into Kibana.
 
 ```
 python tools/verify-kibana-dashboard.py

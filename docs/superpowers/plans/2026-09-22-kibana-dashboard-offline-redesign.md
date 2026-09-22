@@ -39,7 +39,7 @@
 | `src/BaseApi.Service/Features/Orchestration/OrchestrationService.cs` | *modify* — emit `{EntityId, EntityName}` per entity between validation and `SendAsync` (§13.6). |
 | `kibana/kibana-export.ndjson` | *modify* — dashboard-level KQL query, three controls with `ignoreQuery`/`ignoreTimerange`, data view `fieldFormats`, panels re-pointed at raw id fields. Becomes the whole deliverable. |
 | `kibana/generate-field-formatters.py` | **new** — reads id→name pairs out of ES, writes the `fieldFormats` block into the data view saved object. The only thing that replaces `sync-entity-names.py`. |
-| `kibana/classification-fixture.json` | **new** — the twelve documents of `simulate-outcome-classification.json`, re-purposed as a KQL fixture rather than a pipeline `_simulate` body (§13.5). |
+| `tools/classification-fixture.json` | **new** — the twelve documents of `simulate-outcome-classification.json`, re-purposed as a KQL fixture rather than a pipeline `_simulate` body (§13.5). |
 | `kibana/README.md` | *rewrite* — the install order it documents is the thing being removed. |
 | `kibana/logs-custom-pipeline.json` | **delete** — Task 6, not before. |
 | `kibana/enrich-policy.json` | **delete** — Task 6. |
@@ -196,7 +196,7 @@ by-product. `simple-abc` can be stopped again through `POST /api/v1/orchestratio
 
 **Files:**
 - Modify: `kibana/kibana-export.ndjson` — dashboard-level query
-- Create: `kibana/classification-fixture.json`
+- Create: `tools/classification-fixture.json`
 - Modify: `tools/verify-kibana-dashboard.py`
 
 **Interfaces:**
@@ -205,7 +205,7 @@ by-product. `simple-abc` can be stopped again through `POST /api/v1/orchestratio
 
 - [x] **Step 1: Port the fixture before deleting its home**
 
-`kibana/simulate-outcome-classification.json` is twelve documents, one per template of §4, and **three of them are the rarely-fired failure paths that never appear in live traffic.** Once the pipeline goes, `_simulate` is not available to test them. Write `kibana/classification-fixture.json` as the same twelve documents plus their expected verdicts, and a check that bulk-indexes them into a scratch index, runs the §13.4 KQL against it, asserts the verdicts, and deletes the index.
+`kibana/simulate-outcome-classification.json` is twelve documents, one per template of §4, and **three of them are the rarely-fired failure paths that never appear in live traffic.** Once the pipeline goes, `_simulate` is not available to test them. Write `tools/classification-fixture.json` as the same twelve documents plus their expected verdicts, and a check that bulk-indexes them into a scratch index, runs the §13.4 KQL against it, asserts the verdicts, and deletes the index.
 
 Without this, those three failure paths return to being unverified — which is precisely the defect §4 was written to prevent.
 
