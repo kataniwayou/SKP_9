@@ -20,10 +20,14 @@
 *.snk binary
 *.pfx binary
 # The vendored ffmpeg has NO EXTENSION, so none of the rules above reach it and `* text=auto` is
-# the only thing standing between a 78MB executable and CRLF normalisation on a Windows checkout.
+# the only thing standing between a 141MB executable and CRLF normalisation on a Windows checkout.
 # text=auto does sniff content and would probably leave it alone; "probably" is not a guarantee
 # worth taking on the one file the SKNormalizer image cannot start without.
-vendor/ffmpeg/** binary
+#
+# THE PATH IS THE BINARY, NOT THE DIRECTORY. `vendor/ffmpeg/**` also swallows README.md and
+# ffmpeg.sha256, which git then stores as binary and shows as "Bin 0 -> 73 bytes" instead of a diff
+# -- and the checksum file is precisely the line a reviewer needs to read on every refresh.
+vendor/ffmpeg/linux-x64/ffmpeg binary
 # Diff settings
 *.cs diff=csharp
 *.csproj diff=xml
