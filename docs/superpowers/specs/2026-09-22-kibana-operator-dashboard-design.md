@@ -769,14 +769,31 @@ field produces the identical spelling from data that is always present.
 
 Root remains a control as well, for focusing a board with many lists.
 
-**A slice click cross-filters the board; it does not open Discover.** The Lens panel offered a
+**A slice click filters the board, and it does not open Discover.** The Lens panel offered a
 drilldown from the action menu a slice click opened. An aggregation-based pie never opens that menu
 — it opens "Select filters to apply", listing both dimensions, and applies them to the dashboard.
 The drilldown configuration was removed from the panel rather than left in place describing an
-interaction it cannot perform. The behaviour that replaces it is arguably the better one here:
-filtering by `whitelist_owner: sk-normalizer_1.0.0 · chain-artists` and `WhitelistVerdict: Unlisted`
-narrows the bins and the outcome pie below to exactly the records that rejection produced. The panel
-also gains **Download CSV**, which the Lens panel did not offer.
+interaction it cannot perform. The panel gains **Download CSV** instead, which the Lens panel did
+not offer.
+
+**What that click does to the rest of the board is the one sharp edge here, and it is worth stating
+plainly: it blanks it.** Verified 2026-09-22 — applying `whitelist_owner: sk-normalizer_1.0.0 ·
+chain-artists` and `WhitelistVerdict: Unlisted` narrows this panel correctly to Unlisted 100%, and
+sends **Step outcomes over time and Outcome distribution both to "No data"**. Unchecking one of the
+two filters does not help; either alone does the same.
+
+The cause is not the panel type and is not fixable by configuration. **The two atoms share no field
+values.** A step-outcome record carries no `WhitelistVerdict` and no `whitelist_owner`, so any term
+filter drawn from this panel excludes every record the other two panels count, and vice versa. The
+Lens version behaved identically on a slice click; it merely offered the Discover drilldown as an
+alternative that sidestepped it.
+
+So the two atoms sit side by side and can be *read* together, but they cannot cross-filter each
+other. An operator who clicks a slice must clear the filter to get the outcome panels back. The
+alternative is the design this replaced — a separate dashboard per atom — which trades the reading
+for the isolation. That trade was made deliberately in favour of reading them together; if the
+blanking proves worse in practice than the side-by-side is worth, moving this panel back to its own
+dashboard is a panel move and a query revert, not a rebuild.
 
 ### 14.5 Known limits
 
