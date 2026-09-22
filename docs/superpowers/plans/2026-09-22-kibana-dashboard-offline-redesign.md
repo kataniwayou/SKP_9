@@ -320,24 +320,69 @@ Full verification run after the deletions, from a cold Kibana import, to prove t
 
 ---
 
-## Decided: the chain diagram stays off the dashboard
+## Task 7: Embed the chain block diagram — it IS possible
 
-**Decided 2026-09-22 — do not embed it, and do not add a `links` panel for it either.** The
-diagram is orientation, and `docs/testing/kibana-operator-dashboard.md` is already where a
-reader is sent for that. It costs nothing, it keeps one source of truth, and it leaves the
-dashboard as the five things it was asked for.
+**Reopened and re-decided 2026-09-22, after the user said the diagram is vital to understanding the
+workflow.** The earlier conclusion — that a straight embed is unavailable, so link it from the
+operator notes — rested on a survey that never tried a raster data URI. It is wrong. **Measured
+against the live Kibana 8.15.5, a Markdown panel renders an embedded PNG.**
 
-The findings below are kept because re-establishing them costs a session, and because a later
-reader asking "could we just embed it?" deserves the measured answer rather than the decision.
+### What was actually tested
 
-Established against the live Kibana 8.15.5: a `links` panel is available but renders links, not content; an Image panel is **probably** available (`image` is not an allowed saved-object type, but `POST /api/files/find` returns 200, so the Files plugin is present — confirm in the UI); there is **no iframe or raw-HTML panel**, and the Markdown panel sanitizes HTML, so the inline `<svg>` in `docs/diagrams/filefetcher-archiveexpander-chain.html` cannot render through it; and `file:///C:/...` will not load from a page served over http, so the local path is unusable as a link target or a panel source regardless of panel type.
+Four variants published to a scratch dashboard and rendered headless:
 
-The three options not taken, and what each would have cost: serving the HTML over http and adding
-a `links` panel keeps the diagram interactive and single-sourced but needs somewhere to serve it
-from, and nothing in `k8s/` does that today; rendering it to an image buys visual presence at the
-cost of a second copy that drifts from the HTML; re-authoring as Vega makes it a true panel and is a
-substantial rewrite of a hand-drawn schematic.
+| variant | result |
+|---|---|
+| markdown `![](data:image/svg+xml;base64,…)` | **fails** — emitted as literal text; the sanitizer drops the SVG data URI |
+| markdown `![](data:image/png;base64,…)` | **renders** |
+| markdown `![](http://host/diagram.svg)` | **renders**, vector and crisp |
+| markdown with a raw `<img>` tag | **fails** — literal text; HTML is stripped |
 
+The two earlier findings still hold and are not contradicted: there is no iframe or raw-HTML panel,
+and inline `<svg>` markup does not survive the Markdown panel's sanitizer. What was missed is that
+the sanitizer permits an `img` **element produced by markdown syntax** when its source is a PNG data
+URI or an http URL. SVG is not blocked as a format — only as a data URI.
+
+### The diagram is one SVG, not three
+
+`docs/diagrams/filefetcher-archiveexpander-chain.html` contains exactly **one** `<svg>`, at lines
+265–442, and it is the block diagram. The handover's "three inline `<svg>` blocks" is wrong. Its
+styling lives in the document's `<style>` at line 22, so it is not standalone as it sits.
+
+`docs/diagrams/filefetcher-archiveexpander-chain.svg` is the extracted, self-contained version —
+24 CSS rules inlined, 50 dropped as page chrome, 14.5 KB. Verified to render identically.
+
+### Cost of each route
+
+| | payload in the NDJSON | quality | needs a server |
+|---|---|---|---|
+| PNG data URI @1x | 102 KB | legible, soft when maximised | no |
+| **PNG data URI @2x** | **255 KB** | **crisp at full width and maximised** | **no** |
+| PNG data URI @3x | 410 KB | crisp, diminishing returns | no |
+| http URL to the SVG | ~0 (a URL) | vector, perfect at any zoom | **yes** |
+
+**Recommended: the 2x PNG data URI.** It is the only route that survives the move to the offline
+org cluster without new infrastructure — the whole diagram travels inside
+`elastic/kibana-export.ndjson`, with no origin to serve it from, no CORS, and nothing to keep
+running. The http-URL route is better-looking and single-sourced, but nothing in `k8s/` serves
+static files today, and standing something up there is a larger change than the diagram is worth.
+
+Drift is the real cost and it is manageable: the PNG is **generated** from the committed SVG, which
+is generated from the committed HTML. A build step regenerates it; nobody hand-edits the raster.
+
+### What remains to do
+
+- [ ] Generate the PNG from the SVG as a committed build step, not by hand (the SVG extraction and
+      the 2x render are both scripted already — they live in the session scratchpad and need moving
+      into `elastic/`).
+- [ ] Size the panel. At 48 columns wide the image is ~1870px and its aspect is 2.96:1, so it needs
+      about **h=21**; the probe used h=18 and clipped the bottom of the failure row.
+- [ ] Add it to `elastic/kibana-export.ndjson` as a by-value markdown panel and re-verify by render.
+- [ ] Delete the scratch dashboard `skp-diagram-probe` from Kibana.
+
+Still true, and still the reason a link is not the answer: `file:///C:/...` will not load from a page
+served over http, so the local path cannot be a panel source or a link target whichever route is
+taken.
 ---
 
 ## Out of scope

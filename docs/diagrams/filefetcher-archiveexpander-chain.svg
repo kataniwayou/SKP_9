@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1580 520" role="img" aria-label="The chain runs left to right from the Kafka importer to the Kafka exporter. At the normalizer it forks: the Acme step passes its output both to a second normalizer step running the AlphaBeta handler and, by an arc over the row, straight to the archive collapser. Both branches rejoin at that collapser. Every step also has a dashed failure edge down to a shared record-outcome step, which hands off to a second exporter writing the skp-failures topic. The Acme step carries a third, dotted stub that ends in a stop bar: a cancelled document goes nowhere. Seven of the eight schema edges are enforced.">
+  <style>
+    :root {
+    --ground: #EEF0EC;
+    --sheet: #FAFBF8;
+    --ink: #191D1A;
+    --muted: #667069;
+    --rule: #D0D6CE;
+    --rule-soft: #E1E6DF;
+    --ok: #0E6B5E;
+    --ok-soft: rgba(14, 107, 94, 0.10);
+    --fail: #A8481A;
+    --fail-soft: rgba(168, 72, 26, 0.10);
+    --sans: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+    --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+    .node-box { fill: var(--sheet); stroke: var(--rule); stroke-width: 1.4; }
+    .node-box-fork { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.4; }
+    .node-box-fail { fill: var(--fail-soft); stroke: var(--fail); stroke-width: 1.4; }
+    .hop-disc { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.2; }
+    .hop-num { fill: var(--ok); font-family: var(--sans); font-size: 11px; font-weight: 700; }
+    .n-proc { fill: var(--ink); font-family: var(--sans); font-size: 14.5px; font-weight: 600; }
+    .n-step { fill: var(--muted); font-family: var(--mono); font-size: 10px; }
+    .n-cfg { fill: var(--ok); font-family: var(--mono); font-size: 10.5px; }
+    .n-cfg-fail { fill: var(--fail); font-family: var(--mono); font-size: 10.5px; }
+    .edge-ok { stroke: var(--ok); stroke-width: 1.6; fill: none; }
+    .edge-fail { stroke: var(--fail); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+    .edge-cancel { stroke: var(--muted); stroke-width: 1.4; fill: none; stroke-dasharray: 2 4; stroke-linecap: round; }
+    .stop-bar { stroke: var(--muted); stroke-width: 2.2; }
+    .lbl-cancel { fill: var(--muted); font-family: var(--sans); font-size: 11.5px; font-weight: 600; }
+    .gate { fill: var(--sheet); stroke: var(--ok); stroke-width: 2; }
+    .mk-ok { fill: var(--ok); }
+    .mk-fail { fill: var(--fail); }
+    .lbl-schema { fill: var(--muted); font-family: var(--mono); font-size: 10px; }
+    .lbl-fail { fill: var(--fail); font-family: var(--sans); font-size: 11.5px; font-weight: 600; }
+    .lbl-note { fill: var(--muted); font-family: var(--sans); font-size: 11.5px; }
+    .lbl-out { fill: var(--ink); font-family: var(--mono); font-size: 11px; }
+    .topic-pill { fill: none; stroke: var(--ink); stroke-width: 1.2; }
+    .topic-txt { fill: var(--ink); font-family: var(--mono); font-size: 12px; }
+    .legend-txt { fill: var(--muted); font-family: var(--sans); font-size: 12px; }
+  </style>
+
+        <defs>
+          <marker id="ar-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon class="mk-ok" points="0,1 10,5 0,9"></polygon>
+          </marker>
+          <marker id="ar-fail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon class="mk-fail" points="0,1 10,5 0,9"></polygon>
+          </marker>
+        </defs>
+
+        <!-- the bypass arc: Acme's other successor, straight to the collapser -->
+        <path class="edge-ok" d="M 691 120 L 691 68 L 1075 68 L 1075 114" marker-end="url(#ar-ok)"></path>
+        <text class="lbl-schema" x="883" y="60" text-anchor="middle">archive-document — the container branch</text>
+        <text class="lbl-out" x="883" y="86" text-anchor="middle">→ acme-&lt;guid&gt;.zip</text>
+        <circle class="gate" cx="1075" cy="95" r="4"></circle>
+
+        <!-- inbound topic -->
+        <rect class="topic-pill" x="40" y="20" width="150" height="32"></rect>
+        <text class="topic-txt" x="115" y="41" text-anchor="middle">skp-paths</text>
+        <line class="edge-ok" x1="115" y1="52" x2="115" y2="114" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-note" x="200" y="41" text-anchor="start">group skp-splitchain · 25 msgs · idle 10s</text>
+
+        <!-- outbound topic -->
+        <rect class="topic-pill" x="1384" y="20" width="150" height="32"></rect>
+        <text class="topic-txt" x="1459" y="41" text-anchor="middle">skp-documents</text>
+        <line class="edge-ok" x1="1459" y1="120" x2="1459" y2="58" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-note" x="1372" y="96" text-anchor="end">ends lineage · two records per input</text>
+
+        <!-- hop boxes -->
+        <g>
+          <rect class="node-box" x="40" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="58" cy="138" r="12"></circle>
+          <text class="hop-num" x="58" y="142" text-anchor="middle">1</text>
+          <text class="n-proc" x="115" y="162" text-anchor="middle">kafka-importer</text>
+          <text class="n-step" x="115" y="179" text-anchor="middle">split-importer</text>
+          <text class="n-cfg" x="115" y="195" text-anchor="middle">topic skp-paths</text>
+        </g>
+        <g>
+          <rect class="node-box" x="232" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="250" cy="138" r="12"></circle>
+          <text class="hop-num" x="250" y="142" text-anchor="middle">2</text>
+          <text class="n-proc" x="307" y="162" text-anchor="middle">file-fetcher</text>
+          <text class="n-step" x="307" y="179" text-anchor="middle">split-filefetcher</text>
+          <text class="n-cfg" x="307" y="195" text-anchor="middle">.zip only · ≤ 32 MiB</text>
+        </g>
+        <g>
+          <rect class="node-box" x="424" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="442" cy="138" r="12"></circle>
+          <text class="hop-num" x="442" y="142" text-anchor="middle">3</text>
+          <text class="n-proc" x="499" y="162" text-anchor="middle">archive-expander</text>
+          <text class="n-step" x="499" y="179" text-anchor="middle">split-archiveexpander</text>
+          <text class="n-cfg" x="499" y="195" text-anchor="middle">maxDepth 4</text>
+        </g>
+        <g>
+          <rect class="node-box-fork" x="616" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="634" cy="138" r="12"></circle>
+          <text class="hop-num" x="634" y="142" text-anchor="middle">4</text>
+          <text class="n-proc" x="691" y="162" text-anchor="middle">sk-normalizer</text>
+          <text class="n-step" x="691" y="179" text-anchor="middle">sk-normalizer-sample</text>
+          <text class="n-cfg" x="691" y="195" text-anchor="middle">handler Acme</text>
+        </g>
+        <g>
+          <rect class="node-box-fork" x="808" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="826" cy="138" r="12"></circle>
+          <text class="hop-num" x="826" y="142" text-anchor="middle">4b</text>
+          <text class="n-proc" x="883" y="162" text-anchor="middle">sk-normalizer</text>
+          <text class="n-step" x="883" y="179" text-anchor="middle">sk-normalizer-alphabeta</text>
+          <text class="n-cfg" x="883" y="195" text-anchor="middle">handler AlphaBeta</text>
+        </g>
+        <g>
+          <rect class="node-box" x="1000" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="1018" cy="138" r="12"></circle>
+          <text class="hop-num" x="1018" y="142" text-anchor="middle">5</text>
+          <text class="n-proc" x="1075" y="162" text-anchor="middle">archive-collapser</text>
+          <text class="n-step" x="1075" y="179" text-anchor="middle">split-archivecollapser</text>
+          <text class="n-cfg" x="1075" y="195" text-anchor="middle">payload {}</text>
+        </g>
+        <g>
+          <rect class="node-box" x="1192" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="1210" cy="138" r="12"></circle>
+          <text class="hop-num" x="1210" y="142" text-anchor="middle">6</text>
+          <text class="n-proc" x="1267" y="162" text-anchor="middle">file-persister</text>
+          <text class="n-step" x="1267" y="179" text-anchor="middle">split-filepersister</text>
+          <text class="n-cfg" x="1267" y="195" text-anchor="middle">/mnt/skp-files/out</text>
+        </g>
+        <g>
+          <rect class="node-box" x="1384" y="120" width="150" height="86"></rect>
+          <circle class="hop-disc" cx="1402" cy="138" r="12"></circle>
+          <text class="hop-num" x="1402" y="142" text-anchor="middle">7</text>
+          <text class="n-proc" x="1459" y="162" text-anchor="middle">kafka-exporter</text>
+          <text class="n-step" x="1459" y="179" text-anchor="middle">split-exporter</text>
+          <text class="n-cfg" x="1459" y="195" text-anchor="middle">delivery 30s</text>
+        </g>
+
+        <!-- happy-path edges, labelled with the document each hop hands over -->
+        <line class="edge-ok" x1="190" y1="163" x2="226" y2="163" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-schema" x="208" y="110" text-anchor="middle">file-locator</text>
+        <circle class="gate" cx="208" cy="163" r="4"></circle>
+
+        <line class="edge-ok" x1="382" y1="163" x2="418" y2="163" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-schema" x="400" y="110" text-anchor="middle">file-envelope</text>
+        <circle class="gate" cx="400" cy="163" r="4"></circle>
+
+        <line class="edge-ok" x1="574" y1="163" x2="610" y2="163" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-schema" x="592" y="110" text-anchor="middle">archive-document</text>
+        <circle class="gate" cx="592" cy="163" r="4"></circle>
+
+        <line class="edge-ok" x1="766" y1="163" x2="802" y2="163" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-schema" x="784" y="110" text-anchor="middle">archive-document</text>
+        <circle class="gate" cx="784" cy="163" r="4"></circle>
+
+        <line class="edge-ok" x1="958" y1="163" x2="994" y2="163" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-schema" x="976" y="110" text-anchor="middle">archive-document</text>
+        <circle class="gate" cx="976" cy="163" r="4"></circle>
+        <text class="lbl-out" x="976" y="228" text-anchor="middle">→ track01.xml</text>
+
+        <line class="edge-ok" x1="1150" y1="163" x2="1186" y2="163" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-schema" x="1168" y="110" text-anchor="middle">file-envelope</text>
+        <circle class="gate" cx="1168" cy="163" r="4"></circle>
+
+        <line class="edge-ok" x1="1342" y1="163" x2="1378" y2="163" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-schema" x="1360" y="110" text-anchor="middle">file-locator</text>
+
+        <!-- failure bus -->
+        <line class="edge-fail" x1="115" y1="206" x2="115" y2="296"></line>
+        <line class="edge-fail" x1="307" y1="206" x2="307" y2="296"></line>
+        <line class="edge-fail" x1="499" y1="206" x2="499" y2="296"></line>
+        <line class="edge-fail" x1="691" y1="206" x2="691" y2="296"></line>
+
+        <!-- hop 4's third outcome: a cancel no successor admits, so the branch stops here -->
+        <line class="edge-cancel" x1="655" y1="206" x2="655" y2="246"></line>
+        <line class="stop-bar" x1="643" y1="246" x2="667" y2="246"></line>
+        <text class="lbl-cancel" x="632" y="238" text-anchor="end">Cancelled · outcome 3</text>
+        <text class="lbl-note" x="632" y="254" text-anchor="end">no successor admits it</text>
+        <line class="edge-fail" x1="883" y1="206" x2="883" y2="296"></line>
+        <line class="edge-fail" x1="1075" y1="206" x2="1075" y2="296"></line>
+        <line class="edge-fail" x1="1267" y1="206" x2="1267" y2="296"></line>
+        <line class="edge-fail" x1="1459" y1="206" x2="1459" y2="296"></line>
+        <line class="edge-fail" x1="115" y1="296" x2="1459" y2="296"></line>
+        <text class="lbl-fail" x="40" y="324" text-anchor="start">all nine steps, including both sinks</text>
+        <text class="lbl-note" x="40" y="342" text-anchor="start">entryCondition 2 · PreviousFailed</text>
+
+        <line class="edge-fail" x1="595" y1="296" x2="595" y2="334" marker-end="url(#ar-fail)"></line>
+
+        <g>
+          <rect class="node-box-fail" x="520" y="340" width="150" height="86"></rect>
+          <text class="n-proc" x="595" y="376" text-anchor="middle">outcome-recorder</text>
+          <text class="n-step" x="595" y="393" text-anchor="middle">record-outcome</text>
+          <text class="n-cfg-fail" x="595" y="409" text-anchor="middle">all schema ids null</text>
+        </g>
+
+        <line class="edge-ok" x1="670" y1="383" x2="754" y2="383" marker-end="url(#ar-ok)"></line>
+        <text class="lbl-schema" x="712" y="367" text-anchor="middle">Completed</text>
+
+        <g>
+          <rect class="node-box" x="760" y="340" width="150" height="86"></rect>
+          <text class="n-proc" x="835" y="376" text-anchor="middle">kafka-exporter</text>
+          <text class="n-step" x="835" y="393" text-anchor="middle">export-outcome</text>
+          <text class="n-cfg" x="835" y="409" text-anchor="middle">delivery 30s</text>
+        </g>
+
+        <line class="edge-ok" x1="910" y1="383" x2="994" y2="383" marker-end="url(#ar-ok)"></line>
+        <rect class="topic-pill" x="1000" y="367" width="150" height="32"></rect>
+        <text class="topic-txt" x="1075" y="388" text-anchor="middle">skp-failures</text>
+        <text class="lbl-note" x="1160" y="388" text-anchor="start">ends lineage</text>
+
+        <!-- legend -->
+        <line class="edge-ok" x1="40" y1="466" x2="86" y2="466" marker-end="url(#ar-ok)"></line>
+        <text class="legend-txt" x="96" y="470" text-anchor="start">Completed — entryCondition 1 (hop 1 is 4, Always)</text>
+        <line class="edge-fail" x1="450" y1="466" x2="496" y2="466" marker-end="url(#ar-fail)"></line>
+        <text class="legend-txt" x="506" y="470" text-anchor="start">Failed — entryCondition 2</text>
+
+        <line class="edge-cancel" x1="40" y1="496" x2="80" y2="496"></line>
+        <line class="stop-bar" x1="80" y1="488" x2="80" y2="504"></line>
+        <text class="legend-txt" x="96" y="500" text-anchor="start">Cancelled — entryCondition 3, which no step in this workflow declares</text>
+        <circle class="gate" cx="800" cy="496" r="4"></circle>
+        <text class="legend-txt" x="814" y="500" text-anchor="start">schema edge enforced — seven of the eight now are</text>
+</svg>
