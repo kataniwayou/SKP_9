@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Hosting;
-using Processor.FailureRecorder;
+using Processor.OutcomeRecorder;
 
 // The boot resolves identity before building anything, so this is the one place the process can be
 // cancelled while it is still deciding who it is.

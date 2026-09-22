@@ -44,7 +44,7 @@ public abstract class BaseProcessor
     /// while exposing them invites routing decisions nothing in this system needs.
     /// </para>
     /// <para>
-    /// It exists for <c>Processor.FailureRecorder</c>, which runs on a failed step's behalf and must
+    /// It exists for <c>Processor.OutcomeRecorder</c>, which runs on another step's behalf and must
     /// name something an operator can query. An entry step's dispatch carries
     /// <see cref="Guid.Empty"/> as its execution id, so the correlation id — minted once per fire by
     /// the orchestrator — is the only key that is present on every dispatch.

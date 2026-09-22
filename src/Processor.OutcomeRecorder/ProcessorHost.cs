@@ -9,7 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
 
-namespace Processor.FailureRecorder;
+namespace Processor.OutcomeRecorder;
 
 /// <summary>
 /// The composition root, as methods rather than inline in <c>Program</c> so that the one thing worth
@@ -114,7 +114,7 @@ public static class ProcessorHost
         // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
         // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
         // safe only because prefetch is 1.
-        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, FailureRecorderProcessor>();
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, OutcomeRecorderProcessor>();
 
         return builder.Build();
     }

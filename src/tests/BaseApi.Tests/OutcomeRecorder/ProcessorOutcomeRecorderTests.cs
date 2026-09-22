@@ -5,12 +5,12 @@ using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
-using Processor.FailureRecorder;
+using Processor.OutcomeRecorder;
 using Xunit;
 
-namespace BaseApi.Tests.FailureRecorder;
+namespace BaseApi.Tests.OutcomeRecorder;
 
-public sealed class ProcessorFailureRecorderTests
+public sealed class ProcessorOutcomeRecorderTests
 {
     private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
@@ -30,8 +30,8 @@ public sealed class ProcessorFailureRecorderTests
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        var processor = new FailureRecorderProcessor(
-            new RecordingLogger<FailureRecorderProcessor>(),
+        var processor = new OutcomeRecorderProcessor(
+            new RecordingLogger<OutcomeRecorderProcessor>(),
             new FakeTimeProvider(Now));
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
 
@@ -44,7 +44,7 @@ public sealed class ProcessorFailureRecorderTests
     /// Like <see cref="Run"/>, but hands back the logger too -- for the one test that needs to read
     /// the shape the processor logs rather than the envelope it sends.
     /// </summary>
-    private static async Task<(ProcessedData Sent, RecordingLogger<FailureRecorderProcessor> Log)> RunLogging(
+    private static async Task<(ProcessedData Sent, RecordingLogger<OutcomeRecorderProcessor> Log)> RunLogging(
         byte[] data, Guid executionId, string payload = "")
     {
         var sender = Substitute.For<IQueueSender>();
@@ -52,8 +52,8 @@ public sealed class ProcessorFailureRecorderTests
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        var log = new RecordingLogger<FailureRecorderProcessor>();
-        var processor = new FailureRecorderProcessor(log, new FakeTimeProvider(Now));
+        var log = new RecordingLogger<OutcomeRecorderProcessor>();
+        var processor = new OutcomeRecorderProcessor(log, new FakeTimeProvider(Now));
         processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
 
         await processor.ExecuteAsync(data, payload, executionId, CancellationToken.None);
@@ -74,7 +74,7 @@ public sealed class ProcessorFailureRecorderTests
     }
 
     [Fact]
-    public async Task CarriesTheExecutionIdDashedWhenTheFailedStepHadALineage()
+    public async Task CarriesTheExecutionIdDashedWhenThePredecessorHadALineage()
     {
         var record = Record(await Run([], E));
 
@@ -82,10 +82,10 @@ public sealed class ProcessorFailureRecorderTests
     }
 
     [Fact]
-    public async Task OmitsTheExecutionIdWhenTheFailedStepHadNoLineage()
+    public async Task OmitsTheExecutionIdWhenThePredecessorHadNoLineage()
     {
-        // An importer failure. Omitted rather than zeroed, matching ExecutionLogScope: "does not
-        // apply" must stay distinguishable from "is the zero guid".
+        // An importer that ended before opening one. Omitted rather than zeroed, matching
+        // ExecutionLogScope: "does not apply" must stay distinguishable from "is the zero guid".
         var record = Record(await Run([], Guid.Empty));
 
         Assert.False(record.TryGetProperty("executionId", out _));
@@ -95,7 +95,7 @@ public sealed class ProcessorFailureRecorderTests
     public async Task OpensALineageWhenItWasHandedNone()
     {
         // Without this the exporter step downstream is dispatched as an entry step and trips
-        // BaseExporter's edge guard, so an importer failure would never be exported.
+        // BaseExporter's edge guard, so an importer's outcome would never be exported.
         var sent = await Run([], Guid.Empty);
 
         Assert.NotEqual(Guid.Empty, sent.ExecutionId);
@@ -134,7 +134,7 @@ public sealed class ProcessorFailureRecorderTests
     [Fact]
     public async Task IgnoresTheInputItWasHanded()
     {
-        // The orchestrator hands over the failed step's input blob. It is neither parsed nor
+        // The orchestrator hands over the predecessor's input blob. It is neither parsed nor
         // forwarded: a megabyte of arbitrary bytes produces the same three-field record as none.
         var cargo = new byte[1024 * 1024];
         Random.Shared.NextBytes(cargo);
@@ -145,14 +145,14 @@ public sealed class ProcessorFailureRecorderTests
     }
 
     [Fact]
-    public async Task TheLogLineForAnEntryStepFailureCarriesNoExecutionIdAtAll()
+    public async Task TheLogLineForAnEntryStepOutcomeCarriesNoExecutionIdAtAll()
     {
         // A prose sentinel in the structured attribute would defeat the same distinction the record
         // itself preserves by omitting the field. The rendered message is what RecordingLogger keeps,
         // so it is what this asserts against.
         var (_, log) = await RunLogging([], Guid.Empty);
 
-        var line = Assert.Single(log.Records, r => r.Message.Contains("recorded a failed step"));
+        var line = Assert.Single(log.Records, r => r.Message.Contains("recorded a step outcome"));
 
         Assert.DoesNotContain("none", line.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("execution", line.Message, StringComparison.OrdinalIgnoreCase);

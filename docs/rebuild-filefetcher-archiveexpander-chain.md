@@ -29,7 +29,8 @@ it stops. Nothing walks to it from a step. `sk-normalizer`'s Acme handler reads 
 written on its own step payload, which is why step 7b exists.
 
 The success path runs left to right. Every step on it also has a second edge, to
-`record-failure`, taken only when that step fails:
+`record-outcome` — which records whatever outcome dispatched it and never learns which one, so the
+edge below is taken only when that step fails because THIS chain wires it at `entryCondition: 2`:
 
 ```
 split-importer            (kafka-importer, Always)
@@ -42,15 +43,15 @@ split-importer            (kafka-importer, Always)
                       └─> split-filepersister     (file-persister)
                            └─> split-exporter         (kafka-exporter -> skp-documents)
 
-  every step above --(on failure)--> record-failure (failure-recorder)
-                                       └─> export-failure (kafka-exporter -> skp-failures)
+  every step above --(on failure)--> record-outcome (outcome-recorder)
+                                       └─> export-outcome (kafka-exporter -> skp-failures)
 ```
 
 Three things about this shape are easy to get wrong and are checked by the API at start:
 
 - `split-archivecollapser` is reached from **two** parents — `sk-normalizer-sample` directly and
   `sk-normalizer-alphabeta` after it. That is a diamond, not a cycle, and it is intentional.
-- `record-failure` is a fan-in from all nine other steps. It is the reason the edges are written
+- `record-outcome` is a fan-in from all nine other steps. It is the reason the edges are written
   in a second pass.
 - `sk-normalizer` appears **twice**, as two steps on one processor row. Do not create the
   processor twice — `sourceHash` is unique and the second create returns 409.
@@ -311,17 +312,17 @@ Content-Type: application/json
 
 Record the returned id as `<proc:file-fetcher>`.
 
-### 3.3 `failure-recorder`
+### 3.3 `outcome-recorder`
 
 ```http
 POST /api/v1/processors
 Content-Type: application/json
 
 {
-  "name": "failure-recorder",
+  "name": "outcome-recorder",
   "version": "1.0.0",
-  "description": "records that a step failed and where to look; carries no reason and no payload",
-  "sourceHash": "ab61472514e78199ca25ed17276369c738447626df1bd443b63f8cd94b8f212a",
+  "description": "records that a step reached a terminal outcome and where to look; carries no reason and no payload",
+  "sourceHash": "f772623e05972790328e14bd58b30339a5a84abb10717e751bd10f9f480af63d",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": null,
@@ -329,7 +330,7 @@ Content-Type: application/json
 }
 ```
 
-Record the returned id as `<proc:failure-recorder>`.
+Record the returned id as `<proc:outcome-recorder>`.
 
 ### 3.4 `archive-expander`
 
@@ -434,7 +435,7 @@ Record the returned id as `<proc:file-persister>`.
 
 ## Step 4 — create the 10 steps, with no edges yet
 
-`POST /api/v1/steps` with `nextStepIds: null` on every one. A step cannot name a successor that does not exist, and this graph has a fan-in (`record-failure`) that 8 of its own parents point at, so the edges cannot be written on creation in any order. They go in on the second pass, step 5.
+`POST /api/v1/steps` with `nextStepIds: null` on every one. A step cannot name a successor that does not exist, and this graph has a fan-in (`record-outcome`) that 8 of its own parents point at, so the edges cannot be written on creation in any order. They go in on the second pass, step 5.
 
 `entryCondition` is an integer: `1` = PreviousCompleted, `2` = PreviousFailed, `4` = Always. Never omit it — the field is positional and an omitted one binds to `0` (PreviousProcessing), which both validators reject.
 
@@ -474,23 +475,23 @@ Content-Type: application/json
 
 Record the returned id as `<step:split-filefetcher>`.
 
-### 4.3 `record-failure`
+### 4.3 `record-outcome`
 
 ```http
 POST /api/v1/steps
 Content-Type: application/json
 
 {
-  "name": "record-failure",
+  "name": "record-outcome",
   "version": "1.0.0",
-  "description": "records that a step failed and where to look",
-  "processorId": "<proc:failure-recorder>",
+  "description": "records that a step reached a terminal outcome and where to look",
+  "processorId": "<proc:outcome-recorder>",
   "nextStepIds": null,
   "entryCondition": 2
 }
 ```
 
-Record the returned id as `<step:record-failure>`.
+Record the returned id as `<step:record-outcome>`.
 
 ### 4.4 `split-archiveexpander`
 
@@ -510,23 +511,23 @@ Content-Type: application/json
 
 Record the returned id as `<step:split-archiveexpander>`.
 
-### 4.5 `export-failure`
+### 4.5 `export-outcome`
 
 ```http
 POST /api/v1/steps
 Content-Type: application/json
 
 {
-  "name": "export-failure",
+  "name": "export-outcome",
   "version": "1.0.0",
-  "description": "puts the failure record on skp-failures and ends the lineage",
+  "description": "puts the outcome record on skp-failures and ends the lineage",
   "processorId": "<proc:kafka-exporter>",
   "nextStepIds": null,
   "entryCondition": 1
 }
 ```
 
-Record the returned id as `<step:export-failure>`.
+Record the returned id as `<step:export-outcome>`.
 
 ### 4.6 `sk-normalizer-sample`
 
@@ -623,7 +624,7 @@ Record the returned id as `<step:split-exporter>`.
 
 `PUT /api/v1/steps/{id}` once per step that has successors. The update DTO is a full replacement, not a patch: every field must be resent exactly as created, with `nextStepIds` now filled in. One step is a sink and is skipped.
 
-### 5.1 `split-importer` → split-filefetcher, record-failure
+### 5.1 `split-importer` → split-filefetcher, record-outcome
 
 ```http
 PUT /api/v1/steps/<step:split-importer>
@@ -636,13 +637,13 @@ Content-Type: application/json
   "processorId": "<proc:kafka-importer>",
   "nextStepIds": [
     "<step:split-filefetcher>",
-    "<step:record-failure>"
+    "<step:record-outcome>"
   ],
   "entryCondition": 4
 }
 ```
 
-### 5.2 `split-filefetcher` → split-archiveexpander, record-failure
+### 5.2 `split-filefetcher` → split-archiveexpander, record-outcome
 
 ```http
 PUT /api/v1/steps/<step:split-filefetcher>
@@ -655,31 +656,31 @@ Content-Type: application/json
   "processorId": "<proc:file-fetcher>",
   "nextStepIds": [
     "<step:split-archiveexpander>",
-    "<step:record-failure>"
+    "<step:record-outcome>"
   ],
   "entryCondition": 1
 }
 ```
 
-### 5.3 `record-failure` → export-failure
+### 5.3 `record-outcome` → export-outcome
 
 ```http
-PUT /api/v1/steps/<step:record-failure>
+PUT /api/v1/steps/<step:record-outcome>
 Content-Type: application/json
 
 {
-  "name": "record-failure",
+  "name": "record-outcome",
   "version": "1.0.0",
-  "description": "records that a step failed and where to look",
-  "processorId": "<proc:failure-recorder>",
+  "description": "records that a step reached a terminal outcome and where to look",
+  "processorId": "<proc:outcome-recorder>",
   "nextStepIds": [
-    "<step:export-failure>"
+    "<step:export-outcome>"
   ],
   "entryCondition": 2
 }
 ```
 
-### 5.4 `split-archiveexpander` → sk-normalizer-sample, record-failure
+### 5.4 `split-archiveexpander` → sk-normalizer-sample, record-outcome
 
 ```http
 PUT /api/v1/steps/<step:split-archiveexpander>
@@ -692,15 +693,15 @@ Content-Type: application/json
   "processorId": "<proc:archive-expander>",
   "nextStepIds": [
     "<step:sk-normalizer-sample>",
-    "<step:record-failure>"
+    "<step:record-outcome>"
   ],
   "entryCondition": 1
 }
 ```
 
-`export-failure` is a sink — no PUT.
+`export-outcome` is a sink — no PUT.
 
-### 5.5 `sk-normalizer-sample` → split-archivecollapser, record-failure, sk-normalizer-alphabeta
+### 5.5 `sk-normalizer-sample` → split-archivecollapser, record-outcome, sk-normalizer-alphabeta
 
 ```http
 PUT /api/v1/steps/<step:sk-normalizer-sample>
@@ -713,14 +714,14 @@ Content-Type: application/json
   "processorId": "<proc:sk-normalizer>",
   "nextStepIds": [
     "<step:split-archivecollapser>",
-    "<step:record-failure>",
+    "<step:record-outcome>",
     "<step:sk-normalizer-alphabeta>"
   ],
   "entryCondition": 1
 }
 ```
 
-### 5.6 `split-archivecollapser` → split-filepersister, record-failure
+### 5.6 `split-archivecollapser` → split-filepersister, record-outcome
 
 ```http
 PUT /api/v1/steps/<step:split-archivecollapser>
@@ -733,13 +734,13 @@ Content-Type: application/json
   "processorId": "<proc:archive-collapser>",
   "nextStepIds": [
     "<step:split-filepersister>",
-    "<step:record-failure>"
+    "<step:record-outcome>"
   ],
   "entryCondition": 1
 }
 ```
 
-### 5.7 `sk-normalizer-alphabeta` → record-failure, split-archivecollapser
+### 5.7 `sk-normalizer-alphabeta` → record-outcome, split-archivecollapser
 
 ```http
 PUT /api/v1/steps/<step:sk-normalizer-alphabeta>
@@ -751,14 +752,14 @@ Content-Type: application/json
   "description": "Lifts Acme's standardized XML out and makes it the whole document. Runs AFTER the Acme step on its output, so an Acme failure skips it; emits a leaf-root .xml that ArchiveCollapser carries through unpacked.",
   "processorId": "<proc:sk-normalizer>",
   "nextStepIds": [
-    "<step:record-failure>",
+    "<step:record-outcome>",
     "<step:split-archivecollapser>"
   ],
   "entryCondition": 1
 }
 ```
 
-### 5.8 `split-filepersister` → split-exporter, record-failure
+### 5.8 `split-filepersister` → split-exporter, record-outcome
 
 ```http
 PUT /api/v1/steps/<step:split-filepersister>
@@ -771,13 +772,13 @@ Content-Type: application/json
   "processorId": "<proc:file-persister>",
   "nextStepIds": [
     "<step:split-exporter>",
-    "<step:record-failure>"
+    "<step:record-outcome>"
   ],
   "entryCondition": 1
 }
 ```
 
-### 5.9 `split-exporter` → record-failure
+### 5.9 `split-exporter` → record-outcome
 
 ```http
 PUT /api/v1/steps/<step:split-exporter>
@@ -789,7 +790,7 @@ Content-Type: application/json
   "description": "documents out",
   "processorId": "<proc:kafka-exporter>",
   "nextStepIds": [
-    "<step:record-failure>"
+    "<step:record-outcome>"
   ],
   "entryCondition": 1
 }
@@ -834,22 +835,22 @@ Content-Type: application/json
 
 Record the returned id as `<asg:split-filefetcher-cfg>`.
 
-### 6.3 `record-failure` → step `record-failure`
+### 6.3 `record-outcome` → step `record-outcome`
 
 ```http
 POST /api/v1/assignments
 Content-Type: application/json
 
 {
-  "name": "record-failure",
+  "name": "record-outcome",
   "version": "1.0.0",
   "description": "no payload: nothing this processor records is a workflow author's choice",
-  "stepId": "<step:record-failure>",
+  "stepId": "<step:record-outcome>",
   "payload": "{}"
 }
 ```
 
-Record the returned id as `<asg:record-failure>`.
+Record the returned id as `<asg:record-outcome>`.
 
 ### 6.4 `split-archiveexpander-cfg` → step `split-archiveexpander`
 
@@ -868,22 +869,22 @@ Content-Type: application/json
 
 Record the returned id as `<asg:split-archiveexpander-cfg>`.
 
-### 6.5 `export-failure` → step `export-failure`
+### 6.5 `export-outcome` → step `export-outcome`
 
 ```http
 POST /api/v1/assignments
 Content-Type: application/json
 
 {
-  "name": "export-failure",
+  "name": "export-outcome",
   "version": "1.0.0",
   "description": "the failures topic",
-  "stepId": "<step:export-failure>",
+  "stepId": "<step:export-outcome>",
   "payload": "{\"topic\": \"skp-failures\", \"deliveryTimeoutSeconds\": 30}"
 }
 ```
 
-Record the returned id as `<asg:export-failure>`.
+Record the returned id as `<asg:export-outcome>`.
 
 ### 6.6 `sk-normalizer-sample-assignment` → step `sk-normalizer-sample`
 
@@ -1025,9 +1026,9 @@ Content-Type: application/json
   "assignmentIds": [
     "<asg:split-importer-cfg>",
     "<asg:split-filefetcher-cfg>",
-    "<asg:record-failure>",
+    "<asg:record-outcome>",
     "<asg:split-archiveexpander-cfg>",
-    "<asg:export-failure>",
+    "<asg:export-outcome>",
     "<asg:sk-normalizer-sample-assignment>",
     "<asg:split-archivecollapser-assignment>",
     "<asg:sk-normalizer-alphabeta-assignment>",
@@ -1135,9 +1136,9 @@ Three checks, in order. The first two do not need the processors to be running.
 check the edge sets by name. Confirm specifically:
 
 - exactly one entry step, `split-importer`, with `entryCondition: 4`
-- `record-failure` has `entryCondition: 2` and is named by nine parents
+- `record-outcome` has `entryCondition: 2` and is named by nine parents
 - `split-archivecollapser` is named by two parents
-- `export-failure` has an empty `nextStepIds`
+- `export-outcome` has an empty `nextStepIds`
 - every other step has `entryCondition: 1`
 - every one of the 10 steps has exactly one assignment pointing at it
 
@@ -1239,7 +1240,7 @@ failure shapes and only one of them is an error you can search for.
 
 - **No `cacheAddress` on the payload** — you skipped step 7b. The step ends `Failed` with
   *"step payload rejected: this handler gates a field on a whitelist, but the payload names no
-  cacheAddress"*, and takes the `record-failure` edge like any other failure. Loud, and correct:
+  cacheAddress"*, and takes the `record-outcome` edge like any other failure. Loud, and correct:
   refusing every document instead would read in the logs exactly like a whitelist that approves
   nobody.
 - **An address pointing at nothing** — a typo in the root, or the workflow never named the cache
@@ -1248,11 +1249,11 @@ failure shapes and only one of them is an error you can search for.
 - **An artist that is not on the list, or a sidecar naming no artist at all** — the step ends
   **`Cancelled`**, which is neither of the above. No successor in this graph declares
   `entryCondition: 3`, so the branch simply stops: nothing is collapsed, nothing is persisted,
-  and `record-failure` does **not** fire, because a cancel is not a failure. There is no failure
-  record to find and no error to grep. The rejected name survives in exactly one place: the log
-  line `the author cancelled the branch: {Reason}`, written at **Information** while the two
-  failure shapes above are Warnings. A log query filtered to Warning and above shows you a clean
-  system that is dropping documents.
+  and `record-outcome` does **not** fire — it is wired here at `entryCondition: 2`, and a cancel is
+  not a failure. There is no record to find and no error to grep. The rejected name survives in
+  exactly one place: the log line `the author cancelled the branch: {Reason}`, written at
+  **Information** while the two failure shapes above are Warnings. A log query filtered to Warning
+  and above shows you a clean system that is dropping documents.
 
 The third shape is the expected one in normal operation — it is what the gate is for — so treat
 "fewer documents than inputs, no errors anywhere" as a whitelist question first. Step 6b ships

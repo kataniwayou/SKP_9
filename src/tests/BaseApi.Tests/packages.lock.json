@@ -683,12 +683,6 @@
           "SharpCompress": "[1.0.0, )"
         }
       },
-      "processor.failurerecorder": {
-        "type": "Project",
-        "dependencies": {
-          "BaseProcessor.Core": "[1.0.0, 1.0.0]"
-        }
-      },
       "processor.filefetcher": {
         "type": "Project",
         "dependencies": {
@@ -713,6 +707,12 @@
         "dependencies": {
           "BaseProcessor.Core": "[1.0.0, 1.0.0]",
           "Confluent.Kafka": "[2.15.0, )"
+        }
+      },
+      "processor.outcomerecorder": {
+        "type": "Project",
+        "dependencies": {
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]"
         }
       },
       "processor.sample": {

@@ -262,7 +262,7 @@
 
   <figure>
     <div class="scroller">
-      <svg viewBox="0 0 1580 520" role="img" aria-label="The chain runs left to right from the Kafka importer to the Kafka exporter. At the normalizer it forks: the Acme step passes its output both to a second normalizer step running the AlphaBeta handler and, by an arc over the row, straight to the archive collapser. Both branches rejoin at that collapser. Every step also has a dashed failure edge down to a shared record-failure step, which hands off to a second exporter writing the skp-failures topic. The Acme step carries a third, dotted stub that ends in a stop bar: a cancelled document goes nowhere. Seven of the eight schema edges are enforced.">
+      <svg viewBox="0 0 1580 520" role="img" aria-label="The chain runs left to right from the Kafka importer to the Kafka exporter. At the normalizer it forks: the Acme step passes its output both to a second normalizer step running the AlphaBeta handler and, by an arc over the row, straight to the archive collapser. Both branches rejoin at that collapser. Every step also has a dashed failure edge down to a shared record-outcome step, which hands off to a second exporter writing the skp-failures topic. The Acme step carries a third, dotted stub that ends in a stop bar: a cancelled document goes nowhere. Seven of the eight schema edges are enforced.">
         <defs>
           <marker id="ar-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <polygon class="mk-ok" points="0,1 10,5 0,9"></polygon>
@@ -408,8 +408,8 @@
 
         <g>
           <rect class="node-box-fail" x="520" y="340" width="150" height="86"></rect>
-          <text class="n-proc" x="595" y="376" text-anchor="middle">failure-recorder</text>
-          <text class="n-step" x="595" y="393" text-anchor="middle">record-failure</text>
+          <text class="n-proc" x="595" y="376" text-anchor="middle">outcome-recorder</text>
+          <text class="n-step" x="595" y="393" text-anchor="middle">record-outcome</text>
           <text class="n-cfg-fail" x="595" y="409" text-anchor="middle">all schema ids null</text>
         </g>
 
@@ -419,7 +419,7 @@
         <g>
           <rect class="node-box" x="760" y="340" width="150" height="86"></rect>
           <text class="n-proc" x="835" y="376" text-anchor="middle">kafka-exporter</text>
-          <text class="n-step" x="835" y="393" text-anchor="middle">export-failure</text>
+          <text class="n-step" x="835" y="393" text-anchor="middle">export-outcome</text>
           <text class="n-cfg" x="835" y="409" text-anchor="middle">delivery 30s</text>
         </g>
 
@@ -441,7 +441,7 @@
         <text class="legend-txt" x="814" y="500" text-anchor="start">schema edge enforced — seven of the eight now are</text>
       </svg>
     </div>
-    <figcaption>Read across for the round trip, down for the failure path, and nowhere for a cancel. Hop 4 names <span class="m">three</span> successors: the collapser by the arc over the row, hop 4b beside it, and <span class="m">record-failure</span> on a failed outcome — <span class="m">StepAdvancement.SelectNext</span> collects every successor whose entry condition matches, so both Completed branches are dispatched, each with its own freshly minted key. Hops 4 and 4b are the <em>same processor row</em> under two payloads; 5, 6 and 7 are single steps serving both branches, which is why the exporter emits two records per input. The dotted stub under hop 4 is its <em>third</em> outcome: the artist gate cancels, and because a cancel matches neither <span class="m">1 · Completed</span> nor <span class="m">2 · Failed</span>, that document is not collapsed, not persisted, and not recorded as a failure either.</figcaption>
+    <figcaption>Read across for the round trip, down for the failure path, and nowhere for a cancel. Hop 4 names <span class="m">three</span> successors: the collapser by the arc over the row, hop 4b beside it, and <span class="m">record-outcome</span> on a failed outcome — <span class="m">StepAdvancement.SelectNext</span> collects every successor whose entry condition matches, so both Completed branches are dispatched, each with its own freshly minted key. Hops 4 and 4b are the <em>same processor row</em> under two payloads; 5, 6 and 7 are single steps serving both branches, which is why the exporter emits two records per input. The dotted stub under hop 4 is its <em>third</em> outcome: the artist gate cancels, and because a cancel matches neither <span class="m">1 · Completed</span> nor <span class="m">2 · Failed</span>, that document is not collapsed, not persisted, and not recorded as a failure either.</figcaption>
   </figure>
 
   <section>
@@ -519,15 +519,15 @@
           </tr>
           <tr class="failrow">
             <td class="hop f">F1</td>
-            <td><span class="proc">record-failure</span><br><code>73952b09…</code></td>
-            <td>failure-recorder</td>
+            <td><span class="proc">record-outcome</span><br><code>73952b09…</code></td>
+            <td>outcome-recorder</td>
             <td><span class="ec f">2 · Failed</span></td>
             <td><code>{}</code></td>
             <td><code>null → null</code></td>
           </tr>
           <tr class="failrow">
             <td class="hop f">F2</td>
-            <td><span class="proc">export-failure</span><br><code>eb707c5e…</code></td>
+            <td><span class="proc">export-outcome</span><br><code>eb707c5e…</code></td>
             <td>kafka-exporter <em>(same row as 7)</em></td>
             <td><span class="ec ok">1 · Completed</span></td>
             <td><code>{"topic":"skp-failures","deliveryTimeoutSeconds":30}</code></td>
@@ -571,7 +571,7 @@
       </div>
       <div class="note">
         <h3>A multi-pair bundle splits the branches</h3>
-        <p>Acme has a container to hold both items; 4b's leaf root holds one file, so it fails by name rather than dropping the second silently. That failure takes the <code>record-failure</code> edge like any other.</p>
+        <p>Acme has a container to hold both items; 4b's leaf root holds one file, so it fails by name rather than dropping the second silently. That failure takes the <code>record-outcome</code> edge like any other.</p>
       </div>
     </div>
   </section>

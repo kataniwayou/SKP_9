@@ -39,7 +39,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.FilePersister", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.SKNormalizer", "src\Processor.SKNormalizer\Processor.SKNormalizer.csproj", "{F90A3A6E-781E-403D-9216-6F51B26784A8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.FailureRecorder", "src\Processor.FailureRecorder\Processor.FailureRecorder.csproj", "{66CEB79C-8D46-4E98-BF43-641D89CD8C05}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.OutcomeRecorder", "src\Processor.OutcomeRecorder\Processor.OutcomeRecorder.csproj", "{66CEB79C-8D46-4E98-BF43-641D89CD8C05}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

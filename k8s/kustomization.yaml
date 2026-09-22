@@ -26,4 +26,4 @@ resources:
   - 39-processor-archivecollapser.yaml
   - 40-processor-filepersister.yaml
   - 41-processor-sknormalizer.yaml
-  - 42-processor-failurerecorder.yaml
+  - 42-processor-outcomerecorder.yaml

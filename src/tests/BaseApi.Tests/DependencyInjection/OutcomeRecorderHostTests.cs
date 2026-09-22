@@ -2,7 +2,7 @@ using Messaging.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Processor.FailureRecorder;
+using Processor.OutcomeRecorder;
 using Xunit;
 
 namespace BaseApi.Tests.DependencyInjection;
@@ -11,12 +11,12 @@ namespace BaseApi.Tests.DependencyInjection;
 /// The one thing worth asserting about a shell: that its service graph actually resolves. Asserted
 /// without starting a process, which is why ProcessorHost.Create is separate from StartAsync.
 /// </summary>
-public sealed class FailureRecorderHostTests
+public sealed class OutcomeRecorderHostTests
 {
     private static readonly ProcessorIdentityFound Identity = new(
         Guid.Parse("66666666-6666-6666-6666-666666666666"),
         InputSchemaId: null, OutputSchemaId: null, ConfigSchemaId: null,
-        Name: "failure-recorder", Version: "1.0.0");
+        Name: "outcome-recorder", Version: "1.0.0");
 
     private static IHost Build() => ProcessorHost.Create(
         // Development turns on the container's build-time validation, which is the whole point:
@@ -42,7 +42,7 @@ public sealed class FailureRecorderHostTests
         var processor = host.Services
             .GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>();
 
-        Assert.IsType<FailureRecorderProcessor>(processor);
+        Assert.IsType<OutcomeRecorderProcessor>(processor);
     }
 
     [Fact]

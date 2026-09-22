@@ -104,7 +104,7 @@
     <ProjectReference Include="..\..\Processor.SKNormalizer\Processor.SKNormalizer.csproj" />
     <ProjectReference Include="..\..\Processor.FileFetcher\Processor.FileFetcher.csproj" />
     <ProjectReference Include="..\..\Processor.FilePersister\Processor.FilePersister.csproj" />
-    <ProjectReference Include="..\..\Processor.FailureRecorder\Processor.FailureRecorder.csproj" />
+    <ProjectReference Include="..\..\Processor.OutcomeRecorder\Processor.OutcomeRecorder.csproj" />
     <ProjectReference Include="..\..\Orchestrator\Orchestrator.csproj" />
   </ItemGroup>
 

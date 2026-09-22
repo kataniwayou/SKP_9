@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    A concrete processor with the smallest job in the solution: it records THAT a step failed and
-    where to look, and nothing else. It queries nothing, parses nothing, and ignores the input it is
-    handed.
+    A concrete processor with the smallest job in the solution: it records THAT a step reached a
+    terminal outcome and where to look, and nothing else. It queries nothing, parses nothing, and
+    ignores the input it is handed. It is not told which outcome dispatched it either: the dispatch
+    does not carry one.
 
     Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
     Directory.Build.props, and package versions from Directory.Packages.props — never declare
@@ -12,12 +13,12 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <RootNamespace>Processor.FailureRecorder</RootNamespace>
-    <AssemblyName>Processor.FailureRecorder</AssemblyName>
+    <RootNamespace>Processor.OutcomeRecorder</RootNamespace>
+    <AssemblyName>Processor.OutcomeRecorder</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- FailureRecord and the processor are internal: this processor's construction, not its
+    <!-- OutcomeRecord and the processor are internal: this processor's construction, not its
          surface. The tests construct them directly. -->
     <InternalsVisibleTo Include="BaseApi.Tests" />
   </ItemGroup>

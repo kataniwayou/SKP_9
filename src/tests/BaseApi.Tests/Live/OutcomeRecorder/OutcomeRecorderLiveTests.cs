@@ -7,13 +7,13 @@ using BaseApi.Tests.Live.Resilience;
 using Confluent.Kafka;
 using Xunit;
 
-namespace BaseApi.Tests.Live.FailureRecorder;
+namespace BaseApi.Tests.Live.OutcomeRecorder;
 
 /// <summary>
-/// The half of FailureRecorder only the cluster can answer: a step really fails, the PreviousFailed
-/// edge really fires, and a record really lands on skp-failures — with an id that really resolves a
-/// lineage in a real log store. The hermetic suite runs the transform in process and can say nothing
-/// about any of that.
+/// The half of OutcomeRecorder only the cluster can answer: a step really fails, the PreviousFailed
+/// edge this workflow wires it on really fires, and a record really lands on skp-failures — with an
+/// id that really resolves a lineage in a real log store. The hermetic suite runs the transform in
+/// process and can say nothing about any of that.
 /// <para>
 /// Needs <c>SKP_REALSTACK=1</c>, <c>k8s/port-forward-realstack.ps1</c> and
 /// <c>tools/kafka-dev-broker.ps1 -Up</c>, plus the wiring from Task 6.
@@ -21,7 +21,7 @@ namespace BaseApi.Tests.Live.FailureRecorder;
 /// </summary>
 [Trait("Category", RealStack.Category)]
 [Collection("kafka-broker")]
-public sealed class FailureRecorderLiveTests
+public sealed class OutcomeRecorderLiveTests
 {
     private const string FailuresTopic = "skp-failures";
     private const string LogIndex = "logs-generic.otel-default";
@@ -69,7 +69,7 @@ public sealed class FailureRecorderLiveTests
             var consumer = new ConsumerBuilder<Ignore, string>(new ConsumerConfig
             {
                 BootstrapServers = RealStack.KafkaBrokers,
-                GroupId = $"failure-recorder-test-{Guid.NewGuid():N}",
+                GroupId = $"outcome-recorder-test-{Guid.NewGuid():N}",
                 AutoOffsetReset = AutoOffsetReset.Latest,
                 EnableAutoCommit = false,
             }).Build();
@@ -324,7 +324,7 @@ public sealed class FailureRecorderLiveTests
     {
         RealStack.SkipUnlessEnabled();
 
-        // WHY THE PATH IS RECOVERABLE AT ALL, given that FailureRecordJson deliberately carries no
+        // WHY THE PATH IS RECOVERABLE AT ALL, given that OutcomeRecordJson deliberately carries no
         // path field:
         //
         // - skp-paths carries {"filePath": "..."} -- the ONLY place on the wire, anywhere in this
@@ -335,7 +335,7 @@ public sealed class FailureRecorderLiveTests
         //   opened, before anything downstream can fail -- so it survives independently of whatever
         //   the normalizer later does to the file's CONTENT.
         // - Every hop after the importer passes an ENVELOPE (bytes + ids), never the source path.
-        //   FailureRecorder's own record is exactly that envelope's tail: {correlationId,
+        //   OutcomeRecorder's own record is exactly that envelope's tail: {correlationId,
         //   executionId?, recordedAtUtc}, no path. So the importer's log line is the one and only
         //   place downstream of the failure where an operator can still read the path back -- which
         //   is why this test resolves it through Elasticsearch rather than through the record.
@@ -432,7 +432,7 @@ public sealed class FailureRecorderLiveTests
             // CORRECTED FROM THE BRIEF: the brief expected "no successor accepts it", which is
             // StepOutcomeHandler's TERMINAL-step line -- logged only when a step has NO successor at
             // all. That was true before Task 6 wired the PreviousFailed edge; it is no longer true.
-            // The normalizer step this test fails now HAS a successor (FailureRecorder), so its
+            // The normalizer step this test fails now HAS a successor (OutcomeRecorder), so its
             // outcome takes the other branch in the same method: "advancing {SuccessorCount}
             // successor(s) on a {Result} step". Asserting the brief's original text would assert the
             // wiring is ABSENT -- the opposite of what this test exists to prove.
@@ -498,7 +498,7 @@ public sealed class FailureRecorderLiveTests
             var record = Assert.Single(records);
 
             // OMITTED, not zeroed: "the failed step had no lineage" must stay distinguishable from
-            // "this field was not populated". This assertion is what fails if FailureRecordJson ever
+            // "this field was not populated". This assertion is what fails if OutcomeRecordJson ever
             // loses WhenWritingNull.
             Assert.False(record.TryGetProperty("executionId", out _));
 

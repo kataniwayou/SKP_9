@@ -1,7 +1,9 @@
-# processor-failurerecorder — records THAT a step failed and where to look. Wired on
-# entryCondition: PreviousFailed from every step of filefetcher-archiveexpander-chain, and out to a
-# second kafka-exporter step on skp-failures. A downstream transform: it has an input and it
-# produces output, so it is neither an importer nor an exporter.
+# processor-outcomerecorder — records THAT a step reached a terminal outcome and where to look. The
+# dispatch carries no result, so this processor never learns WHICH outcome fired it and behaves
+# identically on every entry condition; filefetcher-archiveexpander-chain happens to wire it on
+# entryCondition: PreviousFailed from every step, and out to a second kafka-exporter step on
+# skp-failures. A downstream transform: it has an input and it produces output, so it is neither an
+# importer nor an exporter.
 # No Service — its only inbound traffic is the kubelet hitting the pod IP for probes.
 #
 # EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS, exactly as the other processors do.
@@ -9,13 +11,13 @@
 #
 # THE MEMORY LIMIT IS 768Mi AND IT IS NOT ABOUT WHAT THIS PROCESSOR DOES. It builds a record of a
 # few hundred bytes and could run in a fraction of that. What sizes it is what it is HANDED: a hop
-# relocates its payload, so the orchestrator copies the failed step's input into a fresh key and
+# relocates its payload, so the orchestrator copies the predecessor's input into a fresh key and
 # this pod's pre handler reads the whole thing into memory before the transform is entered — and
-# then the transform ignores it. A failed archive-expander or sk-normalizer step means up to ~45 MB
+# then the transform ignores it. An archive-expander or sk-normalizer predecessor means up to ~45 MB
 # of document arriving here. Sizing this lower would turn a failed step into an OOM, which is a
 # POISON MESSAGE and not a failed step: the author never returns, the input key is never reclaimed,
 # RabbitMQ requeues the unacked dispatch, and the replacement pod dies the same way. The processor
-# that exists to report failures must not be the one that cannot survive them.
+# that exists to report outcomes must not be the one that cannot survive them.
 #
 # THERE ARE NO ENV VARS BEYOND the shared eight every processor here carries, deliberately. This
 # processor has no ceiling, no path, no endpoint and no payload of its own — everything it records
@@ -23,10 +25,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: processor-failurerecorder
+  name: processor-outcomerecorder
   namespace: skp
   labels:
-    app: processor-failurerecorder
+    app: processor-outcomerecorder
     app.kubernetes.io/part-of: skp
 spec:
   replicas: 1
@@ -41,15 +43,15 @@ spec:
       maxUnavailable: 1
   selector:
     matchLabels:
-      app: processor-failurerecorder
+      app: processor-outcomerecorder
   template:
     metadata:
       labels:
-        app: processor-failurerecorder
+        app: processor-outcomerecorder
     spec:
       containers:
-        - name: processor-failurerecorder
-          image: processor-failurerecorder:local
+        - name: processor-outcomerecorder
+          image: processor-outcomerecorder:local
           imagePullPolicy: IfNotPresent
           env:
             # NO Service__Name / Service__Version here, deliberately, and do not add them back.

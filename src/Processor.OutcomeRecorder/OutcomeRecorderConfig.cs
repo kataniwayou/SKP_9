@@ -1,6 +1,6 @@
 using BaseProcessor.Core.Configuration;
 
-namespace Processor.FailureRecorder;
+namespace Processor.OutcomeRecorder;
 
 /// <summary>
 /// The step payload, and it holds NOTHING. This is a marker, and it exists only because the type
@@ -11,6 +11,12 @@ namespace Processor.FailureRecorder;
 /// <b>There is nothing for a workflow author to choose.</b> Everything this processor records — the
 /// correlation id, the execution id, the moment — arrives on the dispatch or from the clock. A
 /// payload field could only ever restate or contradict one of them.
+/// <para>
+/// The one candidate is the outcome that dispatched this step, and it cannot come from here either:
+/// a payload field would state what the WORKFLOW wired rather than what the run did, and the two
+/// part company the moment a step is reachable on more than one entry condition. See
+/// <c>OutcomeRecord</c>.
+/// </para>
 /// </para>
 /// <para>
 /// <b>Do not add a null check for this in the processor.</b> <c>ArchiveCollapser</c> is the
@@ -19,4 +25,4 @@ namespace Processor.FailureRecorder;
 /// into symmetry with the processors that do read one.
 /// </para>
 /// </summary>
-public sealed record FailureRecorderConfig : ProcessorConfig;
+public sealed record OutcomeRecorderConfig : ProcessorConfig;

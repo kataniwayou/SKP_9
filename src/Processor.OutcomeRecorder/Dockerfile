@@ -1,5 +1,5 @@
 # Build context is the REPO ROOT, not this directory:
-#   docker build -f src/Processor.FailureRecorder/Dockerfile -t processor-failurerecorder:local .
+#   docker build -f src/Processor.OutcomeRecorder/Dockerfile -t processor-outcomerecorder:local .
 #
 # The runtime base is aspnet, not runtime: BaseConsole.Core carries a FrameworkReference on
 # Microsoft.AspNetCore.App for the embedded Kestrel that serves the health probes, and that needs the
@@ -24,11 +24,11 @@ COPY src/Messaging.Transport/nuget/ src/Messaging.Transport/nuget/
 COPY src/BaseConsole.Core/nuget/ src/BaseConsole.Core/nuget/
 COPY src/BaseApi.Core/nuget/ src/BaseApi.Core/nuget/
 COPY src/BaseProcessor.Core/nuget/ src/BaseProcessor.Core/nuget/
-COPY ["src/Processor.FailureRecorder/Processor.FailureRecorder.csproj", "src/Processor.FailureRecorder/"]
-RUN dotnet restore "src/Processor.FailureRecorder/Processor.FailureRecorder.csproj"
+COPY ["src/Processor.OutcomeRecorder/Processor.OutcomeRecorder.csproj", "src/Processor.OutcomeRecorder/"]
+RUN dotnet restore "src/Processor.OutcomeRecorder/Processor.OutcomeRecorder.csproj"
 
-COPY src/Processor.FailureRecorder/ src/Processor.FailureRecorder/
-RUN dotnet publish "src/Processor.FailureRecorder/Processor.FailureRecorder.csproj" \
+COPY src/Processor.OutcomeRecorder/ src/Processor.OutcomeRecorder/
+RUN dotnet publish "src/Processor.OutcomeRecorder/Processor.OutcomeRecorder.csproj" \
       -c Release -o /publish --no-restore /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-bookworm-slim AS runtime
@@ -37,4 +37,4 @@ COPY --from=build /publish .
 USER app
 # The health listener binds this itself from ConsoleHealth:Port; EXPOSE is documentation for a reader.
 EXPOSE 8081
-ENTRYPOINT ["dotnet", "Processor.FailureRecorder.dll"]
+ENTRYPOINT ["dotnet", "Processor.OutcomeRecorder.dll"]
