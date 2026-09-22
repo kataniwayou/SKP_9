@@ -80,6 +80,60 @@ def check_2a_lookup_is_populated(checks, es_url, api_url):
     return checks.report("2a", "Lookup populated", matched and has_policy and executed, detail)
 
 
+def check_2b_enrichment_lands(checks, es_url):
+    """A document indexed AFTER the pipeline was installed carries the four skp fields.
+
+    Scoped to the last 10 minutes precisely because enrichment is forward-only (spec 6.3): an
+    unscoped query would find 24M pre-install documents and report a false failure.
+    """
+    body = {
+        "size": 1,
+        "query": {"bool": {"filter": [
+            {"term": {"skp.outcome_record": True}},
+            {"range": {"@timestamp": {"gte": "now-10m"}}},
+        ]}},
+        "sort": [{"@timestamp": "desc"}],
+    }
+    try:
+        hits = requests.post(f"{es_url}/{DATA_STREAM}/_search", json=body, timeout=20).json()
+        docs = hits["hits"]["hits"]
+    except Exception as exc:  # noqa: BLE001
+        return checks.report(2, "Enrichment lands", False, f"{type(exc).__name__}: {exc}")
+    if not docs:
+        return checks.report(2, "Enrichment lands", False,
+                             "no skp.outcome_record document in the last 10m - is the feed running?")
+    skp = docs[0]["_source"].get("skp", {})
+    present = [f for f in ("workflow_name", "step_name", "processor_name", "outcome_record")
+               if f in skp]
+    return checks.report(2, "Enrichment lands", len(present) == 4, f"fields present: {present}")
+
+
+def check_3_unmatched_ids_survive(checks, es_url):
+    """An unresolvable GUID leaves the document intact rather than failing it.
+
+    Runs through _simulate rather than indexing junk into the live data stream.
+    """
+    doc = {
+        "pipeline": {"processors": [{"pipeline": {"name": "logs@custom"}}]},
+        "docs": [{"_source": {
+            "scope": {"name": "BaseProcessor.Core.Processing.ProcessedDataHandler"},
+            "attributes": {"Result": "Completed",
+                           "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+                           "WorkflowId": "00000000-0000-0000-0000-000000000000"}}}],
+    }
+    try:
+        result = requests.post(f"{es_url}/_ingest/pipeline/_simulate", json=doc, timeout=20).json()
+        source = result["docs"][0]["doc"]["_source"]
+    except Exception as exc:  # noqa: BLE001
+        return checks.report(3, "Unmatched ids survive", False, f"{type(exc).__name__}: {exc}")
+    skp = source.get("skp", {})
+    ok = (source.get("attributes", {}).get("Result") == "Completed"
+          and skp.get("outcome_record") is True
+          and "workflow_name" not in skp
+          and "enrich_error" not in skp)
+    return checks.report(3, "Unmatched ids survive", ok, f"skp={skp}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -91,6 +145,8 @@ def main():
     checks = Checks()
     check_1_kibana_reaches_es(checks, args.kibana_url)
     check_2a_lookup_is_populated(checks, args.es_url, args.api_url)
+    check_2b_enrichment_lands(checks, args.es_url)
+    check_3_unmatched_ids_survive(checks, args.es_url)
 
     print()
     print(f"{checks.failures} check(s) failed")
