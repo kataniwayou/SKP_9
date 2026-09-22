@@ -757,14 +757,13 @@ panel therefore puts its legend **underneath**, one line per entry, and runs a s
 
 What makes a legend trustworthy is the width a line gets, not the truncation flag. One line per
 entry must ellipsise whenever the name is wider than the space — and an ellipsised legend beside a
-dropped in-arc label is how a value comes to appear nowhere at all. There are two ways to give a
-line enough width, and this board uses one of each:
+dropped in-arc label is how a value comes to appear nowhere at all. Both pies therefore keep the legend on the
+**right** and widen the column (`legendSize: xlarge`, 230px) rather than moving it underneath: one
+line per entry then has room for the whole name, and the donut keeps the vertical space a bottom
+legend would have cost. `legendSize` is honoured by the aggregation-based pie as well as by Lens.
 
-- **Whitelist pies** put the legend **underneath**, where a line has the whole row. Four entries,
-  nothing clipped.
-- **Outcome distribution** keeps it on the **right** and widens the column instead
-  (`legendSize: xlarge`). Twenty entries, none clipped, no scrollbar — and the donut keeps the
-  height a bottom legend would have taken.
+Measured on the live board — 20 entries on Outcome distribution and 4 on the whitelist pies, none
+clipped, neither legend scrolling.
 
 Both panels are `w:48 h:22`, and that height is not cosmetic: a shorter panel shortens the radius,
 which drops the longest value from its arc. Measured on both.
