@@ -65,25 +65,34 @@ Guaranteed rather than conventional: `OutcomeLogScope.BuildScope` renders `resul
 
 **This is the load-bearing decision and the obvious answer is wrong.**
 
-`attributes.Result` is carried by **six** message templates, by design — `OutcomeLogScope`'s own documentation says the field is meant to span a processor's Warning line and the orchestrator's completion line so that `attributes.Result: "Failed"` finds both without a hand-join. Measured over the window:
+`attributes.Result` is carried by **nine** message templates, by design — `OutcomeLogScope`'s own documentation says the field is meant to span a processor's Warning line and the orchestrator's completion line so that `attributes.Result: "Failed"` finds both without a hand-join. The full set, read from every `OutcomeLogScope.BuildScope` call site in `src/`:
 
-| count | template | emitter |
+| template | `Result` | emitter scope |
 |---|---|---|
-| 924 | `branch completed in {ElapsedMs}ms` | processor |
-| 132 | `the author reported the step failed: {Reason}` | processor |
-| 44 | `the author cancelled the branch: {Reason}` | processor |
-| 270 | `the terminal step completed with {Result} — no successor accepts it, the run ends here` | orchestrator |
-| 220 | `the entry step completed with {Result}` | orchestrator |
-| 132 | `advancing {SuccessorCount} successor(s) on a {Result} step — their entry conditions accept it` | orchestrator |
+| `branch completed in {ElapsedMs}ms` | Completed | `…Processing.ProcessedDataHandler` |
+| `output failed its schema {OutputSchemaId} — reported failed: {SchemaErrors}` | Failed | `…Processing.ProcessedDataHandler` |
+| `input failed its schema {InputSchemaId} — reported failed: {SchemaErrors}` | Failed | `…Processing.ProcessDispatchHandler` |
+| `the author reported the step failed: {Reason}` | Failed | `…Processing.ProcessDispatchHandler` |
+| `the author cancelled the branch: {Reason}` | Cancelled | `…Processing.ProcessDispatchHandler` |
+| `the transform faulted — reporting the step failed` | Failed | `…Processing.ProcessDispatchHandler` |
+| `the terminal step completed with {Result} — no successor accepts it, the run ends here` | Completed, Cancelled | `Orchestrator.Messaging.StepOutcomeHandler` |
+| `the entry step completed with {Result}` | Completed | `Orchestrator.Messaging.StepOutcomeHandler` |
+| `advancing {SuccessorCount} successor(s) on a {Result} step — their entry conditions accept it` | Failed | `Orchestrator.Messaging.StepOutcomeHandler` |
 
-Spanning six templates is right for **searching** and fatal for **counting**: a lineage is tallied two or three times. So the dashboard counts a defined subset.
+**Only six of the nine fired during the measured window.** The three that did not are the rarer processor-side failures — an input-schema rejection, an output-schema rejection, and an unhandled transform fault. An earlier draft of this section enumerated the six observed templates and called that the complete set; defining the counted set that way would have made exactly those three failures invisible, which are the ones an operator most needs to see. The set is therefore defined **structurally**, not by enumeration.
+
+Spanning nine templates is right for **searching** and fatal for **counting**: a lineage is tallied two or three times. So the dashboard counts a defined subset.
 
 ### 4.1 The subset
 
 A record is counted if **either**:
 
-- it is one of the **three processor templates**, any `Result`; **or**
-- it is the **orchestrator's terminal-step template** *and* `Result` is `Completed`.
+- its `scope.name` starts with **`BaseProcessor.Core.Processing.`** and it carries `attributes.Result` — any template, any `Result`; **or**
+- its `scope.name` is **`Orchestrator.Messaging.StepOutcomeHandler`**, its template is the **terminal-step** one, *and* `Result` is `Completed`.
+
+The first clause is a prefix test rather than a template list precisely so a **new** framework failure path is counted the day it ships. Every `OutcomeLogScope` call site in `src/` lives in `BaseProcessor.Core.Processing`; no processor emits the scope itself, so the framework owns the vocabulary and the prefix is a complete description of the processor side. Verified against the index: `scope.name` partitions the Result-bearing records cleanly into `ProcessedDataHandler`, `ProcessDispatchHandler` and `StepOutcomeHandler`, with no service emitting under more than its own.
+
+The second clause must still name a template, because all three orchestrator templates share one scope and two of them are duplicates. That list is short and stable — one file, `StepOutcomeHandler`.
 
 **Excluded:** `the entry step completed with {Result}` and `advancing … on a {Result} step`. Both restate an outcome the processor side already emitted for the same step and lineage.
 
@@ -197,7 +206,7 @@ Created, not edited: nothing managed is modified, and an Elasticsearch upgrade t
 1. `enrich` `attributes.WorkflowId` → `skp.workflow_name`, `ignore_missing: true`
 2. `enrich` `attributes.StepId` → `skp.step_name`, `ignore_missing: true`
 3. `enrich` `attributes.ProcessorId` → `skp.processor_name`, `ignore_missing: true`
-4. `set` `skp.outcome_record: true`, conditioned per §4.1 — one of the three processor templates with any `Result`, **or** the terminal-step template with `Result == "Completed"`. The condition is a single painless `if`, and the terminal half of it must test `Result`; omitting that test double-counts every cancellation (§4.2).
+4. `set` `skp.outcome_record: true`, conditioned per §4.1 — `scope.name` prefixed `BaseProcessor.Core.Processing.` with `attributes.Result` present, **or** `StepOutcomeHandler` + the terminal-step template + `Result == "Completed"`. The condition is a single painless `if`. Two things in it are load-bearing: the processor half must be a **prefix test, not a template list**, or the three rarely-fired failure templates of §4 are silently uncounted; and the terminal half must test `Result`, or every cancellation is double-counted (§4.2).
 5. `remove` the intermediate enrich target objects
 
 `on_failure` sets `skp.enrich_error` and lets the document through. **A logging pipeline must never drop a log because a lookup missed**; a silently discarded error record is worse than an unresolved GUID.
@@ -283,7 +292,8 @@ Check 5 is the one that guards the design's central risk. Check 9 is the one tha
 |---|---|---|
 | Enrich policy goes stale after a publish | new workflow shows GUIDs | sync script re-executes the policy as its last step; §9 check 9 exercises it |
 | Ingest pipeline error drops documents | silent log loss | `on_failure` passes the document through with `skp.enrich_error`; never a drop |
-| A future template gains `attributes.Result` | double counting returns | the outcome set is defined in one place (§6.6); checks 4 and 5 are the regression tests |
+| A future template gains `attributes.Result` | miscounting | a processor-side one is picked up automatically by the scope prefix (§4.1); an orchestrator-side one is not, and `StepOutcomeHandler` is the one file to re-read when the orchestrator changes |
+| A rare failure path never fires while the dashboard is being built | a template list looks complete when it is not | the set is a scope prefix, not a list — this is exactly the defect §4 records |
 | A terminal step is added that *does* emit output | it would be witnessed twice | check 5 fails on the `(StepId, ExecutionId)` pair rather than silently inflating a bin |
 | Kibana version drifts from ES | Kibana refuses to start | pin 8.15.5 in the manifest; upgrade both together |
 | Historical data has no enriched fields | dashboard looks empty for old ranges | stated in §6.3 and in the operator notes; default the dashboard's time range to a recent window |

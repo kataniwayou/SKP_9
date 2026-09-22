@@ -73,14 +73,30 @@ on `body.text`, or better, aggregate on `attributes.*`, which are all indexed ke
 Field shape: `body.text`, `severity_text`, `attributes.{…}`, `resource.attributes.{…}`.
 `@timestamp` is epoch-millis-as-string but is mapped `date`, so range queries work.
 
-### `attributes.Result` spans six templates, and counting all of them is wrong
+### Only KafkaExporter withholds a Result-bearing log, and it is the framework's doing
+
+All nine processors send a `StepOutcome` to the orchestrator. Exactly one — `Processor.KafkaExporter`
+— emits **no** `attributes.Result` log record on success, and it is not that processor's code:
+`BaseProcessor.EndsLineage` is virtual-false and overridden `true` only in `BaseExporter`. A sink
+sends no branch, so the `-post` queue never fires, so `ProcessedDataHandler` never runs and
+`branch completed` is never logged. `ProcessDispatchHandler` compensates on the message side
+(`StepOutcome(…, Guid.Empty, Completed)`) and deliberately omits the scope, with the comment saying
+so. A **failed** export does log, through the catch chain — so the exporter is visible when it
+breaks and invisible when it works.
+
+### `attributes.Result` spans nine templates, and counting all of them is wrong
 
 By design — `OutcomeLogScope` documents that the field should span processor and orchestrator so a
 search finds both. For **counting**, that tallies a lineage two or three times. The spec's §4 has
-the full table and the counted subset. The one trap: the orchestrator's terminal-step template
-carries `Completed` for terminal-only steps (new information — it is the only witness for
-`kafka-exporter`) **and** `Cancelled` restating a cancel the processor already emitted (a duplicate).
-Count the terminal template only where `Result` is `Completed`.
+the full table and the counted subset. Two traps, both found the hard way:
+
+- The orchestrator's terminal-step template carries `Completed` for terminal-only steps (new
+  information — it is the only witness for `kafka-exporter`) **and** `Cancelled` restating a cancel
+  the processor already emitted (a duplicate). Count it only where `Result` is `Completed`.
+- **Only six of the nine templates fired during a two-hour run.** The three that did not are
+  `input failed its schema`, `output failed its schema` and `the transform faulted`. Defining the
+  counted set by listing observed templates would have silently dropped exactly the failures that
+  matter most. The set is a **`scope.name` prefix** — `BaseProcessor.Core.Processing.` — not a list.
 
 Healthy shape for this workflow under the simulator: **30 outcomes per cycle, 26:3:1**.
 
