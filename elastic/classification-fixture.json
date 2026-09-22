@@ -1,0 +1,149 @@
+{
+  "_comment": [
+    "The counted-set test, carried over from simulate-outcome-classification.json when the rule",
+    "moved out of the ingest pipeline and into the dashboard's own query.",
+    "",
+    "WHY IT HAD TO BE CARRIED OVER RATHER THAN DROPPED. Three of these templates -- an input-schema",
+    "rejection, an output-schema rejection and an unhandled transform fault -- do not fire in normal",
+    "traffic. They are also the three an operator most needs to see. A live measurement cannot cover",
+    "them, so without this fixture the rule would be verified only on the six templates that happen",
+    "to fire, which is exactly the defect section 4 of the spec exists to record.",
+    "",
+    "The old form was a body for _ingest/pipeline/_simulate. There is no pipeline any more, so these",
+    "are indexed into a scratch index and the rule is run against them as a query.",
+    "",
+    "TWO DIFFERENCES FROM THE OLD FIXTURE, both forced by the new rule:",
+    "  1. Every document carries resource.attributes.service.name. The old rule keyed on scope.name",
+    "     and never looked at the service; the new one asks whether the emitter is the orchestrator.",
+    "  2. There is a thirteenth document. ProcessDispatchHandler now emits the terminal step's own",
+    "     Completed outcome, which did not exist when the first twelve were written, and it is the",
+    "     document that makes the orchestrator's copy redundant.",
+    "",
+    "THE VERDICT THAT MOVED: doc 7, the orchestrator's terminal-step Completed. The old rule counted",
+    "it -- it was the entire reason the old rule needed a second clause. The new rule does not,",
+    "because doc 13 now carries that outcome from the processor side, with an EntryId the duplicate",
+    "check can use."
+  ],
+
+  "rule_kql": "attributes.Result:* and not resource.attributes.service.name:\"orchestrator\"",
+
+  "docs": [
+    { "id": "01-branch-completed", "counted": true,
+      "why": "the ordinary success of a step that hands on output",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Processing.ProcessedDataHandler" },
+        "resource": { "attributes": { "service.name": "file-fetcher" } },
+        "attributes": { "Result": "Completed", "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+          "WorkflowId": "1a56b3ca-e276-4815-87fa-5c2f48ab6dad",
+          "StepId": "b9c13653-6558-4445-9d20-ab0a6d3fd48f",
+          "ProcessorId": "8f8344b1-caf6-4482-8710-a3249a238e3c",
+          "EntryId": "154f4f9c-0000-4000-8000-000000000001" } } },
+
+    { "id": "02-output-schema-failed", "counted": true,
+      "why": "RARE IN TRAFFIC - an output-schema rejection; one of the three this fixture exists for",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Processing.ProcessedDataHandler" },
+        "resource": { "attributes": { "service.name": "archive-expander" } },
+        "attributes": { "Result": "Failed",
+          "{OriginalFormat}": "output failed its schema {OutputSchemaId} — reported failed: {SchemaErrors}",
+          "EntryId": "154f4f9c-0000-4000-8000-000000000002" } } },
+
+    { "id": "03-input-schema-failed", "counted": true,
+      "why": "RARE IN TRAFFIC - an input-schema rejection; one of the three this fixture exists for",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler" },
+        "resource": { "attributes": { "service.name": "archive-expander" } },
+        "attributes": { "Result": "Failed",
+          "{OriginalFormat}": "input failed its schema {InputSchemaId} — reported failed: {SchemaErrors}",
+          "EntryId": "154f4f9c-0000-4000-8000-000000000003" } } },
+
+    { "id": "04-author-reported-failed", "counted": true,
+      "why": "the author's own failure report",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler" },
+        "resource": { "attributes": { "service.name": "sk-normalizer" } },
+        "attributes": { "Result": "Failed",
+          "{OriginalFormat}": "the author reported the step failed: {Reason}",
+          "EntryId": "154f4f9c-0000-4000-8000-000000000004" } } },
+
+    { "id": "05-author-cancelled", "counted": true,
+      "why": "a policy rejection, and the processor is always its witness - never the orchestrator",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler" },
+        "resource": { "attributes": { "service.name": "sk-normalizer" } },
+        "attributes": { "Result": "Cancelled",
+          "{OriginalFormat}": "the author cancelled the branch: {Reason}",
+          "EntryId": "154f4f9c-0000-4000-8000-000000000005" } } },
+
+    { "id": "06-transform-faulted", "counted": true,
+      "why": "RARE IN TRAFFIC - an unhandled transform fault; one of the three this fixture exists for",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler" },
+        "resource": { "attributes": { "service.name": "archive-collapser" } },
+        "attributes": { "Result": "Failed",
+          "{OriginalFormat}": "the transform faulted — reporting the step failed",
+          "EntryId": "154f4f9c-0000-4000-8000-000000000006" } } },
+
+    { "id": "07-orchestrator-terminal-completed", "counted": false,
+      "why": "THE VERDICT THAT MOVED. The old rule counted this and needed a whole second clause to do it. Doc 13 now carries the same outcome from the processor side, so counting this one as well would double it",
+      "_source": {
+        "scope": { "name": "Orchestrator.Messaging.StepOutcomeHandler" },
+        "resource": { "attributes": { "service.name": "orchestrator" } },
+        "attributes": { "Result": "Completed",
+          "{OriginalFormat}": "the terminal step completed with {Result} — no successor accepts it, the run ends here" } } },
+
+    { "id": "08-orchestrator-terminal-cancelled", "counted": false,
+      "why": "a restatement of doc 5 - the processor already reported the cancellation for the same step and lineage",
+      "_source": {
+        "scope": { "name": "Orchestrator.Messaging.StepOutcomeHandler" },
+        "resource": { "attributes": { "service.name": "orchestrator" } },
+        "attributes": { "Result": "Cancelled",
+          "{OriginalFormat}": "the terminal step completed with {Result} — no successor accepts it, the run ends here" } } },
+
+    { "id": "09-orchestrator-entry-step", "counted": false,
+      "why": "restates an outcome the processor side already emitted for the same step",
+      "_source": {
+        "scope": { "name": "Orchestrator.Messaging.StepOutcomeHandler" },
+        "resource": { "attributes": { "service.name": "orchestrator" } },
+        "attributes": { "Result": "Completed",
+          "{OriginalFormat}": "the entry step completed with {Result}" } } },
+
+    { "id": "10-orchestrator-advancing", "counted": false,
+      "why": "restates a failure the processor already reported, while advancing successors that accept it",
+      "_source": {
+        "scope": { "name": "Orchestrator.Messaging.StepOutcomeHandler" },
+        "resource": { "attributes": { "service.name": "orchestrator" } },
+        "attributes": { "Result": "Failed",
+          "{OriginalFormat}": "advancing {SuccessorCount} successor(s) on a {Result} step — their entry conditions accept it" } } },
+
+    { "id": "11-zero-guids", "counted": true,
+      "why": "a counted record is counted on its Result and its emitter, never on whether its ids resolve to anything",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Processing.ProcessedDataHandler" },
+        "resource": { "attributes": { "service.name": "file-persister" } },
+        "attributes": { "Result": "Completed", "{OriginalFormat}": "branch completed in {ElapsedMs}ms",
+          "WorkflowId": "00000000-0000-0000-0000-000000000000",
+          "StepId": "00000000-0000-0000-0000-000000000000",
+          "ProcessorId": "00000000-0000-0000-0000-000000000000",
+          "EntryId": "154f4f9c-0000-4000-8000-000000000011" } } },
+
+    { "id": "12-no-result-at-all", "counted": false,
+      "why": "a future framework line under a processor service that carries no Result - the rule must not sweep it in",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Consuming.SomeFutureHandler" },
+        "resource": { "attributes": { "service.name": "file-fetcher" } },
+        "attributes": { "{OriginalFormat}": "a record with no Result at all" } } },
+
+    { "id": "13-processor-terminal-completed", "counted": true,
+      "why": "NEW. The sink's own success, which had no processor-side witness until ProcessDispatchHandler was changed. It carries an EntryId, so unlike doc 7 the duplicate check can reach it",
+      "_source": {
+        "scope": { "name": "BaseProcessor.Core.Processing.ProcessDispatchHandler" },
+        "resource": { "attributes": { "service.name": "kafka-exporter" } },
+        "attributes": { "Result": "Completed",
+          "{OriginalFormat}": "the terminal step completed — there is no output to hand on",
+          "WorkflowId": "1a56b3ca-e276-4815-87fa-5c2f48ab6dad",
+          "StepId": "eb707c5e-24af-4d99-8c97-f127b560e4b4",
+          "ProcessorId": "157a0f40-0000-4000-8000-000000000001",
+          "EntryId": "154f4f9c-0000-4000-8000-000000000013" } } }
+  ]
+}
