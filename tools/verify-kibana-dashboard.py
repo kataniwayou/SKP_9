@@ -70,8 +70,18 @@ DASHBOARD_KQL = f'({COUNTED_KQL}) or attributes.WhitelistVerdict:*'
 PANEL_GUARDS = {
     "skp-outcomes-bins": "attributes.Result:*",
     "skp-outcomes-pie": "attributes.Result:*",
-    "skp-whitelist-pie": "attributes.WhitelistVerdict:*",
+    # Not a Lens panel: the whitelist board is one aggregation-based pie split into one donut per
+    # (processor, whitelist) pair, because a Lens partition chart has no split-chart dimension --
+    # its only groups are "Slice by" and "Metric", verified in the editor. Its guard is load-bearing
+    # for a second reason than the bins panel's: without it the SPLIT would draw a pie per processor
+    # for every step-outcome record too, each one empty, since those records have no verdict to
+    # slice.
+    "skp-whitelist-pies": "attributes.WhitelistVerdict:*",
 }
+
+# The one pair-per-pie bucket. Asserted by check 11 so a later edit cannot quietly go back to
+# splitting on ProcessorId alone, which silently merges a processor's two lists into one donut.
+WHITELIST_SPLIT_FIELD = "whitelist_owner"
 
 
 class Checks:
@@ -436,7 +446,7 @@ def check_11_export_states_the_rule_once(checks):
         return checks.report(11, "Export states the rule once", False, f"{type(exc).__name__}: {exc}")
 
     queries, unknown_keys, option_scope = {}, [], []
-    filters_by_dashboard, panel_queries = {}, {}
+    filters_by_dashboard, panel_queries, vis_states = {}, {}, {}
     for obj in objects:
         if obj.get("type") == "dashboard":
             source = json.loads(obj["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
@@ -461,6 +471,10 @@ def check_11_export_states_the_rule_once(checks):
                 option_scope.append(json.dumps(flt.get("query", {}), sort_keys=True))
         if obj.get("type") == "lens":
             panel_queries[obj["id"]] = obj["attributes"]["state"].get("query", {}).get("query", "")
+        if obj.get("type") == "visualization":
+            source = json.loads(obj["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
+            panel_queries[obj["id"]] = source.get("query", {}).get("query", "")
+            vis_states[obj["id"]] = json.loads(obj["attributes"].get("visState", "{}"))
         if obj.get("type") == "index-pattern":
             for field, fmt in json.loads(obj["attributes"].get("fieldFormatMap", "{}")).items():
                 if "unknownKeyValue" in fmt.get("params", {}):
@@ -487,16 +501,22 @@ def check_11_export_states_the_rule_once(checks):
     missing_guards = sorted(
         i for i, expected in PANEL_GUARDS.items() if panel_queries.get(i) != expected)
 
+    split = [a for a in vis_states.get("skp-whitelist-pies", {}).get("aggs", [])
+             if a.get("schema") == "split"]
+    pair_split = (len(split) == 1
+                  and split[0]["params"]["field"] == WHITELIST_SPLIT_FIELD)
+
     # EVERY dashboard's controls must be bounded, not just the outcomes one: an unbounded Workflow
     # dropdown lists every id in the window whether or not the board can say anything about it.
     unbounded = sorted(i for i, f in filters_by_dashboard.items() if not f)
 
     ok = (states_rule and restated == 1 and not unbounded and not missing_guards
-          and not unknown_keys and stale == 0 and scoped)
+          and pair_split and not unknown_keys and stale == 0 and scoped)
     return checks.report(11, "Export states the rule once", ok,
                          f"dashboard_query_matches={states_rule}, "
                          f"rule_stated_times={restated}, "
                          f"panels_missing_their_guard={missing_guards or 'none'}, "
+                         f"whitelist_splits_on_the_pair={pair_split}, "
                          f"dashboards_with_unbounded_controls={unbounded or 'none'}, "
                          f"stale_enrichment_references={stale}, "
                          f"formatters_setting_unknownKeyValue={unknown_keys or 'none'}, "

@@ -711,12 +711,13 @@ blank field (the list was never consulted). Counting either as `Unlisted` would 
 defect into a chart an operator reads as upstream behaviour — the same conflation
 `UnconfiguredFieldWhitelist` exists to prevent.
 
-### 14.3 On the outcomes board, left of Outcome distribution
+### 14.3 On the outcomes board, its own full-width row
 
 It shipped first as its own dashboard, because `skp-operator-outcomes` was scoped by a
-dashboard-level query requiring `attributes.Result` to exist. It now sits on that board instead,
-at `x:0` on the pie row, with Outcome distribution moved to `x:24` — the two belong side by side,
-because an Unlisted verdict here IS the Cancelled slice there, one step later.
+dashboard-level query requiring `attributes.Result` to exist. It now sits on that board instead, on
+its own full-width row at `y:41 w:48`, with Outcome distribution below it at `y:59`. The two belong
+together, because an Unlisted verdict here IS the Cancelled slice below, one step later — but the
+whitelist panel is not one chart, and that is what makes it need the whole row.
 
 **The dashboard now hosts two atoms, and that costs three edits, not one.**
 
@@ -736,19 +737,46 @@ because an Unlisted verdict here IS the Cancelled slice there, one step later.
 Check 11 was rewritten around this: it pins the union, counts the outcome rule's occurrences in the
 export (exactly one), and asserts each panel carries its expected guard.
 
-### 14.4 The panel
+### 14.4 The panel: one donut per (processor, whitelist) pair
 
-One donut, `skp-whitelist-pie`: inner ring `WhitelistVerdict`, outer ring `WhitelistValue`, metric
-a record count, nested legend on. `Listed` takes the outcomes board's green and `Unlisted` its
-yellow — the same yellow `Cancelled` carries there, because an unlisted value *is* the cancel the
-operator meets downstream. Red stays reserved for defects.
+`skp-whitelist-pies` is **one panel holding N donuts** — one per pair, so two processors with one
+list each and one processor with two lists both draw two. Inside each: inner ring
+`WhitelistVerdict`, outer ring `WhitelistValue`, metric a record count. `Listed` takes the outcomes
+board's green and `Unlisted` its yellow — the same yellow `Cancelled` carries below, because an
+unlisted value *is* the cancel the operator meets downstream. Red stays reserved for defects.
 
 `WhitelistValue` is unbounded — every name upstream ever sends becomes a slice — so it is top 20
 with a real **Other** bucket rather than a silent truncation, which keeps the tail's weight visible.
 
-Root is a control, not a third ring: with two lists a three-level donut is unreadable, and "which
-list" is a filter question, not a proportion question. It joins the outcomes board's existing
-control group as a fourth control.
+**It is an aggregation-based visualization, not Lens, and that is forced.** A Lens partition chart
+exposes exactly two dimension groups, "Slice by" and "Metric" — verified in the editor on 8.15.5.
+There is no split-chart dimension, so no Lens panel can draw a data-driven number of pies. The
+aggregation-based pie has both `Split slices` and `Split chart`. It is deprecated and on the removal
+path for 9.x; the surviving alternative is Vega, which can facet freely but is a hand-written spec
+with no field formatters and no shared palette. That is the migration if the target cluster moves.
+
+**The pair is one field, because two split buckets would draw a grid.** Splitting on `ProcessorId`
+and `WhitelistRoot` separately renders processors x roots, so one processor holding two lists and
+two processors holding one each would each draw two real pies **plus two blank cells**. The data
+view therefore carries a runtime field, `whitelist_owner`, composed per record as
+`sk-normalizer_1.0.0 · chain-artists` from `resource.attributes.service.name`, `service.version`
+and `attributes.WhitelistRoot` — all three already on every whitelist record.
+
+Composing it from the record rather than from `ProcessorId` also removes a failure the id route
+carries: the `ProcessorId -> name_version` formatter is a hand-maintained map of 9 ids, and a tenth
+processor would render as a raw GUID until `generate-field-formatters.py` is re-run. The runtime
+field produces the identical spelling from data that is always present.
+
+Root remains a control as well, for focusing a board with many lists.
+
+**A slice click cross-filters the board; it does not open Discover.** The Lens panel offered a
+drilldown from the action menu a slice click opened. An aggregation-based pie never opens that menu
+— it opens "Select filters to apply", listing both dimensions, and applies them to the dashboard.
+The drilldown configuration was removed from the panel rather than left in place describing an
+interaction it cannot perform. The behaviour that replaces it is arguably the better one here:
+filtering by `whitelist_owner: sk-normalizer_1.0.0 · chain-artists` and `WhitelistVerdict: Unlisted`
+narrows the bins and the outcome pie below to exactly the records that rejection produced. The panel
+also gains **Download CSV**, which the Lens panel did not offer.
 
 ### 14.5 Known limits
 
