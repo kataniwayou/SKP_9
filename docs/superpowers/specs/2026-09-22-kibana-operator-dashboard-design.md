@@ -748,6 +748,14 @@ unlisted value *is* the cancel the operator meets downstream. Red stays reserved
 `WhitelistValue` is unbounded — every name upstream ever sends becomes a slice — so it is top 20
 with a real **Other** bucket rather than a silent truncation, which keeps the tail's weight visible.
 
+**That same unboundedness is why the legend must not truncate.** A sector label that does not fit
+its arc is DROPPED, not shortened: with the default hole and a truncating legend,
+`Unapproved Sim Artist` rendered nowhere at all — no outer label on its half of the donut, and
+`Unapprove...` in the legend — while the shorter `SKP Live Suite` opposite it rendered fine. The
+panel therefore runs `truncateLegend: false`, `maxLegendLines: 3` and a smaller hole
+(`emptySizeRatio: 0.15`) to widen the rings. The first two are the durable guarantee, since a name
+long enough to be dropped from its arc can always arrive; the hole size only buys headroom.
+
 **It is an aggregation-based visualization, not Lens, and that is forced.** A Lens partition chart
 exposes exactly two dimension groups, "Slice by" and "Metric" — verified in the editor on 8.15.5.
 There is no split-chart dimension, so no Lens panel can draw a data-driven number of pies. The
