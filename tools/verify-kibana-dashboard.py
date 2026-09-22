@@ -57,6 +57,22 @@ COUNTED_KQL = 'attributes.Result:* and not resource.attributes.service.name:"orc
 # rather than "there is one dashboard".
 OUTCOMES_DASHBOARD = "skp-operator-outcomes"
 
+# The dashboard hosts TWO atoms since 2026-09-22c: a step outcome (one record per step) and a
+# whitelist lookup (one record per field checked). Its query is their union, with COUNTED_KQL kept
+# verbatim as a parenthesised clause so the rule is still stated exactly once in the export.
+DASHBOARD_KQL = f'({COUNTED_KQL}) or attributes.WhitelistVerdict:*'
+
+# Each panel guards its own atom. THE BINS PANEL MAKES THIS LOAD-BEARING: it counts records split by
+# attributes.StepId, and a whitelist record carries a StepId, so without the guard the union query
+# would inflate every step's series and check 7 would stop matching. The outcomes pie terms on
+# attributes.Result and is immune by construction; it carries the guard anyway, so a future change
+# to its aggregation cannot quietly start counting the other atom.
+PANEL_GUARDS = {
+    "skp-outcomes-bins": "attributes.Result:*",
+    "skp-outcomes-pie": "attributes.Result:*",
+    "skp-whitelist-pie": "attributes.WhitelistVerdict:*",
+}
+
 
 class Checks:
     """Collects results so one failure does not hide the checks after it."""
@@ -420,7 +436,7 @@ def check_11_export_states_the_rule_once(checks):
         return checks.report(11, "Export states the rule once", False, f"{type(exc).__name__}: {exc}")
 
     queries, unknown_keys, option_scope = {}, [], []
-    filters_by_dashboard = {}
+    filters_by_dashboard, panel_queries = {}, {}
     for obj in objects:
         if obj.get("type") == "dashboard":
             source = json.loads(obj["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
@@ -443,12 +459,14 @@ def check_11_export_states_the_rule_once(checks):
             filters_by_dashboard[obj["id"]] = source.get("filter", [])
             for flt in source.get("filter", []):
                 option_scope.append(json.dumps(flt.get("query", {}), sort_keys=True))
+        if obj.get("type") == "lens":
+            panel_queries[obj["id"]] = obj["attributes"]["state"].get("query", {}).get("query", "")
         if obj.get("type") == "index-pattern":
             for field, fmt in json.loads(obj["attributes"].get("fieldFormatMap", "{}")).items():
                 if "unknownKeyValue" in fmt.get("params", {}):
                     unknown_keys.append(field)
 
-    raw = open(EXPORT, encoding="utf-8").read()
+    raw = raw_export = open(EXPORT, encoding="utf-8").read()
     stale = raw.count("skp.outcome_record") + raw.count("skp.step_name") + \
         raw.count("skp.workflow_name") + raw.count("skp.processor_name")
 
@@ -457,19 +475,28 @@ def check_11_export_states_the_rule_once(checks):
 
     # The outcomes dashboard states the rule, and no other object may restate it -- that second
     # half is what the original flat comparison was really enforcing, and it is kept explicitly.
-    states_rule = queries.get(OUTCOMES_DASHBOARD) == COUNTED_KQL
-    restated = sorted(i for i, q in queries.items()
-                      if i != OUTCOMES_DASHBOARD and COUNTED_KQL in q)
+    states_rule = queries.get(OUTCOMES_DASHBOARD) == DASHBOARD_KQL
+    # Still exactly once, now measured over the whole file rather than over dashboard queries:
+    # the rule is a clause inside DASHBOARD_KQL, and no other object may repeat it.
+    # Backslashes stripped first: searchSourceJSON is a JSON string inside a JSON object, so the
+    # quotes in the rule are escaped once or twice depending on nesting depth. Counting the raw
+    # bytes finds nothing and reads as "the rule is stated zero times", which is not a state the
+    # file can be in.
+    restated = raw_export.replace("\\", "").count(COUNTED_KQL)
+
+    missing_guards = sorted(
+        i for i, expected in PANEL_GUARDS.items() if panel_queries.get(i) != expected)
 
     # EVERY dashboard's controls must be bounded, not just the outcomes one: an unbounded Workflow
     # dropdown lists every id in the window whether or not the board can say anything about it.
     unbounded = sorted(i for i, f in filters_by_dashboard.items() if not f)
 
-    ok = (states_rule and not restated and not unbounded
+    ok = (states_rule and restated == 1 and not unbounded and not missing_guards
           and not unknown_keys and stale == 0 and scoped)
     return checks.report(11, "Export states the rule once", ok,
                          f"dashboard_query_matches={states_rule}, "
-                         f"rule_restated_by={restated or 'none'}, "
+                         f"rule_stated_times={restated}, "
+                         f"panels_missing_their_guard={missing_guards or 'none'}, "
                          f"dashboards_with_unbounded_controls={unbounded or 'none'}, "
                          f"stale_enrichment_references={stale}, "
                          f"formatters_setting_unknownKeyValue={unknown_keys or 'none'}, "

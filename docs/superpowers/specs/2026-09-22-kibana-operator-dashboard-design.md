@@ -711,11 +711,30 @@ blank field (the list was never consulted). Counting either as `Unlisted` would 
 defect into a chart an operator reads as upstream behaviour — the same conflation
 `UnconfiguredFieldWhitelist` exists to prevent.
 
-### 14.3 Its own dashboard, not a panel on the outcomes board
+### 14.3 On the outcomes board, left of Outcome distribution
 
-`skp-operator-outcomes` is scoped by a dashboard-level query requiring `attributes.Result` to
-exist. Whitelist records carry no `Result`, so they are invisible there, and widening that query to
-admit them would change the denominator of every panel already on it.
+It shipped first as its own dashboard, because `skp-operator-outcomes` was scoped by a
+dashboard-level query requiring `attributes.Result` to exist. It now sits on that board instead,
+at `x:0` on the pie row, with Outcome distribution moved to `x:24` — the two belong side by side,
+because an Unlisted verdict here IS the Cancelled slice there, one step later.
+
+**The dashboard now hosts two atoms, and that costs three edits, not one.**
+
+1. The query is their union, with the outcome rule kept verbatim as a parenthesised clause so it
+   is still stated exactly once in the export:
+   `(attributes.Result:* and not resource.attributes.service.name:"orchestrator") or attributes.WhitelistVerdict:*`
+2. The control-bounding filter gains `exists attributes.WhitelistVerdict`, or the whitelist records
+   are filtered away before the panel's own guard is ever applied.
+3. **Every panel gains a guard on its own atom**, and on the bins panel this is load-bearing rather
+   than tidy. `Step outcomes over time` counts *records* split by `attributes.StepId`, and a
+   whitelist record carries a StepId — so under the union query alone it would have inflated the
+   Acme step's series with lookups that are not step outcomes, and check 7 would have stopped
+   matching. The outcomes pie terms on `attributes.Result` and is immune by construction; it
+   carries the guard anyway, so a later change to its aggregation cannot quietly start counting the
+   other atom.
+
+Check 11 was rewritten around this: it pins the union, counts the outcome rule's occurrences in the
+export (exactly one), and asserts each panel carries its expected guard.
 
 ### 14.4 The panel
 
@@ -728,8 +747,8 @@ operator meets downstream. Red stays reserved for defects.
 with a real **Other** bucket rather than a silent truncation, which keeps the tail's weight visible.
 
 Root is a control, not a third ring: with two lists a three-level donut is unreadable, and "which
-list" is a filter question, not a proportion question. A `Verdict` control is there too, so the
-outer ring can be read as one side at a time.
+list" is a filter question, not a proportion question. It joins the outcomes board's existing
+control group as a fourth control.
 
 ### 14.5 Known limits
 
