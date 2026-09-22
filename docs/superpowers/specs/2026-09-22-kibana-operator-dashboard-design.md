@@ -297,6 +297,7 @@ Check 5 is the one that guards the design's central risk. Check 9 is the one tha
 | A terminal step is added that *does* emit output | it would be witnessed twice | check 5 fails on the `(StepId, ExecutionId)` pair rather than silently inflating a bin |
 | Kibana version drifts from ES | Kibana refuses to start | pin 8.15.5 in the manifest; upgrade both together |
 | Historical data has no enriched fields | dashboard looks empty for old ranges | stated in §6.3 and in the operator notes; default the dashboard's time range to a recent window |
+| A log record is lost in transit | a bin under-reports, and a missing bar reads as a failed step | **unfixable here, and it must be in the operator notes.** The authoritative outcome is the `StepOutcome` on `orchestrator-result`, which never reaches Elasticsearch; this dashboard reads the *log* of that outcome, exported best-effort. The collector's logs pipeline has no processors and drops nothing deliberately, but before retry and a sending queue were added on 2026-09-11 a failed export silently lost 1–3 records every ~15s, surfacing as whole hops missing from a correlation trace. Past 5 retries or a full 5000-item queue it still can. Treat the counts as an observability signal, not an accounting ledger |
 | ES is unmanaged in `k8s/` | Kibana is manifested against a dependency that is not | called out in §2 as an explicit non-goal, not an oversight |
 
 ## 11. Decisions taken, with the alternative recorded
