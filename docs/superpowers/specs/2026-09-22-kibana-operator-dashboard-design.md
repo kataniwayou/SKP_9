@@ -711,11 +711,11 @@ blank field (the list was never consulted). Counting either as `Unlisted` would 
 defect into a chart an operator reads as upstream behaviour — the same conflation
 `UnconfiguredFieldWhitelist` exists to prevent.
 
-### 14.3 On the outcomes board, its own full-width row
+### 14.3 On the outcomes board, its own full-width row at the bottom
 
 It shipped first as its own dashboard, because `skp-operator-outcomes` was scoped by a
-dashboard-level query requiring `attributes.Result` to exist. It now sits on that board instead, on
-its own full-width row at `y:41 w:48`, with Outcome distribution below it at `y:59`. The two belong
+dashboard-level query requiring `attributes.Result` to exist. It now sits on that board instead, as
+the **bottom** row at `y:55 w:48`, under Outcome distribution at `y:41`. The two belong
 together, because an Unlisted verdict here IS the Cancelled slice below, one step later — but the
 whitelist panel is not one chart, and that is what makes it need the whole row.
 
@@ -812,6 +812,19 @@ values.** A step-outcome record carries no `WhitelistVerdict` and no `whitelist_
 filter drawn from this panel excludes every record the other two panels count, and vice versa. The
 Lens version behaved identically on a slice click; it merely offered the Discover drilldown as an
 alternative that sidestepped it.
+
+**The Step control blanks it, and that is the same cause seen from the other side.** Measured
+2026-09-23: selecting `simple-stepC_1.0.0` — a step that gates on nothing — leaves this panel
+reading "No results found", because a verdict record carries the StepId of *its* step and no other.
+The requirement "the whitelist row always shows every (step, list) pie regardless of the Step
+dropdown" therefore cannot be met while the panel shares a dashboard with that control: Kibana
+applies every dashboard filter to every panel, the aggregation-based panel's menu offers no
+filter opt-out (Settings is title and description only), and Lens's per-layer "ignore global
+filters" is both unavailable here and all-or-nothing — it would drop the Workflow scoping too.
+
+Three ways out, none free: move this panel back to its own dashboard, which is exactly the design
+§14.3 replaced; drop the Step control from this board, which costs the outcome panels their main
+affordance; or accept the coupling.
 
 So the two atoms sit side by side and can be *read* together, but they cannot cross-filter each
 other. An operator who clicks a slice must clear the filter to get the outcome panels back. The
