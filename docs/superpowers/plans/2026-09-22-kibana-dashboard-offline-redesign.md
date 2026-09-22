@@ -264,15 +264,23 @@ Full verification run after the deletions, from a cold Kibana import, to prove t
 
 ---
 
-## Deferred decision: the chain diagram on the dashboard
+## Decided: the chain diagram stays off the dashboard
 
-Not a task, because what it is *for* has not been decided and that decides the answer.
+**Decided 2026-09-22 — do not embed it, and do not add a `links` panel for it either.** The
+diagram is orientation, and `docs/testing/kibana-operator-dashboard.md` is already where a
+reader is sent for that. It costs nothing, it keeps one source of truth, and it leaves the
+dashboard as the five things it was asked for.
+
+The findings below are kept because re-establishing them costs a session, and because a later
+reader asking "could we just embed it?" deserves the measured answer rather than the decision.
 
 Established against the live Kibana 8.15.5: a `links` panel is available but renders links, not content; an Image panel is **probably** available (`image` is not an allowed saved-object type, but `POST /api/files/find` returns 200, so the Files plugin is present — confirm in the UI); there is **no iframe or raw-HTML panel**, and the Markdown panel sanitizes HTML, so the inline `<svg>` in `docs/diagrams/filefetcher-archiveexpander-chain.html` cannot render through it; and `file:///C:/...` will not load from a page served over http, so the local path is unusable as a link target or a panel source regardless of panel type.
 
-**Pre-committed default: option 4 — link it from `docs/testing/kibana-operator-dashboard.md` and leave it off the dashboard.** The operator notes are already where a reader is sent, it costs nothing, and it keeps one source of truth. Proceed on this unless the diagram is meant to be *read beside the bars while diagnosing* rather than to orient a newcomer — in which case option 2 (serve the HTML over http, add a `links` panel) is the one to plan, because it keeps the diagram interactive and single-sourced. Option 1 (render to an image) buys visual presence at the cost of a second copy that drifts; option 3 (re-author as Vega) is a substantial rewrite of a hand-drawn schematic.
-
-This needs a go/no-go on the default, not a menu.
+The three options not taken, and what each would have cost: serving the HTML over http and adding
+a `links` panel keeps the diagram interactive and single-sourced but needs somewhere to serve it
+from, and nothing in `k8s/` does that today; rendering it to an image buys visual presence at the
+cost of a second copy that drifts from the HTML; re-authoring as Vega makes it a true panel and is a
+substantial rewrite of a hand-drawn schematic.
 
 ---
 
@@ -281,4 +289,7 @@ This needs a go/no-go on the default, not a menu.
 - **Check 9's second workflow.** It is a traffic gap — five workflows are stopped — not a dashboard change. Starting one is a precondition for closing the check, not work this plan does.
 - **Adopting Elasticsearch into `k8s/`.** Still the explicit non-goal of §2.
 - **Everything in §12.** Failure-reason table, failure-ratio panel, heartbeat tile, duration percentiles, lineage funnel. Declined during the original design and not revisited here.
-- **The org-cluster unknowns of §13.9.** Four questions — Kibana's presence and version, whether data-view edits are permitted, the Space, and the data stream's identity — are unanswered, and each can invalidate part of this plan. They are answered by asking, not by building.
+- **The org-cluster unknowns of §13.9.** Data-view edits **are** permitted (answered 2026-09-22), so
+  Half 1 stands. Three remain — Kibana's presence and version, the Space, and the data stream's
+  identity — and each can still invalidate part of this plan. They are answered by asking, not by
+  building.

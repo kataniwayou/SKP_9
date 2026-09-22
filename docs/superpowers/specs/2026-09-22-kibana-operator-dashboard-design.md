@@ -553,8 +553,9 @@ One record per entity: `{EntityId, EntityName}` where `EntityName` is `{name}_{v
 Stated to the user and still open. Each one can invalidate part of this amendment:
 
 1. Is Kibana already provided, and at what version? §13.2 is verified on 8.15.5 only.
-2. Are **data-view edits permitted**? The whole of Half 1 is a data-view edit. If they are not, the
-   names have to come back into the records themselves.
+2. ~~Are **data-view edits permitted**?~~ **Answered 2026-09-22: yes.** Half 1 proceeds as written.
+   This was the one unknown that could have killed it — without it the names would have had to
+   come back into the records themselves, which is a different design.
 3. Which **Space** the dashboard lands in — saved-object ids are fixed on purpose, and they collide
    on an import into a Space that already holds them.
 4. Is the data stream `logs-generic.otel-default`, and is `all_strings_to_keywords` in force? Every
