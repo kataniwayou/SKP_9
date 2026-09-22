@@ -337,8 +337,11 @@ Recorded so a later reader knows these were weighed and dropped, not overlooked:
 
 ## 13. Amendment 2026-09-22b — the org-cluster redesign
 
-**Status:** agreed with the user and verified by experiment against the live cluster on 2026-09-22.
-Not yet implemented. The dashboard described by §1–§12 is built, deployed and passing 8 of its 9
+**Status: IMPLEMENTED 2026-09-22.** All of it, verified against the live cluster with every
+Elasticsearch object deleted. Three claims in this section were wrong and are corrected in place,
+each marked. Execution record:
+`docs/superpowers/plans/2026-09-22-kibana-dashboard-offline-redesign.md`.
+Originally: The dashboard described by §1–§12 is built, deployed and passing 8 of its 9
 checks; this amendment replaces the Elasticsearch half of it and leaves the Kibana half standing.
 
 Sections superseded by this one: **§4.1, §4.2, §4.3, §6.1, §6.3, §6.5, §6.6, §7.1, §9.** Each carries
@@ -422,9 +425,17 @@ step appears in the dropdown whether or not it ran. Without them the entity reco
 options are filtered out by the counting query, and vanish from the list once the orchestration-start
 line scrolls out of the selected time range.
 
-**Untested:** `unknownKeyValue` behaviour for an id absent from the map. Get it wrong and a newly
-published entity renders **blank** rather than showing its GUID, which is worse than no formatter at
-all. This must be settled by experiment before the formatter is published.
+**They are not sufficient on their own, and this section was wrong to imply they were.** A dropdown
+is populated from the values of ONE field, and the Step control reads `attributes.StepId`. If the
+naming records carry a generic `EntityId`, a step that has never run still has no record carrying a
+`StepId`, and no control setting will conjure it into the list. The id must be written under the
+same field name the execution records use — see §13.6, which was amended to say so.
+
+**Settled by experiment 2026-09-22: omit `unknownKeyValue`.** A map was published with
+`split-exporter` deliberately removed; it rendered as its own GUID, `9cae7b00-…`, beside twelve
+named siblings. Omitting the setting is what produces that. Setting it to a string would render
+*every* unmapped entity as that one string, so two unlabelled steps would collapse into a single
+bucket in a legend — tidy and wrong, where a raw GUID is ugly and correct.
 
 ### 13.3 Half 2 — counting, by making exporters unexceptional
 
@@ -516,7 +527,16 @@ and `SendAsync` (~line 130) — the window where `WorkflowGraphSnapshot` still h
 **Not the orchestrator's handler.** `WorkflowL1` / `StepL1` are ids-only; the names do not survive
 the projection. The BaseApi is the last place they exist.
 
-One record per entity: `{EntityId, EntityName}` where `EntityName` is `{name}_{version}` per §13.2.
+One record per entity: the id **under the field name the execution records already use**
+(`WorkflowId`, `StepId`, `ProcessorId`), plus `EntityName` as `{name}_{version}` per §13.2 and
+`EntityKind`.
+
+**Not a generic `EntityId`**, which is what an earlier draft of this section said. A control reads
+one field, so the id has to arrive under the field that control reads or a never-run entity cannot
+appear in it (§13.2). `EntityKind` is carried because nothing else in the record says whether the
+GUID belongs in the Workflow control or the Step control.
+
+These records carry no `Result`, so the counted set of §13.4 cannot pick them up.
 
 ### 13.7 Verification — amends §9
 
@@ -531,7 +551,7 @@ One record per entity: `{EntityId, EntityName}` where `EntityName` is `{name}_{v
 | 7 | unchanged — 26:3:1 per cycle |
 | 8 | unchanged — still the one manual click |
 | 9 | unchanged, and **still failing** for want of a second driven workflow |
-| **new** | the KQL rule returns the count the twelve-document fixture predicts (§13.5) |
+| **new** | the rule classifies the fixture correctly. **Not as KQL:** Kibana exposes no endpoint that evaluates a KQL string on demand, so the check runs the equivalent query DSL and a second check pins the KQL text. Stated as a limitation in the check itself |
 | **new** | an unmapped id renders as its GUID, not blank (§13.2's `unknownKeyValue`) |
 | **new** | every published step appears in the Step dropdown, including one that has never run |
 
@@ -545,7 +565,7 @@ One record per entity: `{EntityId, EntityName}` where `EntityName` is `{name}_{v
 | `logs@custom` contended on a shared cluster | **retired** — not claimed |
 | A version bump relabels history | **new**, accepted (§13.2) |
 | Free-text search must use GUIDs | **new**, accepted (§13.2) |
-| `unknownKeyValue` renders a new entity blank | **new**, untested — settle before publishing |
+| `unknownKeyValue` renders a new entity blank | **retired** — omitting it renders the raw GUID, verified |
 | The formatter map must be regenerated after a publish | **new** — the same staleness shape the enrich policy had, but the failure is a raw GUID in a legend rather than a confidently wrong name |
 
 ### 13.9 Unknowns about the target cluster — unanswered
