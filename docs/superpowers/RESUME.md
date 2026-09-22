@@ -1,5 +1,12 @@
 # Resume — SK_P9
 
+> **2026-09-22 — read `HANDOVER-2026-09-22-endless-feed-and-kibana-spec.md` first if you are picking
+> up from that session.** It adds `tools/simulate-endless-feed.py` (an endless five-outcome feed for
+> the split chain, which may still be RUNNING as a background task), a committed but unreviewed
+> Kibana operator-dashboard spec, and a set of measured facts about the Elasticsearch index and
+> publisher-confirm latency that are not stated anywhere below. Nothing in this file is contradicted
+> by it.
+
 Written 2026-09-07. Replaces the 2026-09-01 version; this is the current one. That file's toolkit and
 observability detail is in git history and is still accurate — what it said about the *system* has not
 been re-measured since, and the open items it listed are carried forward below rather than left to be
