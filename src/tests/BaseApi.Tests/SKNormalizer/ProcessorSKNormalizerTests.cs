@@ -48,7 +48,8 @@ public sealed class ProcessorSKNormalizerTests
                 new TreeAssembler(), new XmlMetadataRenderer(), new ExplodingTranscoder()),
             // These tests drive SampleHandler, which consults no whitelist, so the store is never
             // read. Supplied because the processor builds one per dispatch regardless of handler.
-            new InMemoryL2().Multiplexer);
+            new InMemoryL2().Multiplexer,
+            new RecordingLogger<RedisFieldWhitelist>());
 
         return (processor, log);
     }

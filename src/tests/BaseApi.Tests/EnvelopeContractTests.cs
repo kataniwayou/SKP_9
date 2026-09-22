@@ -30,6 +30,7 @@ using NormalizationPipeline = Processor.SKNormalizer.NormalizationPipeline;
 using TreeAssembler = Processor.SKNormalizer.TreeAssembler;
 using XmlMetadataRenderer = Processor.SKNormalizer.XmlMetadataRenderer;
 using IAudioTranscoder = Processor.SKNormalizer.IAudioTranscoder;
+using RedisFieldWhitelist = Processor.SKNormalizer.RedisFieldWhitelist;
 
 namespace BaseApi.Tests;
 
@@ -176,7 +177,8 @@ public sealed class EnvelopeContractTests : IDisposable
             new NormalizationPipeline(
                 new TreeAssembler(), new XmlMetadataRenderer(),
                 transcoder ?? new ExplodingTranscoder()),
-            l2.Multiplexer);
+            l2.Multiplexer,
+            new RecordingLogger<RedisFieldWhitelist>());
 
         normalizer.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
 

@@ -10,7 +10,12 @@ internal sealed class SKNormalizerProcessor(
     ILogger<SKNormalizerProcessor> logger,
     ProviderHandlerRegistry registry,
     NormalizationPipeline pipeline,
-    IConnectionMultiplexer multiplexer)
+    IConnectionMultiplexer multiplexer,
+    // RESOLVED AS ITS OWN CATEGORY, not handed this processor's logger. The whitelist's records are
+    // what the verdict board counts, and a board that has to be told which source category to trust
+    // is one nobody can reproduce; giving them the whitelist's own scope name keeps the query one
+    // term long.
+    ILogger<RedisFieldWhitelist> whitelistLogger)
     : BaseProcessor<SKNormalizerConfig>
 {
     protected override async Task ProcessAsync(
@@ -76,7 +81,7 @@ internal sealed class SKNormalizerProcessor(
     private IFieldWhitelist WhitelistFor(SKNormalizerConfig? config)
         => string.IsNullOrWhiteSpace(config?.CacheAddress)
             ? new UnconfiguredFieldWhitelist()
-            : new RedisFieldWhitelist(multiplexer, config.CacheAddress);
+            : new RedisFieldWhitelist(multiplexer, config.CacheAddress, whitelistLogger);
 
     private IProviderHandler Resolve(SKNormalizerConfig? config)
     {

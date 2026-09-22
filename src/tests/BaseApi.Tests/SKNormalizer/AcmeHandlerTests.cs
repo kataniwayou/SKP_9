@@ -527,7 +527,8 @@ public sealed class AcmeHandlerTests
         // root (an empty dictionary is "[]", not nothing), so an absent root is proof the dictionary
         // was never projected rather than evidence about any artist.
         var l2 = new InMemoryL2();
-        var whitelist = new RedisFieldWhitelist(l2.Multiplexer, "skp:w:cache:absent");
+        var whitelist = new RedisFieldWhitelist(
+            l2.Multiplexer, "skp:w:cache:absent", new RecordingLogger<RedisFieldWhitelist>());
 
         var ex = Assert.Throws<FailedException>(() => whitelist.TryGet("SKP Live Suite", out _));
 
@@ -541,7 +542,8 @@ public sealed class AcmeHandlerTests
         // legitimate configuration and must stay a miss.
         var l2 = new InMemoryL2();
         await l2.Db.StringSetAsync("skp:w:cache:empty", "[]");
-        var whitelist = new RedisFieldWhitelist(l2.Multiplexer, "skp:w:cache:empty");
+        var whitelist = new RedisFieldWhitelist(
+            l2.Multiplexer, "skp:w:cache:empty", new RecordingLogger<RedisFieldWhitelist>());
 
         Assert.False(whitelist.TryGet("SKP Live Suite", out var value));
         Assert.Null(value);
@@ -553,7 +555,8 @@ public sealed class AcmeHandlerTests
         var l2 = new InMemoryL2();
         await l2.Db.StringSetAsync("skp:w:cache:list", """["SKP Live Suite"]""");
         await l2.Db.StringSetAsync("skp:w:cache:list:SKP Live Suite", "SKP Live Suite (Approved)");
-        var whitelist = new RedisFieldWhitelist(l2.Multiplexer, "skp:w:cache:list");
+        var whitelist = new RedisFieldWhitelist(
+            l2.Multiplexer, "skp:w:cache:list", new RecordingLogger<RedisFieldWhitelist>());
 
         Assert.True(whitelist.TryGet("SKP Live Suite", out var value));
         Assert.Equal("SKP Live Suite (Approved)", value);

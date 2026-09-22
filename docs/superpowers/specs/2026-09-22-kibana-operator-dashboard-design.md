@@ -675,3 +675,70 @@ Stated to the user and still open. Each one can invalidate part of this amendmen
    on an import into a Space that already holds them.
 4. Is the data stream `logs-generic.otel-default`, and is `all_strings_to_keywords` in force? Every
    field name in the export assumes the first; §7.4 assumes the second.
+
+## 14. Amendment 2026-09-22c — the whitelist verdict board
+
+A second dashboard, `SKP — whitelist verdicts`, and the three log attributes it counts. Nothing in
+§1–§13 changes; this adds to the export.
+
+### 14.1 The question it answers
+
+"Which values is this list admitting, and which is it refusing?" Before this, half the answer did
+not exist. An unlisted value reached the log store only inside the author's cancel reason —
+`artist 'X' is not on this workflow's whitelist` — which is prose, so counting by value meant
+matching inside a string. A **listed** value left no record at all, so no proportion could be
+computed: a board could show rejections but never what share of traffic they were.
+
+### 14.2 Three attributes, scoped, never templated
+
+| attribute | value | why it is not something else |
+|---|---|---|
+| `WhitelistRoot` | the cache root alone — `chain-artists` | not the full address: a workflow id in every slice label makes one list under two workflows look like two lists |
+| `WhitelistValue` | the value checked, as the provider wrote it | not the canonical form a hit resolves to — that is constant per listed value and says nothing the first dimension did not |
+| `WhitelistVerdict` | `Listed` / `Unlisted` | **not `attributes.Result`.** Result is per dispatch; a verdict is per lookup. A step that checks three fields has three verdicts and one outcome, and reusing the field would make the outcomes pie double-count |
+
+Written by `RedisFieldWhitelist`, not by the handler that asked. A handler could log its own line,
+but then each gated field would name things differently and no single query could count them all.
+
+**Both branches at Information, one template.** Demoting hits to Debug is the obvious economy and
+breaks the board silently: any deployment filtering below Information drops every `Listed` record
+and leaves a chart reading 100% `Unlisted` — indistinguishable from a list that approves nobody.
+`WhitelistVerdictLoggingTests.BothVerdictsAreWrittenAtInformation` pins it.
+
+**Two things deliberately record no verdict**, both covered by tests: an address with no projected
+dictionary (it throws `FailedException` — "there is no list" is not an answer a list gave), and a
+blank field (the list was never consulted). Counting either as `Unlisted` would put a configuration
+defect into a chart an operator reads as upstream behaviour — the same conflation
+`UnconfiguredFieldWhitelist` exists to prevent.
+
+### 14.3 Its own dashboard, not a panel on the outcomes board
+
+`skp-operator-outcomes` is scoped by a dashboard-level query requiring `attributes.Result` to
+exist. Whitelist records carry no `Result`, so they are invisible there, and widening that query to
+admit them would change the denominator of every panel already on it.
+
+### 14.4 The panel
+
+One donut, `skp-whitelist-pie`: inner ring `WhitelistVerdict`, outer ring `WhitelistValue`, metric
+a record count, nested legend on. `Listed` takes the outcomes board's green and `Unlisted` its
+yellow — the same yellow `Cancelled` carries there, because an unlisted value *is* the cancel the
+operator meets downstream. Red stays reserved for defects.
+
+`WhitelistValue` is unbounded — every name upstream ever sends becomes a slice — so it is top 20
+with a real **Other** bucket rather than a silent truncation, which keeps the tail's weight visible.
+
+Root is a control, not a third ring: with two lists a three-level donut is unreadable, and "which
+list" is a filter question, not a proportion question. A `Verdict` control is there too, so the
+outer ring can be read as one side at a time.
+
+### 14.5 Known limits
+
+- **Forward-looking only.** The 1265 whitelist cancels already in the store carry none of these
+  attributes and will never appear in the chart.
+- **The write side is still silent.** `L2ProjectionWriter` has no logging at all, so a projection
+  that wrote zero caches and one that wrote the artist list are byte-identical in the log store —
+  the difference surfaces one hop later, as a step failure in a different service.
+- **One list per step today.** `SKNormalizerConfig.CacheAddress` is a single address, so
+  `WhitelistRoot` is constant per step. It is recorded anyway: the day a processor carries two
+  lists, the board already separates them, and adding the attribute later would strand the history.
+
