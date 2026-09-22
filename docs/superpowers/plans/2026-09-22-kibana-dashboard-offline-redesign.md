@@ -125,7 +125,7 @@ Measured after, on a clean 2-minute window — **the single-clause rule reproduc
 
 ---
 
-## Task 2: The BaseApi emits id→name pairs
+## Task 2: The BaseApi emits id→name pairs — DONE 2026-09-22
 
 Half 1's only code change. Independent of Task 1.
 
@@ -136,11 +136,11 @@ Half 1's only code change. Independent of Task 1.
 - Consumes: `WorkflowGraphSnapshot` — `Workflows`, `Steps` and `Processors`, each a `Dictionary<Guid, …ReadDto>` whose DTO carries `Name` and `Version`.
 - Produces: one log record per entity per accepted start, carrying `attributes.EntityId` and `attributes.EntityName`, under service name **`baseapi`** (not `base-api`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Query ES for records carrying `attributes.EntityName` from service `baseapi`. Today: zero. Add it to the verification tool as the source check for the formatter generator of Task 4.
 
-- [ ] **Step 2: Emit the pairs**
+- [x] **Step 2: Emit the pairs**
 
 Between the liveness gate and `SendAsync` — after `var definition = ToDefinition(snapshot, workflowId);` is the natural place, where the snapshot is known valid and not yet disposed. One `LogInformation` per entity across all three dictionaries, with `EntityId` and `EntityName` as message-template parameters so they land in `attributes.*`.
 
@@ -148,13 +148,47 @@ Between the liveness gate and `SendAsync` — after `var definition = ToDefiniti
 
 **Not the orchestrator's handler.** `WorkflowL1`/`StepL1` are ids-only — the names do not survive the projection, and the BaseApi is the last place they exist (§13.6).
 
-- [ ] **Step 3: Consider the volume**
+- [x] **Step 3: Consider the volume**
 
 `baseapi` already exports ~1,199 records / 2h, and its `/health/*` probe logs already dominate the index at ~58k/day. This adds roughly (1 workflow + N steps + M processors) records per start — on the validation chain, ~19 per start against a 30-second cron. That is real and it is small next to the probe logs, but it is worth one sentence in the operator notes rather than a surprise.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Re-run Step 1. Confirm the pairs are present for all three entity kinds, that `EntityName` reads `{name}_{version}`, and that every `EntityId` in the index resolves against the BaseApi's own REST routes.
+
+**Execution record, and it changed one thing the spec got wrong.**
+
+§13.6 called these "one record per entity per accepted start" and the plan's Step 3 priced the
+volume at ~19 records per start against a 30-second cron. **That arithmetic was wrong, because the
+cron does not come through here.** `WorkflowFireJob` lives in the Orchestrator and fires against the
+L1 projection, which is ids-only — `OrchestrationService.StartAsync` runs when a client POSTs a
+start, and not again. A workflow started last week and running ever since has emitted its pairs
+exactly once, at that moment.
+
+So the volume worry evaporates, and **a retention dependency takes its place**, which is the more
+serious of the two. A reader building the map must search back far enough to find the last start,
+not the last few minutes; a workflow whose start has aged out of the index has no pairs at all.
+Two consequences:
+
+- **Task 4's generator must query over a wide window** — all time, not the dashboard's range.
+- **Deploying this change is not enough to get labels.** Every workflow must be started once
+  afterwards. Today only `simple-abc` has pairs, because it is the one started since the roll. The
+  validation chain has been running since before it and has none. That is an operator step for the
+  notes, not a code change.
+
+`EntityKind` was added beyond what §13.6 specified. A reader cannot recover it: these records say
+"this GUID is called that", and nothing in them says whether the GUID belongs in the Workflow control
+or the Step control. Without it the generator would have to infer the kind from which field the id
+later appears in, which is the join being avoided.
+
+Verified: starting `simple-abc` emitted 5 pairs from service `baseapi` — 1 workflow, 3 steps,
+1 processor — each rendering `{name}_{version}` (`simple-abc_1.0.0`, `simple-stepA_1.0.0`,
+`sample-proc-v9_1.5.0`). Hermetic suite: 1374 total, 0 failed, 37 skipped, exit 0.
+
+**Side effect, deliberate: check 9's precondition is now met.** Starting `simple-abc` to verify this
+task also gave the counted set a second workflow — measured over 2 minutes, 60 records across 10
+steps for the chain and 18 across 3 steps for `simple-abc`. Handover item 2 is closed as a
+by-product. `simple-abc` can be stopped again through `POST /api/v1/orchestration/stop`.
 
 ---
 

@@ -121,6 +121,49 @@ public sealed class OrchestrationService
 
         var definition = ToDefinition(snapshot, workflowId);
 
+        // THE ONLY PLACE AN ENTITY ID AND ITS NAME ARE EVER SEEN TOGETHER IN A LOG RECORD, and that
+        // is why these lines are here rather than anywhere more obvious. Every downstream record —
+        // every step outcome, every dispatch, every orchestrator line — carries WorkflowId, StepId
+        // and ProcessorId and nothing readable. Grafana and Kibana can both group by those ids; a
+        // human reading the result cannot tell which GUID is the importer.
+        //
+        // Emitting these pairs lets a reader build the id -> name map from the LOG STORE ALONE. That
+        // is the point: a dashboard on someone else's Elasticsearch gets readable labels without an
+        // enrich policy, a lookup index, a sync script or any privilege beyond read, and without
+        // calling this API at the time it renders. Section 13.2 and 13.6 of
+        // docs/superpowers/specs/2026-09-22-kibana-operator-dashboard-design.md are the argument.
+        //
+        // HERE AND NOT IN THE ORCHESTRATOR, because the names do not survive the projection --
+        // WorkflowL1 and StepL1 are ids-only. The snapshot above is the last place a Name and a
+        // Version exist in the same object as the Id, and it is disposed shortly after this.
+        //
+        // AFTER every gate, so a refused start emits no pairs. A workflow that cannot run should not
+        // seed a legend with labels for steps nobody will ever see counted.
+        //
+        // EntityKind is carried because a reader cannot recover it: these records say "this GUID is
+        // called that", and nothing in them says whether the GUID belongs in the Workflow control or
+        // the Step control. Without it the reader would have to guess from which field the id later
+        // appears in, which is exactly the join being avoided.
+        //
+        // ONE LINE PER ENTITY PER ACCEPTED START, AND A START IS RARE. The cron does NOT come through
+        // here -- WorkflowFireJob lives in the Orchestrator and fires against the L1 projection, which
+        // is ids-only -- so these lines are written when a human or a client starts a workflow, and
+        // not again until the next start. A workflow started last week and running ever since has
+        // emitted its pairs once, at that moment.
+        //
+        // THAT IS A RETENTION DEPENDENCY AND A READER MUST KNOW IT. A reader building the id -> name
+        // map has to search far enough back to find the last start, not the last few minutes, and a
+        // workflow whose start has aged out of the index has no pairs at all until it is next
+        // started. The alternative -- re-emitting on every tick -- was rejected: on a 30-second cron
+        // that is ~55k records a day per workflow to restate something that changes when someone
+        // edits a row, and the log store is not the right place to hold a lookup table by brute
+        // force. A reader that cannot find a pair should show the raw id, which is legible if ugly.
+        foreach (var (kind, id, name, version) in NameablesOf(snapshot))
+        {
+            _logger.LogInformation(
+                "{EntityKind} {EntityId} is named {EntityName}", kind, id, $"{name}_{version}");
+        }
+
         // The broker is a hard dependency for this path: a send that fails means the projection will
         // never be applied, and the caller has to learn that now rather than be told the work was
         // accepted. The fault is tagged so the response body names a stable operation instead of
@@ -163,6 +206,29 @@ public sealed class OrchestrationService
         }
 
         _logger.LogInformation("accepted stop for workflow {WorkflowId}", workflowId);
+    }
+
+    /// <summary>
+    /// Every entity in the snapshot that has both an id and a human-readable name, flattened into
+    /// one sequence so the caller logs them in a single loop.
+    /// <para>
+    /// <b>Schemas, assignments and caches are left out.</b> They carry names too, but no log record
+    /// anywhere downstream is grouped by their ids — a reader would be building a legend for a
+    /// dimension nothing is ever split by. The three kinds here are exactly the three ids that
+    /// <c>ExecutionLogScope</c> stamps on every execution record.
+    /// </para>
+    /// <para>
+    /// <b>Processors come from the snapshot, not from the step rows.</b> Several steps share one
+    /// processor, and emitting per step would repeat the same pair as many times as it is
+    /// referenced. The snapshot's dictionary is already unique by id.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<(string Kind, Guid Id, string Name, string Version)> NameablesOf(
+        WorkflowGraphSnapshot snapshot)
+    {
+        foreach (var w in snapshot.Workflows.Values)  yield return ("workflow",  w.Id, w.Name, w.Version);
+        foreach (var s in snapshot.Steps.Values)      yield return ("step",      s.Id, s.Name, s.Version);
+        foreach (var p in snapshot.Processors.Values) yield return ("processor", p.Id, p.Name, p.Version);
     }
 
     /// <summary>
