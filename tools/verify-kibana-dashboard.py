@@ -538,10 +538,41 @@ def check_12_published_steps_are_nameable(checks, es_url, names):
     """
     resolved = set(names["step"].values())
     missing = [s for s in PER_CYCLE_BY_STEP if s not in resolved]
-    ok = not missing
+
+    # AND EVERY (step, list) PAIR THAT HAS LOGGED A VERDICT IS LABELLED. The whitelist board splits
+    # on a composite runtime field, and its lookup is generated from the pairs seen in the log
+    # store - so a newly gated step draws a pie titled "{GUID} - {root}" until
+    # generate-field-formatters.py is re-run. That renders perfectly and reads as a broken board,
+    # which is exactly the class of failure a green check must not permit.
+    body = {"size": 0,
+            "query": {"bool": {"filter": [{"exists": {"field": "attributes.WhitelistVerdict"}}]}},
+            "aggs": {"steps": {"terms": {"field": "attributes.StepId", "size": 1000},
+                               "aggs": {"roots": {"terms": {"field": "attributes.WhitelistRoot",
+                                                            "size": 1000}}}}}}
+    live_pairs = set()
+    try:
+        agg = requests.post(f"{es_url}/{DATA_STREAM}/_search", json=body, timeout=60).json()
+        for step in agg["aggregations"]["steps"]["buckets"]:
+            for root in step["roots"]["buckets"]:
+                live_pairs.add(f"{step['key']} · {root['key']}")
+    except Exception as exc:  # noqa: BLE001
+        return checks.report(12, "Published steps are nameable", False,
+                             f"whitelist pair read failed: {type(exc).__name__}: {exc}")
+
+    labelled = set()
+    for obj in (json.loads(line) for line in open(EXPORT, encoding="utf-8") if line.strip()):
+        if obj.get("type") == "index-pattern":
+            fmt = json.loads(obj["attributes"].get("fieldFormatMap", "{}"))
+            for entry in fmt.get("whitelist_owner", {}).get("params", {}).get("lookupEntries", []):
+                labelled.add(entry["key"])
+
+    unlabelled = sorted(live_pairs - labelled)
+    ok = not missing and not unlabelled
     return checks.report(12, "Published steps are nameable", ok,
                          f"{len(resolved)} steps have naming records, "
-                         f"missing={missing or 'none'}")
+                         f"missing={missing or 'none'}, "
+                         f"whitelist_pairs={len(live_pairs)}, "
+                         f"unlabelled_pairs={unlabelled or 'none'}")
 
 
 def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names):

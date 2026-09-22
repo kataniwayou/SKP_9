@@ -763,17 +763,34 @@ aggregation-based pie has both `Split slices` and `Split chart`. It is deprecate
 path for 9.x; the surviving alternative is Vega, which can facet freely but is a hand-written spec
 with no field formatters and no shared palette. That is the migration if the target cluster moves.
 
-**The pair is one field, because two split buckets would draw a grid.** Splitting on `ProcessorId`
-and `WhitelistRoot` separately renders processors x roots, so one processor holding two lists and
-two processors holding one each would each draw two real pies **plus two blank cells**. The data
-view therefore carries a runtime field, `whitelist_owner`, composed per record as
-`sk-normalizer_1.0.0 · chain-artists` from `resource.attributes.service.name`, `service.version`
-and `attributes.WhitelistRoot` — all three already on every whitelist record.
+**The pair is (step, list), and the processor is not in it.** `cacheAddress` lives on the step
+payload — `IFieldWhitelist` says so explicitly, "it differs between two steps of the same workflow
+and between two workflows sharing a processor" — and a step resolves to exactly one processor, so
+the processor is *derivable* from the step and adds nothing to the key. Keying on it was wrong in
+two ways: two steps of one processor gating on the same list merged into a single pie, and the title
+named a processor of which only some steps gate anything. `sk-normalizer` already runs two steps and
+only one of them consults a list.
 
-Composing it from the record rather than from `ProcessorId` also removes a failure the id route
-carries: the `ProcessorId -> name_version` formatter is a hand-maintained map of 9 ids, and a tenth
-processor would render as a raw GUID until `generate-field-formatters.py` is re-run. The runtime
-field produces the identical spelling from data that is always present.
+So the routing rule is: **a record carrying (StepId, root, verdict, value) lands in the pie for its
+(StepId, root)**. Two steps sharing a list are two pies; one step holding two lists is two pies.
+
+**The pair must be one field, because only one split dimension works.** Two split buckets do NOT
+draw a grid — a deliberately sparse 2x2 probe rendered exactly the two real combinations, no blank
+cells. But a second probe, one row value against two column values, rendered ONE pie with the column
+dimension collapsed into slices: the column split is not honoured, so only the row split makes small
+multiples. The data view therefore carries a runtime field, `whitelist_owner`, emitting
+`{StepId} · {WhitelistRoot}`.
+
+**Its label comes from the same lookup that labels the dropdowns.** A `static_lookup` formatter
+applies to a runtime field exactly as to an indexed one — verified on 8.15.5 by mapping the live
+value to a sentinel and watching the pie title change — so `generate-field-formatters.py` now also
+emits one entry per (step, list) pair, turning `56fca87f-… · chain-artists` into
+`sk-normalizer-sample_1.0.0 · chain-artists`. The pairs are read from the verdict records
+themselves, the same log-store source the id maps use, so there is still no live API dependency.
+
+A pair that has never logged a lookup has no entry and renders as `{GUID} · {root}` until the
+generator is re-run — which renders perfectly and reads as a broken board, so **check 12 now fails
+on any live pair the export does not label**.
 
 Root remains a control as well, for focusing a board with many lists.
 

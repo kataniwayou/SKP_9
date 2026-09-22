@@ -73,6 +73,17 @@ KINDS = {
     "processor": "ProcessorId",
 }
 
+# The whitelist board's split field. It is a RUNTIME field on the data view, not an attribute on the
+# record: `{StepId} · {WhitelistRoot}`, one value per (step, list) pair. A formatter applies to
+# a runtime field exactly as it does to an indexed one -- verified on 8.15.5 -- so the same id->name
+# mechanism that labels the dropdowns labels each pie.
+#
+# THE STEP IS THE OWNER, NOT THE PROCESSOR. cacheAddress lives on the step payload, so it differs
+# between two steps of the same workflow; a step resolves to exactly one processor, which makes the
+# processor derivable and therefore redundant in the key. Keying on the processor merged two steps
+# that gate on the same list, and named a processor of which only some steps gate anything.
+WHITELIST_PAIR_FIELD = "whitelist_owner"
+
 
 def read_pairs(es_url, since):
     """Latest name per id, over every record the BaseApi has written.
@@ -116,7 +127,32 @@ def read_pairs(es_url, since):
     return maps
 
 
-def field_format_map(maps):
+def read_whitelist_pairs(es_url):
+    """Every (step, list) pair that has actually produced a verdict.
+
+    Sourced from the verdict records rather than from any registry, for the same reason the id->name
+    pairs are: no live API dependency at the moment someone needs a dashboard. A pair that has never
+    logged a lookup has no entry and renders as `{GUID} · {root}` until this is re-run -- the
+    same honest failure a workflow whose start has aged out already has.
+    """
+    body = {
+        "size": 0,
+        "query": {"bool": {"filter": [{"exists": {"field": "attributes.WhitelistVerdict"}}]}},
+        "aggs": {"steps": {
+            "terms": {"field": "attributes.StepId", "size": 1000},
+            "aggs": {"roots": {"terms": {"field": "attributes.WhitelistRoot", "size": 1000}}}}},
+    }
+    response = requests.post(f"{es_url}/{DATA_STREAM}/_search", json=body, timeout=60)
+    response.raise_for_status()
+
+    pairs = []
+    for step in response.json()["aggregations"]["steps"]["buckets"]:
+        for root in step["roots"]["buckets"]:
+            pairs.append((step["key"], root["key"]))
+    return pairs
+
+
+def field_format_map(maps, whitelist_pairs=()):
     """The data view's fieldFormatMap: one static_lookup per id field.
 
     unknownKeyValue IS OMITTED, AND THAT IS A TESTED CHOICE, not an oversight. With no value set,
@@ -135,6 +171,19 @@ def field_format_map(maps):
             "params": {"lookupEntries": [{"key": k, "value": v}
                                          for k, v in sorted(maps[kind].items(), key=lambda kv: kv[1])]},
         }
+
+    # The composite. Its key is the raw runtime value the aggregation buckets on; its label swaps
+    # the step's GUID for the name the dropdowns use and leaves the root alone, since the root IS
+    # its own name.
+    entries = []
+    for step_id, root in whitelist_pairs:
+        raw = f"{step_id} · {root}"
+        entries.append({"key": raw, "value": f"{maps['step'].get(step_id, step_id)} · {root}"})
+    if entries:
+        formats[WHITELIST_PAIR_FIELD] = {
+            "id": "static_lookup",
+            "params": {"lookupEntries": sorted(entries, key=lambda e: e["value"])},
+        }
     return formats
 
 
@@ -149,10 +198,13 @@ def main():
     maps = read_pairs(args.es, args.since)
     for kind in KINDS:
         print(f"{kind:10s} {len(maps[kind]):3d} mapped")
+
+    whitelist_pairs = read_whitelist_pairs(args.es)
+    print(f"{'whitelist':10s} {len(whitelist_pairs):3d} (step, list) pair(s)")
     if not any(maps.values()):
         sys.exit("no id->name pairs found - has any workflow been started since the BaseApi was rolled?")
 
-    formats = field_format_map(maps)
+    formats = field_format_map(maps, whitelist_pairs)
     if args.dry_run:
         print(json.dumps(formats, indent=1)[:1500])
         return
