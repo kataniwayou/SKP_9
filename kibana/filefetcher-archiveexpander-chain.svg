@@ -21,8 +21,10 @@
     .node-box-fail { fill: var(--fail-soft); stroke: var(--fail); stroke-width: 1.4; }
     .hop-disc { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.2; }
     .hop-num { fill: var(--ok); font-family: var(--sans); font-size: 11px; font-weight: 700; }
-    .n-proc { fill: var(--ink); font-family: var(--sans); font-size: 14.5px; font-weight: 600; }
-    .n-step { fill: var(--muted); font-family: var(--mono); font-size: 10px; }
+    .n-proc { fill: var(--ink); font-family: var(--sans); font-size: 11.5px; font-weight: 600; }
+    .n-proc-ver { fill: var(--muted); font-size: 9px; font-weight: 500; }
+    .n-step { fill: var(--muted); font-family: var(--mono); font-size: 8.5px; }
+    .n-step-ver { fill: var(--muted); font-size: 7.5px; }
     .n-cfg { fill: var(--ok); font-family: var(--mono); font-size: 10.5px; }
     .n-cfg-fail { fill: var(--fail); font-family: var(--mono); font-size: 10.5px; }
     .edge-ok { stroke: var(--ok); stroke-width: 1.6; fill: none; }
@@ -74,64 +76,64 @@
           <rect class="node-box" x="40" y="120" width="150" height="86"></rect>
           <circle class="hop-disc" cx="58" cy="138" r="12"></circle>
           <text class="hop-num" x="58" y="142" text-anchor="middle">1</text>
-          <text class="n-proc" x="115" y="162" text-anchor="middle">kafka-importer</text>
-          <text class="n-step" x="115" y="179" text-anchor="middle">split-importer</text>
+          <text class="n-proc" x="115" y="162" text-anchor="middle">kafka-importer<tspan class="n-proc-ver">_2.2.0</tspan></text>
+          <text class="n-step" x="115" y="179" text-anchor="middle">split-importer<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="115" y="195" text-anchor="middle">topic skp-paths</text>
         </g>
         <g>
           <rect class="node-box" x="232" y="120" width="150" height="86"></rect>
           <circle class="hop-disc" cx="250" cy="138" r="12"></circle>
           <text class="hop-num" x="250" y="142" text-anchor="middle">2</text>
-          <text class="n-proc" x="307" y="162" text-anchor="middle">file-fetcher</text>
-          <text class="n-step" x="307" y="179" text-anchor="middle">split-filefetcher</text>
+          <text class="n-proc" x="307" y="162" text-anchor="middle">file-fetcher<tspan class="n-proc-ver">_1.0.0</tspan></text>
+          <text class="n-step" x="307" y="179" text-anchor="middle">split-filefetcher<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="307" y="195" text-anchor="middle">.zip only · ≤ 32 MiB</text>
         </g>
         <g>
           <rect class="node-box" x="424" y="120" width="150" height="86"></rect>
           <circle class="hop-disc" cx="442" cy="138" r="12"></circle>
           <text class="hop-num" x="442" y="142" text-anchor="middle">3</text>
-          <text class="n-proc" x="499" y="162" text-anchor="middle">archive-expander</text>
-          <text class="n-step" x="499" y="179" text-anchor="middle">split-archiveexpander</text>
+          <text class="n-proc" x="499" y="162" text-anchor="middle">archive-expander<tspan class="n-proc-ver">_1.0.0</tspan></text>
+          <text class="n-step" x="499" y="179" text-anchor="middle">split-archiveexpander<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="499" y="195" text-anchor="middle">maxDepth 4</text>
         </g>
         <g>
           <rect class="node-box-fork" x="616" y="120" width="150" height="86"></rect>
           <circle class="hop-disc" cx="634" cy="138" r="12"></circle>
           <text class="hop-num" x="634" y="142" text-anchor="middle">4</text>
-          <text class="n-proc" x="691" y="162" text-anchor="middle">sk-normalizer</text>
-          <text class="n-step" x="691" y="179" text-anchor="middle">sk-normalizer-sample</text>
+          <text class="n-proc" x="691" y="162" text-anchor="middle">sk-normalizer<tspan class="n-proc-ver">_1.0.0</tspan></text>
+          <text class="n-step" x="691" y="179" text-anchor="middle">sk-normalizer-sample<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="691" y="195" text-anchor="middle">handler Acme</text>
         </g>
         <g>
           <rect class="node-box-fork" x="808" y="120" width="150" height="86"></rect>
           <circle class="hop-disc" cx="826" cy="138" r="12"></circle>
           <text class="hop-num" x="826" y="142" text-anchor="middle">4b</text>
-          <text class="n-proc" x="883" y="162" text-anchor="middle">sk-normalizer</text>
-          <text class="n-step" x="883" y="179" text-anchor="middle">sk-normalizer-alphabeta</text>
+          <text class="n-proc" x="883" y="162" text-anchor="middle">sk-normalizer<tspan class="n-proc-ver">_1.0.0</tspan></text>
+          <text class="n-step" x="883" y="179" text-anchor="middle">sk-normalizer-alphabeta<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="883" y="195" text-anchor="middle">handler AlphaBeta</text>
         </g>
         <g>
           <rect class="node-box" x="1000" y="120" width="150" height="86"></rect>
           <circle class="hop-disc" cx="1018" cy="138" r="12"></circle>
           <text class="hop-num" x="1018" y="142" text-anchor="middle">5</text>
-          <text class="n-proc" x="1075" y="162" text-anchor="middle">archive-collapser</text>
-          <text class="n-step" x="1075" y="179" text-anchor="middle">split-archivecollapser</text>
+          <text class="n-proc" x="1075" y="162" text-anchor="middle">archive-collapser<tspan class="n-proc-ver">_1.0.0</tspan></text>
+          <text class="n-step" x="1075" y="179" text-anchor="middle">split-archivecollapser<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="1075" y="195" text-anchor="middle">payload {}</text>
         </g>
         <g>
           <rect class="node-box" x="1192" y="120" width="150" height="86"></rect>
           <circle class="hop-disc" cx="1210" cy="138" r="12"></circle>
           <text class="hop-num" x="1210" y="142" text-anchor="middle">6</text>
-          <text class="n-proc" x="1267" y="162" text-anchor="middle">file-persister</text>
-          <text class="n-step" x="1267" y="179" text-anchor="middle">split-filepersister</text>
+          <text class="n-proc" x="1267" y="162" text-anchor="middle">file-persister<tspan class="n-proc-ver">_1.0.0</tspan></text>
+          <text class="n-step" x="1267" y="179" text-anchor="middle">split-filepersister<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="1267" y="195" text-anchor="middle">/mnt/skp-files/out</text>
         </g>
         <g>
           <rect class="node-box" x="1384" y="120" width="150" height="86"></rect>
           <circle class="hop-disc" cx="1402" cy="138" r="12"></circle>
           <text class="hop-num" x="1402" y="142" text-anchor="middle">7</text>
-          <text class="n-proc" x="1459" y="162" text-anchor="middle">kafka-exporter</text>
-          <text class="n-step" x="1459" y="179" text-anchor="middle">split-exporter</text>
+          <text class="n-proc" x="1459" y="162" text-anchor="middle">kafka-exporter<tspan class="n-proc-ver">_1.2.0</tspan></text>
+          <text class="n-step" x="1459" y="179" text-anchor="middle">split-exporter<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="1459" y="195" text-anchor="middle">delivery 30s</text>
         </g>
 
@@ -187,8 +189,8 @@
 
         <g>
           <rect class="node-box-fail" x="520" y="340" width="150" height="86"></rect>
-          <text class="n-proc" x="595" y="376" text-anchor="middle">outcome-recorder</text>
-          <text class="n-step" x="595" y="393" text-anchor="middle">record-outcome</text>
+          <text class="n-proc" x="595" y="376" text-anchor="middle">outcome-recorder<tspan class="n-proc-ver">_1.0.0</tspan></text>
+          <text class="n-step" x="595" y="393" text-anchor="middle">record-outcome<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg-fail" x="595" y="409" text-anchor="middle">all schema ids null</text>
         </g>
 
@@ -197,8 +199,8 @@
 
         <g>
           <rect class="node-box" x="760" y="340" width="150" height="86"></rect>
-          <text class="n-proc" x="835" y="376" text-anchor="middle">kafka-exporter</text>
-          <text class="n-step" x="835" y="393" text-anchor="middle">export-outcome</text>
+          <text class="n-proc" x="835" y="376" text-anchor="middle">kafka-exporter<tspan class="n-proc-ver">_1.2.0</tspan></text>
+          <text class="n-step" x="835" y="393" text-anchor="middle">export-outcome<tspan class="n-step-ver">_1.0.0</tspan></text>
           <text class="n-cfg" x="835" y="409" text-anchor="middle">delivery 30s</text>
         </g>
 

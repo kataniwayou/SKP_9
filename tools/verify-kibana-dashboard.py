@@ -26,6 +26,7 @@ RUN THIS FROM POWERSHELL against live port-forwards:
 """
 import argparse
 import json
+import re
 import os
 import sys
 import time
@@ -41,6 +42,7 @@ EXPORT = os.path.join(ROOT, "kibana", "kibana-export.ndjson")
 # Beside this script, not in kibana/: kibana/ is what gets imported into Kibana, and these 13
 # documents are synthetic test data that never leaves a scratch index.
 FIXTURE = os.path.join(ROOT, "tools", "classification-fixture.json")
+DIAGRAM = os.path.join(ROOT, "kibana", "filefetcher-archiveexpander-chain.svg")
 
 # The chain this dashboard is VALIDATED against, not the one it is built for (spec section 1).
 VALIDATION_WORKFLOW = "filefetcher-archiveexpander-chain_1.0.0"
@@ -449,6 +451,77 @@ def check_12_published_steps_are_nameable(checks, es_url, names):
                          f"missing={missing or 'none'}")
 
 
+def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names):
+    """Every name drawn on the chain diagram is a name the dashboard renders, and the diagram's
+    step-to-processor wiring matches what the index actually shows.
+
+    WHY THIS IS A CORRECTNESS CHECK AND NOT A TIDINESS ONE. Nothing in this system makes a name
+    unique. There is no unique index on Name, and none on (Name, Version) either - a processor's
+    identity is its SourceHash, and a step's is its id. Two steps called `split-importer` at 1.0.0
+    and 2.0.0 can coexist, each with its own row, and a workflow can reference either. So a diagram
+    labelled with a bare name does not identify a node: the moment a second version is published it
+    points at two rows with no way to tell which, and it can silently describe the wrong one.
+
+    That is why the diagram carries {name}_{version}, exactly as the dashboard's field formatters
+    render it. This check is what keeps the two from drifting - the diagram is hand-authored and was
+    captured from the live API on a particular day, so a rename or a version bump is otherwise
+    invisible to it.
+
+    THE PAIRING HALF READS THE INDEX, NOT THE API. Any counted record carries both StepId and
+    ProcessorId, so the real wiring can be observed rather than asked for. A step that has not run
+    in the window cannot be checked this way and is reported as unverified rather than passed.
+    """
+    try:
+        svg = open(DIAGRAM, encoding="utf-8").read()
+        # <text class="n-step">split-importer<tspan class="n-step-ver">_1.0.0</tspan></text>
+        def labels(cls):
+            out = []
+            for m in re.finditer(r'<text class="%s"[^>]*>([^<]*)(?:<tspan[^>]*>([^<]*)</tspan>)?' % cls, svg):
+                out.append((m.group(1) or "") + (m.group(2) or ""))
+            return out
+        diagram_steps = labels("n-step")
+        diagram_procs = labels("n-proc")
+        pairs = list(zip(diagram_steps, diagram_procs))
+    except Exception as exc:  # noqa: BLE001
+        return checks.report(13, "Diagram agrees with the dashboard", False, f"{type(exc).__name__}: {exc}")
+
+    rendered_steps = set(names["step"].values())
+    rendered_procs = set(names["processor"].values())
+    unknown = ([s for s in diagram_steps if s not in rendered_steps] +
+               [p for p in diagram_procs if p not in rendered_procs])
+
+    # The wiring the index actually shows, keyed by the same {name}_{version} labels.
+    body = {"size": 0, "query": {"bool": {"filter": [{"exists": {"field": "attributes.Result"}}]}},
+            "aggs": {"pairs": {"multi_terms": {
+                "terms": [{"field": "attributes.StepId"}, {"field": "attributes.ProcessorId"}],
+                "size": 200}}}}
+    try:
+        buckets = requests.post(f"{es_url}/{DATA_STREAM}/_search", json=body, timeout=60).json()
+        observed = {}
+        for bucket in buckets["aggregations"]["pairs"]["buckets"]:
+            step_id, processor_id = bucket["key"]
+            step = names["step"].get(step_id)
+            processor = names["processor"].get(processor_id)
+            if step and processor:
+                observed.setdefault(step, set()).add(processor)
+    except Exception as exc:  # noqa: BLE001
+        return checks.report(13, "Diagram agrees with the dashboard", False, f"{type(exc).__name__}: {exc}")
+
+    wrong, unverified = [], []
+    for step, processor in pairs:
+        if step not in observed:
+            unverified.append(step)
+        elif processor not in observed[step]:
+            wrong.append(f"{step} drawn on {processor}, index says {sorted(observed[step])}")
+
+    ok = not unknown and not wrong
+    return checks.report(13, "Diagram agrees with the dashboard", ok,
+                         f"{len(diagram_steps)} steps / {len(set(diagram_procs))} processors drawn, "
+                         f"names_not_on_dashboard={unknown or 'none'}, "
+                         f"wiring_mismatch={wrong or 'none'}, "
+                         f"unverified_no_traffic={unverified or 'none'}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -482,6 +555,7 @@ def main():
     check_10_rule_classifies_the_fixture(checks, args.es_url)
     check_11_export_states_the_rule_once(checks)
     check_12_published_steps_are_nameable(checks, args.es_url, names)
+    check_13_diagram_agrees_with_the_dashboard(checks, args.es_url, names)
 
     print()
     print(f"{checks.failures} check(s) failed")
