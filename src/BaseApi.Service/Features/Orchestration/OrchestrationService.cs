@@ -173,11 +173,11 @@ public sealed class OrchestrationService
         // counted set is defined by Result being present. They will, however, show up for anyone
         // querying "records for step X" without qualifying it further, which is the same care a
         // lineage query already has to take here.
-        foreach (var (kind, field, id, name, version) in NameablesOf(snapshot))
+        foreach (var (kind, scope, name, version) in NameablesOf(snapshot))
         {
-            // The field name varies per entity kind, so the scope is built by hand rather than
+            // The field names vary per entity kind, so the scope is built by hand rather than
             // through a message template -- a template's parameter name is fixed at compile time.
-            using (_logger.BeginScope(new Dictionary<string, object> { [field] = id.ToString("D") }))
+            using (_logger.BeginScope(scope))
             {
                 _logger.LogInformation("{EntityKind} is named {EntityName}", kind, $"{name}_{version}");
             }
@@ -241,16 +241,44 @@ public sealed class OrchestrationService
     /// processor, and emitting per step would repeat the same pair as many times as it is
     /// referenced. The snapshot's dictionary is already unique by id.
     /// </para>
+    /// <para>
+    /// <b>A STEP ALSO CARRIES ITS WORKFLOW'S ID, AND A PROCESSOR DELIBERATELY DOES NOT.</b> The Step
+    /// control on the dashboard is chained under the Workflow control, which means Kibana narrows
+    /// its options to records matching the selected <c>WorkflowId</c>. Without that id on the step's
+    /// naming record, the only records left to match are executions — and the list collapses to
+    /// steps that have already RUN, which is precisely the guarantee these records exist to provide.
+    /// Measured before the id was added: selecting a workflow took the Step list from 40 options to
+    /// the 10 that had run.
+    /// <br/>
+    /// A processor is not chained under anything — there is no Processor control — and it is
+    /// genuinely shared across workflows, so stamping one workflow on it would pick an arbitrary
+    /// owner and multiply the rows for a reader that only ever needs id to name.
+    /// </para>
     /// </summary>
-    private static IEnumerable<(string Kind, string Field, Guid Id, string Name, string Version)> NameablesOf(
+    private static IEnumerable<(string Kind, Dictionary<string, object> Scope, string Name, string Version)> NameablesOf(
         WorkflowGraphSnapshot snapshot)
     {
         foreach (var w in snapshot.Workflows.Values)
-            yield return ("workflow", ExecutionLogScope.WorkflowId, w.Id, w.Name, w.Version);
-        foreach (var s in snapshot.Steps.Values)
-            yield return ("step", ExecutionLogScope.StepId, s.Id, s.Name, s.Version);
+            yield return ("workflow",
+                new Dictionary<string, object> { [ExecutionLogScope.WorkflowId] = w.Id.ToString("D") },
+                w.Name, w.Version);
+
+        // The loader is called with exactly one workflow id, so every step in this snapshot belongs
+        // to that workflow and the owner is not a guess.
+        foreach (var workflowId in snapshot.Workflows.Keys)
+            foreach (var s in snapshot.Steps.Values)
+                yield return ("step",
+                    new Dictionary<string, object>
+                    {
+                        [ExecutionLogScope.StepId]     = s.Id.ToString("D"),
+                        [ExecutionLogScope.WorkflowId] = workflowId.ToString("D"),
+                    },
+                    s.Name, s.Version);
+
         foreach (var p in snapshot.Processors.Values)
-            yield return ("processor", ExecutionLogScope.ProcessorId, p.Id, p.Name, p.Version);
+            yield return ("processor",
+                new Dictionary<string, object> { [ExecutionLogScope.ProcessorId] = p.Id.ToString("D") },
+                p.Name, p.Version);
     }
 
     /// <summary>

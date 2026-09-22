@@ -527,9 +527,29 @@ and `SendAsync` (~line 130) — the window where `WorkflowGraphSnapshot` still h
 **Not the orchestrator's handler.** `WorkflowL1` / `StepL1` are ids-only; the names do not survive
 the projection. The BaseApi is the last place they exist.
 
-One record per entity: the id **under the field name the execution records already use**
-(`WorkflowId`, `StepId`, `ProcessorId`), plus `EntityName` as `{name}_{version}` per §13.2 and
-`EntityKind`.
+The lookup table is three shapes, and no more than three — schemas, assignments and caches are
+deliberately excluded, because no log record anywhere is grouped by their ids:
+
+| kind | fields on the record |
+|---|---|
+| workflow | `WorkflowId` + `EntityName` |
+| step | `StepId` + **`WorkflowId`** + `EntityName` |
+| processor | `ProcessorId` + `EntityName` |
+
+`EntityName` is `{name}_{version}` per §13.2, and every record also carries `EntityKind`. The id goes
+**under the field name the execution records already use**, never a generic `EntityId`.
+
+**A step carries its workflow's id and a processor does not, and the asymmetry is the point.** The
+Step control is chained under the Workflow control, so Kibana narrows its options to records matching
+the selected `WorkflowId`. Without that id on the step's naming record the only records left to match
+are executions, and the list collapses to steps that have already run — which is precisely the
+guarantee these records exist to provide. Measured: before the id was added, selecting a workflow
+took the Step list from 40 options to the 10 that had run, and the steps resolvable from naming
+records alone under a selected workflow were **0**; after, **10**.
+
+A processor is chained under nothing — there is no Processor control — and is genuinely shared
+across workflows, so stamping one workflow on it would pick an arbitrary owner and multiply the rows
+for a reader that only ever needs id to name.
 
 **Not a generic `EntityId`**, which is what an earlier draft of this section said. A control reads
 one field, so the id has to arrive under the field that control reads or a never-run entity cannot

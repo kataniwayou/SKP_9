@@ -44,6 +44,17 @@ before any of this existed.
 
 The pairs come from the log store: `OrchestrationService` writes one record per entity when a
 workflow is started, carrying the id under the same field name the execution records use.
+
+| kind | fields |
+|---|---|
+| workflow | `WorkflowId` + `EntityName` |
+| step | `StepId` + `WorkflowId` + `EntityName` |
+| processor | `ProcessorId` + `EntityName` |
+
+The step's `WorkflowId` is what lets the Step dropdown stay the published topology when a workflow is
+selected; without it, chaining can only match execution records and the list falls back to steps that
+have run. A processor carries no workflow id — it is chained under nothing and is shared across
+workflows.
 Regenerate after publishing or renaming anything, then re-import:
 
 ```
