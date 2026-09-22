@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "dOQTAN4uxi3q0vBC+YPvvwysRFoBodB8B+7ebpiSTXxW9nzvlvtQDlW/n65odiDj9pZsoJZEBKrDx29QeFPPCw==",
+        "contentHash": "/IGd4lRX/bpLYgrSqLIOcma7FJqBdtNZIauuh4WQMZhu/VP75kz1yth5Bs+/YnPsl2urUGbEWLwNRpIQu9H4mw==",
         "dependencies": {
           "BaseConsole.Core": "[1.0.0]",
           "JsonSchema.Net": "9.2.1",

@@ -377,18 +377,45 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // source step — the sentinel the pre handler already implements — is the more honest of the
         // two failures.
         //
-        // NO OutcomeLogScope HERE, DELIBERATELY. This branch logs nothing at all — see the comment on
-        // "the step returned after {ElapsedMs}ms" above, which fires unconditionally including for
-        // this Completed sink outcome, and see the module comment: no new log statement was added on
-        // this path because none was missing. This Completed outcome is recorded on the ORCHESTRATOR
-        // side instead — StepOutcomeHandler's own "the terminal step completed with {Result}" line —
-        // so a reader who expects a scope beside every StepResult.Completed here should not read its
-        // absence as an oversight.
+        // AN OutcomeLogScope HERE, AND THIS BRANCH USED TO CARRY NONE. The reasoning that kept it out
+        // was that the orchestrator already records this outcome — StepOutcomeHandler's own "the
+        // terminal step completed with {Result}" line — so nothing was missing. That is true of the
+        // EVENT and false of the FIELD, and the difference turned out to cost a great deal.
+        //
+        // attributes.Result is the field every outcome query is built on, and a terminal step was the
+        // one step whose success never carried it from the processor side. A reader counting step
+        // outcomes therefore needed two rules rather than one — a processor-side rule, plus a
+        // carve-out that reached into the orchestrator's records for exactly this case and had to
+        // exclude the Failed and Cancelled halves of that same template to avoid counting them twice.
+        // The carve-out was also unverifiable: a terminal StepOutcome names Guid.Empty (see below),
+        // so the orchestrator's record carries no EntryId, and the duplicate check that guards every
+        // other step could not be run against it. Emitting the field here makes a sink an ordinary
+        // step, collapses the rule to one clause and brings the last two steps under that check.
+        // Section 13.3 of docs/superpowers/specs/2026-09-22-kibana-operator-dashboard-design.md is
+        // the full argument.
+        //
+        // THE SCOPE'S EntryId IS THE DISPATCH'S OWN, and it arrives by itself: the ambient
+        // ExecutionLogScope opened at the top of HandleAsync already carries d.EntryId. Do NOT pass
+        // Guid.Empty here to match the message below. The Guid.Empty in the StepOutcome is a
+        // MESSAGING concern — it stops StepOutcomeHandler reading a blob the reclaim above has
+        // already deleted — and it has no bearing on what this pod should record about the step it
+        // just ran.
+        //
+        // THE ORCHESTRATOR'S LINE STAYS. It is not made redundant by this one; it is deliberately
+        // redundant, and that is its value. Two independent end-of-run markers on two different pods
+        // is the only mitigation there is for a deployment that demonstrably drops log records, and
+        // this line lives on the same pod as the work. The orchestrator's record simply stops being
+        // COUNTED — it does not stop being written.
         if (ran && _processor.EndsLineage)
         {
-            await SendAsync(
-                new StepOutcome(d.CorrelationId, d.ExecutionId, d.WorkflowId, d.StepId, d.ProcessorId,
-                                Guid.Empty, StepResult.Completed), ct).ConfigureAwait(false);
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Completed)))
+            {
+                _logger.LogInformation("the terminal step completed — there is no output to hand on");
+
+                await SendAsync(
+                    new StepOutcome(d.CorrelationId, d.ExecutionId, d.WorkflowId, d.StepId, d.ProcessorId,
+                                    Guid.Empty, StepResult.Completed), ct).ConfigureAwait(false);
+            }
         }
     }
 

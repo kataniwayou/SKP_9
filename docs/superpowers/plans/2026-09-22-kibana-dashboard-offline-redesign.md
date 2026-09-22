@@ -19,7 +19,8 @@
 - **The order of the halves is not free.** Half 2 (Tasks 1, 3) must land before the `elastic/` deletions of Task 6, because the ingest pipeline is currently the only written definition of the counting rule. Half 1 (Tasks 2, 4) can land in either order relative to Half 2.
 - **Nothing is deleted from `elastic/` until its replacement is verified.** Every file there is live today; the dashboard in the cluster is driven by the pipeline and policy they define. Deleting them early breaks a working dashboard and leaves no way to rebuild it.
 - **Task 1 is a framework edit.** `BaseProcessor.Core` is consumed by the processors **as an extracted package**, so a rebuild without a repack tests the old code and goes green while the change is absent. Repack before believing any test result.
-- **A framework edit moves no processor `SourceHash`.** The fold is project-only, so registration rows stay valid and no re-registration is needed — but every processor image still needs rebuilding and `kind load`ing for the new line to be emitted at all. Five processor images, one deploy loop each.
+- **A framework edit moves no processor `SourceHash`.** The fold is project-only, so registration rows stay valid and no re-registration is needed. **Executed 2026-09-22: this is ONE image, not five.** The changed branch is guarded by `_processor.EndsLineage`, and `BaseExporter` is the only class that sets it — `Processor.KafkaExporter` is the repo's only sink, and it serves both of the two missing steps. Every other processor image carries an older framework build with no behavioural difference on this path; they get the new binary at their next routine rebuild.
+- **Repacking `BaseProcessor.Core` invalidates ten `packages.lock.json` files** with NU1403, "the package is different than the last restore". `dotnet restore --force-evaluate` refreshes them and the result is committed. The Dockerfiles do **not** copy processor lock files, so an image build restores unlocked and succeeds while a local build still fails — do not read a green `docker build` as evidence the lock files are fine.
 - **Keep the orchestrator's terminal line.** It is deliberately redundant and that redundancy is the mitigation for the log-loss risk in §10. It stops being *counted*; it does not stop being *emitted*. (§13.3)
 - **The counted set stays a property test, never a template list.** `attributes.Result` present AND emitter is not the orchestrator. A list would silently uncount the three rarely-fired failure templates — the exact defect §4 exists to prevent. (§13.4)
 - **Every string field in the log index is mapped `keyword`** by the `all_strings_to_keywords` dynamic template. `match`/`match_phrase` silently return zero hits. Use `term`, `prefix`, `wildcard`. (§7.4)
@@ -50,7 +51,7 @@
 
 ---
 
-## Task 1: A terminal step reports its own outcome
+## Task 1: A terminal step reports its own outcome — DONE 2026-09-22
 
 This is the whole of Half 2's code change, and it is what lets the counting rule become a single clause.
 
@@ -61,13 +62,13 @@ This is the whole of Half 2's code change, and it is what lets the counting rule
 - Consumes: the ambient `ExecutionLogScope.BuildScope(d)` opened at `ProcessDispatchHandler.cs:56`, which already carries `ExecutionId`, `WorkflowId`, `StepId`, `ProcessorId` and `EntryId`.
 - Produces: one new `Information` record per terminal step completion, carrying `attributes.Result = "Completed"` under `scope.name` `BaseProcessor.Core.Processing.ProcessDispatchHandler`, with `attributes.EntryId` set to the dispatch's own.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Assert against the live index, over one feed cycle, that `attributes.Result` exists on records covering **10** distinct `StepId`s where `resource.attributes.service.name != "orchestrator"`. Today this returns 8 — `export-outcome` and `split-exporter` are absent. That measured 8-of-10 is the failing state (§13.3).
 
 Add it to `tools/verify-kibana-dashboard.py` as the new form of check 5's coverage assertion. Run it and watch it report 8.
 
-- [ ] **Step 2: Emit the line**
+- [x] **Step 2: Emit the line**
 
 Inside `if (ran && _processor.EndsLineage)`, wrap the existing `SendAsync` in a scope and log:
 
@@ -85,21 +86,42 @@ Three things are load-bearing and each has a reason recorded in §13.3:
 - **The `EntryId` in the log comes from the ambient scope**, which already holds `d.EntryId`. Do not pass it explicitly and do not pass `Guid.Empty`; that is the distinction the message-level concern must not be allowed to leak into.
 - **The orchestrator's `the terminal step completed with {Result}` line stays exactly as it is.** Two markers on two pods is the mitigation for log loss (§10). It stops being counted, not emitted.
 
-- [ ] **Step 3: Rewrite the comment that says this must not exist**
+- [x] **Step 3: Rewrite the comment that says this must not exist**
 
 The block at `ProcessDispatchHandler.cs:380-387` currently reads *"NO OutcomeLogScope HERE, DELIBERATELY"* and explains at length why. That reasoning is now superseded and leaving it in place beside code that contradicts it is worse than having no comment. Replace it with why the scope **is** here: terminal-step success was the one outcome invisible on the processor side, which forced the counted set into two clauses and left one slice of check 5 unreachable; §13.3 of the spec is the argument. Keep the paragraph about `Guid.Empty` — it is still true and still the thing a reader will get wrong.
 
-- [ ] **Step 4: Repack, rebuild, redeploy**
+- [x] **Step 4: Repack, rebuild, redeploy**
 
 The processors consume `BaseProcessor.Core` as an extracted package. **Repack it first** — a test run against a stale package goes green with the change absent. Then rebuild and `kind load` all five processor images and roll them.
 
 A framework edit moves no `SourceHash`, so **no re-registration and no schema-row change is needed**. If a rollout times out with pods `Running`/`NotReady` and 0 restarts, that is an unregistered processor waiting by design, not a crash — check the registration before touching the code.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Re-run Step 1's assertion. It must report **10** distinct `StepId`s. Then confirm no double count appeared: the `(StepId, ExecutionId, EntryId)` triple must still carry at most one counted record per triple, now across all ten steps rather than eight.
 
 Also re-check §4.4's totals. The per-cycle total should stay **30** and the split **26:3:1** — the new processor-side line replaces the orchestrator's in the count, it does not add to it. If the total moves to 35, the old terminal clause is still active in the counting rule; that is Task 3's job and it is expected to be wrong until then. Record which it is rather than treating a changed total as a failure.
+
+**Execution record.** Measured before: 10 distinct `StepId`s carry `attributes.Result`, 8 of them
+with a processor-side witness; the two without were `eb707c5e…` (`export-outcome`, 57 records /
+10m) and `9cae7b00…` (`split-exporter`, 38 / 10m), both kafka-exporter, both matching their §4.4
+per-cycle rows over ~19 cycles. After the roll, both appear processor-side within one cycle.
+
+Measured after, on a clean 2-minute window — **the single-clause rule reproduces §4.4 exactly**:
+
+| | per cycle |
+|---|---|
+| total | **30.0** (spec: 30) |
+| Completed : Failed : Cancelled | **26 : 3 : 1** (spec: 26:3:1) |
+| kafka-exporter | **5.0**, now processor-emitted rather than orchestrator-emitted |
+| file-fetcher / kafka-importer | 5.0 / 5.0 |
+| sk-normalizer / archive-expander | 4.0 / 4.0 |
+| outcome-recorder | 3.0 |
+| archive-collapser / file-persister | 2.0 / 2.0 |
+
+**Zero** duplicate `(StepId, ExecutionId, EntryId)` triples, and **zero** counted records without an
+`EntryId` — so check 5's uncovered slice is closed and the check now reaches 10 of 10 steps, as
+§13.3 predicted. Hermetic suite after the repack: 1374 total, 0 failed, 37 skipped, exit 0.
 
 ---
 
