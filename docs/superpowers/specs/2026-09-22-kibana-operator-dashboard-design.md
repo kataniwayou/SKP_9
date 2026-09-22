@@ -420,16 +420,36 @@ therefore **relabels every historical record**. `{name}_{version}` means "what t
 now", not "what it was called when the record was written". That is a real loss of fidelity and it is
 accepted deliberately: the alternative is an as-of join, which is the enrich design being removed.
 
-**The control group needs `ignoreQuery: true` and `ignoreTimerange: true`** so that every published
-step appears in the dropdown whether or not it ran. Without them the entity records that supply the
-options are filtered out by the counting query, and vanish from the list once the orchestration-start
-line scrolls out of the selected time range.
+**The control group needs `ignoreQuery: true`. It does NOT take `ignoreTimerange: true`, and the
+first draft of this section was wrong to ask for it.** `ignoreQuery` is what lets a naming record —
+which carries no `Result` — supply an option at all, and that part is necessary. Ignoring the time
+range as well was justified on the grounds that a stopped workflow should still be selectable, so
+that an empty chart could be read as "stopped" rather than "does not exist".
 
-**They are not sufficient on their own, and this section was wrong to imply they were.** A dropdown
-is populated from the values of ONE field, and the Step control reads `attributes.StepId`. If the
-naming records carry a generic `EntityId`, a step that has never run still has no record carrying a
-`StepId`, and no control setting will conjure it into the list. The id must be written under the
-same field name the execution records use — see §13.6, which was amended to say so.
+Measured, that trade is bad. Ignoring the time range makes the option lists the whole index: **156
+workflows and 780 steps** against a registry of 6 and 42, because the graph has been rebuilt many
+times and every rebuild mints fresh GUIDs. Worse, with a 15-minute range selected, four of the six
+surviving options were workflows that last ran a **week** earlier — choices that can only produce an
+empty panel. A dropdown offering something the chart cannot show is not a feature.
+
+The controls therefore respect the time range, and the lists scale with it: 2 workflows and 13 steps
+over 15 minutes, 6 and 40 over 30 days. The original intent survives where it is cheap — widen the
+range and the catalogue comes back — without making a 15-minute view lie about what is relevant.
+
+**The dashboard also carries one filter**, `attributes.Result exists OR attributes.EntityName
+exists`, which is a superset of the counted set and so bounds the option lists without moving a
+count. It is what keeps the wide end honest: at 30 days it gives 6 and 40 rather than 156 and 780.
+A filter rather than a query, because `ignoreFilters` is deliberately left false and is the one
+parent setting the controls still respect.
+
+**No control setting alone puts a never-run step in a list, and this section originally implied one
+would.** A dropdown is populated from the values of ONE field, and the Step control reads
+`attributes.StepId`. If a naming record carries a generic `EntityId`, a step that has never run has
+no record carrying a `StepId` at all, and no combination of ignore-flags will conjure it into the
+list. Two things had to change in §13.6 instead: the id is written under the field name the
+execution records already use, and a step's record also carries its `WorkflowId` — without which
+chaining under the Workflow control falls back to execution records and the list collapses to steps
+that have run.
 
 **Settled by experiment 2026-09-22: omit `unknownKeyValue`.** A map was published with
 `split-exporter` deliberately removed; it rendered as its own GUID, `9cae7b00-…`, beside twelve

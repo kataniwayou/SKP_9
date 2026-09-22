@@ -414,11 +414,13 @@ def check_11_export_states_the_rule_once(checks):
         if obj.get("type") == "dashboard":
             source = json.loads(obj["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
             queries.append(source.get("query", {}).get("query", ""))
-            # THE CONTROLS IGNORE THE QUERY AND THE TIME RANGE, so their option lists would
-            # otherwise be drawn from every id ever indexed. Measured on this cluster: 156
-            # workflows and 780 steps, against a registry holding 6 and 42 - the rest are dead ids
-            # from earlier rebuilds of the graph, each of which mints fresh GUIDs. A dashboard
-            # FILTER is what bounds them, because ignoreFilters is deliberately left false.
+            # THE CONTROLS IGNORE THE QUERY but NOT the time range, so their option lists are
+            # what is relevant to the window on screen - 2 workflows and 13 steps over 15 minutes
+            # here, 6 and 40 over 30 days. Ignoring the time range as well was tried and reverted:
+            # it drew the lists from every id ever indexed, 156 workflows and 780 steps against a
+            # registry of 6 and 42, and it offered a 15-minute view workflows that last ran a week
+            # earlier. A dashboard FILTER bounds the wide end, because ignoreFilters is
+            # deliberately left false.
             #
             # It admits a record that carries a Result or is a naming record, which is a SUPERSET
             # of the counted set - so it bounds the dropdowns without moving a single count.

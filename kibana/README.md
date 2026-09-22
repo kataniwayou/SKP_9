@@ -82,9 +82,11 @@ collapse two unlabelled steps into a single legend bucket.
 
 ## Why the dropdowns carry a filter
 
-The control group sets `ignoreQuery` and `ignoreTimerange`, so a published step appears in the Step
-dropdown whether or not it has ever run. The cost is that, left alone, the option lists are drawn
-from **every id ever indexed**. Measured on the dev cluster: **156 workflows and 780 steps**, against
+The control group sets `ignoreQuery` so that a naming record — which carries no `Result` — can
+supply an option at all. It does **not** ignore the time range: the dropdowns list what is relevant
+to the window on screen, 2 workflows and 13 steps over 15 minutes here, 6 and 40 over 30 days.
+
+Ignoring the time range was tried and reverted. It made the option lists **every id ever indexed**. Measured on the dev cluster: **156 workflows and 780 steps**, against
 a registry holding 6 and 42. The rest are dead ids from earlier rebuilds of the graph — the rebuild
 runbook mints fresh GUIDs every time, and the index remembers all of them. None has a naming record,
 so they render as raw GUIDs and bury the handful that matter.
@@ -98,7 +100,8 @@ attributes.Result exists  OR  attributes.EntityName exists
 A filter rather than a query, because `ignoreFilters` is deliberately left **false** — it is the one
 parent setting the controls still respect. And it is a **superset of the counted set**, so it bounds
 the dropdowns without moving a single count: every counted record carries a Result and therefore
-matches it. Measured, it takes the lists to 6 workflows and 40 steps, which is the registry.
+matches it. At a 30-day range it gives 6 workflows and 40 steps — the registry — rather than
+156 and 780.
 
 Check 11 asserts the filter is present. Remove it and the dropdowns quietly fill with archaeology.
 
