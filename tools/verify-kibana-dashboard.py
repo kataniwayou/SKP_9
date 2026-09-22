@@ -409,11 +409,21 @@ def check_11_export_states_the_rule_once(checks):
     except Exception as exc:  # noqa: BLE001
         return checks.report(11, "Export states the rule once", False, f"{type(exc).__name__}: {exc}")
 
-    queries, unknown_keys = [], []
+    queries, unknown_keys, option_scope = [], [], []
     for obj in objects:
         if obj.get("type") == "dashboard":
             source = json.loads(obj["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
             queries.append(source.get("query", {}).get("query", ""))
+            # THE CONTROLS IGNORE THE QUERY AND THE TIME RANGE, so their option lists would
+            # otherwise be drawn from every id ever indexed. Measured on this cluster: 156
+            # workflows and 780 steps, against a registry holding 6 and 42 - the rest are dead ids
+            # from earlier rebuilds of the graph, each of which mints fresh GUIDs. A dashboard
+            # FILTER is what bounds them, because ignoreFilters is deliberately left false.
+            #
+            # It admits a record that carries a Result or is a naming record, which is a SUPERSET
+            # of the counted set - so it bounds the dropdowns without moving a single count.
+            for flt in source.get("filter", []):
+                option_scope.append(json.dumps(flt.get("query", {}), sort_keys=True))
         if obj.get("type") == "index-pattern":
             for field, fmt in json.loads(obj["attributes"].get("fieldFormatMap", "{}")).items():
                 if "unknownKeyValue" in fmt.get("params", {}):
@@ -423,11 +433,14 @@ def check_11_export_states_the_rule_once(checks):
     stale = raw.count("skp.outcome_record") + raw.count("skp.step_name") + \
         raw.count("skp.workflow_name") + raw.count("skp.processor_name")
 
-    ok = queries == [COUNTED_KQL] and not unknown_keys and stale == 0
+    scoped = any('"attributes.EntityName"' in f and '"attributes.Result"' in f
+                 for f in option_scope)
+    ok = queries == [COUNTED_KQL] and not unknown_keys and stale == 0 and scoped
     return checks.report(11, "Export states the rule once", ok,
                          f"dashboard_query_matches={queries == [COUNTED_KQL]}, "
                          f"stale_enrichment_references={stale}, "
-                         f"formatters_setting_unknownKeyValue={unknown_keys or 'none'}")
+                         f"formatters_setting_unknownKeyValue={unknown_keys or 'none'}, "
+                         f"control_options_bounded={scoped}")
 
 
 def check_12_published_steps_are_nameable(checks, es_url, names):

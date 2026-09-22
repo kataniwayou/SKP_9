@@ -69,6 +69,28 @@ An id with no entry renders as **itself** — the raw GUID. That is deliberate: 
 `unknownKeyValue`, because setting it would render every unmapped entity as one shared string and
 collapse two unlabelled steps into a single legend bucket.
 
+## Why the dropdowns carry a filter
+
+The control group sets `ignoreQuery` and `ignoreTimerange`, so a published step appears in the Step
+dropdown whether or not it has ever run. The cost is that, left alone, the option lists are drawn
+from **every id ever indexed**. Measured on the dev cluster: **156 workflows and 780 steps**, against
+a registry holding 6 and 42. The rest are dead ids from earlier rebuilds of the graph — the rebuild
+runbook mints fresh GUIDs every time, and the index remembers all of them. None has a naming record,
+so they render as raw GUIDs and bury the handful that matter.
+
+The dashboard therefore carries one filter, `entities, not archaeology`:
+
+```
+attributes.Result exists  OR  attributes.EntityName exists
+```
+
+A filter rather than a query, because `ignoreFilters` is deliberately left **false** — it is the one
+parent setting the controls still respect. And it is a **superset of the counted set**, so it bounds
+the dropdowns without moving a single count: every counted record carries a Result and therefore
+matches it. Measured, it takes the lists to 6 workflows and 40 steps, which is the registry.
+
+Check 11 asserts the filter is present. Remove it and the dropdowns quietly fill with archaeology.
+
 ## What counts as a step outcome
 
 One clause, stated once, in the dashboard's own query:
