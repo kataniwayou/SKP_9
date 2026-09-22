@@ -289,6 +289,50 @@ def check_7_pie_matches_bins(checks, es_url, window):
                          f"only_three_values={only_three} ratio_ok={ratios_ok}")
 
 
+def check_6_every_processor_has_a_bin(checks, es_url, window):
+    """All eight participating processors appear, including the terminal-step-only kafka-exporter.
+
+    kafka-exporter is the one that proves the terminal-step clause of spec 4.1 is doing its job:
+    it emits ZERO processor-side records, so without that clause its bin is simply absent and an
+    operator reads a working export step as a dead one.
+    """
+    try:
+        by_processor = _terms(es_url, "skp.processor_name", window, VALIDATION_WORKFLOW)
+    except Exception as exc:  # noqa: BLE001
+        return checks.report(6, "Every processor has a bin", False, f"{type(exc).__name__}: {exc}")
+    missing = [p for p in PER_CYCLE_BY_PROCESSOR if by_processor.get(p, 0) == 0]
+    return checks.report(6, "Every processor has a bin", not missing,
+                         f"{len(by_processor)} series present, missing={missing or 'none'}")
+
+
+def check_9_generic_across_workflows(checks, es_url, kibana_url, window):
+    """The dashboard's objects exist under their fixed ids, and more than one workflow has
+    counted, named records.
+
+    The UI half of spec check 9 -- selecting a second workflow in the control and watching the
+    panels repopulate -- is a click and lives in the operator notes. What is checkable here is the
+    precondition that makes it work: the data is keyed on workflow NAME, and a second workflow is
+    present in it. This check therefore FAILS while only one workflow is being driven, which is a
+    statement about the traffic and not about the dashboard.
+    """
+    expected_objects = {"skp-logs", "skp-outcomes-bins", "skp-outcomes-pie",
+                        "skp-outcome-records", "skp-operator-outcomes"}
+    try:
+        found = requests.get(
+            f"{kibana_url}/api/saved_objects/_find"
+            "?type=dashboard&type=lens&type=search&type=index-pattern&per_page=100",
+            headers={"kbn-xsrf": "true"}, timeout=20).json()
+        ids = {obj["id"] for obj in found.get("saved_objects", [])}
+        by_workflow = _terms(es_url, "skp.workflow_name", window)
+    except Exception as exc:  # noqa: BLE001
+        return checks.report(9, "Genuinely generic", False, f"{type(exc).__name__}: {exc}")
+    missing_objects = expected_objects - ids
+    ok = not missing_objects and len(by_workflow) >= 2
+    return checks.report(9, "Genuinely generic", ok,
+                         f"workflows with counted records={list(by_workflow)}, "
+                         f"missing saved objects={missing_objects or 'none'}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -309,6 +353,8 @@ def main():
     check_4_totals_match_the_cycle(checks, args.es_url, args.window)
     check_5_one_witness_per_step(checks, args.es_url, args.window)
     check_7_pie_matches_bins(checks, args.es_url, args.window)
+    check_6_every_processor_has_a_bin(checks, args.es_url, args.window)
+    check_9_generic_across_workflows(checks, args.es_url, args.kibana_url, args.window)
 
     print()
     print(f"{checks.failures} check(s) failed")
