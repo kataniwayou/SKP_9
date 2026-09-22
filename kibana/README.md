@@ -32,6 +32,7 @@ now needs read access and nothing else.
 | `kibana-export.ndjson` | the whole deliverable — data view, 2 Lens panels, saved search, dashboard |
 | `generate-field-formatters.py` | writes the id → `{name}_{version}` lookup into the data view |
 | `build-diagram-panel.py` | regenerates the chain diagram panel from the committed HTML |
+| `filefetcher-archiveexpander-chain.svg` | the self-contained diagram, generated — do not hand-edit |
 
 ## How names work
 

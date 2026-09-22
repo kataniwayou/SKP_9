@@ -349,7 +349,7 @@ URI or an http URL. SVG is not blocked as a format — only as a data URI.
 265–442, and it is the block diagram. The handover's "three inline `<svg>` blocks" is wrong. Its
 styling lives in the document's `<style>` at line 22, so it is not standalone as it sits.
 
-`docs/diagrams/filefetcher-archiveexpander-chain.svg` is the extracted, self-contained version —
+`kibana/filefetcher-archiveexpander-chain.svg` is the extracted, self-contained version —
 24 CSS rules inlined, 50 dropped as page chrome, 14.5 KB. Verified to render identically.
 
 ### Cost of each route

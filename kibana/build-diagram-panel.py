@@ -30,7 +30,7 @@ diagram it depicts:
       |                                                       live API on 2026-09-15
       |  extract_svg()        strips the page, inlines the 24 CSS rules the drawing actually uses
       v
-    docs/diagrams/filefetcher-archiveexpander-chain.svg    <- committed, self-contained, ~15 KB
+    kibana/filefetcher-archiveexpander-chain.svg          <- committed, self-contained, ~15 KB
       |
       |  render_png()         headless Chrome at --force-device-scale-factor=2
       v
@@ -54,7 +54,11 @@ import tempfile
 
 ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML   = os.path.join(ROOT, "docs", "diagrams", "filefetcher-archiveexpander-chain.html")
-SVG    = os.path.join(ROOT, "docs", "diagrams", "filefetcher-archiveexpander-chain.svg")
+# The SVG lives HERE, not beside the HTML, because it is not a document - it is a build artifact
+# of this script, regenerated on every run and read by nothing else. The HTML it comes from IS a
+# document (it carries the step ledger and the prose about what the drawing cannot show) and stays
+# in docs/diagrams/.
+SVG    = os.path.join(ROOT, "kibana", "filefetcher-archiveexpander-chain.svg")
 EXPORT = os.path.join(ROOT, "kibana", "kibana-export.ndjson")
 
 DASHBOARD_ID = "skp-operator-outcomes"
