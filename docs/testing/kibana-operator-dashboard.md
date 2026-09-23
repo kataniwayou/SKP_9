@@ -185,7 +185,15 @@ own records before acting on a gap.
 
 ```
 python tools/verify-kibana-dashboard.py --window now-30m
+node run.js tools/verify-kibana-panels.js
 ```
+
+**The two ask different questions and you want both.** The Python script asks Elasticsearch whether
+the DATA each panel needs exists. It cannot see a panel that failed to mount, a control bound to a
+field the mapping does not have, or a chart that rendered its axes and nothing else — all three of
+which have happened on this board. The Node script opens it in a real browser and asserts every
+panel and control arrived, including a count of plotted series per chart, because a Lens panel
+contains a canvas whether or not it drew a single bar.
 
 Eight of the nine checks in §9 of the design are in there, and each prints PASS or FAIL with its
 measured numbers. The ninth — clicking a pie slice and confirming Discover opens pre-filtered with
