@@ -6,7 +6,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddBaseApiObservability(builder.Configuration, source: "webapi");
 builder.Services.AddBaseApi<AppDbContext>(builder.Configuration);
 builder.Services.AddAppMessaging(builder.Configuration);   // broker, gate, consumers
-builder.Services.AddAppFeatures();
+builder.Services.AddAppFeatures(builder.Configuration);
 builder.Services.AddBaseApiFallbackHandler();   // catch-all last, after every domain handler
 
 var app = builder.Build();

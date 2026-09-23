@@ -1,10 +1,12 @@
 using BaseApi.Service.Features.Assignment;
 using BaseApi.Service.Features.Cache;
+using BaseApi.Service.Features.Lookup;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
 using BaseApi.Service.Features.Step;
 using BaseApi.Service.Features.Workflow;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BaseApi.Service.Composition;
@@ -22,7 +24,7 @@ namespace BaseApi.Service.Composition;
 /// </summary>
 internal static class AppFeatures
 {
-    public static IServiceCollection AddAppFeatures(this IServiceCollection services)
+    public static IServiceCollection AddAppFeatures(this IServiceCollection services, IConfiguration cfg)
     {
         services.AddSchemaFeature();
         services.AddCacheFeature();
@@ -31,6 +33,7 @@ internal static class AppFeatures
         services.AddAssignmentFeature();
         services.AddWorkflowFeature();
         services.AddOrchestrationFeature();
+        services.AddLookupFeature(cfg);
         return services;
     }
 }

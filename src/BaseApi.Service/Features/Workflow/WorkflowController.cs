@@ -71,7 +71,24 @@ public sealed class WorkflowsController :
         if (row is null)
             return NotFound();
 
-        return Content(row.Diagram ?? WorkflowDiagram.Placeholder, WorkflowDiagram.ContentType);
+        var svg = row.Diagram ?? WorkflowDiagram.Placeholder;
+
+        // CACHED, BECAUSE THE PANEL ASKS FOR THIS CONSTANTLY. Measured: five requests per dashboard
+        // load, every load, plus every control change, time-range change and auto-refresh tick -
+        // and a drawing changes only when an operator publishes one. With an ETag a repeat view
+        // costs a 304 instead of the whole SVG.
+        //
+        // This was NOT safe to add while the lookup-table refresh rode on these requests: caching
+        // them would have silently stopped it, with nothing connecting the two changes. The refresh
+        // now has its own no-store endpoint, so the two are independent.
+        var etag = "\"" + Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(svg)))[..16] + "\"";
+        if (Request.Headers.IfNoneMatch.Any(v => v == etag))
+            return StatusCode(StatusCodes.Status304NotModified);
+
+        Response.Headers.ETag = etag;
+        Response.Headers.CacheControl = "max-age=60";
+        return Content(svg, WorkflowDiagram.ContentType);
     }
 
     /// <summary>

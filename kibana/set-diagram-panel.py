@@ -46,7 +46,26 @@ PANEL_W, PANEL_H = 48, 23
 
 
 def tsvb_panel(base_url):
-    markdown = "{{#each _all}}![](%s/{{label}}.svg)\n{{/each}}" % base_url.rstrip("/")
+    # THE PING TAG IS NOT DECORATION, and it is deliberately OUTSIDE the {{#each}} loop.
+    #
+    # Kibana never fetches the id -> name lookup table; it has to be pushed, and the only reliable
+    # "an operator is looking at the dashboard" signal available from inside a TSVB panel is the
+    # browser fetching something. This invisible 1x1 image is that signal: BaseApi answers it
+    # immediately and republishes the table in the background if it has changed.
+    #
+    # OUTSIDE the loop, because inside it the signal would fire once per workflow in range - five
+    # times on an unfiltered dashboard - and, worse, NOT AT ALL when the query returns no series,
+    # which is exactly the cold-start case where the table is most likely to be stale.
+    #
+    # The endpoint answers no-store, so it is never cached away. The diagram requests beside it are
+    # cached with an ETag, which only became safe once this tag existed to carry the signal.
+    api_root = base_url.rstrip("/").rsplit("/workflows", 1)[0]
+    # MARKDOWN SYNTAX, NOT AN <img> TAG. Kibana's markdown renderer escapes raw HTML, so an <img>
+    # tag renders as literal text and the browser never fetches it - measured: zero requests where
+    # five diagram images loaded fine beside it. The image is 1x1 and fully transparent, so
+    # markdown's own rendering is invisible enough.
+    ping = '![](%s/lookup/ping.svg)\n' % api_root
+    markdown = ping + "{{#each _all}}![](%s/{{label}}.svg)\n{{/each}}" % base_url.rstrip("/")
     params = {
         "id": "diagram", "type": "markdown",
         "index_pattern": DATA_STREAM, "time_field": "@timestamp",
