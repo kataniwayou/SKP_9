@@ -544,10 +544,15 @@ def check_12_published_steps_are_nameable(checks, es_url, names):
     missing = [s for s in PER_CYCLE_BY_STEP if s not in resolved]
 
     # AND EVERY (step, list) PAIR THAT HAS LOGGED A VERDICT IS LABELLED. The whitelist board splits
-    # on a composite runtime field, and its lookup is generated from the pairs seen in the log
-    # store - so a newly gated step draws a pie titled "{GUID} - {root}" until
-    # generate-field-formatters.py is re-run. That renders perfectly and reads as a broken board,
-    # which is exactly the class of failure a green check must not permit.
+    # on a composite runtime field whose lookup is keyed by the pairs SEEN IN THE LOG STORE, so a
+    # newly gated step draws a pie titled "{GUID} - {root}". That renders perfectly and reads as a
+    # broken board, which is exactly the class of failure a green check must not permit.
+    #
+    # NOTHING REGENERATES THIS ANY MORE, and that is why the check matters more than it did. The
+    # BaseApi publishes the three id maps from its own entity tables and carries whitelist_owner
+    # across untouched, because the pairs are observed in data and derivable from no entity. The
+    # generator that used to rebuild them was deleted with the rest of the manual path. Until
+    # something owns these pairs, a failure here is repaired by hand-editing the export.
     body = {"size": 0,
             "query": {"bool": {"filter": [{"exists": {"field": "attributes.WhitelistVerdict"}}]}},
             "aggs": {"steps": {"terms": {"field": "attributes.StepId", "size": 1000},

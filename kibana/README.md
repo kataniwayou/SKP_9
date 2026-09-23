@@ -30,7 +30,6 @@ now needs read access and nothing else.
 | file | what it is |
 |---|---|
 | `kibana-export.ndjson` | the whole deliverable — data view, 2 Lens panels, 1 agg-based panel, dashboard |
-| `generate-field-formatters.py` | writes the id → `{name}_{version}` lookup into the data view |
 | `set-diagram-panel.py` | points the diagram panel at the BaseApi that serves the drawings |
 | `publish-diagram.py` | extracts a drawing from its HTML page and PUTs it to the workflow row |
 
@@ -55,11 +54,20 @@ The step's `WorkflowId` is what lets the Step dropdown stay the published topolo
 selected; without it, chaining can only match execution records and the list falls back to steps that
 have run. A processor carries no workflow id — it is chained under nothing and is shared across
 workflows.
-Regenerate after publishing or renaming anything, then re-import:
+**Nobody regenerates this.** The BaseApi publishes the table into the data view itself, triggered by
+a dashboard render: the panel fetches `lookup/ping.svg`, and that request republishes the map if a
+render has not asked recently. It is sourced from the entity tables rather than from naming records
+in the log store, which is why a workflow that has only ever run on the cron is nameable — the old
+generator read records written on an explicit start and never by the cron, so those entities had no
+names at all.
 
-```
-python kibana/generate-field-formatters.py
-```
+Two consequences worth knowing:
+
+- **The dashboard is one render behind.** Kibana loads the data view before the panels render, so a
+  push triggered by a render lands on the *next* view. Publish something, and the first look shows
+  raw GUIDs; refresh once and the names appear.
+- **Importing this export overwrites the table** with whatever copy the file carries, because the
+  data view is one of the five objects. That corrects itself on the next render.
 
 **A workflow must have been started at least once for its entities to have names.** Those records
 are written on an explicit start and not again — the cron fires from the orchestrator, against an
