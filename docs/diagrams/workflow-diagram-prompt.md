@@ -36,7 +36,7 @@ script cannot supply.
 | an edge is labelled **only** with the schema row it carries | an edge whose source declares no output schema gets none — captioning it with the entry condition names a property of the step at its far end |
 | failure edges drop to a **shared bus**, and the bus makes **one drop into the sink's top edge** | a stub that stops in white space draws something that looks like an edge and connects nothing, leaving the reader to infer the destination — the one thing a wiring diagram exists to remove |
 | no prose annotation on the failure path | the drawing already says "any step that fails" by where the edges go |
-| the palette, type stack and class names come from `filefetcher-archiveexpander-chain.html` **verbatim** | it is also the golden `tools/verify-diagram-style.py` compares against, so one source feeds both and neither can drift silently |
+| the palette, type stack and class names come from `filefetcher-archiveexpander-chain.html` **verbatim** | pointing at a committed file beats asking the model to remember a palette. Note the authority moved: `publish-diagram.py`'s `STYLE_RULES` is the design system now, and this page is a reference that trails it |
 
 ### What a script cannot draw
 
@@ -103,7 +103,6 @@ that every failure edge starts exactly at the bottom edge of its box, that no
 text overlaps another text or sits over a node box, that no line crosses a
 label, and that nothing escapes the viewBox.
 
-Then run: python tools/verify-diagram-style.py --candidate <the page>
 It asserts the drawing is consistent with the others — the 13 :root tokens,
 the type ladder and the class vocabulary — not the width, which is each
 drawing's own. It never compares
@@ -182,11 +181,12 @@ Then screenshot with `data-theme="dark"` set on the root as well as the default,
   an HTML page with a diagram. Naming them is unnecessary.
 - The design reference in the prompt body is load-bearing and is why the drawings look like one
   another. Pointing at a committed file beats asking the model to remember a palette. It was
-  optional once, which made consistency depend on whoever pasted the prompt; `verify-diagram-style.py`
-  now catches drift after the fact, and the body line prevents it.
+  optional once, which made consistency depend on whoever pasted the prompt; the body line is what
+  prevents drift now that nothing checks for it after the fact.
 - The two committed pages in this directory are no longer publish sources — stage 2 draws fresh
-  every time. They are the STYLE GOLDENS that `verify-diagram-style.py` compares against, which is
-  why they stay.
+  every time — and since `verify-diagram-style.py` was retired they are no longer goldens either.
+  They stay as design references: they carry the interpretive annotations and the Cancelled paths
+  that a script cannot draw, which is the part of this document that is still live.
 - Port 18080 is the supervised BaseApi forward. If it refuses, check the forward before concluding
   the API is down.
 - Capture *after* `POST /orchestration/start` re-projects, not straight after a PUT — an assignment

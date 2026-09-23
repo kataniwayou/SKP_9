@@ -203,14 +203,19 @@ also where the two things a script cannot draw are described — interpretive an
 Cancelled paths that exist only in processor source.
 
 **The drawing is read from the live graph every time**, so it is current by construction rather than
-because someone remembered to redraw it. The two committed pages in `docs/diagrams/` are no longer
-publish sources: they are the style goldens `verify-diagram-style.py` compares against.
+because someone remembered to redraw it. The two committed pages in `docs/diagrams/` are not publish
+sources and are not checked against: they are design references, kept for the annotations and the
+Cancelled paths a script cannot draw.
 
-`verify-diagram-style.py` is what keeps a new drawing consistent with the existing ones. It asserts
-the token palette, the type ladder and the class vocabulary — not the viewBox width, which each
-drawing derives from its own content — and never
-compares content — two runs of a generative task differ in coordinates, and the graph moves
-underneath them, so a byte or geometry diff would fail for reasons that are not defects.
+**There is no separate style check any more, and there is nothing left for one to catch.**
+`tools/verify-diagram-style.py` compared a candidate's class vocabulary against one of those pages
+and was retired in this commit. It made sense while the drawings were produced by an agentic task
+from a prompt, where the design system existed only as an example someone had to match. It stopped
+making sense when `publish-diagram.py` took the style system into `STYLE_RULES` and emitted rules
+only for the classes a drawing actually uses: a class with no treatment can no longer be drawn, so
+the invariant is held by construction rather than asserted afterwards. Left running, it failed on
+ten classes that are all correct — the arrowheads, the bypass path, the cron strip and the legend —
+because its reference page predates every one of them.
 
 **Filenames no longer change per cluster.** The id is resolved at request time from the row itself,
 so rebuilding the graph elsewhere needs no regeneration. The retired design rendered each drawing to

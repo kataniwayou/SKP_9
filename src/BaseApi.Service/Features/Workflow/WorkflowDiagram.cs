@@ -16,9 +16,16 @@ namespace BaseApi.Service.Features.Workflow;
 /// this is substituted at read time, so one edit here changes every unenriched workflow at once.
 /// </para>
 /// <para>
-/// The tokens, type stack and 1580 viewBox width match the generated drawings exactly, so the panel
-/// does not resize or change character when a workflow is enriched. <c>tools/verify-diagram-style.py</c>
-/// asserts that, and this string is checked by it like any other drawing.
+/// The tokens and type stack match the generated drawings exactly, so the panel does not change
+/// character when a workflow is enriched. Nothing asserts that: <c>tools/verify-diagram-style.py</c>
+/// was retired once <c>publish-diagram.py</c> became the one source of the design system, and it had
+/// never covered this string anyway — its list held the two committed pages and nothing else, so the
+/// claim that this was "checked by it like any other drawing" was untrue while it stood.
+/// <para>
+/// This placeholder keeps a fixed 1580x330 viewBox while a generated drawing now derives its own
+/// size, so the panel DOES resize between an enriched workflow and an unenriched one. That is the
+/// honest trade: a placeholder has no content to derive a width from.
+/// </para>
 /// </para>
 /// </summary>
 internal static class WorkflowDiagram
