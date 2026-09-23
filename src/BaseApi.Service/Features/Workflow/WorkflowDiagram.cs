@@ -27,7 +27,7 @@ internal static class WorkflowDiagram
 
     internal const string Placeholder = """
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1580 330" role="img"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1580 330" width="1580" height="330" role="img"
      aria-label="No diagram published for this workflow">
   <style>
     :root {

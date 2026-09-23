@@ -99,6 +99,15 @@ def extract_svg(html_text):
     viewbox = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', head)
     size = (int(float(viewbox.group(1))), int(float(viewbox.group(2)))) if viewbox else (1600, 540)
 
+    # AN INTRINSIC SIZE IS NOT OPTIONAL HERE, and its absence is invisible until it reaches a
+    # browser. The page's <svg> is sized by the page's own CSS and carries only a viewBox, which
+    # is enough while it lives in that page. Served on its own and referenced by an <img> with no
+    # width - exactly what the dashboard's markdown emits - a viewBox-only SVG has no intrinsic
+    # width, so the browser falls back to the 300px default for a replaced element and the
+    # drawing renders as a thumbnail. The retired PNGs never showed this: a bitmap's intrinsic
+    # size is its pixel size, so they arrived at 3200px and were scaled DOWN to fit.
+    head = head.replace("<svg ", '<svg width="%d" height="%d" ' % size, 1)
+
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             + head + "\n" + style + body[head_end:] + "\n</svg>\n"), len(kept), size
 
