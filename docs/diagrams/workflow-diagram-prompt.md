@@ -1,9 +1,67 @@
-# Prompt — draw a workflow graph from the live cluster
+# Workflow diagrams — the layout contract
+
+## The operator's three steps
+
+| step | what the operator does |
+|---|---|
+| **1. Create the entities** | POST the workflow, its steps, assignments and schema rows to the BaseApi |
+| **2. Run the script** | `python kibana/publish-diagram.py <workflow-name>` — reads the live graph, draws it, gates it, publishes it to the workflow row |
+| **3. Verify visually** | open the dashboard, or `node run.js tools/verify-diagram-render.js` |
+
+**Nothing is pre-baked.** The drawing is read from the live graph on every run, so it is current by
+construction rather than because somebody remembered to redraw it. The stored `description` is never
+consulted — `filefetcher-archiveexpander-chain`'s own still lists six hops while the live graph has
+ten, having missed `sk-normalizer` on 2026-09-12 and the AlphaBeta fork on 2026-09-14.
+
+**Step 2 is the operator's choice.** A workflow nobody publishes serves a placeholder saying so,
+which is an ordinary state rather than a gap.
+
+## What this document is
+
+`kibana/publish-diagram.py` implements the contract below; this is its specification, and the place
+to change a rule before changing the code. It was once a prompt to paste, back when each drawing was
+authored by hand — the section at the end keeps that form, for a drawing that needs judgement a
+script cannot supply.
+
+### The layout
+
+| rule | why |
+|---|---|
+| viewBox is **1580 wide**, always | every drawing is served into the same panel; a per-workflow width makes the panel rescale as the operator switches. Deriving it from node count gave 1574 — six pixels, invisible by eye |
+| boxes are **150×86 on a 192 pitch**, success row at y=120, sink row at y=340 | one shape, so two drawings of different graphs still read as the same system |
+| the schema label band sits **above** the boxes, at y=110 | gaps are 42px and `archive-document` renders ~96px wide; centred on the edge it lands on the processor name. Measured: eight collisions |
+| an edge is labelled **only** with the schema row it carries | an edge whose source declares no output schema gets none — captioning it with the entry condition names a property of the step at its far end |
+| failure edges drop to a **shared bus**, and the bus makes **one drop into the sink's top edge** | a stub that stops in white space draws something that looks like an edge and connects nothing, leaving the reader to infer the destination — the one thing a wiring diagram exists to remove |
+| no prose annotation on the failure path | the drawing already says "any step that fails" by where the edges go |
+| the palette, type stack and class names come from `filefetcher-archiveexpander-chain.html` **verbatim** | it is also the golden `tools/verify-diagram-style.py` compares against, so one source feeds both and neither can drift silently |
+
+### What a script cannot draw
+
+Authored judgement does not survive automation, and two kinds matter here:
+
+- **Annotations that interpret the graph** — `archive-document — the container branch` says which of
+  two same-schema edges is the container path. The API has no field for that.
+- **Cancelled paths.** A step has three outcomes, not two. `AcmeHandler.Augment` throws
+  `CancelledException` when the artist misses the whitelist, and because every successor is
+  `entryCondition 1 · Completed`, that branch stops without taking either drawn edge. A cancel is
+  invisible in the API rows — it exists only in the handler.
+
+A generated drawing is therefore honest about wiring and silent about meaning. When a workflow needs
+the second, draw it by hand with the prompt below and publish that page instead.
+
+## The prompt
 
 Paste this, substituting the workflow name. It produces an HTML page published as an artifact.
 
 ```
 Draw me the <workflow-name> workflow graph as an HTML page.
+
+Match the design of docs/diagrams/filefetcher-archiveexpander-chain.html —
+the same colour tokens, type stack and size ladder, the same class names, and
+the same 1580-unit viewBox width. Take the :root block from it verbatim rather
+than re-deriving a palette. This is not decoration: every drawing is served
+into the same dashboard panel, so a fresh visual treatment per workflow makes
+the panel change character as the operator switches between them.
 
 Read the wiring live from the API at http://localhost:18080 — the workflow
 row, every step it reaches via entryStepIds/nextStepIds, every assignment,
@@ -12,6 +70,18 @@ workflow's stored description; draw what the steps actually say.
 
 The page should have: a schematic (inline SVG, success path left to right
 with the schema row labelled on each edge, failure path drawn separately),
+
+Label an edge ONLY with the schema row it carries. An edge whose source step
+declares no output schema gets no label: writing the entry condition there
+captions the edge with a property of the step at its far end. Do not annotate
+the failure path with prose like "any step that fails" - the drawing already
+says that by where the edges go.
+
+Every failure edge must TERMINATE at the sink it feeds. Drop each box onto a
+shared horizontal bus and take one drop from the bus into the sink's top edge.
+A stub that stops in white space draws something that looks like an edge and
+connects nothing, leaving the reader to infer the destination - which is the
+one thing a wiring diagram exists to remove.
 a step ledger table with each step's processor, entryCondition and real
 assignment payload, and a short notes section for what the picture can't
 carry.
@@ -28,7 +98,12 @@ Before publishing, render the page in a browser and MEASURE the SVG with
 getBBox — do not check the geometry by reading your own coordinates. Assert
 that every failure edge starts exactly at the bottom edge of its box, that no
 text overlaps another text or sits over a node box, that no line crosses a
-label, and that nothing escapes the viewBox. Screenshot both themes.
+label, and that nothing escapes the viewBox.
+
+Then run: python tools/verify-diagram-style.py --candidate <the page>
+It asserts the drawing is consistent with the others — the 13 :root tokens,
+the type ladder, the 1580 width and the class vocabulary. It never compares
+content, so a different graph shape is not a failure.
 ```
 
 ## The four lines that earn their place
@@ -91,6 +166,8 @@ into segments and test each.
 | `documentElement.scrollWidth <= clientWidth` | the page scrolls sideways |
 | every gate dot lies on a real edge segment and over no text | a marker floating beside its edge |
 | each vertical stub starts at its box's bottom edge, bus drops excepted | same defect as the failure edges |
+| every vertical failure edge ENDS on the bus, and exactly one drop lands inside the sink box | a stub dangling in white space — it reads as an edge and connects nothing |
+| no edge carries a label unless its source step declares an output schema | an edge captioned with something it does not carry |
 | no `.facts` cell leaves dead columns in its row | an odd fact count paints a grey band |
 
 Then screenshot with `data-theme="dark"` set on the root as well as the default, and look at both.
@@ -99,8 +176,13 @@ Then screenshot with `data-theme="dark"` set on the root as well as the default,
 
 - The design skills (`artifact-design`, `artifact-diagramming`) load on their own once the request is
   an HTML page with a diagram. Naming them is unnecessary.
-- To get the same visual identity rather than a fresh treatment, add: `match the design of
-  docs/diagrams/<file>.html`. Pointing at a committed file beats asking the model to remember.
+- The design reference in the prompt body is load-bearing and is why the drawings look like one
+  another. Pointing at a committed file beats asking the model to remember a palette. It was
+  optional once, which made consistency depend on whoever pasted the prompt; `verify-diagram-style.py`
+  now catches drift after the fact, and the body line prevents it.
+- The two committed pages in this directory are no longer publish sources — stage 2 draws fresh
+  every time. They are the STYLE GOLDENS that `verify-diagram-style.py` compares against, which is
+  why they stay.
 - Port 18080 is the supervised BaseApi forward. If it refuses, check the forward before concluding
   the API is down.
 - Capture *after* `POST /orchestration/start` re-projects, not straight after a PUT — an assignment

@@ -43,7 +43,11 @@ EXPORT = os.path.join(ROOT, "kibana", "kibana-export.ndjson")
 # Beside this script, not in kibana/: kibana/ is what gets imported into Kibana, and these 13
 # documents are synthetic test data that never leaves a scratch index.
 FIXTURE = os.path.join(ROOT, "tools", "classification-fixture.json")
-DIAGRAMS_DIR = os.path.join(ROOT, "kibana", "diagrams")
+# WHERE THE DIAGRAMS LIVE NOW. They were files under kibana/diagrams/, rendered to PNG and served
+# by an nginx; they are rows on the workflow table, served by the BaseApi. The directory is gone, so
+# globbing it silently found nothing and this check PASSED while verifying zero drawings - the worst
+# outcome available to it. It reads what is actually served instead.
+DEFAULT_API = "http://localhost:18080"
 
 # The chain this dashboard is VALIDATED against, not the one it is built for (spec section 1).
 VALIDATION_WORKFLOW = "filefetcher-archiveexpander-chain_1.0.0"
@@ -575,7 +579,23 @@ def check_12_published_steps_are_nameable(checks, es_url, names):
                          f"unlabelled_pairs={unlabelled or 'none'}")
 
 
-def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names):
+def _get_json(url):
+    import urllib.request, json as _json
+    with urllib.request.urlopen(url, timeout=30) as r:
+        return _json.load(r)
+
+
+def _get_text(url):
+    """None when the row is not a workflow the API knows; the served body otherwise."""
+    import urllib.request, urllib.error
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            return r.read().decode("utf-8")
+    except urllib.error.HTTPError:
+        return None
+
+
+def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DEFAULT_API):
     """Every name drawn on the chain diagram is a name the dashboard renders, and the diagram's
     step-to-processor wiring matches what the index actually shows.
 
@@ -598,9 +618,20 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names):
     try:
         # EVERY diagram, not just the chain's. Each workflow now has its own, and a rename in any of
         # them desyncs that workflow's panel from its bars just as silently.
+        # EVERY PUBLISHED diagram, read from the API - not from disk, and not the placeholder.
+        # A workflow nobody has drawn serves a card that says so; parsing it would count its caption
+        # as a step name.
         diagram_steps, diagram_procs, pairs = [], [], []
-        for svg_path in sorted(glob.glob(os.path.join(DIAGRAMS_DIR, "*.svg"))):
-            svg = open(svg_path, encoding="utf-8").read()
+        drawn, unpublished = [], []
+        for wf in _get_json(f"{api_url}/api/v1/workflows"):
+            label = f'{wf["name"]}_{wf["version"]}'
+            svg = _get_text(f'{api_url}/api/v1/workflows/{wf["id"]}.svg')
+            if svg is None:
+                continue
+            if "No diagram published" in svg:
+                unpublished.append(label)
+                continue
+            drawn.append(label)
 
             # <text class="n-step">split-importer<tspan class="n-step-ver">_1.0.0</tspan></text>
             def labels(cls, _svg=svg):
@@ -612,6 +643,13 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names):
             diagram_steps += steps
             diagram_procs += procs
             pairs += list(zip(steps, procs))
+
+        # A CHECK THAT VERIFIES NOTHING MUST SAY SO. With no diagram published there is nothing to
+        # compare, and reporting that as a pass is how this check went blind in the first place.
+        if not drawn:
+            return checks.report(13, "Diagram agrees with the dashboard", False,
+                                 f"no workflow has a published diagram - nothing to verify "
+                                 f"({len(unpublished)} serving the placeholder)")
     except Exception as exc:  # noqa: BLE001
         return checks.report(13, "Diagram agrees with the dashboard", False, f"{type(exc).__name__}: {exc}")
 

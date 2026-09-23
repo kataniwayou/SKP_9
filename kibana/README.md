@@ -160,14 +160,31 @@ workflow"*. That keeps two cases apart which used to look identical: a workflow 
 renders a card that says so, while an unreachable API still renders **nothing at all**, because the
 image tag's alt text is deliberately empty.
 
-**Enriching a workflow is the operator's choice.** Nothing publishes a diagram automatically. The
-drawing is produced by the task in `docs/diagrams/workflow-diagram-prompt.md`, which reads the wiring
-live from the API, and then:
+**Enriching a workflow is the operator's choice.** Nothing publishes a diagram automatically, and a
+workflow that never gets one serves the placeholder indefinitely.
 
-```
-python kibana/publish-diagram.py simple-abc_1.0.0
-python tools/verify-diagram-style.py --candidate <the page>
-```
+Three steps, one command:
+
+| step | what the operator does |
+|---|---|
+| **1. Create the entities** | POST the workflow, steps, assignments and schema rows to the BaseApi |
+| **2. Run the script** | `python kibana/publish-diagram.py <workflow-name>` |
+| **3. Verify visually** | open the dashboard, or `node run.js tools/verify-diagram-render.js` |
+
+Step 2 reads the live graph, draws it, gates it and publishes it to the workflow row. The gate is
+structural and refuses to publish a broken drawing: every failure edge must reach its sink, nothing
+may leave the viewBox, no attribute may be declared twice and the SVG must parse. Text metrics need
+a real renderer, which is step 3 — a duplicated `xmlns` once served as 200 `image/svg+xml` with
+correct bytes and rendered as nothing at all.
+
+The layout rules it implements are specified in
+[`docs/diagrams/workflow-diagram-prompt.md`](../docs/diagrams/workflow-diagram-prompt.md), which is
+also where the two things a script cannot draw are described — interpretive annotations, and the
+Cancelled paths that exist only in processor source.
+
+**The drawing is read from the live graph every time**, so it is current by construction rather than
+because someone remembered to redraw it. The two committed pages in `docs/diagrams/` are no longer
+publish sources: they are the style goldens `verify-diagram-style.py` compares against.
 
 `verify-diagram-style.py` is what keeps a new drawing consistent with the existing ones. It asserts
 the token palette, the type ladder, the 1580 viewBox width and the class vocabulary, and never
