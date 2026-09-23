@@ -31,8 +31,8 @@ now needs read access and nothing else.
 |---|---|
 | `kibana-export.ndjson` | the whole deliverable — data view, 2 Lens panels, 1 agg-based panel, dashboard |
 | `generate-field-formatters.py` | writes the id → `{name}_{version}` lookup into the data view |
-| `build-diagram-panel.py` | regenerates the chain diagram panel from the committed HTML |
-| `filefetcher-archiveexpander-chain.svg` | the self-contained diagram, generated — do not hand-edit |
+| `set-diagram-panel.py` | points the diagram panel at the BaseApi that serves the drawings |
+| `publish-diagram.py` | extracts a drawing from its HTML page and PUTs it to the workflow row |
 
 ## How names work
 
@@ -134,42 +134,50 @@ python tools/verify-kibana-dashboard.py
 
 ## The diagram panel, and how it follows the selection
 
-The panel shows **the diagram of the workflow you have selected**, and nothing when there isn't one.
+The panel shows **the diagram of the workflow you have selected**, and says so plainly when that
+workflow has none.
 
 It is a **TSVB markdown** panel, not the plain Markdown panel, and that is the whole mechanism. A
 Markdown panel runs no query, so it cannot react to anything. TSVB runs one, so it honours the
 Workflow control, the filter and the time range. Splitting that query by `attributes.WorkflowId`
-makes each series label the id itself, and the template turns the id into a filename:
+makes each series label the id itself, and the template turns the id into a URL:
 
 ```
-{{#each _all}}![](http://<base>/{{label}}.png){{/each}}
+{{#each _all}}![](http://<base>/{{label}}.svg){{/each}}
 ```
 
-**Nothing renders when there is no diagram, by two independent routes.** A workflow with no records
-in the window produces no series, so the loop runs zero times. A workflow with records but no file
-gets a 404 — and because the alt text is deliberately **empty**, a broken image collapses to
-nothing. With alt text it would show a placeholder icon and the alt string.
+**The drawings live on the workflow row and are served by the BaseApi.** `WorkflowEntity.Diagram`
+holds SVG source; `GET /api/v1/workflows/{id}.svg` returns it. The id is last in the path because
+the template can only concatenate a base with the label — it cannot express a segment after the id.
 
-Regenerate after editing any diagram, then re-import the export and re-apply the manifest:
+**The operator's browser fetches the drawing, not Kibana.** So the BaseApi must be reachable from
+wherever the dashboard is opened, and the base URL baked into the panel must match. On this cluster
+that is the supervised forward on 18080.
+
+**A workflow with no diagram is an ordinary state, not an error.** The column is null until someone
+publishes one, and the GET answers null with a placeholder that says *"No diagram published for this
+workflow"*. That keeps two cases apart which used to look identical: a workflow nobody has drawn now
+renders a card that says so, while an unreachable API still renders **nothing at all**, because the
+image tag's alt text is deliberately empty.
+
+**Enriching a workflow is the operator's choice.** Nothing publishes a diagram automatically. The
+drawing is produced by the task in `docs/diagrams/workflow-diagram-prompt.md`, which reads the wiring
+live from the API, and then:
 
 ```
-python kibana/build-diagram-panels.py --base-url http://localhost:18097
-kubectl apply --server-side -f k8s/25-diagrams.yaml
+python kibana/publish-diagram.py simple-abc_1.0.0
+python tools/verify-diagram-style.py --candidate <the page>
 ```
 
-`--server-side` is not optional: the ConfigMap is ~370 KB, which overflows the
-`last-applied-configuration` annotation a client-side apply writes (262144 bytes). That is also why
-`25-diagrams.yaml` is not in `kustomization.yaml`.
+`verify-diagram-style.py` is what keeps a new drawing consistent with the existing ones. It asserts
+the token palette, the type ladder, the 1580 viewBox width and the class vocabulary, and never
+compares content — two runs of a generative task differ in coordinates, and the graph moves
+underneath them, so a byte or geometry diff would fail for reasons that are not defects.
 
-**The images are served, not embedded**, which is what lets the filename vary with the selection. A
-data URI is fixed at build time. `k8s/25-diagrams.yaml` is a generated ConfigMap of PNGs behind an
-nginx, reachable on `localhost:18097`; **the operator's browser fetches them, not Kibana**, so it
-must be reachable from wherever the dashboard is opened and `--base-url` must match.
-
-**Filenames are workflow ids, so they change per cluster.** The registry in the build script is
-keyed by workflow *name*, which survives a rebuild; the id is resolved at build time from the same
-naming records the formatters use. Rebuild the graph elsewhere and re-run the script.
+**Filenames no longer change per cluster.** The id is resolved at request time from the row itself,
+so rebuilding the graph elsewhere needs no regeneration. The retired design rendered each drawing to
+PNG, base64'd them into a ConfigMap keyed by workflow id and stood an nginx in front of it; those
+ids were fixed at build time, so every rebuild orphaned the images.
 
 **With no workflow selected and several in range the diagrams stack**, and the panel scrolls rather
 than hiding the ones after the first. Selecting a workflow collapses it to one.
-

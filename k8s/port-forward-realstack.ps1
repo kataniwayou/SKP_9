@@ -52,12 +52,13 @@ $forwards = @(
     @{ svc = "redis";          local = 6380;  remote = 6379 },
     @{ svc = "elasticsearch";  local = 19200; remote = 9200 },
     @{ svc = "prometheus";     local = 19090; remote = 9090 },
-    @{ svc = "kibana";         local = 15601; remote = 5601 },
-    # The dashboard's diagram panel builds an image URL from the selected workflow id, and the
-    # OPERATOR'S BROWSER fetches it - not Kibana. So this has to be reachable from the host, and
-    # the base URL baked into the panel by kibana/build-diagram-panels.py must match it.
-    @{ svc = "skp-diagrams";   local = 18097; remote = 80 }
+    @{ svc = "kibana";         local = 15601; remote = 5601 }
 )
+# NO SEPARATE DIAGRAM FORWARD ANY MORE. The dashboard's diagram panel builds an image URL from the
+# selected workflow id and the OPERATOR'S BROWSER fetches it - not Kibana - so it must be reachable
+# from the host. It now resolves against baseapi-service on 18080, already forwarded above, because
+# the BaseApi serves the drawings from the workflow row. The retired skp-diagrams nginx had its own
+# forward on 18097.
 
 $stateFile = Join-Path ([IO.Path]::GetTempPath()) "skp-port-forwards.pid"
 
