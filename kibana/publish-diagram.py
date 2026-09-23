@@ -83,7 +83,13 @@ STYLE_RULES = {
     ".edge-fail": "stroke: var(--fail); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4;",
     ".edge-cancel": "stroke: var(--muted); stroke-width: 1.4; fill: none; stroke-dasharray: 2 4; stroke-linecap: round;",
     ".lbl-cancel": "fill: var(--muted); font-family: var(--sans); font-size: 11.5px; font-weight: 600;",
-    ".gate": "fill: var(--sheet); stroke: var(--ok); stroke-width: 2;",
+    # ARROWHEADS, NOT A DISC. The disc sat at the MIDDLE of each edge and said nothing about
+    # direction - on a left-to-right chain that is readable, on a bypass that doubles back it is
+    # not. A head that touches the target rectangle states the direction of every edge in the same
+    # way. Filled rather than stroked, which is why these are polygons: the render check requires a
+    # stroke on every path and line, and a filled arrowhead legitimately has none.
+    ".arrow": "fill: var(--ok);",
+    ".arrow-fail": "fill: var(--fail);",
     ".lbl-schema": "fill: var(--muted); font-family: var(--mono); font-size: 10px;",
     ".lbl-fail": "fill: var(--fail); font-family: var(--sans); font-size: 11.5px; font-weight: 600;",
     ".lbl-note": "fill: var(--muted); font-family: var(--sans); font-size: 11.5px;",
@@ -267,10 +273,12 @@ def render(g):
             cfg_txt, hop = f'entryCondition {s["entryCondition"]}', None
         else:
             cls = "node-box-fork" if p["name"] == "sk-normalizer" else "node-box"
-            # NO CONFIG IN THE RECTANGLE - it moved to the legend band, which is what removed the
-            # width pressure that caused the truncation. Fail boxes keep entryCondition: one short
-            # token, and a property of the box rather than of an assignment.
-            cfg_cls, cfg_txt, hop = "n-cfg", None, i + 1
+            # ENTRY CONDITION ON EVERY BOX, not only the failure sink. It is the one property that
+            # decides whether a step runs when its predecessor failed, and showing it on some boxes
+            # and not others read as "these steps have one and those do not". Config keys are in
+            # the legend band; this is a single short token and belongs on the box.
+            cfg_cls = "n-cfg-fail" if s["entryCondition"] == 2 else "n-cfg"
+            cfg_txt, hop = f'entryCondition {s["entryCondition"]}', i + 1
         emit(f'    <rect class="{cls}" x="{x}" y="{y}" width="{W}" height="{H}" rx="3"/>\n', cls)
         emit(f'    <text class="n-proc" x="{x+W//2}" y="{y+40}" text-anchor="middle">{esc(p["name"])}'
              f'<tspan class="n-proc-ver">_{esc(p["version"])}</tspan></text>\n',
@@ -294,6 +302,14 @@ def render(g):
     # sk-normalizer-sample -> split-archivecollapser vanished from a drawing that was otherwise
     # correct and passed its own gate. Positions still come from the spine; what is DRAWN comes
     # from the edge list.
+    def arrow(x, y, facing, cls="arrow"):
+        """A filled head whose TIP touches the rectangle, so the edge visibly terminates on it."""
+        if facing == "right":
+            pts = f"{x},{y} {x-9},{y-4.5} {x-9},{y+4.5}"
+        else:   # down
+            pts = f"{x},{y} {x-4.5},{y-9} {x+4.5},{y-9}"
+        emit(f'    <polygon class="{cls}" points="{pts}"/>\n', cls)
+
     col = {sid: k for k, sid in enumerate(spine)}
     drawn = set()
     for a, b in g["edges"]:
@@ -306,7 +322,7 @@ def render(g):
             if sc:
                 emit(f'    <text class="lbl-schema" x="{(x1+x2)//2}" y="{LABEL_Y}" text-anchor="middle">{esc(sc)}</text>\n',
                      "lbl-schema")
-                emit(f'    <circle class="gate" cx="{(x1+x2)//2}" cy="{y}" r="3.5"/>\n', "gate")
+            arrow(x2, y, "right")
         else:
             # A BYPASS: the source reaches a step further along without passing through the boxes
             # between, so it cannot run on the row. STRAIGHT SEGMENTS ONLY - up into the lane,
@@ -315,6 +331,7 @@ def render(g):
             xa, xb = pos[a][0] + W // 2, pos[b][0] + W // 2
             emit(f'    <path class="edge-ok edge-bypass" d="M {xa} {YT} L {xa} {BYPASS_Y} '
                  f'L {xb} {BYPASS_Y} L {xb} {YT}"/>\n', "edge-ok", "edge-bypass")
+            arrow(xb, YT, "down")
         drawn.add((a, b))
 
     # THE FAILURE EDGES RUN ONTO A BUS AND THEN INTO THE SINK. A stub that stops in white space
@@ -331,10 +348,12 @@ def render(g):
              "edge-fail")
         emit(f'    <line class="edge-fail" x1="{sink_cx}" y1="{BUS_Y}" x2="{sink_cx}" y2="{YF}"/>\n',
              "edge-fail")
+        arrow(sink_cx, YF, "down", "arrow-fail")
     for i in range(len(fail_chain) - 1):
         a, b = fail_chain[i], fail_chain[i + 1]
         x1, x2, y = pos[a][0] + W, pos[b][0], YF + H // 2
         emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
+        arrow(x2, y, "right")
 
     # THE LEGEND BAND. The config keys used to sit inside the 150px rectangle, truncated to two
     # with nothing to say more existed. The boxes already carry numerals, so the full key list
