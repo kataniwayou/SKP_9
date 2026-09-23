@@ -34,6 +34,7 @@ noticed.
 """
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -107,27 +108,57 @@ STYLE_RULES = {
     ".lg-num": "fill: var(--ink-soft); font: 600 11px ui-monospace, monospace;",
     ".lg-step": "fill: var(--ink); font: 600 11px ui-monospace, monospace;",
     ".lg-cfg": "fill: var(--ink-soft); font: 11px ui-monospace, monospace;",
+    # A KEY AND ITS VALUE ARE DIFFERENT THINGS AND LOOK IT. The line was a list of keys, so one
+    # colour was enough; `topic: skp-paths, messageCount: 25` in a single colour is a wall.
+    ".lg-key": "fill: var(--ink-soft);",
+    ".lg-val": "fill: var(--ink);",
+    ".lg-punct": "fill: var(--muted);",
+    # The schedule, above the drawing. Same size as the caption below it - they are the two lines
+    # that describe the run rather than the graph.
+    ".head-cron": "fill: var(--muted); font: 11px ui-monospace, monospace;",
+    ".head-cron-val": "fill: var(--ink); font-weight: 600;",
 }
 
-# 1580 IS A CONTRACT, NOT A COMPUTED VALUE. Every drawing is served into the same dashboard panel,
-# so they must share a width or the panel rescales as the operator switches workflow. Deriving it
-# from the node count gave 1574 for this graph - six pixels, invisible by eye, caught by the style
-# checker.
-# VB_H IS A CONTRACT FOR THE SAME REASON VB_W IS. Every drawing is served into one panel, so a
-# height that tracked each workflow's legend length would make the panel resize as the operator
-# switches workflow. The band is therefore sized for the WORST CASE - LEGEND_ROWS, the most spine
-# steps that fit the width - and short graphs leave it part-empty on purpose. Do not size it to
-# content.
-LEGEND_ROWS = 8
+# THE LEGEND BAND IS AS TALL AS IT HAS LINES. It was sized for the worst case - eight rows,
+# whatever the graph - so simple-abc drew three lines and then 80px of ruled nothing. The argument
+# for the worst case was that the panel keeps its height between workflows; the panel scales the
+# image either way, so all a fixed band bought was a smaller drawing with white underneath it.
+# Measured on simple-abc: 236px of empty lane above the band, and five ruled-but-empty rows in it.
 LEGEND_DY = 16
-VB_W, VB_H = 1580, 0            # VB_H is completed below, once the rows are known
+
+# THE WIDTH IS THE DRAWING'S, NOT A ROUND NUMBER. It was 1580 for every workflow - the width a
+# ten-step spine needs - on the reasoning that a shared width stops the panel rescaling between
+# workflows. What it actually bought was a three-step drawing occupying a third of its own canvas:
+# the panel is a full dashboard row, it scales the image to fit, and a canvas two thirds empty
+# means everything on it renders two thirds smaller, with a band of white between the boxes and the
+# assignment lines below them. So the width is computed from what is drawn - the rightmost box,
+# the legend's longest line, the caption - plus one left-margin's worth of air on the right.
+#
+# TEXT IS ESTIMATED, NOT MEASURED. Python has no text engine; the estimate below is deliberately
+# generous, and the render check measures the real thing in a browser and refuses to publish
+# anything whose content escapes the viewBox. An estimate that is short fails loudly rather than
+# clipping a legend line.
+#
+# THE HEIGHT IS DERIVED THE SAME WAY, and for the same reason. The failure row sat at a fixed
+# y=276 whether or not the graph had a failure sink, so a workflow with none - simple-abc - drew an
+# empty 236px lane between its boxes and its assignment lines, measured in a browser. The legend
+# now starts under the LOWEST ROW THAT WAS ACTUALLY DRAWN, which is the failure row when there is
+# one and the success row when there is not.
+VB_W_MIN = 420                  # a one-step drawing still wants a readable caption under it
+VB_W_PAD = 40                   # air on the right, matching X0 on the left
 X0, PITCH, W, H = 40, 192, 150, 86
 
 # THE DRAWING SITS AS HIGH AS THE LANES ABOVE IT ALLOW. YT was 120, which left most of a viewBox
 # height of empty white above the first row - wasted in a panel that is always shorter than the
 # drawing wants to be. What has to fit above the boxes is only two things: the bypass lane and the
 # schema labels, so YT is the sum of those plus a small margin rather than a round number.
-YT, YF = 56, 276
+# THE STRIP ABOVE THE DRAWING carries the workflow's schedule. It is a property of the run, not of
+# any one step, so it goes where a reader looks first and nowhere near a box. Every y below is
+# derived from these three, so the strip is added once here rather than at each use.
+HEAD_H = 26
+HEAD_Y = 16
+
+YT, YF = 56 + HEAD_H, 276 + HEAD_H
 BUS_Y = YF - 40
 
 # ABOVE the boxes, not beside the edge. The gaps between boxes are 42px and `archive-document`
@@ -138,12 +169,17 @@ LABEL_Y = YT - 10
 # THE BYPASS LANE, above the schema labels at LABEL_Y. An edge that skips a column cannot run along
 # the row - the boxes between are in the way - so it goes up, across and back down. Anything lower
 # collides with the labels it passes; this is the top margin.
-BYPASS_Y = 18
+BYPASS_Y = 18 + HEAD_H
 
-# Derived so lifting the rows cannot leave the band behind: the legend starts under the failure
-# row, and the height is the band plus the caption line.
-LEGEND_Y0 = YF + H + 26
-VB_H = LEGEND_Y0 + LEGEND_ROWS * LEGEND_DY + 36
+# The bypass edge's schema label, ABOVE its lane. The row labels at LABEL_Y belong to the edges
+# running along the row; a bypass runs up here, so its label follows it rather than staying behind
+# with edges it is not.
+BYPASS_LABEL_Y = BYPASS_Y - 6
+
+# The gap between the lowest row of boxes and the first legend line, and the strip under the
+# caption. Both are margins now rather than terms in a fixed total - see render().
+LEGEND_GAP = 26
+CAPTION_BAND = 36
 
 
 def api(base, path):
@@ -230,8 +266,41 @@ def esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def fmt_value(v):
+    """What a payload value reads as on one line.
+
+    Strings unquoted - they are the common case and the quotes are noise; everything else as
+    compact JSON, so a list stays a list and `4` is not mistaken for "4".
+    """
+    if isinstance(v, str):
+        return v
+    if isinstance(v, bool) or v is None:
+        return json.dumps(v)
+    if isinstance(v, (int, float)):
+        return repr(v)
+    return json.dumps(v, separators=(", ", ": "))
+
+
+def cfg_text(pairs):
+    """The same line as plain text - what the width estimate and the gate compare against."""
+    return ", ".join(f"{k}: {v}" for k, v in pairs) if pairs else "no config"
+
+
+def text_w(s, size, mono=True):
+    """A generous upper estimate of rendered width, in user units.
+
+    Generous on purpose: this decides the canvas width, and the browser check refuses to publish a
+    drawing whose content escapes it. Erring wide costs whitespace; erring narrow costs a publish.
+    """
+    return len(str(s)) * size * (0.62 if mono else 0.58)
+
+
 def render(g):
-    """Step 2: the drawing, laid out from the graph."""
+    """Step 2: the drawing, laid out from the graph.
+
+    Returns the SVG and what the gate needs to judge it: where the boxes went, which edges were
+    drawn, which of those carry a schema label, and the canvas the drawing sized for itself.
+    """
     steps, procs, schemas, by_step = g["steps"], g["procs"], g["schemas"], g["by_step"]
     spine, fail_chain = g["spine"], g["fail_chain"]
 
@@ -251,11 +320,14 @@ def render(g):
             cfg = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except (ValueError, TypeError):
             cfg = {}
-        # EVERY KEY. This was list(cfg)[:2] because the box is 150px wide, so split-filefetcher
-        # showed two of its three and lost allowedExtensions - the whitelist that decides one of
-        # the chain's five outcomes - with nothing to say a key was hidden. The keys live in the
-        # legend band now, which has the width for all of them.
-        return ", ".join(cfg) if cfg else "no config"
+        # EVERY KEY AND ITS VALUE. This was list(cfg)[:2] because the box is 150px wide, so
+        # split-filefetcher showed two of its three and lost allowedExtensions - the whitelist that
+        # decides one of the chain's five outcomes - with nothing to say a key was hidden. Then it
+        # was every key and no value, which names what a step is configured BY and never what it is
+        # configured TO: `topic` on two Kafka steps says they both read a topic, not that one reads
+        # skp-paths and the other writes skp-documents. The band has the width for the pair, and
+        # the canvas grows if it does not.
+        return [(k, fmt_value(v)) for k, v in cfg.items()]
 
     body, used = [], set()
 
@@ -310,8 +382,17 @@ def render(g):
             pts = f"{x},{y} {x-4.5},{y-9} {x+4.5},{y-9}"
         emit(f'    <polygon class="{cls}" points="{pts}"/>\n', cls)
 
+    # WHICH EDGES GOT A LABEL, so the gate can check that every edge carrying a schema says so.
+    # The fanout's bypass went unlabelled for exactly as long as nothing compared the two: the
+    # label was emitted in the adjacent-edge branch only, so the one edge on the drawing that a
+    # reader cannot follow by eye was also the one with no schema on it.
     col = {sid: k for k, sid in enumerate(spine)}
-    drawn = set()
+    drawn, labelled = set(), set()
+
+    def schema_label(cx, ly, sc):
+        emit(f'    <text class="lbl-schema" x="{cx}" y="{ly}" text-anchor="middle">{esc(sc)}</text>\n',
+             "lbl-schema")
+
     for a, b in g["edges"]:
         ca, cb = col[a], col[b]
         y = YT + H // 2
@@ -320,8 +401,8 @@ def render(g):
             emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
             sc = out_schema(a)
             if sc:
-                emit(f'    <text class="lbl-schema" x="{(x1+x2)//2}" y="{LABEL_Y}" text-anchor="middle">{esc(sc)}</text>\n',
-                     "lbl-schema")
+                schema_label((x1 + x2) // 2, LABEL_Y, sc)
+                labelled.add((a, b))
             arrow(x2, y, "right")
         else:
             # A BYPASS: the source reaches a step further along without passing through the boxes
@@ -331,6 +412,13 @@ def render(g):
             xa, xb = pos[a][0] + W // 2, pos[b][0] + W // 2
             emit(f'    <path class="edge-ok edge-bypass" d="M {xa} {YT} L {xa} {BYPASS_Y} '
                  f'L {xb} {BYPASS_Y} L {xb} {YT}"/>\n', "edge-ok", "edge-bypass")
+            # THE BYPASS CARRIES A SCHEMA LIKE ANY OTHER EDGE. It was drawn without one - the label
+            # lived in the branch above - so on the chain's fanout the only edge whose route is not
+            # obvious was also the only one that did not say what it carries.
+            sc = out_schema(a)
+            if sc:
+                schema_label((xa + xb) // 2, BYPASS_LABEL_Y, sc)
+                labelled.add((a, b))
             arrow(xb, YT, "down")
         drawn.add((a, b))
 
@@ -355,26 +443,66 @@ def render(g):
         emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
         arrow(x2, y, "right")
 
+    # THE BAND STARTS UNDER THE LOWEST ROW THAT EXISTS. `pos` holds only the steps that were
+    # drawn, so a graph with no failure sink has no failure row and the legend rises to meet the
+    # boxes instead of clearing a lane that nothing is in.
+    legend_y0 = max(y for _x, y in pos.values()) + H + LEGEND_GAP
+    vb_h = legend_y0 + LEGEND_DY * len(spine) + CAPTION_BAND
+
     # THE LEGEND BAND. The config keys used to sit inside the 150px rectangle, truncated to two
     # with nothing to say more existed. The boxes already carry numerals, so the full key list
     # hangs off the numeral down here where there is width for it.
     for k, sid in enumerate(spine):
-        ly = LEGEND_Y0 + LEGEND_DY * k
+        ly = legend_y0 + LEGEND_DY * k
         emit(f'    <text class="lg-num" x="{X0}" y="{ly}">{k+1}</text>\n', "lg-num")
         emit(f'    <text class="lg-step" x="{X0+22}" y="{ly}">{esc(steps[sid]["name"])}</text>\n',
              "lg-step")
-        emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">{esc(config(sid))}</text>\n', "lg-cfg")
+        pairs = config(sid)
+        if pairs:
+            spans = []
+            for n, (k, v) in enumerate(pairs):
+                sep = '<tspan class="lg-punct">, </tspan>' if n else ""
+                spans.append(f'{sep}<tspan class="lg-key">{esc(k)}</tspan>'
+                             f'<tspan class="lg-punct">: </tspan>'
+                             f'<tspan class="lg-val">{esc(v)}</tspan>')
+            emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">' + "".join(spans) + '</text>\n',
+                 "lg-cfg", "lg-key", "lg-val", "lg-punct")
+        else:
+            emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">no config</text>\n', "lg-cfg")
 
-    emit(f'  <text class="legend-txt" x="{X0}" y="{VB_H-24}">{len(spine)} steps on the success path, '
-         f'{len(fail_chain)} on the failure sink, drawn from the live graph</text>\n', "legend-txt")
+    # THE SCHEDULE, ABOVE THE DRAWING AND TO THE LEFT. A workflow with no cron is not a workflow
+    # that runs continuously - it is one nothing starts, which the drawing should say rather than
+    # leave as an empty strip the reader reads as "no opinion".
+    cron = (g["wf"].get("cronExpression") or "").strip()
+    cron_txt = cron if cron else "no cron - started by hand"
+    emit(f'  <text class="head-cron" x="{X0}" y="{HEAD_Y}">cron <tspan class="head-cron-val">'
+         f'{esc(cron_txt)}</tspan></text>\n', "head-cron", "head-cron-val")
+
+    caption = (f'{len(spine)} steps on the success path, '
+               f'{len(fail_chain)} on the failure sink, drawn from the live graph')
+    emit(f'  <text class="legend-txt" x="{X0}" y="{vb_h-24}">{esc(caption)}</text>\n', "legend-txt")
+
+    # THE CANVAS IS SIZED TO WHAT IS ON IT. Three things can be rightmost: the last box on a row, a
+    # legend line, or the caption. The legend lines are often the widest - the config keys were
+    # moved down here precisely because they do not fit inside a 150px box - so a width taken from
+    # the boxes alone would clip them.
+    right = [max(x for x, _y in pos.values()) + W,
+             X0 + text_w(caption, 12, mono=False),
+             X0 + text_w("cron " + cron_txt, 11)]
+    for sid in spine:
+        right.append(X0 + 22 + text_w(steps[sid]["name"], 11))
+        right.append(X0 + 260 + text_w(cfg_text(config(sid)), 11))
+    vb_w = max(VB_W_MIN, int(math.ceil(max(right) + VB_W_PAD)))
 
     label = f'{g["wf"]["name"]}: {len(spine)} steps left to right'
     if fail_chain:
         label += f', failures drop to {steps[fail_chain[0]]["name"]}'
-    head = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {VB_W} {VB_H}" '
-            f'width="{VB_W}" height="{VB_H}" role="img" aria-label="{esc(label)}">\n')
-    return ('<?xml version="1.0" encoding="UTF-8"?>\n' + head + style_block(used)
-            + "".join(body) + "</svg>\n"), pos, drawn
+    head = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" '
+            f'width="{vb_w}" height="{vb_h}" role="img" aria-label="{esc(label)}">\n')
+    svg = ('<?xml version="1.0" encoding="UTF-8"?>\n' + head + style_block(used)
+           + "".join(body) + "</svg>\n")
+    return svg, dict(pos=pos, drawn=drawn, labelled=labelled, vb_w=vb_w, vb_h=vb_h,
+                     cron=cron_txt)
 
 
 # THE BROWSER CHECK, RUN ON THE CANDIDATE BEFORE IT IS PUBLISHED. It used to be
@@ -389,6 +517,12 @@ def render(g):
 RENDER_CHECK_JS = r"""
 const { chromium } = require('playwright');
 const FILE = process.argv[2], VB_W = Number(process.argv[3]), WRAP = process.argv[4];
+
+// WHAT COUNTS AS WASTED CANVAS. Both numbers are the ones the layout aims for plus a little
+// slack - the right margin also absorbs the difference between Python's estimate of a text's
+// width and what the browser actually renders.
+const MAX_GAP = 48;        // boxes to the first assignment line
+const MAX_MARGIN = 160;    // any side, between the drawing and the edge of its canvas
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1700, height: 900 } });
@@ -405,7 +539,7 @@ const FILE = process.argv[2], VB_W = Number(process.argv[3]), WRAP = process.arg
   const img = await page.evaluate(() => { const i = document.getElementById('d');
     return { ok: i.complete && i.naturalWidth > 0, nw: i.naturalWidth, nh: i.naturalHeight }; });
   if (!img.ok) fail.push('the image did not load in an <img> tag');
-  if (img.nw !== VB_W) fail.push('intrinsic width ' + img.nw + ', expected the ' + VB_W + ' contract');
+  if (img.nw !== VB_W) fail.push('intrinsic width ' + img.nw + ', the drawing declares ' + VB_W);
 
   // B) the document itself, for geometry, text metrics and strokes.
   await page.goto(url, { waitUntil: 'load' });
@@ -421,6 +555,10 @@ const FILE = process.argv[2], VB_W = Number(process.argv[3]), WRAP = process.arg
     return { vb: s.getAttribute('viewBox').split(' ').map(Number),
              w: s.getAttribute('width'), h: s.getAttribute('height'),
              boxes: s.querySelectorAll('rect[class^="node-box"]').length,
+             boxBottom: Math.max(...[...s.querySelectorAll('rect[class^="node-box"]')]
+                                   .map(e => bb(e).y + bb(e).h)),
+             legendTop: Math.min(...[...s.querySelectorAll('text.lg-num, text.lg-step, text.lg-cfg')]
+                                   .map(e => bb(e).y), Infinity),
              texts: [...s.querySelectorAll('text')].map(t => ({ s: t.textContent.trim(), ...bb(t) })),
              root: bb(s), strokeless };
   });
@@ -444,14 +582,30 @@ const FILE = process.argv[2], VB_W = Number(process.argv[3]), WRAP = process.arg
   if (r.x < 0 || r.y < 0 || r.x + r.w > d.vb[2] || r.y + r.h > d.vb[3])
     fail.push('content escapes the viewBox');
 
-  console.log('RENDER ' + d.boxes + ' boxes, ' + d.texts.length + ' texts measured');
+  // THE CANVAS IS NO BIGGER THAN THE DRAWING. Both of these were real: a fixed 1580-wide canvas
+  // scaled a three-step drawing down to a third of the panel, and a failure row at a fixed y left
+  // 236px of empty lane between the boxes and the assignment lines of a graph that has no failure
+  // sink. Neither is visible to a gate that only asks whether content fits.
+  const margins = { left: r.x, top: r.y, right: d.vb[2] - (r.x + r.w), bottom: d.vb[3] - (r.y + r.h) };
+  for (const [side, m] of Object.entries(margins))
+    if (m > MAX_MARGIN) fail.push('wasted canvas: ' + Math.round(m) + 'px of ' + side + ' margin');
+  if (isFinite(d.legendTop)) {
+    const gap = d.legendTop - d.boxBottom;
+    if (gap > MAX_GAP)
+      fail.push('wasted canvas: ' + Math.round(gap) + 'px between the boxes and the assignment lines');
+    if (gap < 0) fail.push('the assignment lines run into the boxes');
+  }
+
+  console.log('RENDER ' + d.boxes + ' boxes, ' + d.texts.length + ' texts, '
+    + Math.round(d.legendTop - d.boxBottom) + 'px boxes-to-legend, margins '
+    + Object.values(margins).map(Math.round).join('/') + ' measured');
   fail.forEach(f => console.log('FAIL ' + f));
   process.exit(fail.length ? 1 : 0);
 })();
 """
 
 
-def render_check(svg_text):
+def render_check(svg_text, vb_w):
     """Render the candidate in a real browser. Returns a list of problems; [] means it draws."""
     import pathlib, subprocess, tempfile
     # THE TEMP SCRIPT LIVES IN grafana/, NOT IN /tmp. Node resolves `require` against the
@@ -469,7 +623,7 @@ def render_check(svg_text):
         with open(js, "w", encoding="utf-8") as fh:
             fh.write(RENDER_CHECK_JS)
         try:
-            r = subprocess.run(["node", js, pathlib.Path(cand).as_uri(), str(VB_W),
+            r = subprocess.run(["node", js, pathlib.Path(cand).as_uri(), str(vb_w),
                                 pathlib.Path(os.path.join(tmp, "wrap.html")).as_uri()], cwd=node_cwd,
                                capture_output=True, text=True, timeout=180)
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -483,9 +637,10 @@ def render_check(svg_text):
             [] if r.returncode == 0 else ["render check exited %s: %s" % (r.returncode, r.stderr[:200])])
 
 
-def gate(svg, g, pos, drawn):
-    """Structural checks, on coordinates. Text metrics need a browser - that is step 3."""
+def gate(svg, g, art):
+    """Structural checks, on coordinates. Text metrics need a browser - that is render_check."""
     problems = []
+    pos, drawn, vb_w, vb_h = art["pos"], art["drawn"], art["vb_w"], art["vb_h"]
 
     # EVERY EDGE IN THE GRAPH IS IN THE DRAWING. This is the check that was missing: the old gate
     # verified that failure edges reach the sink and that nothing leaves the viewBox, but never
@@ -496,18 +651,48 @@ def gate(svg, g, pos, drawn):
         problems.append("edge not drawn: %s -> %s"
                         % (g["steps"][a]["name"], g["steps"][b]["name"]))
 
-    # AND EVERY CONFIG KEY IS PRESENT VERBATIM. The keys were truncated to two for years because
-    # nothing compared what was drawn against what the assignment holds.
+    # AND EVERY EDGE THAT CARRIES A SCHEMA SAYS WHICH. The label was emitted only in the
+    # adjacent-edge branch, so the chain's fanout - the one edge whose route a reader cannot follow
+    # by eye - was also the only one with no schema on it, on a drawing where six others had one.
+    # Nothing compared the two, which is why it survived. An edge whose source declares no output
+    # schema is correctly bare and is not asked for a label.
+    for a, b in g["edges"]:
+        proc = g["procs"][g["steps"][a]["processorId"]]
+        sc = (g["schemas"].get(proc.get("outputSchemaId")) or {}).get("name")
+        if sc and (a, b) not in art["labelled"]:
+            problems.append("edge carries %s but is unlabelled: %s -> %s"
+                            % (sc, g["steps"][a]["name"], g["steps"][b]["name"]))
+
+    # AND EVERY CONFIG KEY AND VALUE IS PRESENT VERBATIM. The keys were truncated to two for years
+    # because nothing compared what was drawn against what the assignment holds; the values were
+    # absent for as long again, and a rule that checks only keys cannot tell `topic: skp-paths`
+    # from `topic: skp-documents` - the difference between the step that reads and the one that
+    # writes. An escaped value is compared escaped, since that is what the drawing contains.
     for sid in g["spine"]:
         raw = (g["by_step"].get(sid) or [{}])[0].get("payload")
         try:
             cfg = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except (ValueError, TypeError):
             cfg = {}
-        for key in cfg:
-            if key not in svg:
+        for key, val in cfg.items():
+            if esc(key) not in svg:
                 problems.append("config key missing from drawing: %s on %s"
                                 % (key, g["steps"][sid]["name"]))
+            shown = esc(fmt_value(val))
+            if shown not in svg:
+                problems.append("config value missing from drawing: %s = %s on %s"
+                                % (key, shown, g["steps"][sid]["name"]))
+
+    # AND THE SCHEDULE IS THE ROW'S. The strip above the drawing is the one thing on it that no
+    # step owns, so nothing else would catch it going stale - and a diagram that states a cron the
+    # workflow does not have is worse than one that states none.
+    cron = (g["wf"].get("cronExpression") or "").strip()
+    if cron and f'>{esc(cron)}<' not in svg:
+        problems.append("the drawing does not carry the workflow's cron: %s" % cron)
+    if not cron and "no cron" not in svg:
+        problems.append("the workflow has no cron and the drawing does not say so")
+    if cron and art["cron"] != cron:
+        problems.append("the drawing's cron %r is not the row's %r" % (art["cron"], cron))
     try:
         xml.dom.minidom.parseString(svg.encode("utf-8"))
     except Exception as exc:                                    # noqa: BLE001
@@ -520,7 +705,7 @@ def gate(svg, g, pos, drawn):
             problems.append(f"<svg> declares {attr} {seen} times, expected once")
 
     for sid, (x, y) in pos.items():
-        if x < 0 or y < 0 or x + W > VB_W or y + H > VB_H:
+        if x < 0 or y < 0 or x + W > vb_w or y + H > vb_h:
             problems.append(f'{g["steps"][sid]["name"]} at ({x},{y}) leaves the viewBox')
 
     if g["fail_chain"] and g["spine"]:
@@ -549,23 +734,25 @@ def main():
     args = ap.parse_args()
 
     g = read_graph(args.api, args.workflow)
-    svg, pos, drawn = render(g)
+    svg, art = render(g)
     print(f'{args.workflow:44s} {len(g["spine"])} on the spine, '
-          f'{len(g["fail_chain"])} on the sink, {len(svg)/1024:.1f} KB')
+          f'{len(g["fail_chain"])} on the sink, {art["vb_w"]}x{art["vb_h"]}, '
+          f'{len(svg)/1024:.1f} KB')
 
-    problems = gate(svg, g, pos, drawn)
+    problems = gate(svg, g, art)
     if problems:
         print("\nGATE FAILED - nothing published:")
         for p in problems:
             print("  -", p)
         return 1
-    print("  gate passed: edges terminate, nothing escapes the viewBox, the SVG parses")
+    print("  gate passed: every edge drawn and labelled, nothing escapes the viewBox, "
+          "the SVG parses")
 
     # THE RENDER CHECK RUNS BEFORE THE PUT, not after. It was a separate script an operator ran
     # by hand against the drawing already on the row, so anything only a browser can see was
     # published first and found later, if ever. Verifying the artefact you are about to publish
     # is strictly stronger than verifying the one you already did.
-    rendered = render_check(svg)
+    rendered = render_check(svg, art["vb_w"])
     if rendered:
         print(chr(10) + "RENDER CHECK FAILED - nothing published:")
         for r in rendered:
