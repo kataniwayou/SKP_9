@@ -180,11 +180,22 @@ Three steps, one command:
 | **2. Run the script** | `python kibana/publish-diagram.py <workflow-name>` |
 | *(verification)* | runs inside step 2 against the candidate; a failure refuses the publish |
 
-Step 2 reads the live graph, draws it, gates it and publishes it to the workflow row. The gate is
-structural and refuses to publish a broken drawing: every failure edge must reach its sink, nothing
-may leave the viewBox, no attribute may be declared twice and the SVG must parse. Text metrics need
-a real renderer, which is step 3 — a duplicated `xmlns` once served as 200 `image/svg+xml` with
-correct bytes and rendered as nothing at all.
+Step 2 reads the live graph, draws it, gates it and publishes it to the workflow row. Both checks
+run on the candidate, before the PUT — verifying what you are about to publish is strictly stronger
+than verifying what you already did.
+
+**The coordinate gate** refuses a structurally broken drawing: every edge in the graph must be
+drawn, every edge whose source declares an output schema must be *labelled with it*, every failure
+edge must reach its sink, every assignment key *and its value* must appear verbatim, the strip
+above the drawing must carry the workflow’s own `cronExpression`, nothing may leave the viewBox, no
+attribute may be declared twice, and the SVG must parse.
+
+**The browser check** measures what only a renderer can see: that the image loads at all, that no
+text measures 0px or overlaps another, that no path or line renders without a stroke, and that the
+canvas is no bigger than the drawing on it — no side margin over 160px, and no more than 48px
+between the boxes and the assignment lines. The last two are regressions with names: a fixed
+1580-wide canvas scaled a three-step drawing down to a third of the panel, and a fixed failure row
+left 236px of empty lane in a graph that has no failure sink.
 
 The layout rules it implements are specified in
 [`docs/diagrams/workflow-diagram-prompt.md`](../docs/diagrams/workflow-diagram-prompt.md), which is
@@ -196,7 +207,8 @@ because someone remembered to redraw it. The two committed pages in `docs/diagra
 publish sources: they are the style goldens `verify-diagram-style.py` compares against.
 
 `verify-diagram-style.py` is what keeps a new drawing consistent with the existing ones. It asserts
-the token palette, the type ladder, the 1580 viewBox width and the class vocabulary, and never
+the token palette, the type ladder and the class vocabulary — not the viewBox width, which each
+drawing derives from its own content — and never
 compares content — two runs of a generative task differ in coordinates, and the graph moves
 underneath them, so a byte or geometry diff would fail for reasons that are not defects.
 

@@ -27,9 +27,12 @@ script cannot supply.
 
 | rule | why |
 |---|---|
-| viewBox is **1580 wide**, always | every drawing is served into the same panel; a per-workflow width makes the panel rescale as the operator switches. Deriving it from node count gave 1574 — six pixels, invisible by eye |
-| boxes are **150×86 on a 192 pitch**, success row at y=120, sink row at y=340 | one shape, so two drawings of different graphs still read as the same system |
-| the schema label band sits **above** the boxes, at y=110 | gaps are 42px and `archive-document` renders ~96px wide; centred on the edge it lands on the processor name. Measured: eight collisions |
+| the viewBox is **the drawing's own size**, both ways | 1580x552 was fixed for every workflow, so a three-step graph sat on a canvas sized for ten with a failure lane it never used: 236px of white between its boxes and its assignment lines, and the panel scaled the whole thing down to fit. Width comes from the rightmost of the last box, the longest legend line and the caption; height from the lowest row actually drawn plus one legend line per step. Measured in a browser before every publish |
+| the legend band carries **every key and its value** | the keys were truncated to two, then shown whole without values — which names what a step is configured *by* and never what it is configured *to*: `topic` on two Kafka steps says both read a topic, not that one reads `skp-paths` and the other writes `skp-documents`. Key and value take different tokens so the pairs read apart |
+| the workflow’s **cron sits above the drawing, at the left** | it is a property of the run, not of any step, so it belongs where a reader looks first and nowhere near a box. A workflow with no cron says so — nothing starts it, which is worth stating rather than leaving as an empty strip |
+| **every edge that carries a schema is labelled with it** | the label was emitted for row-adjacent edges only, so the fanout's bypass — the one edge whose route a reader cannot follow by eye — was also the only one that did not say what it carries. A bypass label sits above its own lane, not in the row's label band. An edge whose source declares no output schema stays bare |
+| boxes are **150×86 on a 192 pitch**, success row at y=56, sink row at y=276 | one shape, so two drawings of different graphs still read as the same system |
+| the schema label band sits **above** the boxes, at y=46 | gaps are 42px and `archive-document` renders ~96px wide; centred on the edge it lands on the processor name. Measured: eight collisions |
 | an edge is labelled **only** with the schema row it carries | an edge whose source declares no output schema gets none — captioning it with the entry condition names a property of the step at its far end |
 | failure edges drop to a **shared bus**, and the bus makes **one drop into the sink's top edge** | a stub that stops in white space draws something that looks like an edge and connects nothing, leaving the reader to infer the destination — the one thing a wiring diagram exists to remove |
 | no prose annotation on the failure path | the drawing already says "any step that fails" by where the edges go |
@@ -58,7 +61,7 @@ Draw me the <workflow-name> workflow graph as an HTML page.
 
 Match the design of docs/diagrams/filefetcher-archiveexpander-chain.html —
 the same colour tokens, type stack and size ladder, the same class names, and
-the same 1580-unit viewBox width. Take the :root block from it verbatim rather
+the same class vocabulary. Take the :root block from it verbatim rather
 than re-deriving a palette. This is not decoration: every drawing is served
 into the same dashboard panel, so a fresh visual treatment per workflow makes
 the panel change character as the operator switches between them.
@@ -102,7 +105,8 @@ label, and that nothing escapes the viewBox.
 
 Then run: python tools/verify-diagram-style.py --candidate <the page>
 It asserts the drawing is consistent with the others — the 13 :root tokens,
-the type ladder, the 1580 width and the class vocabulary. It never compares
+the type ladder and the class vocabulary — not the width, which is each
+drawing's own. It never compares
 content, so a different graph shape is not a failure.
 ```
 
