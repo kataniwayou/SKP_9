@@ -25,8 +25,9 @@ at `:05` and `:35`.
 
 The cache is the one row that is not part of the graph and still belongs to it: a named
 dictionary the workflow references, projected into L2 when the workflow starts and deleted when
-it stops. Nothing walks to it from a step. `sk-normalizer`'s Acme handler reads it by the address
-written on its own step payload, which is why step 7b exists.
+it stops. Nothing walks to it from a step. `sk-normalizer`'s Acme handler reaches it by the root
+named on its own step payload, composing the rest of the address from the workflow id its dispatch
+already carries.
 
 The success path runs left to right. Every step on it also has a second edge, to
 `record-outcome` — which records whatever outcome dispatched it and never learns which one, so the
@@ -198,42 +199,42 @@ Content-Type: application/json
 
 Record the returned id as `<kafka-exporter-config>`.
 
-### 2.8 `sk-normalizer-config-v3`
+### 2.8 `sk-normalizer-config-v4`
 
 ```http
 POST /api/v1/schemas
 Content-Type: application/json
 
 {
-  "name": "sk-normalizer-config-v3",
-  "version": "3.0.0",
-  "description": "SKNormalizer step payload. Supersedes sk-normalizer-config-v2 2.0.0, which predates the CacheAddress property on SKNormalizerConfig; a referenced definition cannot be edited, so declaring a new property needs a new row. cacheAddress is declared but unread — ConfigSchemaConformance compares the record shape to this definition at startup, so the property must be described here or the replica fails conformance and publishes UNHEALTHY.",
-  "definition": "{\"type\": \"object\", \"title\": \"SKNormalizer step payload\", \"$schema\": \"https://json-schema.org/draft/2020-12/schema\", \"required\": [\"handler\"], \"properties\": {\"handler\": {\"enum\": [\"Acme\", \"AlphaBeta\", \"Sample\"], \"type\": \"string\", \"description\": \"The provider handler to apply. One of the names this processor version carries.\"}, \"cacheAddress\": {\"type\": [\"string\", \"null\"], \"description\": \"The full L2 address of one projected dictionary for whitelist lookups. Nothing reads it yet. Declared in the schema because ConfigSchemaConformance checks record shape at startup, so every property on the config record must be described here even before any payload sets it.\"}}, \"additionalProperties\": false}"
+  "name": "sk-normalizer-config-v4",
+  "version": "4.0.0",
+  "description": "SKNormalizer step payload. Supersedes sk-normalizer-config-v3 3.0.0, which declared cacheAddress -- the full L2 address, authored by hand into the step payload. The record now declares cacheRoot, the dictionary's NAME alone, and composes skp:{workflowId}:cache:{root} from the workflow id the dispatch already carries. A referenced definition cannot be edited, so renaming a property needs a new row.",
+  "definition": "{\"type\": \"object\", \"title\": \"SKNormalizer step payload\", \"$schema\": \"https://json-schema.org/draft/2020-12/schema\", \"required\": [\"handler\"], \"properties\": {\"handler\": {\"enum\": [\"Acme\", \"AlphaBeta\", \"Sample\"], \"type\": \"string\", \"description\": \"The provider handler to apply. One of the names this processor version carries.\"}, \"cacheRoot\": {\"type\": [\"string\", \"null\"], \"description\": \"The NAME of one projected dictionary for whitelist lookups, not its address. Must match a cache Root bound to this workflow through WorkflowCaches; nothing validates that, and a mismatch is a deterministic failed step naming this root. Declared here because ConfigSchemaConformance compares the record's shape to this definition at startup, so every property on the config record must be described.\"}}, \"additionalProperties\": false}"
 }
 ```
 
-A deployment carrying the `CacheAddress` property on `SKNormalizerConfig` needs this schema row —
-`ConfigSchemaConformance.Check` compares the record's shape against the definition, not against any
-payload, so the property has to be declared here the moment it exists on the record, before any
-operator authors it into a step. If this row is already live without `cacheAddress`, it cannot be
-edited: definitions are frozen, so the fix is a new schema row, both sides re-pointed to it (the
-processor's `configSchemaId` and the workflow steps naming the old one), and a restart. Skip that and
-the replica fails startup conformance against the old row and publishes UNHEALTHY.
+Record the returned id as `<sk-normalizer-config-v4>`.
 
-Record the returned id as `<sk-normalizer-config-v3>`.
+**Why the payload names a root and not an address.** The address is
+`skp:{workflowId}:cache:{root}`, and the workflow id half is the workflow's own. Putting the whole
+address on the payload meant an operator transcribed that id into JSON by hand, and nothing anywhere
+kept the copy equal to the id it came from — not the four gates in step 8, none of which inspects a
+cache address, and not the payload gate, which evaluates the payload against this definition and so
+passes any string at all. Recreate the workflow and the payload quietly names a dictionary that will
+never be projected. The processor now composes the address from the id its dispatch already carries,
+so the only half left to author is the name.
 
-The description above is copied verbatim and is **already stale on the cluster it came from**:
-it says `cacheAddress` is "declared but unread", which was true when the row was written and
-stopped being true when the artist gate shipped. A description is not load-bearing and a
-definition cannot be edited, so it stands. Appendix D is the general rule; this is a second
-instance of it.
+**`cacheRoot` must be declared here or the replica will not start.**
+`ConfigSchemaConformance.Check` compares the *shape of the config record* against the definition at
+startup, not against any payload. A build of `sk-normalizer` whose `SKNormalizerConfig` declares
+`CacheRoot`, pointed at a row that still declares `cacheAddress`, fails conformance and publishes
+UNHEALTHY — and `ProcessorLivenessValidator` then refuses every workflow using it.
 
-**Why the name says v3 when only two properties are declared.** On the cluster this file was
-captured from, `cacheAddress` arrived after `sk-normalizer-config-v2` was already referenced, and
-a referenced definition cannot be edited. So the property landed on a third row rather than in
-the second, and the live processor points at that. You are building from nothing and could name
-this row anything — but name it v3 anyway, so a later diff of the two databases compares rows
-that claim to be the same thing.
+**If v3 is already live, it cannot be edited into this.** Definitions are frozen once referenced, so
+the fix is this new row, the processor's `configSchemaId` re-pointed at it (§3.6), and a restart.
+Only the processor row carries a `configSchemaId`; a step does not, so there is exactly one row to
+re-point. Note that both workflows on this processor are affected, `sc-chain` as well as this chain —
+the schema hangs off the processor, which they share.
 
 ### 2.9 `archive-collapser-config`
 
@@ -386,7 +387,7 @@ Content-Type: application/json
   "instanceId": null,
   "inputSchemaId": "<archive-document>",
   "outputSchemaId": "<archive-document>",
-  "configSchemaId": "<sk-normalizer-config-v3>"
+  "configSchemaId": "<sk-normalizer-config-v4>"
 }
 ```
 
@@ -897,16 +898,27 @@ Content-Type: application/json
   "version": "1.0.0",
   "description": "handler Sample: identity. Acme would reject these fixtures -- they are nested outer-*.zip archives, not the wav+json pairs Acme pairs by basename.",
   "stepId": "<step:sk-normalizer-sample>",
-  "payload": "{\"handler\": \"Acme\"}"
+  "payload": "{\"handler\": \"Acme\", \"cacheRoot\": \"chain-artists\"}"
 }
 ```
 
 Record the returned id as `<asg:sk-normalizer-sample-assignment>`.
 
-**This payload is incomplete on purpose, and step 7b finishes it.** The Acme handler needs a
-`cacheAddress`, and that address embeds the workflow id — which does not exist until step 7. There
-is no ordering that lets you write it here: the assignment must exist before the workflow that
-references it, and the address must exist after. Step 7b is the second half.
+**This payload is complete, and it used to require a second pass.** While the payload carried the
+full address, it could not be written here at all: the address embeds the workflow id, the workflow
+does not exist until step 7, and the assignment must exist before the workflow that references it.
+There was no ordering that worked, so this row was created short and a step 7b came back to stamp the
+address on afterwards. Naming the root instead removes the dependency — `chain-artists` is knowable
+now — and step 7b with it.
+
+**`chain-artists` must match the cache row created in step 6b and named by the workflow in step 7.**
+Nothing checks that, at start or before: a root naming no cache bound to this workflow is a
+deterministic failed step at the first Acme lookup, naming both the composed address and this root.
+See Appendix C7.
+
+**The other `sk-normalizer` step needs no root.** §6.8 runs the AlphaBeta handler, which consults no
+whitelist. A missing root is only a defect for a handler that reaches for a list, which is why that
+step keeps running with a bare `{"handler": "AlphaBeta"}`.
 
 ### 6.7 `split-archivecollapser-assignment` → step `split-archivecollapser`
 
@@ -1047,40 +1059,6 @@ Record the returned id as `<workflow>`.
 `cacheIds` is a third junction beside `entryStepIds` and `assignmentIds`. Every cache it names is
 projected into L2 when the workflow starts and removed when it stops.
 
-## Step 7b — stamp the whitelist address onto the Acme payload
-
-Now that `<workflow>` exists, the address can be written. It is
-`skp:{workflowId}:cache:{root}` — here, `skp:<workflow>:cache:chain-artists`.
-
-```http
-PUT /api/v1/assignments/<asg:sk-normalizer-sample-assignment>
-Content-Type: application/json
-
-{
-  "name": "sk-normalizer-sample-assignment",
-  "version": "1.0.0",
-  "description": "handler Sample: identity. Acme would reject these fixtures -- they are nested outer-*.zip archives, not the wav+json pairs Acme pairs by basename.",
-  "stepId": "<step:sk-normalizer-sample>",
-  "payload": "{\"handler\": \"Acme\", \"cacheAddress\": \"skp:<workflow>:cache:chain-artists\"}"
-}
-```
-
-**A `PUT` replaces the whole row, so every field is re-sent.** `name`, `version`, `description`
-and `stepId` above are byte-identical to what §6.6 created — only `payload` changes. Dropping a
-field here does not leave it alone; it nulls it. The description is the stale one Appendix D
-describes, and it is re-sent stale on purpose: this file copies values, not intentions.
-
-**`cacheAddress` must be declared in the processor's config schema or the replica will not start.**
-`ConfigSchemaConformance` compares the *shape of the config record* against the schema at startup,
-not against any payload, so `sk-normalizer-config-v3` (§2.8) is the version that carries it. A build
-of `sk-normalizer` whose `SKNormalizerConfig` has the property, pointed at a schema that does not
-declare it, fails conformance and publishes UNHEALTHY — and `ProcessorLivenessValidator` then
-refuses every workflow using it.
-
-**The other `sk-normalizer` step needs no address.** §6.8 runs the AlphaBeta handler, which consults
-no whitelist. A missing address is only a defect for a handler that reaches for a list, which is why
-that step keeps running with a bare `{"handler": "AlphaBeta"}`.
-
 ## Step 8 — start the workflow
 
 Creating the rows does not run anything. A workflow only fires once it has been started, and
@@ -1185,7 +1163,7 @@ identical.
 **C2. `422` naming a payload that does not conform.** The payload gate validates each assignment's
 `payload` against its processor's `configSchemaId` definition. `additionalProperties: false` is
 set on all of them, so an extra field fails as loudly as a missing one. Note that
-`sk-normalizer-config-v3` pins `handler` to an enum of exactly `Acme`, `AlphaBeta`, `Sample` —
+`sk-normalizer-config-v4` pins `handler` to an enum of exactly `Acme`, `AlphaBeta`, `Sample` —
 a handler name outside that list is refused here, at start, rather than at dispatch.
 
 **C3. `422` naming a count of unhealthy processors.** The liveness gate reads per-replica
@@ -1238,13 +1216,15 @@ IPv6 case, with a different cause.
 **C7. The chain runs, and Acme documents quietly stop arriving.** The whitelist has three
 failure shapes and only one of them is an error you can search for.
 
-- **No `cacheAddress` on the payload** — you skipped step 7b. The step ends `Failed` with
+- **No `cacheRoot` on the payload** — §6.6's payload was copied short. The step ends `Failed` with
   *"step payload rejected: this handler gates a field on a whitelist, but the payload names no
-  cacheAddress"*, and takes the `record-outcome` edge like any other failure. Loud, and correct:
+  cacheRoot"*, and takes the `record-outcome` edge like any other failure. Loud, and correct:
   refusing every document instead would read in the logs exactly like a whitelist that approves
   nobody.
-- **An address pointing at nothing** — a typo in the root, or the workflow never named the cache
-  in step 7. Also `Failed`, with *"no whitelist is projected at 'skp:…'"*. This is the one B4
+- **A root naming no projected dictionary** — a typo in the root, or the workflow never named the
+  cache in step 7. Also `Failed`, with *"no whitelist is projected at 'skp:…'. This workflow binds no
+  cache with root '…'"*. The workflow id half can no longer be the cause — it is composed from the
+  dispatch rather than authored — so the root is the only half left to doubt. This is the one B4
   catches before a document ever arrives.
 - **An artist that is not on the list, or a sidecar naming no artist at all** — the step ends
   **`Cancelled`**, which is neither of the above. No successor in this graph declares
@@ -1269,10 +1249,9 @@ this file copies values, not intentions. If you want the graph to agree with its
 name and description — never the payload, which is load-bearing for the AlphaBeta step
 downstream, whose whole job is to lift out the XML the Acme handler renders.
 
-Step 7b re-sends that description unchanged rather than quietly improving it, which is the same
-rule applied twice: a `PUT` replaces the row, so the choice there is between copying the stale
-text and inventing a new one, and inventing one would make this appendix false on your machine
-while it stays true on ours.
+There is no second pass in which to quietly improve it. The payload is written once, in §6.6, and
+the stale description is copied alongside it rather than corrected — inventing a better one would
+make this appendix false on your machine while it stays true on ours.
 
 The workflow's own `description` field is likewise stale in the same way: it lists a six-hop
 chain and mentions neither `sk-normalizer` nor the AlphaBeta fork nor the failure path. It is
