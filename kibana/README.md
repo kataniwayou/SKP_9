@@ -178,7 +178,7 @@ Three steps, one command:
 |---|---|
 | **1. Create the entities** | POST the workflow, steps, assignments and schema rows to the BaseApi |
 | **2. Run the script** | `python kibana/publish-diagram.py <workflow-name>` |
-| **3. Verify visually** | open the dashboard, or `node run.js tools/verify-diagram-render.js` |
+| *(verification)* | runs inside step 2 against the candidate; a failure refuses the publish |
 
 Step 2 reads the live graph, draws it, gates it and publishes it to the workflow row. The gate is
 structural and refuses to publish a broken drawing: every failure edge must reach its sink, nothing

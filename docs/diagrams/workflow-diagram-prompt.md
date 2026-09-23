@@ -6,7 +6,7 @@
 |---|---|
 | **1. Create the entities** | POST the workflow, its steps, assignments and schema rows to the BaseApi |
 | **2. Run the script** | `python kibana/publish-diagram.py <workflow-name>` — reads the live graph, draws it, gates it, publishes it to the workflow row |
-| **3. Verify visually** | open the dashboard, or `node run.js tools/verify-diagram-render.js` |
+| *(verification)* | runs inside step 2 against the candidate; a failure refuses the publish |
 
 **Nothing is pre-baked.** The drawing is read from the live graph on every run, so it is current by
 construction rather than because somebody remembered to redraw it. The stored `description` is never

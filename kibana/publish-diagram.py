@@ -6,7 +6,12 @@ THE OPERATOR'S PROCESS IS THREE STEPS, and this is the middle one:
 
     1. create the workflow entities through the BaseApi
     2. python kibana/publish-diagram.py <workflow-name>
-    3. look at the dashboard, or run tools/verify-diagram-render.js
+
+THE RENDER CHECK IS NOT A THIRD STEP ANY MORE. It was tools/verify-diagram-render.js, run by hand
+against the drawing ALREADY on the workflow row - so anything only a browser can see was published
+first and discovered later, if ever. It runs here now, on the candidate, and a failure refuses the
+publish. Verifying the artefact you are about to publish is strictly stronger than verifying the
+one you already did.
 
 NOTHING IS PRE-BAKED. The drawing is read from the live graph on every run, so it is current by
 construction rather than because someone remembered to redraw it. An earlier design kept a registry
@@ -343,6 +348,112 @@ def render(g):
             + "".join(body) + "</svg>\n"), pos, drawn
 
 
+# THE BROWSER CHECK, RUN ON THE CANDIDATE BEFORE IT IS PUBLISHED. It used to be
+# tools/verify-diagram-render.js, a separate step 3 an operator ran by hand against the drawing
+# ALREADY on the workflow row - so a drawing that renders as nothing was published first and
+# discovered afterwards, if at all. That is not hypothetical: an arc carrying a class that set no
+# stroke passed the coordinate gate, reached the row, and served to the dashboard invisible.
+#
+# WHY A BROWSER AT ALL. The gate above is arithmetic on coordinates and cannot see rendering. A
+# duplicated xmlns once served 200 image/svg+xml with correct bytes and drew nothing; text metrics
+# need a real text engine; and a stroke-less path is present in the DOM and absent on screen.
+RENDER_CHECK_JS = r"""
+const { chromium } = require('playwright');
+const FILE = process.argv[2], VB_W = Number(process.argv[3]), WRAP = process.argv[4];
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1700, height: 900 } });
+  const fail = [];
+  const url = FILE;   // a file:// URL built by the caller - no path munging in here
+
+  // A) through the panel's own mechanism: a bare <img> with empty alt, where a failed load is
+  // invisible rather than showing a broken-image icon.
+  // A FILE-ORIGIN WRAPPER, not setContent. A page created by setContent has an about:blank
+  // origin, and Chromium refuses to load a file:// subresource into it - the <img> then
+  // reports naturalWidth 0, which is indistinguishable from the drawing being broken.
+  await page.goto(WRAP, { waitUntil: 'load' });
+  await page.waitForTimeout(1200);
+  const img = await page.evaluate(() => { const i = document.getElementById('d');
+    return { ok: i.complete && i.naturalWidth > 0, nw: i.naturalWidth, nh: i.naturalHeight }; });
+  if (!img.ok) fail.push('the image did not load in an <img> tag');
+  if (img.nw !== VB_W) fail.push('intrinsic width ' + img.nw + ', expected the ' + VB_W + ' contract');
+
+  // B) the document itself, for geometry, text metrics and strokes.
+  await page.goto(url, { waitUntil: 'load' });
+  const d = await page.evaluate(() => {
+    const s = document.querySelector('svg');
+    const bb = e => { const b = e.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
+    const strokeless = [];
+    for (const e of s.querySelectorAll('path, line')) {
+      const cs = getComputedStyle(e);
+      if (cs.stroke === 'none' || cs.strokeWidth === '0px')
+        strokeless.push(e.getAttribute('class') || e.tagName);
+    }
+    return { vb: s.getAttribute('viewBox').split(' ').map(Number),
+             w: s.getAttribute('width'), h: s.getAttribute('height'),
+             boxes: s.querySelectorAll('rect[class^="node-box"]').length,
+             texts: [...s.querySelectorAll('text')].map(t => ({ s: t.textContent.trim(), ...bb(t) })),
+             root: bb(s), strokeless };
+  });
+  if (+d.w !== d.vb[2] || +d.h !== d.vb[3])
+    fail.push('width/height ' + d.w + 'x' + d.h + ' disagrees with viewBox');
+  if (img.nh !== d.vb[3]) fail.push('the <img> reported ' + img.nh + ' tall, the SVG says ' + d.vb[3]);
+  if (d.boxes === 0) fail.push('a drawing with no step boxes');
+
+  // THE CHECK THAT WAS MISSING EVERYWHERE. A stroke-less path is in the DOM, counted by any
+  // structural gate, and invisible on screen - the same failure as an edge that was never drawn.
+  for (const c of d.strokeless) fail.push('element renders no stroke: ' + c);
+
+  d.texts.forEach((t, i) => { if (t.w === 0) fail.push('text[' + i + '] "' + t.s + '" measured 0px wide'); });
+  for (let i = 0; i < d.texts.length; i++)
+    for (let j = i + 1; j < d.texts.length; j++) {
+      const a = d.texts[i], b = d.texts[j];
+      if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h)
+        fail.push('text overlap: "' + a.s + '" x "' + b.s + '"');
+    }
+  const r = d.root;
+  if (r.x < 0 || r.y < 0 || r.x + r.w > d.vb[2] || r.y + r.h > d.vb[3])
+    fail.push('content escapes the viewBox');
+
+  console.log('RENDER ' + d.boxes + ' boxes, ' + d.texts.length + ' texts measured');
+  fail.forEach(f => console.log('FAIL ' + f));
+  process.exit(fail.length ? 1 : 0);
+})();
+"""
+
+
+def render_check(svg_text):
+    """Render the candidate in a real browser. Returns a list of problems; [] means it draws."""
+    import pathlib, subprocess, tempfile
+    # THE TEMP SCRIPT LIVES IN grafana/, NOT IN /tmp. Node resolves `require` against the
+    # directory of the FILE, not the working directory, and playwright is installed under
+    # grafana/node_modules - the same copy tools/verify-kibana-panels.js uses. A script written
+    # anywhere else cannot find it however the cwd is set.
+    node_cwd = os.path.join(ROOT, "grafana")
+    with tempfile.TemporaryDirectory(dir=node_cwd) as tmp:
+        cand = os.path.join(tmp, "candidate.svg")
+        with open(cand, "w", encoding="utf-8") as fh:
+            fh.write(svg_text)
+        with open(os.path.join(tmp, "wrap.html"), "w", encoding="utf-8") as fh:
+            fh.write('<body style="margin:0"><img id="d" src="candidate.svg" alt=""></body>')
+        js = os.path.join(tmp, "check.js")
+        with open(js, "w", encoding="utf-8") as fh:
+            fh.write(RENDER_CHECK_JS)
+        try:
+            r = subprocess.run(["node", js, pathlib.Path(cand).as_uri(), str(VB_W),
+                                pathlib.Path(os.path.join(tmp, "wrap.html")).as_uri()], cwd=node_cwd,
+                               capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            # NOT a silent pass. A publisher that treats "could not check" as "fine" is worse than
+            # one with no check, because the operator believes the drawing was verified.
+            return ["could not run the render check: %s" % exc]
+        for line in r.stdout.splitlines():
+            if line.startswith("RENDER "):
+                print("  " + line[7:] + " - rendered in a browser")
+        return [l[5:] for l in r.stdout.splitlines() if l.startswith("FAIL ")] or (
+            [] if r.returncode == 0 else ["render check exited %s: %s" % (r.returncode, r.stderr[:200])])
+
+
 def gate(svg, g, pos, drawn):
     """Structural checks, on coordinates. Text metrics need a browser - that is step 3."""
     problems = []
@@ -421,6 +532,17 @@ def main():
         return 1
     print("  gate passed: edges terminate, nothing escapes the viewBox, the SVG parses")
 
+    # THE RENDER CHECK RUNS BEFORE THE PUT, not after. It was a separate script an operator ran
+    # by hand against the drawing already on the row, so anything only a browser can see was
+    # published first and found later, if ever. Verifying the artefact you are about to publish
+    # is strictly stronger than verifying the one you already did.
+    rendered = render_check(svg)
+    if rendered:
+        print(chr(10) + "RENDER CHECK FAILED - nothing published:")
+        for r in rendered:
+            print("  -", r)
+        return 1
+
     if args.out:
         open(args.out, "w", encoding="utf-8", newline="\n").write(svg)
         print(f"  wrote {args.out}")
@@ -436,7 +558,7 @@ def main():
         code = r.status
     print(f'  published to {g["wf"]["id"]} ({code})')
     print(f'  served at    {args.api}/api/v1/workflows/{g["wf"]["id"]}.svg')
-    print("\nStep 3: open the dashboard, or run tools/verify-diagram-render.js")
+    print(chr(10) + "Open the dashboard to see it in place.")
     return 0
 
 
