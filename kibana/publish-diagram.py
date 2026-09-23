@@ -72,8 +72,6 @@ STYLE_RULES = {
     ".node-box": "fill: var(--sheet); stroke: var(--rule); stroke-width: 1.4;",
     ".node-box-fork": "fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.4;",
     ".node-box-fail": "fill: var(--fail-soft); stroke: var(--fail); stroke-width: 1.4;",
-    ".hop-disc": "fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.2;",
-    ".hop-num": "fill: var(--ok); font-family: var(--sans); font-size: 11px; font-weight: 700;",
     ".n-proc": "fill: var(--ink); font-family: var(--sans); font-size: 11.5px; font-weight: 600;",
     ".n-proc-ver": "fill: var(--muted); font-size: 9px; font-weight: 500;",
     ".n-step": "fill: var(--muted); font-family: var(--mono); font-size: 8.5px;",
@@ -105,7 +103,6 @@ STYLE_RULES = {
     # was: structurally there, visually absent.
     ".edge-bypass": "fill: none;",
     # The legend band. Monospace so the key lists column up under each other.
-    ".lg-num": "fill: var(--ink-soft); font: 600 11px ui-monospace, monospace;",
     ".lg-step": "fill: var(--ink); font: 600 11px ui-monospace, monospace;",
     ".lg-cfg": "fill: var(--ink-soft); font: 11px ui-monospace, monospace;",
     # A KEY AND ITS VALUE ARE DIFFERENT THINGS AND LOOK IT. The line was a list of keys, so one
@@ -335,22 +332,25 @@ def render(g):
         used.update(classes)
         body.append(markup)
 
-    for i, sid in enumerate(spine + fail_chain):
+    # NO ORDINAL ON A BOX, and none on its assignment line either. A numeral is only a reading
+    # order, and this drawing already states one everywhere it is true: the spine runs left to
+    # right and the arrowheads say which way each edge points. What the numeral added was a second
+    # naming scheme for the same step - the box says `sk-normalizer-sample`, the legend line says
+    # `sk-normalizer-sample`, and the numeral said `4`, which is a fact about the layout rather
+    # than about the graph. It also went stale the moment the spine changed: insert a step and
+    # every numeral after it means a different box than it did in the last drawing anyone saw.
+    for sid in spine + fail_chain:
         s = steps[sid]
         p = procs[s["processorId"]]
         x, y = pos[sid]
-        if sid in fail_chain:
-            cls = "node-box-fail" if s["entryCondition"] == 2 else "node-box"
-            cfg_cls = "n-cfg-fail" if s["entryCondition"] == 2 else "n-cfg"
-            cfg_txt, hop = f'entryCondition {s["entryCondition"]}', None
-        else:
-            cls = "node-box-fork" if p["name"] == "sk-normalizer" else "node-box"
-            # ENTRY CONDITION ON EVERY BOX, not only the failure sink. It is the one property that
-            # decides whether a step runs when its predecessor failed, and showing it on some boxes
-            # and not others read as "these steps have one and those do not". Config keys are in
-            # the legend band; this is a single short token and belongs on the box.
-            cfg_cls = "n-cfg-fail" if s["entryCondition"] == 2 else "n-cfg"
-            cfg_txt, hop = f'entryCondition {s["entryCondition"]}', i + 1
+        cls = ("node-box-fail" if s["entryCondition"] == 2 else "node-box") if sid in fail_chain \
+            else ("node-box-fork" if p["name"] == "sk-normalizer" else "node-box")
+        # ENTRY CONDITION ON EVERY BOX, not only the failure sink. It is the one property that
+        # decides whether a step runs when its predecessor failed, and showing it on some boxes
+        # and not others read as "these steps have one and those do not". Config keys are in
+        # the legend band; this is a single short token and belongs on the box.
+        cfg_cls = "n-cfg-fail" if s["entryCondition"] == 2 else "n-cfg"
+        cfg_txt = f'entryCondition {s["entryCondition"]}'
         emit(f'    <rect class="{cls}" x="{x}" y="{y}" width="{W}" height="{H}" rx="3"/>\n', cls)
         emit(f'    <text class="n-proc" x="{x+W//2}" y="{y+40}" text-anchor="middle">{esc(p["name"])}'
              f'<tspan class="n-proc-ver">_{esc(p["version"])}</tspan></text>\n',
@@ -358,13 +358,8 @@ def render(g):
         emit(f'    <text class="n-step" x="{x+W//2}" y="{y+59}" text-anchor="middle">{esc(s["name"])}'
              f'<tspan class="n-step-ver">_{esc(s["version"])}</tspan></text>\n',
              "n-step", "n-step-ver")
-        if cfg_txt is not None:
-            emit(f'    <text class="{cfg_cls}" x="{x+W//2}" y="{y+74}" text-anchor="middle">{esc(cfg_txt)}</text>\n',
-                 cfg_cls)
-        if hop is not None:
-            emit(f'    <circle class="hop-disc" cx="{x+12}" cy="{y+12}" r="9"/>\n', "hop-disc")
-            emit(f'    <text class="hop-num" x="{x+12}" y="{y+15}" text-anchor="middle">{hop}</text>\n',
-                 "hop-num")
+        emit(f'    <text class="{cfg_cls}" x="{x+W//2}" y="{y+74}" text-anchor="middle">{esc(cfg_txt)}</text>\n',
+             cfg_cls)
 
     # A LABEL NAMES THE SCHEMA THE EDGE CARRIES, and nothing else. An edge whose source declares no
     # output schema gets none: captioning it with the entry condition would name a property of the
@@ -450,12 +445,12 @@ def render(g):
     vb_h = legend_y0 + LEGEND_DY * len(spine) + CAPTION_BAND
 
     # THE LEGEND BAND. The config keys used to sit inside the 150px rectangle, truncated to two
-    # with nothing to say more existed. The boxes already carry numerals, so the full key list
-    # hangs off the numeral down here where there is width for it.
+    # with nothing to say more existed. They hang off the step's NAME down here, where there is
+    # width for the whole list - the name is what ties a line to its box now that neither carries
+    # a numeral, and it is the same string the box prints.
     for k, sid in enumerate(spine):
         ly = legend_y0 + LEGEND_DY * k
-        emit(f'    <text class="lg-num" x="{X0}" y="{ly}">{k+1}</text>\n', "lg-num")
-        emit(f'    <text class="lg-step" x="{X0+22}" y="{ly}">{esc(steps[sid]["name"])}</text>\n',
+        emit(f'    <text class="lg-step" x="{X0}" y="{ly}">{esc(steps[sid]["name"])}</text>\n',
              "lg-step")
         pairs = config(sid)
         if pairs:
@@ -490,7 +485,7 @@ def render(g):
              X0 + text_w(caption, 12, mono=False),
              X0 + text_w("cron " + cron_txt, 11)]
     for sid in spine:
-        right.append(X0 + 22 + text_w(steps[sid]["name"], 11))
+        right.append(X0 + text_w(steps[sid]["name"], 11))
         right.append(X0 + 260 + text_w(cfg_text(config(sid)), 11))
     vb_w = max(VB_W_MIN, int(math.ceil(max(right) + VB_W_PAD)))
 
@@ -557,7 +552,7 @@ const MAX_MARGIN = 160;    // any side, between the drawing and the edge of its 
              boxes: s.querySelectorAll('rect[class^="node-box"]').length,
              boxBottom: Math.max(...[...s.querySelectorAll('rect[class^="node-box"]')]
                                    .map(e => bb(e).y + bb(e).h)),
-             legendTop: Math.min(...[...s.querySelectorAll('text.lg-num, text.lg-step, text.lg-cfg')]
+             legendTop: Math.min(...[...s.querySelectorAll('text.lg-step, text.lg-cfg')]
                                    .map(e => bb(e).y), Infinity),
              texts: [...s.querySelectorAll('text')].map(t => ({ s: t.textContent.trim(), ...bb(t) })),
              root: bb(s), strokeless };
