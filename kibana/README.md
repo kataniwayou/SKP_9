@@ -29,9 +29,19 @@ now needs read access and nothing else.
 
 | file | what it is |
 |---|---|
-| `kibana-export.ndjson` | the whole deliverable — data view, 2 Lens panels, 1 agg-based panel, dashboard |
-| `set-diagram-panel.py` | points the diagram panel at the BaseApi that serves the drawings |
-| `publish-diagram.py` | extracts a drawing from its HTML page and PUTs it to the workflow row |
+| `kibana-export.ndjson` | the whole deliverable — data view, 2 Lens panels, 1 agg-based panel, dashboard, and the diagram panel |
+| `publish-diagram.py` | draws a workflow from the live graph, gates it in a browser, and PUTs it to the workflow row |
+
+**The diagram panel lives in the export, not in a script.** `set-diagram-panel.py` used to write it
+— a TSVB panel whose markdown is `{{#each _all}}![](<base>/{{label}}.svg){{/each}}`, split on
+`attributes.WorkflowId` so each series label is a workflow id the template turns into a URL. It was
+one-time wiring: the panel resolves the id at REQUEST time, so a new or redrawn diagram needs
+nothing done to the dashboard, and the only thing the script encoded was the base URL as the
+operator's browser sees it. It was retired once the panel it produces was committed here.
+
+To repoint it at a different BaseApi — another host, or the air-gapped stack — edit `p3`'s
+`embeddableConfig` in the ndjson and re-import. Note the committed panel is `h: 14`, which is not
+what the retired script wrote (`23`), so the export is the authority on its own layout.
 
 ## How names work
 
