@@ -46,7 +46,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # THE STYLE SYSTEM LIVES HERE, not in a workflow's page. It used to be scraped with a regex out of
 # docs/diagrams/filefetcher-archiveexpander-chain.html at every publish, which made a script that
 # draws ANY workflow depend on the committed page of ONE - rename or delete that file and every
-# drawing loses its styling. The tokens and rules below are that page's, carried over verbatim, so
+# drawing loses its styling. That page has since been deleted, which this survived precisely
+# because the coupling was cut first. The tokens and rules below are that page's, carried over verbatim, so
 # the rendered output is unchanged; what changed is that the generic script no longer reaches into
 # a specific workflow's artefact to find out what a box looks like.
 #

@@ -36,7 +36,7 @@ script cannot supply.
 | an edge is labelled **only** with the schema row it carries | an edge whose source declares no output schema gets none — captioning it with the entry condition names a property of the step at its far end |
 | failure edges drop to a **shared bus**, and the bus makes **one drop into the sink's top edge** | a stub that stops in white space draws something that looks like an edge and connects nothing, leaving the reader to infer the destination — the one thing a wiring diagram exists to remove |
 | no prose annotation on the failure path | the drawing already says "any step that fails" by where the edges go |
-| the palette, type stack and class names come from `filefetcher-archiveexpander-chain.html` **verbatim** | pointing at a committed file beats asking the model to remember a palette. Note the authority moved: `publish-diagram.py`'s `STYLE_RULES` is the design system now, and this page is a reference that trails it |
+| the palette, type stack and class names come from `publish-diagram.py`'s `STYLE_RULES` **verbatim** | it is the design system, not a copy of one. This pointed at a committed page until that page was deleted, which is the better arrangement anyway: a generator that emits a rule per class it uses cannot drift from itself, and a sample page always could |
 
 ### What a script cannot draw
 
@@ -59,12 +59,12 @@ Paste this, substituting the workflow name. It produces an HTML page published a
 ```
 Draw me the <workflow-name> workflow graph as an HTML page.
 
-Match the design of docs/diagrams/filefetcher-archiveexpander-chain.html —
-the same colour tokens, type stack and size ladder, the same class names, and
-the same class vocabulary. Take the :root block from it verbatim rather
-than re-deriving a palette. This is not decoration: every drawing is served
-into the same dashboard panel, so a fresh visual treatment per workflow makes
-the panel change character as the operator switches between them.
+Match the design in kibana/publish-diagram.py — STYLE_ROOT and STYLE_RULES,
+the colour tokens, type stack and size ladder, and the class names. Take the
+:root block from STYLE_ROOT verbatim rather than re-deriving a palette. This
+is not decoration: every drawing is served into the same dashboard panel, so a
+fresh visual treatment per workflow makes the panel change character as the
+operator switches between them.
 
 Read the wiring live from the API at http://localhost:18080 — the workflow
 row, every step it reaches via entryStepIds/nextStepIds, every assignment,
@@ -183,10 +183,12 @@ Then screenshot with `data-theme="dark"` set on the root as well as the default,
   another. Pointing at a committed file beats asking the model to remember a palette. It was
   optional once, which made consistency depend on whoever pasted the prompt; the body line is what
   prevents drift now that nothing checks for it after the fact.
-- The two committed pages in this directory are no longer publish sources — stage 2 draws fresh
-  every time — and since `verify-diagram-style.py` was retired they are no longer goldens either.
-  They stay as design references: they carry the interpretive annotations and the Cancelled paths
-  that a script cannot draw, which is the part of this document that is still live.
+- **The two committed pages in this directory are gone**, and with them the last reason this
+  document described itself as a live workflow. They stopped being publish sources when stage 2
+  began drawing fresh every time, stopped being style goldens when `verify-diagram-style.py` was
+  retired, and were deleted once nothing read them. What remains here that `publish-diagram.py`
+  cannot produce is the *description* of the interpretive annotations and the Cancelled paths — the
+  judgements themselves, not any drawing carrying them.
 - Port 18080 is the supervised BaseApi forward. If it refuses, check the forward before concluding
   the API is down.
 - Capture *after* `POST /orchestration/start` re-projects, not straight after a PUT — an assignment
@@ -200,7 +202,7 @@ Then screenshot with `data-theme="dark"` set on the root as well as the default,
 
 | workflow | page | artifact |
 |---|---|---|
-| `filefetcher-archiveexpander-chain` | [`filefetcher-archiveexpander-chain.html`](filefetcher-archiveexpander-chain.html) | https://claude.ai/code/artifact/da7795b5-c70c-4da4-bcdb-8dff262ad359 |
+| `filefetcher-archiveexpander-chain` | deleted — `publish-diagram.py` draws it live | https://claude.ai/code/artifact/da7795b5-c70c-4da4-bcdb-8dff262ad359 |
 
 Redrawn 2026-09-15 from a fresh live capture and republished to the same URL (version 4). What the
 redraw changed, beyond the cancelled stub the prompt now asks for:

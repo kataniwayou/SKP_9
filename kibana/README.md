@@ -203,13 +203,15 @@ also where the two things a script cannot draw are described — interpretive an
 Cancelled paths that exist only in processor source.
 
 **The drawing is read from the live graph every time**, so it is current by construction rather than
-because someone remembered to redraw it. The two committed pages in `docs/diagrams/` are not publish
-sources and are not checked against: they are design references, kept for the annotations and the
-Cancelled paths a script cannot draw.
+because someone remembered to redraw it. The two committed pages that used to live in
+`docs/diagrams/` are deleted: they stopped being publish sources when this script took over, stopped
+being style goldens when the style check was retired, and were removed once nothing read them. What
+a script still cannot draw — the interpretive annotations and the Cancelled paths that exist only in
+processor source — is described in `workflow-diagram-prompt.md` rather than drawn anywhere.
 
 **There is no separate style check any more, and there is nothing left for one to catch.**
 `tools/verify-diagram-style.py` compared a candidate's class vocabulary against one of those pages
-and was retired in this commit. It made sense while the drawings were produced by an agentic task
+and was retired just before them. It made sense while the drawings were produced by an agentic task
 from a prompt, where the design system existed only as an example someone had to match. It stopped
 making sense when `publish-diagram.py` took the style system into `STYLE_RULES` and emitted rules
 only for the classes a drawing actually uses: a class with no treatment can no longer be drawn, so
