@@ -37,17 +37,79 @@ import xml.dom.minidom
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The design system lives in a committed page, which is ALSO the golden that
-# tools/verify-diagram-style.py compares against. One source, two consumers: a palette change moves
-# both, and neither can drift without the style checker saying so. That page is not a publish
-# source - it stopped being one when this script started drawing.
-STYLE_REFERENCE = os.path.join(ROOT, "docs", "diagrams", "filefetcher-archiveexpander-chain.html")
+# THE STYLE SYSTEM LIVES HERE, not in a workflow's page. It used to be scraped with a regex out of
+# docs/diagrams/filefetcher-archiveexpander-chain.html at every publish, which made a script that
+# draws ANY workflow depend on the committed page of ONE - rename or delete that file and every
+# drawing loses its styling. The tokens and rules below are that page's, carried over verbatim, so
+# the rendered output is unchanged; what changed is that the generic script no longer reaches into
+# a specific workflow's artefact to find out what a box looks like.
+#
+# Only rules the drawing actually references are emitted - see style_block. The page carried 76,
+# of which a drawing can use these.
+STYLE_ROOT = """
+    --ground: #EEF0EC;
+    --sheet: #FAFBF8;
+    --ink: #191D1A;
+    --muted: #667069;
+    --rule: #D0D6CE;
+    --rule-soft: #E1E6DF;
+    --ok: #0E6B5E;
+    --ok-soft: rgba(14, 107, 94, 0.10);
+    --fail: #A8481A;
+    --fail-soft: rgba(168, 72, 26, 0.10);
+    --sans: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+    --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+"""
+
+STYLE_RULES = {
+    ".node-box": "fill: var(--sheet); stroke: var(--rule); stroke-width: 1.4;",
+    ".node-box-fork": "fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.4;",
+    ".node-box-fail": "fill: var(--fail-soft); stroke: var(--fail); stroke-width: 1.4;",
+    ".hop-disc": "fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.2;",
+    ".hop-num": "fill: var(--ok); font-family: var(--sans); font-size: 11px; font-weight: 700;",
+    ".n-proc": "fill: var(--ink); font-family: var(--sans); font-size: 11.5px; font-weight: 600;",
+    ".n-proc-ver": "fill: var(--muted); font-size: 9px; font-weight: 500;",
+    ".n-step": "fill: var(--muted); font-family: var(--mono); font-size: 8.5px;",
+    ".n-step-ver": "fill: var(--muted); font-size: 7.5px;",
+    ".n-cfg": "fill: var(--ok); font-family: var(--mono); font-size: 10.5px;",
+    ".n-cfg-fail": "fill: var(--fail); font-family: var(--mono); font-size: 10.5px;",
+    ".edge-ok": "stroke: var(--ok); stroke-width: 1.6; fill: none;",
+    ".edge-fail": "stroke: var(--fail); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4;",
+    ".edge-cancel": "stroke: var(--muted); stroke-width: 1.4; fill: none; stroke-dasharray: 2 4; stroke-linecap: round;",
+    ".lbl-cancel": "fill: var(--muted); font-family: var(--sans); font-size: 11.5px; font-weight: 600;",
+    ".gate": "fill: var(--sheet); stroke: var(--ok); stroke-width: 2;",
+    ".lbl-schema": "fill: var(--muted); font-family: var(--mono); font-size: 10px;",
+    ".lbl-fail": "fill: var(--fail); font-family: var(--sans); font-size: 11.5px; font-weight: 600;",
+    ".lbl-note": "fill: var(--muted); font-family: var(--sans); font-size: 11.5px;",
+    ".lbl-out": "fill: var(--ink); font-family: var(--mono); font-size: 11px;",
+    ".legend-txt": "fill: var(--muted); font-family: var(--sans); font-size: 12px;",
+    # New with the bypass arc: an edge that skips a column is the same stroke as any success edge,
+    # drawn as a path rather than a line, so it needs no colour of its own - only the fill reset
+    # that a path requires and a line does not.
+    # BOTH CLASSES, ALWAYS. This rule only resets the fill a <path> needs and a <line> does not;
+    # the stroke comes from .edge-ok. Emitted alone it renders a path with no stroke - present in
+    # the DOM, counted by the gate, invisible on screen. Which is the same failure the missing edge
+    # was: structurally there, visually absent.
+    ".edge-bypass": "fill: none;",
+    # The legend band. Monospace so the key lists column up under each other.
+    ".lg-num": "fill: var(--ink-soft); font: 600 11px ui-monospace, monospace;",
+    ".lg-step": "fill: var(--ink); font: 600 11px ui-monospace, monospace;",
+    ".lg-cfg": "fill: var(--ink-soft); font: 11px ui-monospace, monospace;",
+}
 
 # 1580 IS A CONTRACT, NOT A COMPUTED VALUE. Every drawing is served into the same dashboard panel,
 # so they must share a width or the panel rescales as the operator switches workflow. Deriving it
 # from the node count gave 1574 for this graph - six pixels, invisible by eye, caught by the style
 # checker.
-VB_W, VB_H = 1580, 520
+# VB_H IS A CONTRACT FOR THE SAME REASON VB_W IS. Every drawing is served into one panel, so a
+# height that tracked each workflow's legend length would make the panel resize as the operator
+# switches workflow. The band is therefore sized for the WORST CASE - LEGEND_ROWS, the most spine
+# steps that fit the width - and short graphs leave it part-empty on purpose. Do not size it to
+# content.
+LEGEND_ROWS = 8
+LEGEND_Y0, LEGEND_DY = 452, 16
+VB_W, VB_H = 1580, LEGEND_Y0 + LEGEND_ROWS * LEGEND_DY + 36
 X0, PITCH, W, H = 40, 192, 150, 86
 YT, YF = 120, 340
 BUS_Y = YF - 40
@@ -56,6 +118,11 @@ BUS_Y = YF - 40
 # renders ~96px wide, so a label centred on the edge spills over the box on either side and lands on
 # the processor name. Measured: eight collisions.
 LABEL_Y = YT - 10
+
+# ABOVE the schema labels, which sit at LABEL_Y. An edge that skips a column cannot run along the
+# row - the boxes between are in the way - so it arcs over them. Anything lower collides with the
+# labels it passes.
+ARC_Y = 56
 
 
 def api(base, path):
@@ -109,27 +176,33 @@ def read_graph(base, workflow_name):
                if n in steps and n not in fail_chain]
         cur = nxt[-1] if nxt else None      # a fork's later branch continues the line
 
+    # EVERY SUCCESS EDGE, not only the ones the spine happens to walk. The spine is a LINE and a
+    # graph is not: at a fork it keeps one successor and drops the rest, which is how
+    # sk-normalizer-sample -> split-archivecollapser disappeared from a drawing that was otherwise
+    # correct. Positions still come from the spine; what is drawn comes from here.
+    on_spine = set(spine)
+    edges = []
+    for sid in spine:
+        for n in (steps[sid].get("nextStepIds") or []):
+            if n in on_spine and n != sid:
+                edges.append((sid, n))
+
     return dict(wf=wf, steps=steps, procs=procs, schemas=schemas, by_step=by_step,
-                spine=spine, fail_chain=fail_chain)
+                spine=spine, fail_chain=fail_chain, edges=edges)
 
 
 def style_block(used_classes):
-    """The reference page's :root plus only the rules the drawing references.
+    """The tokens, plus only the rules the drawing references.
 
-    The page's stylesheet is mostly chrome. Carrying all of it would couple the image to a layout it
-    is no longer part of, and the drawing is served on its own.
+    Emitting all of them would carry chrome the image is not part of: the drawing is served on
+    its own, not inside the page these came from.
     """
-    text = open(STYLE_REFERENCE, encoding="utf-8").read()
-    css = text[text.index("<style>") + 7:text.index("</style>")]
-    root = re.search(r":root\s*\{(.*?)\}", css, re.S).group(1)
-    kept = []
-    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
-        selector, decls = m.group(1).strip(), m.group(2)
-        if selector.startswith("@") or selector == ":root":
-            continue
-        if any(("." + c) in selector for c in used_classes):
-            kept.append("%s {%s}" % (selector, decls))
-    return "  <style>\n    :root {%s}\n    %s\n  </style>\n" % (root, "\n    ".join(kept))
+    kept = [sel + " {" + decls + "}" for sel, decls in STYLE_RULES.items()
+            if any(("." + c) == sel for c in used_classes)]
+    parts = ["  <style>", "    :root {" + STYLE_ROOT.strip() + "}"]
+    parts += ["    " + k for k in kept]
+    parts += ["  </style>", ""]
+    return chr(10).join(parts)
 
 
 def esc(s):
@@ -157,7 +230,11 @@ def render(g):
             cfg = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except (ValueError, TypeError):
             cfg = {}
-        return ", ".join(list(cfg)[:2]) if cfg else "no config"
+        # EVERY KEY. This was list(cfg)[:2] because the box is 150px wide, so split-filefetcher
+        # showed two of its three and lost allowedExtensions - the whitelist that decides one of
+        # the chain's five outcomes - with nothing to say a key was hidden. The keys live in the
+        # legend band now, which has the width for all of them.
+        return ", ".join(cfg) if cfg else "no config"
 
     body, used = [], set()
 
@@ -175,7 +252,10 @@ def render(g):
             cfg_txt, hop = f'entryCondition {s["entryCondition"]}', None
         else:
             cls = "node-box-fork" if p["name"] == "sk-normalizer" else "node-box"
-            cfg_cls, cfg_txt, hop = "n-cfg", config(sid), i + 1
+            # NO CONFIG IN THE RECTANGLE - it moved to the legend band, which is what removed the
+            # width pressure that caused the truncation. Fail boxes keep entryCondition: one short
+            # token, and a property of the box rather than of an assignment.
+            cfg_cls, cfg_txt, hop = "n-cfg", None, i + 1
         emit(f'    <rect class="{cls}" x="{x}" y="{y}" width="{W}" height="{H}" rx="3"/>\n', cls)
         emit(f'    <text class="n-proc" x="{x+W//2}" y="{y+40}" text-anchor="middle">{esc(p["name"])}'
              f'<tspan class="n-proc-ver">_{esc(p["version"])}</tspan></text>\n',
@@ -183,8 +263,9 @@ def render(g):
         emit(f'    <text class="n-step" x="{x+W//2}" y="{y+59}" text-anchor="middle">{esc(s["name"])}'
              f'<tspan class="n-step-ver">_{esc(s["version"])}</tspan></text>\n',
              "n-step", "n-step-ver")
-        emit(f'    <text class="{cfg_cls}" x="{x+W//2}" y="{y+74}" text-anchor="middle">{esc(cfg_txt)}</text>\n',
-             cfg_cls)
+        if cfg_txt is not None:
+            emit(f'    <text class="{cfg_cls}" x="{x+W//2}" y="{y+74}" text-anchor="middle">{esc(cfg_txt)}</text>\n',
+                 cfg_cls)
         if hop is not None:
             emit(f'    <circle class="hop-disc" cx="{x+12}" cy="{y+12}" r="9"/>\n', "hop-disc")
             emit(f'    <text class="hop-num" x="{x+12}" y="{y+15}" text-anchor="middle">{hop}</text>\n',
@@ -193,15 +274,33 @@ def render(g):
     # A LABEL NAMES THE SCHEMA THE EDGE CARRIES, and nothing else. An edge whose source declares no
     # output schema gets none: captioning it with the entry condition would name a property of the
     # step at its far end.
-    for i in range(len(spine) - 1):
-        a, b = spine[i], spine[i + 1]
-        x1, x2, y = pos[a][0] + W, pos[b][0], YT + H // 2
-        emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
-        sc = out_schema(a)
-        if sc:
-            emit(f'    <text class="lbl-schema" x="{(x1+x2)//2}" y="{LABEL_Y}" text-anchor="middle">{esc(sc)}</text>\n',
-                 "lbl-schema")
-            emit(f'    <circle class="gate" cx="{(x1+x2)//2}" cy="{y}" r="3.5"/>\n', "gate")
+    # EVERY EDGE, not only the neighbours the spine walks. The spine is a LINE and a graph is not:
+    # at a fork it keeps one successor and drops the rest, which is how
+    # sk-normalizer-sample -> split-archivecollapser vanished from a drawing that was otherwise
+    # correct and passed its own gate. Positions still come from the spine; what is DRAWN comes
+    # from the edge list.
+    col = {sid: k for k, sid in enumerate(spine)}
+    drawn = set()
+    for a, b in g["edges"]:
+        ca, cb = col[a], col[b]
+        y = YT + H // 2
+        if cb == ca + 1:
+            x1, x2 = pos[a][0] + W, pos[b][0]
+            emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
+            sc = out_schema(a)
+            if sc:
+                emit(f'    <text class="lbl-schema" x="{(x1+x2)//2}" y="{LABEL_Y}" text-anchor="middle">{esc(sc)}</text>\n',
+                     "lbl-schema")
+                emit(f'    <circle class="gate" cx="{(x1+x2)//2}" cy="{y}" r="3.5"/>\n', "gate")
+        else:
+            # A BYPASS: the source reaches a step further along without passing through the boxes
+            # between, so it cannot run on the row - it arcs over them. Deliberately unlabelled:
+            # the schema is already named on the row beneath, and repeating it over the arc is the
+            # collision the label rule exists to avoid.
+            xa, xb = pos[a][0] + W // 2, pos[b][0] + W // 2
+            emit(f'    <path class="edge-ok edge-bypass" d="M {xa} {YT} Q {(xa+xb)//2} {ARC_Y} {xb} {YT}"/>\n',
+                 "edge-ok", "edge-bypass")
+        drawn.add((a, b))
 
     # THE FAILURE EDGES RUN ONTO A BUS AND THEN INTO THE SINK. A stub that stops in white space
     # draws something that LOOKS like an edge and connects nothing, leaving the reader to infer the
@@ -222,6 +321,16 @@ def render(g):
         x1, x2, y = pos[a][0] + W, pos[b][0], YF + H // 2
         emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
 
+    # THE LEGEND BAND. The config keys used to sit inside the 150px rectangle, truncated to two
+    # with nothing to say more existed. The boxes already carry numerals, so the full key list
+    # hangs off the numeral down here where there is width for it.
+    for k, sid in enumerate(spine):
+        ly = LEGEND_Y0 + LEGEND_DY * k
+        emit(f'    <text class="lg-num" x="{X0}" y="{ly}">{k+1}</text>\n', "lg-num")
+        emit(f'    <text class="lg-step" x="{X0+22}" y="{ly}">{esc(steps[sid]["name"])}</text>\n',
+             "lg-step")
+        emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">{esc(config(sid))}</text>\n', "lg-cfg")
+
     emit(f'  <text class="legend-txt" x="{X0}" y="{VB_H-24}">{len(spine)} steps on the success path, '
          f'{len(fail_chain)} on the failure sink, drawn from the live graph</text>\n', "legend-txt")
 
@@ -231,12 +340,34 @@ def render(g):
     head = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {VB_W} {VB_H}" '
             f'width="{VB_W}" height="{VB_H}" role="img" aria-label="{esc(label)}">\n')
     return ('<?xml version="1.0" encoding="UTF-8"?>\n' + head + style_block(used)
-            + "".join(body) + "</svg>\n"), pos
+            + "".join(body) + "</svg>\n"), pos, drawn
 
 
-def gate(svg, g, pos):
+def gate(svg, g, pos, drawn):
     """Structural checks, on coordinates. Text metrics need a browser - that is step 3."""
     problems = []
+
+    # EVERY EDGE IN THE GRAPH IS IN THE DRAWING. This is the check that was missing: the old gate
+    # verified that failure edges reach the sink and that nothing leaves the viewBox, but never
+    # that the success edges EXIST - so a drawing that silently dropped a fork passed it. An
+    # omission here is invisible by eye: the result is a clean, plausible, wrong diagram.
+    missing = [(a, b) for a, b in g["edges"] if (a, b) not in drawn]
+    for a, b in missing:
+        problems.append("edge not drawn: %s -> %s"
+                        % (g["steps"][a]["name"], g["steps"][b]["name"]))
+
+    # AND EVERY CONFIG KEY IS PRESENT VERBATIM. The keys were truncated to two for years because
+    # nothing compared what was drawn against what the assignment holds.
+    for sid in g["spine"]:
+        raw = (g["by_step"].get(sid) or [{}])[0].get("payload")
+        try:
+            cfg = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except (ValueError, TypeError):
+            cfg = {}
+        for key in cfg:
+            if key not in svg:
+                problems.append("config key missing from drawing: %s on %s"
+                                % (key, g["steps"][sid]["name"]))
     try:
         xml.dom.minidom.parseString(svg.encode("utf-8"))
     except Exception as exc:                                    # noqa: BLE001
@@ -278,11 +409,11 @@ def main():
     args = ap.parse_args()
 
     g = read_graph(args.api, args.workflow)
-    svg, pos = render(g)
+    svg, pos, drawn = render(g)
     print(f'{args.workflow:44s} {len(g["spine"])} on the spine, '
           f'{len(g["fail_chain"])} on the sink, {len(svg)/1024:.1f} KB')
 
-    problems = gate(svg, g, pos)
+    problems = gate(svg, g, pos, drawn)
     if problems:
         print("\nGATE FAILED - nothing published:")
         for p in problems:
