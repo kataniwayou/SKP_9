@@ -46,6 +46,7 @@ internal static class OrchestrationServiceCollectionExtensions
             sp.GetRequiredService<PayloadConfigSchemaValidator>(),
             sp.GetRequiredService<ProcessorLivenessValidator>(),
             sp.GetRequiredService<IQueueSender>(),
+            sp.GetRequiredService<BaseApi.Service.Features.Lookup.IEntityLookupPublisher>(),
             sp.GetRequiredService<ILogger<OrchestrationService>>()));
         services.AddScoped<IWorkflowGraphLoader, WorkflowGraphLoader>();
         services.AddScoped<CycleDetector>();

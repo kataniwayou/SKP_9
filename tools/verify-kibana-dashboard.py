@@ -15,8 +15,10 @@ WHAT CHANGED WHEN THE ELASTICSEARCH OBJECTS WENT AWAY:
     here rather than being silently absent.
   * The counted set is now one clause, and it is asserted against the dashboard's own query rather
     than a pipeline-written flag (check 10).
-  * Names are no longer fields in the index. They are rendered by the data view's formatters, so
-    this script resolves ids to names itself, from the same records the formatter generator reads.
+  * Names are no longer fields in the index. They are rendered by the data view's formatters, and
+    this script reads that same formatter map, so it resolves an id exactly as a viewer sees it.
+  * Check 12 no longer asserts that a never-run step is listable. The naming records that made that
+    true were removed from OrchestrationService; see that method and check 12's own docstring.
   * Check 5 reaches 10 of 10 steps rather than 8, because a terminal step now reports its own
     outcome and carries an EntryId.
 
@@ -85,7 +87,10 @@ PANEL_GUARDS = {
 
 # The one pair-per-pie bucket. Asserted by check 11 so a later edit cannot quietly go back to
 # splitting on ProcessorId alone, which silently merges a processor's two lists into one donut.
-WHITELIST_SPLIT_FIELD = "whitelist_owner"
+# Stamped onto each record by the logs@custom pipeline from the enriched step name and
+# the root. It replaced a runtime field of the same purpose whose readable half came from
+# a hand-maintained formatter; nothing is hand-maintained now.
+WHITELIST_SPLIT_FIELD = "attributes.WhitelistOwner"
 
 
 class Checks:
@@ -104,35 +109,44 @@ class Checks:
 # ---------------------------------------------------------------------------------------------
 # Names
 #
-# The index holds ids. The dashboard renders names through data-view formatters, which is a Kibana
-# concern this script cannot see, so it resolves ids the same way the formatter generator does -
-# from the records OrchestrationService writes when a workflow is started.
+# The index holds ids. The dashboard renders names through the data view's field formatters, and
+# this script reads that same formatter map so it is checking what a viewer actually sees.
 #
-# NO TIME WINDOW ON THIS QUERY. Those records are written on an explicit start and not again, so a
-# workflow started last week emitted its pairs last week. Bounding this by the measurement window
-# would resolve nothing.
+# IT USED TO READ ELASTICSEARCH. OrchestrationService emitted one naming record per entity on every
+# accepted start, and this resolved ids from those. That emission is gone (see the note in
+# OrchestrationService.StartAsync): it only ever covered entities whose workflow had been explicitly
+# started, it decayed out of the index with retention, and KibanaLookupPublisher already pushes a
+# strictly larger map from the entity tables. Reading the formatter has no time window to get wrong
+# and no start to depend on.
+#
+# A FAILURE HERE NOW MEANS THE PUBLISHER HAS NOT RUN. The map is refreshed when the dashboard's
+# diagram panel fetches lookup/ping.svg, throttled to Kibana:MinimumInterval, and is absent entirely
+# when Kibana:BaseUrl is unset.
 # ---------------------------------------------------------------------------------------------
 KINDS = {"workflow": "WorkflowId", "step": "StepId", "processor": "ProcessorId"}
+LOOKUP_INDEX = "skp-entity-lookup"
+GUID_PREFIX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-")
+DATA_VIEW = "skp-logs"
 
 
 def load_names(es_url):
-    body = {"size": 0, "query": {"bool": {"filter": [{"exists": {"field": "attributes.EntityName"}}]}},
-            "aggs": {}}
-    for kind, field in KINDS.items():
-        body["aggs"][kind] = {
-            "terms": {"field": f"attributes.{field}", "size": 1000},
-            "aggs": {"latest": {"top_hits": {"size": 1, "sort": [{"@timestamp": {"order": "desc"}}],
-                                             "_source": ["attributes.EntityName",
-                                                         "attributes.EntityKind"]}}}}
-    aggs = requests.post(f"{es_url}/{DATA_STREAM}/_search", json=body, timeout=60).json()["aggregations"]
-    out = {}
-    for kind in KINDS:
-        pairs = {}
-        for bucket in aggs[kind]["buckets"]:
-            source = bucket["latest"]["hits"]["hits"][0]["_source"]["attributes"]
-            if source.get("EntityKind") == kind:
-                pairs[bucket["key"]] = source["EntityName"]
-        out[kind] = pairs
+    """The id -> {name}_{version} map, read from the lookup index BaseApi writes at every start.
+
+    THE SOURCE MOVED OUT OF KIBANA. This used to read the data view's fieldFormatMap, because the
+    table lived there and something had to push it. Names now ride on the log records themselves,
+    stamped by the logs@custom ingest pipeline from this index, so the data view carries no
+    formatter at all and Kibana is not consulted here.
+    """
+    body = {"size": 10000, "query": {"match_all": {}}}
+    response = requests.post(f"{es_url}/{LOOKUP_INDEX}/_search", json=body, timeout=60)
+    response.raise_for_status()
+
+    out = {kind: {} for kind in KINDS}
+    for hit in response.json()["hits"]["hits"]:
+        row = hit["_source"]
+        kind = row.get("kind")
+        if kind in out:
+            out[kind][row["id"]] = f"{row['name']}_{row['version']}"
     return out
 
 
@@ -488,7 +502,13 @@ def check_11_export_states_the_rule_once(checks):
     stale = raw.count("skp.outcome_record") + raw.count("skp.step_name") + \
         raw.count("skp.workflow_name") + raw.count("skp.processor_name")
 
-    scoped = any('"attributes.EntityName"' in f and '"attributes.Result"' in f
+    # attributes.EntityName IS NO LONGER ONE OF THESE. The bound used to admit naming records,
+    # emitted once per entity on an accepted start so a published-but-never-run step still appeared
+    # in a dropdown. Those records were removed long before this change and the live dashboard has
+    # not referenced them since -- the repo export merely kept saying so. What bounds the option
+    # lists now is a record carrying an outcome or a whitelist verdict, which is a superset of the
+    # counted set and therefore moves no count.
+    scoped = any('"attributes.WhitelistVerdict"' in f and '"attributes.Result"' in f
                  for f in option_scope)
 
     # The outcomes dashboard states the rule, and no other object may restate it -- that second
@@ -528,59 +548,43 @@ def check_11_export_states_the_rule_once(checks):
 
 
 def check_12_published_steps_are_nameable(checks, es_url, names):
-    """Every step the bins chart expects has a naming record, so the dropdown can list it.
+    """Every step the bins chart expects has a label, and every whitelist pair is readable.
 
-    THE POINT IS THE STEP THAT HAS NEVER RUN. A dropdown is populated from one field's values, and
-    the Step control reads attributes.StepId. Because OrchestrationService writes the naming record
-    under that same field rather than a generic EntityId, a published step has a record carrying its
-    StepId from the moment its workflow is started - whether or not it has ever executed. With the
-    control group ignoring the query and the time range, that is what puts it in the list.
+    WHAT THIS NO LONGER CLAIMS. It used to assert that a published-but-never-run step would appear
+    in the Step dropdown. That guarantee is gone and its absence is now structural rather than
+    incidental: an optionsListControl lists values PRESENT IN THE FIELD, and the name is stamped
+    onto a record at ingest, so a step that has never executed has no record and therefore no entry.
+    Publishing more rows cannot change that - only running the step can.
 
-    What this asserts is that the naming records exist and resolve. The never-run case is covered by
-    construction rather than by a workflow that has genuinely never run, and that limitation is
-    stated here rather than implied.
+    NOTHING IS HAND-MAINTAINED HERE ANY MORE. The whitelist board splits on
+    attributes.WhitelistOwner, which the logs@custom pipeline builds from the enriched step name and
+    the root on each record. It used to split on a runtime field whose lookup was keyed by pairs
+    OBSERVED IN THE DATA and derivable from no entity, which nothing regenerated - a newly gated
+    step drew a pie titled "{GUID} - {root}" until somebody hand-edited the export. A pair is now
+    unreadable only when the step's own name was unresolved at ingest, which is the same failure the
+    id fallback already reports, so this check reads the records rather than the export.
     """
     resolved = set(names["step"].values())
     missing = [s for s in PER_CYCLE_BY_STEP if s not in resolved]
 
-    # AND EVERY (step, list) PAIR THAT HAS LOGGED A VERDICT IS LABELLED. The whitelist board splits
-    # on a composite runtime field whose lookup is keyed by the pairs SEEN IN THE LOG STORE, so a
-    # newly gated step draws a pie titled "{GUID} - {root}". That renders perfectly and reads as a
-    # broken board, which is exactly the class of failure a green check must not permit.
-    #
-    # NOTHING REGENERATES THIS ANY MORE, and that is why the check matters more than it did. The
-    # BaseApi publishes the three id maps from its own entity tables and carries whitelist_owner
-    # across untouched, because the pairs are observed in data and derivable from no entity. The
-    # generator that used to rebuild them was deleted with the rest of the manual path. Until
-    # something owns these pairs, a failure here is repaired by hand-editing the export.
     body = {"size": 0,
             "query": {"bool": {"filter": [{"exists": {"field": "attributes.WhitelistVerdict"}}]}},
-            "aggs": {"steps": {"terms": {"field": "attributes.StepId", "size": 1000},
-                               "aggs": {"roots": {"terms": {"field": "attributes.WhitelistRoot",
-                                                            "size": 1000}}}}}}
-    live_pairs = set()
+            "aggs": {"owners": {"terms": {"field": "attributes.WhitelistOwner", "size": 1000}}}}
     try:
         agg = requests.post(f"{es_url}/{DATA_STREAM}/_search", json=body, timeout=60).json()
-        for step in agg["aggregations"]["steps"]["buckets"]:
-            for root in step["roots"]["buckets"]:
-                live_pairs.add(f"{step['key']} · {root['key']}")
+        owners = [b["key"] for b in agg["aggregations"]["owners"]["buckets"]]
     except Exception as exc:  # noqa: BLE001
         return checks.report(12, "Published steps are nameable", False,
-                             f"whitelist pair read failed: {type(exc).__name__}: {exc}")
+                             f"whitelist owner read failed: {type(exc).__name__}: {exc}")
 
-    labelled = set()
-    for obj in (json.loads(line) for line in open(EXPORT, encoding="utf-8") if line.strip()):
-        if obj.get("type") == "index-pattern":
-            fmt = json.loads(obj["attributes"].get("fieldFormatMap", "{}"))
-            for entry in fmt.get("whitelist_owner", {}).get("params", {}).get("lookupEntries", []):
-                labelled.add(entry["key"])
+    # A fallback label is the raw StepId, so an unreadable pair starts with a GUID.
+    unlabelled = sorted(o for o in owners if GUID_PREFIX.match(o))
 
-    unlabelled = sorted(live_pairs - labelled)
     ok = not missing and not unlabelled
     return checks.report(12, "Published steps are nameable", ok,
-                         f"{len(resolved)} steps have naming records, "
+                         f"{len(resolved)} steps carry a name in the lookup index, "
                          f"missing={missing or 'none'}, "
-                         f"whitelist_pairs={len(live_pairs)}, "
+                         f"whitelist_pairs={len(owners)}, "
                          f"unlabelled_pairs={unlabelled or 'none'}")
 
 
@@ -711,12 +715,13 @@ def main():
     try:
         names = load_names(args.es_url)
     except Exception as exc:  # noqa: BLE001
-        print(f"could not load id->name pairs: {type(exc).__name__}: {exc}")
+        print(f"could not read the {LOOKUP_INDEX} lookup index: {type(exc).__name__}: {exc}")
         return 1
 
     workflow_id = next((i for i, n in names["workflow"].items() if n == VALIDATION_WORKFLOW), None)
     if workflow_id is None:
-        print(f"no naming record for {VALIDATION_WORKFLOW} - start it once so it emits its pairs")
+        print(f"no lookup row for {VALIDATION_WORKFLOW} - start that workflow once so BaseApi "
+              f"publishes its entities, or check Elasticsearch:BaseUrl is set on the API")
         return 1
 
     check_1_kibana_reaches_es(checks, args.kibana_url)

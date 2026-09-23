@@ -35,58 +35,55 @@ now needs read access and nothing else.
 
 ## How names work
 
-Panels and controls aggregate on the **raw id** — `attributes.WorkflowId`, `attributes.StepId`,
-`attributes.ProcessorId`. The data view carries a `static_lookup` field formatter per id field, and
-Kibana substitutes `{name}_{version}` when it draws. Nothing is written to Elasticsearch, and
-because formatting happens at read time it covers **all history**, including records indexed long
-before any of this existed.
+Panels and controls aggregate on the **name field** — `attributes.WorkflowName`,
+`attributes.StepName` — which carries `{name}_{version}`. The name is written **into each log
+record at ingest**, so Kibana holds nothing: the `skp-logs` data view has an empty
+`fieldFormatMap` and an empty `runtimeFieldMap`, and nothing pushes to it or triggers it.
 
-The pairs come from the log store: `OrchestrationService` writes one record per entity when a
-workflow is started, carrying the id under the same field name the execution records use.
+Three Elasticsearch objects do the work, all created by BaseApi at boot and owned by no human:
 
-| kind | fields |
-|---|---|
-| workflow | `WorkflowId` + `EntityName` |
-| step | `StepId` + `WorkflowId` + `EntityName` |
-| processor | `ProcessorId` + `EntityName` |
+| Object | Role |
+| --- | --- |
+| `skp-entity-lookup` index | one row per entity, `_id` = its GUID, holding `name`, `version`, `kind` |
+| `skp-entity-lookup` enrich policy | matches a document's id against that index |
+| `logs@custom` ingest pipeline | stamps the name onto each record; x-pack's managed `logs@default-pipeline` already calls it |
 
-The step's `WorkflowId` is what lets the Step dropdown stay the published topology when a workflow is
-selected; without it, chaining can only match execution records and the list falls back to steps that
-have run. A processor carries no workflow id — it is chained under nothing and is shared across
-workflows.
-**Nobody regenerates this.** The BaseApi publishes the table into the data view itself, triggered by
-a dashboard render: the panel fetches `lookup/ping.svg`, and that request republishes the map if a
-render has not asked recently. It is sourced from the entity tables rather than from naming records
-in the log store, which is why a workflow that has only ever run on the cron is nameable — the old
-generator read records written on an explicit start and never by the cron, so those entities had no
-names at all.
+**The table is written at workflow start**, from the validated graph snapshot, before the
+`StartOrchestration` message is sent. A workflow's ids reach the log store only once the
+orchestrator has been told to run it, and a running workflow's composition is frozen at start by
+the L2 projection — so the graph in hand at that moment is exactly the set of ids the run can emit.
+Entity rows edited afterwards cannot reach it, which is the point: the label says what the thing was
+called **when it ran**.
 
-Two consequences worth knowing:
+The ordering is load-bearing. Enrichment is frozen at index time, so a record written before its id
+is in the materialised policy is unnamed permanently and no later publish repairs it.
 
-- **The dashboard is one render behind.** Kibana loads the data view before the panels render, so a
-  push triggered by a render lands on the *next* view. Publish something, and the first look shows
-  raw GUIDs; refresh once and the names appear.
-- **Importing this export overwrites the table** with whatever copy the file carries, because the
-  data view is one of the five objects. That corrects itself on the next render.
+**An unmatched id renders as its own GUID**, not as blank and not as a shared "unknown" string. A
+missing field would give a panel a *missing* bucket that reads as a different entity; one shared
+string would merge two unlabelled entities into one. This is the same choice the retired
+`static_lookup` formatter made by omitting `unknownKeyValue`.
 
-**A workflow must have been started at least once for its entities to have names.** Those records
-are written on an explicit start and not again — the cron fires from the orchestrator, against an
-ids-only projection, and never comes through the BaseApi. A workflow whose last start has aged out
-of the index has no pairs, and its ids render as raw GUIDs until it is next started. That is the one
-operational cost of sourcing names from logs, and it is why the generator searches all of time
-rather than a recent window.
+`attributes.WhitelistOwner` is built the same way, by a `set` processor joining the enriched step
+name to the record's own `WhitelistRoot`. It replaced a runtime field whose readable half came from
+a formatter nothing regenerated — a newly gated step drew a pie titled `{GUID} · {root}` until
+somebody hand-edited the export.
 
-Two consequences worth knowing before you are surprised by them:
+### What this replaced, and what went with it
 
-- **Free-text search needs the GUID.** Names exist only at render time. An operator filtering in KQL
-  or hunting in Discover must type the id.
-- **A version bump relabels history.** The lookup is a flat map applied to all of time and `Version`
-  is mutable on the same row, so `{name}_{version}` means "what this is called now", not what it was
-  called when the record was written.
+`KibanaLookupPublisher` pushed a `static_lookup` formatter onto the data view, triggered by a
+dashboard render fetching `lookup/ping.svg`. Formatting happened at read time and therefore covered
+all history, including a rename — which is the one thing lost here. It also meant BaseApi held a
+Kibana address and an API key, a Kibana outage meant stale labels, and re-importing this export
+silently reverted the table until the next render.
 
-An id with no entry renders as **itself** — the raw GUID. That is deliberate: the formatters omit
-`unknownKeyValue`, because setting it would render every unmapped entity as one shared string and
-collapse two unlabelled steps into a single legend bucket.
+Before that, `OrchestrationService` emitted a naming record per entity on every accepted start.
+That covered only explicitly started workflows, never the cron path, and decayed out of the index
+with retention.
+
+One guarantee is common to all three designs and worth restating: a control lists values **present
+in the field**, so a step that has never executed is in no dropdown. Under the current design that
+is structural rather than incidental — the name is stamped onto records, and a step that never ran
+has none.
 
 ## Why the dropdowns carry a filter
 
@@ -99,11 +96,15 @@ a registry holding 6 and 42. The rest are dead ids from earlier rebuilds of the 
 runbook mints fresh GUIDs every time, and the index remembers all of them. None has a naming record,
 so they render as raw GUIDs and bury the handful that matter.
 
-The dashboard therefore carries one filter, `entities, not archaeology`:
+The dashboard therefore carries one filter, `outcomes and lookups`:
 
 ```
-attributes.Result exists  OR  attributes.EntityName exists
+attributes.Result exists  OR  attributes.WhitelistVerdict exists
 ```
+
+(An `attributes.EntityName exists` clause sat here too, admitting the naming records described
+above. It was removed with them. Because every id in those records also appears in execution
+records, dropping it changes no dropdown.)
 
 A filter rather than a query, because `ignoreFilters` is deliberately left **false** — it is the one
 parent setting the controls still respect. And it is a **superset of the counted set**, so it bounds

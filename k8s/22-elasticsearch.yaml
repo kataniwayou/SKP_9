@@ -1,0 +1,104 @@
+# ============================================================================
+# elasticsearch — log store (StatefulSet + PVC + headless Service).
+# ============================================================================
+# ADOPTED INTO THE REPO 2026-09-23, HAVING RUN OUT-OF-BAND UNTIL THEN. The
+# StatefulSet existed in the cluster for 48 days with no manifest here, which is
+# why 24-kibana.yaml describes the ES Service as "out-of-band but its name is
+# stable" and why nothing in this directory pinned its version. An untracked
+# deployment cannot be upgraded reproducibly — the 8.15.5 -> 9.3.4 move is the
+# occasion for adopting it, not the reason.
+#
+# 9.3.4 MATCHES THE AIR-GAPPED STACK. Dev ran 8.15.5 while the offline machine
+# ran 9.3.4, so every behaviour verified here was verified on the wrong version.
+#
+# THE DATA IS DELIBERATELY NOT MIGRATED. 8.15 -> 9.3 is not a supported rolling
+# upgrade — 9.x wants the last 8.x minor first — and the contents are logs under
+# retention. The PVC is recreated empty. Kibana's saved objects live in ES too,
+# so they are restored from the ndjson export, not from this volume.
+#
+# SECURITY IS OFF, same dev posture as every other store here (D-12): no TLS, no
+# auth, no enrollment. The port reaches a laptop only through a port-forward.
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: skp
+  labels:
+    app: elasticsearch
+    app.kubernetes.io/part-of: skp
+spec:
+  clusterIP: None            # headless — required for StatefulSet stable DNS
+  selector:
+    app: elasticsearch
+  ports:
+    - port: 9200
+      targetPort: 9200
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  namespace: skp
+  labels:
+    app: elasticsearch
+    app.kubernetes.io/part-of: skp
+spec:
+  serviceName: elasticsearch   # MUST match the headless Service name
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+        app.kubernetes.io/part-of: skp
+    spec:
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:9.3.4
+          env:
+            # One node, no quorum, no cluster formation. Anything else needs
+            # cluster.initial_master_nodes and a second replica.
+            - name: discovery.type
+              value: "single-node"
+            - name: xpack.security.enabled
+              value: "false"
+            - name: xpack.security.enrollment.enabled
+              value: "false"
+            # CARRIED UNCHANGED FROM 8.15.5. Heap is pinned rather than left to
+            # ES's cgroup sizing so it cannot drift toward the 2Gi limit and get
+            # OOMKilled — the same rule 24-kibana.yaml applies to node's heap.
+            # Changed alongside a major version bump it would confound any
+            # memory regression, so it moves on its own or not at all.
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          ports:
+            - containerPort: 9200
+          resources:
+            requests:
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+          # PROBES ARE NEW HERE; the out-of-band StatefulSet carried none, which
+          # made "ES is up" indistinguishable from "the pod is scheduled". Kibana
+          # 9 refuses to start against an ES that is not ready, so a real signal
+          # is worth more than it was.
+          startupProbe:
+            httpGet: { path: /_cluster/health, port: 9200 }
+            periodSeconds: 5
+            failureThreshold: 60      # 5 min — a cold single node forms slowly
+          readinessProbe:
+            httpGet: { path: /_cluster/health, port: 9200 }
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 2Gi

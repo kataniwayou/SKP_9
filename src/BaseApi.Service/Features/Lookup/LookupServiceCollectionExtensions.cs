@@ -4,25 +4,26 @@ using Microsoft.Extensions.DependencyInjection;
 namespace BaseApi.Service.Features.Lookup;
 
 /// <summary>
-/// Registration for the lookup-table feature.
+/// Registration for the entity id → name table.
 /// <para>
-/// <b>The publisher is a singleton</b>, because the two things that keep it cheap — the staleness
-/// floor and the last-published hash — are state that must survive between requests. A scoped
-/// publisher would rebuild and republish on every dashboard render.
+/// <b>The publisher is a singleton and holds no state.</b> It is one because the HTTP client factory
+/// and options are, not because anything is remembered between calls — every publish sends the whole
+/// table for the workflow being started, so two concurrent starts cannot produce a partial result.
 /// </para>
 /// <para>
-/// <b>Nothing here fails fast on missing configuration</b>, unlike the Postgres and broker
-/// registrations. An absent <c>Kibana:BaseUrl</c> means the feature is off, which is the correct
-/// behaviour for an environment with no Kibana — including the test host.
+/// <b>An absent <c>Elasticsearch:BaseUrl</c> disables the feature.</b> Unlike Postgres and the broker
+/// this is not fail-fast: the test host runs without a log store, and a service that refused to boot
+/// without one would make every unrelated test need an Elasticsearch.
 /// </para>
 /// </summary>
 internal static class LookupServiceCollectionExtensions
 {
     public static IServiceCollection AddLookupFeature(this IServiceCollection services, IConfiguration cfg)
     {
-        services.Configure<KibanaLookupOptions>(cfg.GetSection(KibanaLookupOptions.SectionName));
-        services.AddHttpClient(nameof(KibanaLookupPublisher));
-        services.AddSingleton<KibanaLookupPublisher>();
+        services.Configure<ElasticLookupOptions>(cfg.GetSection(ElasticLookupOptions.SectionName));
+        services.AddHttpClient(nameof(ElasticLookupPublisher));
+        services.AddSingleton<IEntityLookupPublisher, ElasticLookupPublisher>();
+        services.AddHostedService<LookupProvisioningService>();
         return services;
     }
 }

@@ -18,8 +18,8 @@
 # amd64 blobs, so ctr chases a manifest that is not in the tar. The working sequence pins
 # the platform at SAVE time, which makes the index a plain single-platform manifest:
 #
-#   docker pull --platform linux/amd64 docker.elastic.co/kibana/kibana:8.15.5
-#   docker save --platform linux/amd64 -o kibana-amd64.tar docker.elastic.co/kibana/kibana:8.15.5
+#   docker pull --platform linux/amd64 docker.elastic.co/kibana/kibana:9.3.4
+#   docker save --platform linux/amd64 -o kibana-amd64.tar docker.elastic.co/kibana/kibana:9.3.4
 #   kind load image-archive kibana-amd64.tar --name desktop
 #
 # The tag on the node is the real one, so this manifest stays pinned to the official image
@@ -88,7 +88,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: kibana
-          image: docker.elastic.co/kibana/kibana:8.15.5
+          image: docker.elastic.co/kibana/kibana:9.3.4
           ports:
             - containerPort: 5601
           env:

@@ -89,12 +89,13 @@ spec:
             - name: RabbitMq__Password
               valueFrom:
                 secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
-            # Kibana holds the id -> name lookup table and will never fetch it, so this service
-            # publishes it when a dashboard render asks. SERVER-TO-SERVER, so the in-cluster
-            # Service name - NOT the base URL the operator's browser uses for diagrams, which has
-            # to be reachable from a laptop. Unset this and the feature is simply off.
-            - name: Kibana__BaseUrl
-              value: http://kibana:5601
+            # The entity id -> name table lives in Elasticsearch: this service writes it at every
+            # workflow start and an ingest pipeline stamps the name onto each log record, so nothing
+            # pushes to Kibana and nothing triggers it. SERVER-TO-SERVER, so the in-cluster Service
+            # name - NOT the base URL the operator's browser uses for diagrams, which has to be
+            # reachable from a laptop. Unset this and naming is simply off.
+            - name: Elasticsearch__BaseUrl
+              value: http://elasticsearch:9200
           ports:
             - containerPort: 8080
           # Startup covers migrations, which is why its budget is the generous one: 30 x 5s.

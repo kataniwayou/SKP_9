@@ -2,6 +2,7 @@ using System.Text.Json;
 using BaseApi.Core.Exceptions;
 using BaseApi.Core.Persistence;
 using BaseApi.Service.Features.Cache;
+using BaseApi.Service.Features.Lookup;
 using BaseApi.Service.Features.Orchestration.Loading;
 using BaseApi.Service.Features.Orchestration.Validation;
 using BaseApi.Service.Features.Workflow;
@@ -40,6 +41,7 @@ public sealed class OrchestrationService
     private readonly PayloadConfigSchemaValidator _payloadConfigSchemaValidator;
     private readonly ProcessorLivenessValidator _processorLivenessValidator;
     private readonly IQueueSender _sender;
+    private readonly IEntityLookupPublisher _lookup;
     private readonly ILogger<OrchestrationService> _logger;
 
     // The constructor is internal rather than public: it accepts internal seam types, which the
@@ -53,6 +55,7 @@ public sealed class OrchestrationService
         PayloadConfigSchemaValidator payloadConfigSchemaValidator,
         ProcessorLivenessValidator processorLivenessValidator,
         IQueueSender sender,
+        IEntityLookupPublisher lookup,
         ILogger<OrchestrationService> logger)
     {
         _db                           = db                           ?? throw new ArgumentNullException(nameof(db));
@@ -62,6 +65,7 @@ public sealed class OrchestrationService
         _payloadConfigSchemaValidator = payloadConfigSchemaValidator ?? throw new ArgumentNullException(nameof(payloadConfigSchemaValidator));
         _processorLivenessValidator   = processorLivenessValidator   ?? throw new ArgumentNullException(nameof(processorLivenessValidator));
         _sender                       = sender                       ?? throw new ArgumentNullException(nameof(sender));
+        _lookup                       = lookup                       ?? throw new ArgumentNullException(nameof(lookup));
         _logger                       = logger                       ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -121,67 +125,23 @@ public sealed class OrchestrationService
 
         var definition = ToDefinition(snapshot, workflowId);
 
-        // THE ONLY PLACE AN ENTITY ID AND ITS NAME ARE EVER SEEN TOGETHER IN A LOG RECORD, and that
-        // is why these lines are here rather than anywhere more obvious. Every downstream record —
-        // every step outcome, every dispatch, every orchestrator line — carries WorkflowId, StepId
-        // and ProcessorId and nothing readable. Grafana and Kibana can both group by those ids; a
-        // human reading the result cannot tell which GUID is the importer.
+        // THE NAMES GO OUT BEFORE THE START DOES, and that order is the design.
         //
-        // Emitting these pairs lets a reader build the id -> name map from the LOG STORE ALONE. That
-        // is the point: a dashboard on someone else's Elasticsearch gets readable labels without an
-        // enrich policy, a lookup index, a sync script or any privilege beyond read, and without
-        // calling this API at the time it renders. Section 13.2 and 13.6 of
-        // docs/superpowers/specs/2026-09-22-kibana-operator-dashboard-design.md are the argument.
+        // This workflow's ids reach the log store only once the orchestrator has been told to run it,
+        // and enrichment is frozen at index time: a record written before its id is in the
+        // materialised policy is unnamed permanently, and no later publish repairs it. Publishing
+        // after the send would leave exactly the records of the busiest window unnamed, with every
+        // call still returning success.
         //
-        // HERE AND NOT IN THE ORCHESTRATOR, because the names do not survive the projection --
-        // WorkflowL1 and StepL1 are ids-only. The snapshot above is the last place a Name and a
-        // Version exist in the same object as the Id, and it is disposed shortly after this.
+        // The snapshot is the source, not the entity tables. A running workflow's composition is
+        // frozen at start by the L2 projection, so the graph in hand here IS the set of ids this run
+        // can emit. Tables edited afterwards cannot reach it.
         //
-        // AFTER every gate, so a refused start emits no pairs. A workflow that cannot run should not
-        // seed a legend with labels for steps nobody will ever see counted.
-        //
-        // EntityKind is carried because a reader cannot recover it: these records say "this GUID is
-        // called that", and nothing in them says whether the GUID belongs in the Workflow control or
-        // the Step control. Without it the reader would have to guess from which field the id later
-        // appears in, which is exactly the join being avoided.
-        //
-        // ONE LINE PER ENTITY PER ACCEPTED START, AND A START IS RARE. The cron does NOT come through
-        // here -- WorkflowFireJob lives in the Orchestrator and fires against the L1 projection, which
-        // is ids-only -- so these lines are written when a human or a client starts a workflow, and
-        // not again until the next start. A workflow started last week and running ever since has
-        // emitted its pairs once, at that moment.
-        //
-        // THAT IS A RETENTION DEPENDENCY AND A READER MUST KNOW IT. A reader building the id -> name
-        // map has to search far enough back to find the last start, not the last few minutes, and a
-        // workflow whose start has aged out of the index has no pairs at all until it is next
-        // started. The alternative -- re-emitting on every tick -- was rejected: on a 30-second cron
-        // that is ~55k records a day per workflow to restate something that changes when someone
-        // edits a row, and the log store is not the right place to hold a lookup table by brute
-        // force. A reader that cannot find a pair should show the raw id, which is legible if ugly.
-        // THE ID GOES UNDER THE SAME FIELD NAME THE EXECUTION RECORDS USE -- WorkflowId, StepId,
-        // ProcessorId -- rather than a single generic EntityId, and that is not cosmetic.
-        //
-        // A reader's dropdown is populated from the values of ONE field. If these records carried
-        // EntityId, the Step dropdown would still have to read attributes.StepId, and the only
-        // records carrying that are executions: a step that has never run would be missing from the
-        // list entirely, no matter how the dropdown is configured. Writing the id under its own
-        // field means a published step has a record naming it from the moment its workflow is
-        // started, so the list is the published topology rather than a list of what happened to
-        // fire recently.
-        //
-        // These records carry NO Result, so nothing that counts outcomes can pick them up -- the
-        // counted set is defined by Result being present. They will, however, show up for anyone
-        // querying "records for step X" without qualifying it further, which is the same care a
-        // lineage query already has to take here.
-        foreach (var (kind, scope, name, version) in NameablesOf(snapshot))
-        {
-            // The field names vary per entity kind, so the scope is built by hand rather than
-            // through a message template -- a template's parameter name is fixed at compile time.
-            using (_logger.BeginScope(scope))
-            {
-                _logger.LogInformation("{EntityKind} is named {EntityName}", kind, $"{name}_{version}");
-            }
-        }
+        // A FAILURE HERE REFUSES THE START. Unlike the Kibana publisher this replaces -- which
+        // swallowed its own faults because it ran behind a dashboard render -- this runs while there
+        // is still a request to answer, and a start whose names never landed produces a run nobody
+        // can read. Letting it escape is the honest outcome.
+        await _lookup.PublishAsync(LookupRowExtractor.From(snapshot), ct);
 
         // The broker is a hard dependency for this path: a send that fails means the projection will
         // never be applied, and the caller has to learn that now rather than be told the work was
@@ -225,60 +185,6 @@ public sealed class OrchestrationService
         }
 
         _logger.LogInformation("accepted stop for workflow {WorkflowId}", workflowId);
-    }
-
-    /// <summary>
-    /// Every entity in the snapshot that has both an id and a human-readable name, flattened into
-    /// one sequence so the caller logs them in a single loop.
-    /// <para>
-    /// <b>Schemas, assignments and caches are left out.</b> They carry names too, but no log record
-    /// anywhere downstream is grouped by their ids — a reader would be building a legend for a
-    /// dimension nothing is ever split by. The three kinds here are exactly the three ids that
-    /// <c>ExecutionLogScope</c> stamps on every execution record.
-    /// </para>
-    /// <para>
-    /// <b>Processors come from the snapshot, not from the step rows.</b> Several steps share one
-    /// processor, and emitting per step would repeat the same pair as many times as it is
-    /// referenced. The snapshot's dictionary is already unique by id.
-    /// </para>
-    /// <para>
-    /// <b>A STEP ALSO CARRIES ITS WORKFLOW'S ID, AND A PROCESSOR DELIBERATELY DOES NOT.</b> The Step
-    /// control on the dashboard is chained under the Workflow control, which means Kibana narrows
-    /// its options to records matching the selected <c>WorkflowId</c>. Without that id on the step's
-    /// naming record, the only records left to match are executions — and the list collapses to
-    /// steps that have already RUN, which is precisely the guarantee these records exist to provide.
-    /// Measured before the id was added: selecting a workflow took the Step list from 40 options to
-    /// the 10 that had run.
-    /// <br/>
-    /// A processor is not chained under anything — there is no Processor control — and it is
-    /// genuinely shared across workflows, so stamping one workflow on it would pick an arbitrary
-    /// owner and multiply the rows for a reader that only ever needs id to name.
-    /// </para>
-    /// </summary>
-    private static IEnumerable<(string Kind, Dictionary<string, object> Scope, string Name, string Version)> NameablesOf(
-        WorkflowGraphSnapshot snapshot)
-    {
-        foreach (var w in snapshot.Workflows.Values)
-            yield return ("workflow",
-                new Dictionary<string, object> { [ExecutionLogScope.WorkflowId] = w.Id.ToString("D") },
-                w.Name, w.Version);
-
-        // The loader is called with exactly one workflow id, so every step in this snapshot belongs
-        // to that workflow and the owner is not a guess.
-        foreach (var workflowId in snapshot.Workflows.Keys)
-            foreach (var s in snapshot.Steps.Values)
-                yield return ("step",
-                    new Dictionary<string, object>
-                    {
-                        [ExecutionLogScope.StepId]     = s.Id.ToString("D"),
-                        [ExecutionLogScope.WorkflowId] = workflowId.ToString("D"),
-                    },
-                    s.Name, s.Version);
-
-        foreach (var p in snapshot.Processors.Values)
-            yield return ("processor",
-                new Dictionary<string, object> { [ExecutionLogScope.ProcessorId] = p.Id.ToString("D") },
-                p.Name, p.Version);
     }
 
     /// <summary>

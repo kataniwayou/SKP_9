@@ -60,12 +60,12 @@ def tsvb_panel(base_url):
     # The endpoint answers no-store, so it is never cached away. The diagram requests beside it are
     # cached with an ETag, which only became safe once this tag existed to carry the signal.
     api_root = base_url.rstrip("/").rsplit("/workflows", 1)[0]
-    # MARKDOWN SYNTAX, NOT AN <img> TAG. Kibana's markdown renderer escapes raw HTML, so an <img>
-    # tag renders as literal text and the browser never fetches it - measured: zero requests where
-    # five diagram images loaded fine beside it. The image is 1x1 and fully transparent, so
-    # markdown's own rendering is invisible enough.
-    ping = '![](%s/lookup/ping.svg)\n' % api_root
-    markdown = ping + "{{#each _all}}![](%s/{{label}}.svg)\n{{/each}}" % base_url.rstrip("/")
+    # NO REFRESH SIGNAL. This template used to carry a 1x1 image pointing at the API, whose only
+    # purpose was to tell that service a dashboard had been rendered so it could republish the
+    # id -> name table into Kibana's data view. Names now ride on the log records themselves,
+    # written by an ingest pipeline, so there is nothing to keep fresh and nothing to trigger.
+    markdown = "{{#each _all}}![](%s/{{label}}.svg)
+{{/each}}" % base_url.rstrip("/")
     params = {
         "id": "diagram", "type": "markdown",
         "index_pattern": DATA_STREAM, "time_field": "@timestamp",
