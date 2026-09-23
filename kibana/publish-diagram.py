@@ -113,10 +113,15 @@ STYLE_RULES = {
 # steps that fit the width - and short graphs leave it part-empty on purpose. Do not size it to
 # content.
 LEGEND_ROWS = 8
-LEGEND_Y0, LEGEND_DY = 452, 16
-VB_W, VB_H = 1580, LEGEND_Y0 + LEGEND_ROWS * LEGEND_DY + 36
+LEGEND_DY = 16
+VB_W, VB_H = 1580, 0            # VB_H is completed below, once the rows are known
 X0, PITCH, W, H = 40, 192, 150, 86
-YT, YF = 120, 340
+
+# THE DRAWING SITS AS HIGH AS THE LANES ABOVE IT ALLOW. YT was 120, which left most of a viewBox
+# height of empty white above the first row - wasted in a panel that is always shorter than the
+# drawing wants to be. What has to fit above the boxes is only two things: the bypass lane and the
+# schema labels, so YT is the sum of those plus a small margin rather than a round number.
+YT, YF = 56, 276
 BUS_Y = YF - 40
 
 # ABOVE the boxes, not beside the edge. The gaps between boxes are 42px and `archive-document`
@@ -124,10 +129,15 @@ BUS_Y = YF - 40
 # the processor name. Measured: eight collisions.
 LABEL_Y = YT - 10
 
-# ABOVE the schema labels, which sit at LABEL_Y. An edge that skips a column cannot run along the
-# row - the boxes between are in the way - so it arcs over them. Anything lower collides with the
-# labels it passes.
-ARC_Y = 56
+# THE BYPASS LANE, above the schema labels at LABEL_Y. An edge that skips a column cannot run along
+# the row - the boxes between are in the way - so it goes up, across and back down. Anything lower
+# collides with the labels it passes; this is the top margin.
+BYPASS_Y = 18
+
+# Derived so lifting the rows cannot leave the band behind: the legend starts under the failure
+# row, and the height is the band plus the caption line.
+LEGEND_Y0 = YF + H + 26
+VB_H = LEGEND_Y0 + LEGEND_ROWS * LEGEND_DY + 36
 
 
 def api(base, path):
@@ -299,12 +309,12 @@ def render(g):
                 emit(f'    <circle class="gate" cx="{(x1+x2)//2}" cy="{y}" r="3.5"/>\n', "gate")
         else:
             # A BYPASS: the source reaches a step further along without passing through the boxes
-            # between, so it cannot run on the row - it arcs over them. Deliberately unlabelled:
-            # the schema is already named on the row beneath, and repeating it over the arc is the
-            # collision the label rule exists to avoid.
+            # between, so it cannot run on the row. STRAIGHT SEGMENTS ONLY - up into the lane,
+            # across, and back down - matching every other wire on the drawing. A curve here was
+            # the only non-straight line in the diagram and read as a different KIND of edge.
             xa, xb = pos[a][0] + W // 2, pos[b][0] + W // 2
-            emit(f'    <path class="edge-ok edge-bypass" d="M {xa} {YT} Q {(xa+xb)//2} {ARC_Y} {xb} {YT}"/>\n',
-                 "edge-ok", "edge-bypass")
+            emit(f'    <path class="edge-ok edge-bypass" d="M {xa} {YT} L {xa} {BYPASS_Y} '
+                 f'L {xb} {BYPASS_Y} L {xb} {YT}"/>\n', "edge-ok", "edge-bypass")
         drawn.add((a, b))
 
     # THE FAILURE EDGES RUN ONTO A BUS AND THEN INTO THE SINK. A stub that stops in white space
