@@ -1,16 +1,25 @@
 using BaseProcessor.Core.Processing;
+using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace Processor.SKNormalizer;
 
 /// <summary>
-/// Reads one projected dictionary out of L2, under the address the step payload supplied.
+/// Reads one projected dictionary out of L2, at an address composed from this dispatch's workflow id
+/// and the root the step payload named.
 /// <para>
-/// <b>One key per lookup, composed and never scanned.</b> The address is the dictionary's root —
-/// <c>skp:{workflowId}:cache:{root}</c> — and an entry is that string, a colon, and the field. The
-/// writer forbids a colon in either half precisely so this concatenation cannot resolve to another
-/// dictionary's entry.
+/// <b>One key per lookup, composed and never scanned.</b> The address is
+/// <c>skp:{workflowId}:cache:{root}</c>, built through the same <see cref="L2ProjectionKeys.Cache"/>
+/// the projection writer uses, and an entry is that string, a colon, and the field.
+/// </para>
+/// <para>
+/// <b>The workflow id comes from the dispatch, not from the payload, and that removes a class of
+/// defect rather than a bug.</b> The address used to arrive pre-composed on the step payload, which
+/// meant an operator transcribed a workflow id into JSON and nothing anywhere kept the copy equal to
+/// the workflow's own id — a recreated workflow left the payload naming a dictionary that would never
+/// be projected, reported as a payload defect, which was true but named the wrong half. Composing here
+/// makes that unrepresentable: the only operator-supplied half left is the root.
 /// </para>
 /// <para>
 /// <b>The read is synchronous, and deliberately so.</b> The handler stage that calls this is
@@ -58,7 +67,8 @@ internal sealed class RedisFieldWhitelist : IFieldWhitelist
     private bool _dictionaryConfirmed;
 
     public RedisFieldWhitelist(
-        IConnectionMultiplexer multiplexer, string address, ILogger<RedisFieldWhitelist> logger)
+        IConnectionMultiplexer multiplexer, Guid workflowId, string root,
+        ILogger<RedisFieldWhitelist> logger)
     {
         _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
 
@@ -66,22 +76,30 @@ internal sealed class RedisFieldWhitelist : IFieldWhitelist
         // verdict silently, and an empty board reads exactly like a step nobody ran.
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        if (string.IsNullOrWhiteSpace(address))
+        if (string.IsNullOrWhiteSpace(root))
         {
-            throw new ArgumentException("address must not be blank", nameof(address));
+            throw new ArgumentException("root must not be blank", nameof(root));
         }
 
-        _address = address.Trim();
+        _root = root.Trim();
 
-        // THE ROOT IS THE LAST SEGMENT, and that is safe because L2ProjectionKeys refuses a root
-        // containing a colon — the same rule that stops one address forging another. Taken from the
-        // address rather than accepted as a second argument so the two cannot disagree: a caller
-        // that passed the wrong name would label a whole board's worth of verdicts with a list they
-        // did not come from.
-        var lastSeparator = _address.LastIndexOf(':');
-        _root = lastSeparator >= 0 && lastSeparator < _address.Length - 1
-            ? _address[(lastSeparator + 1)..]
-            : _address;
+        // THE COLON BAN IS NOW THIS SIDE'S BUSINESS TOO. It used to be the server's alone: the address
+        // arrived pre-composed, CacheRules.CheckRoot had already refused a colon, and nothing here
+        // concatenated anything it had not been handed whole. Composing the address here moves that
+        // exposure across — a root carrying a colon resolves to a different dictionary's entry, the
+        // exact forgery CacheEntity documents — so the guard travels with the concatenation rather than
+        // staying where the value was first accepted.
+        if (_root.Contains(':', StringComparison.Ordinal))
+        {
+            throw new ArgumentException("root must not contain a colon", nameof(root));
+        }
+
+        // ONE VALUE IN, BOTH DERIVED, which preserves what the old string surgery was protecting. The
+        // root used to be split back off the address so a caller could not pass a name the address did
+        // not carry and mislabel a whole board's worth of verdicts with a list they did not come from.
+        // Inverting it keeps that guarantee in the other direction and drops the parsing: one root in,
+        // the address built from it, and no second value left to disagree.
+        _address = L2ProjectionKeys.Cache(workflowId, _root);
     }
 
     /// <summary>
@@ -166,8 +184,8 @@ internal sealed class RedisFieldWhitelist : IFieldWhitelist
     /// <summary>
     /// Confirms, once, that a dictionary was actually projected at this address.
     /// <para>
-    /// Deterministic on purpose: the address is wrong, or the workflow names no cache, and every
-    /// redelivery answers the same way. A requeue would spin on a misconfiguration no retry can
+    /// Deterministic on purpose: the root is wrong, or the workflow binds no cache carrying it, and
+    /// every redelivery answers the same way. A requeue would spin on a misconfiguration no retry can
     /// repair, and a cancel would report a business decision the whitelist never got to make.
     /// </para>
     /// <para>
@@ -186,9 +204,14 @@ internal sealed class RedisFieldWhitelist : IFieldWhitelist
 
         if (db.StringGet(_address).IsNullOrEmpty)
         {
+            // THE MESSAGE NAMES THE ROOT AS WELL AS THE ADDRESS, because the root is now the only half
+            // an operator wrote. While the whole address came off the payload, a wrong workflow id and a
+            // wrong root produced the same line and left the reader to work out which half to doubt.
+            // There is nothing left to align but this name, so the line says so.
             throw new FailedException(
-                $"step payload rejected: no whitelist is projected at '{_address}'. Either the "
-                + "workflow names no cache with that root, or the payload's cacheAddress is wrong.");
+                $"step payload rejected: no whitelist is projected at '{_address}'. This workflow "
+                + $"binds no cache with root '{_root}' — either the payload's cacheRoot is wrong, or "
+                + "that cache is not among the workflow's caches.");
         }
 
         _dictionaryConfirmed = true;

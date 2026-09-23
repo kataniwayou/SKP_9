@@ -1,6 +1,7 @@
 using System.Text;
 using BaseApi.Tests.Support;
 using BaseProcessor.Core.Processing;
+using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Time.Testing;
 using Processor.SKNormalizer;
 using Xunit;
@@ -9,6 +10,13 @@ namespace BaseApi.Tests.SKNormalizer;
 
 public sealed class AcmeHandlerTests
 {
+    /// <summary>
+    /// The workflow the whitelist tests below compose their address from. Any value works — what the
+    /// tests exercise is that the seed and the lookup derive from the SAME one, which is exactly what
+    /// stopped being an operator's problem when the address left the payload.
+    /// </summary>
+    private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
     private static DateTime Stamp => new(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
 
     private const string Sidecar = """
@@ -456,10 +464,10 @@ public sealed class AcmeHandlerTests
     }
 
     [Fact]
-    public void AStepWithNoCacheAddressFailsRatherThanCancelling()
+    public void AStepWithNoCacheRootFailsRatherThanCancelling()
     {
         // The failure that must NOT look like an empty whitelist. A step whose payload forgot its
-        // address would otherwise cancel every document, which reads in the logs exactly like a
+        // root would otherwise cancel every document, which reads in the logs exactly like a
         // correctly-configured list that matches nothing.
         var handler = Handler();
         var item = Assert.Single(handler.Locate(
@@ -470,7 +478,7 @@ public sealed class AcmeHandlerTests
         var ex = Assert.Throws<FailedException>(
             () => handler.Augment(metadata, item, new UnconfiguredFieldWhitelist()));
 
-        Assert.Contains("cacheAddress", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("cacheRoot", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -519,20 +527,24 @@ public sealed class AcmeHandlerTests
     }
 
     [Fact]
-    public void AnAddressWithNoProjectedDictionaryFailsRatherThanCancelling()
+    public void ARootWithNoProjectedDictionaryFailsRatherThanCancelling()
     {
-        // THE GAP THIS CLOSES. A wrong address, or a workflow that names no cache, used to answer
-        // every lookup with a miss — cancelling every document, which in the logs is
+        // THE GAP THIS CLOSES. A wrong root, or a workflow that binds no cache carrying it, used to
+        // answer every lookup with a miss — cancelling every document, which in the logs is
         // indistinguishable from a whitelist that approves nobody. The writer always stores the cache
         // root (an empty dictionary is "[]", not nothing), so an absent root is proof the dictionary
         // was never projected rather than evidence about any artist.
         var l2 = new InMemoryL2();
         var whitelist = new RedisFieldWhitelist(
-            l2.Multiplexer, "skp:w:cache:absent", new RecordingLogger<RedisFieldWhitelist>());
+            l2.Multiplexer, W, "absent", new RecordingLogger<RedisFieldWhitelist>());
 
         var ex = Assert.Throws<FailedException>(() => whitelist.TryGet("SKP Live Suite", out _));
 
         Assert.Contains("no whitelist is projected", ex.Message, StringComparison.Ordinal);
+
+        // The root is named as well as the address: it is the only half an operator authored, so it is
+        // the only half worth doubting.
+        Assert.Contains("'absent'", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -541,9 +553,9 @@ public sealed class AcmeHandlerTests
         // The other side of the same line: "[]" is a whitelist that approves nobody, which is a
         // legitimate configuration and must stay a miss.
         var l2 = new InMemoryL2();
-        await l2.Db.StringSetAsync("skp:w:cache:empty", "[]");
+        await l2.Db.StringSetAsync(L2ProjectionKeys.Cache(W, "empty"), "[]");
         var whitelist = new RedisFieldWhitelist(
-            l2.Multiplexer, "skp:w:cache:empty", new RecordingLogger<RedisFieldWhitelist>());
+            l2.Multiplexer, W, "empty", new RecordingLogger<RedisFieldWhitelist>());
 
         Assert.False(whitelist.TryGet("SKP Live Suite", out var value));
         Assert.Null(value);
@@ -553,10 +565,11 @@ public sealed class AcmeHandlerTests
     public async Task APresentDictionaryReturnsTheCanonicalValue()
     {
         var l2 = new InMemoryL2();
-        await l2.Db.StringSetAsync("skp:w:cache:list", """["SKP Live Suite"]""");
-        await l2.Db.StringSetAsync("skp:w:cache:list:SKP Live Suite", "SKP Live Suite (Approved)");
+        await l2.Db.StringSetAsync(L2ProjectionKeys.Cache(W, "list"), """["SKP Live Suite"]""");
+        await l2.Db.StringSetAsync(
+            L2ProjectionKeys.CacheEntry(W, "list", "SKP Live Suite"), "SKP Live Suite (Approved)");
         var whitelist = new RedisFieldWhitelist(
-            l2.Multiplexer, "skp:w:cache:list", new RecordingLogger<RedisFieldWhitelist>());
+            l2.Multiplexer, W, "list", new RecordingLogger<RedisFieldWhitelist>());
 
         Assert.True(whitelist.TryGet("SKP Live Suite", out var value));
         Assert.Equal("SKP Live Suite (Approved)", value);

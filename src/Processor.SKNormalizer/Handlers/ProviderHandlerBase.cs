@@ -19,7 +19,7 @@ public abstract class ProviderHandlerBase : IProviderHandler
     /// <summary>
     /// Stage 4, and a no-op by default. <paramref name="whitelist"/> is accepted by every handler
     /// and consulted only by those that gate a field on one — Sample and AlphaBeta ignore it, which
-    /// is why their steps need no cacheAddress on the payload.
+    /// is why their steps need no cacheRoot on the payload.
     /// </summary>
     public virtual void Augment(StandardMetadata metadata, SourceItem item, IFieldWhitelist whitelist)
     {

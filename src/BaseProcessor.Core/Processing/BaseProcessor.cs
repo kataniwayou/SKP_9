@@ -33,15 +33,21 @@ public abstract class BaseProcessor
     /// <summary>
     /// The correlation id of the dispatch currently being handled.
     /// <para>
-    /// <b>Read-only, and that is the whole of the concession.</b> The ids are otherwise withheld from
-    /// authors so that none of them can be STAMPED on outgoing work — <see cref="SendToPostAsync"/>
-    /// takes every id from <see cref="DispatchState"/> and none from the author, and that is
-    /// unchanged. Reading is not forging.
+    /// <b>Read-only, and that is the whole of the concession.</b> No id here can be STAMPED on
+    /// outgoing work — <see cref="SendToPostAsync"/> takes every id from <see cref="DispatchState"/>
+    /// and none from the author, and that is unchanged. Reading is not forging.
     /// </para>
     /// <para>
-    /// <b>Only the correlation id is exposed.</b> WorkflowId, StepId and ProcessorId stay private:
-    /// they are static and can reach an author through its step payload if they are ever wanted,
-    /// while exposing them invites routing decisions nothing in this system needs.
+    /// <b>All four ids are exposed, which reverses an earlier decision, and the reason belongs
+    /// here.</b> The other three used to stay private on the argument that a static id "can reach an
+    /// author through its step payload if they are ever wanted". That is precisely what SKNormalizer's
+    /// whitelist address did, and the cost was a workflow id transcribed by hand into a payload string
+    /// with nothing on any path keeping the copy equal to the workflow's own id — not the four start
+    /// gates, and not <c>PayloadConfigSchemaValidator</c>, which checks shape and passes any string.
+    /// An author composing a key from <see cref="WorkflowId"/> cannot get that wrong; an operator
+    /// typing the same id into JSON can, and nothing would tell them. What is accepted in trade is
+    /// that an author COULD now branch on its position in the graph. Nothing does, and a review that
+    /// meets the first one should treat it as the smell it is.
     /// </para>
     /// <para>
     /// It exists for <c>Processor.OutcomeRecorder</c>, which runs on another step's behalf and must
@@ -55,6 +61,28 @@ public abstract class BaseProcessor
     /// </para>
     /// </summary>
     protected Guid CorrelationId => Current.CorrelationId;
+
+    /// <summary>
+    /// The workflow this dispatch belongs to.
+    /// <para>
+    /// <b>Static for the life of the step, unlike <see cref="CorrelationId"/>, which is minted per
+    /// fire.</b> That is what makes it the id to build a durable key from: a projection written once
+    /// when the workflow started is addressed by this and not by any one run of it.
+    /// </para>
+    /// <para>
+    /// <b>Reading is not forging.</b> <see cref="SendToPostAsync"/> still takes every id it stamps
+    /// from <see cref="DispatchState"/> and none from the author. Exposing these changes what an
+    /// author can READ, and nothing about what it can put on its own output.
+    /// </para>
+    /// <para>Throws outside a dispatch, inheriting <see cref="Current"/>'s guard.</para>
+    /// </summary>
+    protected Guid WorkflowId => Current.WorkflowId;
+
+    /// <inheritdoc cref="WorkflowId"/>
+    protected Guid StepId => Current.StepId;
+
+    /// <inheritdoc cref="WorkflowId"/>
+    protected Guid ProcessorId => Current.ProcessorId;
 
     /// <summary>Framework entry point, supplied by <see cref="BaseProcessor{TConfig}"/>.</summary>
     internal abstract Task ExecuteAsync(byte[] data, string payload, Guid executionId, CancellationToken ct);

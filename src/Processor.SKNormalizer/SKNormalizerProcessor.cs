@@ -69,9 +69,10 @@ internal sealed class SKNormalizerProcessor(
     }
 
     /// <summary>
-    /// Builds this dispatch's whitelist from the address on the step payload.
+    /// Builds this dispatch's whitelist from the root on the step payload and this dispatch's own
+    /// workflow id.
     /// <para>
-    /// <b>A missing address is not refused here.</b> Only a handler that gates a field needs one,
+    /// <b>A missing root is not refused here.</b> Only a handler that gates a field needs one,
     /// and Sample and AlphaBeta do not — refusing at this point would fail every step of theirs for
     /// a field their payloads have no reason to carry. The unconfigured whitelist defers the
     /// complaint to the first lookup, which happens only inside a handler that actually wants a
@@ -79,9 +80,9 @@ internal sealed class SKNormalizerProcessor(
     /// </para>
     /// </summary>
     private IFieldWhitelist WhitelistFor(SKNormalizerConfig? config)
-        => string.IsNullOrWhiteSpace(config?.CacheAddress)
+        => string.IsNullOrWhiteSpace(config?.CacheRoot)
             ? new UnconfiguredFieldWhitelist()
-            : new RedisFieldWhitelist(multiplexer, config.CacheAddress, whitelistLogger);
+            : new RedisFieldWhitelist(multiplexer, WorkflowId, config.CacheRoot, whitelistLogger);
 
     private IProviderHandler Resolve(SKNormalizerConfig? config)
     {

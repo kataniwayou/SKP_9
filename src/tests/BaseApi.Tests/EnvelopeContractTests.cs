@@ -4,6 +4,7 @@ using System.Text.Json;
 using BaseApi.Tests.Support;
 using BaseProcessor.Core.Validation;
 using Messaging.Contracts;
+using Messaging.Contracts.Projections;
 using Messaging.Transport;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -143,8 +144,19 @@ public sealed class EnvelopeContractTests : IDisposable
     /// wired in so a test can pass <c>handler</c> to exercise Acme's mapping path
     /// instead, without touching every existing identity-path call site.
     /// </summary>
-    /// <summary>The whitelist address these tests hand the normalizer; shape only, nothing reads it.</summary>
-    private const string CacheAddress = "skp:11111111-1111-1111-1111-111111111111:cache:envelope-tests";
+    /// <summary>
+    /// The whitelist root these tests hand the normalizer, and the address it will compose from that
+    /// root and <see cref="W"/>.
+    /// <para>
+    /// <b>The address is no longer written out, and the seeding below is why that matters.</b> It used
+    /// to be a literal whose workflow id happened to equal W, transcribed by hand and correct only by
+    /// coincidence — the very alignment the rename removed. Composing it here through the same helper
+    /// the processor uses means the seed and the lookup cannot disagree even if W changes.
+    /// </para>
+    /// </summary>
+    private const string CacheRoot = "envelope-tests";
+
+    private static readonly string CacheAddress = L2ProjectionKeys.Cache(W, CacheRoot);
 
     private static async Task<byte[]> Normalize(
         byte[] document, string handler = "Sample", IAudioTranscoder? transcoder = null)
@@ -154,8 +166,8 @@ public sealed class EnvelopeContractTests : IDisposable
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        // Acme now gates the artist on the workflow's whitelist, so this hop needs a store and an
-        // address. Seeded with the fixture's own artist mapped to itself: these tests assert the
+        // Acme now gates the artist on the workflow's whitelist, so this hop needs a store and a
+        // root — and a dispatch, since the workflow id half of the address comes off DispatchState. Seeded with the fixture's own artist mapped to itself: these tests assert the
         // ENVELOPE contract, and canonicalisation is AcmeHandlerTests' business, so the identity
         // mapping keeps every existing assertion meaning exactly what it meant before the gate.
         var l2 = new InMemoryL2();
@@ -184,7 +196,7 @@ public sealed class EnvelopeContractTests : IDisposable
 
         await normalizer.ExecuteAsync(
             document,
-            $$"""{"handler":"{{handler}}","cacheAddress":"{{CacheAddress}}"}""",
+            $$"""{"handler":"{{handler}}","cacheRoot":"{{CacheRoot}}"}""",
             E, CancellationToken.None);
 
         return Assert.Single(sends).Data;

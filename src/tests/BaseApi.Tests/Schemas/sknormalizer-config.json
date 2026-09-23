@@ -8,9 +8,9 @@
       "description": "The provider handler to apply. One of the names this processor version carries.",
       "enum": ["Acme", "AlphaBeta", "Sample"]
     },
-    "cacheAddress": {
+    "cacheRoot": {
       "type": ["string", "null"],
-      "description": "The full L2 address of one projected dictionary for whitelist lookups. Nothing reads it yet. Declared in the schema because ConfigSchemaConformance checks record shape at startup, so every property on the config record must be described here even before any payload sets it."
+      "description": "The NAME of one projected dictionary for whitelist lookups, not its address. The full L2 address is skp:{workflowId}:cache:{root}; the workflow id half is composed at dispatch from the id the message already carries, so it is never authored here and cannot drift from the workflow it names. Must match a cache Root bound to the workflow through WorkflowCaches -- nothing validates that, and a mismatch is a deterministic failed step naming this root. Declared here because ConfigSchemaConformance compares the record's shape to this definition at startup, so every property on the config record must be described."
     }
   },
   "required": ["handler"],
