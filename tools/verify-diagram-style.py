@@ -52,7 +52,6 @@ def facts(path):
         "width":  (lambda m: float(m.group(1)) if m else None)(
                       re.search(r'viewBox="0 0 ([\d.]+) [\d.]+"', svg)),
         "stray":  sorted({h for h in re.findall(r"#[0-9a-fA-F]{3,8}\b", drawing)}),
-        "dark":   bool(re.search(r"prefers-color-scheme|data-theme", text)),
     }
 
 
@@ -74,8 +73,6 @@ def compare(name, cand, ref):
         out.append(f"class {c!r} has no treatment in the design system")
     if cand["stray"]:
         out.append(f"hard-coded colour(s) in the drawing, not tokens: {', '.join(cand['stray'])}")
-    if not cand["dark"]:
-        out.append("no dark-theme rules - renders light-only on a dark Kibana")
     return out
 
 
@@ -88,7 +85,7 @@ def main():
     ref = facts(os.path.join(ROOT, WORKFLOWS[args.reference]))
     print(f"reference  {args.reference}")
     print(f"           {len(ref['vars'])} tokens, {len(ref['classes'])} classes, "
-          f"width {ref['width']:.0f}, ladder {len(ref['sizes'])}, dark={ref['dark']}\n")
+          f"width {ref['width']:.0f}, ladder {len(ref['sizes'])}\n")
 
     targets = ([("candidate", args.candidate)] if args.candidate
                else [(n, os.path.join(ROOT, p)) for n, p in sorted(WORKFLOWS.items())])

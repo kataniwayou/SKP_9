@@ -20,8 +20,32 @@ namespace BaseApi.Service.Features.Workflow;
 /// raises SQLSTATE 23001 and becomes a 422. The third junction, <c>WorkflowCaches</c>, carries the
 /// caches the workflow projects.
 /// </para>
+/// <para>
+/// <b><c>Diagram</c> is deliberately absent from all three DTOs.</b> It is written and read by the
+/// two dedicated actions on <c>WorkflowsController</c>, never through CRUD, for two reasons: the
+/// read DTO is a positional record whose constructor every mapper must satisfy, and a diagram is
+/// tens of kilobytes that no list response should carry. The mappers therefore ignore it explicitly
+/// — with Mapperly diagnostics promoted to errors, an unmapped member is a build failure, so the
+/// ignores are not decoration but the thing that keeps the asymmetry compiling.
+/// </para>
+/// <para>
+/// Null means <b>no diagram has been published</b>, which is an ordinary state rather than an error:
+/// enriching a workflow is the operator's choice. The GET action answers null with a placeholder
+/// that says so, so "nobody drew this one" stays distinguishable from "the API is unreachable" —
+/// the latter renders as nothing at all, because the dashboard's image tag carries empty alt text.
+/// </para>
 /// </summary>
 public sealed class WorkflowEntity : BaseEntity
 {
     public string? CronExpression { get; set; }
+
+    /// <summary>
+    /// The workflow's diagram as SVG source, or null when none has been published.
+    /// <para>
+    /// SVG rather than PNG: the committed drawings are 15.8 KB and 5.6 KB against 195 KB and 83 KB
+    /// for the same images rendered to PNG, they stay sharp at any size the dashboard panel gives
+    /// them, and storing the source removes the headless-Chrome render from the pipeline entirely.
+    /// </para>
+    /// </summary>
+    public string? Diagram { get; set; }
 }
