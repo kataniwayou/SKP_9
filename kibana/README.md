@@ -197,17 +197,18 @@ between the boxes and the assignment lines. The last two are regressions with na
 1580-wide canvas scaled a three-step drawing down to a third of the panel, and a fixed failure row
 left 236px of empty lane in a graph that has no failure sink.
 
-The layout rules it implements are specified in
-[`docs/diagrams/workflow-diagram-prompt.md`](../docs/diagrams/workflow-diagram-prompt.md), which is
-also where the two things a script cannot draw are described — interpretive annotations, and the
-Cancelled paths that exist only in processor source.
+The layout rules are the script's own — `STYLE_ROOT`, `STYLE_RULES` and the geometry constants at
+the top of it. There is no separate specification: `docs/diagrams/workflow-diagram-prompt.md` held
+one while the drawings were produced by hand from a prompt, and was retired with the rest of that
+flow. The two things a script cannot draw are recorded in the script's own header, under WHAT A
+SCRIPT CANNOT DRAW.
 
 **The drawing is read from the live graph every time**, so it is current by construction rather than
 because someone remembered to redraw it. The two committed pages that used to live in
 `docs/diagrams/` are deleted: they stopped being publish sources when this script took over, stopped
-being style goldens when the style check was retired, and were removed once nothing read them. What
-a script still cannot draw — the interpretive annotations and the Cancelled paths that exist only in
-processor source — is described in `workflow-diagram-prompt.md` rather than drawn anywhere.
+being style goldens when the style check was retired, and were removed once nothing read them. The
+directory is gone with them — interpretive annotations and the Cancelled paths that exist only in
+processor source are now described in `publish-diagram.py`'s header rather than drawn anywhere.
 
 **There is no separate style check any more, and there is nothing left for one to catch.**
 `tools/verify-diagram-style.py` compared a candidate's class vocabulary against one of those pages

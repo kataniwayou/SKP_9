@@ -20,11 +20,22 @@ earlier date, and capped the pipeline at whichever workflows somebody had added 
 stored `description` is not consulted either, and for good reason - this workflow's own still reads
 six hops while the live graph has ten.
 
-WHAT A SCRIPT CANNOT DRAW. Authored judgement does not survive this: an annotation like
-"archive-document - the container branch", and a step's Cancelled paths, which exist only in
-processor source and never in the API. A hand-drawn page can carry them; this cannot. That is the
-price of the drawing being current, and it is why docs/diagrams/workflow-diagram-prompt.md remains -
-it is the layout contract this implements, and the place those judgements are described.
+WHAT A SCRIPT CANNOT DRAW, kept here because the document that used to hold it is retired and this
+is the only place it still bears on. Authored judgement does not survive automation, and two kinds
+matter:
+
+  - AN ANNOTATION THAT INTERPRETS THE GRAPH. `archive-document - the container branch` says which of
+    two same-schema edges is the container path. The API has no field for that, so no reading of the
+    rows can recover it.
+
+  - A STEP'S CANCELLED PATHS. A step has three outcomes, not two. AcmeHandler.Augment throws
+    CancelledException when the artist misses the whitelist, and because every successor here is
+    entryCondition 1 (Completed), that branch stops without taking either drawn edge. The cancel is
+    invisible in the API rows - it exists only in the handler - so a drawing sourced from the live
+    graph alone will always miss it. Read a drawing as honest about WIRING and silent about MEANING.
+
+That is the price of the drawing being current, and it is not recoverable by trying harder here: the
+information is not in the rows this reads.
 
 THE GATE REFUSES TO PUBLISH A BROKEN DRAWING. It is structural and runs on coordinates: every
 failure edge reaches the sink, nothing leaves the viewBox, no attribute is declared twice, and the
