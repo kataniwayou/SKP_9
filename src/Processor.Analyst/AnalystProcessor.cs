@@ -89,15 +89,24 @@ internal sealed class AnalystProcessor(
         {
             throw new FailedException(ex.Message);
         }
-        catch (OperationCanceledException ex)
+        // The worst failure this design can have is a monitor that reports all-clear because it
+        // broke. Cancelled is reserved for a run that reached a terminal tool and found nothing —
+        // NOT for a run that never got there — so an OperationCanceledException from a library call
+        // (an HTTP timeout is the common shape) must be mapped to FailedException deliberately rather
+        // than left to the framework's generic fault branch, which logs it as a code bug.
+        //
+        // The filter matters: `when (!ct.IsCancellationRequested)`. ProcessDispatchHandler's own
+        // catch (FailedException) sits ABOVE its filtered general catch -- so if `ct` is ever the one
+        // that got cancelled (the real consumer passes CancellationToken.None today, confirmed at
+        // GatedQueueConsumer.cs:368, but this method must not assume that forever), converting a
+        // genuine shutdown into FailedException here would acknowledge the delivery with a fabricated
+        // outcome and lose the message. Letting THAT case escape unfiltered creates no hazard this
+        // design is guarding against: an escaping OperationCanceledException parks the delivery with
+        // no StepOutcome sent at all, so nothing downstream ever reads Cancelled. The filter is what
+        // keeps this catch confined to "something else's cancellation", the case that genuinely needs
+        // a deliberate, loud disposition.
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            // The worst failure this design can have is a monitor that reports all-clear because it
-            // broke. Cancelled is reserved for a run that reached a terminal tool and found nothing —
-            // NOT for a run that never got there. Letting this propagate unchanged would either be
-            // read as a code bug by the framework's generic fault branch, or -- worse, if it ever
-            // aliased Cancelled -- as silence, which downstream reads as the all-clear. Mapping it to
-            // FailedException here makes the outcome deliberate regardless of which model call or
-            // panel read produced it.
             throw new FailedException($"the analysis was cancelled before it finished: {ex.Message}");
         }
 

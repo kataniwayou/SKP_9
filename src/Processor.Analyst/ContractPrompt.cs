@@ -20,10 +20,21 @@ namespace Processor.Analyst;
 /// <b>"Verbatim" is load-bearing here, not politeness.</b> <c>StageAssertions</c> compares a
 /// <c>ruledOut</c> entry's <c>disconfirmingCriterion</c> against the one recorded in
 /// <c>record_plan</c>, and matches hypothesis names across <c>record_plan</c>,
-/// <c>record_verification</c> and <c>ruledOut</c>. Both comparisons tolerate whitespace differences
-/// and nothing else — a paraphrase fails the check with no clue in the message that the fix is
-/// "copy the words, not the meaning." So this prompt says "verbatim" outright, twice, at the exact
-/// points a well-meaning model would otherwise reword.
+/// <c>record_verification</c> and <c>ruledOut</c> — including a re-plan, since a carried-forward
+/// hypothesis keeps its original pre-commitment mark only if <c>StageArtifacts</c> sees it restated
+/// identically. Both comparisons tolerate whitespace differences and nothing else — a paraphrase
+/// fails the check with no clue in the message that the fix is "copy the words, not the meaning." So
+/// this prompt says "verbatim" outright, at the exact points a well-meaning model would otherwise
+/// reword.
+/// </para>
+/// <para>
+/// <b>A criterion must name evidence not yet in hand.</b> <c>StageAssertions</c> indicts any
+/// hypothesis whose criterion names a panel the trace shows was already read before that hypothesis
+/// was first planned — and stage 1 makes reading panels during Research unavoidable, since
+/// <c>read_panel</c> is the only observation tool there is. Left unsaid, a model that did exactly
+/// what stage 1 asked, then named the panel that tipped it off as its own stage-3 criterion, would
+/// fail for a reason the prompt never warned it about. So stage 3 says outright that a criterion
+/// naming evidence already seen is not a pre-commitment, and to point at something still outstanding.
 /// </para>
 /// </summary>
 internal static class ContractPrompt
@@ -43,10 +54,14 @@ internal static class ContractPrompt
            the system. If the window cannot be analysed, say so here rather than guessing.
         3. Plan — for each hypothesis, state the evidence that would KILL it, before you read that
            evidence. Record with {ToolNames.RecordPlan}. A criterion stated afterwards is not a
-           criterion. Give every hypothesis a short, distinct name, and use that EXACT name, character
-           for character, everywhere you refer to it again — in verification and in a finding's
-           ruledOut list alike. A hypothesis renamed partway through reads as a different hypothesis
-           that was never planned.
+           criterion, and neither is one built on a panel you have already looked at — if you saw it
+           during Research or anywhere else, you already know what it shows, so it cannot also be the
+           test that could disprove the hypothesis it inspired. Name a panel you have NOT yet read.
+           Give every hypothesis a short, distinct name, and use that EXACT name, character for
+           character, everywhere you refer to it again — in verification, in a re-plan if you return
+           here for a second look, and in a finding's ruledOut list alike. A hypothesis renamed
+           partway through, including across a re-plan, reads as a different hypothesis that was never
+           planned.
         4. Execute — read the panels the plan named. Record with {ToolNames.RecordReadings}.
         5. Verify — judge each hypothesis against its own stated criterion, and apply the same
            scepticism from stage 2 to anything you read during stage 4. Record with
@@ -59,11 +74,13 @@ internal static class ContractPrompt
         Finish in exactly one of two ways. Call {ToolNames.SubmitFinding} when you have something that
         contributes to understanding whether something is broken or heading that way — and include the
         hypotheses you killed, with what killed them, because "I suspected this and ruled it out" is
-        often the more useful half. When you list a killed hypothesis, copy its disconfirming criterion
-        into the finding VERBATIM, exactly as you wrote it in stage 3 — do not summarize it or restate
-        it in your own words, even if the restatement means the same thing. Call
-        {ToolNames.ReportNoFinding} when the analysis ran and its result does not contribute. Reporting
-        nothing is a correct and complete outcome; inventing a trend to have something to say is not.
+        often the more useful half. List in ruledOut only the hypotheses your own stage-5 verification
+        recorded as NOT surviving — not everything you merely doubted. When you list a killed
+        hypothesis, copy its disconfirming criterion into the finding VERBATIM, exactly as you wrote
+        it in stage 3 — do not summarize it or restate it in your own words, even if the restatement
+        means the same thing. Call {ToolNames.ReportNoFinding} when the analysis ran and its result
+        does not contribute. Reporting nothing is a correct and complete outcome; inventing a trend to
+        have something to say is not.
 
         The following is the analytical judgment for this particular monitor.
 

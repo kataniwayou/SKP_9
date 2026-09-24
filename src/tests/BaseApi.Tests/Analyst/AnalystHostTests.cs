@@ -96,7 +96,12 @@ public sealed class AnalystHostTests
                 services.AddSingleton<IPanelReader, PlaceholderPanelReader>();
             });
 
-        Assert.NotNull(host.Services.GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>());
+        // IsType, not NotNull: the registration this test exists to prove is that the base type
+        // resolves to THIS AUTHOR'S implementation specifically -- AddSingleton<AnalystProcessor>()
+        // alone would leave BaseProcessor unsatisfied and every other registration here could still
+        // pass with a stub. This is the single fact standing between a healthy-looking pod and one
+        // that processes nothing.
+        Assert.IsType<AnalystProcessor>(host.Services.GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>());
     }
 
     /// <summary>Stands in for Task 13's real adapter. Never called: the graph is only asked to resolve.</summary>

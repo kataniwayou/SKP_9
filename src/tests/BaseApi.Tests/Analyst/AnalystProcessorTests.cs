@@ -94,7 +94,10 @@ public sealed class AnalystProcessorTests
         // nothing -- never for a run that was torn down or timed out before it got there. A bare
         // OperationCanceledException escaping AnalyseAsync unmapped would either read as a code bug
         // to the framework's generic fault branch, or -- if it were ever allowed to alias Cancelled
-        // -- as silence, which downstream reads as the all-clear.
+        // -- as silence, which downstream reads as the all-clear. CancellationToken.None here means
+        // ct.IsCancellationRequested is false, so the `when (!ct.IsCancellationRequested)` filter on
+        // AnalyseAsync's catch still applies -- this is "someone else's" cancellation, e.g. a
+        // library's own timeout, which is exactly what that catch exists to map deliberately.
         var torndown = new ThrowingModel(new OperationCanceledException("connection torn down"));
         var processor = Processor(torndown, new ScriptedModel());
 
@@ -105,17 +108,56 @@ public sealed class AnalystProcessorTests
     }
 
     [Fact]
+    public async Task ACancellationOfTheCallersOwnTokenEscapesRatherThanBeingReportedFailed()
+    {
+        // The OCE filter's reason to exist: ProcessDispatchHandler's catch (FailedException) sits
+        // ABOVE its own filtered general catch, so if the token AnalyseAsync was handed is ever the
+        // one that got cancelled, mapping that to FailedException here would acknowledge the
+        // delivery with a fabricated outcome and lose the message. Letting it escape instead creates
+        // no hazard: an uncaught OperationCanceledException parks the delivery with no StepOutcome
+        // sent at all, so nothing downstream ever reads this as Cancelled -- or as anything.
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var torndown = new ThrowingModel(new OperationCanceledException("shutting down"));
+        var processor = Processor(torndown, new ScriptedModel());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => processor.AnalyseAsync(Config(), cts.Token));
+    }
+
+    [Fact]
     public async Task AnAnalysisThatFindsNothingCancels()
     {
+        // C1: report_no_finding still needs its five stages recorded -- the check is presence-only,
+        // but it applies to this branch too now.
         var processor = Processor(
             new ScriptedModel(FitBit()),
-            new ScriptedModel(ModelReply.Of(
-                ScriptedModel.Call("report_no_finding", new { reason = "nothing moved" }))));
+            new ScriptedModel(
+                [
+                    .. AnalystScript.Stages(),
+                    ModelReply.Of(ScriptedModel.Call("report_no_finding", new { reason = "nothing moved" })),
+                ]));
 
         var ex = await Assert.ThrowsAsync<CancelledException>(
             () => processor.AnalyseAsync(Config(), CancellationToken.None));
 
         Assert.Contains("nothing moved", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AStagelessReportNoFindingFailsRatherThanCancels()
+    {
+        // C1: a model that records zero stages and calls report_no_finding on turn one has analysed
+        // nothing -- that must not read as the same quiet, all-clear disposition as a run that
+        // actually reached verification and found nothing worth reporting.
+        var processor = Processor(
+            new ScriptedModel(FitBit()),
+            new ScriptedModel(ModelReply.Of(
+                ScriptedModel.Call("report_no_finding", new { reason = "nothing moved" }))));
+
+        await Assert.ThrowsAsync<FailedException>(
+            () => processor.AnalyseAsync(Config(), CancellationToken.None));
     }
 
     [Fact]

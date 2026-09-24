@@ -184,6 +184,19 @@ internal sealed class InvestigationLoop(
     {
         if (terminal.ToolName == ToolNames.ReportNoFinding)
         {
+            // There is no finding to cross-reference, but there is still a claim that the analysis
+            // RAN -- and the five stage artifacts are the only evidence of that. Silence is the
+            // all-clear, so an unearned silence must fail just as loudly as an unearned finding;
+            // presence-only, not the full StageAssertions.Check suite, because there is genuinely
+            // nothing else here to check against.
+            var stageProblems = StageAssertions.CheckStagesRecorded(artifacts);
+            if (stageProblems.Count > 0)
+            {
+                throw new AnalysisImpossibleException(
+                    "report_no_finding was called without completing the investigation: "
+                    + string.Join("; ", stageProblems));
+            }
+
             return new LoopOutcome.NoFinding(terminal.Input.GetProperty("reason").GetString()!);
         }
 

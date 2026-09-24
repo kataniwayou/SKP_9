@@ -23,11 +23,15 @@ internal static class StageAssertions
         ToolNames.RecordVerification,
     ];
 
-    internal static IReadOnlyList<string> Check(
-        StageArtifacts artifacts, InvestigationTrace trace, JsonElement finding)
+    /// <summary>
+    /// Presence only: did all five stages get recorded at all. Used on BOTH terminal paths — even
+    /// <c>report_no_finding</c> has nothing else to check, but it must not be exempt from this one.
+    /// A stage-less "nothing to report" is indistinguishable, to anything downstream, from a run
+    /// that never happened; silence is the all-clear, so that gap must fail loudly instead.
+    /// </summary>
+    internal static IReadOnlyList<string> CheckStagesRecorded(StageArtifacts artifacts)
     {
         ArgumentNullException.ThrowIfNull(artifacts);
-        ArgumentNullException.ThrowIfNull(trace);
 
         var problems = new List<string>();
 
@@ -38,6 +42,17 @@ internal static class StageAssertions
                 problems.Add($"stage {stage} was never recorded");
             }
         }
+
+        return problems;
+    }
+
+    internal static IReadOnlyList<string> Check(
+        StageArtifacts artifacts, InvestigationTrace trace, JsonElement finding)
+    {
+        ArgumentNullException.ThrowIfNull(artifacts);
+        ArgumentNullException.ThrowIfNull(trace);
+
+        var problems = new List<string>(CheckStagesRecorded(artifacts));
 
         if (problems.Count > 0)
         {

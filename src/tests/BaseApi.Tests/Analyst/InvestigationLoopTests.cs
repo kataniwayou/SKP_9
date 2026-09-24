@@ -51,15 +51,34 @@ public sealed class InvestigationLoopTests
     [Fact]
     public async Task ATerminalReportNoFindingProducesNoFinding()
     {
-        // No stages here: the cross-reference assertions run only on the submit_finding path,
-        // because a run that found nothing has nothing to support.
+        // C1: report_no_finding is checked for stage PRESENCE only (not the full cross-reference
+        // suite -- there is genuinely no finding to cross-reference), so the five stages still have
+        // to be recorded before this terminates quietly.
         var model = new ScriptedModel(
-            ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" })));
+            [
+                .. AnalystScript.Stages(),
+                ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" })),
+            ]);
 
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
 
         var none = Assert.IsType<LoopOutcome.NoFinding>(outcome);
         Assert.Equal("nothing moved", none.Reason);
+    }
+
+    [Fact]
+    public async Task AStagelessReportNoFindingIsImpossibleNotQuiet()
+    {
+        // C1: the design's worst failure is a monitor that reports all-clear because it never ran.
+        // report_no_finding on turn one, with zero stages recorded, is exactly that shape -- and
+        // must fail loudly rather than cancel silently.
+        var model = new ScriptedModel(
+            ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" })));
+
+        var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
+
+        Assert.Contains("report_no_finding", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
