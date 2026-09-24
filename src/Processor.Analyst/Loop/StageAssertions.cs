@@ -55,14 +55,62 @@ internal static class StageAssertions
 
         var read = trace.PanelsRead;
         var plan = artifacts.Get(ToolNames.RecordPlan).GetProperty("hypotheses").EnumerateArray().ToArray();
-        var criteria = plan.ToDictionary(
-            h => h.GetProperty("hypothesis").GetString()!,
-            h => h.GetProperty("panelsToRead").EnumerateArray().Select(p => p.GetString()!).ToArray(),
-            StringComparer.Ordinal);
+
+        // The plan-vs-readings ordinal check above compares two self-reports: it passes for a model
+        // that reads every panel first and ONLY THEN calls record_plan, because record_plan's ordinal
+        // still precedes record_readings'. That is the exact rationalisation the plan stage exists to
+        // prevent -- writing a "disconfirming" criterion for an answer already in hand -- and the only
+        // thing that can catch it is the trace itself, which is ground truth for when each panel was
+        // actually first read. A panel first read at or before record_plan's own mark means its
+        // answer was already known when the criterion naming it was written.
+        var planMark = artifacts.PanelsReadMarkOf(ToolNames.RecordPlan);
+        foreach (var hypothesis in plan)
+        {
+            var name = hypothesis.GetProperty("hypothesis").GetString()!;
+
+            foreach (var panel in hypothesis.GetProperty("panelsToRead").EnumerateArray().Select(p => p.GetString()!))
+            {
+                var firstRead = trace.Entries
+                    .Where(e => e.PanelId == panel)
+                    .Select(e => e.Ordinal)
+                    .DefaultIfEmpty(int.MaxValue)
+                    .Min();
+
+                if (firstRead <= planMark)
+                {
+                    problems.Add(
+                        $"hypothesis '{name}' names {panel} as its disconfirming criterion, but {panel} "
+                        + "was already read before record_plan was recorded -- the criterion was "
+                        + "written after the answer was already known");
+                }
+            }
+        }
+
+        // A dictionary built with ToDictionary throws on a duplicate key, and the record_plan schema
+        // has no way to express hypothesis-name uniqueness -- so a schema-valid reply can carry the
+        // same hypothesis twice. That is a defective record, which is what a problem is for, not a
+        // reason for Check itself to throw. TryAdd keeps the first declaration and flags the rest.
+        var criteria = new Dictionary<string, (string[] PanelsToRead, string DisconfirmingCriterion)>(StringComparer.Ordinal);
+        foreach (var hypothesis in plan)
+        {
+            var name = hypothesis.GetProperty("hypothesis").GetString()!;
+            var panelsToRead = hypothesis.GetProperty("panelsToRead").EnumerateArray().Select(p => p.GetString()!).ToArray();
+            var criterion = hypothesis.GetProperty("disconfirmingCriterion").GetString()!;
+
+            if (!criteria.TryAdd(name, (panelsToRead, criterion)))
+            {
+                problems.Add($"record_plan names the hypothesis '{name}' more than once");
+            }
+        }
+
+        var verifiedHypotheses = new HashSet<string>(StringComparer.Ordinal);
+        var survivedByHypothesis = new Dictionary<string, bool>(StringComparer.Ordinal);
 
         foreach (var verdict in artifacts.Get(ToolNames.RecordVerification).GetProperty("verdicts").EnumerateArray())
         {
             var hypothesis = verdict.GetProperty("hypothesis").GetString()!;
+            verifiedHypotheses.Add(hypothesis);
+            survivedByHypothesis.TryAdd(hypothesis, verdict.GetProperty("survived").GetBoolean());
 
             if (!criteria.TryGetValue(hypothesis, out var needed))
             {
@@ -70,7 +118,7 @@ internal static class StageAssertions
                 continue;
             }
 
-            foreach (var panel in needed.Where(p => !read.Contains(p)))
+            foreach (var panel in needed.PanelsToRead.Where(p => !read.Contains(p)))
             {
                 problems.Add(
                     $"hypothesis '{hypothesis}' was judged without reading {panel}, which its own "
@@ -81,6 +129,43 @@ internal static class StageAssertions
                          .Select(p => p.GetString()!).Where(p => !read.Contains(p)))
             {
                 problems.Add($"verification for '{hypothesis}' cites {cited}, which was never read");
+            }
+        }
+
+        // The reverse direction: a hypothesis the plan proposed but verification never judges could
+        // otherwise be claimed as ruled out below with nothing behind that claim at all.
+        foreach (var hypothesis in criteria.Keys)
+        {
+            if (!verifiedHypotheses.Contains(hypothesis))
+            {
+                problems.Add($"record_plan proposes '{hypothesis}' but record_verification never judges it");
+            }
+        }
+
+        // record_plan and record_verification are checked above, but neither is ever exported --
+        // finding.ruledOut is the only pre-commitment artifact that reaches the operator, and until
+        // now it was never cross-checked against the record that is supposed to back it.
+        foreach (var ruledOut in finding.GetProperty("ruledOut").EnumerateArray())
+        {
+            var hypothesis = ruledOut.GetProperty("hypothesis").GetString()!;
+            var criterion = ruledOut.GetProperty("disconfirmingCriterion").GetString()!;
+
+            if (!criteria.TryGetValue(hypothesis, out var declared))
+            {
+                problems.Add($"the finding rules out '{hypothesis}', which record_plan never proposed");
+            }
+            else if (!string.Equals(declared.DisconfirmingCriterion, criterion, StringComparison.Ordinal))
+            {
+                problems.Add(
+                    $"the finding's ruledOut criterion for '{hypothesis}' does not match the one "
+                    + "record_plan stated");
+            }
+
+            if (!survivedByHypothesis.TryGetValue(hypothesis, out var survived) || survived)
+            {
+                problems.Add(
+                    $"the finding rules out '{hypothesis}', but record_verification has no "
+                    + "surviving=false verdict for it");
             }
         }
 

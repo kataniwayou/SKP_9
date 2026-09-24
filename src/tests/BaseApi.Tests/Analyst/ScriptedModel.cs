@@ -19,7 +19,11 @@ internal sealed class ScriptedModel(params ModelReply[] script) : IAnalystModel
     public Task<ModelReply> SendAsync(
         string system, IReadOnlyList<ModelTurn> transcript, IReadOnlyList<ToolSpec> tools, CancellationToken ct)
     {
-        Received.Add((system, transcript, tools));
+        // Snapshot, not a reference: the loop mutates the same List<ModelTurn> across every call, so
+        // storing the reference would make every entry in Received alias the final transcript once
+        // the run completes, silently defeating any assertion on Received[i] that expects a mid-run
+        // snapshot (Tasks 10 and 12 are exactly the callers who will want that).
+        Received.Add((system, [.. transcript], tools));
 
         if (_remaining.Count == 0)
         {

@@ -151,9 +151,10 @@ internal sealed class InvestigationLoop(
                 return new ModelToolResult(call.CallId, JsonSerializer.Serialize(reading), IsError: false);
 
             default:
-                // The five record_* tools. Keeping the artifact is what makes the cross-reference
+                // The five record_* tools. Keeping the artifact -- and how many panels the trace had
+                // already recorded a read for at this moment -- is what makes the cross-reference
                 // checks at termination possible; acknowledging it is what keeps the model moving.
-                artifacts.Record(call.ToolName, call.Input);
+                artifacts.Record(call.ToolName, call.Input, trace.Entries.Count);
                 return new ModelToolResult(call.CallId, "recorded", IsError: false);
         }
     }
