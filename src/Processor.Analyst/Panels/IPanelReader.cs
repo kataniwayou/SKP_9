@@ -16,6 +16,16 @@ internal interface IPanelReader
     /// <summary>What this panel is, for the system prompt.</summary>
     PanelDescriptor Describe(string panelId);
 
-    /// <summary>Reads one panel over one window. Throws <see cref="PanelUnavailableException"/> if the source cannot be reached.</summary>
-    Task<PanelReading> ReadAsync(string panelId, TimeRange range, CancellationToken ct);
+    /// <summary>
+    /// Reads one panel over one window, scoped to the workflow under investigation. Throws
+    /// <see cref="PanelUnavailableException"/> if the source cannot be reached.
+    /// <para>
+    /// <b><paramref name="targetWorkflowId"/> only narrows a business-layer (Elasticsearch) panel.</b>
+    /// An ops-layer (Prometheus) panel carries no workflow dimension at all -- <c>pipeline_*</c>
+    /// series are labelled by queue, destination and replica, never by workflow, and a single
+    /// processor replica ordinarily serves several workflows -- so a Prometheus panel ignores this id
+    /// and reads host-level telemetry for the whole replica.
+    /// </para>
+    /// </summary>
+    Task<PanelReading> ReadAsync(string panelId, Guid targetWorkflowId, TimeRange range, CancellationToken ct);
 }

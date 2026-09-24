@@ -138,7 +138,7 @@ internal sealed class InvestigationLoop(
                 PanelReading reading;
                 try
                 {
-                    reading = await panels.ReadAsync(panelId, window, ct).ConfigureAwait(false);
+                    reading = await panels.ReadAsync(panelId, config.TargetWorkflowId, window, ct).ConfigureAwait(false);
                 }
                 catch (PanelUnavailableException ex)
                 {

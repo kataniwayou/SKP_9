@@ -24,9 +24,17 @@ namespace Processor.Analyst;
 /// </para>
 /// </summary>
 /// <param name="TargetWorkflowId">
-/// The workflow to investigate. It scopes every query the agent issues, which is also how the agent
-/// stays out of its own mirror: its own executions land under the monitor workflow's id, so a query
-/// scoped to this one cannot see them. There is no exclusion clause to forget.
+/// The workflow to investigate. It scopes every business-layer (Elasticsearch) query the agent
+/// issues, which is also how the agent stays out of its own mirror: it runs as an ordinary
+/// processor and its own step records would otherwise satisfy the same "an outcome record whose
+/// emitter isn't the orchestrator" filter, but they carry the MONITOR workflow's id, not this one, so
+/// a query scoped to this id cannot see them. There is no exclusion clause to forget.
+/// <para>
+/// <b>Ops-layer (Prometheus) panels are not scoped by this id, and cannot be.</b> <c>pipeline_*</c>
+/// series carry no workflow label at all, and one processor replica ordinarily serves several
+/// workflows at once — an ops panel reads host-level telemetry for the replica, not for this
+/// workflow specifically. See each ops panel's description in <c>PanelRegistry</c>.
+/// </para>
 /// </param>
 /// <param name="WindowMinutes">
 /// How far back to look, matching what the dashboards show. Months of history is explicitly not the

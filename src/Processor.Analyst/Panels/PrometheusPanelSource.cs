@@ -68,9 +68,21 @@ internal sealed class PrometheusPanelSource
         }
     }
 
-    internal async Task<PanelReading> ReadAsync(PanelDefinition definition, TimeRange range, CancellationToken ct)
+    /// <param name="definition">The panel to read.</param>
+    /// <param name="targetWorkflowId">
+    /// Unused. <c>pipeline_*</c> series carry no workflow label and a replica ordinarily serves
+    /// several workflows at once, so no Prometheus query in <see cref="PanelRegistry"/> can be scoped
+    /// by it -- see <see cref="IPanelReader.ReadAsync"/>'s own doc comment. Accepted only so this
+    /// source's signature matches <see cref="ElasticPanelSource.ReadAsync"/>, which
+    /// <see cref="LivePanelReader"/> dispatches to uniformly.
+    /// </param>
+    /// <param name="range">The window to read.</param>
+    /// <param name="ct">Cancellation.</param>
+    internal async Task<PanelReading> ReadAsync(
+        PanelDefinition definition, Guid targetWorkflowId, TimeRange range, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
+        _ = targetWorkflowId;
 
         var step = ComputeStep(range);
         var url =
@@ -96,6 +108,15 @@ internal sealed class PrometheusPanelSource
             // The request's own timeout, not the caller's cancellation -- that case propagates
             // untouched so the loop's own cancellation handling still sees it as such.
             throw new PanelUnavailableException(definition.PanelId, $"prometheus timed out: {ex.Message}");
+        }
+        catch (InvalidOperationException ex)
+        {
+            // HttpClient throws this -- not HttpRequestException -- when it is handed a relative URI
+            // and has no BaseAddress: a null or blank Analyst:Panels:PrometheusBaseUrl. That is
+            // exactly as much "the source could not be reached" as a refused connection, and must
+            // land in the same domain channel rather than escaping the loop as a raw framework
+            // exception.
+            throw new PanelUnavailableException(definition.PanelId, $"prometheus is not configured: {ex.Message}");
         }
 
         using (response)
@@ -183,20 +204,37 @@ internal sealed class PrometheusPanelSource
                 new PanelTrust(SeriesPresent: false, WindowFullyCovered: false, NoDataDistinguishable: false));
         }
 
-        var earliestSeconds = series.SelectMany(s => s.Points).Min(p => p.TimestampSeconds);
-        var windowFullyCovered = earliestSeconds <= range.From.ToUnixTimeSeconds() + (long)Math.Ceiling(step.TotalSeconds);
+        var coverageThreshold = range.From.ToUnixTimeSeconds() + (long)Math.Ceiling(step.TotalSeconds);
 
-        var valueJson = JsonSerializer.Serialize(series.Select(s => new
+        // Coverage is checked PER SERIES and ANDed, not from the single earliest point across every
+        // series combined. The bug that shape had: four replicas covering the window from the start
+        // made the fifth's late (or entirely absent-of-real-points) series invisible -- exactly the
+        // orphaned-instrument case SeriesPresent/WindowFullyCovered exist to catch. A series with zero
+        // real points fails this by construction (nothing to cover the window with).
+        var windowFullyCovered = series.All(s =>
+            s.Points.Count > 0 && s.Points.Min(p => p.TimestampSeconds) <= coverageThreshold);
+
+        // seriesCount is surfaced alongside the readings so the model has something to compare
+        // against its own expectations of how many replicas should be reporting -- this reader has no
+        // independent source for "how many replicas exist" and cannot detect one that is missing from
+        // the response entirely, only one that reported but did not cover the window.
+        var seriesCount = series.Count(s => s.Points.Count > 0);
+
+        var valueJson = JsonSerializer.Serialize(new
         {
-            labels = s.Labels.ValueKind == JsonValueKind.Object
-                ? s.Labels.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString())
-                : new Dictionary<string, string?>(),
-            points = s.Points.Select(p => new
+            seriesCount,
+            series = series.Select(s => new
             {
-                timestamp = DateTimeOffset.FromUnixTimeSeconds(p.TimestampSeconds).ToString("O"),
-                value = p.Value,
+                labels = s.Labels.ValueKind == JsonValueKind.Object
+                    ? s.Labels.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString())
+                    : new Dictionary<string, string?>(),
+                points = s.Points.Select(p => new
+                {
+                    timestamp = DateTimeOffset.FromUnixTimeSeconds(p.TimestampSeconds).ToString("O"),
+                    value = p.Value,
+                }),
             }),
-        }));
+        });
 
         return new PanelReading(
             definition.PanelId, definition.Layer, valueJson, SampleCount: totalPoints,

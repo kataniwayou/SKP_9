@@ -17,7 +17,22 @@ internal sealed record PanelDescriptor(string PanelId, string Layer, string Desc
 /// </summary>
 /// <param name="SeriesPresent">The series the panel names actually existed in the response.</param>
 /// <param name="WindowFullyCovered">Data spanned the whole requested range, not a truncated part of it.</param>
-/// <param name="NoDataDistinguishable">Whether "nothing happened" could be told apart from "nothing reported".</param>
+/// <param name="NoDataDistinguishable">
+/// Whether "nothing happened" could be told apart from "nothing reported".
+/// <para>
+/// <b>On a Prometheus reading this is NOT an independent signal.</b> A counter or histogram that was
+/// scraped but never incremented, and the identical query over a label combination that was never
+/// observed at all (a dead replica; a metrics regression), both come back as an empty
+/// <c>query_range</c> result on this system — Prometheus client libraries only materialise a series
+/// once an observation with that exact label set occurs, and nothing here zero-seeds one. So on a
+/// Prometheus-backed <see cref="PanelReading"/> this flag tracks <see cref="SeriesPresent"/> exactly
+/// and adds no information beyond it: a present series is trustworthy telemetry (including a
+/// legitimate zero), an absent one is never distinguishable from a blind spot, no matter which of the
+/// two it actually is. Only Elasticsearch can independently draw this line — a clean zero-count
+/// aggregation over documents that undeniably exist in the same window is a shape Prometheus cannot
+/// produce. Do not let a quiet Prometheus panel alone be read as "confirmed nothing happened."
+/// </para>
+/// </param>
 internal sealed record PanelTrust(bool SeriesPresent, bool WindowFullyCovered, bool NoDataDistinguishable);
 
 /// <summary>One panel consultation's result.</summary>

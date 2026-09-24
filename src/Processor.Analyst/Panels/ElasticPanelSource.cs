@@ -9,10 +9,11 @@ namespace Processor.Analyst.Panels;
 /// response into a <see cref="PanelReading"/> with its trust flags computed.
 /// <para>
 /// <b>The trust decision this class makes:</b> every panel query here is written against the SAME
-/// broad scope -- every outcome record (<c>attributes.Result</c> present, emitter not the
-/// orchestrator) in the window -- and only narrows to the panel's specific interest inside an
-/// aggregation. That is what lets <c>hits.total.value</c> answer "did anything get reported at all"
-/// independently of whether the panel's own slice of it happens to be zero:
+/// broad scope -- every outcome record for the target workflow (<c>attributes.Result</c> present,
+/// <c>attributes.WorkflowId</c> matching, emitter not the orchestrator) in the window -- and only
+/// narrows to the panel's specific interest inside an aggregation. That is what lets
+/// <c>hits.total.value</c> answer "did anything get reported at all" independently of whether the
+/// panel's own slice of it happens to be zero:
 /// </para>
 /// <list type="bullet">
 /// <item><description>
@@ -60,13 +61,15 @@ internal sealed class ElasticPanelSource
         }
     }
 
-    internal async Task<PanelReading> ReadAsync(PanelDefinition definition, TimeRange range, CancellationToken ct)
+    internal async Task<PanelReading> ReadAsync(
+        PanelDefinition definition, Guid targetWorkflowId, TimeRange range, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
 
         var body = definition.Query
             .Replace("{{FROM}}", range.From.UtcDateTime.ToString("o"), StringComparison.Ordinal)
-            .Replace("{{TO}}", range.To.UtcDateTime.ToString("o"), StringComparison.Ordinal);
+            .Replace("{{TO}}", range.To.UtcDateTime.ToString("o"), StringComparison.Ordinal)
+            .Replace("{{WORKFLOW}}", targetWorkflowId.ToString("D"), StringComparison.Ordinal);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/{PanelRegistry.ElasticIndex}/_search")
         {
@@ -89,6 +92,14 @@ internal sealed class ElasticPanelSource
             // The request's own timeout, not the caller's cancellation -- that case propagates
             // untouched so the loop's own cancellation handling still sees it as such.
             throw new PanelUnavailableException(definition.PanelId, $"elasticsearch timed out: {ex.Message}");
+        }
+        catch (InvalidOperationException ex)
+        {
+            // HttpClient throws this -- not HttpRequestException -- when it is handed a relative URI
+            // and has no BaseAddress: a null or blank Analyst:Panels:ElasticBaseUrl. That is exactly
+            // as much "the source could not be reached" as a refused connection, and must land in the
+            // same domain channel rather than escaping the loop as a raw framework exception.
+            throw new PanelUnavailableException(definition.PanelId, $"elasticsearch is not configured: {ex.Message}");
         }
 
         using (response)
@@ -233,8 +244,11 @@ internal sealed class ElasticPanelSource
             samples,
         });
 
+        // SampleCount is the total outcome-record count, matching BuildStepOutcomes -- not
+        // failedCount. A healthy window with zero failures genuinely returned "total" records; using
+        // failedCount here would record it in the trace as a panel that returned nothing.
         return new PanelReading(
-            definition.PanelId, definition.Layer, valueJson, SampleCount: checked((int)failedCount),
+            definition.PanelId, definition.Layer, valueJson, SampleCount: checked((int)total),
             new PanelTrust(SeriesPresent: true, windowFullyCovered, NoDataDistinguishable: true));
     }
 

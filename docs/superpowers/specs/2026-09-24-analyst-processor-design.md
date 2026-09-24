@@ -71,9 +71,18 @@ other decision in this document is downstream of refusing it.
 ### 2.2 The watched workflow is untouched
 
 No step is added to it, no schema changes, no coupling. The Analyst's own executions land in lineage
-under the Analyst workflow's id, so **every query it issues is scoped by the target `workflowId` from
-its payload** — it stays out of its own mirror by construction, not by an exclusion clause someone
-must remember to keep writing.
+under the Analyst workflow's id, so **every business-layer (Elasticsearch) query it issues is scoped
+by the target `workflowId` from its payload** — it stays out of its own mirror by construction, not
+by an exclusion clause someone must remember to keep writing.
+
+**Amended 2026-09-24 (Task 14 review, C3): the ops layer is not, and cannot be, scoped by `workflowId`
+the same way.** `pipeline_*` metrics carry no workflow label at all — they are labelled by queue,
+destination and replica (`service_instance_id`), never by a workflow id — and a single processor
+replica ordinarily serves several workflows over its lifetime. A Prometheus panel therefore reads
+host-level telemetry for the replica, not evidence scoped to the monitored workflow specifically; a
+queue-wait spike it shows may belong to a different workflow entirely running on the same replica.
+Every ops panel's own description says so explicitly, so the model is told this in the one channel
+that reaches it (the panel descriptions), not only here.
 
 ### 2.3 The export leg is not end-to-end testable in dev
 

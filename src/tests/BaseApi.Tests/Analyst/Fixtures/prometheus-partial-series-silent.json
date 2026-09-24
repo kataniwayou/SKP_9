@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": { "service_instance_id": "analyst-abc123" },
+        "values": [
+          [1790208000, "0.013"],
+          [1790208060, "0.014"]
+        ]
+      },
+      {
+        "metric": { "service_instance_id": "analyst-def456" },
+        "values": [
+          [1790208000, "NaN"],
+          [1790208060, "NaN"]
+        ]
+      }
+    ]
+  }
+}

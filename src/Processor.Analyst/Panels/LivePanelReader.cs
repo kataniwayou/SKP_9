@@ -16,14 +16,14 @@ internal sealed class LivePanelReader(ElasticPanelSource elastic, PrometheusPane
         return new PanelDescriptor(definition.PanelId, definition.Layer, definition.Description);
     }
 
-    public Task<PanelReading> ReadAsync(string panelId, TimeRange range, CancellationToken ct)
+    public Task<PanelReading> ReadAsync(string panelId, Guid targetWorkflowId, TimeRange range, CancellationToken ct)
     {
         var definition = Find(panelId);
 
         return definition.Kind switch
         {
-            PanelKind.Elastic => elastic.ReadAsync(definition, range, ct),
-            PanelKind.Prometheus => prometheus.ReadAsync(definition, range, ct),
+            PanelKind.Elastic => elastic.ReadAsync(definition, targetWorkflowId, range, ct),
+            PanelKind.Prometheus => prometheus.ReadAsync(definition, targetWorkflowId, range, ct),
             _ => throw new PanelUnavailableException(panelId, $"panel kind {definition.Kind} has no source"),
         };
     }

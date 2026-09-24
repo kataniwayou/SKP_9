@@ -45,8 +45,13 @@ internal sealed class FixturePanelReader : IPanelReader
             ? d
             : new PanelDescriptor(panelId, "unknown", "not configured in this fixture");
 
-    public Task<PanelReading> ReadAsync(string panelId, TimeRange range, CancellationToken ct)
+    public Task<PanelReading> ReadAsync(string panelId, Guid targetWorkflowId, TimeRange range, CancellationToken ct)
     {
+        // Fixture readings are keyed on panelId alone -- a fixture-driven test has no live workflow
+        // to scope against, so the id is accepted (matching the real IPanelReader signature) and
+        // ignored, same as PrometheusPanelSource ignores it for its own, real reason.
+        _ = targetWorkflowId;
+
         if (_failures.TryGetValue(panelId, out var why))
         {
             throw new PanelUnavailableException(panelId, why);

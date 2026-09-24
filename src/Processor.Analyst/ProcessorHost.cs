@@ -138,8 +138,26 @@ public static class ProcessorHost
         builder.Services.AddSingleton<Model.IAnalystModel, Model.AnthropicAnalystModel>();
 
         builder.Services.Configure<Panels.PanelSourceOptions>(builder.Configuration.GetSection("Analyst:Panels"));
-        builder.Services.AddHttpClient<Panels.ElasticPanelSource>();
-        builder.Services.AddHttpClient<Panels.PrometheusPanelSource>();
+
+        // LivePanelReader below is a singleton, and it captures ElasticPanelSource/PrometheusPanelSource
+        // for the process lifetime through constructor injection -- a captive dependency that defeats
+        // IHttpClientFactory's own handler rotation (the transient typed client is only ever resolved
+        // once, at LivePanelReader's own construction). PooledConnectionLifetime is the documented fix
+        // for exactly this shape: it recycles the underlying sockets periodically regardless of how
+        // long the HttpClient wrapper itself lives, so a Service IP change (e.g. Elasticsearch's pod
+        // moving behind the same cluster DNS name) is still picked up without needing a new handler.
+        // Timeout is set explicitly because the .NET default (100s) would otherwise let a hung source
+        // block a panel read for far longer than any sane WallClockSeconds budget allows.
+        builder.Services.AddHttpClient<Panels.ElasticPanelSource>(client => client.Timeout = TimeSpan.FromSeconds(20))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            });
+        builder.Services.AddHttpClient<Panels.PrometheusPanelSource>(client => client.Timeout = TimeSpan.FromSeconds(20))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            });
         builder.Services.AddSingleton<Panels.IPanelReader, Panels.LivePanelReader>();
 
         // The concrete processor the pre/post handlers resolve as BaseProcessor. AddBaseProcessor
