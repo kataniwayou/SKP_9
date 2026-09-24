@@ -37,12 +37,11 @@ internal sealed class InvestigationLoop(
         while (budget.BeginTurn())
         {
             var reply = await model.SendAsync(system, transcript, tools, ct).ConfigureAwait(false);
-            budget.RecordUsage(reply.InputTokens, reply.OutputTokens);
 
-            if (budget.Exhausted)
-            {
-                throw new AnalysisImpossibleException(budget.Why!);
-            }
+            // Usage is recorded before anything else, but the budget is not enforced yet: a reply
+            // that both answers and crosses a ceiling still carries an answer that was already paid
+            // for, and the budget must not throw it away underneath a terminal call (I1).
+            budget.RecordUsage(reply.InputTokens, reply.OutputTokens);
 
             if (reply.ToolCalls.Count == 0)
             {
@@ -54,14 +53,35 @@ internal sealed class InvestigationLoop(
 
             transcript.Add(new ModelTurn(ModelRole.Assistant, reply.Text, reply.ToolCalls, []));
 
-            // A terminal call ends the run even if it arrived alongside others: there is nothing
-            // after the end.
-            var terminal = reply.ToolCalls.FirstOrDefault(c => ToolNames.Terminal.Contains(c.ToolName));
-            if (terminal is not null)
+            var terminalCalls = reply.ToolCalls.Where(c => ToolNames.Terminal.Contains(c.ToolName)).ToArray();
+
+            if (terminalCalls.Length > 1)
             {
-                return Terminate(terminal, trace, window, promptHash);
+                // A self-contradicting reply -- e.g. both submit_finding and report_no_finding -- is
+                // a broken run, not a quiet one. Resolving it by list position would let the same two
+                // calls export a finding in one order and report silence in the other.
+                throw new AnalysisImpossibleException(
+                    "the model called more than one terminal tool in the same reply: "
+                    + string.Join(", ", terminalCalls.Select(c => c.ToolName)));
             }
 
+            if (terminalCalls.Length == 1 && Validates(terminalCalls[0], tools))
+            {
+                // The only path whose payload becomes a persisted, frozen-schema document (or is
+                // read as the reason for silence) gets the same client-side validation as every
+                // other call before it is trusted. A terminal call ends the run even if it arrived
+                // alongside others: there is nothing after the end, so nothing else in this reply is
+                // executed and no non-terminal sibling leaves a trace entry behind (I3).
+                return Terminate(terminalCalls[0], trace, window, promptHash);
+            }
+
+            // Either there was no terminal call, or the one terminal call failed its own schema. A
+            // schema-invalid terminal call is handled by the SAME client-side validation as any other
+            // call -- inside ExecuteAsync -- and comes back as an error tool_result the model can
+            // correct, never a crash and never an unchecked document (C2). Every call in this reply
+            // still needs a matching result before the transcript goes back to the model, so siblings
+            // run normally.
+            //
             // EVERY result for this reply goes back in ONE user turn. Splitting them across several
             // silently trains the model to stop making parallel calls.
             var results = new List<ModelToolResult>(reply.ToolCalls.Count);
@@ -71,6 +91,14 @@ internal sealed class InvestigationLoop(
             }
 
             transcript.Add(new ModelTurn(ModelRole.User, null, [], results));
+
+            // Only now, with a terminal call either absent or already handled as an error the model
+            // can act on, does the budget get to end the run (I1). An invalid terminal call still
+            // falls through to this check rather than looping forever against an exhausted budget.
+            if (budget.Exhausted)
+            {
+                throw new AnalysisImpossibleException(budget.Why!);
+            }
         }
 
         throw new AnalysisImpossibleException(budget.Why!);
@@ -114,7 +142,7 @@ internal sealed class InvestigationLoop(
                 {
                     // The evidence source could not be reached. That is not a poor reading the agent
                     // can reason around -- it means the analysis cannot be completed.
-                    throw new AnalysisImpossibleException(ex.Message);
+                    throw new AnalysisImpossibleException(ex.Message, ex);
                 }
 
                 trace.Record(panelId, reading.SampleCount > 0);
@@ -170,8 +198,10 @@ internal sealed class InvestigationLoop(
                 r.GetProperty("hypothesis").GetString()!,
                 r.GetProperty("disconfirmingCriterion").GetString()!,
                 r.GetProperty("whatWasSeen").GetString()!))],
-            // The loop's own record, never the model's claim about it.
-            Trace: trace.Entries,
+            // The loop's own record, never the model's claim about it. Copied rather than passed by
+            // reference so the finding does not alias live loop state that a caller could still be
+            // writing to.
+            Trace: [.. trace.Entries],
             PromptHash: promptHash);
 
         return new LoopOutcome.Finding(finding);

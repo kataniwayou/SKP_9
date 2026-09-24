@@ -219,6 +219,126 @@ public sealed class InvestigationLoopTests
         var results = model.Received[1].Transcript.SelectMany(t => t.ToolResults).ToArray();
         Assert.True(results.Single().IsError);
     }
+
+    [Fact]
+    public async Task TwoTerminalCallsInOneReplyIsImpossibleNotResolvedByPosition()
+    {
+        // C1: report_no_finding then submit_finding in the same reply is self-contradicting. Picking
+        // the first by list position would make the same two calls export a finding in one order and
+        // report silence -- the all-clear -- in the other. Neither is honest; only a failure is.
+        var model = new ScriptedModel(
+            new ModelReply(
+                [
+                    ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" }),
+                    SubmitFinding(),
+                ],
+                Text: null, InputTokens: 0, OutputTokens: 0));
+
+        var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
+
+        Assert.Contains(ToolNamesForTest.ReportNoFinding, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(ToolNamesForTest.SubmitFinding, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnInvalidSubmitFindingIsAnErrorResultNotAnExportedDocument()
+    {
+        // C2: "Quiet" is not in submit_finding's verdict enum, and AnalystFinding's own contract says
+        // a verdict must never reach a document unvalidated. Terminate is reached only after the same
+        // client-side validation every other call gets, so this comes back as an error tool_result
+        // the model can correct, not a persisted document and not a raw exception.
+        var invalidFinding = ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
+        {
+            verdict = "Quiet",
+            narrative = "nothing much",
+            samplesExamined = 10,
+            evidence = new[] { new { panelId = "arrival-mean", layer = "ops", label = "mean", value = "1ms" } },
+            ruledOut = Array.Empty<object>(),
+        });
+
+        var model = new ScriptedModel(
+            ModelReply.Of(invalidFinding),
+            ModelReply.Of(SubmitFinding()));
+
+        var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
+
+        var finding = Assert.IsType<LoopOutcome.Finding>(outcome);
+        Assert.Equal("Drifting", finding.Value.Verdict);
+        var results = model.Received[1].Transcript.SelectMany(t => t.ToolResults).ToArray();
+        Assert.True(results.Single().IsError);
+    }
+
+    [Fact]
+    public async Task AReportNoFindingMissingItsReasonIsAnErrorResultNotACancel()
+    {
+        // C2, the other terminal tool: a missing required property must not throw a raw
+        // KeyNotFoundException out of RunAsync on a path the brief calls an expected event, and must
+        // not silently cancel with no reason recorded anywhere.
+        var model = new ScriptedModel(
+            ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { })),
+            ModelReply.Of(SubmitFinding()));
+
+        var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
+
+        Assert.IsType<LoopOutcome.Finding>(outcome);
+        var results = model.Received[1].Transcript.SelectMany(t => t.ToolResults).ToArray();
+        Assert.True(results.Single().IsError);
+    }
+
+    [Fact]
+    public async Task ATerminalCallThatCrossesTheTokenCeilingInTheSameReplyStillProducesAFinding()
+    {
+        // I1: usage for this reply is recorded before the terminal call is handled. The finding
+        // exists and has already been paid for, so the budget must not discard it just because the
+        // same reply also crossed the ceiling -- exhaustion means "no answer", and here there is one.
+        var model = new ScriptedModel(
+            new ModelReply([SubmitFinding()], Text: null, InputTokens: 60_000, OutputTokens: 60_000));
+
+        var outcome = await Loop(model).RunAsync(
+            "sys", Config(maxTokens: 100_000), Window, Hash, CancellationToken.None);
+
+        Assert.IsType<LoopOutcome.Finding>(outcome);
+    }
+
+    [Fact]
+    public async Task DataReturnedIsFalseWhenThePanelAnsweredWithNoSamples()
+    {
+        // I2: DataReturned is the field that distinguishes "looked at the ops layer and saw nothing"
+        // from "never looked" -- the trace's entire reason for existing.
+        var panels = Panels().MissingSeries("arrival-mean");
+        var model = new ScriptedModel(
+            ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "arrival-mean" })),
+            ModelReply.Of(SubmitFinding()));
+
+        var outcome = await Loop(model, panels).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
+
+        var finding = Assert.IsType<LoopOutcome.Finding>(outcome);
+        var entry = Assert.Single(finding.Value.Trace);
+        Assert.Equal("arrival-mean", entry.PanelId);
+        Assert.False(entry.DataReturned);
+    }
+
+    [Fact]
+    public async Task ANonTerminalCallAlongsideAValidTerminalCallInTheSameReplyLeavesNoTraceEntry()
+    {
+        // I3: the run ended on submit_finding in this same reply, so the read_panel call that arrived
+        // beside it was never executed. Pinning this down so a future refactor that executes tools
+        // before checking for a terminal cannot quietly add a phantom trace entry for a read that
+        // never happened.
+        var model = new ScriptedModel(
+            new ModelReply(
+                [
+                    ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "arrival-mean" }),
+                    SubmitFinding(),
+                ],
+                Text: null, InputTokens: 0, OutputTokens: 0));
+
+        var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
+
+        var finding = Assert.IsType<LoopOutcome.Finding>(outcome);
+        Assert.Empty(finding.Value.Trace);
+    }
 }
 
 /// <summary>Mirrors ToolNames, which is internal to the processor and reached through InternalsVisibleTo.</summary>

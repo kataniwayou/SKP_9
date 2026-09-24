@@ -10,4 +10,5 @@ namespace Processor.Analyst.Loop;
 /// be silent.
 /// </para>
 /// </summary>
-internal sealed class AnalysisImpossibleException(string why) : Exception(why);
+internal sealed class AnalysisImpossibleException(string why, Exception? innerException = null)
+    : Exception(why, innerException);
