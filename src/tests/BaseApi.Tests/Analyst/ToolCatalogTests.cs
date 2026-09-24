@@ -93,4 +93,64 @@ public sealed class ToolCatalogTests
         // is a claim about what happened; a loop-assembled one is what happened.
         Assert.DoesNotContain("trace", required);
     }
+
+    [Fact]
+    public void EveryToolSchemaIsRecursivelySatisfiable()
+    {
+        // EveryToolSchemaForbidsAdditionalProperties only inspects each tool's root -- not the item
+        // schemas nested under record_plan.hypotheses, record_readings.readings,
+        // record_verification.verdicts, submit_finding.evidence or submit_finding.ruledOut. The
+        // trace defect this catalog once shipped with (a required name absent from properties, under
+        // additionalProperties:false) is exactly the shape a nested schema could hide from a
+        // root-only check. This walks every level, of every tool, recursively.
+        //
+        // Read from each built ToolSpec's InputSchemaJson, not from ToolCatalog.SchemaFor: read_panel
+        // has no SchemaFor case, because its schema is built from the configured panel set inside
+        // Build() rather than being static -- the built spec is what is actually sent to the model.
+        foreach (var spec in ToolCatalog.Build(Panels()))
+        {
+            var schema = JsonDocument.Parse(spec.InputSchemaJson).RootElement;
+            AssertSchemaIsSatisfiable(spec.Name, "$", schema);
+        }
+    }
+
+    private static void AssertSchemaIsSatisfiable(string toolName, string path, JsonElement schema)
+    {
+        if (schema.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        if (schema.TryGetProperty("properties", out var properties))
+        {
+            Assert.True(
+                schema.TryGetProperty("additionalProperties", out var additionalProperties)
+                    && additionalProperties.ValueKind == JsonValueKind.False,
+                $"{toolName} at {path}: additionalProperties must be present and false");
+
+            var propertyNames = properties.EnumerateObject().Select(p => p.Name).ToHashSet();
+
+            if (schema.TryGetProperty("required", out var required))
+            {
+                foreach (var entry in required.EnumerateArray())
+                {
+                    var requiredName = entry.GetString();
+                    Assert.True(
+                        requiredName is not null && propertyNames.Contains(requiredName),
+                        $"{toolName} at {path}: required names '{requiredName}', which is not "
+                        + "declared in properties at that same level");
+                }
+            }
+
+            foreach (var property in properties.EnumerateObject())
+            {
+                AssertSchemaIsSatisfiable(toolName, $"{path}.properties.{property.Name}", property.Value);
+            }
+        }
+
+        if (schema.TryGetProperty("items", out var items))
+        {
+            AssertSchemaIsSatisfiable(toolName, $"{path}.items", items);
+        }
+    }
 }
