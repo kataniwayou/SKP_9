@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Analyst finding",
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["Drifting", "Notable"],
+      "description": "Quiet and Indeterminate are deliberately absent: a quiet run cancels the step and an unanalysable one fails it, so neither reaches a document."
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" },
+        "samplesExamined": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["from", "to", "samplesExamined"],
+      "additionalProperties": false,
+      "description": "The REALIZED window, not the configured one. Precision here is what lets two consecutive answers be compared, which is the only liveness signal a stateless agent has. format:date-time on from/to is documentation only -- ProcessorJsonSchemaValidator does not set RequireFormatValidation, so it is never enforced. No pattern is added either: unlike a hand-authored payload field, these values come from this processor's own serializer writing DateTimeOffset, so the only way they could be malformed is a bug in code we already test; the actual guarantee is the serializer, not this schema."
+    },
+    "narrative": { "type": "string", "minLength": 1 },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "panelId": { "type": "string", "minLength": 1 },
+          "layer": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "value": { "type": "string" }
+        },
+        "required": ["panelId", "layer", "label", "value"],
+        "additionalProperties": false
+      }
+    },
+    "ruledOut": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "hypothesis": { "type": "string", "minLength": 1 },
+          "disconfirmingCriterion": { "type": "string", "minLength": 1 },
+          "whatWasSeen": { "type": "string", "minLength": 1 }
+        },
+        "required": ["hypothesis", "disconfirmingCriterion", "whatWasSeen"],
+        "additionalProperties": false
+      }
+    },
+    "trace": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "ordinal": { "type": "integer", "minimum": 1 },
+          "panelId": { "type": "string", "minLength": 1 },
+          "dataReturned": { "type": "boolean" }
+        },
+        "required": ["ordinal", "panelId", "dataReturned"],
+        "additionalProperties": false
+      },
+      "description": "How a reader tells 'checked and it was clean' from 'never looked'. Without it a wrong conclusion is unauditable."
+    },
+    "promptHash": { "type": "string", "minLength": 1 }
+  },
+  "required": ["verdict", "window", "narrative", "evidence", "ruledOut", "trace", "promptHash"],
+  "additionalProperties": false
+}
