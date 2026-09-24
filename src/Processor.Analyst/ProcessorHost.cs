@@ -117,8 +117,12 @@ public static class ProcessorHost
 
         // Analyst services are registered here as each task lands: the tool catalog (Task 6), the
         // panel reader (Task 7), the loop (Task 8), the BIT (Task 11), the scratch store (Task 12)
-        // and the model adapter (Task 13). AnalystHostTests.TheServiceGraphResolves is what catches
-        // a registration whose dependencies are not all present.
+        // and the model adapter (Task 13). AnalystHostTests.TheHostBuildsAndItsRegisteredServicesResolve
+        // proves the services registered so far construct cleanly; it does NOT catch a registration
+        // whose dependencies are missing — that needs ValidateOnBuild, which needs the whole graph to
+        // be real, which it isn't until BaseProcessor.Core.Processing.BaseProcessor is registered
+        // below. Task 12's whole-graph, ["--environment", "Development"] form is what restores that
+        // coverage (see commit 58959c2 for the precedent).
         //
         // Task 12 registers the processor itself as
         // AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>() — the
