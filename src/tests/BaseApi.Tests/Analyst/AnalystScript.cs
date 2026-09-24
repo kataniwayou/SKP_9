@@ -22,6 +22,23 @@ internal static class AnalystScript
         ModelReply.Of(ScriptedModel.Call("record_verification", new { verdicts = new[] { new { hypothesis = "broker slow", survived = false, whatWasSeen = "max 4", citedPanels = new[] { panelId } } } })),
     ];
 
+    /// <summary>
+    /// F1: the same five stage calls as <see cref="Stages"/>, but WITHOUT the trailing
+    /// <c>read_panel</c> call -- fabricated stages with no observation behind them. The record_*
+    /// schemas require only non-empty strings, so a model can call all five and claim a panel was
+    /// read (in <c>record_readings</c>) and cited (in <c>record_verification</c>) when
+    /// <c>InvestigationTrace</c> shows it never actually called <c>read_panel</c> at all. Used to
+    /// prove <c>report_no_finding</c> cannot buy silence from an investigation that never looked.
+    /// </summary>
+    internal static ModelReply[] StagesWithoutReadingAnyPanel(string panelId = "queue-depth") =>
+    [
+        ModelReply.Of(ScriptedModel.Call("record_research", new { observations = new[] { "arrival mean rose" } })),
+        ModelReply.Of(ScriptedModel.Call("record_validation", new { analysable = true, concerns = Array.Empty<string>(), reason = "series present" })),
+        ModelReply.Of(ScriptedModel.Call("record_plan", new { hypotheses = new[] { new { hypothesis = "broker slow", disconfirmingCriterion = "queue depth over 100", panelsToRead = new[] { panelId } } } })),
+        ModelReply.Of(ScriptedModel.Call("record_readings", new { readings = new[] { new { panelId, summary = "max 4", trusted = true } } })),
+        ModelReply.Of(ScriptedModel.Call("record_verification", new { verdicts = new[] { new { hypothesis = "broker slow", survived = false, whatWasSeen = "max 4", citedPanels = new[] { panelId } } } })),
+    ];
+
     /// <summary>A valid submit_finding call, citing the given panel as its evidence, as a raw tool call.</summary>
     internal static ModelToolCall SubmitFinding(string panelId = "queue-depth") => ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
     {

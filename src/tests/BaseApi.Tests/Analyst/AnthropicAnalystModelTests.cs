@@ -1,3 +1,4 @@
+using System.Linq;
 using Processor.Analyst.Model;
 using Xunit;
 
@@ -15,6 +16,21 @@ public sealed class AnthropicAnalystModelTests
 
         Assert.Equal("read_panel", tool.Name);
         Assert.Contains("panelId", System.Text.Json.JsonSerializer.Serialize(tool.InputSchema), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ToolInputSchemaHasNoFieldForRootAdditionalProperties()
+    {
+        // F7: confirms, by reflection, exactly what the comment on ToTool now says -- pinned here
+        // so a future SDK upgrade that DOES add the field is caught by this test starting to fail,
+        // which is the prompt to go carry it through instead of just documenting its absence.
+        var properties = typeof(Anthropic.Models.Messages.InputSchema)
+            .GetProperties()
+            .Select(p => p.Name)
+            .ToArray();
+
+        Assert.DoesNotContain("AdditionalProperties", properties);
+        Assert.DoesNotContain("DisallowAdditionalProperties", properties);
     }
 
     [Fact]

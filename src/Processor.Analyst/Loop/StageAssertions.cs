@@ -46,6 +46,68 @@ internal static class StageAssertions
         return problems;
     }
 
+    /// <summary>
+    /// F1: the <c>report_no_finding</c> path's ground-truth check. Presence alone
+    /// (<see cref="CheckStagesRecorded"/>) proves nothing — the five <c>record_*</c> schemas require
+    /// only non-empty strings, so five invented stage calls followed by <c>report_no_finding</c> pass
+    /// presence with <see cref="InvestigationTrace.Entries"/> still empty: a fabricated "I looked and
+    /// found nothing" from a run where <c>read_panel</c> was never called. The finding path is
+    /// checked against the trace (<c>evidence[].panelId</c>, verification's <c>citedPanels</c>,
+    /// plan's <c>panelsToRead</c>); this is the symmetric check for the quiet path, which otherwise
+    /// had no ground truth backing it at all.
+    /// </summary>
+    internal static IReadOnlyList<string> CheckNoFindingIsGrounded(StageArtifacts artifacts, InvestigationTrace trace)
+    {
+        ArgumentNullException.ThrowIfNull(artifacts);
+        ArgumentNullException.ThrowIfNull(trace);
+
+        var problems = new List<string>(CheckStagesRecorded(artifacts));
+
+        if (problems.Count > 0)
+        {
+            return problems;
+        }
+
+        if (trace.Entries.Count == 0)
+        {
+            // No read_panel call at all -- five stage artifacts with nothing behind them. This is
+            // the exact shape a model can fabricate: the record_* schemas require only non-empty
+            // strings, and none of them require having actually read anything first.
+            problems.Add(
+                "no panel was ever read; the five stages were recorded without observing anything");
+            return problems;
+        }
+
+        var read = trace.PanelsRead;
+
+        foreach (var hypothesis in artifacts.Get(ToolNames.RecordPlan).GetProperty("hypotheses").EnumerateArray())
+        {
+            var name = hypothesis.GetProperty("hypothesis").GetString()!;
+            foreach (var panel in hypothesis.GetProperty("panelsToRead").EnumerateArray().Select(p => p.GetString()!))
+            {
+                if (!read.Contains(panel))
+                {
+                    problems.Add(
+                        $"hypothesis '{name}' names {panel} as the evidence to read, but it was never read");
+                }
+            }
+        }
+
+        foreach (var verdict in artifacts.Get(ToolNames.RecordVerification).GetProperty("verdicts").EnumerateArray())
+        {
+            var hypothesis = verdict.GetProperty("hypothesis").GetString()!;
+            foreach (var cited in verdict.GetProperty("citedPanels").EnumerateArray().Select(p => p.GetString()!))
+            {
+                if (!read.Contains(cited))
+                {
+                    problems.Add($"verification for '{hypothesis}' cites {cited}, which was never read");
+                }
+            }
+        }
+
+        return problems;
+    }
+
     internal static IReadOnlyList<string> Check(
         StageArtifacts artifacts, InvestigationTrace trace, JsonElement finding)
     {

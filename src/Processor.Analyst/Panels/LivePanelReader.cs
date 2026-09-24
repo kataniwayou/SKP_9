@@ -28,7 +28,17 @@ internal sealed class LivePanelReader(ElasticPanelSource elastic, PrometheusPane
         };
     }
 
+    /// <summary>
+    /// F3: an unknown panel id is the same class of problem as an unreachable source -- the
+    /// investigation cannot proceed on it -- so it throws the same domain exception as everything
+    /// else in this file, not a raw <see cref="ArgumentException"/>. That used to escape uncaught to
+    /// <c>AnalystProcessor</c>, which only catches <see cref="AnalysisImpossibleException"/> and a
+    /// filtered <see cref="OperationCanceledException"/>, landing in the framework's generic fault
+    /// branch as "the transform faulted" with a stack trace instead of a clean failed step.
+    /// <c>AnalystProcessor.AnalyseAsync</c> now validates <c>config.PanelSet</c> against this same
+    /// registry before a dispatch ever reaches here, so this is defence in depth, not the only guard.
+    /// </summary>
     private static PanelDefinition Find(string panelId)
         => PanelRegistry.All.FirstOrDefault(p => p.PanelId == panelId)
-           ?? throw new ArgumentException($"panel '{panelId}' is not in the panel registry", nameof(panelId));
+           ?? throw new PanelUnavailableException(panelId, "panel is not in the panel registry");
 }

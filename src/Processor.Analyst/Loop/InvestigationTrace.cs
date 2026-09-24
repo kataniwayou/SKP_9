@@ -15,7 +15,7 @@ internal sealed class InvestigationTrace
 
     internal IReadOnlyList<TraceEntry> Entries => _entries;
 
-    /// <summary>The distinct panels read, for the assertions in Task 9.</summary>
+    /// <summary>The distinct panels read, for the cross-reference assertions in <c>StageAssertions</c>.</summary>
     internal IReadOnlySet<string> PanelsRead => _entries.Select(e => e.PanelId).ToHashSet();
 
     internal void Record(string panelId, bool dataReturned)

@@ -61,7 +61,11 @@ internal static class ContractPrompt
         2. Validate — decide whether the evidence can be believed at all, and record it with
            {ToolNames.RecordValidation}. A series that was absent, a window only partly covered, or a
            "no data" you cannot tell apart from "no problem" are facts about the EVIDENCE, not about
-           the system. If the window cannot be analysed, say so here rather than guessing.
+           the system. If the window cannot be analysed, say so here rather than guessing. Recording
+           analysable as false ENDS the investigation as unable to run — it is not the same thing as
+           finding nothing, and it must never be followed by {ToolNames.ReportNoFinding}. "I could not
+           see" and "everything is fine" are different events and must never be reported as the same
+           one.
         3. Plan — for each hypothesis, state the evidence that would KILL it, before you read that
            evidence. Record with {ToolNames.RecordPlan}. A criterion stated afterwards is not a
            criterion, and neither is one built on a panel you have already looked at — if you saw it

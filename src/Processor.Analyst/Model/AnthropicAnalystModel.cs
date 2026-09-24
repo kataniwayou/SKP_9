@@ -128,6 +128,16 @@ internal sealed class AnthropicAnalystModel : IAnalystModel
             required = [.. requiredElement.EnumerateArray().Select(e => e.GetString()!)];
         }
 
+        // F7: every schema in ToolCatalog.SchemaFor declares "additionalProperties":false at the
+        // root, but Anthropic.Models.Messages.InputSchema -- confirmed by reflection: its only
+        // members are Type, Properties, Required, RawData -- has no field for it, so this root
+        // keyword is dropped when copying into the SDK's tool-definition shape. `Strict = true`
+        // below therefore enforces, server-side, something looser than this comment used to claim:
+        // an object with the declared Properties and Required, but NOT closed against extra ones.
+        // This is not an actual hole -- InvestigationLoop.Validates re-validates every tool input
+        // against the FULL schema (including additionalProperties:false) client-side, on every
+        // call, on both adapters, so a model that slipped an extra property past the server's
+        // laxer enforcement would still be caught here before the input is ever used.
         return new Tool
         {
             Name = spec.Name,
@@ -138,7 +148,9 @@ internal sealed class AnthropicAnalystModel : IAnalystModel
             // strict: true is a top-level field on the tool definition, not on tool_choice. The loop
             // still validates every input client-side regardless (see InvestigationLoop.Validates) --
             // the on-prem adapter has no server-side enforcement, and the two paths must not diverge
-            // in strictness.
+            // in strictness. See the comment above: `Strict` currently enforces less than
+            // additionalProperties:false would ask for, because InputSchema cannot carry that
+            // keyword -- the client-side validation is what actually closes that gap.
             Strict = true,
         };
     }

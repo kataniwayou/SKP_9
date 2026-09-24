@@ -57,7 +57,18 @@ internal sealed class ElasticPanelSource
         var baseUrl = options.Value.ElasticBaseUrl;
         if (!string.IsNullOrWhiteSpace(baseUrl))
         {
-            _http.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+            try
+            {
+                _http.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+            }
+            catch (UriFormatException ex)
+            {
+                // F3: consistent with LivePanelReader.Find -- a configuration problem that means
+                // this source cannot be used is the same domain failure as one it cannot reach, so
+                // it is this same exception type rather than a raw framework one.
+                throw new PanelUnavailableException(
+                    "elasticsearch", $"Analyst:Panels:ElasticBaseUrl is malformed: {ex.Message}");
+            }
         }
     }
 

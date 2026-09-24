@@ -26,31 +26,26 @@ public sealed class AnalystHostTests
         ["RabbitMq:Password"]       = "guest",
     };
 
-    // No "--environment", "Development": that turns on ServiceProviderOptions.ValidateOnBuild, which
-    // would validate the WHOLE graph, including AddProcessorExecution's ProcessDispatchHandler --
-    // and that handler needs BaseProcessor.Core.Processing.BaseProcessor, which nothing registers
-    // until Task 12 adds AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>().
-    // At Task 2 that dependency is missing BY DESIGN, so asserting the whole graph here would be
-    // asserting something false about this shell rather than testing it.
+    // No "--environment", "Development" here: that turns on ServiceProviderOptions.ValidateOnBuild,
+    // which validates the WHOLE graph, including AddProcessorExecution's ProcessDispatchHandler.
+    // TheServiceGraphResolves, below, is the whole-graph form; this one exercises the narrower,
+    // partial-resolution path on purpose so both shapes stay covered.
     internal static Microsoft.Extensions.Hosting.IHost Host()
         => ProcessorHost.Create([], Identity, cfg => cfg.AddInMemoryCollection(Configuration));
 
     [Fact]
     public void TheHostBuildsAndItsRegisteredServicesResolve()
     {
-        // What Task 2 can honestly claim: the host builds, and the services this shell actually
-        // registers -- via AddBaseConsoleObservability and AddBaseProcessor(cfg, identity) -- resolve
-        // without throwing. That still catches a throwing constructor, a bad options binding or a
-        // missing configuration key; it just cannot catch a missing registration, which at Task 2 is
-        // expected (AnalystProcessor doesn't exist until Task 12).
+        // The host builds, and the services this shell registers -- via AddBaseConsoleObservability
+        // and AddBaseProcessor(cfg, identity) -- resolve without throwing. That catches a throwing
+        // constructor, a bad options binding or a missing configuration key, but (with ValidateOnBuild
+        // off) not a missing registration elsewhere in the container.
         //
         // The whole-graph form -- ["--environment", "Development"], which turns on ValidateOnBuild and
-        // proves every registration in the container resolves, not just the ones asserted below --
-        // belongs to Task 12, once AddSingleton<BaseProcessor.Core.Processing.BaseProcessor,
-        // AnalystProcessor>() makes the graph complete. That is the same shape
-        // src/tests/BaseApi.Tests/PathImporter's host-wiring fact takes (see commit 58959c2, "the host
-        // wiring fact validates the whole graph, not two registrations") -- meaningful only once the
-        // graph it validates is actually whole. TheServiceGraphResolves, below, is that form.
+        // proves every registration in the container resolves, not just the ones asserted below -- is
+        // the same shape src/tests/BaseApi.Tests/PathImporter's host-wiring fact takes (see commit
+        // 58959c2, "the host wiring fact validates the whole graph, not two registrations").
+        // TheServiceGraphResolves, below, is that form.
         using var host = Host();
 
         // IProcessorContext is seeded with the identity Create() was handed -- proves the identity
@@ -82,9 +77,9 @@ public sealed class AnalystHostTests
         // BaseProcessor.Core.Processing.BaseProcessor -- satisfied now that ProcessorHost.Create
         // registers AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>().
         //
-        // IAnalystModel resolves to the real AnthropicAnalystModel registered by ProcessorHost.Create
-        // (Task 13), and IPanelReader now resolves to the real LivePanelReader (Task 14) -- no
-        // configureServices override is needed for either any more.
+        // IAnalystModel resolves to the real AnthropicAnalystModel and IPanelReader resolves to the
+        // real LivePanelReader, both registered by ProcessorHost.Create -- no configureServices
+        // override is needed for either.
         using var host = ProcessorHost.Create(
             ["--environment", "Development"],
             Identity,

@@ -160,23 +160,35 @@ cheap row edit. Discovering a missing knob is the whole dance. Therefore:
 
 | Field | Purpose |
 |---|---|
-| `targetWorkflowId` | which workflow to investigate. Scopes every query. |
-| `window` | the analysis window, matching what the dashboards show. Months of history is explicitly not the job. |
+| `targetWorkflowId` | which workflow to investigate. Scopes every business-layer query. |
+| `windowMinutes` | the analysis window in minutes, matching what the dashboards show. Months of history is explicitly not the job. |
 | `prompt` | the analytical judgment layer (§5). |
 | `panelSet` | which panels this assignment may consult. |
-| `budget` | iteration cap, token ceiling, wall-clock (§10). |
+| `maxIterations` | iteration cap (§10). |
+| `maxTokens` | accumulated-token ceiling (§10). |
+| `wallClockSeconds` | wall-clock ceiling (§10). |
+
+**Flat integers, not a nested `budget` object.** The three ceilings are three top-level schema
+properties, deliberately — a flat `AnalystConfig` record is what `ConfigSchemaConformance.Check`
+compares against the schema row, and a nested object multiplies the ways those two shapes can
+disagree for no gain.
 
 **Deliberately NOT in the payload:** model id and effort. See §9.2.
 
 ### 4.3 What the processor must still check itself
 
-The schema cannot express these, so `ProcessAsync` checks them before spending anything, and throws
-`FailedException` on violation:
+The schema cannot express these, so `ProcessAsync`/`AnalyseAsync` check them before spending
+anything, and throw `FailedException` on violation:
 
-- the window is sane relative to the panels' retention
-- the budget is survivable and leaves room for evidence
-- the prompt is non-empty after trimming, within length bounds, and leaves token headroom for the
-  panel results it will have to hold
+- the prompt is non-empty after trimming
+- the window is sane relative to the panels' retention (`windowMinutes` does not exceed the 30-day
+  ceiling the panel sources can honestly answer)
+- `maxTokens` does not exceed the compiled ceiling tied to the pod's manifest memory limit — a
+  per-payload value has no ceiling of its own, and this is what keeps a bad config row from being
+  the only thing standing between the pod and an OOM kill
+- every id in `panelSet` names a panel that actually exists in the compiled panel registry — an
+  unknown panel id would otherwise surface only when the model tried to read it, as a raw exception
+  escaping the loop rather than a clean, pre-flight `FailedException`
 
 A well-formed config the processor cannot work with is still an analysis that could not run.
 
@@ -258,7 +270,10 @@ Distinct from the preflight BIT (§8), which tests the *prompt*. These test the 
 actual investigation*, in compiled code, by cross-reference:
 
 - a hypothesis marked ruled-out whose stated disconfirming criterion was never read
-- a verification verdict citing a reading absent from `record_readings`
+- a verification verdict citing a panel the **trace** shows was never actually read — checked against
+  the trace itself, not against `record_readings`'s self-reported claim, because the trace is ground
+  truth assembled by the loop from what it actually executed, and the self-report is only a claim
+  about that
 - a finding whose evidence references a panel the trace shows was never consulted
 - the plan recorded after execute rather than before
 - a surviving hypothesis with no disconfirming criterion at all
@@ -438,7 +453,8 @@ prerequisite for trusting the offline deployment.
 ## 10. Budget
 
 Enforced by the loop, in the processor: **iteration cap, wall clock, accumulated tokens.** All three
-come from the payload's `budget` field.
+come from the payload as flat top-level fields — `maxIterations`, `wallClockSeconds`, `maxTokens`
+(§4.2) — not a nested `budget` object.
 
 Budget exhaustion with no terminal tool call is `FailedException` — an analysis that did not finish is
 an analysis that did not run. On the Anthropic path a task budget may additionally be set so the model

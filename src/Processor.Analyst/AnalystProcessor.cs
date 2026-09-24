@@ -99,6 +99,19 @@ internal sealed class AnalystProcessor(
                 "the pod's memory limit was sized for");
         }
 
+        // F3: panelSet is schema-checked for "an array of strings" only -- a payload can name a
+        // panel id that does not exist, and until this check the first sign of that was a raw
+        // ArgumentException out of LivePanelReader.Find, reached from a live dispatch and caught by
+        // nothing this processor declares, so it fell into the framework's generic fault branch
+        // ("the transform faulted", stack trace and all) instead of a clean FailedException. A
+        // well-formed config the processor cannot work with is still an analysis that could not run.
+        var unknownPanels = config.PanelSet.Where(p => !PanelRegistry.All.Any(d => d.PanelId == p)).ToArray();
+        if (unknownPanels.Length > 0)
+        {
+            throw new FailedException(
+                $"panelSet names panels not in the panel registry: {string.Join(", ", unknownPanels)}");
+        }
+
         LoopOutcome outcome;
         try
         {

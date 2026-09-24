@@ -23,8 +23,8 @@ internal sealed class InvestigationLoop(
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        var budget = new BudgetLedger(
-            config.MaxIterations, config.MaxTokens, TimeSpan.FromSeconds(config.WallClockSeconds), clock);
+        var wallClock = TimeSpan.FromSeconds(config.WallClockSeconds);
+        var budget = new BudgetLedger(config.MaxIterations, config.MaxTokens, wallClock, clock);
         var trace = new InvestigationTrace();
         var artifacts = new StageArtifacts();
         var tools = ToolCatalog.Build([.. config.PanelSet.Select(panels.Describe)]);
@@ -35,13 +35,28 @@ internal sealed class InvestigationLoop(
                 [], []),
         };
 
+        // F5: BudgetLedger's wall-clock check only runs BETWEEN turns (BeginTurn), so it bounds the
+        // gap between model calls, never a single call itself. Production passes
+        // CancellationToken.None all the way down and AnthropicClient has no configured request
+        // timeout, so without this a hung model call would wedge the pod's one consumer
+        // indefinitely while the liveness probe -- "the loops still turning" -- kept passing: the
+        // pod stays green forever, processing nothing. `dispatchCt` is what actually bounds the
+        // model call and every panel read below; `ct` itself is left untouched so a cancellation
+        // from THIS deadline can still be told apart, by AnalystProcessor's existing filter, from
+        // the caller's own token being cancelled. Timer-based, driven by `clock` rather than real
+        // time, so a test can arm and trip it with a FakeTimeProvider exactly like BudgetLedger's
+        // own deadline.
+        using var deadlineOnlyCts = new CancellationTokenSource(wallClock, clock);
+        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineOnlyCts.Token);
+        var dispatchCt = deadlineCts.Token;
+
         while (budget.BeginTurn())
         {
-            var reply = await model.SendAsync(system, transcript, tools, ct).ConfigureAwait(false);
+            var reply = await model.SendAsync(system, transcript, tools, dispatchCt).ConfigureAwait(false);
 
             // Usage is recorded before anything else, but the budget is not enforced yet: a reply
             // that both answers and crosses a ceiling still carries an answer that was already paid
-            // for, and the budget must not throw it away underneath a terminal call (I1).
+            // for, and the budget must not throw it away underneath a terminal call.
             budget.RecordUsage(reply.InputTokens, reply.OutputTokens);
 
             if (reply.ToolCalls.Count == 0)
@@ -72,14 +87,14 @@ internal sealed class InvestigationLoop(
                 // read as the reason for silence) gets the same client-side validation as every
                 // other call before it is trusted. A terminal call ends the run even if it arrived
                 // alongside others: there is nothing after the end, so nothing else in this reply is
-                // executed and no non-terminal sibling leaves a trace entry behind (I3).
+                // executed and no non-terminal sibling leaves a trace entry behind.
                 return Terminate(terminalCalls[0], artifacts, trace, window, promptHash);
             }
 
             // Either there was no terminal call, or the one terminal call failed its own schema. A
             // schema-invalid terminal call is handled by the SAME client-side validation as any other
             // call -- inside ExecuteAsync -- and comes back as an error tool_result the model can
-            // correct, never a crash and never an unchecked document (C2). Every call in this reply
+            // correct, never a crash and never an unchecked document. Every call in this reply
             // still needs a matching result before the transcript goes back to the model, so siblings
             // run normally.
             //
@@ -88,13 +103,13 @@ internal sealed class InvestigationLoop(
             var results = new List<ModelToolResult>(reply.ToolCalls.Count);
             foreach (var call in reply.ToolCalls)
             {
-                results.Add(await ExecuteAsync(call, window, trace, artifacts, config, tools, ct).ConfigureAwait(false));
+                results.Add(await ExecuteAsync(call, window, trace, artifacts, config, tools, dispatchCt).ConfigureAwait(false));
             }
 
             transcript.Add(new ModelTurn(ModelRole.User, null, [], results));
 
             // Only now, with a terminal call either absent or already handled as an error the model
-            // can act on, does the budget get to end the run (I1). An invalid terminal call still
+            // can act on, does the budget get to end the run. An invalid terminal call still
             // falls through to this check rather than looping forever against an exhausted budget.
             if (budget.Exhausted)
             {
@@ -150,6 +165,25 @@ internal sealed class InvestigationLoop(
                 trace.Record(panelId, reading.SampleCount > 0);
                 return new ModelToolResult(call.CallId, JsonSerializer.Serialize(reading), IsError: false);
 
+            case ToolNames.RecordValidation:
+                artifacts.Record(call.ToolName, call.Input, trace.Entries.Count);
+
+                // F2 / design §15, §18.6: validate OWNS the Cancelled-vs-Failed call. `analysable`
+                // is the field that call is made through, and before this nothing in production
+                // code read it -- a compliant model that correctly concluded it could not see the
+                // window had no terminal tool that said so, and report_no_finding's own description
+                // ("the analysis ran and its result does not contribute") was the closest match it
+                // would find. That reaches the operator as the same event as "everything is fine",
+                // which §3.1 exists to prevent. An unanalysable window is not a quiet ending; it is
+                // an analysis that could not run.
+                if (!call.Input.GetProperty("analysable").GetBoolean())
+                {
+                    throw new AnalysisImpossibleException(
+                        "validate found the window unanalysable: " + call.Input.GetProperty("reason").GetString());
+                }
+
+                return new ModelToolResult(call.CallId, "recorded", IsError: false);
+
             default:
                 // The five record_* tools. Keeping the artifact -- and how many panels the trace had
                 // already recorded a read for at this moment -- is what makes the cross-reference
@@ -185,11 +219,14 @@ internal sealed class InvestigationLoop(
         if (terminal.ToolName == ToolNames.ReportNoFinding)
         {
             // There is no finding to cross-reference, but there is still a claim that the analysis
-            // RAN -- and the five stage artifacts are the only evidence of that. Silence is the
-            // all-clear, so an unearned silence must fail just as loudly as an unearned finding;
-            // presence-only, not the full StageAssertions.Check suite, because there is genuinely
-            // nothing else here to check against.
-            var stageProblems = StageAssertions.CheckStagesRecorded(artifacts);
+            // RAN -- and presence of the five stage artifacts alone does not prove it: the record_*
+            // schemas require only non-empty strings, so five invented stage calls followed by
+            // report_no_finding would otherwise pass with the trace still empty. Silence is the
+            // all-clear, so an unearned silence must fail just as loudly as an unearned finding --
+            // CheckNoFindingIsGrounded checks presence AND cross-references the plan's panelsToRead
+            // and the verification's citedPanels against the trace, the same ground truth the
+            // finding path is checked against.
+            var stageProblems = StageAssertions.CheckNoFindingIsGrounded(artifacts, trace);
             if (stageProblems.Count > 0)
             {
                 throw new AnalysisImpossibleException(

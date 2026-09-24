@@ -11,22 +11,26 @@ namespace BaseApi.Tests.Analyst;
 
 public sealed class AnalystProcessorTests
 {
+    // "queue-wait" is a real PanelRegistry id -- F3 makes AnalyseAsync validate PanelSet against the
+    // registry before the loop runs, so a fictitious id like the old "queue-depth" would now fail
+    // every test in this file at that check rather than reaching what each test actually means to
+    // exercise.
     private static AnalystConfig Config(string prompt = "look for drift", int window = 360)
         => new(
             TargetWorkflowId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             WindowMinutes: window,
             Prompt: prompt,
-            PanelSet: ["queue-depth"],
+            PanelSet: ["queue-wait"],
             MaxIterations: 20,
             MaxTokens: 100_000,
             WallClockSeconds: 300);
 
-    private static AnalystProcessor Processor(IAnalystModel bitModel, IAnalystModel loopModel)
+    private static AnalystProcessor Processor(IAnalystModel bitModel, IAnalystModel loopModel, FakeTimeProvider? clock = null)
         => new(
             new PreflightBit(bitModel, new BitCache(4)),
             new InvestigationLoop(loopModel, new FixturePanelReader()
-                    .Reading("queue-depth", "ops", """{"max":4}""", samples: 91),
-                new FakeTimeProvider(), NullLogger<InvestigationLoop>.Instance),
+                    .Reading("queue-wait", "ops", """{"max":4}""", samples: 91),
+                clock ?? new FakeTimeProvider(), NullLogger<InvestigationLoop>.Instance),
             NullLogger<AnalystProcessor>.Instance);
 
     private static ModelReply FitBit() => ModelReply.Of(
@@ -68,6 +72,42 @@ public sealed class AnalystProcessorTests
             () => processor.AnalyseAsync(config, CancellationToken.None));
 
         Assert.Contains("MaxTokens", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task APanelSetNamingAnUnregisteredPanelFails()
+    {
+        // F3: panelSet is schema-checked for "an array of strings" only, so a payload can name a
+        // panel id that does not exist in PanelRegistry. Before this check the first sign of that
+        // was a raw ArgumentException out of LivePanelReader.Find on a live dispatch, caught by
+        // nothing this processor declares and landing in the framework's generic fault branch --
+        // "the transform faulted", stack trace and all -- instead of a clean failed step. This is
+        // live today: AnalystConfigSchemaTests' own canonical "valid" payload used to name
+        // "arrival-mean", which PanelRegistryTests explicitly asserts is NOT in the registry.
+        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel());
+
+        var config = Config() with { PanelSet = ["queue-wait", "arrival-mean"] };
+
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => processor.AnalyseAsync(config, CancellationToken.None));
+
+        Assert.Contains("arrival-mean", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AModelCallThatHangsPastTheWallClockFailsTheDispatch()
+    {
+        // F5: WallClockSeconds must bound the model call itself, not just the gap BETWEEN turns --
+        // production passes CancellationToken.None with no adapter-level timeout, so without a
+        // deadline-linked token a hung call would wedge the pod's one consumer forever while
+        // liveness kept passing. The hang surfaces as OperationCanceledException with the outer `ct`
+        // (CancellationToken.None here) un-cancelled, which AnalyseAsync's existing filtered catch
+        // maps to FailedException -- the disposition falls out correctly with no special-casing.
+        var clock = new FakeTimeProvider();
+        var processor = Processor(new ScriptedModel(FitBit()), new HangingModel(clock, TimeSpan.FromSeconds(300)), clock);
+
+        await Assert.ThrowsAsync<FailedException>(
+            () => processor.AnalyseAsync(Config() with { WallClockSeconds = 300 }, CancellationToken.None));
     }
 
     [Fact]
@@ -153,7 +193,7 @@ public sealed class AnalystProcessorTests
             new ScriptedModel(FitBit()),
             new ScriptedModel(
                 [
-                    .. AnalystScript.Stages(),
+                    .. AnalystScript.Stages("queue-wait"),
                     ModelReply.Of(ScriptedModel.Call("report_no_finding", new { reason = "nothing moved" })),
                 ]));
 
@@ -193,7 +233,7 @@ public sealed class AnalystProcessorTests
     public async Task ThePromptHashOnTheFindingIsTheHashOfThePayloadPrompt()
     {
         // The one check that makes "edit payload -> restart workflow -> confirm it took" performable.
-        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel([.. AnalystScript.Stages(), AnalystScript.Submit()]));
+        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel([.. AnalystScript.Stages("queue-wait"), AnalystScript.Submit("queue-wait")]));
 
         var finding = await processor.AnalyseAsync(Config(), CancellationToken.None);
 

@@ -126,10 +126,10 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // The Analyst's own graph. Both IAnalystModel (Task 13) and IPanelReader (Task 14) are now
-        // registered with their real, live implementations below, so the whole-graph ValidateOnBuild
-        // form resolves on its own — configureServices exists for a test to substitute fakes, not
-        // because either registration is still missing.
+        // The Analyst's own graph. Both IAnalystModel and IPanelReader are registered below with
+        // their real, live implementations, so the whole-graph ValidateOnBuild form resolves on its
+        // own — configureServices exists for a test to substitute fakes, not because either
+        // registration is missing.
         builder.Services.AddSingleton<BitCache>(_ => new BitCache(capacity: 8));
         builder.Services.AddSingleton<PreflightBit>();
         builder.Services.AddSingleton<InvestigationLoop>();

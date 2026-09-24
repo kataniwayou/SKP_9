@@ -67,6 +67,67 @@ public sealed class InvestigationLoopTests
     }
 
     [Fact]
+    public async Task FabricatedStagesWithNoPanelReadsCannotBuySilenceViaReportNoFinding()
+    {
+        // F1: CheckStagesRecorded is presence-only and never consulted InvestigationTrace, so five
+        // invented stage calls followed by report_no_finding used to pass -- Cancelled, silence --
+        // from a run where read_panel was never called once. The record_* schemas require only
+        // non-empty strings; nothing about them requires having actually observed anything. This is
+        // the worst failure the design calls out: a monitor reporting all-clear because it never ran.
+        var model = new ScriptedModel(
+            [
+                .. AnalystScript.StagesWithoutReadingAnyPanel(),
+                ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" })),
+            ]);
+
+        var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
+
+        Assert.Contains("no panel was ever read", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnUnanalysableValidationFailsRatherThanProceedingToReportNoFinding()
+    {
+        // F2: record_validation's analysable flag is the field design §15/§18.6 say owns the
+        // Cancelled-vs-Failed call, and before this fix nothing in production code read it. A model
+        // that correctly said "I could not see this window" had no terminal tool that said so --
+        // report_no_finding's own description was the closest match -- so "I could not see" and
+        // "everything is fine" would reach the operator as the same event.
+        var model = new ScriptedModel(
+            ModelReply.Of(ScriptedModel.Call("record_validation", new
+            {
+                analysable = false,
+                concerns = new[] { "queue-depth series absent for the whole window" },
+                reason = "series absent; cannot tell no-data from no-problem",
+            })));
+
+        var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
+
+        Assert.Contains("unanalysable", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AModelCallThatHangsPastTheWallClockFailsRatherThanWedging()
+    {
+        // F5: BudgetLedger's deadline was only ever checked BETWEEN turns (BeginTurn); production
+        // passes CancellationToken.None straight into model.SendAsync with no adapter-level
+        // timeout, so a single hung call would wedge the pod's one consumer forever while liveness
+        // -- "the loops still turning" -- kept passing. HangingModel simulates that: it advances the
+        // fake clock past the deadline WHILE the call is still in flight, then waits on its own `ct`
+        // -- the deadline-linked token InvestigationLoop now derives and passes down.
+        var clock = new FakeTimeProvider();
+        var model = new HangingModel(clock, TimeSpan.FromSeconds(300));
+
+        // ThrowsAnyAsync, not ThrowsAsync: Task.Delay(..., ct) throws TaskCanceledException, a
+        // subclass of OperationCanceledException -- AnalystProcessor's catch filters on the base
+        // type, so the subclass is exactly what production sees too.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => Loop(model, clock: clock).RunAsync("sys", Config(wallClock: 300), Window, Hash, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task AStagelessReportNoFindingIsImpossibleNotQuiet()
     {
         // C1: the design's worst failure is a monitor that reports all-clear because it never ran.
@@ -428,5 +489,23 @@ internal sealed class AdvancingModel(FakeTimeProvider clock, TimeSpan perTurn) :
     {
         clock.Advance(perTurn);
         return Task.FromResult(ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "arrival-mean" })));
+    }
+}
+
+/// <summary>
+/// F5: a model whose call never completes on its own -- it advances the fake clock past the wall
+/// clock deadline WHILE the call is in flight (simulating a live call that takes long enough for the
+/// deadline to elapse mid-flight), then awaits its own cancellation token forever. Proves the loop's
+/// deadline-linked token, not just BudgetLedger's between-turn check, is what actually bounds a single
+/// hung call.
+/// </summary>
+internal sealed class HangingModel(FakeTimeProvider clock, TimeSpan wallClock) : IAnalystModel
+{
+    public async Task<ModelReply> SendAsync(
+        string system, IReadOnlyList<ModelTurn> transcript, IReadOnlyList<ToolSpec> tools, CancellationToken ct)
+    {
+        clock.Advance(wallClock + TimeSpan.FromSeconds(1));
+        await Task.Delay(Timeout.InfiniteTimeSpan, ct).ConfigureAwait(false);
+        throw new InvalidOperationException("unreachable: the delay above must have observed cancellation");
     }
 }

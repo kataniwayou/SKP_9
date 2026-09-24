@@ -19,7 +19,7 @@ namespace BaseApi.Tests.Analyst;
 /// the same <see cref="PanelTrust"/> on Elasticsearch, and <see cref="PanelTrust.NoDataDistinguishable"/>
 /// must be an honest, DOCUMENTED no-op on Prometheus rather than a silent copy of
 /// <see cref="PanelTrust.SeriesPresent"/> -- see the decision recorded on
-/// <see cref="PrometheusPanelSource"/>'s own doc comment, and Task 14's report.
+/// <see cref="PrometheusPanelSource"/>'s own doc comment.
 /// </para>
 /// </summary>
 public sealed class PanelTrustTests
@@ -439,10 +439,15 @@ public sealed class PanelTrustTests
     [Fact]
     public void LivePanelReader_AnUnregisteredPanelIdThrows()
     {
+        // F3: PanelUnavailableException, not a raw ArgumentException -- an unknown panel id is the
+        // same class of problem as an unreachable source (the analysis cannot proceed on it), and
+        // AnalystProcessor only catches AnalysisImpossibleException plus a filtered
+        // OperationCanceledException. A raw ArgumentException used to escape both, landing in the
+        // framework's generic fault branch instead of a clean failed step.
         var reader = BuildReader(
             new RecordingHandler(HttpStatusCode.OK, "{}"), new RecordingHandler(HttpStatusCode.OK, "{}"));
 
-        Assert.Throws<ArgumentException>(() => reader.Describe("does-not-exist"));
+        Assert.Throws<PanelUnavailableException>(() => reader.Describe("does-not-exist"));
     }
 
     private static LivePanelReader BuildReader(RecordingHandler elasticHandler, RecordingHandler prometheusHandler)

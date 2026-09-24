@@ -11,9 +11,13 @@ public sealed class AnalystConfigSchemaTests
     private static string Definition()
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "analyst-config.json"));
 
+    // F3: these must be real PanelRegistry ids -- "arrival-mean" was renamed to
+    // "consumer-duration-mean" while the id was still free to rename (see PanelRegistryTests.
+    // TheOldArrivalMeanIdIsGone), and this payload's entire purpose is being right before the
+    // schema row is POSTed, which makes a fictitious panel id here worse than merely wrong.
     private const string Valid = """
         {"targetWorkflowId":"11111111-1111-1111-1111-111111111111","windowMinutes":360,
-         "prompt":"Look for drift.","panelSet":["queue-wait","arrival-mean"],
+         "prompt":"Look for drift.","panelSet":["queue-wait","consumer-duration-mean"],
          "maxIterations":20,"maxTokens":120000,"wallClockSeconds":300}
         """;
 
@@ -70,7 +74,7 @@ public sealed class AnalystConfigSchemaTests
     {
         // An agent with no panels can neither find anything nor honestly report nothing: every
         // dispatch would end Failed at the validate stage. Refuse it at publish instead.
-        var empty = Valid.Replace("""["queue-wait","arrival-mean"]""", "[]");
+        var empty = Valid.Replace("""["queue-wait","consumer-duration-mean"]""", "[]");
 
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(), Encoding.UTF8.GetBytes(empty), out _);

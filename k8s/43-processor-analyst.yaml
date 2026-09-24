@@ -5,7 +5,8 @@
 #
 # EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS, exactly as the other processors do.
 # `kubectl rollout status` will time out; that timeout is the expected signal, not a fault. See
-# k8s/README.md and task-16 (registration) for the row this pod is waiting on.
+# k8s/README.md for the registration row (processor, config schema, finding schema) this pod is
+# waiting on.
 #
 # RESOURCES MATCH processor-sample, NOT processor-sknormalizer, and NOT BY GUESSING. This pod holds
 # no document under transcoding, so it carries none of SKNormalizer's dual-residency reasoning for
