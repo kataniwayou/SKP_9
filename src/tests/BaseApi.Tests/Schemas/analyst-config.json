@@ -6,7 +6,8 @@
     "targetWorkflowId": {
       "type": "string",
       "format": "uuid",
-      "description": "The workflow to investigate. Scopes every query the agent issues; the Analyst's own executions live under the monitor workflow's id, so a query scoped here cannot see them."
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "The workflow to investigate. Scopes every query the agent issues; the Analyst's own executions live under the monitor workflow's id, so a query scoped here cannot see them. The pattern is what enforces UUID shape here -- ProcessorJsonSchemaValidator does not set RequireFormatValidation, so format:uuid alone validates any string. format is kept as correct, tool-readable documentation; do not delete pattern as 'redundant' with it."
     },
     "windowMinutes": {
       "type": "integer",

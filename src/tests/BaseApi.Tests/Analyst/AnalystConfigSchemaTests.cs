@@ -105,4 +105,25 @@ public sealed class AnalystConfigSchemaTests
 
         Assert.False(ok);
     }
+
+    [Fact]
+    public void AMalformedTargetWorkflowIdIsRejected()
+    {
+        // format:uuid is documentation only - ProcessorJsonSchemaValidator's EvaluationOptions do
+        // not set RequireFormatValidation, so the library treats "format" as an annotation and lets
+        // any string through. pattern is the keyword that actually enforces UUID shape here; without
+        // it a malformed id would sail past the schema layer and fail later as an ungraceful Guid
+        // deserialization error instead of the clean 422 this layer exists to give.
+        var malformed = Valid.Replace(
+            "\"targetWorkflowId\":\"11111111-1111-1111-1111-111111111111\"",
+            "\"targetWorkflowId\":\"not-a-uuid-at-all\"");
+
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), Encoding.UTF8.GetBytes(malformed), out var errors);
+
+        // Confirmed empirically (not just asserted) that this fails for the reason it claims: the
+        // errors list names "pattern", not "format" or anything else - see task-3-report.md.
+        Assert.False(ok);
+        Assert.Contains(errors, e => e.Contains("pattern"));
+    }
 }
