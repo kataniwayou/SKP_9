@@ -19,7 +19,7 @@ internal sealed class AnthropicAnalystModel : IAnalystModel
     private const string ModelId = "claude-opus-5";
     private const int MaxTokens = 16000;
 
-    private readonly AnthropicClient _client;
+    private readonly Lazy<AnthropicClient> _client;
 
     public AnthropicAnalystModel(IOptions<AnalystModelOptions> options)
     {
@@ -27,18 +27,24 @@ internal sealed class AnthropicAnalystModel : IAnalystModel
 
         var opts = options.Value;
 
-        // ApiKey and BaseUrl are init-only. The parameterless constructor already resolves ApiKey
-        // from ANTHROPIC_API_KEY and BaseUrl from the SDK's own default -- explicitly assigning
-        // either property to null in an object initializer clears that resolved value rather than
-        // leaving it alone, so a property is only ever listed here when the option actually has a
-        // value.
-        _client = (opts.ApiKey, opts.BaseUrl) switch
-        {
-            ({ Length: > 0 } key, { Length: > 0 } url) => new AnthropicClient { ApiKey = key, BaseUrl = url },
-            ({ Length: > 0 } key, _) => new AnthropicClient { ApiKey = key },
-            (_, { Length: > 0 } url) => new AnthropicClient { BaseUrl = url },
-            _ => new AnthropicClient(),
-        };
+        // Lazy, not built here: this constructor runs during DI's ValidateOnBuild and at pod boot,
+        // and the seam's design is that a bad or missing credential surfaces as a per-dispatch
+        // Failed step (a 401 on the first call, translated below), never as a boot-time crash. That
+        // must stay true regardless of what a future SDK version's constructor happens to validate
+        // eagerly -- so nothing here does I/O or SDK construction until the first SendAsync.
+        _client = new Lazy<AnthropicClient>(() =>
+            // ApiKey and BaseUrl are init-only. The parameterless constructor already resolves
+            // ApiKey from ANTHROPIC_API_KEY and BaseUrl from the SDK's own default -- explicitly
+            // assigning either property to null in an object initializer clears that resolved value
+            // rather than leaving it alone, so a property is only ever listed here when the option
+            // actually has a value.
+            (opts.ApiKey, opts.BaseUrl) switch
+            {
+                ({ Length: > 0 } key, { Length: > 0 } url) => new AnthropicClient { ApiKey = key, BaseUrl = url },
+                ({ Length: > 0 } key, _) => new AnthropicClient { ApiKey = key },
+                (_, { Length: > 0 } url) => new AnthropicClient { BaseUrl = url },
+                _ => new AnthropicClient(),
+            });
     }
 
     public async Task<ModelReply> SendAsync(
@@ -67,7 +73,7 @@ internal sealed class AnthropicAnalystModel : IAnalystModel
         Message response;
         try
         {
-            response = await _client.Messages.Create(parameters, ct).ConfigureAwait(false);
+            response = await _client.Value.Messages.Create(parameters, ct).ConfigureAwait(false);
         }
         // Most-specific-first: every branch below reaches the same conclusion -- the analysis could
         // not run -- so the ordering exists to document intent, not to vary the handling.
