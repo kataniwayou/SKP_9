@@ -470,15 +470,23 @@ guess — which is the door the future whitelist opens deliberately, not by sugg
 
 ---
 
-## 12. Redis scratch
+## 12. Redis scratch — deferred, with a reason
 
-A dedicated segment, used as working notes **within a single dispatch only**, keyed per `executionId`,
-with a TTL near the dispatch lifetime. Two concurrent dispatches, or a redelivery of the same message,
-must never read each other's notes.
+The design permitted a dedicated Redis segment as per-dispatch working notes, TTL'd, keyed per
+`executionId`. **It is not built, because the loop gave it no consumer**: one dispatch is one process
+holding one transcript in memory, and that transcript dies with the dispatch by design.
 
-The key prefix must be unmistakably the Analyst's. Redis also holds the L2 projection and the soak
-workload set is read from `skp:*`; the Analyst must never be the reason someone scales or flushes
-Redis, and scaling Redis wipes L2.
+Writing it anyway would cost a round-trip per turn, a TTL to tune, and a new failure mode — Redis
+unavailable failing a dispatch the agent could otherwise have completed — to persist notes nothing
+reads.
+
+**What would change that:** a transcript that outgrows the context window and needs compaction with
+the dropped turns kept somewhere recoverable, or an investigation allowed to span dispatches. The
+first is a real possibility on a wide panel set; the second contradicts §13 and should not happen.
+
+**If it is ever built**, the constraints stand: its own unmistakable key prefix, keyed per
+`executionId` so a redelivery cannot read another dispatch's notes, a TTL near the dispatch lifetime,
+and never a reason for anyone to scale or flush Redis — scaling Redis wipes L2.
 
 ---
 
@@ -602,7 +610,7 @@ missing — check with `--timestamps`.
 10. Model and effort are compiled constants. (§9.2)
 11. Budget is loop-enforced so both backends behave identically. (§9.3, §10)
 12. Stateless across dispatches; repetition is the consistency signal. (§13)
-13. Redis is per-dispatch scratch only. (§12)
+13. Redis scratch deferred; the loop provides no consumer for per-dispatch notes. (§12)
 
 ## 19. Open questions
 
