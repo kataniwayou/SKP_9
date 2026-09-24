@@ -38,6 +38,10 @@
          package and its full transitive closure are vendored in nugets/ because the Docker build
          clears nuget.org - see nugets/README-anthropic.md. -->
     <PackageReference Include="Anthropic" />
+
+    <!-- AddHttpClient<T>() for ElasticPanelSource and PrometheusPanelSource. Vendored into nugets/
+         the same way, for the same reason. -->
+    <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,15 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": { "service_instance_id": "analyst-ghi789" },
+        "values": [
+          [1790208000, "NaN"],
+          [1790208060, "NaN"]
+        ]
+      }
+    ]
+  }
+}

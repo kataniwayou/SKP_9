@@ -1,0 +1,21 @@
+{
+  "error": {
+    "root_cause": [
+      {
+        "type": "index_not_found_exception",
+        "reason": "no such index [logs-generic.otel-default]",
+        "resource.type": "index_expression",
+        "resource.id": "logs-generic.otel-default",
+        "index_uuid": "_na_",
+        "index": "logs-generic.otel-default"
+      }
+    ],
+    "type": "index_not_found_exception",
+    "reason": "no such index [logs-generic.otel-default]",
+    "resource.type": "index_expression",
+    "resource.id": "logs-generic.otel-default",
+    "index_uuid": "_na_",
+    "index": "logs-generic.otel-default"
+  },
+  "status": 404
+}

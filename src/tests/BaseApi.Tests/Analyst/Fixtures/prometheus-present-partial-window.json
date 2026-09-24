@@ -1,0 +1,15 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": { "queue": "step-dispatch", "service_instance_id": "analyst-def456" },
+        "values": [
+          [1790211600, "0.02"],
+          [1790211660, "0.021"]
+        ]
+      }
+    ]
+  }
+}

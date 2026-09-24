@@ -1,0 +1,16 @@
+{
+  "took": 5,
+  "timed_out": false,
+  "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 },
+  "hits": { "total": { "value": 120, "relation": "eq" }, "max_score": null, "hits": [] },
+  "aggregations": {
+    "by_result": {
+      "buckets": {
+        "Completed": { "doc_count": 100 },
+        "Failed": { "doc_count": 15 },
+        "Cancelled": { "doc_count": 5 }
+      }
+    },
+    "earliest": { "value": 1790208000000.0, "value_as_string": "2026-09-24T00:00:00.000Z" }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "took": 3,
+  "timed_out": false,
+  "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 },
+  "hits": { "total": { "value": 90, "relation": "eq" }, "max_score": null, "hits": [] },
+  "aggregations": {
+    "failed": {
+      "doc_count": 0,
+      "samples": {
+        "hits": { "total": { "value": 0, "relation": "eq" }, "max_score": null, "hits": [] }
+      }
+    },
+    "earliest": { "value": 1790208000000.0, "value_as_string": "2026-09-24T00:00:00.000Z" }
+  }
+}

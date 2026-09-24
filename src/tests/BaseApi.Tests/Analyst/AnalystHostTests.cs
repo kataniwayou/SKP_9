@@ -5,8 +5,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Processor.Analyst;
-using Processor.Analyst.Model;
-using Processor.Analyst.Panels;
 using Xunit;
 
 namespace BaseApi.Tests.Analyst;
@@ -84,16 +82,13 @@ public sealed class AnalystHostTests
         // BaseProcessor.Core.Processing.BaseProcessor -- satisfied now that ProcessorHost.Create
         // registers AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>().
         //
-        // IAnalystModel now resolves to the real AnthropicAnalystModel registered by
-        // ProcessorHost.Create (Task 13). IPanelReader is still a placeholder until Task 14.
+        // IAnalystModel resolves to the real AnthropicAnalystModel registered by ProcessorHost.Create
+        // (Task 13), and IPanelReader now resolves to the real LivePanelReader (Task 14) -- no
+        // configureServices override is needed for either any more.
         using var host = ProcessorHost.Create(
             ["--environment", "Development"],
             Identity,
-            cfg => cfg.AddInMemoryCollection(Configuration),
-            services =>
-            {
-                services.AddSingleton<IPanelReader, PlaceholderPanelReader>();
-            });
+            cfg => cfg.AddInMemoryCollection(Configuration));
 
         // IsType, not NotNull: the registration this test exists to prove is that the base type
         // resolves to THIS AUTHOR'S implementation specifically -- AddSingleton<AnalystProcessor>()
@@ -101,15 +96,5 @@ public sealed class AnalystHostTests
         // pass with a stub. This is the single fact standing between a healthy-looking pod and one
         // that processes nothing.
         Assert.IsType<AnalystProcessor>(host.Services.GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>());
-    }
-
-    /// <summary>Stands in for Task 14's real reader. Never called: the graph is only asked to resolve.</summary>
-    private sealed class PlaceholderPanelReader : IPanelReader
-    {
-        public PanelDescriptor Describe(string panelId)
-            => throw new NotSupportedException("placeholder registration; only used to complete the DI graph");
-
-        public Task<PanelReading> ReadAsync(string panelId, TimeRange range, CancellationToken ct)
-            => throw new NotSupportedException("placeholder registration; only used to complete the DI graph");
     }
 }

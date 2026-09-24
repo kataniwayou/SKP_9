@@ -84,10 +84,9 @@ public static class ProcessorHost
     /// </summary>
     /// <param name="configureServices">
     /// Extra service registrations applied after this shell's own, before the host is built. Null in
-    /// production. A test uses it to substitute fakes for <c>IAnalystModel</c> and
-    /// <c>IPanelReader</c>, which have no production implementation until Tasks 13 and 14 — without
-    /// it, the whole-graph <c>ValidateOnBuild</c> form has no way to make this composition root
-    /// resolve end to end.
+    /// production. Both <c>IAnalystModel</c> and <c>IPanelReader</c> now have real registrations
+    /// below, so a test only needs this to substitute a fake in their place — e.g. a scripted model
+    /// or a <c>FixturePanelReader</c> — not to complete an otherwise-unsatisfiable graph.
     /// </param>
     public static IHost Create(
         string[] args,
@@ -127,17 +126,21 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // The Analyst's own graph. The model adapter (Task 13) and the panel reader (Task 14) are not
-        // registered here — nothing under src/Processor.Analyst implements IAnalystModel or
-        // IPanelReader yet — so the whole-graph ValidateOnBuild form only resolves when a caller
-        // supplies both through configureServices (tests do this today; the real adapters replace
-        // that call when Tasks 13/14 land).
+        // The Analyst's own graph. Both IAnalystModel (Task 13) and IPanelReader (Task 14) are now
+        // registered with their real, live implementations below, so the whole-graph ValidateOnBuild
+        // form resolves on its own — configureServices exists for a test to substitute fakes, not
+        // because either registration is still missing.
         builder.Services.AddSingleton<BitCache>(_ => new BitCache(capacity: 8));
         builder.Services.AddSingleton<PreflightBit>();
         builder.Services.AddSingleton<InvestigationLoop>();
 
         builder.Services.Configure<Model.AnalystModelOptions>(builder.Configuration.GetSection("Analyst:Model"));
         builder.Services.AddSingleton<Model.IAnalystModel, Model.AnthropicAnalystModel>();
+
+        builder.Services.Configure<Panels.PanelSourceOptions>(builder.Configuration.GetSection("Analyst:Panels"));
+        builder.Services.AddHttpClient<Panels.ElasticPanelSource>();
+        builder.Services.AddHttpClient<Panels.PrometheusPanelSource>();
+        builder.Services.AddSingleton<Panels.IPanelReader, Panels.LivePanelReader>();
 
         // The concrete processor the pre/post handlers resolve as BaseProcessor. AddBaseProcessor
         // deliberately does not register an author's implementation, so this exact form -- against

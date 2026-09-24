@@ -1,0 +1,16 @@
+{
+  "took": 2,
+  "timed_out": false,
+  "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 },
+  "hits": { "total": { "value": 0, "relation": "eq" }, "max_score": null, "hits": [] },
+  "aggregations": {
+    "by_result": {
+      "buckets": {
+        "Completed": { "doc_count": 0 },
+        "Failed": { "doc_count": 0 },
+        "Cancelled": { "doc_count": 0 }
+      }
+    },
+    "earliest": { "value": null }
+  }
+}

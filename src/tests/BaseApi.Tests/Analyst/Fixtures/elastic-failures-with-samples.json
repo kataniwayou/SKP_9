@@ -1,0 +1,32 @@
+{
+  "took": 4,
+  "timed_out": false,
+  "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 },
+  "hits": { "total": { "value": 80, "relation": "eq" }, "max_score": null, "hits": [] },
+  "aggregations": {
+    "failed": {
+      "doc_count": 3,
+      "samples": {
+        "hits": {
+          "total": { "value": 3, "relation": "eq" },
+          "max_score": null,
+          "hits": [
+            {
+              "_index": "logs-generic.otel-default",
+              "_id": "abc123",
+              "_source": {
+                "body.text": "the author reported the step failed: downstream 503",
+                "scope.name": "BaseProcessor.Core.Processing.ProcessDispatchHandler",
+                "attributes.Result": "Failed",
+                "attributes.StepId": "798b9dc8-3e1e-4f0a-9c2a-000000000001",
+                "attributes.WorkflowId": "1a56b3ca-2222-4f0a-9c2a-000000000002",
+                "@timestamp": "2026-09-24T03:00:00.000Z"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "earliest": { "value": 1790208000000.0, "value_as_string": "2026-09-24T00:00:00.000Z" }
+  }
+}
