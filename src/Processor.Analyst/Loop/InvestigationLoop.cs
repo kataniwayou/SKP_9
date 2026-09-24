@@ -26,6 +26,7 @@ internal sealed class InvestigationLoop(
         var budget = new BudgetLedger(
             config.MaxIterations, config.MaxTokens, TimeSpan.FromSeconds(config.WallClockSeconds), clock);
         var trace = new InvestigationTrace();
+        var artifacts = new StageArtifacts();
         var tools = ToolCatalog.Build([.. config.PanelSet.Select(panels.Describe)]);
         var transcript = new List<ModelTurn>
         {
@@ -72,7 +73,7 @@ internal sealed class InvestigationLoop(
                 // other call before it is trusted. A terminal call ends the run even if it arrived
                 // alongside others: there is nothing after the end, so nothing else in this reply is
                 // executed and no non-terminal sibling leaves a trace entry behind (I3).
-                return Terminate(terminalCalls[0], trace, window, promptHash);
+                return Terminate(terminalCalls[0], artifacts, trace, window, promptHash);
             }
 
             // Either there was no terminal call, or the one terminal call failed its own schema. A
@@ -87,7 +88,7 @@ internal sealed class InvestigationLoop(
             var results = new List<ModelToolResult>(reply.ToolCalls.Count);
             foreach (var call in reply.ToolCalls)
             {
-                results.Add(await ExecuteAsync(call, window, trace, config, tools, ct).ConfigureAwait(false));
+                results.Add(await ExecuteAsync(call, window, trace, artifacts, config, tools, ct).ConfigureAwait(false));
             }
 
             transcript.Add(new ModelTurn(ModelRole.User, null, [], results));
@@ -108,6 +109,7 @@ internal sealed class InvestigationLoop(
         ModelToolCall call,
         TimeRange window,
         InvestigationTrace trace,
+        StageArtifacts artifacts,
         AnalystConfig config,
         IReadOnlyList<ToolSpec> tools,
         CancellationToken ct)
@@ -149,8 +151,9 @@ internal sealed class InvestigationLoop(
                 return new ModelToolResult(call.CallId, JsonSerializer.Serialize(reading), IsError: false);
 
             default:
-                // The five record_* tools. The loop keeps the artifact on the transcript, which is
-                // where Task 9's assertions read them from, and acknowledges it.
+                // The five record_* tools. Keeping the artifact is what makes the cross-reference
+                // checks at termination possible; acknowledging it is what keeps the model moving.
+                artifacts.Record(call.ToolName, call.Input);
                 return new ModelToolResult(call.CallId, "recorded", IsError: false);
         }
     }
@@ -176,7 +179,7 @@ internal sealed class InvestigationLoop(
     }
 
     private static LoopOutcome Terminate(
-        ModelToolCall terminal, InvestigationTrace trace, TimeRange window, string promptHash)
+        ModelToolCall terminal, StageArtifacts artifacts, InvestigationTrace trace, TimeRange window, string promptHash)
     {
         if (terminal.ToolName == ToolNames.ReportNoFinding)
         {
@@ -184,6 +187,15 @@ internal sealed class InvestigationLoop(
         }
 
         var input = terminal.Input;
+
+        // A finding that fails these is not a weaker finding, it is an investigation whose own record
+        // does not support it -- so it must not be exported, and it must not be silent either.
+        var problems = StageAssertions.Check(artifacts, trace, input);
+        if (problems.Count > 0)
+        {
+            throw new AnalysisImpossibleException(
+                "the investigation's own record does not support its finding: " + string.Join("; ", problems));
+        }
 
         var finding = new AnalystFinding(
             Verdict: input.GetProperty("verdict").GetString()!,
