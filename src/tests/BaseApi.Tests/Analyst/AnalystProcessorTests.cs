@@ -53,6 +53,24 @@ public sealed class AnalystProcessorTests
     }
 
     [Fact]
+    public async Task AMaxTokensBudgetLargerThanTheCompiledCeilingFails()
+    {
+        // Same shape as AWindowLongerThanTheRetentionFails: a well-formed config the processor
+        // cannot work with is still an analysis that could not run. MaxTokens has no ceiling of its
+        // own -- a config row can set it to anything -- so AnalystProcessor.MaxTokenBudget is the
+        // compiled ceiling that keeps a config edit from being the only thing standing between the
+        // pod and its manifest memory limit.
+        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel());
+
+        var config = Config() with { MaxTokens = 10_000_001 };
+
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => processor.AnalyseAsync(config, CancellationToken.None));
+
+        Assert.Contains("MaxTokens", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AnUnfitPromptFailsTheDispatch()
     {
         // Not Cancelled. An agent that just failed its fitness exam has analysed nothing, and

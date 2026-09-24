@@ -22,6 +22,36 @@ internal sealed class AnalystProcessor(
     /// <summary>The longest window any panel source here can honestly answer.</summary>
     private static readonly TimeSpan MaxWindow = TimeSpan.FromDays(30);
 
+    /// <summary>
+    /// The compiled ceiling on <c>AnalystConfig.MaxTokens</c>, paired with
+    /// <c>k8s/43-processor-analyst.yaml</c>'s 384Mi memory limit. Raising either one alone is wrong —
+    /// see that manifest's comment above the limit.
+    /// <para>
+    /// <b>Why this needs a compiled ceiling at all:</b> <c>InvestigationTrace</c> and the transcript
+    /// <c>InvestigationLoop</c> builds hold every turn's text and tool results for the life of a
+    /// dispatch, and a successful <c>read_panel</c> result goes in <b>untruncated</b> — only the
+    /// error bodies in <c>ElasticPanelSource</c>/<c>PrometheusPanelSource</c> are capped (at 500
+    /// chars). <c>MaxTokens</c> is the only thing bounding how large that transcript can grow, and it
+    /// is a per-payload config value with no ceiling of its own — a monitor's config row can set it
+    /// to anything, and a config edit tomorrow does not touch this file. This constant is what keeps
+    /// a bad row from being the only thing standing between the pod and an OOM kill.
+    /// </para>
+    /// <para>
+    /// <b>Derivation, from the manifest limit down:</b> 384Mi total, minus ~160Mi reserved for the
+    /// .NET/ASP.NET Core/OTel baseline this exact runtime stack costs at idle (the observed figure —
+    /// <c>processor-sample</c>'s own request value, the lightest processor here, running the same
+    /// host on the same base image), leaves ~224Mi = 234,881,024 bytes of headroom for the
+    /// transcript. Budgeting 16 bytes per accumulated token — 4 characters/token (the usual English/
+    /// JSON heuristic) at 2 bytes/char because .NET strings are UTF-16, doubled again because each
+    /// turn transiently holds a second copy of the transcript while it is being serialized into the
+    /// outbound model request — gives 234,881,024 / 16 ≈ 14,680,064 tokens as the honest ceiling this
+    /// arithmetic supports. This constant is set below that, at 10,000,000, for margin against parts
+    /// of the transient footprint (JSON parse trees, HttpClient buffering) the estimate above does
+    /// not itemise.
+    /// </para>
+    /// </summary>
+    private const int MaxTokenBudget = 10_000_000;
+
     protected override async Task ProcessAsync(
         byte[] data, AnalystConfig? config, Guid executionId, CancellationToken ct)
     {
@@ -57,6 +87,16 @@ internal sealed class AnalystProcessor(
         {
             throw new FailedException(
                 $"window of {window.TotalDays:F0} days exceeds what the panels retain ({MaxWindow.TotalDays:F0} days)");
+        }
+
+        // A config the pod's memory limit cannot honour is exactly the same kind of failure as a
+        // window the panels cannot answer -- a well-formed payload the processor cannot work with.
+        // See MaxTokenBudget's doc comment for the derivation tying this to the manifest's 384Mi.
+        if (config.MaxTokens > MaxTokenBudget)
+        {
+            throw new FailedException(
+                $"MaxTokens of {config.MaxTokens} exceeds the compiled ceiling of {MaxTokenBudget} " +
+                "the pod's memory limit was sized for");
         }
 
         LoopOutcome outcome;
