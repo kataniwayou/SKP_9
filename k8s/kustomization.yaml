@@ -29,3 +29,4 @@ resources:
   - 40-processor-filepersister.yaml
   - 41-processor-sknormalizer.yaml
   - 42-processor-outcomerecorder.yaml
+  - 43-processor-analyst.yaml

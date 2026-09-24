@@ -1,0 +1,122 @@
+# processor-analyst — the scheduled operator surrogate. It reads the same panels (Elasticsearch,
+# Prometheus) an operator would read, hands them to the model behind Analyst:Model, and writes one
+# finding or nothing. No Service — its only inbound traffic is the kubelet hitting the pod IP for
+# probes; nothing dispatches work to it over HTTP.
+#
+# EXPECT IT TO SIT NOT-READY UNTIL A PROCESSOR ROW EXISTS, exactly as the other processors do.
+# `kubectl rollout status` will time out; that timeout is the expected signal, not a fault. See
+# k8s/README.md and task-16 (registration) for the row this pod is waiting on.
+#
+# RESOURCES MATCH processor-sample, NOT processor-sknormalizer, DELIBERATELY. This pod holds bounded
+# JSON — Elastic/Prometheus panel responses and one Anthropic request/response — never a document
+# being transcoded, so it carries none of the dual-residency reasoning that sizes the pipeline
+# processors at 768Mi. If a real panel response turns out to be larger than assumed here, raise this
+# alongside evidence rather than guessing again.
+#
+# THE MODEL API KEY IS A SECRET CREATED OUT OF BAND, deliberately not in this repo:
+#   kubectl -n skp create secret generic analyst-model --from-literal=apiKey='sk-ant-...'
+# Until that secret exists this Deployment will not even start (secretKeyRef with no matching key
+# blocks the pod at admission), which is a louder and earlier failure than a missing panel address.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor-analyst
+  namespace: skp
+  labels:
+    app: processor-analyst
+    app.kubernetes.io/part-of: skp
+spec:
+  # Two, for the same reason processor-sample runs two: a processor is a competing consumer on its
+  # own work queue, so replicas divide the work rather than duplicating it, and the two register
+  # under one processor id as separate liveness keys.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: processor-analyst
+  template:
+    metadata:
+      labels:
+        app: processor-analyst
+    spec:
+      containers:
+        - name: processor-analyst
+          image: processor-analyst:local
+          imagePullPolicy: IfNotPresent
+          env:
+            # NO Service__Name / Service__Version here, deliberately, and do not add them back.
+            # A processor takes its service.name and service.version from its database row, resolved
+            # before the host is built so they can reach the OTel resource, and that row wins over
+            # configuration unconditionally. The fallback they nominally provide lives in code
+            # (ProcessorHost, "processor" / "1.0.0").
+            #
+            # The replica identity that names this pod's liveness key, its reply queue, and the
+            # service.instance.id on its telemetry. All three must be the same string, which is why it
+            # is resolved once from the downward API rather than three times from three defaults.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            # The collector already running in this namespace. Without it the SDK still works and
+            # export simply fails quietly, so this is an enrichment rather than a dependency.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+            # 10s, against a 15s Prometheus scrape. Exporting faster than the scrape makes the
+            # effective resolution the scrape interval; exporting at exactly the scrape interval
+            # aliases and leaves some scrapes with nothing new.
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: "10000"
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_USER }
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+            # Straight to Redis, the same address the orchestrator and the API use.
+            - name: ConnectionStrings__Redis
+              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            - name: ConsoleHealth__Port
+              value: "8081"
+            # The model API key. Created out of band — see the header comment — and never committed.
+            - name: Analyst__Model__ApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: analyst-model
+                  key: apiKey
+            # appsettings.json ships dev addresses on forwarded ports (localhost:19200/19090) for
+            # running outside the cluster. In-cluster these must be service DNS on the in-cluster
+            # ports, which is why both are overridden here rather than left to the file.
+            - name: Analyst__Panels__ElasticBaseUrl
+              value: "http://elasticsearch:9200"
+            - name: Analyst__Panels__PrometheusBaseUrl
+              value: "http://prometheus:9090"
+          ports:
+            - containerPort: 8081
+          # Startup flips on the liveness loop's first beat, within moments of the host starting, so
+          # this passes long before discovery does. It is deliberately not gated on identity: a
+          # processor waiting on an unregistered row is starting correctly, however long that takes.
+          startupProbe:
+            httpGet: { path: /health/startup, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Readiness is identity resolution. It stays red until the processor row exists, and no
+          # restart will help — which is exactly why this is readiness and not liveness.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8081 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          # Liveness is the loops still turning, and nothing else. A broker that is down must not
+          # restart this pod: the startup loop is designed to retry against it forever, and a restart
+          # only throws away the backoff progress.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8081 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests: { memory: "160Mi" }
+            limits:   { memory: "384Mi" }
