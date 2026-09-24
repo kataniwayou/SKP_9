@@ -1,4 +1,5 @@
 using Processor.Analyst.Bit;
+using Processor.Analyst.Loop;
 using Processor.Analyst.Model;
 using Xunit;
 
@@ -107,7 +108,7 @@ public sealed class PreflightBitTests
         var model = new ScriptedModel(new ModelReply([], Text: "looks fine to me", 0, 0));
         var bit = new PreflightBit(model, new BitCache(4));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<AnalysisImpossibleException>(
             () => bit.CheckAsync("p", CancellationToken.None));
     }
 
@@ -122,7 +123,7 @@ public sealed class PreflightBitTests
             ScriptedModel.Call("report_fitness", new { problems = new[] { new { stage = "verify" } } })));
         var bit = new PreflightBit(model, new BitCache(4));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<AnalysisImpossibleException>(
             () => bit.CheckAsync("p", CancellationToken.None));
     }
 

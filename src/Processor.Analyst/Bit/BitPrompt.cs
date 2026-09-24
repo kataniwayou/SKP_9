@@ -70,16 +70,21 @@ internal static class BitPrompt
     /// <para>
     /// A literal occurrence of either delimiter inside the operator's own prompt is neutralised
     /// first: unescaped, it could close the evaluated block early (or open a second one), placing
-    /// the remainder of the prompt structurally outside what gets judged. A zero-width space inside
-    /// the tag breaks the exact-string match while leaving what the judge reads effectively
-    /// unchanged.
+    /// the remainder of the prompt structurally outside what gets judged. The judge quotes offending
+    /// text back to a human, so the neutralised form is a visible backslash escape rather than an
+    /// invisible character -- a zero-width space breaks the exact-string match too, but it renders
+    /// on screen, in logs and in copy-paste as indistinguishable from a real delimiter, and any
+    /// Unicode-sanitising layer or log pipeline that trims zero-width characters would silently
+    /// un-neutralise it. A backslash before each angle bracket is visible, still clearly reads as
+    /// the same tag to a human, and cannot be produced by anything upstream of here trimming
+    /// whitespace.
     /// </para>
     /// </summary>
     internal static string Wrap(string prompt)
     {
         var neutralized = prompt
-            .Replace(OpenTag, "<prompt-under-evaluation​>", StringComparison.Ordinal)
-            .Replace(CloseTag, "<​/prompt-under-evaluation>", StringComparison.Ordinal);
+            .Replace(OpenTag, @"\<prompt-under-evaluation\>", StringComparison.Ordinal)
+            .Replace(CloseTag, @"\</prompt-under-evaluation\>", StringComparison.Ordinal);
 
         return $"{OpenTag}\n{neutralized}\n{CloseTag}";
     }

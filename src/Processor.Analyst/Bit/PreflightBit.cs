@@ -1,4 +1,5 @@
 using Json.Schema;
+using Processor.Analyst.Loop;
 using Processor.Analyst.Model;
 
 namespace Processor.Analyst.Bit;
@@ -25,7 +26,7 @@ internal sealed class PreflightBit(IAnalystModel model, BitCache cache)
             .ConfigureAwait(false);
 
         var call = reply.ToolCalls.FirstOrDefault(c => c.ToolName == BitPrompt.ToolName)
-            ?? throw new InvalidOperationException(
+            ?? throw new AnalysisImpossibleException(
                 "the fitness judge answered without calling report_fitness; a verdict it can phrase "
                 + "freely is a gate that can talk itself into passing");
 
@@ -33,10 +34,13 @@ internal sealed class PreflightBit(IAnalystModel model, BitCache cache)
         // server-side `strict` enforcement on the on-prem path, and there is no retry here to hand a
         // malformed call back to the model for correction -- this is one call, not a loop. A
         // report_fitness that fails its own schema means the gate could not evaluate the prompt at
-        // all, which is the same class of failure as the judge never calling it.
+        // all, which is the same class of failure as the judge never calling it -- and, like
+        // InvestigationLoop's own PanelUnavailableException mapping, that is an
+        // AnalysisImpossibleException, not a raw exception the framework's generic-fault path would
+        // log as a processor bug.
         if (!JsonSchema.FromText(BitPrompt.Tool.InputSchemaJson).Evaluate(call.Input).IsValid)
         {
-            throw new InvalidOperationException(
+            throw new AnalysisImpossibleException(
                 "the fitness judge's report_fitness call does not match its own schema; a malformed "
                 + "verdict cannot be trusted as either a pass or a fail");
         }
