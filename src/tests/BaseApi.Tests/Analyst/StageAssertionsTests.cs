@@ -451,4 +451,80 @@ public sealed class StageAssertionsTests
 
         Assert.Empty(problems);
     }
+
+    [Fact]
+    public void AHypothesisCarriedForwardWithAWhitespaceOnlyNameDifferenceIsAccepted()
+    {
+        // Site 4, the sharpest consequence the re-review found: StageArtifacts._hypothesisFirstMark
+        // used raw string equality, so a hypothesis retyped with a doubled space or a trailing space
+        // between v1 and v2 registered as a DISTINCT key -- reopening, by name drift, precisely the
+        // false rejection rounds 1 and 2 closed by fixing artifact overwrite. It must keep v1's mark,
+        // not register as new under v2's stricter one.
+        var artifacts = new StageArtifacts();
+        artifacts.Record("record_research", Json("""{"observations":["x"]}"""));
+        artifacts.Record("record_validation", Json("""{"analysable":true,"concerns":[],"reason":"r"}"""));
+        var planV1 = Json("""
+            {"hypotheses":[{"hypothesis":"broker slow","disconfirmingCriterion":"queue depth over 100",
+                            "panelsToRead":["queue-depth"]}]}
+            """);
+        artifacts.Record("record_plan", planV1, panelsReadMark: 0);
+
+        // "queue-depth" is read between v1 and v2 -- mark 1 by the time v2 is recorded. v2 retypes
+        // the SAME hypothesis with a doubled internal space and a trailing space.
+        var planV2 = Json("""
+            {"hypotheses":[{"hypothesis":"broker  slow ","disconfirmingCriterion":"queue depth over 100",
+                            "panelsToRead":["queue-depth"]}]}
+            """);
+        artifacts.Record("record_plan", planV2, panelsReadMark: 1);
+
+        artifacts.Record("record_readings", Json("""
+            {"readings":[{"panelId":"queue-depth","summary":"max 4","trusted":true}]}
+            """));
+        artifacts.Record("record_verification", Json("""
+            {"verdicts":[{"hypothesis":"broker slow","survived":false,"whatWasSeen":"max 4",
+                          "citedPanels":["queue-depth"]}]}
+            """));
+
+        var problems = StageAssertions.Check(artifacts, TraceOver("queue-depth"), Finding());
+
+        Assert.Empty(problems);
+    }
+
+    [Fact]
+    public void AHypothesisNamedWithDifferentWhitespaceAcrossPlanVerificationAndRuledOutProducesNoProblems()
+    {
+        // Sites 1-3: the plan's criteria dictionary, record_verification's lookups, and
+        // finding.ruledOut's lookup key must all tolerate the model retyping the same hypothesis name
+        // with incidental whitespace differences across three separate payloads. Before this fix this
+        // produced THREE problems at once for a run that never renamed anything: "verification names
+        // a hypothesis with no stated criterion", "record_plan proposes X but record_verification
+        // never judges it", and "the finding rules out X, which record_plan never proposed".
+        var artifacts = new StageArtifacts();
+        artifacts.Record("record_research", Json("""{"observations":["x"]}"""));
+        artifacts.Record("record_validation", Json("""{"analysable":true,"concerns":[],"reason":"r"}"""));
+        artifacts.Record("record_plan", Json("""
+            {"hypotheses":[{"hypothesis":"broker slow","disconfirmingCriterion":"queue depth over 100",
+                            "panelsToRead":["queue-depth"]}]}
+            """), panelsReadMark: 0);
+        artifacts.Record("record_readings", Json("""
+            {"readings":[{"panelId":"queue-depth","summary":"max 4","trusted":true}]}
+            """));
+        // Doubled internal space.
+        artifacts.Record("record_verification", Json("""
+            {"verdicts":[{"hypothesis":"broker  slow","survived":false,"whatWasSeen":"max 4",
+                          "citedPanels":["queue-depth"]}]}
+            """));
+
+        // Trailing space.
+        var finding = Json("""
+            {"verdict":"Drifting","narrative":"n","samplesExamined":91,
+             "evidence":[{"panelId":"queue-depth","layer":"ops","label":"l","value":"v"}],
+             "ruledOut":[{"hypothesis":"broker slow ","disconfirmingCriterion":"queue depth over 100",
+                          "whatWasSeen":"max 4"}]}
+            """);
+
+        var problems = StageAssertions.Check(artifacts, TraceOver("queue-depth"), finding);
+
+        Assert.Empty(problems);
+    }
 }

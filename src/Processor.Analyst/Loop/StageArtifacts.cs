@@ -22,6 +22,13 @@ namespace Processor.Analyst.Loop;
 /// hypothesis look like it was planned after the fact. A hypothesis introduced for the first time in
 /// v2 gets v2's mark, so it is still held to what had already been read by then.
 /// </para>
+/// <para>
+/// "Restated" is judged after <see cref="TextNormalization.Whitespace"/>, not by raw string equality:
+/// a hypothesis retyped with a trailing space or a doubled internal space is the same hypothesis, and
+/// treating it as a fresh one would silently reopen the exact false rejection the mark exists to
+/// avoid, just triggered by formatting drift instead of a genuine re-plan. Not case-folded -- a
+/// capitalisation change is plausibly a different claim.
+/// </para>
 /// </summary>
 internal sealed class StageArtifacts
 {
@@ -46,7 +53,7 @@ internal sealed class StageArtifacts
         {
             foreach (var hypothesis in input.GetProperty("hypotheses").EnumerateArray())
             {
-                var name = hypothesis.GetProperty("hypothesis").GetString()!;
+                var name = TextNormalization.Whitespace(hypothesis.GetProperty("hypothesis").GetString()!);
 
                 // TryAdd only: a hypothesis carried forward into a later plan keeps the mark from
                 // where it FIRST appeared, not the mark of whichever record_plan call is most recent.
@@ -66,7 +73,11 @@ internal sealed class StageArtifacts
     /// <summary>
     /// The panels-read mark captured the first time this hypothesis name appeared in any recorded
     /// record_plan, across every re-plan -- or <c>int.MaxValue</c> if this hypothesis was never named.
+    /// The lookup is whitespace-normalised (see class remarks), so callers pass the raw name as it
+    /// appears in whichever plan they are currently reading; they do not need to normalise it first.
     /// </summary>
     internal int HypothesisMarkOf(string hypothesis)
-        => _hypothesisFirstMark.TryGetValue(hypothesis, out var mark) ? mark : int.MaxValue;
+        => _hypothesisFirstMark.TryGetValue(TextNormalization.Whitespace(hypothesis), out var mark)
+            ? mark
+            : int.MaxValue;
 }

@@ -97,14 +97,20 @@ internal static class StageAssertions
         // has no way to express hypothesis-name uniqueness -- so a schema-valid reply can carry the
         // same hypothesis twice. That is a defective record, which is what a problem is for, not a
         // reason for Check itself to throw. TryAdd keeps the first declaration and flags the rest.
-        var criteria = new Dictionary<string, (string[] PanelsToRead, string DisconfirmingCriterion)>(StringComparer.Ordinal);
+        //
+        // Keyed by the WHITESPACE-NORMALISED name, because this dictionary is looked up from
+        // record_verification and finding.ruledOut too, and the model is free to retype the same
+        // hypothesis with a stray space each time it names it. The original, unnormalised name is
+        // carried alongside for messages -- a problem should echo what is actually in record_plan's
+        // payload, not a normalised form the operator will not find there.
+        var criteria = new Dictionary<string, (string OriginalName, string[] PanelsToRead, string DisconfirmingCriterion)>(StringComparer.Ordinal);
         foreach (var hypothesis in plan)
         {
             var name = hypothesis.GetProperty("hypothesis").GetString()!;
             var panelsToRead = hypothesis.GetProperty("panelsToRead").EnumerateArray().Select(p => p.GetString()!).ToArray();
             var criterion = hypothesis.GetProperty("disconfirmingCriterion").GetString()!;
 
-            if (!criteria.TryAdd(name, (panelsToRead, criterion)))
+            if (!criteria.TryAdd(TextNormalization.Whitespace(name), (name, panelsToRead, criterion)))
             {
                 problems.Add($"record_plan names the hypothesis '{name}' more than once");
             }
@@ -116,10 +122,11 @@ internal static class StageAssertions
         foreach (var verdict in artifacts.Get(ToolNames.RecordVerification).GetProperty("verdicts").EnumerateArray())
         {
             var hypothesis = verdict.GetProperty("hypothesis").GetString()!;
-            verifiedHypotheses.Add(hypothesis);
-            survivedByHypothesis.TryAdd(hypothesis, verdict.GetProperty("survived").GetBoolean());
+            var normalizedHypothesis = TextNormalization.Whitespace(hypothesis);
+            verifiedHypotheses.Add(normalizedHypothesis);
+            survivedByHypothesis.TryAdd(normalizedHypothesis, verdict.GetProperty("survived").GetBoolean());
 
-            if (!criteria.TryGetValue(hypothesis, out var needed))
+            if (!criteria.TryGetValue(normalizedHypothesis, out var needed))
             {
                 problems.Add($"verification names a hypothesis with no stated criterion: '{hypothesis}'");
                 continue;
@@ -140,12 +147,13 @@ internal static class StageAssertions
         }
 
         // The reverse direction: a hypothesis the plan proposed but verification never judges could
-        // otherwise be claimed as ruled out below with nothing behind that claim at all.
-        foreach (var hypothesis in criteria.Keys)
+        // otherwise be claimed as ruled out below with nothing behind that claim at all. Message uses
+        // record_plan's own original spelling of the name, not the normalised dictionary key.
+        foreach (var (normalizedHypothesis, declared) in criteria)
         {
-            if (!verifiedHypotheses.Contains(hypothesis))
+            if (!verifiedHypotheses.Contains(normalizedHypothesis))
             {
-                problems.Add($"record_plan proposes '{hypothesis}' but record_verification never judges it");
+                problems.Add($"record_plan proposes '{declared.OriginalName}' but record_verification never judges it");
             }
         }
 
@@ -155,15 +163,16 @@ internal static class StageAssertions
         foreach (var ruledOut in finding.GetProperty("ruledOut").EnumerateArray())
         {
             var hypothesis = ruledOut.GetProperty("hypothesis").GetString()!;
+            var normalizedHypothesis = TextNormalization.Whitespace(hypothesis);
             var criterion = ruledOut.GetProperty("disconfirmingCriterion").GetString()!;
 
-            if (!criteria.TryGetValue(hypothesis, out var declared))
+            if (!criteria.TryGetValue(normalizedHypothesis, out var declared))
             {
                 problems.Add($"the finding rules out '{hypothesis}', which record_plan never proposed");
             }
             else if (!string.Equals(
-                         NormalizeWhitespace(declared.DisconfirmingCriterion),
-                         NormalizeWhitespace(criterion),
+                         TextNormalization.Whitespace(declared.DisconfirmingCriterion),
+                         TextNormalization.Whitespace(criterion),
                          StringComparison.Ordinal))
             {
                 // Trimmed and collapsed, not case-folded: a trailing period or a doubled space is a
@@ -174,7 +183,7 @@ internal static class StageAssertions
                     + "record_plan stated -- copy it verbatim");
             }
 
-            if (!survivedByHypothesis.TryGetValue(hypothesis, out var survived) || survived)
+            if (!survivedByHypothesis.TryGetValue(normalizedHypothesis, out var survived) || survived)
             {
                 problems.Add(
                     $"the finding rules out '{hypothesis}', but record_verification has no "
@@ -194,12 +203,4 @@ internal static class StageAssertions
 
         return problems;
     }
-
-    /// <summary>
-    /// Trims and collapses internal whitespace, nothing else -- deliberately not case-folded and not
-    /// otherwise loosened. This exists only so a trailing period or a doubled space does not read
-    /// identically to an actually different criterion.
-    /// </summary>
-    private static string NormalizeWhitespace(string value)
-        => string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 }
