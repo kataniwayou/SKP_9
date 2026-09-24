@@ -4,7 +4,10 @@
 **Branch:** `feature/path-importer`
 **State:** Tasks 1–15 of 16 complete and reviewed as merge-ready. **Task 16 is unstarted and deliberately so.**
 **Head at handover:** `7b2b4fb`. The plan's work starts at `c2cbcda` (exclusive) — 32 commits.
-**Suite:** 1533 total / 0 failed / 37 skipped, every skip under `Live/`. Read that *shape*, never a remembered total.
+**Suite:** 1537 total / 0 failed / 37 skipped, every skip under `Live/`. Read that *shape*, never a remembered total.
+
+**Since handover:** risk F6 (the thinking-block round-trip) was resolved offline and closed as a defect —
+see below and Ruling 35. Uncommitted in the working tree.
 
 ---
 
@@ -61,17 +64,31 @@ disagree:
 - config ← `src/tests/BaseApi.Tests/Schemas/analyst-config.json`
 - finding ← `src/tests/BaseApi.Tests/Schemas/analyst-finding.json`
 
-### Before anything irreversible: one smoke test
+### The thinking-block round-trip — FIXED, no longer a risk
 
-**The adapter drops thinking blocks on the round-trip.** `AnthropicAnalystModel.ToReply` discards them and
-`ToMessage` reconstructs assistant turns from text + tool_use only. Thinking is on by default on
-`claude-opus-5`, and the Messages API requires thinking blocks echoed back unmodified on assistant turns
-carrying tool use. If that applies here, **every multi-turn investigation fails on its second model call.**
+This was carried out of execution as risk F6, on the belief that it could not be settled offline. It could
+be, and it was a **defect**, not a risk: the adapter dropped signed thinking blocks it was required to
+return, so **every investigation would have failed on its second model call** — the first one to replay an
+assistant turn. Green offline because it is only reachable against the real API.
 
-No offline test can catch this — nothing in the branch has ever completed a real two-turn loop. Verify a
-two-turn investigation against the live API **before** POSTing anything that cannot be undone. The failure
-is loud (`AnthropicApiException` → `AnalysisImpossibleException` → Failed), not silent, but it would make
-the processor inert.
+Settled from the bundled `claude-api` reference, which is authoritative here: its C# agentic-loop example
+reconstructs `ThinkingBlock` carrying `Signature` ("the API rejects tampering") and `RedactedThinkingBlock`
+alongside text and tool_use. Thinking **is** on by default on `claude-opus-5`, and `display` defaults to
+`"omitted"` — so the blocks arrive with an *empty body* and a signature that still has to survive.
+
+The adapter now replays each assistant turn **verbatim** (`AssistantEcho`) instead of rebuilding it. The
+opaque blocks ride across the seam on `ModelToolCall.ProviderEcho`, because the loop copies `ToolCalls`
+into the transcript unchanged and copies nothing else out of a reply — so the loop still has no notion of
+"thinking", exactly as `IAnalystModel` requires. Full reasoning: **Ruling 35** in the ledger.
+
+Analyst 145/145; suite 1537 total / 0 failed / 37 skipped, all under `Live/`.
+
+### Still do the live smoke test first
+
+**Nothing in the branch has ever completed a real two-turn loop.** The smoke test is no longer aimed at a
+predicted failure, but it remains the first thing a live run should check, **before** POSTing anything that
+cannot be undone. Any failure here is loud (`AnthropicApiException` → `AnalysisImpossibleException` →
+Failed), never silent.
 
 ### Current cluster state
 

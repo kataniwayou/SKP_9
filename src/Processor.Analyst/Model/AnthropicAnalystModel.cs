@@ -101,7 +101,10 @@ internal sealed class AnthropicAnalystModel : IAnalystModel
             throw new AnalysisImpossibleException("the model backend timed out", ex);
         }
 
-        return ToReply(response);
+        return ToReply(
+            response.Content,
+            checked((int)response.Usage.InputTokens),
+            checked((int)response.Usage.OutputTokens));
     }
 
     /// <summary>Translates one tool of the loop's catalog into the SDK's tool-definition shape.</summary>
@@ -189,6 +192,17 @@ internal sealed class AnthropicAnalystModel : IAnalystModel
             return new MessageParam { Role = Role.User, Content = blocks };
         }
 
+        // An assistant turn this adapter produced goes back EXACTLY as it arrived. Reconstructing one
+        // drops its signed thinking blocks, and the API rejects a tool-use turn that comes back
+        // without them -- so every investigation would fail on its second model call. Only a turn from
+        // somewhere else (the on-prem adapter, a hand-built transcript) falls through to the
+        // reconstruction below.
+        if (turn.ToolCalls.Select(call => call.ProviderEcho).OfType<List<ContentBlockParam>>().FirstOrDefault()
+            is { } echo)
+        {
+            return new MessageParam { Role = Role.Assistant, Content = echo };
+        }
+
         if (turn.Text is { Length: > 0 } assistantText)
         {
             blocks.Add(new TextBlockParam { Text = assistantText });
@@ -214,33 +228,103 @@ internal sealed class AnthropicAnalystModel : IAnalystModel
         return message.Content.TryPickContentBlockParams(out var blocks) ? blocks.Count : 0;
     }
 
-    private static ModelReply ToReply(Message response)
+    /// <summary>
+    /// Rebuilds one assistant turn's content as the parameter shapes the API expects back, in the
+    /// order it arrived, so the turn can be replayed <b>verbatim</b> instead of reconstructed.
+    /// <para>
+    /// Thinking blocks are the reason this exists. They are signed, and the API requires an assistant
+    /// turn carrying <c>tool_use</c> to come back with them intact — a turn rebuilt from text plus
+    /// tool_use alone is rejected, which fails every multi-turn investigation on its second model call
+    /// (the first one that replays a turn). Thinking is on by default on <c>claude-opus-5</c> and
+    /// <c>display</c> defaults to <c>"omitted"</c>, so the blocks arrive with an EMPTY body and a
+    /// signature that still has to survive: replay them exactly as received, empty text included.
+    /// </para>
+    /// <para>
+    /// This does not give the loop a notion of thinking. The list is handed across the seam as an
+    /// opaque <see cref="ModelToolCall.ProviderEcho"/> that only this adapter ever opens.
+    /// </para>
+    /// </summary>
+    internal static List<ContentBlockParam> AssistantEcho(IReadOnlyList<ContentBlock> content)
     {
+        ArgumentNullException.ThrowIfNull(content);
+
+        List<ContentBlockParam> blocks = [];
+
+        foreach (var block in content)
+        {
+            if (block.TryPickThinking(out var thinking))
+            {
+                // The signature is what the API validates; it must be passed through untouched.
+                blocks.Add(new ThinkingBlockParam
+                {
+                    Thinking = thinking.Thinking,
+                    Signature = thinking.Signature,
+                });
+            }
+            else if (block.TryPickRedactedThinking(out var redacted))
+            {
+                blocks.Add(new RedactedThinkingBlockParam { Data = redacted.Data });
+            }
+            else if (block.TryPickText(out var textBlock))
+            {
+                blocks.Add(new TextBlockParam { Text = textBlock.Text });
+            }
+            else if (block.TryPickToolUse(out var toolUse))
+            {
+                // ToolUseBlock.Caller is required on the response type but optional on the param type,
+                // and is not ours to assert -- it is deliberately not copied.
+                blocks.Add(new ToolUseBlockParam
+                {
+                    ID = toolUse.ID,
+                    Name = toolUse.Name,
+                    Input = toolUse.Input,
+                });
+            }
+        }
+
+        return blocks;
+    }
+
+    /// <summary>
+    /// Translates one response into the loop's reply shape. Takes the content and usage rather than a
+    /// <c>Message</c> so the translation is reachable from a test without standing up a whole SDK
+    /// response object.
+    /// </summary>
+    internal static ModelReply ToReply(IReadOnlyList<ContentBlock> content, int inputTokens, int outputTokens)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        // Built once and shared by every call in the turn: the loop copies ModelReply.ToolCalls into
+        // the transcript unchanged and copies nothing else out of a reply, so a tool call is the only
+        // vehicle this can ride. A reply with no tool calls has no carrier and needs none -- the loop
+        // rejects that reply outright, so such a turn is never replayed.
+        var echo = AssistantEcho(content);
+
         List<ModelToolCall> calls = [];
         string? text = null;
 
-        foreach (var block in response.Content)
+        foreach (var block in content)
         {
             if (block.TryPickToolUse(out var toolUse))
             {
                 calls.Add(new ModelToolCall(
                     toolUse.ID,
                     toolUse.Name,
-                    JsonSerializer.SerializeToElement(toolUse.Input)));
+                    JsonSerializer.SerializeToElement(toolUse.Input))
+                {
+                    ProviderEcho = echo,
+                });
             }
             else if (block.TryPickText(out var textBlock))
             {
                 text = text is null ? textBlock.Text : text + textBlock.Text;
             }
-            // TryPickThinking blocks are intentionally not translated: the loop above this seam has
-            // no notion of "thinking" and must not gain one through a side channel.
+            // Thinking blocks are deliberately absent from ModelReply: the loop has no notion of
+            // "thinking" and must not gain one. They travel in the opaque echo above instead, which
+            // is what lets the turn be replayed intact without the loop ever seeing inside it.
         }
 
-        return new ModelReply(
-            calls,
-            text,
-            checked((int)response.Usage.InputTokens),
-            checked((int)response.Usage.OutputTokens));
+        return new ModelReply(calls, text, inputTokens, outputTokens);
     }
 
     private static Dictionary<string, JsonElement> ToInputDictionary(JsonElement input)

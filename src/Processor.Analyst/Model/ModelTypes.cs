@@ -11,7 +11,24 @@ internal enum ModelRole { User, Assistant }
 /// binding — server-side <c>strict</c> enforcement does not exist on the on-prem path, so the client
 /// must never assume a well-formed input.
 /// </summary>
-internal sealed record ModelToolCall(string CallId, string ToolName, JsonElement Input);
+internal sealed record ModelToolCall(string CallId, string ToolName, JsonElement Input)
+{
+    /// <summary>
+    /// Provider-opaque state belonging to the assistant turn this call arrived in, set by the adapter
+    /// that produced the call and interpretable ONLY by that adapter.
+    /// <para>
+    /// <b>Nothing above the seam may read this, and nothing above the seam needs to.</b> It exists
+    /// because some backends require an assistant turn to be echoed back byte-for-byte rather than
+    /// reconstructed from its visible parts — Anthropic's thinking blocks are signed, and a turn
+    /// carrying <c>tool_use</c> that comes back without them is rejected. The loop already copies
+    /// <see cref="ModelReply.ToolCalls"/> into the transcript unchanged, so parking the state here is
+    /// what lets it round-trip without the loop growing a notion of "thinking" it must not have (see
+    /// <see cref="IAnalystModel"/>). An adapter with nothing to carry leaves it null; a transcript
+    /// built by hand, as every test does, leaves it null and the adapter falls back to reconstruction.
+    /// </para>
+    /// </summary>
+    internal object? ProviderEcho { get; init; }
+}
 
 /// <summary>One tool result going back. <paramref name="IsError"/> is returned rather than dropped: a
 /// call with no matching result is rejected by the API.</summary>
