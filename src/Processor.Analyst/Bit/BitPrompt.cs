@@ -62,9 +62,27 @@ internal static class BitPrompt
          "additionalProperties":false}
         """);
 
-    /// <summary>Wraps the payload prompt as data.</summary>
+    private const string OpenTag = "<prompt-under-evaluation>";
+    private const string CloseTag = "</prompt-under-evaluation>";
+
+    /// <summary>
+    /// Wraps the payload prompt as data.
+    /// <para>
+    /// A literal occurrence of either delimiter inside the operator's own prompt is neutralised
+    /// first: unescaped, it could close the evaluated block early (or open a second one), placing
+    /// the remainder of the prompt structurally outside what gets judged. A zero-width space inside
+    /// the tag breaks the exact-string match while leaving what the judge reads effectively
+    /// unchanged.
+    /// </para>
+    /// </summary>
     internal static string Wrap(string prompt)
-        => $"<prompt-under-evaluation>\n{prompt}\n</prompt-under-evaluation>";
+    {
+        var neutralized = prompt
+            .Replace(OpenTag, "<prompt-under-evaluation​>", StringComparison.Ordinal)
+            .Replace(CloseTag, "<​/prompt-under-evaluation>", StringComparison.Ordinal);
+
+        return $"{OpenTag}\n{neutralized}\n{CloseTag}";
+    }
 
     internal static IReadOnlyList<StageProblem> Read(JsonElement input)
         => [.. input.GetProperty("problems").EnumerateArray().Select(p => new StageProblem(

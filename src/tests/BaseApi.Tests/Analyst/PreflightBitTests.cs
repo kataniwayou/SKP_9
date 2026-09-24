@@ -55,8 +55,10 @@ public sealed class PreflightBitTests
     public async Task AFailureIsCachedToo()
     {
         // Otherwise a bad prompt re-runs the full BIT on every dispatch, paying the most for the
-        // configuration that deserves it least. The only fix is a payload edit, which changes the
-        // hash and creates a new entry, so caching a failure can never strand anyone.
+        // configuration that deserves it least. A genuine fix changes a word, or adds or removes a
+        // paragraph break -- the two things PromptHash treats as content -- so it lands under a
+        // different hash and is judged fresh; only a reformat that fixes nothing keeps the same hash,
+        // and there is nothing to strand in re-serving that prompt its own unchanged verdict.
         var model = new ScriptedModel(Unfit("plan", "contradicting"));
         var bit = new PreflightBit(model, new BitCache(4));
 
@@ -103,6 +105,21 @@ public sealed class PreflightBitTests
         // The judge reports; the processor decides. A judge allowed to answer in prose is a gate that
         // can talk itself into passing.
         var model = new ScriptedModel(new ModelReply([], Text: "looks fine to me", 0, 0));
+        var bit = new PreflightBit(model, new BitCache(4));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => bit.CheckAsync("p", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AJudgeReplyThatFailsItsOwnSchemaIsItselfAFailure()
+    {
+        // Client-side validation, same as every tool call InvestigationLoop trusts. Missing "kind"
+        // and "offending" on a problem entry is not a weaker verdict -- it is a report_fitness call
+        // that does not match its own schema, and there is no loop here to hand it back for
+        // correction, so it must be treated as the gate failing to evaluate the prompt at all.
+        var model = new ScriptedModel(ModelReply.Of(
+            ScriptedModel.Call("report_fitness", new { problems = new[] { new { stage = "verify" } } })));
         var bit = new PreflightBit(model, new BitCache(4));
 
         await Assert.ThrowsAsync<InvalidOperationException>(
