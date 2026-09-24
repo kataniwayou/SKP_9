@@ -33,6 +33,11 @@
          folder and NuGet imports it automatically, stamping the hash on THIS assembly - the entry
          assembly, where the runtime reader looks. A ProjectReference could not flow build targets. -->
     <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+
+    <!-- No Version attribute: Central Package Management pins it in Directory.Packages.props. The
+         package and its full transitive closure are vendored in nugets/ because the Docker build
+         clears nuget.org - see nugets/README-anthropic.md. -->
+    <PackageReference Include="Anthropic" />
   </ItemGroup>
 
 </Project>

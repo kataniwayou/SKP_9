@@ -84,15 +84,14 @@ public sealed class AnalystHostTests
         // BaseProcessor.Core.Processing.BaseProcessor -- satisfied now that ProcessorHost.Create
         // registers AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>().
         //
-        // Placeholders until the real adapters land (Tasks 13 and 14). Deleting these is part of
-        // those tasks: the graph must resolve with the real implementations, not only with fakes.
+        // IAnalystModel now resolves to the real AnthropicAnalystModel registered by
+        // ProcessorHost.Create (Task 13). IPanelReader is still a placeholder until Task 14.
         using var host = ProcessorHost.Create(
             ["--environment", "Development"],
             Identity,
             cfg => cfg.AddInMemoryCollection(Configuration),
             services =>
             {
-                services.AddSingleton<IAnalystModel, PlaceholderModel>();
                 services.AddSingleton<IPanelReader, PlaceholderPanelReader>();
             });
 
@@ -102,14 +101,6 @@ public sealed class AnalystHostTests
         // pass with a stub. This is the single fact standing between a healthy-looking pod and one
         // that processes nothing.
         Assert.IsType<AnalystProcessor>(host.Services.GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>());
-    }
-
-    /// <summary>Stands in for Task 13's real adapter. Never called: the graph is only asked to resolve.</summary>
-    private sealed class PlaceholderModel : IAnalystModel
-    {
-        public Task<ModelReply> SendAsync(
-            string system, IReadOnlyList<ModelTurn> transcript, IReadOnlyList<ToolSpec> tools, CancellationToken ct)
-            => throw new NotSupportedException("placeholder registration; only used to complete the DI graph");
     }
 
     /// <summary>Stands in for Task 14's real reader. Never called: the graph is only asked to resolve.</summary>

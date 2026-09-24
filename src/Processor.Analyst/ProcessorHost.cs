@@ -136,6 +136,9 @@ public static class ProcessorHost
         builder.Services.AddSingleton<PreflightBit>();
         builder.Services.AddSingleton<InvestigationLoop>();
 
+        builder.Services.Configure<Model.AnalystModelOptions>(builder.Configuration.GetSection("Analyst:Model"));
+        builder.Services.AddSingleton<Model.IAnalystModel, Model.AnthropicAnalystModel>();
+
         // The concrete processor the pre/post handlers resolve as BaseProcessor. AddBaseProcessor
         // deliberately does not register an author's implementation, so this exact form -- against
         // the base type, not AddSingleton<AnalystProcessor>() alone -- is what makes the framework
