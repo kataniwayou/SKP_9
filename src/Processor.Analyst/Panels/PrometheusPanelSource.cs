@@ -199,8 +199,12 @@ internal sealed class PrometheusPanelSource
             // Prometheus this is indistinguishable from a genuinely quiet series, so
             // NoDataDistinguishable is false here exactly as it is for SeriesPresent -- matching
             // FixturePanelReader.MissingSeries's convention of all three flags false together.
+            //
+            // Same object shape as the populated case below -- {"seriesCount":0,"series":[]} rather
+            // than a bare "[]" -- so the model parses one shape per panel instead of two, and the
+            // empty case does not silently lose the seriesCount field it would otherwise carry.
             return new PanelReading(
-                definition.PanelId, definition.Layer, "[]", SampleCount: 0,
+                definition.PanelId, definition.Layer, """{"seriesCount":0,"series":[]}""", SampleCount: 0,
                 new PanelTrust(SeriesPresent: false, WindowFullyCovered: false, NoDataDistinguishable: false));
         }
 

@@ -169,10 +169,16 @@ internal static class PanelRegistry
                 "telemetry for whatever the replica is doing, not scoped to the monitored workflow. " +
                 "About 12 of every ~13ms in this number is the sender's own publisher confirm, " +
                 "double-counted: subtract the produce-duration panel's mean, for the SAME " +
-                "service_instance_id, to get the true broker wait -- both panels use the identical " +
-                "estimator and grouping so the subtraction lines up exactly. An empty reading here " +
-                "is never distinguishable from a genuinely idle broker; see " +
-                "PanelTrust.NoDataDistinguishable's own caveat for why.",
+                "service_instance_id, to approximate the true broker wait -- both panels use the " +
+                "identical estimator and grouping, which makes the subtraction meaningful, but it " +
+                "remains an approximation because the two instruments count different message " +
+                "populations (consumed versus published) over the same window. An empty reading " +
+                "here is never distinguishable from a genuinely idle broker; see " +
+                "PanelTrust.NoDataDistinguishable's own caveat for why. The reading also carries " +
+                "seriesCount: how many replicas reported at all in this window. A replica missing " +
+                "from the response entirely cannot be counted, so seriesCount is a floor, not a " +
+                "census -- a drop in it is meaningful, but a steady value is not proof every " +
+                "expected replica is present.",
             Kind: PanelKind.Prometheus,
             Query:
                 $"sum by (service_instance_id) " +
@@ -187,11 +193,17 @@ internal static class PanelRegistry
                 "Mean seconds a publish call spent waiting on its own broker confirm, from " +
                 "Prometheus, grouped by replica only (service_instance_id) -- matching queue-wait's " +
                 "grouping and estimator exactly, so queue-wait's mean minus this panel's mean, for " +
-                "the same service_instance_id, isolates the time a message actually spent waiting " +
-                "in the broker rather than in the sender's own confirm. No workflow dimension: " +
-                "host-level telemetry for the replica, not the monitored workflow. An empty reading " +
-                "is never distinguishable from a genuinely idle publisher; see " +
-                "PanelTrust.NoDataDistinguishable's own caveat for why.",
+                "the same service_instance_id, approximates the time a message actually spent " +
+                "waiting in the broker rather than in the sender's own confirm. It is an " +
+                "approximation, not an exact join: the two instruments count different message " +
+                "populations (published here versus consumed on queue-wait) over the same window, " +
+                "not the same individual messages. No workflow dimension: host-level telemetry for " +
+                "the replica, not the monitored workflow. An empty reading is never distinguishable " +
+                "from a genuinely idle publisher; see PanelTrust.NoDataDistinguishable's own caveat " +
+                "for why. The reading also carries seriesCount: how many replicas reported at all in " +
+                "this window. A replica missing from the response entirely cannot be counted, so " +
+                "seriesCount is a floor, not a census -- a drop in it is meaningful, but a steady " +
+                "value is not proof every expected replica is present.",
             Kind: PanelKind.Prometheus,
             Query:
                 $"sum by (service_instance_id) " +
@@ -212,7 +224,11 @@ internal static class PanelRegistry
                 "not a quantile: the bucket ladder is coarser than the system at typical sample " +
                 "counts. No workflow dimension: host-level telemetry for the replica, not the " +
                 "monitored workflow specifically. An empty series is never distinguishable from a " +
-                "genuinely idle replica; see PanelTrust.NoDataDistinguishable's own caveat for why.",
+                "genuinely idle replica; see PanelTrust.NoDataDistinguishable's own caveat for why. " +
+                "The reading also carries seriesCount: how many replicas reported at all in this " +
+                "window. A replica missing from the response entirely cannot be counted, so " +
+                "seriesCount is a floor, not a census -- a drop in it is meaningful, but a steady " +
+                "value is not proof every expected replica is present.",
             Kind: PanelKind.Prometheus,
             Query:
                 $"sum by (queue, disposition, service_instance_id) " +
@@ -230,7 +246,11 @@ internal static class PanelRegistry
                 "whatever workflows are assigned to it. A replica that drops out of this panel's " +
                 "series entirely has stopped reporting, which is a different failure than reporting " +
                 "unready -- and because this is Prometheus, that silence is never distinguishable " +
-                "from a genuinely idle series; see PanelTrust.NoDataDistinguishable's own caveat.",
+                "from a genuinely idle series; see PanelTrust.NoDataDistinguishable's own caveat. " +
+                "The reading also carries seriesCount: how many replicas reported at all in this " +
+                "window. A replica missing from the response entirely cannot be counted, so " +
+                "seriesCount is a floor, not a census -- a drop in it is meaningful, but a steady " +
+                "value is not proof every expected replica is present.",
             Kind: PanelKind.Prometheus,
             Query: "min by (service_instance_id) (last_over_time(pipeline_identity_ready_ratio[40s]))"),
     ];

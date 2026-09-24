@@ -69,6 +69,33 @@ public sealed class PanelRegistryTests
     }
 
     [Fact]
+    public void EveryOpsDescriptionExplainsSeriesCount()
+    {
+        // Review wave 3, finding 1: seriesCount reaches the model in every Prometheus ValueJson with
+        // no explanation anywhere but an implementation comment. The description is the one channel
+        // that reaches the model, so it has to say what the number means and its limit (a floor, not
+        // a census -- an absent replica cannot be counted).
+        Assert.All(
+            PanelRegistry.All.Where(p => p.Layer == "ops"),
+            p => Assert.Contains("seriesCount", p.Description, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheSubtractionDescriptionsAreHonestAboutBeingAnApproximation()
+    {
+        // Review wave 3, finding 3: queue-wait and produce-duration share an estimator and a join
+        // key, but they count different message populations (consumed vs published), so the
+        // correction is an approximation, not an exact join -- the description must say so rather
+        // than claim it "lines up exactly".
+        var queueWait = PanelRegistry.All.Single(p => p.PanelId == "queue-wait").Description;
+        var produceDuration = PanelRegistry.All.Single(p => p.PanelId == "produce-duration").Description;
+
+        Assert.Contains("approximat", queueWait, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("approximat", produceDuration, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("lines up exactly", queueWait, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void EveryOpsDescriptionCarriesTheNoDataDistinguishableCaveat()
     {
         // I2: the flag's Prometheus limitation is documented on an internal class and on PanelTrust

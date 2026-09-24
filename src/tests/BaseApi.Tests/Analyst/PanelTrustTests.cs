@@ -51,6 +51,13 @@ public sealed class PanelTrustTests
         Assert.False(reading.Trust.WindowFullyCovered);
         Assert.False(reading.Trust.NoDataDistinguishable);
         Assert.Equal(0, reading.SampleCount);
+
+        // Same object shape as a populated reading -- {"seriesCount":0,"series":[]} -- not a bare
+        // "[]", so the model parses one shape per panel rather than two and the empty case does not
+        // silently lose the seriesCount field it would otherwise carry.
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(0, value.RootElement.GetProperty("seriesCount").GetInt32());
+        Assert.Equal(0, value.RootElement.GetProperty("series").GetArrayLength());
     }
 
     [Fact]
