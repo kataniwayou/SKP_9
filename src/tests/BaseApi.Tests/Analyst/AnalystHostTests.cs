@@ -5,6 +5,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Processor.Analyst;
+using Processor.Analyst.Model;
+using Processor.Analyst.Panels;
 using Xunit;
 
 namespace BaseApi.Tests.Analyst;
@@ -16,6 +18,16 @@ public sealed class AnalystHostTests
         InputSchemaId: null, OutputSchemaId: null, ConfigSchemaId: null,
         Name: "analyst", Version: "1.0.0");
 
+    private static readonly Dictionary<string, string?> Configuration = new()
+    {
+        ["Service:Name"]            = "processor",
+        ["Service:Version"]         = "0.0.0",
+        ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
+        ["RabbitMq:Host"]           = "localhost",
+        ["RabbitMq:Username"]       = "guest",
+        ["RabbitMq:Password"]       = "guest",
+    };
+
     // No "--environment", "Development": that turns on ServiceProviderOptions.ValidateOnBuild, which
     // would validate the WHOLE graph, including AddProcessorExecution's ProcessDispatchHandler --
     // and that handler needs BaseProcessor.Core.Processing.BaseProcessor, which nothing registers
@@ -23,18 +35,7 @@ public sealed class AnalystHostTests
     // At Task 2 that dependency is missing BY DESIGN, so asserting the whole graph here would be
     // asserting something false about this shell rather than testing it.
     internal static Microsoft.Extensions.Hosting.IHost Host()
-        => ProcessorHost.Create(
-            [],
-            Identity,
-            cfg => cfg.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Service:Name"]            = "processor",
-                ["Service:Version"]         = "0.0.0",
-                ["ConnectionStrings:Redis"] = "localhost:6379,abortConnect=false",
-                ["RabbitMq:Host"]           = "localhost",
-                ["RabbitMq:Username"]       = "guest",
-                ["RabbitMq:Password"]       = "guest",
-            }));
+        => ProcessorHost.Create([], Identity, cfg => cfg.AddInMemoryCollection(Configuration));
 
     [Fact]
     public void TheHostBuildsAndItsRegisteredServicesResolve()
@@ -51,7 +52,7 @@ public sealed class AnalystHostTests
         // AnalystProcessor>() makes the graph complete. That is the same shape
         // src/tests/BaseApi.Tests/PathImporter's host-wiring fact takes (see commit 58959c2, "the host
         // wiring fact validates the whole graph, not two registrations") -- meaningful only once the
-        // graph it validates is actually whole.
+        // graph it validates is actually whole. TheServiceGraphResolves, below, is that form.
         using var host = Host();
 
         // IProcessorContext is seeded with the identity Create() was handed -- proves the identity
@@ -70,5 +71,49 @@ public sealed class AnalystHostTests
 
         // Configure<ProcessorLivenessOptions> binds without throwing.
         Assert.NotNull(host.Services.GetRequiredService<IOptions<ProcessorLivenessOptions>>().Value);
+    }
+
+    [Fact]
+    public void TheServiceGraphResolves()
+    {
+        // The whole-graph form. "--environment", "Development" turns on
+        // ServiceProviderOptions.ValidateOnBuild/ValidateScopes, matching ProcessorSampleTests.Build()
+        // and the PathImporter host-wiring fact (commit 58959c2) -- it proves every registration in
+        // the container resolves, not just the ones a caller happens to ask for. That includes
+        // AddProcessorExecution's ProcessDispatchHandler, which needs
+        // BaseProcessor.Core.Processing.BaseProcessor -- satisfied now that ProcessorHost.Create
+        // registers AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>().
+        //
+        // Placeholders until the real adapters land (Tasks 13 and 14). Deleting these is part of
+        // those tasks: the graph must resolve with the real implementations, not only with fakes.
+        using var host = ProcessorHost.Create(
+            ["--environment", "Development"],
+            Identity,
+            cfg => cfg.AddInMemoryCollection(Configuration),
+            services =>
+            {
+                services.AddSingleton<IAnalystModel, PlaceholderModel>();
+                services.AddSingleton<IPanelReader, PlaceholderPanelReader>();
+            });
+
+        Assert.NotNull(host.Services.GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>());
+    }
+
+    /// <summary>Stands in for Task 13's real adapter. Never called: the graph is only asked to resolve.</summary>
+    private sealed class PlaceholderModel : IAnalystModel
+    {
+        public Task<ModelReply> SendAsync(
+            string system, IReadOnlyList<ModelTurn> transcript, IReadOnlyList<ToolSpec> tools, CancellationToken ct)
+            => throw new NotSupportedException("placeholder registration; only used to complete the DI graph");
+    }
+
+    /// <summary>Stands in for Task 14's real reader. Never called: the graph is only asked to resolve.</summary>
+    private sealed class PlaceholderPanelReader : IPanelReader
+    {
+        public PanelDescriptor Describe(string panelId)
+            => throw new NotSupportedException("placeholder registration; only used to complete the DI graph");
+
+        public Task<PanelReading> ReadAsync(string panelId, TimeRange range, CancellationToken ct)
+            => throw new NotSupportedException("placeholder registration; only used to complete the DI graph");
     }
 }

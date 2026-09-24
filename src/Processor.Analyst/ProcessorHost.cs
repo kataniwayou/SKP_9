@@ -8,6 +8,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
+using Processor.Analyst.Bit;
+using Processor.Analyst.Loop;
 
 namespace Processor.Analyst;
 
@@ -80,8 +82,18 @@ public static class ProcessorHost
     /// Builds the host around an identity that is already known. Separate from
     /// <see cref="StartAsync"/> so a test can assert the graph resolves without a broker.
     /// </summary>
+    /// <param name="configureServices">
+    /// Extra service registrations applied after this shell's own, before the host is built. Null in
+    /// production. A test uses it to substitute fakes for <c>IAnalystModel</c> and
+    /// <c>IPanelReader</c>, which have no production implementation until Tasks 13 and 14 — without
+    /// it, the whole-graph <c>ValidateOnBuild</c> form has no way to make this composition root
+    /// resolve end to end.
+    /// </param>
     public static IHost Create(
-        string[] args, ProcessorIdentityFound identity, Action<IConfigurationBuilder>? configure = null)
+        string[] args,
+        ProcessorIdentityFound identity,
+        Action<IConfigurationBuilder>? configure = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
 
@@ -115,19 +127,22 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // Analyst services are registered here as each task lands: the tool catalog (Task 6), the
-        // panel reader (Task 7), the loop (Task 8), the BIT (Task 11), the scratch store (Task 12)
-        // and the model adapter (Task 13). AnalystHostTests.TheHostBuildsAndItsRegisteredServicesResolve
-        // proves the services registered so far construct cleanly; it does NOT catch a registration
-        // whose dependencies are missing — that needs ValidateOnBuild, which needs the whole graph to
-        // be real, which it isn't until BaseProcessor.Core.Processing.BaseProcessor is registered
-        // below. Task 12's whole-graph, ["--environment", "Development"] form is what restores that
-        // coverage (see commit 58959c2 for the precedent).
-        //
-        // Task 12 registers the processor itself as
-        // AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>() — the
-        // framework does not auto-register an author's processor, so that exact form is required;
-        // AddSingleton<AnalystProcessor>() alone leaves the base-type resolution unsatisfied.
+        // The Analyst's own graph. The model adapter (Task 13) and the panel reader (Task 14) are not
+        // registered here — nothing under src/Processor.Analyst implements IAnalystModel or
+        // IPanelReader yet — so the whole-graph ValidateOnBuild form only resolves when a caller
+        // supplies both through configureServices (tests do this today; the real adapters replace
+        // that call when Tasks 13/14 land).
+        builder.Services.AddSingleton<BitCache>(_ => new BitCache(capacity: 8));
+        builder.Services.AddSingleton<PreflightBit>();
+        builder.Services.AddSingleton<InvestigationLoop>();
+
+        // The concrete processor the pre/post handlers resolve as BaseProcessor. AddBaseProcessor
+        // deliberately does not register an author's implementation, so this exact form -- against
+        // the base type, not AddSingleton<AnalystProcessor>() alone -- is what makes the framework
+        // see it. Matches Processor.SKNormalizer/ProcessorHost.cs.
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>();
+
+        configureServices?.Invoke(builder.Services);
 
         return builder.Build();
     }

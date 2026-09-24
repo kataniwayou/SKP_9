@@ -34,36 +34,12 @@ public sealed class InvestigationLoopTests
     private static InvestigationLoop Loop(IAnalystModel model, IPanelReader? panels = null, FakeTimeProvider? clock = null)
         => new(model, panels ?? Panels(), clock ?? new FakeTimeProvider(), NullLogger<InvestigationLoop>.Instance);
 
-    /// <summary>The five stage calls a well-behaved agent makes before submitting, as one reply each.</summary>
-    private static ModelReply[] Stages(string panelId = "queue-depth") =>
-    [
-        ModelReply.Of(ScriptedModel.Call("record_research", new { observations = new[] { "arrival mean rose" } })),
-        ModelReply.Of(ScriptedModel.Call("record_validation", new { analysable = true, concerns = Array.Empty<string>(), reason = "series present" })),
-        ModelReply.Of(ScriptedModel.Call("record_plan", new { hypotheses = new[] { new { hypothesis = "broker slow", disconfirmingCriterion = "queue depth over 100", panelsToRead = new[] { panelId } } } })),
-        ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId })),
-        ModelReply.Of(ScriptedModel.Call("record_readings", new { readings = new[] { new { panelId, summary = "max 4", trusted = true } } })),
-        ModelReply.Of(ScriptedModel.Call("record_verification", new { verdicts = new[] { new { hypothesis = "broker slow", survived = false, whatWasSeen = "max 4", citedPanels = new[] { panelId } } } })),
-    ];
-
-    private static ModelToolCall SubmitFinding() => SubmitFindingCiting("queue-depth");
-
-    /// <summary><see cref="SubmitFinding"/> with the evidence panelId substituted.</summary>
-    private static ModelToolCall SubmitFindingCiting(string panelId) => ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
-    {
-        verdict = "Drifting",
-        narrative = "arrival mean rose",
-        samplesExamined = 91,
-        evidence = new[] { new { panelId, layer = "ops", label = "mean", value = "180ms" } },
-        ruledOut = new[]
-        {
-            new { hypothesis = "broker slow", disconfirmingCriterion = "queue depth over 100", whatWasSeen = "max 4" },
-        },
-    });
+    // Stages()/SubmitFinding()/Submit() now live on AnalystScript, shared with AnalystProcessorTests.
 
     [Fact]
     public async Task ATerminalSubmitFindingProducesAFinding()
     {
-        var model = new ScriptedModel([.. Stages(), ModelReply.Of(SubmitFinding())]);
+        var model = new ScriptedModel([.. AnalystScript.Stages(), AnalystScript.Submit()]);
 
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
 
@@ -93,9 +69,9 @@ public sealed class InvestigationLoopTests
         // and it was clean" from "never looked".
         var model = new ScriptedModel(
             [
-                .. Stages("arrival-mean"),
+                .. AnalystScript.Stages("arrival-mean"),
                 ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "queue-depth" })),
-                ModelReply.Of(SubmitFinding()),
+                AnalystScript.Submit(),
             ]);
 
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
@@ -109,7 +85,7 @@ public sealed class InvestigationLoopTests
     public async Task AllToolResultsForOneReplyComeBackInASingleUserTurn()
     {
         // Splitting parallel results across several user turns silently trains the model to stop
-        // making parallel calls at all. Stages() precede this reply only so the eventual
+        // making parallel calls at all. AnalystScript.Stages() precede this reply only so the eventual
         // submit_finding satisfies Task 9's cross-reference assertions; each of their record_* calls
         // is answered with its own one-result turn, so instead of asserting there is only ever one
         // user-turn-with-results in the whole run (no longer true once stages exist), this isolates
@@ -121,14 +97,14 @@ public sealed class InvestigationLoopTests
         // works equally well here.
         var model = new ScriptedModel(
             [
-                .. Stages(),
+                .. AnalystScript.Stages(),
                 new ModelReply(
                     [
                         ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "arrival-mean" }),
                         ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "queue-depth" }),
                     ],
                     Text: null, InputTokens: 0, OutputTokens: 0),
-                ModelReply.Of(SubmitFinding()),
+                AnalystScript.Submit(),
             ]);
 
         await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
@@ -209,16 +185,16 @@ public sealed class InvestigationLoopTests
     {
         // Server-side strict enforcement does not exist on the on-prem path, so a malformed input is
         // an expected event. Hand it back as an error result and let the model correct itself; only
-        // a loop that never recovers becomes a failed step. Stages() precede the malformed call only
+        // a loop that never recovers becomes a failed step. AnalystScript.Stages() precede the malformed call only
         // so the eventual submit_finding satisfies Task 9's cross-reference assertions; their record_*
         // calls always validate, so filtering the whole run's results down to the errors still finds
         // exactly the one this test causes (Received aliases the loop's own transcript list, so it
         // reflects the final state regardless of which index is read).
         var model = new ScriptedModel(
             [
-                .. Stages(),
+                .. AnalystScript.Stages(),
                 ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { wrongField = "x" })),
-                ModelReply.Of(SubmitFinding()),
+                AnalystScript.Submit(),
             ]);
 
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
@@ -245,15 +221,15 @@ public sealed class InvestigationLoopTests
     {
         // ToolCatalog.SchemaFor has no case for a name the model invented; resolving the schema from
         // the catalog the loop already holds means an unknown name is a handled tool_result, not an
-        // ArgumentOutOfRangeException the model gets no chance to correct. Stages() run afterward only
+        // ArgumentOutOfRangeException the model gets no chance to correct. AnalystScript.Stages() run afterward only
         // to satisfy Task 9's cross-reference assertions on the eventual valid submit_finding; their
         // record_* calls always validate, so filtering the whole run down to error results still
         // isolates exactly the one this test causes.
         var model = new ScriptedModel(
             [
                 ModelReply.Of(ScriptedModel.Call("not_a_real_tool", new { })),
-                .. Stages(),
-                ModelReply.Of(SubmitFinding()),
+                .. AnalystScript.Stages(),
+                AnalystScript.Submit(),
             ]);
 
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
@@ -275,7 +251,7 @@ public sealed class InvestigationLoopTests
             new ModelReply(
                 [
                     ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" }),
-                    SubmitFinding(),
+                    AnalystScript.SubmitFinding(),
                 ],
                 Text: null, InputTokens: 0, OutputTokens: 0));
 
@@ -292,7 +268,7 @@ public sealed class InvestigationLoopTests
         // C2: "Quiet" is not in submit_finding's verdict enum, and AnalystFinding's own contract says
         // a verdict must never reach a document unvalidated. Terminate is reached only after the same
         // client-side validation every other call gets, so this comes back as an error tool_result
-        // the model can correct, not a persisted document and not a raw exception. Stages() run
+        // the model can correct, not a persisted document and not a raw exception. AnalystScript.Stages() run
         // between the invalid attempt and the valid one only to satisfy Task 9's assertions on the
         // eventual successful submit_finding; their record_* calls always validate, so filtering the
         // whole run's results down to the errors still isolates exactly the one this test causes.
@@ -308,8 +284,8 @@ public sealed class InvestigationLoopTests
         var model = new ScriptedModel(
             [
                 ModelReply.Of(invalidFinding),
-                .. Stages(),
-                ModelReply.Of(SubmitFinding()),
+                .. AnalystScript.Stages(),
+                AnalystScript.Submit(),
             ]);
 
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
@@ -325,15 +301,15 @@ public sealed class InvestigationLoopTests
     {
         // C2, the other terminal tool: a missing required property must not throw a raw
         // KeyNotFoundException out of RunAsync on a path the brief calls an expected event, and must
-        // not silently cancel with no reason recorded anywhere. Stages() run between the invalid
+        // not silently cancel with no reason recorded anywhere. AnalystScript.Stages() run between the invalid
         // attempt and the valid submit only to satisfy Task 9's assertions; their record_* calls
         // always validate, so filtering the whole run's results down to the errors still isolates
         // exactly the one this test causes.
         var model = new ScriptedModel(
             [
                 ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { })),
-                .. Stages(),
-                ModelReply.Of(SubmitFinding()),
+                .. AnalystScript.Stages(),
+                AnalystScript.Submit(),
             ]);
 
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
@@ -351,8 +327,8 @@ public sealed class InvestigationLoopTests
         // same reply also crossed the ceiling -- exhaustion means "no answer", and here there is one.
         var model = new ScriptedModel(
             [
-                .. Stages(),
-                new ModelReply([SubmitFinding()], Text: null, InputTokens: 60_000, OutputTokens: 60_000),
+                .. AnalystScript.Stages(),
+                new ModelReply([AnalystScript.SubmitFinding()], Text: null, InputTokens: 60_000, OutputTokens: 60_000),
             ]);
 
         var outcome = await Loop(model).RunAsync(
@@ -365,11 +341,11 @@ public sealed class InvestigationLoopTests
     public async Task DataReturnedIsFalseWhenThePanelAnsweredWithNoSamples()
     {
         // I2: DataReturned is the field that distinguishes "looked at the ops layer and saw nothing"
-        // from "never looked" -- the trace's entire reason for existing. Stages("arrival-mean") is
+        // from "never looked" -- the trace's entire reason for existing. AnalystScript.Stages("arrival-mean") is
         // the ONLY read in this run, so the assertions below (Assert.Single, in particular) still
         // prove exactly what they proved before Task 9's stages existed.
         var panels = Panels().MissingSeries("arrival-mean");
-        var model = new ScriptedModel([.. Stages("arrival-mean"), ModelReply.Of(SubmitFindingCiting("arrival-mean"))]);
+        var model = new ScriptedModel([.. AnalystScript.Stages("arrival-mean"), AnalystScript.Submit("arrival-mean")]);
 
         var outcome = await Loop(model, panels).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
 
@@ -389,17 +365,17 @@ public sealed class InvestigationLoopTests
         //
         // Task 9's assertions require submit_finding's own evidence to cite a panel that was
         // genuinely read, so this run can no longer end with an EMPTY trace the way the original
-        // version of this test did -- Stages() legitimately reads "queue-depth" beforehand, which is
+        // version of this test did -- AnalystScript.Stages() legitimately reads "queue-depth" beforehand, which is
         // what submit_finding now cites. The invariant under test is unchanged: the "arrival-mean"
         // read that arrives alongside the terminal call must never reach the trace, regardless of
         // what else is in it.
         var model = new ScriptedModel(
             [
-                .. Stages(),
+                .. AnalystScript.Stages(),
                 new ModelReply(
                     [
                         ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "arrival-mean" }),
-                        SubmitFinding(),
+                        AnalystScript.SubmitFinding(),
                     ],
                     Text: null, InputTokens: 0, OutputTokens: 0),
             ]);
@@ -414,7 +390,7 @@ public sealed class InvestigationLoopTests
     public async Task AFindingWhoseEvidenceWasNeverReadIsImpossible()
     {
         // The end-to-end shape of the assertions: the loop, not a unit test, refuses it.
-        var model = new ScriptedModel([.. Stages(), ModelReply.Of(SubmitFindingCiting("never-read"))]);
+        var model = new ScriptedModel([.. AnalystScript.Stages(), AnalystScript.Submit("never-read")]);
 
         var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
             () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
@@ -423,13 +399,7 @@ public sealed class InvestigationLoopTests
     }
 }
 
-/// <summary>Mirrors ToolNames, which is internal to the processor and reached through InternalsVisibleTo.</summary>
-internal static class ToolNamesForTest
-{
-    internal const string ReadPanel = "read_panel";
-    internal const string SubmitFinding = "submit_finding";
-    internal const string ReportNoFinding = "report_no_finding";
-}
+// ToolNamesForTest now lives on AnalystScript.cs, shared with AnalystProcessorTests.
 
 /// <summary>A model that burns wall clock on every turn and never terminates.</summary>
 internal sealed class AdvancingModel(FakeTimeProvider clock, TimeSpan perTurn) : IAnalystModel
