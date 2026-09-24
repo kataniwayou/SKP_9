@@ -1,0 +1,37 @@
+using Processor.Analyst.Model;
+
+namespace Processor.Analyst.Bit;
+
+/// <summary>
+/// Checked every dispatch, run on a cache miss. One model call — the scenario lives inside the
+/// judging prompt as text, so there is no tool loop, no panel read and no fixture reader.
+/// </summary>
+internal sealed class PreflightBit(IAnalystModel model, BitCache cache)
+{
+    internal async Task<FitnessVerdict> CheckAsync(string prompt, CancellationToken ct)
+    {
+        var hash = PromptHash.Of(prompt);
+
+        if (cache.TryGet(hash, out var cached))
+        {
+            return cached;
+        }
+
+        ModelTurn[] transcript = [new(ModelRole.User, BitPrompt.Wrap(prompt), [], [])];
+
+        var reply = await model
+            .SendAsync(BitPrompt.System, transcript, [BitPrompt.Tool], ct)
+            .ConfigureAwait(false);
+
+        var call = reply.ToolCalls.FirstOrDefault(c => c.ToolName == BitPrompt.ToolName)
+            ?? throw new InvalidOperationException(
+                "the fitness judge answered without calling report_fitness; a verdict it can phrase "
+                + "freely is a gate that can talk itself into passing");
+
+        var verdict = FitnessVerdict.From(BitPrompt.Read(call.Input));
+
+        cache.Put(hash, verdict);
+
+        return verdict;
+    }
+}
