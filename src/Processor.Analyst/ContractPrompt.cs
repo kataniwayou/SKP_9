@@ -28,6 +28,16 @@ namespace Processor.Analyst;
 /// reword.
 /// </para>
 /// <para>
+/// <b>A re-plan REPLACES, it does not add.</b> <c>StageArtifacts.Record</c> overwrites the
+/// <c>record_plan</c> artifact on every call, and <c>StageAssertions.Check</c> reads only the latest
+/// one. A model that returns to stage 3 and records only its new hypothesis — reasonably assuming
+/// the first plan is still on file somewhere — silently drops every hypothesis it carried forward,
+/// which then fails verification ("no stated criterion") or a finding's <c>ruledOut</c> ("never
+/// proposed") for a hypothesis the model never stopped believing it had planned. So the prompt says
+/// outright that a re-plan is the whole plan from then on, next to the verbatim instruction it goes
+/// with, rather than as a separate, missable rule.
+/// </para>
+/// <para>
 /// <b>A criterion must name evidence not yet in hand.</b> <c>StageAssertions</c> indicts any
 /// hypothesis whose criterion names a panel the trace shows was already read before that hypothesis
 /// was first planned — and stage 1 makes reading panels during Research unavoidable, since
@@ -61,7 +71,10 @@ internal static class ContractPrompt
            character, everywhere you refer to it again — in verification, in a re-plan if you return
            here for a second look, and in a finding's ruledOut list alike. A hypothesis renamed
            partway through, including across a re-plan, reads as a different hypothesis that was never
-           planned.
+           planned. A re-plan REPLACES the previous plan entirely, it does not add to it — so if you
+           return to this stage, restate every hypothesis still in play, carried-forward ones verbatim
+           alongside any new ones. A hypothesis you leave out of a re-plan is treated as never having
+           been proposed at all, even if an earlier plan named it.
         4. Execute — read the panels the plan named. Record with {ToolNames.RecordReadings}.
         5. Verify — judge each hypothesis against its own stated criterion, and apply the same
            scepticism from stage 2 to anything you read during stage 4. Record with
