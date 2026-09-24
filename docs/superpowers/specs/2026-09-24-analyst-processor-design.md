@@ -1,7 +1,7 @@
 # Processor.Analyst — a scheduled operator surrogate that reads the boards
 
 **Date:** 2026-09-24
-**Status:** Designed, decisions resolved except §19. Not implemented.
+**Status:** Designed, name confirmed, all decisions resolved except §19.1 (scheduling). Not implemented.
 **Introduces:** `src/Processor.Analyst/`, a k8s manifest for it, one config schema row, one finding
 schema row, and the solution's first LLM dependency (`Anthropic` NuGet package, pinned in
 `Directory.Packages.props`).
@@ -606,11 +606,5 @@ missing — check with `--timestamps`.
 
 ## 19. Open questions
 
-1. **The processor's name.** This document uses `Processor.Analyst`, on the argument that every existing
-   name is object+actor (`ArchiveCollapser`, `FileFetcher`, `KafkaExporter`) and a bare `Analyzer` would
-   be the only one with no object — and the weakest possible object, since every processor analyses
-   something. "Analyst" names the role rather than the input, which survives the day it reads something
-   that is not a panel. `Processor.PanelAnalyzer` is the honest alternative if binding to today's reality
-   is preferred. **Not confirmed.**
-2. **Whether the scored-window set (§16.3) is built before or after first deployment.** It is a
+1. **Whether the scored-window set (§16.3) is built before or after first deployment.** It is a
    prerequisite for trusting the offline backend but not for shipping the connected one.
