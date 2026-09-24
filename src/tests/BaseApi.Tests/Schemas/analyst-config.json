@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Analyst step payload",
+  "type": "object",
+  "properties": {
+    "targetWorkflowId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The workflow to investigate. Scopes every query the agent issues; the Analyst's own executions live under the monitor workflow's id, so a query scoped here cannot see them."
+    },
+    "windowMinutes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How far back to look, matching what the dashboards show. The agent is stateless across dispatches, so this window is the only history it has."
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The analytical judgment layer only. The loop contract -- the five stages, the tool protocol, the terminal tools -- is compiled, so a payload edit cannot break the typed exit."
+    },
+    "panelSet": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "description": "The panels this monitor may consult. This is the read boundary: the tool surface is the panel list."
+    },
+    "maxIterations": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Hard ceiling on model turns. Exhaustion with no terminal tool call is a failed step, never a quiet one."
+    },
+    "maxTokens": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Hard ceiling on accumulated tokens across the dispatch."
+    },
+    "wallClockSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Hard ceiling on elapsed investigation time."
+    }
+  },
+  "required": [
+    "targetWorkflowId", "windowMinutes", "prompt", "panelSet",
+    "maxIterations", "maxTokens", "wallClockSeconds"
+  ],
+  "additionalProperties": false
+}
