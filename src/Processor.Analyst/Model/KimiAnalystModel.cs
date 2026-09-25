@@ -252,7 +252,19 @@ internal sealed class KimiAnalystModel : IAnalystModel
     /// </summary>
     internal static ModelReply ToReply(JsonElement body)
     {
-        var message = body.GetProperty("choices")[0].GetProperty("message");
+        // The response envelope is validated here, where it is read, rather than by adding an
+        // exception type per shape to SendAsync's catch chain. Every one of these is "reached the
+        // backend, got a 2xx, cannot read the answer" -- which is an analysis that could not run, not
+        // one that found nothing. Silence is the all-clear, so this must never become Cancelled.
+        if (!body.TryGetProperty("choices", out var choices)
+            || choices.ValueKind != JsonValueKind.Array
+            || choices.GetArrayLength() == 0)
+        {
+            throw new AnalysisImpossibleException(
+                "the model backend returned a response with no choices");
+        }
+
+        var message = choices[0].GetProperty("message");
 
         // The verbatim assistant message, kept as its own tree so it outlives the caller's
         // JsonDocument and can be sent back untouched. This is what Task 3 replays.
@@ -284,13 +296,35 @@ internal sealed class KimiAnalystModel : IAnalystModel
             text = content.GetString();
         }
 
-        var usage = body.GetProperty("usage");
+        if (!body.TryGetProperty("usage", out var usage))
+        {
+            throw new AnalysisImpossibleException(
+                "the model backend returned a response with no usage");
+        }
 
         return new ModelReply(
             calls,
             text,
-            usage.GetProperty("prompt_tokens").GetInt32(),
-            usage.GetProperty("completion_tokens").GetInt32());
+            TokenCount(usage, "prompt_tokens"),
+            TokenCount(usage, "completion_tokens"));
+    }
+
+    /// <summary>
+    /// Reads one token count. A count that is absent, non-numeric, or outside <see cref="int"/> range
+    /// makes the reply unreadable rather than merely odd: the loop enforces its own token budget from
+    /// these numbers, so substituting zero would let a run spend without accounting for it.
+    /// </summary>
+    private static int TokenCount(JsonElement usage, string name)
+    {
+        if (!usage.TryGetProperty(name, out var value)
+            || value.ValueKind != JsonValueKind.Number
+            || !value.TryGetInt32(out var count))
+        {
+            throw new AnalysisImpossibleException(
+                $"the model backend returned a response whose usage.{name} could not be read");
+        }
+
+        return count;
     }
 
     /// <summary>

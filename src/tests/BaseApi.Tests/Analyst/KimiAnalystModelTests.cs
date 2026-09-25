@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Processor.Analyst.Loop;
 using Processor.Analyst.Model;
 using Xunit;
 
@@ -240,5 +241,45 @@ public sealed class KimiAnalystModelTests
         var baseAddress = KimiAnalystModel.NormaliseBaseAddress(configured);
 
         Assert.Equal(expected, new Uri(baseAddress, KimiAnalystModel.RequestPath).ToString());
+    }
+
+    [Fact]
+    public void AnEmptyChoicesArrayIsAnUnreadableResponseRatherThanACrash()
+    {
+        // The indexer on an empty array throws IndexOutOfRangeException, which no catch in SendAsync
+        // translates -- so it would escape as an unhandled fault instead of a Failed step.
+        var body = JsonDocument.Parse("""
+        { "choices": [], "usage": { "prompt_tokens": 1, "completion_tokens": 1 } }
+        """).RootElement.Clone();
+
+        var ex = Assert.Throws<AnalysisImpossibleException>(
+            () => KimiAnalystModel.ToReply(body));
+        Assert.Contains("no choices", ex.Message, System.StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AMissingUsageBlockIsAnUnreadableResponse()
+    {
+        var body = JsonDocument.Parse("""
+        { "choices": [ { "message": { "role": "assistant", "content": "hello" } } ] }
+        """).RootElement.Clone();
+
+        Assert.Throws<AnalysisImpossibleException>(
+            () => KimiAnalystModel.ToReply(body));
+    }
+
+    [Fact]
+    public void ANonNumericTokenCountIsAnUnreadableResponse()
+    {
+        // The loop enforces its budget from these numbers, so a count it cannot read is a run it
+        // cannot account for -- not a run worth continuing with a fabricated zero.
+        var body = JsonDocument.Parse("""
+        { "choices": [ { "message": { "role": "assistant", "content": "hello" } } ],
+          "usage": { "prompt_tokens": "lots", "completion_tokens": 1 } }
+        """).RootElement.Clone();
+
+        var ex = Assert.Throws<AnalysisImpossibleException>(
+            () => KimiAnalystModel.ToReply(body));
+        Assert.Contains("prompt_tokens", ex.Message, System.StringComparison.Ordinal);
     }
 }
