@@ -15,8 +15,9 @@ API**, and make the backend's three coordinates — **model id, API key, base UR
 environment variables rather than compiled constants.
 
 Throughout this document, *OpenAI-compatible* describes the **wire protocol**, which is settled and not
-in question. *OpenAI SDK* means the `openai-dotnet` **client library**, which §4 examines separately and
-largely rejects. The two are independent choices and the distinction is load-bearing.
+in question. *OpenAI SDK* means the `openai-dotnet` **client library**, which §4 considers separately and
+does not adopt. The two are independent decisions and the distinction is load-bearing: this design speaks
+the OpenAI wire protocol without using the OpenAI client library.
 
 The Anthropic adapter is **deleted**, not retained behind a switch. There is one backend.
 
@@ -76,38 +77,51 @@ that turn is never replayed.
 
 ## 4. Transport decision
 
-The request was "via the OpenAI SDK". Evidence gathered while writing this spec argues against its
-typed surface, so all three options are recorded and one needs sign-off.
+**Decided: plain `HttpClient` + `System.Text.Json`.**
 
-### Rejected — OpenAI .NET SDK, strongly-typed surface
+### 4.1 The scope that settles it
 
-`openai-dotnet` **issue #1329** documents reasoning content from non-OpenAI models via third-party
-endpoints being **silently dropped**: the deserializer maps a known subset of fields and everything else
-falls into unmapped-property handling that never becomes readable. Related requests (#643) confirm the
-gap.
+**Supporting several models is explicitly not a requirement.** This processor targets `kimi-k3`. If the
+org later provides a better model that is a deliberate future change, and `IAnalystModel` is what makes it
+contained. Building a provider-agnostic transport now would hedge against a future we have been told not
+to design for.
 
-Using the typed surface would therefore reconstruct §3's defect *inside the SDK*, where no amount of
-care in our own adapter can see it. **Rejected on correctness, not taste.**
+That cancels the two flexibility arguments that dominated earlier drafts — raw JSON's
+provider-agnosticism and the SDK's ecosystem reach — leaving one criterion: the most efficient transport
+that fulfils the business for one known endpoint.
 
-### Recommended — plain `HttpClient` + `System.Text.Json`
+### 4.2 Why `HttpClient` wins on that criterion
 
-- The echo requirement becomes trivial: keep the assistant message's raw `JsonElement` and send it back.
-- **No new NuGet package.** `NuGet.config` clears nuget.org, so every package must be vendored into
-  `nugets/` with its full transitive closure or the Docker build fails. This option costs nothing there.
-- The wire surface we need is small: one POST to `/chat/completions`, four message roles, a `tools`
-  array, `tool_calls`, and `usage`.
-- It is what §9.1 of the prior design chose, for these reasons.
+1. **It satisfies §3 by construction, with nothing to verify first.** We hold the raw assistant message
+   and send it back. §3 is the one property that fails invisibly offline and kills every investigation on
+   its second call, so "guaranteed" beats "probably" by more than the usual margin.
+2. **One fewer mapping layer.** Wire JSON → seam types, rather than wire JSON → SDK typed models → seam
+   types. Less code, fewer allocations, and one fewer place a field can be lost — for a model whose
+   required field is not in the SDK's schema anyway. This is the literal answer to "most efficient".
+3. **Zero build cost.** No package, so nothing to vendor into `nugets/` with its full transitive closure.
+4. **House style.** `AddHttpClient<ElasticPanelSource>` and `AddHttpClient<PrometheusPanelSource>`
+   (`ProcessorHost.cs:151,156`) are already how this processor makes outbound calls. One style, not two.
+5. **Retry behaviour stays ours** — which matters because F5 bounds a single model call with a wall-clock
+   token, and a library retrying internally could consume that budget invisibly.
 
-### Sanctioned alternative — OpenAI SDK, protocol-level only
+The wire surface is small enough to make this cheap: one POST to `/chat/completions`, four message roles,
+a `tools` array, `tool_calls`, and `usage`.
 
-If the SDK is required for policy reasons, use only its protocol methods (`BinaryContent` in, raw JSON
-out), never the typed chat surface. Auth, retries and transport come from the SDK; the JSON stays ours,
-so §3 holds.
+### 4.3 Considered and not chosen
 
-**The tradeoff, stated plainly:** we write the JSON by hand either way, so this buys plumbing while
-still paying the offline vendoring cost. It is viable, not preferable.
+**OpenAI SDK, typed surface** — what was originally requested. Not chosen for the reasons above, and
+*not* on correctness grounds. An earlier draft of this section rejected it outright on the strength of
+`openai-dotnet` **issue #1329**; that was wrong, and it is corrected here rather than quietly dropped,
+because the record of why a decision was made outlives the decision. #1329 concerns the **Responses
+API** (`ReasoningResponseItem`), not **Chat Completions**, so it says nothing directly about this path —
+and it contains a detail that *favours* the SDK: unmapped properties fall into a generic mechanism, and
+the reporter had to tag their own additions to stop them leaking back into serialization on subsequent
+calls, which is exactly the round-trip §3 needs. It would most likely have worked. It simply costs a
+verification task, a vendoring task, and a mapping layer that buy nothing here.
 
-**Decision required at review.** Everything downstream of this section is identical under all three.
+**OpenAI SDK, protocol methods only** (`BinaryContent` in, raw JSON out) — keeps §3 safe and brings the
+SDK's auth and retries. Not chosen: we write the JSON by hand either way, so it pays the vendoring cost
+for plumbing we do not need, and it gives up point 5 above.
 
 ---
 
@@ -241,10 +255,15 @@ premise silently inherited into a comment is how a closed hole reopens. Check th
 state it.
 
 **`Model/IAnalystModel.cs:6-13`.** The seam justifies itself as "the only thing that makes one binary
-shippable to both the connected cluster and the air-gapped machine". With one adapter that is no longer
-true. The seam remains fully justified — §16.2's stub model and the bulk of the 145 tests depend on it —
-but the comment must be rewritten to the honest reason. A comment that lies about why something exists
-is how the next person deletes the wrong thing.
+shippable to both the connected cluster and the air-gapped machine". That is no longer true, and §4.1
+narrows it further: with one adapter and multi-model support explicitly out of scope, the seam's
+justification is now **purely that it is the test seam** — §16.2's stub model and the bulk of the 145
+tests depend on it, and without it none of the loop, BIT or disposition behaviour is testable offline.
+
+That is still a sufficient reason to keep it, and a second one survives: it is what makes a future model
+change contained rather than invasive. But the comment must say *those* things. This is the second place
+in this document where a comment justified something by a fact that has stopped being true, and a comment
+that lies about why something exists is how the next person deletes the wrong thing.
 
 ---
 
@@ -299,9 +318,10 @@ Blocking, expected from the user:
 2. **Model id** — `kimi-k3` unless the org pins something else.
 3. **Base URL** — `https://api.moonshot.ai/v1` unless the org fronts it with a proxy.
 
-Blocking, needing a decision at review:
+Closed:
 
-4. **§4** — plain `HttpClient` (recommended) or protocol-level OpenAI SDK.
+4. ~~**§4 transport**~~ — decided: plain `HttpClient`. Multi-model support confirmed out of scope, which
+   removed the only argument for a client library here.
 
 Non-blocking, to confirm against the live endpoint during the smoke test:
 
@@ -316,7 +336,7 @@ Non-blocking, to confirm against the live endpoint during the smoke test:
 | Risk | Mitigation |
 |---|---|
 | `reasoning_content` dropped on the round-trip | §3 and §4; red-checked test; live two-turn smoke test |
-| A typed SDK silently eats the field | §4 rejects that surface on the strength of issue #1329 |
+| A client library silently eats the field | §4; no client library — the adapter holds the raw JSON |
 | Effort left at `max` | §5.3 sets it explicitly and restart-gates changes |
 | A backend fault reported as silence | §6.1; `AnalysisImpossibleException` → `Failed` |
 | Model or effort changed against a warm BIT cache | §5.2; env-var-only, restart-gated |
