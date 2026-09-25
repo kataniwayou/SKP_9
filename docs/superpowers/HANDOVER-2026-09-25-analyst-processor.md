@@ -2,12 +2,14 @@
 
 **Date:** 2026-09-25
 **Branch:** `feature/path-importer`
-**State:** Tasks 1–15 of 16 complete and reviewed as merge-ready. **Task 16 is unstarted and deliberately so.**
-**Head at handover:** `7b2b4fb`. The plan's work starts at `c2cbcda` (exclusive) — 32 commits.
-**Suite:** 1537 total / 0 failed / 37 skipped, every skip under `Live/`. Read that *shape*, never a remembered total.
-
-**Since handover:** risk F6 (the thinking-block round-trip) was resolved offline and closed as a defect —
-see below and Ruling 35. Uncommitted in the working tree.
+**State:** The Anthropic → Kimi K3 backend swap is complete (6 of 6 tasks, reviewed). Registration and
+workflow wiring — the prior handover's "Task 16" — is **still unstarted**, and for a different reason now
+(see below).
+**Head at handover:** `fa4a8f1`. This backend-swap plan's work starts at `0ed5649` (exclusive, the prior
+handover commit) — 13 commits.
+**Suite:** 1549 total / 0 failed / 1512 succeeded / 37 skipped, every skip under `Live/`. Confirmed by
+running `src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe` directly on a quiet machine. Read
+that *shape*, never a remembered total.
 
 ---
 
@@ -18,14 +20,21 @@ dashboards. It is dispatched with a target `workflowId` and a time window, reads
 Grafana panels a human reads, drives a language model through a five-stage investigation, and either
 writes a finding to L2 or says nothing. It reads; in this milestone it cannot modify anything.
 
-**Design:** `docs/superpowers/specs/2026-09-24-analyst-processor-design.md`
-**Plan:** `docs/superpowers/plans/2026-09-24-analyst-processor.md`
-**Full execution ledger — 34 rulings with reasoning and cost-if-wrong, every parked finding, every
-deferred minor:** `.superpowers/sdd/2026-09-24-analyst-processor/progress.md`
+**Current design (the backend swap):** `docs/superpowers/specs/2026-09-25-analyst-kimi-k3-backend-design.md`
+**Current plan:** `docs/superpowers/plans/2026-09-25-analyst-kimi-k3-backend.md`
+**Its ledger — the rulings behind every backend-swap decision, including §9.2's amendment, the
+env-var-only condition, and the `reasoning_effort` default:**
+`.superpowers/sdd/2026-09-25-analyst-kimi-k3-backend/progress.md`
 
-**The ledger is the real record. Read it before changing anything in `src/Processor.Analyst/`.** It is
-gitignored scratch and will not survive `git clean -fdx`; if it is gone, `git log c2cbcda..HEAD` is the
-fallback, but the reasoning is only in the ledger.
+**Prior design (everything the swap did not touch — the loop, the BIT, the five stage tools, disposition
+rules):** `docs/superpowers/specs/2026-09-24-analyst-processor-design.md`, plan
+`docs/superpowers/plans/2026-09-24-analyst-processor.md`, ledger
+`.superpowers/sdd/2026-09-24-analyst-processor/progress.md`.
+
+**Both ledgers are the real record. Read the relevant one before changing anything in
+`src/Processor.Analyst/`.** They are gitignored scratch and will not survive `git clean -fdx`; if either is
+gone, `git log 0ed5649..HEAD` (this swap) or `git log c2cbcda..0ed5649` (the original build) is the
+fallback, but the reasoning is only in the ledgers.
 
 ---
 
@@ -41,80 +50,166 @@ fallback, but the reasoning is only in the ledger.
 
 An analysis that finds the system on fire is a *successful* analysis. **The worst failure this design can
 have is a monitor reporting all-clear because it broke.** Four separate routes to an unearned Cancelled
-were found and closed during execution — two of them in the final whole-branch review. If you change
-anything near `Terminate`, `StageAssertions`, or `AnalystProcessor.AnalyseAsync`, that is the property to
+were found and closed during the original build (two of them in the final whole-branch review), and this
+swap re-verified the property holds for the new backend: `KimiAnalystModel` maps every transport and HTTP
+fault to `AnalysisImpossibleException`, most-specific-first, which is disposition-critical — it becomes
+`Failed`, never a quiet Cancelled. If you change anything near `Terminate`, `StageAssertions`,
+`AnalystProcessor.AnalyseAsync`, or `KimiAnalystModel`'s error translation, that is the property to
 protect.
 
 ---
 
-## Task 16 — why it stopped, and what it needs
+## The backend: Kimi K3 over a plain `HttpClient`
 
-Task 16 is registration and workflow wiring. **Every step is irreversible, outward-facing, or
-security-sensitive**, which is why it was not executed without a human decision:
+The Anthropic adapter is **deleted**, not retained behind a switch — `Model/AnthropicAnalystModel.cs` and
+its tests are gone, the `Anthropic` NuGet package is removed from `Directory.Packages.props` and the
+offline `nugets/` store. `Model/KimiAnalystModel.cs` is the one implementation of `IAnalystModel`.
 
-1. **POST two schema rows** (`analyst-config`, `analyst-finding`) — **a referenced schema definition can
-   never be edited.** A mistake is a new row, both sides re-pointed, and a restart.
-2. **POST the processor registration row** with the SourceHash the built image claims.
-3. **Create a Kubernetes Secret** `analyst-model` holding a real Anthropic API key.
-4. **Build a two-step monitor workflow** and start it on a cron — which then calls a **paid API**
-   unattended, on a schedule.
+**Backend:** `kimi-k3` at `https://api.moonshot.ai/v1`, reached over a plain `HttpClient` +
+`System.Text.Json` — deliberately **not** a client library (not the `openai-dotnet` SDK, not any
+Anthropic-style SDK). The endpoint returns a non-standard `reasoning_content` field on assistant turns
+that must be replayed unchanged on every later call, and holding the raw JSON — rather than a typed
+model that only round-trips the fields it knows about — is what guarantees that field survives. See spec
+§4 for the full transport tradeoff (multi-model support is explicitly out of scope, which is what tips the
+decision away from a client library).
 
-Post the schema rows **verbatim from the files the tests read**, so the row and the test can never
-disagree:
-- config ← `src/tests/BaseApi.Tests/Schemas/analyst-config.json`
-- finding ← `src/tests/BaseApi.Tests/Schemas/analyst-finding.json`
+### Four environment variables, deployment-supplied
 
-### The thinking-block round-trip — FIXED, no longer a risk
+| Variable | Value |
+|---|---|
+| `Analyst__Model__ApiKey` | the Moonshot key |
+| `Analyst__Model__BaseUrl` | `https://api.moonshot.ai/v1` |
+| `Analyst__Model__ModelId` | `kimi-k3` |
+| `Analyst__Model__ReasoningEffort` | `high` |
 
-This was carried out of execution as risk F6, on the belief that it could not be settled offline. It could
-be, and it was a **defect**, not a risk: the adapter dropped signed thinking blocks it was required to
-return, so **every investigation would have failed on its second model call** — the first one to replay an
-assistant turn. Green offline because it is only reachable against the real API.
+**These must remain environment variables, never a reloadable ConfigMap file.** Model id and effort both
+change the preflight BIT's verdict, and `PreflightBit` caches on a hash of the prompt alone — so something
+must guarantee a changed value can never meet a warm cache. Environment variables freeze at container
+start: editing one in the Deployment rolls the pods, and `BitCache` is per-replica, in memory, and dies
+with the process it lived in. A live file swap under a mounted ConfigMap would break this silently — the
+process would keep answering from a verdict earned on the old model or effort. `AnalystModelOptions` is
+bound via `IOptions<T>` (a snapshot, not `IOptionsMonitor`), and that is intentional; it must stay that way.
+This is an amendment to the prior design's §9.2 (which compiled these values as constants for the same
+reason) — the ruling and its reasoning are recorded in the current ledger, not restated here to avoid a
+second, possibly-diverging account.
 
-Settled from the bundled `claude-api` reference, which is authoritative here: its C# agentic-loop example
-reconstructs `ThinkingBlock` carrying `Signature` ("the API rejects tampering") and `RedactedThinkingBlock`
-alongside text and tool_use. Thinking **is** on by default on `claude-opus-5`, and `display` defaults to
-`"omitted"` — so the blocks arrive with an *empty body* and a signature that still has to survive.
+**`reasoning_effort` is set explicitly to `high`.** The endpoint defaults to `max` — the most expensive
+setting — and reasoning tokens bill as output at $15/MTok on what will eventually be an unattended cron.
+Never let a future change silently inherit the default; if it needs to move, the scored-window replay set
+(below) is what should justify the move, not a hunch.
 
-The adapter now replays each assistant turn **verbatim** (`AssistantEcho`) instead of rebuilding it. The
-opaque blocks ride across the seam on `ModelToolCall.ProviderEcho`, because the loop copies `ToolCalls`
-into the transcript unchanged and copies nothing else out of a reply — so the loop still has no notion of
-"thinking", exactly as `IAnalystModel` requires. Full reasoning: **Ruling 35** in the ledger.
+**A hazard that no longer exists:** the prior design's §9.3 documented an Opus 5 trap — with thinking
+disabled, the model occasionally wrote a tool call into visible text that never ran, and the loop believed
+it had read a panel it had not. K3 cannot disable thinking, so this failure mode is structurally
+impossible on this backend. `InvestigationLoopTests.cs:290` was updated to say so instead of citing Opus 5.
 
-Analyst 145/145; suite 1537 total / 0 failed / 37 skipped, all under `Live/`.
+### The API key: inline, no Kubernetes Secret
 
-### Still do the live smoke test first
+The key is a plain value in `src/Processor.Analyst/appsettings.json` and
+`k8s/43-processor-analyst.yaml`, **not** a Kubernetes Secret. This was the user's explicit decision, made
+after being shown the consequence: both files are tracked, so the key enters git history permanently and
+**rotating it is a commit, not a `kubectl` command**. It was reaffirmed on the reasoning "no secret - the
+api key same threat as `Analyst__Model__ModelId`" — the same argument that already applied to the other
+three coordinates.
 
-**Nothing in the branch has ever completed a real two-turn loop.** The smoke test is no longer aimed at a
-predicted failure, but it remains the first thing a live run should check, **before** POSTing anything that
-cannot be undone. Any failure here is loud (`AnthropicApiException` → `AnalysisImpossibleException` →
-Failed), never silent.
+**The current key is a dead placeholder, not a live credential to protect urgently.** Its account is
+creditless — spent down to connectivity and minimal-functionality checks before this task started — and
+separately the key was pasted into a chat transcript, so it must be treated as compromised regardless of
+the no-Secret decision. Both facts make the git-history exposure currently theoretical. **The accepted
+tradeoff only bites for real the moment someone funds the account and a live key lands in a tracked
+file — that is the moment to revisit this decision, not before.**
 
-### Current cluster state
+### The load-bearing property: verbatim replay
 
-Both `processor-analyst` pods are in `CreateContainerConfigError` — sole event `secret "analyst-model" not
-found`, repeating. That is **correct**: the Secret is deliberately created out of band. `PodScheduled` and
-`Initialized` are true; only `Ready` is false. The image is built and `kind load`ed into cluster `desktop`.
+An assistant turn is replayed **verbatim** from the provider's raw JSON, via `ModelToolCall.ProviderEcho`
+— never rebuilt from `content` + `tool_calls`. The loop copies `ModelReply.ToolCalls` into the transcript
+unchanged and copies nothing else out of a reply, which is why the echo rides on a tool call: it
+round-trips without the loop ever learning anything about "thinking" or "reasoning". Nothing above
+`IAnalystModel` may gain such a notion — see the interface's own doc comment.
 
-A **rollout timeout is the expected outcome** even once the Secret exists, until registration lands — an
-unregistered processor waits rather than crashing (Running/NotReady, 0 restarts, by design).
+**Rebuilding drops `reasoning_content` and fails every investigation on its second model call, while
+every offline test passes**, because turn 1 replays nothing and no offline test completes a real two-turn
+loop. This exact defect shipped once before, on the Anthropic adapter, dropping signed thinking blocks the
+same way — found by reading the vendor's own documented loop, not by any test (Ruling 35, prior ledger).
 
-### Two gotchas that will bite
+The guarding test — `AnAssistantTurnReplaysItsProviderEchoVerbatimRatherThanRebuildingIt` — was
+**red-checked twice**: once by the implementer (disabled the replay guard, confirmed exactly that test
+failed 13/14, restored it, confirmed 14/14), and independently by the controller, who both re-ran the
+red-check itself and separately grepped the committed source to confirm no disabled-guard artifact had
+leaked into the commit. A green test against a reconstructing adapter would have been worthless; this is
+the one property no offline test would otherwise reach.
 
-- **`entryCondition` 4 is `Always`, and every sample step uses it.** Step 2 (KafkaExporter) must gate on
-  step 1 having **Completed**. Copying a sample ships a monitor that fires the exporter from a *crashed*
-  Analyst step and delivers a confident empty finding. Read the value back after setting it.
-- **A workflow needs a cron AND an explicit start.** With neither, the orchestrator logs nothing and the
-  whole thing looks broken.
-- **`ConfigSchemaConformance` has no opinion on `Guid`** — it cannot catch a wrong JSON *type* on
-  `targetWorkflowId` in the posted row. Only publish-time payload validation does. Get that field right by
-  hand.
+### The seam, and why it still exists
 
-### The iteration loop, once running
+`IAnalystModel` now has exactly one implementation. Its justification has narrowed and changed: it is no
+longer "the only thing that makes one binary shippable to both the connected cluster and the air-gapped
+machine" (see "What is still not done" below — that claim is no longer true). It is now justified purely as **the test
+seam** — the investigation loop, the preflight BIT and every disposition rule are exercised against a stub
+implementation, which is why the large majority of the suite passed untouched by this swap — plus the
+boundary a future model change is contained to. Multi-model support is explicitly out of scope by decision.
+See `Model/IAnalystModel.cs`'s doc comment, which was rewritten to say this rather than the now-false claim
+it used to carry.
 
-**Edit payload → restart the workflow → confirm the `promptHash` in the next finding changed.** A running
-workflow reads the L2 projection from its start time, so without the restart the pods keep using the old
-prompt while the row shows the new one, silently. The hash is what makes that confirmable.
+---
+
+## What is still not done
+
+Two items must not disappear into "shipped":
+
+1. **The live two-turn smoke test has never run.** Nothing offline can prove the verbatim-replay
+   requirement (above) holds against the real endpoint — that is the whole lesson of the defect it
+   guards against. It has a second reason to be outstanding right now: **the account is creditless.**
+   That is not purely bad news — a creditless key fails **loudly**: a non-2xx response trips
+   `!IsSuccessStatusCode` → `AnalysisImpossibleException` → `Failed`. A quota rejection is therefore the
+   cheapest available proof that the failure path reaches `Failed` rather than silence, and is worth
+   running deliberately at smoke-test time for exactly that reason — even before the account is funded.
+2. **The scored-window replay set (prior design §16.3) is still a prerequisite, not a nicety.** The prior
+   design's §9.5, cited in the current spec's §9, holds that a prompt passing its BIT on two models is not thereby equally good on both, and this work
+   changed the model. Without the replay set, prompt iteration against K3 is guesswork, and **no finding
+   it produces can be justified as trustworthy** until it exists. Candidate windows already named in the
+   spec: the 210s queue-wait cycle, the publisher-confirm double-count, a dead port-forward reading as an
+   outage, and a stopped load generator whose flat line meant nothing.
+
+Also carried forward, unchanged by this work:
+
+- **The air-gapped machine is not served by this design**, and that is a deliberate governance decision,
+  not an oversight. `api.moonshot.ai` is a hosted, third-party endpoint; panel payloads are raw
+  Elasticsearch and Prometheus operational telemetry and they leave the org when sent to it. Serving the
+  offline case would mean self-hosting K3's open weights, which at 2.8T parameters is an infrastructure
+  programme, not a deployment step. If the offline case is still wanted, it is separate work.
+- **The `ship/` offline-baseline drop was deliberately not advanced by this task, and that is not an
+  oversight either.** `ship/` exists to carry changes to the air-gapped machine, and per the point above
+  this design does not target that machine at all — there is nothing meaningful to ship there. `ship/`
+  also does not exist in this working tree (it is untracked by design, never aligned to a commit), so
+  running `tools/ship-delta.ps1` against an absent baseline would have staged the entire curated scope as
+  a "delta" rather than produce a real diff. If the offline case becomes real work later, it needs its own
+  drop — the adapter cannot reach `api.moonshot.ai` from that machine regardless of what ships.
+- **The offline Elasticsearch/Kibana version gap (9.3.4 there vs. 8.15.5 in dev) is out of scope for the
+  same reason** — irrelevant to a connected-cluster deployment, blocking only for an offline one that this
+  design does not serve.
+
+### Registration and workflow wiring — still where the prior handover left it
+
+The prior handover's "Task 16" (POST the two schema rows, POST the processor registration row, wire a
+cron workflow) has not moved. One of its four original steps has changed:
+
+- ~~Create a Kubernetes Secret `analyst-model` holding a real API key~~ — **superseded.** There is no
+  Secret in this design; the key is one of the four inline environment variables above. Do not create one.
+- The other three steps — POST the two schema rows verbatim from
+  `src/tests/BaseApi.Tests/Schemas/analyst-config.json` and `analyst-finding.json`, POST the processor
+  registration row with the built image's SourceHash, and build/start a two-step cron workflow — are
+  unchanged and still outstanding. See the prior design's plan for the two gotchas that will bite
+  (`entryCondition` 4 is `Always` and every sample step uses it; a workflow needs a cron *and* an explicit
+  start) and the iteration loop once running (edit payload → restart the workflow → confirm the
+  `promptHash` changed).
+
+**Current cluster state, verified by `kubectl` at handover time:** both `processor-analyst` pods are
+`CreateContainerConfigError`, sole event `secret "analyst-model" not found`, ~18h old. That is the deployed
+manifest from *before* this swap's commit `fa4a8f1` — the running cluster has not had the new manifest
+(the one with no `secretKeyRef`, inline env vars) applied yet. Re-applying `k8s/43-processor-analyst.yaml`
+is expected to move the pods past this specific error into the Running/NotReady state described next.
+Once applied, **a rollout timeout is the expected outcome** until registration lands — an unregistered
+processor waits rather than crashing (Running/NotReady, 0 restarts, by design).
 
 ---
 
@@ -126,7 +221,7 @@ These were each found the hard way. Reversing one silently reopens a closed hole
   type. `AddBaseProcessor` deliberately does not register the author's processor. The wrong form ships a
   pod that looks healthy and never processes a dispatch.
 - **The trace is assembled by the loop, never supplied by the model.** It is the record of what was
-  executed; a model-supplied trace would be a claim. The quiet path (`report_no_finding`) is now grounded
+  executed; a model-supplied trace would be a claim. The quiet path (`report_no_finding`) is grounded
   against it too — fabricated stages with zero panel reads must fail, not cancel.
 - **`analysable: false` in `record_validation` is terminal → Failed.** A model that correctly concludes it
   cannot see must not land on silence.
@@ -141,9 +236,17 @@ These were each found the hard way. Reversing one silently reopens a closed hole
   clause does not exclude it.
 - **`MaxTokenBudget` (10,000,000) is paired with the manifest's 384Mi** and each names the other. Raising
   one alone is wrong. Derivation is in the constant's doc comment.
-- **Model id and effort are compiled constants**, never payload — they change the preflight BIT's verdict,
-  and the BIT caches on a hash of the prompt alone.
+- **Model id and reasoning effort are environment variables, never a reloadable config source** (amended
+  from "compiled constants" by this swap — see §5.2 above). The property they protect is unchanged: they
+  change the preflight BIT's verdict, and the guarantee against a stale cache now rests on env vars
+  freezing at container start rather than on a rebuild.
+- **The API key is an environment variable, by the same "property of where the processor runs, never of
+  the assignment payload" rule as the other three coordinates** — never accept it in a dispatch payload.
 - **The BIT judges; compiled code decides.** The judge may only emit problems, never a pass verdict.
+- **An assistant turn is replayed verbatim from the provider's raw JSON** (`ModelToolCall.ProviderEcho`),
+  never rebuilt from its visible parts. See "The load-bearing property" above — this is the swap's own
+  addition to this list, and reversing it is the specific defect this whole backend change existed to
+  avoid repeating.
 
 ---
 
@@ -159,36 +262,36 @@ These were each found the hard way. Reversing one silently reopens a closed hole
 | Panel payloads enter the transcript untruncated | `MaxTokenBudget` bounds the total. Capping is an evidence-fidelity decision — it belongs with the scored-window work, where its effect on findings can be measured. |
 | `NoDataDistinguishable` collapses to `SeriesPresent` on Prometheus | Genuinely unfixable from one `query_range`; documented on the type and in every ops panel description. |
 | `seriesCount` cannot detect an entirely absent replica | Same reason. It is a floor, not a census, and the descriptions say so. |
+| `ModelTypes.cs:22`'s retained clause "some backends require an assistant turn to be echoed back byte-for-byte" reads oddly with exactly one backend wired up | True statement about a class of backend, not a claim about what is wired; deliberately protected from rewrite during the sweep. |
 
 ---
 
 ## Environmental: the suite can silently under-report
 
-**Three background commands were killed for low system memory during the session that built this.** On a
-loaded machine, the test host can lose results for the batch in flight and Microsoft Testing Platform
-surfaces them as `NotExecuted` — a test that never ran, reported as a skip. One run skipped a plain `[Fact]`
-with no skip condition.
-
-Four consecutive runs on a quiet machine produced byte-identical skip sets, all under `Live/`. **So a green
-run taken under memory pressure is not trustworthy evidence.** If skip membership looks odd, check the
-machine before suspecting the code.
+On a loaded machine, the test host can lose results for the batch in flight and Microsoft Testing Platform
+surfaces them as `NotExecuted` — a test that never ran, reported as a skip. This was seen during the
+original build (one run skipped a plain `[Fact]` with no skip condition) and remains true here; it was not
+observed during this swap's own runs, but the risk did not go away. If skip membership looks odd, check the
+machine before suspecting the code — and re-run rather than trust a single green pass taken under load.
 
 Other repo facts worth having: `dotnet test` **silently ignores `--filter`** under MTP and reports counts
 only — run `src/tests/BaseApi.Tests/bin/Debug/net8.0/BaseApi.Tests.exe` directly for names. Restore is
 **offline**: `NuGet.config` clears nuget.org, so any new package must be vendored into `nugets/` with its
-full transitive closure or the Docker build fails.
+full transitive closure or the Docker build fails. This swap added no packages — `System.Text.Json` is
+in-box and `Microsoft.Extensions.Http` was already referenced.
 
 ---
 
 ## Not built, by design
 
-- **The scored-window replay set** (design §16.3). A held-aside set of recorded windows with known answers,
-  served through the fixture `IPanelReader`, replayed offline against a candidate prompt. Without it,
-  prompt iteration is guesswork — and design §9.5 makes it a prerequisite for trusting the on-prem
-  `kimi-2.5` backend, since a prompt that passes its BIT on both models is not thereby equally good on both.
-  The seam exists and is used throughout the tests.
-- **The on-prem `kimi-2.5` adapter.** `IAnalystModel` was built for it and the Anthropic adapter proves the
-  seam holds. Nothing Anthropic-only is load-bearing: budgets are loop-enforced, tool inputs are validated
-  client-side.
+- **The scored-window replay set** (prior design §16.3). A held-aside set of recorded windows with known
+  answers, served through the fixture `IPanelReader`, replayed offline against a candidate prompt. See
+  "What is still not done" above — this swap raises its priority rather than lowering it, since it changed
+  the very model the existing BIT passes were earned against.
+- **Multi-model / backend-selection support.** `IAnalystModel` is the seam a future change would use, but
+  there is exactly one adapter, registered once, and adding a second is explicitly out of scope by
+  decision — not a gap, a boundary.
 - **Destructive capability and its whitelist.** Tools are the unit of capability, so adding it later means
   registering more tools rather than retrofitting a policy layer.
+- **Self-hosting K3 for the air-gapped machine**, and closing the offline Elasticsearch 9.3.4 gap — both
+  under "What is still not done" above, both out of scope for a connected-cluster deployment.
