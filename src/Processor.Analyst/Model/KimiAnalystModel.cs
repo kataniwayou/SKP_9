@@ -1,5 +1,8 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Options;
+using Processor.Analyst.Loop;
 
 namespace Processor.Analyst.Model;
 
@@ -13,8 +16,96 @@ namespace Processor.Analyst.Model;
 /// OpenAI's schema would be free to drop it. See the design's §3 and §4.
 /// </para>
 /// </summary>
-internal sealed class KimiAnalystModel
+internal sealed class KimiAnalystModel : IAnalystModel
 {
+    internal const string RequestPath = "chat/completions";
+
+    private readonly HttpClient _http;
+    private readonly AnalystModelOptions _options;
+
+    public KimiAnalystModel(HttpClient http, IOptions<AnalystModelOptions> options)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(options);
+
+        _http = http;
+        _options = options.Value;
+    }
+
+    /// <summary>
+    /// A base address must end in "/" or <see cref="Uri"/> composition discards its last path segment,
+    /// sending every request to <c>/chat/completions</c> instead of <c>/v1/chat/completions</c>.
+    /// </summary>
+    internal static Uri NormaliseBaseAddress(string? baseUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+
+        return new Uri(baseUrl.EndsWith('/') ? baseUrl : baseUrl + "/", UriKind.Absolute);
+    }
+
+    public async Task<ModelReply> SendAsync(
+        string system,
+        IReadOnlyList<ModelTurn> transcript,
+        IReadOnlyList<ToolSpec> tools,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(system);
+        ArgumentNullException.ThrowIfNull(transcript);
+        ArgumentNullException.ThrowIfNull(tools);
+
+        var request = BuildRequest(_options, system, transcript, tools);
+
+        try
+        {
+            using var response = await _http
+                .PostAsJsonAsync(RequestPath, request, ct)
+                .ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                // Reached and answered with a failure: auth, rate limit, 5xx. Still "could not run" --
+                // the loop has no way to make progress from here.
+                throw new AnalysisImpossibleException(
+                    $"the model backend returned {(int)response.StatusCode} {response.ReasonPhrase}");
+            }
+
+            var body = await response.Content
+                .ReadFromJsonAsync<JsonElement>(ct)
+                .ConfigureAwait(false);
+
+            return ToReply(body);
+        }
+        catch (HttpRequestException ex)
+        {
+            // The connection itself failed: DNS, TCP, TLS, or no response at all.
+            throw new AnalysisImpossibleException("the model backend could not be reached", ex);
+        }
+        catch (JsonException ex)
+        {
+            // Reached, answered 2xx, and sent something this adapter cannot read.
+            throw new AnalysisImpossibleException(
+                "the model backend returned a response that could not be parsed", ex);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            // Valid JSON missing a field this adapter requires -- same conclusion.
+            throw new AnalysisImpossibleException(
+                "the model backend returned a response missing a required field", ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // JsonElement accessor called against the wrong value kind: also a shape we cannot read.
+            throw new AnalysisImpossibleException(
+                "the model backend returned a response of an unexpected shape", ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            // The client's own timeout, not our caller's cancellation -- that case is left to
+            // propagate untouched so the loop's own handling still sees it as a cancellation.
+            throw new AnalysisImpossibleException("the model backend timed out", ex);
+        }
+    }
+
     /// <summary>Builds the whole request body. Static and options-taking so a test needs no HttpClient.</summary>
     internal static JsonObject BuildRequest(
         AnalystModelOptions options,

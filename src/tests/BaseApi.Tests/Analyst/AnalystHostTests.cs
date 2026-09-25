@@ -24,6 +24,7 @@ public sealed class AnalystHostTests
         ["RabbitMq:Host"]           = "localhost",
         ["RabbitMq:Username"]       = "guest",
         ["RabbitMq:Password"]       = "guest",
+        ["Analyst:Model:BaseUrl"]   = "https://example.invalid/v1",
     };
 
     // No "--environment", "Development" here: that turns on ServiceProviderOptions.ValidateOnBuild,
@@ -77,7 +78,7 @@ public sealed class AnalystHostTests
         // BaseProcessor.Core.Processing.BaseProcessor -- satisfied now that ProcessorHost.Create
         // registers AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, AnalystProcessor>().
         //
-        // IAnalystModel resolves to the real AnthropicAnalystModel and IPanelReader resolves to the
+        // IAnalystModel resolves to the real KimiAnalystModel and IPanelReader resolves to the
         // real LivePanelReader, both registered by ProcessorHost.Create -- no configureServices
         // override is needed for either.
         using var host = ProcessorHost.Create(

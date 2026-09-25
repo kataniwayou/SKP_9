@@ -229,4 +229,16 @@ public sealed class KimiAnalystModelTests
         Assert.Equal("thinking out loud", message["content"]!.GetValue<string>());
         Assert.Equal("read_panel", message["tool_calls"]!.AsArray()[0]!["function"]!["name"]!.GetValue<string>());
     }
+
+    [Theory]
+    [InlineData("https://api.moonshot.ai/v1", "https://api.moonshot.ai/v1/chat/completions")]
+    [InlineData("https://api.moonshot.ai/v1/", "https://api.moonshot.ai/v1/chat/completions")]
+    public void TheBaseAddressKeepsItsPathSegment(string configured, string expected)
+    {
+        // Without a trailing slash, Uri composition DROPS the last segment, and requests silently go to
+        // /chat/completions instead of /v1/chat/completions -- a 404 that looks like a wrong URL.
+        var baseAddress = KimiAnalystModel.NormaliseBaseAddress(configured);
+
+        Assert.Equal(expected, new Uri(baseAddress, KimiAnalystModel.RequestPath).ToString());
+    }
 }

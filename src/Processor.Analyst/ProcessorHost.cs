@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using Processor.Analyst.Bit;
 using Processor.Analyst.Loop;
@@ -135,7 +136,32 @@ public static class ProcessorHost
         builder.Services.AddSingleton<InvestigationLoop>();
 
         builder.Services.Configure<Model.AnalystModelOptions>(builder.Configuration.GetSection("Analyst:Model"));
-        builder.Services.AddSingleton<Model.IAnalystModel, Model.AnthropicAnalystModel>();
+
+        // Timeout.InfiniteTimeSpan is deliberate, not an oversight. Thinking is always on for this
+        // model and cannot be disabled, so a single call at `high` effort can legitimately run for
+        // minutes -- far past HttpClient's 100s default, which would abort healthy investigations. The
+        // real bound is the wall-clock token InvestigationLoop links into every model call (F5); that
+        // is the only thing that should end a call early, and it reports as a cancellation rather than
+        // a backend fault. PooledConnectionLifetime matches the panel sources: this typed client is
+        // captured for the process lifetime by a singleton, which defeats IHttpClientFactory's own
+        // handler rotation, and recycling sockets periodically is the documented fix.
+        builder.Services.AddHttpClient<Model.KimiAnalystModel>((serviceProvider, client) =>
+            {
+                var options = serviceProvider
+                    .GetRequiredService<IOptions<Model.AnalystModelOptions>>().Value;
+
+                client.BaseAddress = Model.KimiAnalystModel.NormaliseBaseAddress(options.BaseUrl);
+                client.Timeout = Timeout.InfiniteTimeSpan;
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", options.ApiKey);
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            });
+
+        builder.Services.AddSingleton<Model.IAnalystModel>(serviceProvider =>
+            serviceProvider.GetRequiredService<Model.KimiAnalystModel>());
 
         builder.Services.Configure<Panels.PanelSourceOptions>(builder.Configuration.GetSection("Analyst:Panels"));
 

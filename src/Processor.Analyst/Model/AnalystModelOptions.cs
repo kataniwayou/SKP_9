@@ -1,8 +1,10 @@
 namespace Processor.Analyst.Model;
 
 /// <summary>
-/// Where the model lives. Bound from <c>Analyst:Model:*</c>, which the manifest fills from a
-/// Kubernetes Secret.
+/// Where the model lives. Bound from <c>Analyst:Model:*</c>, which the manifest fills from plain
+/// environment variables, including <see cref="ApiKey"/> — a deliberate decision, not an oversight:
+/// this key is not held in a Kubernetes Secret, so rotating it is a commit rather than a
+/// <c>kubectl</c> command.
 /// <para>
 /// <b>Credentials are a property of where the processor runs, never of the workflow.</b> They must
 /// not appear in the assignment payload — the payload says what to analyse, the deployment says what
