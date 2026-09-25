@@ -62,7 +62,8 @@ Anthropic adapter and its package are deleted. Everything above `IAnalystModel` 
 - `src/Processor.Analyst/Loop/InvestigationLoop.cs:40` — the F5 premise about client timeouts.
 - `src/Processor.Analyst/Processor.Analyst.csproj:37-40`, `Directory.Packages.props:152` — drop `Anthropic`.
 - `src/Processor.Analyst/appsettings.json` — dev defaults under `Analyst:Model`.
-- `k8s/43-processor-analyst.yaml` — three new env vars; the Secret comment shows an `sk-ant-…` key.
+- `k8s/43-processor-analyst.yaml` — the `ApiKey` entry moves from `secretKeyRef` to a plain inline value,
+  three more env vars are added, and the header comment instructing Secret creation is deleted.
 - `src/tests/BaseApi.Tests/Analyst/AnalystHostTests.cs:80` — names `AnthropicAnalystModel`.
 - `src/tests/BaseApi.Tests/Analyst/InvestigationLoopTests.cs:290` — cites an Opus 5 trap that cannot occur.
 
@@ -972,11 +973,30 @@ Inside the existing `"Analyst"` object, before `"Panels"`:
     "Model": {
       "BaseUrl": "https://api.moonshot.ai/v1",
       "ModelId": "kimi-k3",
-      "ReasoningEffort": "high"
+      "ReasoningEffort": "high",
+      "ApiKey": ""
     },
 ```
 
-Do **not** add `ApiKey` — it comes from the Secret, never a file in the repo.
+Leave `ApiKey` as an **empty string**. The controller substitutes the real value directly; it is
+deliberately absent from this plan and from every task brief so the literal exists in as few files as
+possible. An empty key is also the correct fallback behaviour — see the note in Step 6 on why a missing
+key must not crash at boot.
+
+- [ ] **Step 5b: Correct the options class comment, which the no-Secret decision falsifies**
+
+`src/Processor.Analyst/Model/AnalystModelOptions.cs` opens with *"Where the model lives. Bound from
+`Analyst:Model:*`, which the manifest fills from a Kubernetes Secret."* There is no longer a Secret —
+the key is supplied as a plain environment variable like every other value. Replace that sentence with:
+
+```csharp
+/// Where the model lives. Bound from <c>Analyst:Model:*</c>, which the deployment supplies as plain
+/// environment variables — including the API key, by explicit decision: it is configured exactly like
+/// the model id, not through a Kubernetes Secret.
+```
+
+Keep the credentials paragraph below it as-is: it says credentials belong to the deployment rather than
+the workflow payload, which is still true and still the rule that matters.
 
 - [ ] **Step 6: Update the host tests**
 
@@ -1147,9 +1167,27 @@ git commit -m "refactor(analyst): delete the Anthropic backend and correct what 
 **Files:**
 - Modify: `k8s/43-processor-analyst.yaml`
 
-- [ ] **Step 1: Add the three new environment variables**
+- [ ] **Step 1: Replace the Secret reference with a plain value**
 
-Beside the existing `Analyst__Model__ApiKey` block, add:
+By explicit user decision, the API key is configured exactly like the model id — a plain inline
+environment variable, no Kubernetes Secret. Replace the existing `Analyst__Model__ApiKey` block, which
+currently reads its value from `secretKeyRef` → Secret `analyst-model`, with a plain `value:` entry:
+
+```yaml
+            # Supplied inline, like every other model coordinate, by explicit decision: this key is
+            # treated the same as Analyst__Model__ModelId rather than as a Kubernetes Secret.
+            - name: Analyst__Model__ApiKey
+              value: "<<CONTROLLER SUBSTITUTES THE LITERAL HERE>>"
+```
+
+Leave the placeholder exactly as written — the controller substitutes the real key, which is deliberately
+absent from this plan and every brief. Also delete the manifest header comment block (around line 20-23)
+that instructs creating the `analyst-model` Secret out of band and claims the Deployment will not start
+until it exists; both statements become false with this change.
+
+- [ ] **Step 2: Add the three remaining environment variables**
+
+Beside the `Analyst__Model__ApiKey` block, add:
 
 ```yaml
             # The backend's three coordinates, deployment-supplied. These MUST stay environment
@@ -1165,14 +1203,6 @@ Beside the existing `Analyst__Model__ApiKey` block, add:
             # setting, reasoning tokens bill as output, and the monitor workflow runs unattended.
             - name: Analyst__Model__ReasoningEffort
               value: "high"
-```
-
-- [ ] **Step 2: Fix the Secret comment in the header**
-
-Line 21 shows an Anthropic key format. Change the example to a Moonshot key and name its source:
-
-```
-#   kubectl -n skp create secret generic analyst-model --from-literal=apiKey='<key from platform.kimi.ai>'
 ```
 
 - [ ] **Step 3: Validate the manifest parses**
@@ -1211,7 +1241,8 @@ ConfigMap; and that `reasoning_effort` defaults to `max` at the endpoint and is 
 - [ ] **Step 2: Update the handover**
 
 Replace the Anthropic-specific sections with the new backend's shape: the four environment variables, the
-`analyst-model` Secret now holding a Moonshot key, the suite shape from Task 5, and the still-open items.
+API key supplied inline as a plain env var with no Secret (and the consequence: it is in git history, so
+rotating it means a commit), the suite shape from Task 5, and the still-open items.
 Keep the disposition rule section verbatim — it is unchanged and it is the thing that matters most.
 
 - [ ] **Step 3: Re-diff the offline baseline**

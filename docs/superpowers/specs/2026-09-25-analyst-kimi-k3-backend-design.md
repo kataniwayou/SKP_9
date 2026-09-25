@@ -133,12 +133,24 @@ for plumbing we do not need, and it gives up point 5 above.
 |---|---|---|
 | `Analyst__Model__ModelId` | `kimi-k3` | inline in the pod template |
 | `Analyst__Model__BaseUrl` | `https://api.moonshot.ai/v1` | inline in the pod template |
-| `Analyst__Model__ApiKey` | the Moonshot key | `secretKeyRef` → Secret `analyst-model`, key `apiKey` |
+| `Analyst__Model__ApiKey` | the Moonshot key | inline in the pod template **and** in `appsettings.json` — **no Kubernetes Secret** |
 | `Analyst__Model__ReasoningEffort` | `high` (see §5.3) | inline in the pod template |
 
-`Analyst__Model__ApiKey` is already wired this way in `k8s/43-processor-analyst.yaml`; only the other
-three are new. Credentials remain a property of *where the processor runs*, never of the assignment
-payload — that rule from §9.4 is unchanged.
+Credentials remain a property of *where the processor runs*, never of the assignment payload — that rule
+from §9.4 is unchanged.
+
+**On the API key being inline rather than a Secret.** The prior design put it in a Secret created out of
+band, and an earlier draft of this document did too. The user was shown the consequence — `appsettings.json`
+and `k8s/43-processor-analyst.yaml` are both tracked, so an inline key enters git history permanently,
+reaches every clone, and survives deleting the line — and decided to configure the key exactly like the
+model id anyway. That is recorded here as their decision, with the tradeoff stated, rather than quietly
+implemented or quietly refused.
+
+Two consequences that follow and are handled: `AnalystModelOptions`' class comment claimed the manifest
+fills these from a Secret and must be corrected, and the manifest's header comment instructing Secret
+creation must be deleted — both become false statements otherwise, which this project treats as a real
+defect. The key literal is kept out of the plan and every task brief so it exists in as few files as
+possible.
 
 ### 5.2 Amending §9.2: why env vars are safe here
 
@@ -155,9 +167,8 @@ process. Its own doc comment:
 > "Per-replica, in memory, bounded, and lost on restart... each replica proves its own fitness with
 > **its own model backend** and its own wiring, and a proof is only as good as the process holding it."
 
-Environment variables are frozen at container start. Editing them in the Deployment rolls the pods;
-editing the backing Secret does not reach a running container at all. Either way the process holding the
-stale verdict is gone. A mid-rollout mix of old and new pods is fine — each replica is self-consistent,
+Environment variables are frozen at container start, so editing one in the Deployment rolls the pods and
+the process holding the stale verdict is gone. A mid-rollout mix of old and new pods is fine — each replica is self-consistent,
 which is exactly the property that comment blesses.
 
 **The condition that makes this true, and must be commented as such:** these values must remain
@@ -244,7 +255,7 @@ then sweep:
 | `Loop/BudgetLedger.cs:6-8` | "deliberately not Anthropic task budgets" — the rationale survives, the wording does not |
 | `tests/…/AnalystHostTests.cs:80` | asserts `IAnalystModel` resolves to `AnthropicAnalystModel` |
 | `tests/…/InvestigationLoopTests.cs:290` | see §5.4 |
-| `k8s/43-processor-analyst.yaml:21` | the Secret comment shows an `sk-ant-…` key |
+| `k8s/43-processor-analyst.yaml:20-23` | the header comment instructs creating an `analyst-model` Secret with an `sk-ant-…` key — both the Secret instruction and the key format are now wrong; delete the block |
 
 ### 7.1 Two premises that must be re-verified, not reworded
 
@@ -314,7 +325,9 @@ connected-cluster deployment; blocking for an offline one.
 
 Blocking, expected from the user:
 
-1. **API key** — into the `analyst-model` Secret, out of band, never in the repo or this conversation.
+1. ~~**API key**~~ — supplied. By the user's explicit decision it is configured inline as a plain
+   environment variable rather than through a Secret; see §5.1 for the tradeoff that was accepted. It is
+   therefore in git history, which means rotating it is a commit rather than a `kubectl` command.
 2. **Model id** — `kimi-k3` unless the org pins something else.
 3. **Base URL** — `https://api.moonshot.ai/v1` unless the org fronts it with a proxy.
 
