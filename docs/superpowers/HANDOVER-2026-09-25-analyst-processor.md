@@ -22,8 +22,11 @@ writes a finding to L2 or says nothing. It reads; in this milestone it cannot mo
 
 **Current design (the backend swap):** `docs/superpowers/specs/2026-09-25-analyst-kimi-k3-backend-design.md`
 **Current plan:** `docs/superpowers/plans/2026-09-25-analyst-kimi-k3-backend.md`
-**Its ledger — the rulings behind every backend-swap decision, including §9.2's amendment, the
-env-var-only condition, and the `reasoning_effort` default:**
+**The full argument behind §9.2's amendment, the env-var-only condition, and the `reasoning_effort`
+default lives in the tracked source, not scratch:** `src/Processor.Analyst/Model/AnalystModelOptions.cs`
+carries it in the class comment and on each property. The ledger below is the secondary reference — it
+predates that comment being written out in full and will not survive `git clean -fdx`.
+**Its ledger — the rulings behind every backend-swap decision:**
 `.superpowers/sdd/2026-09-25-analyst-kimi-k3-backend/progress.md`
 
 **Prior design (everything the swap did not touch — the loop, the BIT, the five stage tools, disposition
@@ -111,6 +114,13 @@ after being shown the consequence: both files are tracked, so the key enters git
 **rotating it is a commit, not a `kubectl` command**. It was reaffirmed on the reasoning "no secret - the
 api key same threat as `Analyst__Model__ModelId`" — the same argument that already applied to the other
 three coordinates.
+
+**Rotation is no longer a `kubectl` operation on all three fronts.** The key is baked into the image
+layer from `appsettings.json`, so a rotation now has to touch `appsettings.json`, the manifest
+(`k8s/43-processor-analyst.yaml`), **and a rebuilt image** — editing the manifest alone leaves the image's
+own copy stale. Pod-read RBAC also now exposes the key where secret-read RBAC used to be the boundary:
+anyone who can `kubectl exec` or read the pod spec can read it, which is a wider surface than the old
+Secret-scoped RBAC.
 
 **The current key is a dead placeholder, not a live credential to protect urgently.** Its account is
 creditless — spent down to connectivity and minimal-functionality checks before this task started — and
@@ -262,7 +272,7 @@ These were each found the hard way. Reversing one silently reopens a closed hole
 | Panel payloads enter the transcript untruncated | `MaxTokenBudget` bounds the total. Capping is an evidence-fidelity decision — it belongs with the scored-window work, where its effect on findings can be measured. |
 | `NoDataDistinguishable` collapses to `SeriesPresent` on Prometheus | Genuinely unfixable from one `query_range`; documented on the type and in every ops panel description. |
 | `seriesCount` cannot detect an entirely absent replica | Same reason. It is a floor, not a census, and the descriptions say so. |
-| `ModelTypes.cs:22`'s retained clause "some backends require an assistant turn to be echoed back byte-for-byte" reads oddly with exactly one backend wired up | True statement about a class of backend, not a claim about what is wired; deliberately protected from rewrite during the sweep. |
+| `ModelTypes.cs:22`'s retained clause "some backends require an assistant turn to be echoed back..." reads oddly with exactly one backend wired up | True statement about a class of backend, not a claim about what is wired; the plural phrasing was deliberately left alone during this sweep. Superseded in part by the final-fix-wave review's F6: the clause's old "byte-for-byte" wording overstated the guarantee (it is semantically unchanged, property-for-property — string escaping is not preserved) and was corrected, independent of the "some backends" phrasing question, which still stands. |
 
 ---
 
