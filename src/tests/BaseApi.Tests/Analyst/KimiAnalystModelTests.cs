@@ -186,4 +186,47 @@ public sealed class KimiAnalystModelTests
         Assert.Empty(reply.ToolCalls);
         Assert.Equal("I need more information.", reply.Text);
     }
+
+    [Fact]
+    public void AnAssistantTurnReplaysItsProviderEchoVerbatimRatherThanRebuildingIt()
+    {
+        // The whole point. reasoning_content cannot be reconstructed from content + tool_calls, and the
+        // endpoint requires the complete assistant message returned unchanged on tool-call turns -- so
+        // a rebuilt turn fails every investigation on its SECOND model call, the first one to replay.
+        var reply = KimiAnalystModel.ToReply(ReasonedThenCalled("weighing two hypotheses"));
+        var turn = new ModelTurn(ModelRole.Assistant, reply.Text, reply.ToolCalls, []);
+
+        var message = KimiAnalystModel.ToMessages(turn).Single();
+
+        Assert.Equal("weighing two hypotheses", message["reasoning_content"]!.GetValue<string>());
+        Assert.Equal("call-1", message["tool_calls"]!.AsArray()[0]!["id"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void ReplayingTheSameTurnTwiceIsSafe()
+    {
+        // A JsonNode cannot be attached to two parents, and the transcript is re-sent on every call --
+        // so the echo must be cloned per use or the second request throws.
+        var reply = KimiAnalystModel.ToReply(ReasonedThenCalled());
+        var turn = new ModelTurn(ModelRole.Assistant, reply.Text, reply.ToolCalls, []);
+
+        _ = KimiAnalystModel.BuildRequest(Options(), "contract", [turn], []);
+        var second = KimiAnalystModel.BuildRequest(Options(), "contract", [turn], []);
+
+        Assert.Equal("assistant", second["messages"]!.AsArray()[1]!["role"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void AnAssistantTurnWithNoEchoIsStillRebuiltFromItsVisibleParts()
+    {
+        // Every hand-built transcript in the rest of the suite leaves ProviderEcho null. That path must
+        // keep working.
+        var turn = new ModelTurn(ModelRole.Assistant, "thinking out loud",
+            [new ModelToolCall("call-1", "read_panel", JsonDocument.Parse("{}").RootElement.Clone())], []);
+
+        var message = KimiAnalystModel.ToMessages(turn).Single();
+
+        Assert.Equal("thinking out loud", message["content"]!.GetValue<string>());
+        Assert.Equal("read_panel", message["tool_calls"]!.AsArray()[0]!["function"]!["name"]!.GetValue<string>());
+    }
 }

@@ -101,9 +101,29 @@ internal sealed class KimiAnalystModel
         }
     }
 
-    /// <summary>Reconstruction from visible parts. Task 3 replaces this with verbatim replay.</summary>
+    /// <summary>
+    /// An assistant turn this adapter produced goes back <b>exactly</b> as it arrived.
+    /// <para>
+    /// The endpoint's documentation requires the complete assistant message returned unchanged on
+    /// multi-turn tool calls, and its <c>reasoning_content</c> cannot be rebuilt from <c>content</c> plus
+    /// <c>tool_calls</c>. Rebuilding one therefore fails every investigation on its SECOND model call —
+    /// the first that replays a turn — while every offline test still passes. The reconstruction below
+    /// exists only for turns that came from somewhere else: a hand-built transcript, or any future
+    /// adapter that carries no echo.
+    /// </para>
+    /// <para>
+    /// The clone is required, not defensive: a <see cref="JsonNode"/> cannot be attached to two parents,
+    /// and the transcript is re-sent on every call of the loop.
+    /// </para>
+    /// </summary>
     private static JsonNode AssistantMessage(ModelTurn turn)
     {
+        if (turn.ToolCalls.Select(call => call.ProviderEcho).OfType<JsonNode>().FirstOrDefault()
+            is { } echo)
+        {
+            return echo.DeepClone();
+        }
+
         var message = new JsonObject { ["role"] = "assistant" };
 
         if (turn.Text is { Length: > 0 } assistantText)
