@@ -58,8 +58,9 @@ public sealed class ToolCatalogTests
     [Fact]
     public void EveryToolSchemaForbidsAdditionalProperties()
     {
-        // Server-side strict enforcement does not exist on the on-prem path, so the client validates
-        // every input itself -- and it can only do that against a closed schema.
+        // No server-side schema enforcement may ever be load-bearing above the seam, regardless of
+        // what the backend happens to enforce, so the client validates every input itself -- and it
+        // can only do that against a closed schema.
         foreach (var spec in ToolCatalog.Build(Panels()))
         {
             var root = JsonDocument.Parse(spec.InputSchemaJson).RootElement;

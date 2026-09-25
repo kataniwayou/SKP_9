@@ -42,6 +42,14 @@ internal sealed class AnalystModelOptions
     /// </summary>
     public string? ReasoningEffort { get; set; }
 
+    /// <summary>
+    /// The Moonshot API key. Deliberately unguarded: a missing or empty key must NOT crash at boot --
+    /// it produces a request the endpoint rejects, which becomes an <c>AnalysisImpossibleException</c>
+    /// and so a per-dispatch <c>Failed</c> step, never a crash loop. Passing a null or empty key to
+    /// <c>AuthenticationHeaderValue("Bearer", …)</c> is legal and is the intended path. Do not add a
+    /// startup guard here to match <see cref="ModelId"/> or <see cref="ReasoningEffort"/> -- doing so
+    /// would turn a per-dispatch failure into a boot-time crash loop.
+    /// </summary>
     public string? ApiKey { get; set; }
 
     /// <summary>

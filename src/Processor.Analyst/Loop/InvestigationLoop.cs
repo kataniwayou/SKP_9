@@ -130,8 +130,9 @@ internal sealed class InvestigationLoop(
         IReadOnlyList<ToolSpec> tools,
         CancellationToken ct)
     {
-        // Client-side validation, always. Server-side `strict` enforcement exists on one adapter and
-        // not the other, so trusting it would make the on-prem path silently laxer than the tests.
+        // Client-side validation, always. No server-side schema enforcement may ever be load-bearing
+        // above the seam, regardless of what any single backend happens to enforce -- see
+        // IAnalystModel's own doc comment.
         // The schema is resolved from the catalog THIS loop already built, not re-derived from
         // ToolCatalog.SchemaFor: that static lookup has no case for read_panel (its schema depends on
         // the panel set, which only the catalog instance carries) and no case at all for a name the

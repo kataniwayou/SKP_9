@@ -8,8 +8,8 @@ internal enum ModelRole { User, Assistant }
 /// <summary>
 /// One tool call the model asked for. <paramref name="Input"/> stays a <see cref="JsonElement"/>
 /// rather than a typed object because the loop validates it against the tool's own schema before
-/// binding — server-side <c>strict</c> enforcement does not exist on the on-prem path, so the client
-/// must never assume a well-formed input.
+/// binding — no server-side schema enforcement may ever be load-bearing above the seam, regardless of
+/// what the backend happens to enforce, so the client must never assume a well-formed input.
 /// </summary>
 internal sealed record ModelToolCall(string CallId, string ToolName, JsonElement Input)
 {
@@ -18,9 +18,9 @@ internal sealed record ModelToolCall(string CallId, string ToolName, JsonElement
     /// that produced the call and interpretable ONLY by that adapter.
     /// <para>
     /// <b>Nothing above the seam may read this, and nothing above the seam needs to.</b> It exists
-    /// because some backends require an assistant turn to be echoed back byte-for-byte rather than
-    /// reconstructed from its visible parts — this endpoint returns a <c>reasoning_content</c> field
-    /// that its documentation requires returned unchanged on assistant turns carrying tool calls, and
+    /// because some backends require an assistant turn to be echoed back semantically unchanged,
+    /// property-for-property, rather than reconstructed from its visible parts — this endpoint returns
+    /// a <c>reasoning_content</c> field that its documentation requires returned unchanged on assistant turns carrying tool calls, and
     /// that cannot be rebuilt from the turn's visible parts. The loop already copies
     /// <see cref="ModelReply.ToolCalls"/> into the transcript unchanged, so parking the state here is
     /// what lets it round-trip without the loop growing a notion of "thinking" it must not have (see

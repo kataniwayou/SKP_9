@@ -35,7 +35,8 @@
     <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
 
     <!-- AddHttpClient<T>() for ElasticPanelSource and PrometheusPanelSource. Vendored into nugets/
-         the same way, for the same reason. -->
+         because the Docker build clears nuget.org, so every package must ship with its full
+         transitive closure or the offline build fails. -->
     <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 

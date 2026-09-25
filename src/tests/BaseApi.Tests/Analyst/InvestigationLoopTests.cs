@@ -263,9 +263,10 @@ public sealed class InvestigationLoopTests
     [Fact]
     public async Task AToolInputThatFailsItsOwnSchemaIsReturnedAsAToolErrorNotAnExplosion()
     {
-        // Server-side strict enforcement does not exist on the on-prem path, so a malformed input is
-        // an expected event. Hand it back as an error result and let the model correct itself; only
-        // a loop that never recovers becomes a failed step. AnalystScript.Stages() precede the malformed call only
+        // No server-side schema enforcement may ever be load-bearing above the seam, regardless of
+        // what the backend happens to enforce, so a malformed input is an expected event. Hand it
+        // back as an error result and let the model correct itself; only a loop that never recovers
+        // becomes a failed step. AnalystScript.Stages() precede the malformed call only
         // so the eventual submit_finding satisfies Task 9's cross-reference assertions; their record_*
         // calls always validate, so filtering the whole run's results down to the errors still finds
         // exactly the one this test causes (Received aliases the loop's own transcript list, so it

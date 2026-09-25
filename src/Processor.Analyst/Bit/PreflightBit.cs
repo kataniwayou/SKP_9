@@ -30,9 +30,10 @@ internal sealed class PreflightBit(IAnalystModel model, BitCache cache)
                 "the fitness judge answered without calling report_fitness; a verdict it can phrase "
                 + "freely is a gate that can talk itself into passing");
 
-        // Client-side validation, same as every tool call InvestigationLoop trusts: there is no
-        // server-side `strict` enforcement on the on-prem path, and there is no retry here to hand a
-        // malformed call back to the model for correction -- this is one call, not a loop. A
+        // Client-side validation, same as every tool call InvestigationLoop trusts: no server-side
+        // schema enforcement may ever be load-bearing above the seam, regardless of what the backend
+        // happens to enforce, and there is no retry here to hand a malformed call back to the model
+        // for correction -- this is one call, not a loop. A
         // report_fitness that fails its own schema means the gate could not evaluate the prompt at
         // all, which is the same class of failure as the judge never calling it -- and, like
         // InvestigationLoop's own PanelUnavailableException mapping, that is an

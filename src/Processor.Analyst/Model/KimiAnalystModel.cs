@@ -193,7 +193,11 @@ internal sealed class KimiAnalystModel : IAnalystModel
     }
 
     /// <summary>
-    /// An assistant turn this adapter produced goes back <b>exactly</b> as it arrived.
+    /// An assistant turn this adapter produced goes back <b>semantically unchanged, property-for-property</b>
+    /// as it arrived. It is re-serialised via <c>JsonNode.Parse</c> → <c>DeepClone</c> →
+    /// <c>PostAsJsonAsync</c>, so property order and values survive but string escaping need not (the
+    /// default encoder escapes non-ASCII, <c>&lt;</c>, <c>&gt;</c>, <c>+</c>). No plausible server
+    /// compares bytes, but this comment should not promise more than the code delivers.
     /// <para>
     /// The endpoint's documentation requires the complete assistant message returned unchanged on
     /// multi-turn tool calls, and its <c>reasoning_content</c> cannot be rebuilt from <c>content</c> plus
