@@ -151,6 +151,7 @@ public static class ProcessorHost
                     .GetRequiredService<IOptions<Model.AnalystModelOptions>>().Value;
 
                 client.BaseAddress = Model.KimiAnalystModel.NormaliseBaseAddress(options.BaseUrl);
+                Model.KimiAnalystModel.ValidateReasoningEffort(options.ReasoningEffort);
                 client.Timeout = Timeout.InfiniteTimeSpan;
                 client.DefaultRequestHeaders.Authorization =
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", options.ApiKey);

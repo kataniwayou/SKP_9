@@ -25,6 +25,11 @@ public sealed class AnalystHostTests
         ["RabbitMq:Username"]       = "guest",
         ["RabbitMq:Password"]       = "guest",
         ["Analyst:Model:BaseUrl"]   = "https://example.invalid/v1",
+        // ReasoningEffort is validated at DI resolution (KimiAnalystModel.ValidateReasoningEffort,
+        // called from the AddHttpClient configure callback), and appsettings.json is not loaded by
+        // this in-memory host, so a value must be supplied here or the whole-graph resolution below
+        // throws for a reason that has nothing to do with what this test proves.
+        ["Analyst:Model:ReasoningEffort"] = "high",
     };
 
     // No "--environment", "Development" here: that turns on ServiceProviderOptions.ValidateOnBuild,

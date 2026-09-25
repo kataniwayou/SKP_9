@@ -1,10 +1,18 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
 using Processor.Analyst.Loop;
 using Processor.Analyst.Model;
 using Xunit;
+using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace BaseApi.Tests.Analyst;
 
@@ -281,5 +289,122 @@ public sealed class KimiAnalystModelTests
         var ex = Assert.Throws<AnalysisImpossibleException>(
             () => KimiAnalystModel.ToReply(body));
         Assert.Contains("prompt_tokens", ex.Message, System.StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A minimal stub transport for <see cref="KimiAnalystModel.SendAsync"/> offline coverage (F2).
+    /// Either answers every request with a canned response, or throws a canned exception -- enough to
+    /// drive the four fault-translation routes without a real endpoint.
+    /// </summary>
+    private sealed class StubHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage>? _respond;
+        private readonly Exception? _throw;
+
+        private StubHandler(Func<HttpRequestMessage, HttpResponseMessage>? respond, Exception? toThrow)
+        {
+            _respond = respond;
+            _throw = toThrow;
+        }
+
+        internal static StubHandler Returning(Func<HttpRequestMessage, HttpResponseMessage> respond) =>
+            new(respond, null);
+
+        internal static StubHandler Throwing(Exception toThrow) => new(null, toThrow);
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (_throw is not null)
+            {
+                throw _throw;
+            }
+
+            return Task.FromResult(_respond!(request));
+        }
+    }
+
+    private static KimiAnalystModel ModelOver(HttpMessageHandler handler)
+    {
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://api.moonshot.ai/v1/") };
+        return new KimiAnalystModel(httpClient, MsOptions.Create(Options()));
+    }
+
+    private static HttpResponseMessage ValidTwoHundred() => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(
+            """{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}""",
+            Encoding.UTF8,
+            "application/json"),
+    };
+
+    [Fact]
+    public async Task ANonSuccessStatusCodeBecomesAnAnalysisImpossibleException()
+    {
+        var model = ModelOver(StubHandler.Returning(
+            _ => new HttpResponseMessage(HttpStatusCode.InternalServerError)));
+
+        await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => model.SendAsync("system", [], [], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AConnectionFailureBecomesAnAnalysisImpossibleException()
+    {
+        var model = ModelOver(StubHandler.Throwing(new HttpRequestException("connection refused")));
+
+        await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => model.SendAsync("system", [], [], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnUnparseableTwoHundredBodyBecomesAnAnalysisImpossibleException()
+    {
+        var model = ModelOver(StubHandler.Returning(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("not json", Encoding.UTF8, "application/json"),
+        }));
+
+        await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => model.SendAsync("system", [], [], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task APreCancelledTokenPropagatesUntranslatedRatherThanBecomingAFabricatedFailure()
+    {
+        // The most valuable of the four SendAsync fault-translation tests: it is the only one that
+        // would catch an inverted `when (!ct.IsCancellationRequested)` filter, and an inverted filter
+        // is what would turn a genuine shutdown into a fabricated Failed outcome instead of letting the
+        // cancellation propagate for the loop's own handling to see.
+        var model = ModelOver(StubHandler.Returning(_ => ValidTwoHundred()));
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => model.SendAsync("system", [], [], cts.Token));
+
+        Assert.IsNotType<AnalysisImpossibleException>(ex);
+    }
+
+    [Theory]
+    [InlineData("low")]
+    [InlineData("high")]
+    [InlineData("max")]
+    public void ValidateReasoningEffortReturnsEachOfTheThreeAcceptedValuesUnchanged(string effort)
+    {
+        Assert.Equal(effort, KimiAnalystModel.ValidateReasoningEffort(effort));
+    }
+
+    [Theory]
+    [InlineData("higb")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void ValidateReasoningEffortRejectsAnythingElse(string? effort)
+    {
+        // Unvalidated, a typo or an omitted key serialises as `"reasoning_effort": null` and the
+        // endpoint silently falls back to its documented, most expensive default of `max` -- with no
+        // local signal that it happened. This must fail loudly instead.
+        Assert.Throws<ArgumentException>(() => KimiAnalystModel.ValidateReasoningEffort(effort));
     }
 }

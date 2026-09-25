@@ -43,6 +43,30 @@ internal sealed class KimiAnalystModel : IAnalystModel
         return new Uri(baseUrl.EndsWith('/') ? baseUrl : baseUrl + "/", UriKind.Absolute);
     }
 
+    /// <summary>
+    /// Confines <see cref="AnalystModelOptions.ReasoningEffort"/> to the endpoint's three accepted
+    /// values. Left unvalidated, a typo or an omitted key serialises as <c>"reasoning_effort": null</c>
+    /// and the endpoint silently falls back to its documented default of <c>max</c> -- the most
+    /// expensive setting, which the design's §5.3 exists specifically to avoid inheriting by silence --
+    /// with no local signal that it happened. Called from the <c>AddHttpClient</c> configure callback
+    /// right beside <see cref="NormaliseBaseAddress"/>, so a bad value fails loudly at DI resolution,
+    /// never reaching the loop. Unlike <see cref="AnalystModelOptions.ApiKey"/>, this one IS guarded at
+    /// startup -- a bad effort is a deployment mistake with no legitimate empty/missing case, where a
+    /// bad or missing key is an intentional path that must fail per-dispatch instead (see that
+    /// property's doc comment).
+    /// </summary>
+    internal static string ValidateReasoningEffort(string? effort)
+    {
+        if (effort is "low" or "high" or "max")
+        {
+            return effort;
+        }
+
+        throw new ArgumentException(
+            $"Analyst:Model:ReasoningEffort was '{effort ?? "<null>"}'; it must be one of low, high, max.",
+            nameof(effort));
+    }
+
     public async Task<ModelReply> SendAsync(
         string system,
         IReadOnlyList<ModelTurn> transcript,
@@ -53,10 +77,10 @@ internal sealed class KimiAnalystModel : IAnalystModel
         ArgumentNullException.ThrowIfNull(transcript);
         ArgumentNullException.ThrowIfNull(tools);
 
-        var request = BuildRequest(_options, system, transcript, tools);
-
         try
         {
+            var request = BuildRequest(_options, system, transcript, tools);
+
             using var response = await _http
                 .PostAsJsonAsync(RequestPath, request, ct)
                 .ConfigureAwait(false);
