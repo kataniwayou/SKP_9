@@ -94,4 +94,96 @@ public sealed class KimiAnalystModelTests
         Assert.Equal("user", message["role"]!.GetValue<string>());
         Assert.Equal("Investigate workflow 7", message["content"]!.GetValue<string>());
     }
+
+    /// <summary>
+    /// A realistic response body for one assistant turn that reasoned and then called a tool.
+    /// Hand-built because nothing offline can reach the endpoint; `reasoning_content` is present
+    /// because K3 always thinks, and its docs require the complete assistant message returned unchanged.
+    /// </summary>
+    private static JsonElement ReasonedThenCalled(string reasoning = "weighing two hypotheses") =>
+        JsonDocument.Parse($$"""
+        {
+          "choices": [
+            { "index": 0,
+              "finish_reason": "tool_calls",
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "reasoning_content": "{{reasoning}}",
+                "tool_calls": [
+                  { "id": "call-1", "type": "function",
+                    "function": { "name": "read_panel", "arguments": "{\"panelId\":\"arrival-rate\"}" } }
+                ]
+              } }
+          ],
+          "usage": { "prompt_tokens": 1200, "completion_tokens": 340 }
+        }
+        """).RootElement.Clone();
+
+    [Fact]
+    public void AToolCallIsReadWithItsIdNameAndParsedArguments()
+    {
+        var reply = KimiAnalystModel.ToReply(ReasonedThenCalled());
+
+        var call = Assert.Single(reply.ToolCalls);
+        Assert.Equal("call-1", call.CallId);
+        Assert.Equal("read_panel", call.ToolName);
+        Assert.Equal("arrival-rate", call.Input.GetProperty("panelId").GetString());
+    }
+
+    [Fact]
+    public void TokenCountsAreReadFromUsage()
+    {
+        var reply = KimiAnalystModel.ToReply(ReasonedThenCalled());
+
+        Assert.Equal(1200, reply.InputTokens);
+        Assert.Equal(340, reply.OutputTokens);
+    }
+
+    [Fact]
+    public void ANullContentBecomesNoTextRatherThanTheStringNull()
+    {
+        var reply = KimiAnalystModel.ToReply(ReasonedThenCalled());
+
+        Assert.Null(reply.Text);
+    }
+
+    [Fact]
+    public void MalformedToolArgumentsStillProduceACallThatCannotValidate()
+    {
+        // The model can emit invalid JSON in `arguments`. That must not throw: every tool_call needs a
+        // matching tool message in the next request, so the call has to exist for the loop to answer
+        // it with an error. JSON null is used because it fails every object schema in the catalog --
+        // an empty object could VALIDATE against a schema with no required fields, and the loop would
+        // then run a tool with input the model never actually sent.
+        var body = JsonDocument.Parse("""
+        {
+          "choices": [ { "message": { "role": "assistant", "content": null,
+            "tool_calls": [ { "id": "call-1", "type": "function",
+              "function": { "name": "read_panel", "arguments": "{not json" } } ] } } ],
+          "usage": { "prompt_tokens": 1, "completion_tokens": 1 }
+        }
+        """).RootElement.Clone();
+
+        var reply = KimiAnalystModel.ToReply(body);
+
+        var call = Assert.Single(reply.ToolCalls);
+        Assert.Equal(JsonValueKind.Null, call.Input.ValueKind);
+    }
+
+    [Fact]
+    public void ATextOnlyReplyIsReadAsTextWithNoCalls()
+    {
+        var body = JsonDocument.Parse("""
+        {
+          "choices": [ { "message": { "role": "assistant", "content": "I need more information." } } ],
+          "usage": { "prompt_tokens": 5, "completion_tokens": 6 }
+        }
+        """).RootElement.Clone();
+
+        var reply = KimiAnalystModel.ToReply(body);
+
+        Assert.Empty(reply.ToolCalls);
+        Assert.Equal("I need more information.", reply.Text);
+    }
 }
