@@ -48,7 +48,11 @@ internal sealed record ModelTurn(
     IReadOnlyList<ModelToolCall> ToolCalls,
     IReadOnlyList<ModelToolResult> ToolResults);
 
-/// <summary>A tool as the model sees it. The schema is raw JSON so both adapters can hand it on unchanged.</summary>
+/// <summary>
+/// A tool as the model sees it. The schema stays raw JSON so the adapter can hand it to the wire
+/// unchanged rather than re-modelling it, and so the loop's own client-side validation checks the same
+/// text the backend was given.
+/// </summary>
 internal sealed record ToolSpec(string Name, string Description, string InputSchemaJson);
 
 /// <summary>
