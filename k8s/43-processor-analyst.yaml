@@ -17,10 +17,6 @@
 # exact figure — see the comment above the resources block below, and that constant's doc comment for
 # the byte math. Do not change this number without changing that one.
 #
-# THE MODEL API KEY IS A SECRET CREATED OUT OF BAND, deliberately not in this repo:
-#   kubectl -n skp create secret generic analyst-model --from-literal=apiKey='sk-ant-...'
-# Until that secret exists this Deployment will not even start (secretKeyRef with no matching key
-# blocks the pod at admission), which is a louder and earlier failure than a missing panel address.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -81,12 +77,23 @@ spec:
               value: "redis:6379,abortConnect=false,connectTimeout=5000"
             - name: ConsoleHealth__Port
               value: "8081"
-            # The model API key. Created out of band — see the header comment — and never committed.
+            # Supplied inline, like every other model coordinate, by explicit decision: this key is
+            # treated the same as Analyst__Model__ModelId rather than as a Kubernetes Secret.
             - name: Analyst__Model__ApiKey
-              valueFrom:
-                secretKeyRef:
-                  name: analyst-model
-                  key: apiKey
+              value: "<<CONTROLLER SUBSTITUTES THE LITERAL HERE>>"
+            # The backend's three coordinates, deployment-supplied. These MUST stay environment
+            # variables: they change the preflight BIT's verdict, and PreflightBit caches on a hash of
+            # the prompt alone. Env vars freeze at container start, so editing one here rolls the pod,
+            # which discards the per-replica BitCache, which re-runs the BIT. A mounted ConfigMap with
+            # reloadOnChange would break that silently.
+            - name: Analyst__Model__BaseUrl
+              value: "https://api.moonshot.ai/v1"
+            - name: Analyst__Model__ModelId
+              value: "kimi-k3"
+            # low | high | max. Set explicitly: the endpoint defaults to max, the most expensive
+            # setting, reasoning tokens bill as output, and the monitor workflow runs unattended.
+            - name: Analyst__Model__ReasoningEffort
+              value: "high"
             # appsettings.json ships dev addresses on forwarded ports (localhost:19200/19090) for
             # running outside the cluster. In-cluster these must be service DNS on the in-cluster
             # ports, which is why both are overridden here rather than left to the file.
