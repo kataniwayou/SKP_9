@@ -9,9 +9,13 @@ namespace Processor.Analyst.Model;
 /// it may talk to.
 /// </para>
 /// <para>
-/// The model id and effort are deliberately NOT here: they change the preflight BIT's verdict, and
-/// the BIT caches on a hash of the prompt alone. As compiled constants, changing them requires a
-/// rebuild, which restarts the pod, which clears the cache, which re-runs the BIT.
+/// <b>The model id and effort live here, as environment variables — deliberately amending an earlier
+/// decision that compiled them in.</b> Both change the preflight BIT's verdict, and the BIT caches on a
+/// hash of the prompt alone, so something has to guarantee that a changed value can never meet a warm
+/// cache. A compiled constant guaranteed it by forcing a rebuild. An environment variable guarantees the
+/// same thing for the same reason: env vars freeze at container start, so changing one rolls the pod, and
+/// <c>BitCache</c> is per-replica and dies with the process. What must not happen is either value
+/// arriving from a reloadable source — see the note on each property.
 /// </para>
 /// </summary>
 internal sealed class AnalystModelOptions
