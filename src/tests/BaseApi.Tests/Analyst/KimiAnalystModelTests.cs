@@ -48,8 +48,8 @@ public sealed class KimiAnalystModelTests
         var tool = request["tools"]!.AsArray()[0]!;
         Assert.Equal("function", tool["type"]!.GetValue<string>());
         Assert.Equal("read_panel", tool["function"]!["name"]!.GetValue<string>());
-        // additionalProperties survives here, unlike the Anthropic tool shape which had no field for
-        // it. The loop re-validates against the full schema regardless.
+        // additionalProperties survives the round-trip into the wire request unchanged. The loop
+        // re-validates against the full schema regardless, so nothing depends on the wire carrying it.
         Assert.Contains("additionalProperties", tool["function"]!["parameters"]!.ToJsonString(), System.StringComparison.Ordinal);
     }
 

@@ -37,10 +37,11 @@ internal sealed class InvestigationLoop(
 
         // F5: BudgetLedger's wall-clock check only runs BETWEEN turns (BeginTurn), so it bounds the
         // gap between model calls, never a single call itself. Production passes
-        // CancellationToken.None all the way down and AnthropicClient has no configured request
-        // timeout, so without this a hung model call would wedge the pod's one consumer
-        // indefinitely while the liveness probe -- "the loops still turning" -- kept passing: the
-        // pod stays green forever, processing nothing. `dispatchCt` is what actually bounds the
+        // CancellationToken.None all the way down and the model client is configured with
+        // Timeout.InfiniteTimeSpan -- deliberately, because a thinking model at `high` effort can
+        // legitimately run for minutes -- so without this a hung model call would wedge the pod's
+        // one consumer indefinitely while the liveness probe kept passing, and the pod would stay
+        // green forever, processing nothing. `dispatchCt` is what actually bounds the
         // model call and every panel read below; `ct` itself is left untouched so a cancellation
         // from THIS deadline can still be told apart, by AnalystProcessor's existing filter, from
         // the caller's own token being cancelled. Timer-based, driven by `clock` rather than real

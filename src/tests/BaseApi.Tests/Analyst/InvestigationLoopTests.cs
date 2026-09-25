@@ -287,9 +287,10 @@ public sealed class InvestigationLoopTests
     [Fact]
     public async Task AReplyWithNoToolCallsAtAllIsImpossible()
     {
-        // The model talked instead of acting. On Opus 5 with thinking disabled this is a known
-        // failure shape -- a tool call written into visible text, never executed, nothing raised.
-        // Thinking is left on precisely to avoid it, and this is the net underneath.
+        // The model talked instead of acting. Nothing was executed, so there is nothing to report and
+        // no way to continue honestly. Note this cannot be caused by disabled thinking on this
+        // backend -- K3 always thinks and cannot be configured otherwise -- so a reply with no tool
+        // calls is a genuine anomaly.
         var model = new ScriptedModel(new ModelReply([], Text: "I think it is fine", 0, 0));
 
         await Assert.ThrowsAsync<AnalysisImpossibleException>(

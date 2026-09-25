@@ -3,16 +3,19 @@ namespace Processor.Analyst.Model;
 /// <summary>
 /// The model backend, above the wire format.
 /// <para>
-/// <b>Deliberately not raw SDK message objects.</b> Anthropic speaks <c>tool_use</c>/<c>tool_result</c>
-/// and the on-prem <c>kimi-2.5</c> endpoint speaks <c>tool_calls</c>; the loop must not know which. The
-/// Anthropic SDK cannot talk to a non-Anthropic endpoint — a base-URL override produces wire-format
-/// mismatches, not a working client — so this seam is the only thing that makes one binary shippable
-/// to both the connected cluster and the air-gapped machine.
+/// <b>Deliberately not raw wire objects.</b> This is the test seam: the investigation loop, the
+/// preflight BIT and every disposition rule are exercised against a stub implementation of this
+/// interface, and without it none of that behaviour is testable offline. That alone justifies it.
 /// </para>
 /// <para>
-/// Nothing Anthropic-only may become load-bearing above this line: no adaptive thinking, no effort, no
-/// task budgets, no server-side schema enforcement. Those are pacing niceties on one adapter, never
-/// mechanisms the loop depends on.
+/// It is also what keeps a future model change contained rather than invasive. Supporting several
+/// backends at once is explicitly out of scope — there is one adapter, registered in ProcessorHost —
+/// but when a better model arrives, this interface is the boundary the change stops at.
+/// </para>
+/// <para>
+/// Nothing provider-specific may become load-bearing above this line: no reasoning or thinking
+/// concept, no effort, no server-side schema enforcement. The authoritative budget is loop-enforced and
+/// every tool input is validated client-side, so the loop never depends on a courtesy of one backend.
 /// </para>
 /// </summary>
 internal interface IAnalystModel

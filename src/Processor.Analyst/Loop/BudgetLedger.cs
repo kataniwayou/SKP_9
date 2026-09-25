@@ -3,10 +3,10 @@ namespace Processor.Analyst.Loop;
 /// <summary>
 /// The three ceilings, enforced here rather than by the backend.
 /// <para>
-/// <b>Deliberately not Anthropic task budgets.</b> Those do not exist on the on-prem path, so an
-/// offline deployment would silently lose its ceiling. A task budget may still be set on the
-/// Anthropic adapter as a pacing nicety — so the model wraps up rather than being truncated
-/// mid-thought — but nothing depends on it.
+/// <b>Deliberately not backend-side task budgets.</b> Backend-side pacing is never load-bearing — a
+/// backend that offered one could withdraw or ignore it without this ceiling ever noticing. A task
+/// budget may still be set on the adapter as a pacing nicety — so the model wraps up rather than
+/// being truncated mid-thought — but nothing depends on it.
 /// </para>
 /// </summary>
 internal sealed class BudgetLedger(int maxIterations, int maxTokens, TimeSpan wallClock, TimeProvider clock)

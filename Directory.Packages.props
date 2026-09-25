@@ -145,11 +145,6 @@
     <PackageVersion Include="BaseConsole.Core" Version="[1.0.0]" />
     <PackageVersion Include="BaseApi.Core" Version="[1.0.0]" />
     <PackageVersion Include="BaseProcessor.Core" Version="[1.0.0]" />
-
-    <!-- The Analyst's model backend. Vendored into nugets/ like everything else: the Docker build
-         clears nuget.org and restores from the repo-local feed, so an un-vendored package fails the
-         image build, not just the developer's first restore. -->
-    <PackageVersion Include="Anthropic" Version="12.50.0" />
   </ItemGroup>
 
 </Project>

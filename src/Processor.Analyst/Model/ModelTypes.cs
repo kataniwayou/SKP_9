@@ -19,8 +19,9 @@ internal sealed record ModelToolCall(string CallId, string ToolName, JsonElement
     /// <para>
     /// <b>Nothing above the seam may read this, and nothing above the seam needs to.</b> It exists
     /// because some backends require an assistant turn to be echoed back byte-for-byte rather than
-    /// reconstructed from its visible parts — Anthropic's thinking blocks are signed, and a turn
-    /// carrying <c>tool_use</c> that comes back without them is rejected. The loop already copies
+    /// reconstructed from its visible parts — this endpoint returns a <c>reasoning_content</c> field
+    /// that its documentation requires returned unchanged on assistant turns carrying tool calls, and
+    /// that cannot be rebuilt from the turn's visible parts. The loop already copies
     /// <see cref="ModelReply.ToolCalls"/> into the transcript unchanged, so parking the state here is
     /// what lets it round-trip without the loop growing a notion of "thinking" it must not have (see
     /// <see cref="IAnalystModel"/>). An adapter with nothing to carry leaves it null; a transcript
@@ -52,8 +53,8 @@ internal sealed record ToolSpec(string Name, string Description, string InputSch
 
 /// <summary>
 /// What came back. Token counts are reported so the loop can enforce its own ceiling — the
-/// authoritative budget is loop-enforced precisely because Anthropic's task budgets do not exist on
-/// the on-prem path.
+/// authoritative budget is loop-enforced precisely because no budget the backend might offer is
+/// something the loop may depend on.
 /// </summary>
 internal sealed record ModelReply(
     IReadOnlyList<ModelToolCall> ToolCalls,
