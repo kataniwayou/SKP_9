@@ -29,7 +29,7 @@ now needs read access and nothing else.
 
 | file | what it is |
 |---|---|
-| `kibana-export.ndjson` | the whole deliverable — data view, 4 Lens panels, 1 agg-based panel, dashboard, and the diagram panel |
+| `kibana-export.ndjson` | the whole deliverable — data view, 3 Lens panels, 1 agg-based panel, dashboard, and the diagram panel |
 | `publish-diagram.py` | draws a workflow from the live graph, gates it in a browser, and PUTs it to the workflow row |
 
 **The diagram panel lives in the export, not in a script.** `set-diagram-panel.py` used to write it
@@ -106,11 +106,17 @@ a registry holding 6 and 42. The rest are dead ids from earlier rebuilds of the 
 runbook mints fresh GUIDs every time, and the index remembers all of them. None has a naming record,
 so they render as raw GUIDs and bury the handful that matter.
 
-The dashboard therefore carries one filter, `outcomes and lookups`:
+The dashboard therefore carries one filter, `outcomes, lookups and refusals`:
 
 ```
 attributes.Result exists  OR  attributes.WhitelistVerdict exists
+                          OR  (severity_text = Error AND attributes.Queue exists)
 ```
+
+The third clause arrived with the refusal table and is the reason the filter was renamed. It admits
+a record that has no `Result` at all, so unlike the first two it is NOT a superset of the counted
+set — it is a disjoint third atom. It still moves no count, because every panel carries its own
+guard.
 
 (An `attributes.EntityName exists` clause sat here too, admitting the naming records described
 above. It was removed with them. Because every id in those records also appears in execution
@@ -159,12 +165,14 @@ was ever sent. **No outcome panel can show that, at any severity, ever** — the
 `attributes.Result` to count. The board would read green for work that was thrown away, which is
 precisely how six parked outcomes sat unnoticed across two days on the live stack.
 
-Two panels, below the whitelist pies:
+One panel, `skp-parked-table`, **beside the outcome pie rather than below the board**: the pie says
+what the runs decided, the table says what never got to decide, and the pairing is the point. A
+refusal panel parked at the bottom of a long board is a refusal panel nobody scrolls to, which is
+how six parked outcomes went unnoticed for two days in the first place.
 
-| panel | what it answers |
-|---|---|
-| `skp-parked-bins` | which workflow lost messages, when — on the same timeline as the outcome bars |
-| `skp-parked-table` | what was lost, and whether it is actually recoverable from a dead-letter queue |
+A second panel — a bar chart of refusals over time, `skp-parked-bins` — was built and then removed.
+Two panels answered one question, and the table answers it better: a bar says a workflow lost
+messages, the table says which queue, which message type, and whether they are still recoverable.
 
 One clause, in the dashboard query and mirrored as a DSL filter:
 
