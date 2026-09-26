@@ -144,6 +144,32 @@
           "WorkflowId": "1a56b3ca-e276-4815-87fa-5c2f48ab6dad",
           "StepId": "eb707c5e-24af-4d99-8c97-f127b560e4b4",
           "ProcessorId": "157a0f40-0000-4000-8000-000000000001",
-          "EntryId": "154f4f9c-0000-4000-8000-000000000013" } } }
+          "EntryId": "154f4f9c-0000-4000-8000-000000000013" } } },
+
+    { "id": "14-refused-and-parked", "counted": false,
+      "why": "NEW 2026-09-26. A refusal, not an outcome: GatedQueueConsumer rejected the delivery without requeue and the broker dead-lettered it, so the step reported nothing at all. It carries WorkflowId, StepId and ProcessorId - lifted off the delivery's own x-skp-* headers, because the handler's scope was already disposed by the unwinding exception - and that is exactly why it belongs here: it looks as joinable as an outcome and has no Result, so a rule keyed on the ids rather than on Result would count thrown-away work as completed work",
+      "_source": {
+        "severity_text": "Error",
+        "scope": { "name": "BaseConsole.Core.Messaging.GatedQueueConsumer" },
+        "resource": { "attributes": { "service.name": "orchestrator" } },
+        "attributes": { "{OriginalFormat}": "refusing message of type {Type} on {Queue} — parked",
+          "Type": "StepOutcome",
+          "Queue": "orchestrator-result",
+          "WorkflowId": "1a56b3ca-e276-4815-87fa-5c2f48ab6dad",
+          "StepId": "eb707c5e-24af-4d99-8c97-f127b560e4b4",
+          "ProcessorId": "157a0f40-0000-4000-8000-000000000001" } } },
+
+    { "id": "15-refused-not-parked", "counted": false,
+      "why": "NEW 2026-09-26. The other half of the same catch block: the channel died before the broker heard the rejection, so the message is REDELIVERED rather than dead-lettered and there is nothing in a dead-letter queue to recover. One code branch, one metric bucket and one severity with doc 14 - the template is the only thing telling them apart, which is why the refusal table terms on attributes.{OriginalFormat} instead of counting rows",
+      "_source": {
+        "severity_text": "Error",
+        "scope": { "name": "BaseConsole.Core.Messaging.GatedQueueConsumer" },
+        "resource": { "attributes": { "service.name": "file-fetcher" } },
+        "attributes": { "{OriginalFormat}": "refusing message of type {Type} on {Queue} — NOT parked: the channel was gone before the broker was told, so it will be redelivered rather than dead-lettered",
+          "Type": "ProcessDispatch",
+          "Queue": "processor-8f8344b1-caf6-4482-8710-a3249a238e3c",
+          "WorkflowId": "1a56b3ca-e276-4815-87fa-5c2f48ab6dad",
+          "StepId": "b9c13653-6558-4445-9d20-ab0a6d3fd48f",
+          "ProcessorId": "8f8344b1-caf6-4482-8710-a3249a238e3c" } } }
   ]
 }

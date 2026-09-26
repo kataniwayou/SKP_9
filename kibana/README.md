@@ -29,7 +29,7 @@ now needs read access and nothing else.
 
 | file | what it is |
 |---|---|
-| `kibana-export.ndjson` | the whole deliverable — data view, 2 Lens panels, 1 agg-based panel, dashboard, and the diagram panel |
+| `kibana-export.ndjson` | the whole deliverable — data view, 4 Lens panels, 1 agg-based panel, dashboard, and the diagram panel |
 | `publish-diagram.py` | draws a workflow from the live graph, gates it in a browser, and PUTs it to the workflow row |
 
 **The diagram panel lives in the export, not in a script.** `set-diagram-panel.py` used to write it
@@ -150,6 +150,74 @@ you import into Kibana.
 ```
 python tools/verify-kibana-dashboard.py
 ```
+
+## What counts as a refusal, and why it is on this board at all
+
+A step outcome says what a run decided. A **refusal** is a run that never got to decide: the
+consumer rejected the delivery without requeue, the broker dead-lettered it, and no `StepOutcome`
+was ever sent. **No outcome panel can show that, at any severity, ever** — there is no record with an
+`attributes.Result` to count. The board would read green for work that was thrown away, which is
+precisely how six parked outcomes sat unnoticed across two days on the live stack.
+
+Two panels, below the whitelist pies:
+
+| panel | what it answers |
+|---|---|
+| `skp-parked-bins` | which workflow lost messages, when — on the same timeline as the outcome bars |
+| `skp-parked-table` | what was lost, and whether it is actually recoverable from a dead-letter queue |
+
+One clause, in the dashboard query and mirrored as a DSL filter:
+
+```
+severity_text:"Error" and attributes.Queue:*
+```
+
+**The severity half is load-bearing, not decoration.** `attributes.Queue` also rides
+Information-level startup lines (`consumption admitted … consuming {Queue}`, `reply queue {Queue}
+bound`) and both WARNING-level *requeue* lines. A requeue is not lost work — the message comes back
+— so counting those would turn every store outage into a wall of phantom losses. `Error` + `Queue`
+is exactly `GatedQueueConsumer`'s park branch, on both sides: orchestrator and processor run the
+same consumer, and BaseApi's copy writes the identical record.
+
+**It had to widen the dashboard's query AND its filter.** Both previously admitted only a record
+carrying `Result` or `WhitelistVerdict`; the dashboard's query and filter AND with every panel's
+own, so the two panels rendered permanently empty until the third clause existed. It moves no
+count — measured against the live store, the outcome selector under the widened filter matches the
+same 181,732 records and zero refusals, because each panel still carries its own guard.
+
+### The Outcome column is the whole point of the table
+
+`- parked` means the broker was told, and the message **is** in that queue's `.dead` counterpart,
+recoverable by hand. `- NOT parked: the channel was gone before the broker was told` means it will
+be **redelivered** and there is nothing in a dead-letter queue to find. Those are one code branch,
+one metric bucket (`disposition="parked"`) and one severity — the log template is the only thing
+that distinguishes them, which is why the table terms on `attributes.{OriginalFormat}` rather than
+just counting rows. An operator who cannot tell them apart either hunts for a message that was
+never parked, or ignores one that was.
+
+### The ids come off the headers, not the body
+
+A refusal is logged from a catch block, where the handler's own log scope has already been disposed
+by the unwinding exception — so for a long time these records carried no ids at all and could not be
+paired to anything. `MessageIdHeaders` now stamps six `x-skp-*` AMQP headers at send and the
+consumer lifts them back under the **log-scope** names, so a refusal lands on the same
+`attributes.WorkflowId` / `StepId` / `ProcessorId` fields an outcome does — which is what lets
+`logs@custom` enrich it to `attributes.WorkflowName` and what makes the controls at the top of this
+board filter it like anything else. The headers survive into the dead-letter queue too, so the same
+ids appear on the log line and on the parked message.
+
+**`missingBucket` is true on every dimension of both panels, deliberately.** A refusal whose body
+would not deserialize, or one predating the header stamping, has no workflow id — and a refusal
+dropped for want of a label is lost work the board reports as absent, which is the exact failure
+these panels exist to end. It renders as its own bucket instead. Of the ten messages parked on the
+live stack, nine carry the id and the tenth is this case.
+
+### Coverage
+
+The park branch does not fire in normal traffic — it had not fired once in the current log store —
+so `tools/classification-fixture.json` carries documents 14 and 15 for it, one per half of the
+branch, both `counted: false`. That is the only guard there is against the widened rule quietly
+starting to count refusals as outcomes; check 10 runs it.
 
 ## The diagram panel, and how it follows the selection
 

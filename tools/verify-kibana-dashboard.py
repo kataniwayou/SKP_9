@@ -63,10 +63,31 @@ COUNTED_KQL = 'attributes.Result:* and not resource.attributes.service.name:"orc
 # rather than "there is one dashboard".
 OUTCOMES_DASHBOARD = "skp-operator-outcomes"
 
-# The dashboard hosts TWO atoms since 2026-09-22c: a step outcome (one record per step) and a
-# whitelist lookup (one record per field checked). Its query is their union, with COUNTED_KQL kept
-# verbatim as a parenthesised clause so the rule is still stated exactly once in the export.
-DASHBOARD_KQL = f'({COUNTED_KQL}) or attributes.WhitelistVerdict:*'
+# A refusal: the one Error record GatedQueueConsumer writes, on both sides, when it rejects a
+# delivery without requeue and the broker dead-letters it. THE SEVERITY HALF IS LOAD-BEARING, not
+# decoration -- attributes.Queue also rides Information-level startup lines ("consumption admitted
+# ... consuming {Queue}", "reply queue {Queue} bound", 15 of them in the live store) and the two
+# WARNING-level requeue lines, which are not parks and must never be counted as lost work. Error +
+# Queue is exactly the park branch, both halves of it: the one that landed and the one where the
+# channel died before the broker was told.
+#
+# NO BRACES IN THIS CLAUSE, deliberately. attributes.{OriginalFormat} is the field that separates
+# "parked" from "NOT parked", and it is a keyword that aggregates fine -- so the refusal table uses
+# it as a DIMENSION, which needs no query parsing, rather than putting { and } through Kibana's KQL
+# grammar to find out how it treats them.
+REFUSED_KQL = 'severity_text:"Error" and attributes.Queue:*'
+
+# The dashboard hosts THREE atoms since 2026-09-26: a step outcome (one record per step), a
+# whitelist lookup (one record per field checked), and a refusal (one record per message thrown
+# away). Its query is their union, with COUNTED_KQL kept verbatim as a parenthesised clause so the
+# rule is still stated exactly once in the export.
+#
+# THE REFUSAL CLAUSE HAD TO GO HERE, not only on the panels. The dashboard query and its filter AND
+# with every panel's own query, and both previously admitted only a record carrying Result or
+# WhitelistVerdict -- a refusal carries neither, so the two refusal panels rendered permanently
+# empty until this clause existed. Widening it moves no count: checked against the live store, the
+# outcome selector under the widened filter still matches 181,732 records and zero refusals.
+DASHBOARD_KQL = f'({COUNTED_KQL}) or attributes.WhitelistVerdict:* or ({REFUSED_KQL})'
 
 # Each panel guards its own atom. THE BINS PANEL MAKES THIS LOAD-BEARING: it counts records split by
 # attributes.StepId, and a whitelist record carries a StepId, so without the guard the union query
@@ -83,6 +104,12 @@ PANEL_GUARDS = {
     # for every step-outcome record too, each one empty, since those records have no verdict to
     # slice.
     "skp-whitelist-pies": "attributes.WhitelistVerdict:*",
+    # The two refusal panels. Their guard is load-bearing in the same direction as the bins panel's
+    # and for a sharper reason: a refusal record carries StepId and WorkflowId, so without the guard
+    # the union query would let step outcomes into a panel whose whole claim is "this work was thrown
+    # away", and an operator would read 181,732 completed steps as lost messages.
+    "skp-parked-bins": REFUSED_KQL,
+    "skp-parked-table": REFUSED_KQL,
 }
 
 # The one pair-per-pie bucket. Asserted by check 11 so a later edit cannot quietly go back to
