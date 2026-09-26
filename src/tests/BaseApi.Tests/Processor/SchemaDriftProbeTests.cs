@@ -44,7 +44,8 @@ public sealed class SchemaDriftProbeTests
             LastBody = body;
             if (reply is not null)
             {
-                slot.Publish(reply);
+                // Echoes the probe's own correlation id, as the real replier does.
+                slot.Publish(reply, correlationId);
             }
 
             return Task.CompletedTask;

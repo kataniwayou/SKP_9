@@ -102,6 +102,13 @@ public sealed class ReplyQueueConsumer : IReplyEndpoint, IAsyncDisposable
         // handler finally runs.
         var channel = ((IAsyncBasicConsumer)sender).Channel;
         var type = ea.BasicProperties.Type ?? string.Empty;
+
+        // The id the asker minted and RpcQueueConsumer echoed back. Read here because routing on the
+        // message TYPE alone is what let a reply answer the wrong question: one slot serves every
+        // asker in this process, so a late answer to a timed-out ask was handed to whoever asked
+        // next, and the reply body carries nothing that says what it answers.
+        var correlationId = ea.BasicProperties.CorrelationId;
+
         try
         {
             var routed = DiscoveryReplyRouter.Route(type, ea.Body);
@@ -109,9 +116,16 @@ public sealed class ReplyQueueConsumer : IReplyEndpoint, IAsyncDisposable
             {
                 _logger.LogWarning("reply of unknown type {Type} on {Queue} — dropping", type, QueueName);
             }
-            else
+            else if (!_slot.Publish(routed, correlationId))
             {
-                _slot.Publish(routed);
+                // Was silent, and the silence was the defect: a crossed reply looked exactly like a
+                // normal one from every angle. Information rather than Warning because a late answer
+                // to an ask that already timed out is ordinary under load -- the ask retried and the
+                // retry is what will be answered. What matters is that it is now VISIBLE, and that
+                // the answer went nowhere instead of somewhere wrong.
+                _logger.LogInformation(
+                    "reply {CorrelationId} of type {Type} on {Queue} matches no outstanding ask — dropping",
+                    correlationId, type, QueueName);
             }
         }
         catch (Exception ex)

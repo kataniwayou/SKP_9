@@ -213,7 +213,11 @@ public sealed class SchemaDriftProbe : BackgroundService
         try
         {
             await _replies.EnsureStartedAsync(ct).ConfigureAwait(false);
-            _slot.Take();
+            // Arms the slot for THIS ask before the request goes out, so a reply that beats the
+            // send call returning is still accepted. It replaces a bare Take(): that drained the
+            // value but left the slot willing to accept any reply at all, which is how a late answer
+            // to a timed-out ask came back as the answer to the next question.
+            _slot.Expect(correlationId);
             await _sender.SendAsync(
                 ProcessorQueues.IdentityQuery,
                 MessageTypes.GetProcessorBySourceHash,

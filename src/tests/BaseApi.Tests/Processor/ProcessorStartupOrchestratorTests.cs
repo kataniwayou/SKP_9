@@ -47,7 +47,9 @@ public sealed class ProcessorStartupOrchestratorTests
             OnSend?.Invoke(Sent.Count);
             if (_script.Count > 0 && _script.Dequeue() is { } reply)
             {
-                _slot.Publish(reply);
+                // Echoes the id the orchestrator minted, exactly as RpcQueueConsumer does. Without
+                // the echo the slot rejects it, which is the whole point of the matching.
+                _slot.Publish(reply, correlationId);
             }
 
             return Task.CompletedTask;

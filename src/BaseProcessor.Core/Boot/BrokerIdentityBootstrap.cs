@@ -268,7 +268,11 @@ public sealed class BrokerIdentityBootstrap : IIdentityBootstrap, IAsyncDisposab
         try
         {
             await replies.EnsureStartedAsync(ct).ConfigureAwait(false);
-            slot.Take();
+            // Arms the slot for THIS ask before the request goes out, so a reply that beats the
+            // send call returning is still accepted. It replaces a bare Take(): that drained the
+            // value but left the slot willing to accept any reply at all, which is how a late answer
+            // to a timed-out ask came back as the answer to the next question.
+            slot.Expect(correlationId);
             await sender.SendAsync(
                 ProcessorQueues.IdentityQuery,
                 MessageTypes.GetProcessorBySourceHash,
