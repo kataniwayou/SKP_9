@@ -1,3 +1,4 @@
+using BaseConsole.Core.Gating;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -117,8 +118,30 @@ public sealed class WorkflowFireJobTests
         public void StopWorkflow(Guid workflowId) =>
             Store.MarkDeleted(workflowId, DateTimeOffset.UnixEpoch);
 
+        /// <summary>
+        /// The projection store's gate, opened.
+        /// <para>
+        /// <b>A fresh L2Gate is CLOSED</b> — it fails closed until the probe's first healthy
+        /// measurement, which is right in production and wrong as a test default: every test here
+        /// but one is about what a fire does when the store is usable, and a shut gate would make
+        /// them all pass for the wrong reason. Opening it models a replica whose probe has already
+        /// run. The test that wants it shut trips it explicitly.
+        /// </para>
+        /// </summary>
+        public L2Gate Gate { get; } = OpenedGate();
+
+        private static L2Gate OpenedGate()
+        {
+            var gate = new L2Gate(NullLogger<L2Gate>.Instance);
+
+            // Blocking is safe: SetAsync awaits nothing but its own SemaphoreSlim, and this gate has
+            // no subscribers to run under it.
+            gate.ReportHealthyAsync().GetAwaiter().GetResult();
+            return gate;
+        }
+
         public WorkflowFireJob Build() => new(
-            Store, Scheduler, Sender, State, NullLogger<WorkflowFireJob>.Instance);
+            Store, Scheduler, Sender, State, Gate, NullLogger<WorkflowFireJob>.Instance);
 
         /// <summary>The context a fire of this workflow's own job arrives with.</summary>
         public IJobExecutionContext Context(Guid workflowId, Guid jobId) =>
@@ -185,6 +208,47 @@ public sealed class WorkflowFireJobTests
             Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
         await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P2), MessageTypes.ProcessDispatch,
             Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task AClosedProjectionStoreDispatchesNothingButStillReschedules()
+    {
+        // No point starting a step nothing can finish. The processor's own consumer bounces the
+        // dispatch with gate_closed before the author is reached, and the branch the author would
+        // send needs an L2 write that cannot happen -- so every message published during an outage is
+        // guaranteed-futile work that accumulates at the cron rate and drains afterwards as a burst
+        // of runs whose window has passed.
+        //
+        // THE RESCHEDULE IS THE OTHER HALF. A skipped fire costs one tick and nothing else: the cron
+        // re-arms, so the first fire after recovery is an ordinary one. This is the policy the
+        // scheduler already chose for process downtime, where BuildTrigger catches a missed fire up
+        // once rather than replaying it.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
+        await h.Gate.TripAsync();
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+        Assert.Equal(1, h.Scheduler.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task AReopenedStoreDispatchesAgainOnTheNextFire()
+    {
+        // The skip must not be sticky. A gate that closed and reopened has to leave the job dispatching
+        // exactly as before, or one outage would quietly retire a workflow until someone restarted it.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
+
+        await h.Gate.TripAsync();
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await h.Gate.ReportHealthyAsync();
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await h.Sender.Received(1).SendAsync(Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+        Assert.Equal(2, h.Scheduler.RescheduleCount);
     }
 
     [Fact]

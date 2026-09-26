@@ -1,3 +1,4 @@
+using BaseConsole.Core.Gating;
 using BaseConsole.Core.Messaging;
 using Messaging.Contracts;
 using Messaging.Transport;
@@ -50,6 +51,7 @@ public sealed class WorkflowFireJob(
     IWorkflowScheduler scheduler,
     IQueueSender sender,
     LeaderState leaderState,
+    L2Gate gate,
     ILogger<WorkflowFireJob> logger) : IJob
 {
     /// <summary>
@@ -106,7 +108,39 @@ public sealed class WorkflowFireJob(
             // order, so a fire that arrives before L1 holds its workflow returns at the lookup above —
             // before this gate is consulted at all. A term that can never be false is a term that
             // reads as a live mechanism while protecting nothing.
-            if (leaderState.IsLeader)
+            // THE STORE BEFORE THE ROLE, and the order is the point rather than a style choice.
+            // "nothing can be written" is true for every replica and has nothing to do with whose
+            // turn it is to dispatch; nesting it inside the leader branch would put the local reason
+            // ahead of the fundamental one, and would have to be remembered again if dispatch ever
+            // stopped being leader-only. It changes no message traffic today -- only the leader
+            // dispatches either way -- which is exactly why it is worth stating as its own condition
+            // instead of hiding inside one.
+            //
+            // An entry dispatch is guaranteed-futile while the gate is shut. The processor's own
+            // GatedQueueConsumer bounces it with requeue/gate_closed before the author is reached,
+            // and the branch the author would send needs an L2 write that cannot happen. With
+            // x-delivery-limit -1 on these queues nothing is lost -- it simply accumulates at the
+            // cron rate for the whole outage, and drains afterwards as a burst of runs whose window
+            // has passed.
+            //
+            // SKIPPING COSTS ONE TICK AND NOTHING ELSE. The reschedule below is outside this branch,
+            // so the cron re-arms and the first fire after recovery is an ordinary one. That is the
+            // policy this scheduler already chose for process downtime -- BuildTrigger's comment says
+            // a missed fire time is "caught up once rather than replayed" -- so treating an L2 outage
+            // the same way makes the two agree. Publishing through the outage is the behaviour that
+            // disagrees with it.
+            //
+            // The LEVEL is role-aware even though the decision is not: seven workflows firing twice a
+            // minute across three replicas would ship ~42 records a minute for the length of an
+            // outage, and L2Gate already logs the closed transition once. The leader's skip is the
+            // one worth shipping.
+            if (!gate.IsOpen)
+            {
+                logger.Log(
+                    leaderState.IsLeader ? LogLevel.Information : LogLevel.Debug,
+                    "the projection store is unusable; this fire dispatches nothing");
+            }
+            else if (leaderState.IsLeader)
             {
                 await DispatchEntryStepsAsync(workflowId, entry.Definition, context).ConfigureAwait(false);
             }
