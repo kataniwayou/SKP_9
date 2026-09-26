@@ -174,11 +174,41 @@ A second panel — a bar chart of refusals over time, `skp-parked-bins` — was 
 Two panels answered one question, and the table answers it better: a bar says a workflow lost
 messages, the table says which queue, which message type, and whether they are still recoverable.
 
-One clause, in the dashboard query and mirrored as a DSL filter:
+Two clauses that do different jobs, and the split is deliberate.
+
+The dashboard **query** is KQL and stays a shape:
 
 ```
 severity_text:"Error" and attributes.Queue:*
 ```
+
+The dashboard **filter** is DSL and is an identity — it enumerates the two log templates:
+
+```
+severity_text = "Error"
+AND attributes.{OriginalFormat} IN (
+      "refusing message of type {Type} on {Queue} — parked",
+      "refusing message of type {Type} on {Queue} — NOT parked: the channel was gone before …" )
+```
+
+They AND together, so the DSL half is what actually bounds the panel. `attributes.{OriginalFormat}`
+holds the message template **before** substitution — identical on every record from one `LogError`
+call — so naming the two strings closes the set by identity rather than inferring a refusal from a
+shape. Measured: against one real park record and one synthetic `Error`-with-a-`{Queue}` from a
+different template, the shape matches **2** and the identity matches **1**.
+
+Braces never reach KQL. That was the only reason the field was avoided in the selector, and putting
+the templates in the DSL filter — which the dashboard already carries — sidesteps it entirely.
+
+`severity_text:"Error"` is kept in both halves although the templates alone would do. It costs
+nothing and changes the failure direction: if someone rewords a template without updating
+`Templates.cs`, the record still satisfies the KQL shape and shows up as a wrong-looking row rather
+than vanishing and leaving a silently empty panel.
+
+**The strings are the live suite's, not retyped.** `Templates.cs` pins both as `RefusingAndParking`
+and `RefusingNotParked`, and the resilience suite matches records by them — so a reword that was not
+propagated fails a test before it empties a dashboard. That guard is what makes template-identity the
+safer choice here, where in most codebases it would be the riskier one.
 
 **The severity half is load-bearing, not decoration.** `attributes.Queue` also rides
 Information-level startup lines (`consumption admitted … consuming {Queue}`, `reply queue {Queue}
