@@ -269,12 +269,6 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // Both halves now name themselves, under the correlation id the fire minted.
         if (entry.Definition.EntryStepIds.Contains(m.StepId))
         {
-            // EntryComplete, not EntryDispatch: this is one record per LINEAGE written by whichever
-            // replica consumed the outcome, where the fire's dispatch record is one per fire and
-            // leader-only. Two counters, so two values -- see RunPositions.
-            using var position = _logger.BeginScope(
-                RunPositions.Scope(RunPositions.EntryComplete));
-
             _logger.Log(level, "the entry step completed with {Result}", m.Result);
         }
 

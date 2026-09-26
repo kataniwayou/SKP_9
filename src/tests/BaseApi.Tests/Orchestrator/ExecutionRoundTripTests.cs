@@ -815,41 +815,6 @@ public sealed class ExecutionRoundTripTests
     }
 
     [Fact]
-    public async Task AnEntryStepsOutcomeCarriesTheEntryCompleteRunPosition()
-    {
-        // Distinct from EntryDispatch on purpose. This record is one per LINEAGE and is written by
-        // whichever replica consumed the outcome; the dispatch record is one per fire and only the
-        // leader writes it. One shared value would merge a fire counter with a work-item counter into
-        // a number that is neither -- measured live at 19k against 36k.
-        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
-        Seed(h, Entry, Output);
-
-        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-
-        var scope = h.ScopeOf("the entry step completed with {Result}");
-        Assert.NotNull(scope);
-        Assert.Equal(RunPositions.EntryComplete, Assert.Contains(RunPositions.Key, scope!));
-    }
-
-    [Fact]
-    public async Task AStepThatIsBothEntryAndTerminalCarriesADifferentValueOnEachRecord()
-    {
-        // A single-step workflow: A is the entry step AND has no successor. Live examples exist --
-        // analyst-monitor and sc-split-importer both emit the two completion lines for the same
-        // StepId. So RunPosition describes THE RECORD, never the step, and a single-valued
-        // "what position is this step" field could not represent this case at all.
-        var h = new Harness(Step(A, PA, 1, "{}"));
-        Seed(h, Entry, Output);
-
-        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-
-        Assert.Equal(
-            RunPositions.EntryComplete,
-            h.ScopeOf("the entry step completed with {Result}")![RunPositions.Key]);
-        Assert.Equal(RunPositions.Terminal, h.ScopeOf(TerminalTemplate)![RunPositions.Key]);
-    }
-
-    [Fact]
     public async Task AMidRunRecordCarriesNoRunPositionAtAll()
     {
         // The handoff and advancement lines are neither end of the run, and they outnumber both --
@@ -870,21 +835,31 @@ public sealed class ExecutionRoundTripTests
     }
 
     [Fact]
-    public void TheThreeRunPositionValuesAreDistinctAndNoneContainsAnother()
+    public void TheTwoRunPositionValuesAreDistinctAndNeitherContainsTheOther()
     {
         // A reader matching by substring must not be able to conflate them -- the lesson the refusal
         // templates paid for, where "NOT parked" contains "parked".
-        string[] all = [RunPositions.EntryDispatch, RunPositions.EntryComplete, RunPositions.Terminal];
+        Assert.NotEqual(RunPositions.Entry, RunPositions.Terminal);
+        Assert.DoesNotContain(RunPositions.Entry, RunPositions.Terminal, StringComparison.Ordinal);
+        Assert.DoesNotContain(RunPositions.Terminal, RunPositions.Entry, StringComparison.Ordinal);
+    }
 
-        Assert.Equal(all.Length, all.Distinct(StringComparer.Ordinal).Count());
-        foreach (var a in all)
-        {
-            foreach (var b in all.Where(x => !string.Equals(x, a, StringComparison.Ordinal)))
-            {
-                Assert.False(
-                    b.Contains(a, StringComparison.Ordinal),
-                    $"'{b}' contains '{a}', so a substring match for one matches the other");
-            }
-        }
+    [Fact]
+    public async Task AnEntryStepThatIsAlsoTerminalIsTaggedOnlyOnItsTerminalRecord()
+    {
+        // A single-step workflow: A is the entry step AND has no successor. Live examples exist --
+        // analyst-monitor and sc-split-importer both emit the two completion lines for one StepId.
+        // Only the terminal record carries RunPosition: "entry" marks the DISPATCH, which the fire
+        // writes, so an outcome-side record never claims it however the step is wired.
+        var h = new Harness(Step(A, PA, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Equal(RunPositions.Terminal, h.ScopeOf(TerminalTemplate)![RunPositions.Key]);
+
+        var entryCompleted = h.ScopeOf("the entry step completed with {Result}");
+        Assert.NotNull(entryCompleted);
+        Assert.DoesNotContain(RunPositions.Key, entryCompleted!);
     }
 }

@@ -25,9 +25,10 @@ namespace Messaging.Contracts;
 /// message text untouched.
 /// </para>
 /// <para>
-/// <b>Only the three records that end or begin something carry it.</b> Handoff and advancement lines
-/// outnumber both ends several times over and no counter wants them, so they are left untagged and a
-/// terms aggregation on this field stays readable.
+/// <b>Only two records carry it: the dispatch that starts a run and the outcome that ends a branch.</b>
+/// Everything in between -- handoffs, advancement, the entry step's own completion -- is left
+/// untagged, so a terms aggregation on this field answers exactly the two questions it was added for
+/// and nothing else.
 /// </para>
 /// </summary>
 public static class RunPositions
@@ -40,7 +41,10 @@ public static class RunPositions
     public const string Key = "RunPosition";
 
     /// <summary>
-    /// The orchestrator put an entry step on a processor's queue. One record per entry step per fire,
+    /// The orchestrator put an entry step on a processor's queue. The ONLY value marking the start of
+    /// a run: the entry step's own completion record is deliberately left untagged, because the
+    /// counter this exists for is "how many entry steps were dispatched" and that is a different
+    /// question from "how many lineages began" -- one per fire against one per item read. One record per entry step per fire,
     /// all of them under the fire's single correlation id — so a document count is dispatches and a
     /// distinct-correlation count is fires. The two coincide only while every workflow has one entry
     /// step.
@@ -55,20 +59,7 @@ public static class RunPositions
     /// absent: this counts entry steps that actually reached a queue.
     /// </para>
     /// </summary>
-    public const string EntryDispatch = "entry-dispatch";
-
-    /// <summary>
-    /// An entry step finished. One record per LINEAGE, not per fire — a source step opens one lineage
-    /// per item it reads and reports an outcome for each — and written by whichever replica consumed
-    /// the outcome, so it is role-agnostic where <see cref="EntryDispatch"/> is leader-only.
-    /// <para>
-    /// Deliberately a different value from <see cref="EntryDispatch"/>. Sharing one would merge a fire
-    /// counter with a work-item counter; the two differ by roughly a factor of two on this deployment.
-    /// Paired with <see cref="Terminal"/> — both are per-lineage completion events from the same
-    /// handler, which is what makes a completion rate over distinct <c>ExecutionId</c> meaningful.
-    /// </para>
-    /// </summary>
-    public const string EntryComplete = "entry-complete";
+    public const string Entry = "entry";
 
     /// <summary>
     /// A branch ended: no successor accepted this outcome. Role-agnostic, one record per branch end,

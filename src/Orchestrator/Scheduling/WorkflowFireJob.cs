@@ -304,7 +304,7 @@ public sealed class WorkflowFireJob(
                     // counts, so it must mark entry steps that actually reached a queue. The frozen
                     // skip and the send failure below share that outer scope and must NOT carry it, or
                     // the counter would report dispatches that never happened.
-                    using (logger.BeginScope(RunPositions.Scope(RunPositions.EntryDispatch)))
+                    using (logger.BeginScope(RunPositions.Scope(RunPositions.Entry)))
                     {
                         logger.LogInformation("dispatched an entry step");
                     }

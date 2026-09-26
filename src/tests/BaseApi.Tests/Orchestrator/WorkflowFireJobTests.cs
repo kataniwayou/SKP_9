@@ -545,7 +545,7 @@ public sealed class WorkflowFireJobTests
     // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task ADispatchedEntryStepCarriesTheEntryDispatchRunPosition()
+    public async Task ADispatchedEntryStepCarriesTheEntryRunPosition()
     {
         // The operator's start-trip counter is a document count over this record, selected by
         // RunPosition rather than by the English template. It rides the log SCOPE, not the template:
@@ -557,7 +557,7 @@ public sealed class WorkflowFireJobTests
 
         var scope = h.ScopeOf("dispatched an entry step");
         Assert.NotNull(scope);
-        Assert.Equal(RunPositions.EntryDispatch, Assert.Contains(RunPositions.Key, scope!));
+        Assert.Equal(RunPositions.Entry, Assert.Contains(RunPositions.Key, scope!));
     }
 
     [Fact]
@@ -581,7 +581,7 @@ public sealed class WorkflowFireJobTests
             }
 
             dispatches++;
-            Assert.Equal(RunPositions.EntryDispatch, h.Log.RecordScopes[i][RunPositions.Key]);
+            Assert.Equal(RunPositions.Entry, h.Log.RecordScopes[i][RunPositions.Key]);
             correlations.Add(h.Log.RecordScopes[i][CorrelationKeys.LogScope].ToString()!);
         }
 
