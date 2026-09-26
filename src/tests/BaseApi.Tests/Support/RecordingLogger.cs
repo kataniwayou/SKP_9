@@ -50,8 +50,21 @@ internal sealed class RecordingLogger<T> : ILogger<T>
     /// break on a one-byte change to a template and on nothing else, so the template is the thing
     /// worth pinning.
     /// </para>
+    /// <para>
+    /// Index i here is the template of <see cref="Records"/>'s record i. That pairing holds under
+    /// concurrent logging only because both appends happen under one lock; see the field below.
+    /// </para>
     /// </summary>
     public Recorded<string?> Templates { get; } = new();
+
+    /// <summary>
+    /// Held across BOTH appends in <see cref="Log"/>, so a template and its record are added as one
+    /// step. <see cref="Recorded{T}"/> locks each list individually, which is enough for a reader of
+    /// either list alone but not enough to pair them: two components logging concurrently on the same
+    /// logger could otherwise interleave as template-A, template-B, record-B, record-A and silently
+    /// swap which template belongs to which record.
+    /// </summary>
+    private readonly object _pair = new();
 
     public bool IsEnabled(LogLevel logLevel) => true;
 
@@ -62,13 +75,18 @@ internal sealed class RecordingLogger<T> : ILogger<T>
         Exception? exception,
         Func<TState, Exception?, string> formatter)
     {
-        // Appended before the record so an index valid in Records is always valid in Templates.
-        Templates.Add(
-            state is IEnumerable<KeyValuePair<string, object?>> values
-                ? values.FirstOrDefault(v => v.Key == "{OriginalFormat}").Value?.ToString()
-                : null);
+        var template = state is IEnumerable<KeyValuePair<string, object?>> values
+            ? values.FirstOrDefault(v => v.Key == "{OriginalFormat}").Value?.ToString()
+            : null;
+        var message = formatter(state, exception);
 
-        Records.Add((level, formatter(state, exception), exception));
+        lock (_pair)
+        {
+            // Template first, so Templates is never SHORTER than Records: a reader walking Records by
+            // index can always index Templates with the same one, even mid-append.
+            Templates.Add(template);
+            Records.Add((level, message, exception));
+        }
     }
 
     private sealed class Scope : IDisposable
