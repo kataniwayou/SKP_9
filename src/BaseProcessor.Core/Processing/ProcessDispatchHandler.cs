@@ -382,7 +382,14 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // throwing CancelledException, which is caught above and sends a Cancelled outcome; a sink
         // declares EndsLineage and is sent Completed below. Returning normally, sending nothing and
         // not ending the lineage is the one shape with no legitimate reading.
-        if (ran && !_processor.EndsLineage && !state.BranchSent)
+        // MaySendNoBranch is what keeps a SOURCE out of this. An importer's dispatch is a "go and
+        // fetch" instruction rather than a step in a lineage -- each item it reads opens its own,
+        // with its own execution id -- so a drained poll opens no lineage, sends no branch, and has
+        // nothing to report an outcome for. Shipped without this carve-out, the check fired twice on
+        // kafka-importer within three minutes of the rollout, on exactly the quiet polls that are its
+        // ordinary behaviour. A diagnostic that cries wolf on a healthy path is worse than the
+        // silence it replaced, because it trains an operator to scroll past the line that matters.
+        if (ran && !_processor.EndsLineage && !_processor.MaySendNoBranch && !state.BranchSent)
         {
             _logger.LogError(
                 "the step returned without sending a branch — no StepOutcome will be reported, so the "

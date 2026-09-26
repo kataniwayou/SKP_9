@@ -40,6 +40,20 @@ public sealed class ProcessDispatchHandlerTests
         public Task Send(byte[] d) => SendToPostAsync(d, E, CancellationToken.None);
     }
 
+    /// <summary>A source: it may legitimately return having sent nothing, exactly as BaseImporter does.</summary>
+    private sealed class SourceProbe : BaseProcessor<NoConfig>
+    {
+        public bool Ran { get; private set; }
+
+        internal override bool MaySendNoBranch => true;
+
+        protected override Task ProcessAsync(byte[] data, NoConfig? config, Guid executionId, CancellationToken ct)
+        {
+            Ran = true;
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class Harness
     {
         public IDatabase Db { get; } = Substitute.For<IDatabase>();
@@ -136,6 +150,24 @@ public sealed class ProcessDispatchHandlerTests
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
+        Assert.DoesNotContain(h.Log.Records, r => r.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task SaysNothingWhenTheProcessorMaySendNoBranch()
+    {
+        // A SOURCE, not a transform. An importer's dispatch is a "go and fetch" instruction: each item
+        // it reads opens its own lineage, so a drained poll opens none, sends none, and has nothing to
+        // report an outcome for. Shipped without this carve-out the check fired twice on
+        // kafka-importer within three minutes of a rollout, on exactly the quiet polls that are its
+        // ordinary behaviour.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new SourceProbe();
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.True(probe.Ran);
         Assert.DoesNotContain(h.Log.Records, r => r.Level == LogLevel.Error);
     }
 

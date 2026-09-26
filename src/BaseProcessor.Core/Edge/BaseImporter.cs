@@ -45,6 +45,18 @@ public abstract class BaseImporter<TConfig>(ILogger logger) : BaseProcessor<TCon
     private string? _key;
 
     /// <summary>
+    /// A drained poll is an ordinary outcome for a source, not a broken chain.
+    /// <para>
+    /// Every item read here opens its OWN lineage — <c>NewExecutionId</c> per item, one branch each —
+    /// so the outcome is reported per lineage and never for this dispatch. Reading zero items opens
+    /// zero lineages and therefore has nothing to report an outcome for, which is why this dispatch
+    /// legitimately ends with no branch sent. It is not silent either: the batch already logs
+    /// "consumed {Consumed}/{Requested} records; stopped because {Reason}" with Reason=Drained.
+    /// </para>
+    /// </summary>
+    internal sealed override bool MaySendNoBranch => true;
+
+    /// <summary>
     /// What "the same source" means, so a dispatch naming a different one gets a different source
     /// rather than silently inheriting this one. It differs per importer on purpose: a subscribed
     /// consumer is bound to a broker list, a topic and a group; a folder reader is bound to a path.
