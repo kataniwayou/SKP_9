@@ -101,14 +101,26 @@ RUNPOSITION_KQL = "attributes.RunPosition:*"
 DASHBOARD_KQL = (
     f'({COUNTED_KQL}) or attributes.WhitelistVerdict:* or ({REFUSED_KQL}) or {RUNPOSITION_KQL}')
 
-# Each panel guards its own atom. THE BINS PANEL MAKES THIS LOAD-BEARING: it counts records split by
+# Each panel guards its own atom, and must do so WITHOUT relying on the dashboard query to have
+# excluded anything -- see the outcome panels below for what that assumption cost.
+# THE BINS PANEL MAKES THIS LOAD-BEARING: it counts records split by
 # attributes.StepId, and a whitelist record carries a StepId, so without the guard the union query
 # would inflate every step's series and check 7 would stop matching. The outcomes pie terms on
-# attributes.Result and is immune by construction; it carries the guard anyway, so a future change
-# to its aggregation cannot quietly start counting the other atom.
+# attributes.Result -- which was wrongly described here as "immune by construction", the exact
+# assumption that later failed when a record carrying BOTH Result and RunPosition was admitted.
 PANEL_GUARDS = {
-    "skp-outcomes-bins": "attributes.Result:*",
-    "skp-outcomes-pie": "attributes.Result:*",
+    # COUNTED_KQL, not a bare "attributes.Result:*" -- and the difference is a defect that shipped.
+    # The orchestrator exclusion used to live ONLY inside the dashboard query's first clause, so
+    # these two panels leaned on it instead of stating it. Adding a fourth clause for run boundaries
+    # broke that: an orchestrator TERMINAL record carries attributes.Result AND attributes.RunPosition,
+    # so it entered through the new clause, sailed past a guard that only asked for Result, and
+    # doubled the terminal step. Measured on simple-abc: stepA/stepB/stepC went from 120/120/120 to
+    # 120/120/240, reporting 25/25/50 where the truth is 33/33/33.
+    #
+    # Each panel guards its own atom, completely. A guard that is only correct because of what some
+    # OTHER clause happens to exclude is not a guard.
+    "skp-outcomes-bins": COUNTED_KQL,
+    "skp-outcomes-pie": COUNTED_KQL,
     # Not a Lens panel: the whitelist board is one aggregation-based pie split into one donut per
     # (processor, whitelist) pair, because a Lens partition chart has no split-chart dimension --
     # its only groups are "Slice by" and "Metric", verified in the editor. Its guard is load-bearing
@@ -563,6 +575,15 @@ def check_11_export_states_the_rule_once(checks):
     # quotes in the rule are escaped once or twice depending on nesting depth. Counting the raw
     # bytes finds nothing and reads as "the rule is stated zero times", which is not a state the
     # file can be in.
+    # ONE PER PLACE THAT IS SUPPOSED TO STATE IT, not one full stop. Until 2026-09-26 this asserted
+    # restated == 1: the rule lived only in the dashboard query and the two outcome panels leaned on
+    # it. That is precisely what let a fourth dashboard clause admit orchestrator terminal records
+    # into panels whose guard only asked for attributes.Result, doubling the terminal step. The
+    # panels now state the rule themselves, so the expected count is the dashboard plus each panel
+    # guarded by it -- and an occurrence ANYWHERE ELSE still fails, which is the drift this check
+    # exists to catch. Drift WITHIN a guarded panel is caught by missing_guards below, which compares
+    # each panel's query to its guard verbatim.
+    expected_restatements = 1 + sum(1 for g in PANEL_GUARDS.values() if g == COUNTED_KQL)
     restated = raw_export.replace("\\", "").count(COUNTED_KQL)
 
     missing_guards = sorted(
@@ -577,11 +598,11 @@ def check_11_export_states_the_rule_once(checks):
     # dropdown lists every id in the window whether or not the board can say anything about it.
     unbounded = sorted(i for i, f in filters_by_dashboard.items() if not f)
 
-    ok = (states_rule and restated == 1 and not unbounded and not missing_guards
+    ok = (states_rule and restated == expected_restatements and not unbounded and not missing_guards
           and pair_split and not unknown_keys and stale == 0 and scoped)
     return checks.report(11, "Export states the rule once", ok,
                          f"dashboard_query_matches={states_rule}, "
-                         f"rule_stated_times={restated}, "
+                         f"rule_stated_times={restated}/{expected_restatements}, "
                          f"panels_missing_their_guard={missing_guards or 'none'}, "
                          f"whitelist_splits_on_the_pair={pair_split}, "
                          f"dashboards_with_unbounded_controls={unbounded or 'none'}, "
