@@ -172,10 +172,17 @@ internal sealed class ElasticPanelSource
 
         if (total == 0)
         {
-            // No outcome record at all in the window -- indistinguishable from a blind spot.
-            // Matches FixturePanelReader.MissingSeries: all three flags false together.
+            // Not one record in the window that this panel's scope admits -- indistinguishable from a
+            // blind spot. Matches FixturePanelReader.MissingSeries: all three flags false together.
+            //
+            // Named per panel rather than shared, because the panels do not all count the same thing.
+            // step-outcomes and step-failures scope to outcome records; refused-messages scopes to
+            // every record for the workflow, since a refusal has no attributes.Result to require and
+            // a scope narrowed to refusals could not tell an all-clear from an ingest outage. Calling
+            // that 0 "outcome records" would be a small dishonesty the model has no way to check.
             return new PanelReading(
-                definition.PanelId, definition.Layer, """{"totalOutcomeRecords":0}""", SampleCount: 0,
+                definition.PanelId, definition.Layer,
+                $"{{\"{ScopeCountName(definition.PanelId)}\":0}}", SampleCount: 0,
                 new PanelTrust(SeriesPresent: false, WindowFullyCovered: false, NoDataDistinguishable: false));
         }
 
@@ -186,6 +193,7 @@ internal sealed class ElasticPanelSource
         {
             "step-outcomes" => BuildStepOutcomes(definition, total, aggregations, windowFullyCovered),
             "step-failures" => BuildStepFailures(definition, total, aggregations, windowFullyCovered),
+            "refused-messages" => BuildRefusedMessages(definition, total, aggregations, windowFullyCovered),
             _ => throw new PanelUnavailableException(
                 definition.PanelId, $"no elasticsearch response parser registered for panel '{definition.PanelId}'"),
         };
@@ -258,6 +266,83 @@ internal sealed class ElasticPanelSource
         // SampleCount is the total outcome-record count, matching BuildStepOutcomes -- not
         // failedCount. A healthy window with zero failures genuinely returned "total" records; using
         // failedCount here would record it in the trace as a panel that returned nothing.
+        return new PanelReading(
+            definition.PanelId, definition.Layer, valueJson, SampleCount: checked((int)total),
+            new PanelTrust(SeriesPresent: true, windowFullyCovered, NoDataDistinguishable: true));
+    }
+
+    /// <summary>
+    /// What <c>hits.total</c> counts for a given panel, as the name the model sees on a reading.
+    /// <para>
+    /// Every Elastic panel here queries a BROAD scope and narrows inside an aggregation -- that is
+    /// what lets <c>hits.total</c> answer "was anything reported at all" independently of whether the
+    /// panel's own slice is zero. But the broad scope is not the same scope for every panel, and the
+    /// reading has to say which one it is.
+    /// </para>
+    /// </summary>
+    private static string ScopeCountName(string panelId) => panelId switch
+    {
+        "refused-messages" => "totalWorkflowRecords",
+        _ => "totalOutcomeRecords",
+    };
+
+    /// <summary>
+    /// The refusals reading: how much work this workflow lost in the window, split by queue and by
+    /// whether the park actually landed, with the exceptions that caused the most recent five.
+    /// <para>
+    /// <b>The outcome split comes from a <c>filters</c> aggregation, not a <c>terms</c> one.</b> The
+    /// two refusal templates share a long prefix and differ only past it, and the Kibana panel found
+    /// the expensive way that a terms aggregation's bucket label gets truncated to that shared prefix
+    /// -- collapsing the only distinction the split exists to make, silently and identically for both
+    /// variants. A filters aggregation names its own buckets, so nothing can truncate them.
+    /// </para>
+    /// </summary>
+    private static PanelReading BuildRefusedMessages(
+        PanelDefinition definition, long total, JsonElement aggregations, bool windowFullyCovered)
+    {
+        var refusals = aggregations.GetProperty("refusals");
+        var refusedCount = refusals.GetProperty("doc_count").GetInt64();
+
+        var byQueue = new Dictionary<string, long>(StringComparer.Ordinal);
+        if (refusals.TryGetProperty("by_queue", out var byQueueAgg)
+            && byQueueAgg.TryGetProperty("buckets", out var queueBuckets))
+        {
+            foreach (var bucket in queueBuckets.EnumerateArray())
+            {
+                byQueue[bucket.GetProperty("key").GetString() ?? "(unnamed queue)"] =
+                    bucket.GetProperty("doc_count").GetInt64();
+            }
+        }
+
+        var outcomes = refusals.GetProperty("by_outcome").GetProperty("buckets");
+
+        var samples = new List<JsonElement>();
+        if (refusals.TryGetProperty("samples", out var samplesAgg)
+            && samplesAgg.TryGetProperty("hits", out var hitsWrapper)
+            && hitsWrapper.TryGetProperty("hits", out var hitsArray))
+        {
+            foreach (var hit in hitsArray.EnumerateArray())
+            {
+                if (hit.TryGetProperty("_source", out var source))
+                {
+                    samples.Add(source.Clone());
+                }
+            }
+        }
+
+        var valueJson = JsonSerializer.Serialize(new
+        {
+            totalWorkflowRecords = total,
+            refusedCount,
+            parked = BucketCount(outcomes, "parked"),
+            notParked = BucketCount(outcomes, "notParked"),
+            byQueue,
+            samples,
+        });
+
+        // The scope total, matching both other Elastic panels -- NOT refusedCount. Four refusals out
+        // of 612 records is not a panel that returned four things, and recording it that way would
+        // put a healthy window in the trace as a panel that returned almost nothing.
         return new PanelReading(
             definition.PanelId, definition.Layer, valueJson, SampleCount: checked((int)total),
             new PanelTrust(SeriesPresent: true, windowFullyCovered, NoDataDistinguishable: true));

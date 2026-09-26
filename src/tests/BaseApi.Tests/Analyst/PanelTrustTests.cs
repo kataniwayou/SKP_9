@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Messaging.Contracts;
 using Processor.Analyst.Panels;
 using Xunit;
 
@@ -250,6 +251,95 @@ public sealed class PanelTrustTests
         Assert.Equal(90, reading.SampleCount);
         Assert.True(reading.Trust.SeriesPresent);
         Assert.True(reading.Trust.NoDataDistinguishable);
+    }
+
+    [Fact]
+    public void Elastic_RefusedMessages_ReportsQueuesOutcomesAndTheExceptionThatCausedThem()
+    {
+        var reading = ElasticPanelSource.Parse(
+            Def("refused-messages"), Window, Fixture("elastic-refusals-present.json"));
+
+        Assert.True(reading.Trust.SeriesPresent);
+        Assert.True(reading.Trust.NoDataDistinguishable);
+        Assert.True(reading.Trust.WindowFullyCovered);
+
+        // SampleCount is the scope total (612), matching every other Elastic panel's convention --
+        // not the refusal count. A window with four refusals out of 612 records is not a panel that
+        // returned four things.
+        Assert.Equal(612, reading.SampleCount);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        var root = value.RootElement;
+
+        Assert.Equal(4, root.GetProperty("refusedCount").GetInt64());
+
+        // The two outcomes counted apart. This is the distinction the whole panel turns on: a park
+        // landed in a dead-letter queue and can be recovered, a NOT-parked refusal was redelivered
+        // and there is nothing in a dead-letter queue to go and look at.
+        Assert.Equal(3, root.GetProperty("parked").GetInt64());
+        Assert.Equal(1, root.GetProperty("notParked").GetInt64());
+
+        // Attributed to queues, which dead-letter-depth can also do -- but here scoped to the
+        // workflow, which dead-letter-depth cannot do at all.
+        var byQueue = root.GetProperty("byQueue");
+        Assert.Equal(3, byQueue.GetProperty("orchestrator-result").GetInt64());
+        Assert.Equal(1, byQueue.GetProperty("processor-filefetcher-in").GetInt64());
+
+        // The exception is WHY it was refused, and the most useful field on the record.
+        Assert.Contains("FileNotFoundException", reading.ValueJson, StringComparison.Ordinal);
+        Assert.Contains("disappeared between poll and fetch", reading.ValueJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Elastic_RefusedMessages_NoRefusalsWhileTheWorkflowIsReportingIsATrustedZero()
+    {
+        // The reading this panel returns almost always, and the one that has to be believable: 940
+        // records exist for the workflow in the window and not one of them is a refusal. That is a
+        // real all-clear, and it is drawable ONLY because the query's scope is every record for the
+        // workflow rather than the refusals themselves -- scoped to refusals, an empty response could
+        // not be told apart from an ingest outage, and this panel would be useless in exactly the
+        // case it is read in most often.
+        var reading = ElasticPanelSource.Parse(
+            Def("refused-messages"), Window, Fixture("elastic-refusals-zero.json"));
+
+        Assert.True(reading.Trust.SeriesPresent);
+        Assert.True(reading.Trust.NoDataDistinguishable);
+        Assert.Equal(940, reading.SampleCount);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(0, value.RootElement.GetProperty("refusedCount").GetInt64());
+        Assert.Equal(0, value.RootElement.GetProperty("samples").GetArrayLength());
+    }
+
+    [Fact]
+    public void Elastic_RefusedMessages_NoRecordsAtAllIsStillReportedAsABlindSpot()
+    {
+        // The other side of the same line. This panel shares the zero-documents branch with the other
+        // Elastic panels, and must not quietly inherit their noun for it: the scope here is every
+        // record for the workflow, not outcome records, and a reading that calls 0 "outcome records"
+        // when it counted something else is the kind of small dishonesty the model cannot check.
+        var reading = ElasticPanelSource.Parse(
+            Def("refused-messages"), Window, Fixture("elastic-outcomes-zero-documents.json"));
+
+        Assert.False(reading.Trust.SeriesPresent);
+        Assert.False(reading.Trust.NoDataDistinguishable);
+        Assert.Equal(0, reading.SampleCount);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(0, value.RootElement.GetProperty("totalWorkflowRecords").GetInt64());
+    }
+
+    [Fact]
+    public void Elastic_RefusedMessages_QueryCarriesTheTemplatesTheConsumerActuallyEmits()
+    {
+        // The end-to-end pin for the hoist: the shipped query selects on the same constants
+        // GatedQueueConsumer logs (RefusalTemplateTests holds the emitter, the live suite and the
+        // Kibana export to those same two). Without this the panel could drift to a stale template
+        // and keep returning a confident, trusted zero forever.
+        var query = Def("refused-messages").Query;
+
+        Assert.Contains(RefusalTemplates.Parked, query, StringComparison.Ordinal);
+        Assert.Contains(RefusalTemplates.NotParked, query, StringComparison.Ordinal);
     }
 
     [Fact]

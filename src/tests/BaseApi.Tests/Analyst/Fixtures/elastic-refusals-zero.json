@@ -1,0 +1,52 @@
+{
+  "took": 3,
+  "timed_out": false,
+  "_shards": {
+    "total": 1,
+    "successful": 1,
+    "skipped": 0,
+    "failed": 0
+  },
+  "hits": {
+    "total": {
+      "value": 940,
+      "relation": "eq"
+    },
+    "max_score": null,
+    "hits": []
+  },
+  "aggregations": {
+    "refusals": {
+      "doc_count": 0,
+      "by_queue": {
+        "doc_count_error_upper_bound": 0,
+        "sum_other_doc_count": 0,
+        "buckets": []
+      },
+      "by_outcome": {
+        "buckets": {
+          "parked": {
+            "doc_count": 0
+          },
+          "notParked": {
+            "doc_count": 0
+          }
+        }
+      },
+      "samples": {
+        "hits": {
+          "total": {
+            "value": 0,
+            "relation": "eq"
+          },
+          "max_score": null,
+          "hits": []
+        }
+      }
+    },
+    "earliest": {
+      "value": 1790208000000.0,
+      "value_as_string": "2026-09-24T00:00:00.000Z"
+    }
+  }
+}

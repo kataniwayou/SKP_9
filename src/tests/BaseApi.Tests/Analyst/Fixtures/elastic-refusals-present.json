@@ -1,0 +1,122 @@
+{
+  "took": 7,
+  "timed_out": false,
+  "_shards": {
+    "total": 1,
+    "successful": 1,
+    "skipped": 0,
+    "failed": 0
+  },
+  "hits": {
+    "total": {
+      "value": 612,
+      "relation": "eq"
+    },
+    "max_score": null,
+    "hits": []
+  },
+  "aggregations": {
+    "refusals": {
+      "doc_count": 4,
+      "by_queue": {
+        "doc_count_error_upper_bound": 0,
+        "sum_other_doc_count": 0,
+        "buckets": [
+          {
+            "key": "orchestrator-result",
+            "doc_count": 3
+          },
+          {
+            "key": "processor-filefetcher-in",
+            "doc_count": 1
+          }
+        ]
+      },
+      "by_outcome": {
+        "buckets": {
+          "parked": {
+            "doc_count": 3
+          },
+          "notParked": {
+            "doc_count": 1
+          }
+        }
+      },
+      "samples": {
+        "hits": {
+          "total": {
+            "value": 4,
+            "relation": "eq"
+          },
+          "max_score": null,
+          "hits": [
+            {
+              "_index": "logs-generic.otel-default",
+              "_id": "r0.",
+              "_source": {
+                "attributes.{OriginalFormat}": "refusing message of type {Type} on {Queue} — parked",
+                "attributes.exception.type": "System.InvalidOperationException",
+                "attributes.exception.message": "no step definition matches entry 4f0a",
+                "attributes.Queue": "orchestrator-result",
+                "attributes.Type": "step-outcome",
+                "attributes.StepId": "798b9dc8-3e1e-4f0a-9c2a-000000000001",
+                "attributes.ProcessorId": "f361e170-1111-4f0a-9c2a-000000000003",
+                "attributes.WorkflowId": "1a56b3ca-2222-4f0a-9c2a-000000000002",
+                "@timestamp": "2026-09-24T05:40:00.000Z"
+              }
+            },
+            {
+              "_index": "logs-generic.otel-default",
+              "_id": "r0.",
+              "_source": {
+                "attributes.{OriginalFormat}": "refusing message of type {Type} on {Queue} — NOT parked: the channel was gone before the broker was told, so it will be redelivered rather than dead-lettered",
+                "attributes.exception.type": "System.InvalidOperationException",
+                "attributes.exception.message": "no step definition matches entry 4f0a",
+                "attributes.Queue": "orchestrator-result",
+                "attributes.Type": "step-outcome",
+                "attributes.StepId": "798b9dc8-3e1e-4f0a-9c2a-000000000001",
+                "attributes.ProcessorId": "f361e170-1111-4f0a-9c2a-000000000003",
+                "attributes.WorkflowId": "1a56b3ca-2222-4f0a-9c2a-000000000002",
+                "@timestamp": "2026-09-24T05:20:00.000Z"
+              }
+            },
+            {
+              "_index": "logs-generic.otel-default",
+              "_id": "r0.",
+              "_source": {
+                "attributes.{OriginalFormat}": "refusing message of type {Type} on {Queue} — parked",
+                "attributes.exception.type": "System.IO.FileNotFoundException",
+                "attributes.exception.message": "in/abc.zip disappeared between poll and fetch",
+                "attributes.Queue": "processor-filefetcher-in",
+                "attributes.Type": "step-outcome",
+                "attributes.StepId": "798b9dc8-3e1e-4f0a-9c2a-000000000001",
+                "attributes.ProcessorId": "f361e170-1111-4f0a-9c2a-000000000003",
+                "attributes.WorkflowId": "1a56b3ca-2222-4f0a-9c2a-000000000002",
+                "@timestamp": "2026-09-24T04:10:00.000Z"
+              }
+            },
+            {
+              "_index": "logs-generic.otel-default",
+              "_id": "r0.",
+              "_source": {
+                "attributes.{OriginalFormat}": "refusing message of type {Type} on {Queue} — parked",
+                "attributes.exception.type": "System.InvalidOperationException",
+                "attributes.exception.message": "no step definition matches entry 4f0a",
+                "attributes.Queue": "orchestrator-result",
+                "attributes.Type": "step-outcome",
+                "attributes.StepId": "798b9dc8-3e1e-4f0a-9c2a-000000000001",
+                "attributes.ProcessorId": "f361e170-1111-4f0a-9c2a-000000000003",
+                "attributes.WorkflowId": "1a56b3ca-2222-4f0a-9c2a-000000000002",
+                "@timestamp": "2026-09-24T03:05:00.000Z"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "earliest": {
+      "value": 1790208000000.0,
+      "value_as_string": "2026-09-24T00:00:00.000Z"
+    }
+  }
+}

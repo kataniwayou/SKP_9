@@ -1,3 +1,5 @@
+using Messaging.Contracts;
+
 namespace Processor.Analyst.Panels;
 
 /// <summary>Which transport a panel's <see cref="PanelDefinition.Query"/> is written for.</summary>
@@ -292,5 +294,126 @@ internal static class PanelRegistry
                 "can take up to five minutes to appear.",
             Kind: PanelKind.Prometheus,
             Query: "max by (queue) (pipeline_deadletter_depth)"),
+
+        // THE BUSINESS COUNTERPART TO dead-letter-depth, AND THE ONLY PANEL THAT CAN SAY WHOSE WORK
+        // WAS LOST. The two are deliberately not redundant: depth is a level with no attribution,
+        // this is an event stream scoped to one workflow. Added because the session that gave the
+        // operator a Kibana refusals panel left the agent without a counterpart -- which is exactly
+        // the drift this registry has no detector for. See the maintenance rule above.
+        new PanelDefinition(
+            PanelId: "refused-messages",
+            Layer: "business",
+            Description:
+                "Messages the pipeline REFUSED for the target workflow: work that was thrown away " +
+                "rather than completed or failed, from Elasticsearch, counted by queue and split " +
+                "into the two outcomes a refusal can have, with up to five of the most recent " +
+                "records and the exception that caused each one. A refused message produces no " +
+                "StepOutcome at all, so it is invisible to step-outcomes and step-failures by " +
+                "construction -- both require attributes.Result and a refusal has none. " +
+                "THE TWO OUTCOMES MEAN DIFFERENT THINGS AND THE DIFFERENCE IS ACTIONABLE: " +
+                "`parked` means the broker was told, so the message IS in that queue's dead-letter " +
+                "queue and can be recovered; `notParked` means the channel died before the broker " +
+                "heard the rejection, so the message was REDELIVERED instead and there is nothing " +
+                "in a dead-letter queue to go and look at -- do not send anyone hunting for it. " +
+                "EVENTS IN THIS WINDOW, NOT A LEVEL, which is the whole difference from " +
+                "dead-letter-depth: that panel reports how many messages are sitting in each " +
+                "dead-letter queue right now, with no attribution at all, however long ago they " +
+                "got there. Read the pair together. Refusals here with depth flat means the parks " +
+                "are landing elsewhere or being drained; depth above zero with no refusals here " +
+                "means loss that is still outstanding but happened before this window or belonged " +
+                "to another workflow; refusals here AND rising depth means this workflow is losing " +
+                "work right now. " +
+                "A zero here is a genuine all-clear whenever the reading is trusted, because the " +
+                "query counts every record for this workflow in the window and narrows to refusals " +
+                "only inside the aggregation: totalWorkflowRecords above zero proves the workflow " +
+                "was reporting, which makes refusedCount zero a fact rather than a silence. " +
+                "Its two limits both make it UNDER-report. A refusal that carries no workflow id " +
+                "is invisible here, because the id reaches the record only through the delivery's " +
+                "own headers and a message parked before the sender stamped them carries none -- " +
+                "that is real lost work this panel cannot see, and dead-letter-depth is the " +
+                "cross-check, because a queue depth needs no attribution to be counted. And " +
+                "byQueue keeps only the ten busiest queues, so a wide spread of single refusals " +
+                "can be undercounted there while refusedCount still totals them all. " +
+                "Samples carry the exception type and message -- which is WHY the message was " +
+                "refused, and the most useful field on the record -- but never the stack trace.",
+            Kind: PanelKind.Elastic,
+            Query: WithRefusalTemplates(
+                """
+                {
+                  "size": 0,
+                  "track_total_hits": true,
+                  "query": {
+                    "bool": {
+                      "filter": [
+                        { "range": { "@timestamp": { "gte": "{{FROM}}", "lte": "{{TO}}" } } },
+                        { "term": { "attributes.WorkflowId": "{{WORKFLOW}}" } }
+                      ]
+                    }
+                  },
+                  "aggs": {
+                    "refusals": {
+                      "filter": {
+                        "terms": {
+                          "attributes.{OriginalFormat}": [ "$PARKED$", "$NOT_PARKED$" ]
+                        }
+                      },
+                      "aggs": {
+                        "by_queue": {
+                          "terms": {
+                            "field": "attributes.Queue",
+                            "size": 10,
+                            "missing": "(unnamed queue)"
+                          }
+                        },
+                        "by_outcome": {
+                          "filters": {
+                            "filters": {
+                              "parked": {
+                                "term": { "attributes.{OriginalFormat}": "$PARKED$" }
+                              },
+                              "notParked": {
+                                "term": { "attributes.{OriginalFormat}": "$NOT_PARKED$" }
+                              }
+                            }
+                          }
+                        },
+                        "samples": {
+                          "top_hits": {
+                            "size": 5,
+                            "sort": [ { "@timestamp": "desc" } ],
+                            "_source": [
+                              "@timestamp", "attributes.Queue", "attributes.Type",
+                              "attributes.exception.type", "attributes.exception.message",
+                              "attributes.StepId", "attributes.ProcessorId",
+                              "attributes.{OriginalFormat}"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "earliest": { "min": { "field": "@timestamp" } }
+                  }
+                }
+                """)),
     ];
+
+    /// <summary>
+    /// Substitutes the refusal templates into a panel query once, at type-initialisation time.
+    /// <para>
+    /// <b>A different placeholder syntax from <c>{{FROM}}</c>, deliberately.</b> The double-brace
+    /// placeholders are substituted per READ by <see cref="ElasticPanelSource"/>, from the dispatch's
+    /// own window and target workflow. These are substituted once, here, from a compiled constant --
+    /// spelling them the same way would send a reader looking for them in the read path, where they
+    /// are not and must never be.
+    /// </para>
+    /// <para>
+    /// <b>Why substituted rather than written out.</b> The refusal templates are the only identifier
+    /// a refused message has, and a literal copy here would be one no compiler holds to the emitter:
+    /// the panel would go on returning a confident, trusted zero while the consumer logged something
+    /// else. See <see cref="RefusalTemplates"/> and <c>RefusalTemplateTests</c>.
+    /// </para>
+    /// </summary>
+    private static string WithRefusalTemplates(string query) => query
+        .Replace("$PARKED$", RefusalTemplates.Parked, StringComparison.Ordinal)
+        .Replace("$NOT_PARKED$", RefusalTemplates.NotParked, StringComparison.Ordinal);
 }
