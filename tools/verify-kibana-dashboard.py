@@ -77,17 +77,29 @@ OUTCOMES_DASHBOARD = "skp-operator-outcomes"
 # query, which the keyword attributes.* fields do not.
 REFUSED_KQL = 'severity_text:"Error" and attributes.Queue:*'
 
-# The dashboard hosts THREE atoms since 2026-09-26: a step outcome (one record per step), a
-# whitelist lookup (one record per field checked), and a refusal (one record per message thrown
-# away). Its query is their union, with COUNTED_KQL kept verbatim as a parenthesised clause so the
-# rule is still stated exactly once in the export.
+# The dashboard hosts FOUR atoms since 2026-09-26: a step outcome (one record per step), a
+# whitelist lookup (one record per field checked), a refusal (one record per message thrown away),
+# and a run boundary (one record per fire, and one per branch end). Its query is their union, with
+# COUNTED_KQL kept verbatim as a parenthesised clause so the rule is still stated exactly once in
+# the export.
 #
 # THE REFUSAL CLAUSE HAD TO GO HERE, not only on the panel. The dashboard query and its filter AND
 # with every panel's own query, and both previously admitted only a record carrying Result or
 # WhitelistVerdict -- a refusal carries neither, so the refusal table rendered permanently empty
 # until this clause existed. Widening it moves no count: checked against the live store, the
 # outcome selector under the widened filter still matches 181,732 records and zero refusals.
-DASHBOARD_KQL = f'({COUNTED_KQL}) or attributes.WhitelistVerdict:* or ({REFUSED_KQL})'
+# The run-boundary selector. Exactly the two records the orchestrator tags with a RunPosition: the
+# fire's entry dispatch and a branch's terminal outcome. Nothing else in the store carries the field.
+#
+# THIS CLAUSE HAD TO GO IN THE DASHBOARD QUERY FOR A SHARPER REASON THAN THE REFUSAL ONE. Both
+# boundary records were excluded, and by DIFFERENT clauses: "dispatched an entry step" carries no
+# Result at all, and the terminal record carries one but is emitted BY the orchestrator, which
+# COUNTED_KQL excludes by name. So the pie would have rendered permanently empty on both slices --
+# the same failure the refusal table shipped with, twice over.
+RUNPOSITION_KQL = "attributes.RunPosition:*"
+
+DASHBOARD_KQL = (
+    f'({COUNTED_KQL}) or attributes.WhitelistVerdict:* or ({REFUSED_KQL}) or {RUNPOSITION_KQL}')
 
 # Each panel guards its own atom. THE BINS PANEL MAKES THIS LOAD-BEARING: it counts records split by
 # attributes.StepId, and a whitelist record carries a StepId, so without the guard the union query
@@ -109,6 +121,11 @@ PANEL_GUARDS = {
     # union query would let step outcomes into a panel whose whole claim is "this work was thrown
     # away", and an operator would read 181,732 completed steps as lost messages.
     "skp-parked-table": REFUSED_KQL,
+    # The run-boundary pie. Its guard is load-bearing in the OPPOSITE direction to the others': this
+    # panel's metric is a unique count of CorrelationId, and every other atom on this dashboard
+    # carries a CorrelationId too, so without the guard both slices would count every outcome,
+    # whitelist lookup and refusal in the window as though it were a run boundary.
+    "skp-runposition-pie": RUNPOSITION_KQL,
 }
 
 # The one pair-per-pie bucket. Asserted by check 11 so a later edit cannot quietly go back to
