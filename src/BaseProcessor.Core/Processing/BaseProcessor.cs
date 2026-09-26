@@ -172,6 +172,13 @@ public abstract class BaseProcessor
             await state.Sender
                 .SendTransientAsync(ProcessorQueues.Post(state.ProcessorId), MessageTypes.ProcessedData, branch, ct)
                 .ConfigureAwait(false);
+
+            // AFTER the send returns, never before it, and inside the try rather than after the catch.
+            // The flag means "a branch reached the post queue", which is the only thing that makes a
+            // StepOutcome eventually arrive -- a send that threw produced no branch and must not mark
+            // one, or a dispatch whose every send failed would look, to the check in
+            // ProcessDispatchHandler, exactly like one that worked.
+            state.MarkBranchSent();
         }
         catch (TransientSendException ex)
         {

@@ -7,6 +7,7 @@ using BaseApi.Tests.Support;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using StackExchange.Redis;
@@ -104,6 +105,65 @@ public sealed class ProcessDispatchHandlerTests
         Assert.False(probe.Ran);
         await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
                                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task LogsAnErrorWhenTheAuthorReturnsWithoutSendingABranch()
+    {
+        // The chain stops here and nothing else says so. A non-terminal step reports its outcome only
+        // through the branch it sends, so an author who returns normally without sending one ends the
+        // lineage with no outcome at all -- and the "the step returned" line above it is logged
+        // identically by a healthy step, which is what made the two indistinguishable in the record.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) => Task.CompletedTask);   // runs, never sends
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.True(probe.Ran);
+        var error = Assert.Single(h.Log.Records, r => r.Level == LogLevel.Error);
+        Assert.Contains("without sending a branch", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SaysNothingWhenTheAuthorDidSendABranch()
+    {
+        // The other half: the check must not fire on the ordinary path, or it becomes noise an
+        // operator learns to ignore -- which is worse than the silence it replaced.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((d, p) => p.Send(d));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.DoesNotContain(h.Log.Records, r => r.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task StillLogsTheErrorWhenEverySendFailed()
+    {
+        // A send that threw produced no branch, so it must not count as one. Without this the flag
+        // would be set before the send was known to have landed, and a dispatch whose every send
+        // failed would look exactly like one that worked. The dispatch itself still propagates --
+        // this assertion is only about what the flag records.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        // SendTransientAsync is an extension method and cannot be substituted; it delegates to
+        // SendAsync and wraps a transport fault, so the stub goes on the interface member.
+        h.Sender
+            .SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
+                       Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>())
+            .ThrowsAsync(new TransientSendException("broker gone", new InvalidOperationException()));
+
+        var probe = new Probe(async (d, p) =>
+        {
+            try { await p.Send(d); } catch (PostSendException) { /* swallowed on purpose */ }
+        });
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        var error = Assert.Single(h.Log.Records, r => r.Level == LogLevel.Error);
+        Assert.Contains("without sending a branch", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

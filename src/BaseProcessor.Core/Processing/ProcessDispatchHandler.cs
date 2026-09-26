@@ -225,8 +225,13 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             return;
         }
 
-        _processor.BeginDispatch(new DispatchState(
-            _sender, d.CorrelationId, d.WorkflowId, d.StepId, d.ProcessorId));
+        // Kept rather than discarded into BeginDispatch, so the branch check after the transform can
+        // read what the author actually did with it. BaseProcessor exposes no accessor for this and
+        // does not need one: this handler is what constructs the state.
+        var state = new DispatchState(
+            _sender, d.CorrelationId, d.WorkflowId, d.StepId, d.ProcessorId);
+
+        _processor.BeginDispatch(state);
 
         // INFORMATION, unlike the enter lines on every other handler, and the asymmetry is the point:
         // what runs next is the author's own code, which this framework knows nothing about and cannot
@@ -355,6 +360,36 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // measured across their transform and nothing else, which is the number worth having.
         _logger.LogInformation(
             "the step returned after {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+
+        // THE CHAIN STOPPED HERE AND NOTHING ELSE SAYS SO. A non-terminal step reports its outcome
+        // only through the branch it sends -- ProcessedDataHandler is what turns that branch into the
+        // StepOutcome -- so an author who returns normally without sending one ends the lineage with
+        // no outcome of any kind. The line above is logged identically by a healthy step, and the
+        // send itself logs nothing on this hop, so until this check the two were byte-identical in
+        // the record: a broken workflow and a working one produced the same single Information line.
+        //
+        // THIS IS A DIAGNOSTIC, NOT A GUARD, and the difference is deliberate. It does not throw, does
+        // not change the disposition, and does not invent an outcome: the delivery is still acked and
+        // the input still reclaimed above. Catching the mistake is the author's job; this only makes
+        // the breakage visible when they miss it.
+        //
+        // NO OutcomeLogScope, and its absence is load-bearing. There IS no outcome here -- attaching
+        // attributes.Result would make the dashboard's counted-set rule count this as a step outcome,
+        // which is exactly backwards for a step that reported nothing. It rides the ambient
+        // ExecutionLogScope instead, so it still joins to the run by workflow, execution and step id.
+        //
+        // It cannot fire on a correct processor. A step with nothing to hand on reports that by
+        // throwing CancelledException, which is caught above and sends a Cancelled outcome; a sink
+        // declares EndsLineage and is sent Completed below. Returning normally, sending nothing and
+        // not ending the lineage is the one shape with no legitimate reading.
+        if (ran && !_processor.EndsLineage && !state.BranchSent)
+        {
+            _logger.LogError(
+                "the step returned without sending a branch — no StepOutcome will be reported, so the "
+                + "orchestrator never advances this workflow past this step and the lineage stops "
+                + "here. A non-terminal processor must call SendToPostAsync at least once; a step "
+                + "with nothing to hand on reports that by throwing CancelledException.");
+        }
 
         // THE TERMINAL OUTCOME, and it exists because a sink's success was the one disposition nobody
         // reported. An exporter sends no branch, so the post handler never runs and never sends the
