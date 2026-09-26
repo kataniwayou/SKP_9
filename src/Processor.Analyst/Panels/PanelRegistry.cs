@@ -47,6 +47,48 @@ internal sealed record PanelDefinition(
 /// count itself. Ops-layer (Prometheus) panels have no workflow dimension to filter on at all; see
 /// each ops panel's own description and <c>IPanelReader.ReadAsync</c>'s doc comment.
 /// </para>
+/// <para>
+/// <b>THE MAINTENANCE RULE: a panel added to an operator dashboard needs its counterpart here, or
+/// the shared language has a hole. NOTHING ENFORCES THIS.</b> The stated design intent — written on
+/// <c>ProcessorRow.description</c>, <c>ContractPrompt</c>, <see cref="PanelDefinition"/>,
+/// <c>IPanelReader</c> and <c>AnalystConfig.WindowMinutes</c> — is that the Analyst reads the same
+/// panels an operator reads: same query, same data, same window, only the rendering differing. But
+/// the agent never reads Kibana or Grafana. Every <see cref="PanelDefinition"/> is a hand-written C#
+/// re-expression of a dashboard panel, so this is two clients over one database, agreeing only
+/// because a human keeps them agreeing. There is no test, no generator and no schema between them;
+/// the failure mode is not a broken build but an agent that reads every board it has, finds them
+/// clean, and reports no finding over the one metric that would have explained the incident.
+/// </para>
+/// <para>
+/// <b>Audited 2026-09-26, and the gap is wide.</b> (Every metric named below was confirmed present
+/// in the live Prometheus at audit time rather than copied from a note — the whole point of this
+/// registry is that a panel naming a series that does not exist reads as a confident all-clear.) The operator has 5 Kibana panels and ~60 Grafana
+/// panels over ~14 distinct <c>pipeline_*</c> metrics; this registry has 8. Nine metrics the operator
+/// can see still have no counterpart here, and three of them are this agent's own recurring failure
+/// modes — it can observe that queue wait rose and cannot see that the L2 gate was shut
+/// (<c>pipeline_gate_open_ratio</c>, <c>pipeline_gate_trips_total</c>), that the queue was backed up
+/// (<c>pipeline_queue_depth</c>), or that a pod restarted inside the same window
+/// (<c>pipeline_process_start_timestamp_seconds</c>). Also absent:
+/// <c>pipeline_messages_consumed_total</c> (requeue storms), <c>pipeline_messages_produced_total</c>,
+/// <c>pipeline_queue_consumers</c> (a queue with no consumer attached),
+/// <c>pipeline_gate_probe_duration_seconds</c> (a histogram — only <c>_bucket</c>, <c>_sum</c> and
+/// <c>_count</c> series exist, so the bare name matches nothing, exactly as for queue-wait's
+/// instrument), <c>pipeline_leader_ratio</c> /
+/// <c>pipeline_hydration_admitted_ratio</c>, and the whole <c>skp-baseapi</c> board (5xx, p95,
+/// exception rate). On the business side, Kibana's "Whitelist verdicts by value" has no counterpart
+/// either. In priority order the next three are <c>gate-open</c>, <c>queue-depth</c> and
+/// <c>restarts</c>: they are the panels that explain what the agent already observes.
+/// </para>
+/// <para>
+/// <b>The pair that closed the first hole is worth copying as a shape.</b>
+/// <c>refused-messages</c> was added because the session that gave the operator a Kibana refusals
+/// panel left the agent without one — the drift happening in real time, in the same session that
+/// documented it. Two things made it safe to add: the selector it matches on is a compiled constant
+/// shared with the emitter (<see cref="RefusalTemplates"/>), not a literal retyped into the query;
+/// and its query was executed against the live store before shipping, because a panel invented
+/// without confirming the field or metric exists is a liability the agent will report on with the
+/// same confidence as a real one.
+/// </para>
 /// </summary>
 internal static class PanelRegistry
 {
