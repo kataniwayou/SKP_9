@@ -28,15 +28,71 @@ internal sealed class RecordingLogger<T> : ILogger<T>
     /// </summary>
     public Recorded<IReadOnlyDictionary<string, object>> Scopes { get; } = new();
 
+    /// <summary>
+    /// Every record's ACTIVE scope, flattened outer-to-inner, aligned with <see cref="Records"/> by
+    /// index.
+    /// <para>
+    /// <b>This is what the OpenTelemetry bridge actually does,</b> and <see cref="Scopes"/> is not:
+    /// that list says a scope was opened at some point, which cannot answer "did THIS record carry
+    /// that field". With <c>IncludeScopes</c> + <c>ParseStateValues</c> every open scope's pairs are
+    /// flattened onto the record as <c>attributes.&lt;Key&gt;</c>, so a test asserting on an attribute
+    /// has to look at the scope that was live when the line was written. Inner scopes win, matching
+    /// the bridge.
+    /// </para>
+    /// </summary>
+    public Recorded<IReadOnlyDictionary<string, object>> RecordScopes { get; } = new();
+
+    /// <summary>
+    /// The live scope chain, per async flow — the real providers keep this in an
+    /// <see cref="AsyncLocal{T}"/> for the same reason: a scope opened on one flow must not leak onto
+    /// a record written by another. A linked node rather than a mutable stack so a captured chain
+    /// cannot be changed by a later push or pop.
+    /// </summary>
+    private readonly AsyncLocal<ScopeNode?> _active = new();
+
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull
     {
-        if (state is IEnumerable<KeyValuePair<string, object>> pairs)
+        var values = state is IEnumerable<KeyValuePair<string, object>> pairs
+            ? pairs.ToDictionary(p => p.Key, p => p.Value)
+            : null;
+
+        if (values is not null)
         {
-            Scopes.Add(pairs.ToDictionary(p => p.Key, p => p.Value));
+            Scopes.Add(values);
         }
 
-        return new Scope();
+        var restore = _active.Value;
+        _active.Value = new ScopeNode(values, restore);
+        return new Scope(this, restore);
     }
+
+    /// <summary>Flattens the live chain outer-to-inner, so an inner scope's value wins.</summary>
+    private IReadOnlyDictionary<string, object> FlattenActiveScope()
+    {
+        var chain = new List<ScopeNode>();
+        for (var node = _active.Value; node is not null; node = node.Parent)
+        {
+            chain.Add(node);
+        }
+
+        var merged = new Dictionary<string, object>(StringComparer.Ordinal);
+        for (var i = chain.Count - 1; i >= 0; i--)
+        {
+            if (chain[i].Values is null)
+            {
+                continue;
+            }
+
+            foreach (var pair in chain[i].Values!)
+            {
+                merged[pair.Key] = pair.Value;
+            }
+        }
+
+        return merged;
+    }
+
+    private sealed record ScopeNode(Dictionary<string, object>? Values, ScopeNode? Parent);
 
     /// <summary>
     /// Every record's unsubstituted message template, in the same order as <see cref="Records"/>
@@ -80,18 +136,21 @@ internal sealed class RecordingLogger<T> : ILogger<T>
             : null;
         var message = formatter(state, exception);
 
+        var scope = FlattenActiveScope();
+
         lock (_pair)
         {
-            // Template first, so Templates is never SHORTER than Records: a reader walking Records by
-            // index can always index Templates with the same one, even mid-append.
+            // Template and scope first, so neither list is ever SHORTER than Records: a reader walking
+            // Records by index can always index both with the same one, even mid-append.
             Templates.Add(template);
+            RecordScopes.Add(scope);
             Records.Add((level, message, exception));
         }
     }
 
-    private sealed class Scope : IDisposable
+    private sealed class Scope(RecordingLogger<T> owner, ScopeNode? restore) : IDisposable
     {
-        public void Dispose() { }
+        public void Dispose() => owner._active.Value = restore;
     }
 }
 

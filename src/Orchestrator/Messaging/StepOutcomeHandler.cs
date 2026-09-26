@@ -269,6 +269,12 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // Both halves now name themselves, under the correlation id the fire minted.
         if (entry.Definition.EntryStepIds.Contains(m.StepId))
         {
+            // EntryComplete, not EntryDispatch: this is one record per LINEAGE written by whichever
+            // replica consumed the outcome, where the fire's dispatch record is one per fire and
+            // leader-only. Two counters, so two values -- see RunPositions.
+            using var position = _logger.BeginScope(
+                RunPositions.Scope(RunPositions.EntryComplete));
+
             _logger.Log(level, "the entry step completed with {Result}", m.Result);
         }
 
@@ -312,6 +318,11 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
         if (selection.Matches.Count == 0)
         {
+            // What the termination counter selects on. Worth more than the template it accompanies:
+            // a processor emits its own line beginning "the terminal step completed", so a prefix
+            // match over-counts while this attribute cannot be confused with it.
+            using var position = _logger.BeginScope(RunPositions.Scope(RunPositions.Terminal));
+
             _logger.Log(level,
                 "the terminal step completed with {Result} — no successor accepts it, the run ends here",
                 m.Result);

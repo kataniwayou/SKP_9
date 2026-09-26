@@ -298,7 +298,16 @@ public sealed class WorkflowFireJob(
                     // with it — would exist solely inside messages, and a run could not be found from
                     // the orchestrator's side at all. Every id rides the open scope; the template
                     // carries none, and never the payload.
-                    logger.LogInformation("dispatched an entry step");
+                    //
+                    // RunPosition is scoped to THIS LINE rather than added to the per-step scope above,
+                    // and the narrowness is the point: it is what the operator's start-trip counter
+                    // counts, so it must mark entry steps that actually reached a queue. The frozen
+                    // skip and the send failure below share that outer scope and must NOT carry it, or
+                    // the counter would report dispatches that never happened.
+                    using (logger.BeginScope(RunPositions.Scope(RunPositions.EntryDispatch)))
+                    {
+                        logger.LogInformation("dispatched an entry step");
+                    }
                 }
                 catch (Exception ex) when (!context.CancellationToken.IsCancellationRequested)
                 {

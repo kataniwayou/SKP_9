@@ -1,3 +1,4 @@
+using BaseApi.Tests.Support;
 using BaseConsole.Core.Gating;
 using Messaging.Contracts;
 using Messaging.Transport;
@@ -140,8 +141,34 @@ public sealed class WorkflowFireJobTests
             return gate;
         }
 
+        /// <summary>
+        /// A real recording logger rather than a null one, so a test can assert on what a fire WROTE.
+        /// The dispatch counter on the operator dashboard is a document count over this record, and
+        /// RunPosition is the field it selects on — an attribute no test looked at could be dropped by
+        /// a refactor without a single failure.
+        /// </summary>
+        public RecordingLogger<WorkflowFireJob> Log { get; } = new();
+
         public WorkflowFireJob Build() => new(
-            Store, Scheduler, Sender, State, Gate, NullLogger<WorkflowFireJob>.Instance);
+            Store, Scheduler, Sender, State, Gate, Log);
+
+        /// <summary>
+        /// The flattened scope of the one record matching <paramref name="template"/>, or null if no
+        /// record carried it. Keyed on the template rather than the rendered text: the template is
+        /// what reaches attributes.{OriginalFormat} and what every reader selects on.
+        /// </summary>
+        public IReadOnlyDictionary<string, object>? ScopeOf(string template)
+        {
+            for (var i = 0; i < Log.Records.Count; i++)
+            {
+                if (Log.Templates[i] == template)
+                {
+                    return Log.RecordScopes[i];
+                }
+            }
+
+            return null;
+        }
 
         /// <summary>The context a fire of this workflow's own job arrives with.</summary>
         public IJobExecutionContext Context(Guid workflowId, Guid jobId) =>
@@ -511,5 +538,106 @@ public sealed class WorkflowFireJobTests
         await h.Build().Execute(h.Context(W, h.JobId));
 
         Assert.Equal((W, h.JobId, EveryHour), Assert.Single(h.Scheduler.Rescheduled));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // RunPosition: the attribute the start-trip counter selects on
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ADispatchedEntryStepCarriesTheEntryDispatchRunPosition()
+    {
+        // The operator's start-trip counter is a document count over this record, selected by
+        // RunPosition rather than by the English template. It rides the log SCOPE, not the template:
+        // the message text is a pinned contract (tools/verify-kibana-dashboard.py, the live suite's
+        // ledger) and adding a parameter to it would break every existing reader.
+        var h = new Harness().AsLeader().WithWorkflow(W, [(S1, P1)]);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        var scope = h.ScopeOf("dispatched an entry step");
+        Assert.NotNull(scope);
+        Assert.Equal(RunPositions.EntryDispatch, Assert.Contains(RunPositions.Key, scope!));
+    }
+
+    [Fact]
+    public async Task EveryEntryStepOfOneFireCarriesItSeparatelyUnderOneCorrelationId()
+    {
+        // Three entry steps, three records, one correlation id -- so the counter's unit is the
+        // DISPATCH and distinct-CorrelationId is the unit of the FIRE. Both are load-bearing on the
+        // panel and they only coincide while every workflow has a single entry step, which is true of
+        // this deployment today and is not a property of the design.
+        var h = new Harness().AsLeader().WithWorkflow(W, [(S1, P1), (S2, P2)]);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        var dispatches = 0;
+        var correlations = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < h.Log.Records.Count; i++)
+        {
+            if (h.Log.Templates[i] != "dispatched an entry step")
+            {
+                continue;
+            }
+
+            dispatches++;
+            Assert.Equal(RunPositions.EntryDispatch, h.Log.RecordScopes[i][RunPositions.Key]);
+            correlations.Add(h.Log.RecordScopes[i][CorrelationKeys.LogScope].ToString()!);
+        }
+
+        Assert.Equal(2, dispatches);
+        Assert.Single(correlations);
+    }
+
+    [Fact]
+    public async Task AFrozenEntryStepDoesNotCarryTheRunPositionSoItIsNotCounted()
+    {
+        // A frozen step was never dispatched. If its skip record carried the same RunPosition the
+        // counter would report a dispatch that did not happen -- and the freeze exists precisely so an
+        // operator can take one entry step out without stopping the workflow, which is a state the
+        // panel has to render honestly.
+        var h = new Harness().AsLeader().WithGatedWorkflow(W, [(S1, P1, Never)]);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        Assert.Null(h.ScopeOf("dispatched an entry step"));
+
+        var frozen = h.ScopeOf("the entry step is frozen \u2014 its entry condition is Never; skipping it");
+        Assert.NotNull(frozen);
+        Assert.DoesNotContain(RunPositions.Key, frozen!);
+    }
+
+    [Fact]
+    public async Task AFailedSendDoesNotCarryTheRunPositionSoItIsNotCounted()
+    {
+        // The record is written AFTER a successful send, so a broker fault must not be counted as a
+        // dispatch. Same reasoning as the frozen case: the counter is "entry steps that actually went
+        // onto a queue", and a fire that failed to send left no work anywhere.
+        var h = new Harness().AsLeader().WithWorkflow(W, [(S1, P1)]);
+        h.Sender
+            .SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new IOException("broker gone"));
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        Assert.Null(h.ScopeOf("dispatched an entry step"));
+
+        var failed = h.ScopeOf("the entry-step dispatch failed to send; continuing");
+        Assert.NotNull(failed);
+        Assert.DoesNotContain(RunPositions.Key, failed!);
+    }
+
+    [Fact]
+    public async Task AFollowerWritesNoDispatchRecordAtAll()
+    {
+        // Why the counter needs no role clause: a follower never reaches the line, so there is nothing
+        // for a role filter to remove -- while attributes.role is stamped at write time and reads
+        // "follower" on a leader's record if the lease lapses mid-fire, which makes the filter lossy
+        // in the one direction that matters.
+        var h = new Harness().AsFollower().WithWorkflow(W, [(S1, P1)]);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        Assert.Null(h.ScopeOf("dispatched an entry step"));
     }
 }

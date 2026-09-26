@@ -77,6 +77,24 @@ public sealed class ExecutionRoundTripTests
         }
 
         public IQueueMessageHandler Pre => new StepOutcomeHandler(Store, L2.Multiplexer, Bus, PreLog);
+
+        /// <summary>
+        /// The flattened scope of the one record matching <paramref name="template"/>, or null if none
+        /// did. Keyed on the template because that is what reaches attributes.{OriginalFormat}, which
+        /// is what every reader of these records selects on.
+        /// </summary>
+        public IReadOnlyDictionary<string, object>? ScopeOf(string template)
+        {
+            for (var i = 0; i < PreLog.Records.Count; i++)
+            {
+                if (PreLog.Templates[i] == template)
+                {
+                    return PreLog.RecordScopes[i];
+                }
+            }
+
+            return null;
+        }
         public IQueueMessageHandler Post => new NextStepHandoffHandler(L2.Multiplexer, Bus, PostLog);
 
         /// <summary>Feeds one message into the handler registered for its type, as the consumer does.</summary>
@@ -123,6 +141,15 @@ public sealed class ExecutionRoundTripTests
 
     private static void Seed(Harness h, Guid entryId, string value) =>
         h.L2.Db.StringSetAsync(L2ProjectionKeys.ExecutionData(entryId), value).Wait();
+
+    /// <summary>
+    /// The orchestrator's terminal template, escaped rather than spelled: it carries U+2014, and a
+    /// constant whose correctness depends on this file's encoding surviving every tool that touches it
+    /// is a constant that silently matches nothing. Same reasoning as Live/Resilience/Templates.
+    /// </summary>
+    private const string TerminalTemplate =
+        "the terminal step completed with {Result} \u2014 no successor accepts it, the run ends here";
+
 
     // ---------------------------------------------------------------- the round trip
 
@@ -764,5 +791,100 @@ public sealed class ExecutionRoundTripTests
         Assert.Single(
             h.PreLog.Records,
             e => e.Message.Contains("the entry step completed", StringComparison.Ordinal));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // RunPosition: the attribute the round-trip counters select on
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ATerminalOutcomeCarriesTheTerminalRunPosition()
+    {
+        // The termination counter selects on this rather than on the template, because two different
+        // templates in this deployment begin "the terminal step completed" -- this one, and the
+        // exporter's own "there is no output to hand on". A prefix match over-counts by the second;
+        // an attribute cannot be confused with it at all.
+        var h = new Harness(Step(A, PA, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        var scope = h.ScopeOf(TerminalTemplate);
+        Assert.NotNull(scope);
+        Assert.Equal(RunPositions.Terminal, Assert.Contains(RunPositions.Key, scope!));
+    }
+
+    [Fact]
+    public async Task AnEntryStepsOutcomeCarriesTheEntryCompleteRunPosition()
+    {
+        // Distinct from EntryDispatch on purpose. This record is one per LINEAGE and is written by
+        // whichever replica consumed the outcome; the dispatch record is one per fire and only the
+        // leader writes it. One shared value would merge a fire counter with a work-item counter into
+        // a number that is neither -- measured live at 19k against 36k.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        var scope = h.ScopeOf("the entry step completed with {Result}");
+        Assert.NotNull(scope);
+        Assert.Equal(RunPositions.EntryComplete, Assert.Contains(RunPositions.Key, scope!));
+    }
+
+    [Fact]
+    public async Task AStepThatIsBothEntryAndTerminalCarriesADifferentValueOnEachRecord()
+    {
+        // A single-step workflow: A is the entry step AND has no successor. Live examples exist --
+        // analyst-monitor and sc-split-importer both emit the two completion lines for the same
+        // StepId. So RunPosition describes THE RECORD, never the step, and a single-valued
+        // "what position is this step" field could not represent this case at all.
+        var h = new Harness(Step(A, PA, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Equal(
+            RunPositions.EntryComplete,
+            h.ScopeOf("the entry step completed with {Result}")![RunPositions.Key]);
+        Assert.Equal(RunPositions.Terminal, h.ScopeOf(TerminalTemplate)![RunPositions.Key]);
+    }
+
+    [Fact]
+    public async Task AMidRunRecordCarriesNoRunPositionAtAll()
+    {
+        // The handoff and advancement lines are neither end of the run, and they outnumber both --
+        // 118k handoffs against 19k dispatches. Tagging them would make a terms aggregation on this
+        // field unreadable, and there is no counter that wants them.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        var handoff = h.ScopeOf("handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}");
+        Assert.NotNull(handoff);
+        Assert.DoesNotContain(RunPositions.Key, handoff!);
+
+        var advanced = h.ScopeOf("advanced {SuccessorCount} successor(s) in {ElapsedMs}ms");
+        Assert.NotNull(advanced);
+        Assert.DoesNotContain(RunPositions.Key, advanced!);
+    }
+
+    [Fact]
+    public void TheThreeRunPositionValuesAreDistinctAndNoneContainsAnother()
+    {
+        // A reader matching by substring must not be able to conflate them -- the lesson the refusal
+        // templates paid for, where "NOT parked" contains "parked".
+        string[] all = [RunPositions.EntryDispatch, RunPositions.EntryComplete, RunPositions.Terminal];
+
+        Assert.Equal(all.Length, all.Distinct(StringComparer.Ordinal).Count());
+        foreach (var a in all)
+        {
+            foreach (var b in all.Where(x => !string.Equals(x, a, StringComparison.Ordinal)))
+            {
+                Assert.False(
+                    b.Contains(a, StringComparison.Ordinal),
+                    $"'{b}' contains '{a}', so a substring match for one matches the other");
+            }
+        }
     }
 }
