@@ -253,5 +253,44 @@ internal static class PanelRegistry
                 "value is not proof every expected replica is present.",
             Kind: PanelKind.Prometheus,
             Query: "min by (service_instance_id) (last_over_time(pipeline_identity_ready_ratio[40s]))"),
+
+        // THE ONE PANEL THAT SHOWS WORK THAT WAS THROWN AWAY. Every other panel here reports what
+        // the pipeline DID -- an outcome it recorded, a latency it measured. A message refused by
+        // GatedQueueConsumer and dead-lettered produced no StepOutcome at all, so it is invisible to
+        // step-outcomes and step-failures by construction (both require attributes.Result), and it
+        // moves no latency series. Without this panel the agent can read every other board clean and
+        // call report_no_finding over a window in which the deployment was silently losing work --
+        // which is exactly the "confident quiet result over a blind spot" IPanelReader warns about.
+        new PanelDefinition(
+            PanelId: "dead-letter-depth",
+            Layer: "ops",
+            Description:
+                "How many messages are sitting in each dead-letter queue right now: work that was " +
+                "refused and has not been dealt with, from Prometheus, grouped by queue. This is a " +
+                "LEVEL, not a rate -- a parked message stays counted until a human drains the " +
+                "queue, so a non-zero value means the loss is still outstanding, however long ago " +
+                "it happened. Grouped with max rather than sum because every replica of a role " +
+                "probes the SAME shared queue and reports the same number: summing three " +
+                "orchestrator replicas turns a depth of 10 into 30. No workflow dimension: a " +
+                "dead-letter queue belongs to a queue, not to a workflow, so this panel says work " +
+                "was lost but never whose -- the refusal log records carry the workflow id and this " +
+                "panel cannot show them. " +
+                "ZERO HERE IS A REPORT, WHICH IS THE OPPOSITE OF EVERY OTHER PROMETHEUS PANEL ON " +
+                "THIS LIST: the probe publishes 0 explicitly for a queue it read and found empty, " +
+                "so a series present and reading 0 IS a confirmed all-clear and is distinguishable " +
+                "from a blind spot. A series that is ABSENT is not: it means no process is probing " +
+                "that queue at all -- every replica of its owner is down, or the instrument was " +
+                "never wired -- which is a gap in the evidence, not an empty queue. Do not read a " +
+                "missing queue as a healthy one. In a healthy deployment nearly every series is a " +
+                "flat zero; a non-zero series, a rising one, or one that disappears is the signal. " +
+                "The reading also carries seriesCount: how many dead-letter queues reported at all " +
+                "in this window. It is a floor, not a census -- a queue whose owning process is " +
+                "entirely down cannot report and cannot be counted, so a steady seriesCount is not " +
+                "proof every expected queue is present. " +
+                "The probe behind it runs on a five-minute backstop and is also read immediately " +
+                "whenever something is parked, so a new park shows up promptly while a manual drain " +
+                "can take up to five minutes to appear.",
+            Kind: PanelKind.Prometheus,
+            Query: "max by (queue) (pipeline_deadletter_depth)"),
     ];
 }

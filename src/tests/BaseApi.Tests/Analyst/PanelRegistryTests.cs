@@ -138,6 +138,50 @@ public sealed class PanelRegistryTests
     }
 
     [Fact]
+    public void DeadLetterDepthIsTheOnlyPanelThatCanSeeDiscardedWork()
+    {
+        // The agent's whole failure mode is a confident quiet result over a blind spot, and this was
+        // the widest one left: a refused message produces no StepOutcome, so BOTH business panels
+        // exclude it by construction (each requires attributes.Result) and no latency series moves.
+        // Without this panel every board reads clean while the deployment loses work -- which is how
+        // six parked outcomes went unnoticed for two days on the live stack.
+        var panel = PanelRegistry.All.Single(p => p.PanelId == "dead-letter-depth");
+
+        Assert.Equal("ops", panel.Layer);
+        Assert.Equal(PanelKind.Prometheus, panel.Kind);
+        Assert.Contains("pipeline_deadletter_depth", panel.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeadLetterDepthDedupesReplicasWithMaxRatherThanSummingThem()
+    {
+        // Every replica of a role probes the SAME shared dead-letter queue and reports the same
+        // number, so sum by (queue) multiplies the depth by the replica count -- measured live, the
+        // three orchestrator replicas turned a real depth of 10 into 30. max is the only aggregator
+        // that reads the queue rather than the fleet.
+        var query = PanelRegistry.All.Single(p => p.PanelId == "dead-letter-depth").Query;
+
+        Assert.Contains("max by (queue)", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("sum by", query, StringComparison.Ordinal);
+        // service_instance_id would re-split what max by (queue) exists to collapse.
+        Assert.DoesNotContain("service_instance_id", query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeadLetterDepthSaysZeroIsAReportAndAbsenceIsNot()
+    {
+        // This panel inverts the caveat every other ops panel carries. Its probe publishes 0
+        // explicitly for a queue it read and found empty (DeadLetterDepthMetrics: "Zero is a report,
+        // not a silence"), so a present zero is a genuine all-clear -- while an ABSENT series means
+        // nothing is probing that queue. Read the usual way round, a missing queue would be taken as
+        // a healthy one, which is the single most expensive misreading available here.
+        var description = PanelRegistry.All.Single(p => p.PanelId == "dead-letter-depth").Description;
+
+        Assert.Contains("ZERO HERE IS A REPORT", description, StringComparison.Ordinal);
+        Assert.Contains("Do not read a missing queue as a healthy one", description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheOldArrivalMeanIdIsGone()
     {
         // M2: renamed while it was still free to rename -- the id freezes once shipped as a model
