@@ -160,7 +160,7 @@
           "ProcessorId": "157a0f40-0000-4000-8000-000000000001" } } },
 
     { "id": "15-refused-not-parked", "counted": false,
-      "why": "NEW 2026-09-26. The other half of the same catch block: the channel died before the broker heard the rejection, so the message is REDELIVERED rather than dead-lettered and there is nothing in a dead-letter queue to recover. One code branch, one metric bucket and one severity with doc 14 - the template is the only thing telling them apart, which is why the refusal table terms on attributes.{OriginalFormat} instead of counting rows",
+      "why": "NEW 2026-09-26. The other half of the same catch block: the channel died before the broker heard the rejection, so the message is REDELIVERED rather than dead-lettered and there is nothing in a dead-letter queue to recover. One code branch, one metric bucket and one severity with doc 14 - the template is the only thing telling them apart, which is why the refusal table splits them with a phrase match on body.text - match_only_text, so it answers a phrase query, unlike the keyword attributes.* fields",
       "_source": {
         "severity_text": "Error",
         "scope": { "name": "BaseConsole.Core.Messaging.GatedQueueConsumer" },

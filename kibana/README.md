@@ -190,10 +190,22 @@ same 181,732 records and zero refusals, because each panel still carries its own
 `- parked` means the broker was told, and the message **is** in that queue's `.dead` counterpart,
 recoverable by hand. `- NOT parked: the channel was gone before the broker was told` means it will
 be **redelivered** and there is nothing in a dead-letter queue to find. Those are one code branch,
-one metric bucket (`disposition="parked"`) and one severity — the log template is the only thing
-that distinguishes them, which is why the table terms on `attributes.{OriginalFormat}` rather than
-just counting rows. An operator who cannot tell them apart either hunts for a message that was
+one metric bucket (`disposition="parked"`) and one severity — the log line is the only thing that
+distinguishes them. An operator who cannot tell them apart either hunts for a message that was
 never parked, or ignores one that was.
+
+The column is **two labelled buckets, not the raw log template**, and that was a correction made
+against a screenshot rather than a preference. Terming on `attributes.{OriginalFormat}` put the
+discriminating words at the END of a 60-to-150 character string and the column truncated them: a
+parked row and a redelivered one both rendered as `refusing message of type {Type} o`, identical,
+which defeats the only thing this column is for. The buckets split on `body.text`, which is
+`match_only_text` and so answers a phrase query — the `attributes.*` fields are all `keyword`, where
+a match returns zero silently.
+
+A `filters` column emits its bucket even when nothing matches it, so every group shows both rows.
+That is kept deliberately, with `emptyAsNull` off so the empty one reads `0` rather than `(null)`:
+"NOT parked: 0" is the statement that the whole group **is** in the dead-letter queue and can be
+recovered by hand, which is the actionable half.
 
 ### The ids come off the headers, not the body
 
