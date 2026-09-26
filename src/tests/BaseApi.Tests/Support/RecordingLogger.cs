@@ -38,6 +38,21 @@ internal sealed class RecordingLogger<T> : ILogger<T>
         return new Scope();
     }
 
+    /// <summary>
+    /// Every record's unsubstituted message template, in the same order as <see cref="Records"/>
+    /// (null for a record written without one).
+    /// <para>
+    /// <b>Separate from <see cref="Records"/>' formatted message, because only the template is a
+    /// contract.</b> The formatted text carries the substituted values, so a test asserting on it
+    /// re-asserts the arguments; the template is what the OpenTelemetry bridge puts on
+    /// <c>attributes.{OriginalFormat}</c> as a keyword, and therefore what a dashboard panel, the
+    /// live suite's scenario counting and the Analyst's own panel all select on. Those selectors
+    /// break on a one-byte change to a template and on nothing else, so the template is the thing
+    /// worth pinning.
+    /// </para>
+    /// </summary>
+    public Recorded<string?> Templates { get; } = new();
+
     public bool IsEnabled(LogLevel logLevel) => true;
 
     public void Log<TState>(
@@ -46,7 +61,15 @@ internal sealed class RecordingLogger<T> : ILogger<T>
         TState state,
         Exception? exception,
         Func<TState, Exception?, string> formatter)
-        => Records.Add((level, formatter(state, exception), exception));
+    {
+        // Appended before the record so an index valid in Records is always valid in Templates.
+        Templates.Add(
+            state is IEnumerable<KeyValuePair<string, object?>> values
+                ? values.FirstOrDefault(v => v.Key == "{OriginalFormat}").Value?.ToString()
+                : null);
+
+        Records.Add((level, formatter(state, exception), exception));
+    }
 
     private sealed class Scope : IDisposable
     {

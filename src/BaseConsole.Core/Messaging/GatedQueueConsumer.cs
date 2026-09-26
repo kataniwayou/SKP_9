@@ -436,8 +436,7 @@ public sealed class GatedQueueConsumer : BackgroundService
                         if (landed)
                         {
                             _logger.LogError(
-                                ex, "refusing message of type {Type} on {Queue} — parked",
-                                type, _options.Queue);
+                                ex, RefusalTemplates.Parked, type, _options.Queue);
                         }
                         else
                         {
@@ -445,11 +444,7 @@ public sealed class GatedQueueConsumer : BackgroundService
                             // reading this is deciding whether to go looking in the dead-letter
                             // queue, and there will be nothing there.
                             _logger.LogError(
-                                ex,
-                                "refusing message of type {Type} on {Queue} — NOT parked: the channel "
-                                + "was gone before the broker was told, so it will be redelivered "
-                                + "rather than dead-lettered",
-                                type, _options.Queue);
+                                ex, RefusalTemplates.NotParked, type, _options.Queue);
                         }
 
                         Record("parked", "refused");

@@ -1,7 +1,11 @@
+using Messaging.Contracts;
+
 namespace BaseApi.Tests.Live.Resilience;
 
 /// <summary>
-/// Every message template the scenarios count, copied from the emitting call site.
+/// Every message template the scenarios count, copied from the emitting call site -- except the two
+/// refusal templates, which are ALIASED to <see cref="RefusalTemplates"/> because a dashboard selects
+/// on them too and a copy here could drift from the panel without either one failing to build.
 /// <para>
 /// <b>Templates, not rendered text.</b> The OpenTelemetry bridge puts the unsubstituted template on
 /// <c>attributes.{OriginalFormat}</c> as a keyword, so "the step returned after {ElapsedMs}ms" is one
@@ -38,22 +42,21 @@ internal static class Templates
     public const string StoreUnreachable =
         "projection store unreachable \u2014 returning message to {Queue}";
     /// <summary>
-    /// The park record, as the consumer now writes it: after the nack, naming the queue, and saying
-    /// `parked` only when the broker was actually told. Paired with <see cref="RefusingNotParked"/>,
-    /// which is the same catch block reporting that the rejection never landed.
+    /// The park record. Aliased to <see cref="RefusalTemplates.Parked"/> rather than copied: these
+    /// two are the only templates in this ledger that a dashboard ALSO selects on, so they live in
+    /// the contracts assembly where the emitter and every reader share one definition. Kept as names
+    /// here so the scenarios read in this file's own vocabulary.
     /// </summary>
-    public const string RefusingAndParking =
-        "refusing message of type {Type} on {Queue} \u2014 parked";
+    public const string RefusingAndParking = RefusalTemplates.Parked;
 
     /// <summary>
-    /// The other half of the park branch: the channel died before the broker heard the rejection, so
-    /// the delivery is REDELIVERED rather than dead-lettered. It accounts for a short ledger exactly
-    /// as a park does -- the run did not advance -- but an operator must not go looking for the
-    /// message in a dead-letter queue, because it is not there.
+    /// The other half of the park branch, aliased to <see cref="RefusalTemplates.NotParked"/>: the
+    /// channel died before the broker heard the rejection, so the delivery is REDELIVERED rather than
+    /// dead-lettered. It accounts for a short ledger exactly as a park does -- the run did not
+    /// advance -- but an operator must not go looking for the message in a dead-letter queue, because
+    /// it is not there.
     /// </summary>
-    public const string RefusingNotParked =
-        "refusing message of type {Type} on {Queue} \u2014 NOT parked: the channel was gone before "
-        + "the broker was told, so it will be redelivered rather than dead-lettered";
+    public const string RefusingNotParked = RefusalTemplates.NotParked;
 
     public const string SendFailedReturning =
         "send failed while handling {Type} \u2014 returning message to {Queue}";

@@ -1,7 +1,9 @@
 using BaseApi.Tests.Support;
 using BaseConsole.Core.Messaging;
+using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
@@ -57,13 +59,22 @@ public sealed class ConsumerTwinParityTests
     }
 
     /// <summary>One host's report of a single delivery, in the terms both hosts must agree on.</summary>
+    /// <param name="RefusalTemplate">
+    /// The unsubstituted template of the first Error this delivery produced, or null if it produced
+    /// none. Here rather than in a test of its own because the refusal templates are a SELECTOR: the
+    /// Kibana refusals panel, the live suite's scenario counting and the Analyst's refused-messages
+    /// panel all identify a park by matching this exact string. Two twins that park identically but
+    /// word it differently are two dashboards, one of which is silently half blind -- and equality
+    /// across the whole scenario table is the only assertion that cannot be half-updated.
+    /// </param>
     private sealed record Report(
         string Disposition,
         string Reason,
         string Queue,
         string Type,
         string DurationDisposition,
-        bool Escaped);
+        bool Escaped,
+        string? RefusalTemplate);
 
     private sealed class Latch : IConsumerAdmission
     {
@@ -109,7 +120,7 @@ public sealed class ConsumerTwinParityTests
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
-    private static Report Read(MetricCollector metrics, bool escaped)
+    private static Report Read<T>(MetricCollector metrics, RecordingLogger<T> logger, bool escaped)
     {
         var consumed = Assert.Single(metrics.For("pipeline.messages.consumed"));
         var duration = Assert.Single(metrics.For(IngressMetrics.ConsumerDurationInstrument));
@@ -120,13 +131,33 @@ public sealed class ConsumerTwinParityTests
             consumed.Tags["queue"],
             consumed.Tags["type"],
             duration.Tags["disposition"],
-            escaped);
+            escaped,
+            FirstErrorTemplate(logger));
+    }
+
+    /// <summary>
+    /// The template of the first Error record, found by LEVEL rather than by matching the refusal
+    /// text -- a search for the string under test would pass by construction on a twin that stopped
+    /// logging the refusal at all.
+    /// </summary>
+    private static string? FirstErrorTemplate<T>(RecordingLogger<T> logger)
+    {
+        for (var i = 0; i < logger.Records.Count; i++)
+        {
+            if (logger.Records[i].Level == LogLevel.Error)
+            {
+                return logger.Templates[i];
+            }
+        }
+
+        return null;
     }
 
     private static async Task<Report> RunApiAsync(bool gateOpen, string type, Fault fault, bool trip)
     {
         using var metrics = new MetricCollector(IngressMetrics.MeterName);
 
+        var logger = new RecordingLogger<ApiConsumer>();
         var gate = new ApiGate(NullLogger<ApiGate>.Instance);
         if (gateOpen)
         {
@@ -143,7 +174,7 @@ public sealed class ConsumerTwinParityTests
             gate,
             Scopes(fault == Fault.None && type != Type ? [] : [new Handler(Body(fault))]),
             Options.Create(new ApiOptions { Queue = Queue }),
-            NullLogger<ApiConsumer>.Instance);
+            logger);
 
         var escaped = false;
         try
@@ -155,13 +186,14 @@ public sealed class ConsumerTwinParityTests
             escaped = true;
         }
 
-        return Read(metrics, escaped);
+        return Read(metrics, logger, escaped);
     }
 
     private static async Task<Report> RunConsoleAsync(bool gateOpen, string type, Fault fault, bool trip)
     {
         using var metrics = new MetricCollector(IngressMetrics.MeterName);
 
+        var logger = new RecordingLogger<ConsoleConsumer>();
         var gate = new ConsoleGate(NullLogger<ConsoleGate>.Instance);
         if (gateOpen)
         {
@@ -179,7 +211,7 @@ public sealed class ConsumerTwinParityTests
             Scopes(fault == Fault.None && type != Type ? [] : [new Handler(Body(fault))]),
             Options.Create(new ConsoleOptions { Queue = Queue }),
             new Latch(),
-            NullLogger<ConsoleConsumer>.Instance);
+            logger);
 
         var escaped = false;
         try
@@ -191,7 +223,7 @@ public sealed class ConsumerTwinParityTests
             escaped = true;
         }
 
-        return Read(metrics, escaped);
+        return Read(metrics, logger, escaped);
     }
 
     public static TheoryData<string, bool, string, Fault, bool> Scenarios() => new()
@@ -222,6 +254,26 @@ public sealed class ConsumerTwinParityTests
 
         // Named so a failure says WHICH row diverged, since the records render as one blob.
         Assert.True(api == console, $"twins disagree on '{name}': api={api}, console={console}");
+    }
+
+    [Fact]
+    public async Task BothTwinsRefuseWithTheSameHoistedTemplate()
+    {
+        // Guards the guard, the same way TheEscapeRowActuallyEscapesOnBothSides does: the equality
+        // assertion above compares two templates without caring what they SAY, so two twins that
+        // both stopped logging the refusal would agree on null and pass. This pins the actual value,
+        // and pins it to the shared constant rather than to a literal copied into the test -- a
+        // literal here would be a fifth copy of the very string the hoist exists to de-duplicate.
+        //
+        // NOT parked, not parked: the connection in this harness was never opened, so the nack never
+        // reaches a broker and the consumer correctly reports that the message will be REDELIVERED
+        // rather than dead-lettered. The parked branch needs a live broker and is witnessed by the
+        // live suite (Templates.RefusingAndParking), which reads the same constant.
+        var api = await RunApiAsync(true, Type, Fault.Deterministic, trip: false);
+        var console = await RunConsoleAsync(true, Type, Fault.Deterministic, trip: false);
+
+        Assert.Equal(RefusalTemplates.NotParked, api.RefusalTemplate);
+        Assert.Equal(RefusalTemplates.NotParked, console.RefusalTemplate);
     }
 
     [Fact]
