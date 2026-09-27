@@ -437,7 +437,89 @@ internal static class PanelRegistry
                   }
                 }
                 """)),
-    ];
+
+        // THE AGENT'S COUNTERPART TO THE OPERATOR'S RUN-BOUNDARY PIE (skp-runposition-pie), added
+        // under the maintenance rule above in the same change that put the pie on the board -- the
+        // drift this registry has no detector for, closed deliberately this time rather than left.
+        // It reads attributes.RunPosition, the same attribute the board selects on.
+        new PanelDefinition(
+            PanelId: "run-boundaries",
+            Layer: "business",
+            Description:
+                "Where this workflow's runs began and ended in the window: how many entry steps the " +
+                "orchestrator dispatched, and how many branches reached an end because no successor " +
+                "accepted their outcome. The operator reads the same two counts as a pie beside the " +
+                "outcome distribution. " +
+                "THE TWO ARE DELIBERATELY NOT 1:1, AND EXPECTING THEM TO BE EQUAL IS THE MOST " +
+                "AVAILABLE MISREADING HERE. One entry record per fire, but one terminal record per " +
+                "branch END, so a workflow whose entry step opens several lineages ends several " +
+                "times per fire. The healthy ratio is a constant OF THIS WORKFLOW, not a number " +
+                "that should approach parity: a two-lineage chain sits at 1:2, a wider one at 1:6. " +
+                "You cannot know that constant from one dispatch, so do NOT report a shortfall " +
+                "against an assumed 1:1 -- read the ratio, and report only the shapes below, which " +
+                "are unambiguous without a baseline. " +
+                "entry ABOVE ZERO WITH TERMINAL AT ZERO is the one unambiguous finding: the " +
+                "workflow is alive -- the schedule fired, the leader held the lease, the gate was " +
+                "open, the dispatch reached a queue -- and nothing completed. " +
+                "BEFORE REPORTING THAT, CHECK drainedPolls. An importer that read no records opens " +
+                "no lineage and correctly produces no terminal, so a fire it drove could not have " +
+                "ended and its absence is not loss. drainedPolls out of importerPolls is how many " +
+                "fires were no-ops. If drainedPolls accounts for the missing terminals, the " +
+                "workflow is idle for want of input, which is not a defect and not a finding; if " +
+                "terminals are missing BEYOND what drainedPolls explains, work is being lost. " +
+                "entry AT ZERO means the workflow did not fire at all: stopped, no leader " +
+                "dispatching, or the projection store gate shut. " +
+                "Both counts are records rather than distinct runs, on purpose: deduplicating by " +
+                "run collapses a fire's several branch ends into one, which hides the loss of SOME " +
+                "branches of a run while others finish. " +
+                "Scoped to the target workflow by attributes.WorkflowId, so unlike the operator's " +
+                "pie this panel cannot blend two workflows' different ratios into one that " +
+                "describes neither.",
+            Kind: PanelKind.Elastic,
+            Query: WithRunPositions(
+                """
+                {
+                  "size": 0,
+                  "track_total_hits": true,
+                  "query": {
+                    "bool": {
+                      "filter": [
+                        { "range": { "@timestamp": { "gte": "{{FROM}}", "lte": "{{TO}}" } } },
+                        { "term": { "attributes.WorkflowId": "{{WORKFLOW}}" } }
+                      ]
+                    }
+                  },
+                  "aggs": {
+                    "boundaries": {
+                      "filter": {
+                        "terms": { "attributes.$KEY$": [ "$ENTRY$", "$TERMINAL$" ] }
+                      },
+                      "aggs": {
+                        "by_position": {
+                          "filters": {
+                            "filters": {
+                              "entry": { "term": { "attributes.$KEY$": "$ENTRY$" } },
+                              "terminal": { "term": { "attributes.$KEY$": "$TERMINAL$" } }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "polls": {
+                      "filter": {
+                        "term": {
+                          "attributes.{OriginalFormat}":
+                            "consumed {Consumed}/{Requested} records; stopped because {Reason}"
+                        }
+                      },
+                      "aggs": {
+                        "drained": { "filter": { "term": { "attributes.Consumed": 0 } } }
+                      }
+                    },
+                    "earliest": { "min": { "field": "@timestamp" } }
+                  }
+                }
+                """)),    ];
 
     /// <summary>
     /// Substitutes the refusal templates into a panel query once, at type-initialisation time.
@@ -458,4 +540,16 @@ internal static class PanelRegistry
     private static string WithRefusalTemplates(string query) => query
         .Replace("$PARKED$", RefusalTemplates.Parked, StringComparison.Ordinal)
         .Replace("$NOT_PARKED$", RefusalTemplates.NotParked, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Substitutes the run-position key and its two values into a panel query once, at
+    /// type-initialisation time — the same compile-time substitution, and for the same reason, as
+    /// <see cref="WithRefusalTemplates"/>: the orchestrator writes these values and a dashboard and
+    /// this panel both select on them, so a literal retyped here would be a copy no compiler holds
+    /// to the emitter.
+    /// </summary>
+    private static string WithRunPositions(string query) => query
+        .Replace("$KEY$", RunPositions.Key, StringComparison.Ordinal)
+        .Replace("$ENTRY$", RunPositions.Entry, StringComparison.Ordinal)
+        .Replace("$TERMINAL$", RunPositions.Terminal, StringComparison.Ordinal);
 }

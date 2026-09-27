@@ -273,4 +273,58 @@ public sealed class PanelRegistryTests
         Assert.DoesNotContain(PanelRegistry.All, p => p.PanelId == "arrival-mean");
         Assert.Contains(PanelRegistry.All, p => p.PanelId == "consumer-duration-mean");
     }
+
+    [Fact]
+    public void RunBoundariesIsTheAgentsCounterpartToTheOperatorsRunBoundaryPie()
+    {
+        // The maintenance rule on PanelRegistry: an operator panel without a PanelDefinition is a
+        // hole in the shared language. skp-runposition-pie shipped on the Kibana board this session;
+        // this is its counterpart, and it selects on the SAME attribute the board selects on.
+        var panel = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries");
+
+        Assert.Equal("business", panel.Layer);
+        Assert.Equal(PanelKind.Elastic, panel.Kind);
+        Assert.Contains(RunPositions.Key, panel.Query, StringComparison.Ordinal);
+        Assert.Contains(RunPositions.Entry, panel.Query, StringComparison.Ordinal);
+        Assert.Contains(RunPositions.Terminal, panel.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RunBoundariesCountsRecordsRatherThanDedupingByRun()
+    {
+        // The operator panel learned this the hard way: deduping boundary records by CorrelationId
+        // collapses a fire's several terminal records into one, so a workflow that opens two lineages
+        // per fire reads 50/50 instead of 1:2 -- and a run that lost ONE of two lineages still reads
+        // 50/50, hiding partial loss entirely. Counting records is what makes the shortfall visible.
+        var query = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Query;
+
+        Assert.DoesNotContain("cardinality", query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CorrelationId", query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RunBoundariesCarriesTheDrainedPollCountThatExplainsAMissingTerminal()
+    {
+        // The agent cannot go and look at a log the way an operator can, and "entry records with no
+        // terminal" has two completely different causes: an importer that found nothing to read
+        // (correct, a no-op) and work that is being lost (a finding). Without the drained count in
+        // the same reading the agent must report inconclusive every time the source is idle, which
+        // on this deployment is about half of all polls.
+        var query = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Query;
+
+        Assert.Contains("attributes.Consumed", query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RunBoundariesTellsTheModelTheRatioIsAWorkflowConstant()
+    {
+        // The single most available misreading: that entry and terminal "should" be equal. They are
+        // not -- one entry record per fire, one terminal record per branch END -- and the healthy
+        // ratio belongs to the workflow, not to the panel. A model that does not know this reports a
+        // perfectly healthy 1:2 chain as losing half its work.
+        var description = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Description;
+
+        Assert.Contains("NOT 1:1", description, StringComparison.Ordinal);
+        Assert.Contains("drained", description, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -342,6 +342,58 @@ public sealed class PanelTrustTests
         Assert.Contains(RefusalTemplates.NotParked, query, StringComparison.Ordinal);
     }
 
+
+    [Fact]
+    public void Elastic_RunBoundaries_ReportsBothEndsAndTheDrainedPollsThatExplainAGap()
+    {
+        var reading = ElasticPanelSource.Parse(
+            Def("run-boundaries"), Window, Fixture("elastic-run-boundaries-present.json"));
+
+        Assert.True(reading.Trust.SeriesPresent);
+        Assert.True(reading.Trust.NoDataDistinguishable);
+        Assert.Equal(940, reading.SampleCount);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        var root = value.RootElement;
+
+        // 20 fires, 40 branch ends: the 1:2 of a workflow whose entry step opens two lineages.
+        Assert.Equal(20, root.GetProperty("entry").GetInt64());
+        Assert.Equal(40, root.GetProperty("terminal").GetInt64());
+
+        // The discriminator. 8 of the 20 polls read nothing, so 8 fires COULD NOT have produced a
+        // terminal and their absence is not loss.
+        Assert.Equal(20, root.GetProperty("importerPolls").GetInt64());
+        Assert.Equal(8, root.GetProperty("drainedPolls").GetInt64());
+    }
+
+    [Fact]
+    public void Elastic_RunBoundaries_NoBoundariesWhileTheWorkflowIsReportingIsATrustedZero()
+    {
+        // The workflow is logging 940 records and not one is a run boundary. That is a real zero --
+        // the workflow is not firing at all -- rather than a gap, and it is drawable only because the
+        // query's scope is every record for the workflow rather than the boundaries themselves.
+        var reading = ElasticPanelSource.Parse(
+            Def("run-boundaries"), Window, Fixture("elastic-run-boundaries-zero.json"));
+
+        Assert.True(reading.Trust.SeriesPresent);
+        Assert.True(reading.Trust.NoDataDistinguishable);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(0, value.RootElement.GetProperty("entry").GetInt64());
+        Assert.Equal(0, value.RootElement.GetProperty("terminal").GetInt64());
+    }
+
+    [Fact]
+    public void Elastic_RunBoundaries_QueryCarriesTheValuesTheOrchestratorActuallyWrites()
+    {
+        // End-to-end pin: the panel selects on the same constants WorkflowFireJob and
+        // StepOutcomeHandler tag their records with, not on a literal retyped into the query.
+        var query = Def("run-boundaries").Query;
+
+        Assert.Contains(RunPositions.Entry, query, StringComparison.Ordinal);
+        Assert.Contains(RunPositions.Terminal, query, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Elastic_PartialShardFailure_ThrowsPanelUnavailableRatherThanReturningAnUndercount()
     {

@@ -194,6 +194,7 @@ internal sealed class ElasticPanelSource
             "step-outcomes" => BuildStepOutcomes(definition, total, aggregations, windowFullyCovered),
             "step-failures" => BuildStepFailures(definition, total, aggregations, windowFullyCovered),
             "refused-messages" => BuildRefusedMessages(definition, total, aggregations, windowFullyCovered),
+            "run-boundaries" => BuildRunBoundaries(definition, total, aggregations, windowFullyCovered),
             _ => throw new PanelUnavailableException(
                 definition.PanelId, $"no elasticsearch response parser registered for panel '{definition.PanelId}'"),
         };
@@ -283,6 +284,7 @@ internal sealed class ElasticPanelSource
     private static string ScopeCountName(string panelId) => panelId switch
     {
         "refused-messages" => "totalWorkflowRecords",
+        "run-boundaries" => "totalWorkflowRecords",
         _ => "totalOutcomeRecords",
     };
 
@@ -343,6 +345,37 @@ internal sealed class ElasticPanelSource
         // The scope total, matching both other Elastic panels -- NOT refusedCount. Four refusals out
         // of 612 records is not a panel that returned four things, and recording it that way would
         // put a healthy window in the trace as a panel that returned almost nothing.
+        return new PanelReading(
+            definition.PanelId, definition.Layer, valueJson, SampleCount: checked((int)total),
+            new PanelTrust(SeriesPresent: true, windowFullyCovered, NoDataDistinguishable: true));
+    }
+
+    /// <summary>
+    /// The run-boundary reading: how many runs this workflow began, how many branches ended, and the
+    /// importer polls that explain a gap between them.
+    /// <para>
+    /// <b>drainedPolls is carried for the model's benefit, not the panel's.</b> An operator seeing
+    /// entries with no terminals can go and read the importer's log; the agent has only what a
+    /// reading contains, and "the source had nothing to read" and "work is being lost" produce the
+    /// identical shape. Without this count the agent must call every idle window inconclusive.
+    /// </para>
+    /// </summary>
+    private static PanelReading BuildRunBoundaries(
+        PanelDefinition definition, long total, JsonElement aggregations, bool windowFullyCovered)
+    {
+        var positions = aggregations.GetProperty("boundaries").GetProperty("by_position")
+            .GetProperty("buckets");
+        var polls = aggregations.GetProperty("polls");
+
+        var valueJson = JsonSerializer.Serialize(new
+        {
+            totalWorkflowRecords = total,
+            entry = BucketCount(positions, "entry"),
+            terminal = BucketCount(positions, "terminal"),
+            importerPolls = polls.GetProperty("doc_count").GetInt64(),
+            drainedPolls = polls.GetProperty("drained").GetProperty("doc_count").GetInt64(),
+        });
+
         return new PanelReading(
             definition.PanelId, definition.Layer, valueJson, SampleCount: checked((int)total),
             new PanelTrust(SeriesPresent: true, windowFullyCovered, NoDataDistinguishable: true));
