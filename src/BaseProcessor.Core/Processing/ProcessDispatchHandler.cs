@@ -170,21 +170,8 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
                 //
                 // With execution blobs carrying no TTL, this branch now has exactly two readings, not
                 // three: reclaimed, or never written. It can no longer mean expired.
-                // DIVERGES FROM THE ORCHESTRATOR ON PURPOSE, and the two were unargued until now.
-                // StepOutcomeHandler.ReadAsync meets the same condition — the key its message names
-                // is gone — and THROWS, so the delivery parks. This one acks. Both stop the duplicate
-                // advancing; they differ in whether a lost ack becomes operator work.
-                //
-                // The case for acking here: a redelivery after a lost ack is the normal cost of
-                // at-least-once, not an incident, and parking one would put a message in a dead-letter
-                // queue for every such redelivery. The case for parking there: an outcome naming a
-                // blob the store does not hold can ALSO mean the processor reported an entry it never
-                // wrote, which is a real defect, and the orchestrator has no cheaper way to surface it.
-                //
-                // Neither is obviously right for both sides, so the split stands as a decision rather
-                // than an accident. Unifying it means choosing which of those two costs to pay
-                // everywhere; that choice has not been made and should not be made by whichever file
-                // is edited next.
+                // StepOutcomeHandler meets the same condition — the key its message names is gone —
+                // and also acks, logging it at Warning.
                 _logger.LogInformation("entry absent — treating as a duplicate delivery");
                 return;
             }
@@ -324,28 +311,28 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             _processor.EndDispatch();
         }
 
+        // Did the author do what every author must: send at least one branch? A no-data send counts
+        // (spec D4). Anything else that returned normally forgot, and that is the one output rule
+        // the framework enforces (spec D3).
+        var forgotToSend = ran && !state.BranchSent;
+
         // The input is reclaimed HERE rather than in the post handler, and only after the author's
-        // transform returned normally. A fan-out sends N branches from inside one ProcessAsync; the
-        // return is the only signal that all N went out. Reclaiming per branch instead would delete
-        // the input after branch 1, so a failed branch-2 send would requeue a dispatch whose input is
-        // already gone — the redelivery would read an absent key, take the duplicate-delivery branch,
-        // and lose branch 2 silently.
+        // transform returned normally having sent. A fan-out sends N branches from inside one
+        // ProcessAsync; the return is the only signal that all N went out. Reclaiming per branch
+        // instead would delete the input after branch 1, so a failed branch-2 send would requeue a
+        // dispatch whose input is already gone.
         //
         // Outside the catch chain on purpose: a store fault on this delete must propagate so the L2
-        // classifier trips the gate and requeues. Inside the try it would be caught by the general
-        // catch and reported as a failed step that never happened.
+        // classifier trips the gate and requeues.
         //
-        // A DELETE THAT FAILS IS THE ONE PATH THAT COSTS SOMETHING, and it is the price of minting
-        // branch ids with NewGuid. The redelivery finds this key still present, re-runs the author,
-        // and its branches carry FRESH ids — so the post handler writes new blobs rather than
-        // rewriting the ones the first attempt wrote, and the successor subtree runs twice. Nothing is
-        // lost and nothing leaks (the orchestrator reclaims every blob it relocates), but the author's
-        // own code does run again. See SendToPostAsync for why that trade was taken and how to reverse
-        // it.
+        // NOT RECLAIMED WHEN THE AUTHOR FORGOT TO SEND. The Failed outcome below names this key, as
+        // every Failed path does, and the orchestrator reclaims it. Reclaiming here first would make a
+        // failed send of that outcome unrecoverable: the redelivery would read the key absent, take
+        // the duplicate branch and return, and the step would end with no outcome at all. Leaving it
+        // makes that a replay, which this system always prefers.
         //
-        // Skipped for a source step, which produced its own input and has no key. The author still
-        // ran; only the delete is skipped.
-        if (ran && d.EntryId != Guid.Empty)
+        // Skipped for a source step, which produced its own input and has no key.
+        if (ran && !forgotToSend && d.EntryId != Guid.Empty)
         {
             _logger.LogDebug("reclaiming the input from L2");
 
@@ -354,110 +341,26 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
                 .ConfigureAwait(false);
         }
 
-        // The pre hop had no completion record at all: on the happy path it deleted a key and returned
-        // in silence, so the only evidence a step finished was the branch its author sent from the OTHER
-        // hop. This closes the pair opened by "running the step" — and the duration is the author's own,
-        // measured across their transform and nothing else, which is the number worth having.
         _logger.LogInformation(
             "the step returned after {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
 
-        // THE CHAIN STOPPED HERE AND NOTHING ELSE SAYS SO. A non-terminal step reports its outcome
-        // only through the branch it sends -- ProcessedDataHandler is what turns that branch into the
-        // StepOutcome -- so an author who returns normally without sending one ends the lineage with
-        // no outcome of any kind. The line above is logged identically by a healthy step, and the
-        // send itself logs nothing on this hop, so until this check the two were byte-identical in
-        // the record: a broken workflow and a working one produced the same single Information line.
-        //
-        // THIS IS A DIAGNOSTIC, NOT A GUARD, and the difference is deliberate. It does not throw, does
-        // not change the disposition, and does not invent an outcome: the delivery is still acked and
-        // the input still reclaimed above. Catching the mistake is the author's job; this only makes
-        // the breakage visible when they miss it.
-        //
-        // NO OutcomeLogScope, and its absence is load-bearing. There IS no outcome here -- attaching
-        // attributes.Result would make the dashboard's counted-set rule count this as a step outcome,
-        // which is exactly backwards for a step that reported nothing. It rides the ambient
-        // ExecutionLogScope instead, so it still joins to the run by workflow, execution and step id.
-        //
-        // It cannot fire on a correct processor. A step with nothing to hand on reports that by
-        // throwing CancelledException, which is caught above and sends a Cancelled outcome; a sink
-        // declares EndsLineage and is sent Completed below. Returning normally, sending nothing and
-        // not ending the lineage is the one shape with no legitimate reading.
-        // MaySendNoBranch is what keeps a SOURCE out of this. An importer's dispatch is a "go and
-        // fetch" instruction rather than a step in a lineage -- each item it reads opens its own,
-        // with its own execution id -- so a drained poll opens no lineage, sends no branch, and has
-        // nothing to report an outcome for. Shipped without this carve-out, the check fired twice on
-        // kafka-importer within three minutes of the rollout, on exactly the quiet polls that are its
-        // ordinary behaviour. A diagnostic that cries wolf on a healthy path is worse than the
-        // silence it replaced, because it trains an operator to scroll past the line that matters.
-        if (ran && !_processor.EndsLineage && !_processor.MaySendNoBranch && !state.BranchSent)
+        // THE ONE OUTPUT RULE (spec D3). An author reports its outcome through the branches it sends:
+        // with data to hand it on, with no data to say it finished with nothing to hand on. Returning
+        // without either used to end the lineage with an Error line and no outcome, so the
+        // orchestrator never advanced. It is now a Failed outcome like any other, scoped so
+        // attributes.Result counts it, and at Error because it is a defect in the author, not a
+        // business result.
+        if (forgotToSend)
         {
-            _logger.LogError(
-                "the step returned without sending a branch — no StepOutcome will be reported, so the "
-                + "orchestrator never advances this workflow past this step and the lineage stops "
-                + "here. A non-terminal processor must call SendToPostAsync at least once; a step "
-                + "with nothing to hand on reports that by throwing CancelledException.");
-        }
-
-        // THE TERMINAL OUTCOME, and it exists because a sink's success was the one disposition nobody
-        // reported. An exporter sends no branch, so the post handler never runs and never sends the
-        // StepOutcome every other completed step reports — while a FAILED export does report, through
-        // the catch chain above. The orchestrator therefore heard about a run only when it went
-        // wrong, and its silence at the end of a trace meant either "finished" or "the records were
-        // lost". Two independent end-of-run markers now exist, on two different pods, which matters
-        // in a deployment that demonstrably drops log records.
-        //
-        // Guid.Empty, NOT d.EntryId, and the difference is not cosmetic. The reclaim above has already
-        // deleted that key: naming it would send StepOutcomeHandler to ReadAsync a blob that is gone,
-        // which takes the duplicate-delivery branch and logs "the execution blob is absent" at
-        // Warning — every successful run ending in a spurious warning. Empty skips the read, data is
-        // empty, and no successor matches, so the orchestrator's existing "the terminal step completed
-        // ... the run ends here" line fires. No new log statement anywhere: that line was already
-        // worded for this event and had never been reachable on the happy path.
-        //
-        // A successor wired AFTER a sink would now be dispatched with Guid.Empty rather than silently
-        // never running. That is a graph an author should not have written, and dispatching it as a
-        // source step — the sentinel the pre handler already implements — is the more honest of the
-        // two failures.
-        //
-        // AN OutcomeLogScope HERE, AND THIS BRANCH USED TO CARRY NONE. The reasoning that kept it out
-        // was that the orchestrator already records this outcome — StepOutcomeHandler's own "the
-        // terminal step completed with {Result}" line — so nothing was missing. That is true of the
-        // EVENT and false of the FIELD, and the difference turned out to cost a great deal.
-        //
-        // attributes.Result is the field every outcome query is built on, and a terminal step was the
-        // one step whose success never carried it from the processor side. A reader counting step
-        // outcomes therefore needed two rules rather than one — a processor-side rule, plus a
-        // carve-out that reached into the orchestrator's records for exactly this case and had to
-        // exclude the Failed and Cancelled halves of that same template to avoid counting them twice.
-        // The carve-out was also unverifiable: a terminal StepOutcome names Guid.Empty (see below),
-        // so the orchestrator's record carries no EntryId, and the duplicate check that guards every
-        // other step could not be run against it. Emitting the field here makes a sink an ordinary
-        // step, collapses the rule to one clause and brings the last two steps under that check.
-        // Section 13.3 of docs/superpowers/specs/2026-09-22-kibana-operator-dashboard-design.md is
-        // the full argument.
-        //
-        // THE SCOPE'S EntryId IS THE DISPATCH'S OWN, and it arrives by itself: the ambient
-        // ExecutionLogScope opened at the top of HandleAsync already carries d.EntryId. Do NOT pass
-        // Guid.Empty here to match the message below. The Guid.Empty in the StepOutcome is a
-        // MESSAGING concern — it stops StepOutcomeHandler reading a blob the reclaim above has
-        // already deleted — and it has no bearing on what this pod should record about the step it
-        // just ran.
-        //
-        // THE ORCHESTRATOR'S LINE STAYS. It is not made redundant by this one; it is deliberately
-        // redundant, and that is its value. Two independent end-of-run markers on two different pods
-        // is the only mitigation there is for a deployment that demonstrably drops log records, and
-        // this line lives on the same pod as the work. The orchestrator's record simply stops being
-        // COUNTED — it does not stop being written.
-        if (ran && _processor.EndsLineage)
-        {
-            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Completed)))
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed)))
             {
-                _logger.LogInformation("the terminal step completed — there is no output to hand on");
-
-                await SendAsync(
-                    new StepOutcome(d.CorrelationId, d.ExecutionId, d.WorkflowId, d.StepId, d.ProcessorId,
-                                    Guid.Empty, StepResult.Completed), ct).ConfigureAwait(false);
+                _logger.LogError(
+                    "the step returned without sending a branch — reported failed. A processor must "
+                    + "call SendToPostAsync at least once, with no data if it has nothing to hand on; "
+                    + "a step that decides not to continue reports that by throwing CancelledException.");
             }
+
+            await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
         }
     }
 
@@ -465,8 +368,8 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
     /// Builds the outcome for a step that produced no output.
     /// <para>
     /// <b>EntryId is the dispatch's own — the step's INPUT — and that is the whole point of it.</b>
-    /// None of these paths sets <c>ran</c>, so the reclaim at the end of <see cref="RunAsync"/> is
-    /// skipped and that key is still in the store. Execution blobs have no TTL and no sweeper covers
+    /// None of these paths reclaims the input (the missing-branch path included), so that key is
+    /// still in the store. Execution blobs have no TTL and no sweeper covers
     /// them, so if this outcome did not name the key, nothing anywhere ever would and every failed step
     /// would leak its input permanently. A source step reports <see cref="Guid.Empty"/> here, which is
     /// correct: it read no key, so there is none to reclaim.

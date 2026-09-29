@@ -94,47 +94,6 @@ public abstract class BaseProcessor
     internal void EndDispatch() => Volatile.Write(ref _dispatch, null);
 
     /// <summary>
-    /// True for an author that deliberately produces no branch, so returning normally IS the end of
-    /// the lineage. False everywhere else, which is every transform and every source.
-    /// <para>
-    /// <b>The pre handler reports a terminal outcome on this, and it must be a property of the CLASS
-    /// rather than an observation of the dispatch.</b> "Sent no branch" looks like the same
-    /// condition and is not: a <c>BaseImporter</c> whose source drained sends no branch either, and
-    /// reporting Completed for it would advance every successor gated on
-    /// <c>PreviousCompleted</c> — dispatching the rest of the workflow on an empty topic. That step
-    /// produced nothing because there was nothing to produce; this one produces nothing because
-    /// producing nothing is what it does.
-    /// </para>
-    /// </summary>
-    internal virtual bool EndsLineage => false;
-
-    /// <summary>
-    /// Whether this processor may legitimately return having sent no branch at all.
-    /// <para>
-    /// <b>False for a transform, and that is the point.</b> A transform reports its outcome only
-    /// through the branch it sends, so returning without one ends the lineage with no outcome —
-    /// which <c>ProcessDispatchHandler</c> logs as an error, because nothing else says the chain
-    /// stopped.
-    /// </para>
-    /// <para>
-    /// <b>True for a source.</b> An importer's dispatch is a "go and fetch" instruction, not a step
-    /// in a lineage: each item it reads opens its OWN lineage with its own execution id, and the
-    /// outcome is reported per lineage rather than per dispatch. A poll that finds the source drained
-    /// therefore opens no lineage, sends no branch, and has nothing to report an outcome for — it is
-    /// an ordinary empty batch, and it already says so with "consumed 0/{Requested} records". Holding
-    /// it to the transform's rule would fire an error on every quiet poll, which is how a diagnostic
-    /// becomes noise an operator learns to scroll past.
-    /// </para>
-    /// <para>
-    /// Distinct from <see cref="EndsLineage"/>, which is about the other end: a sink consumes a
-    /// lineage and sends nothing onward, and the framework reports ITS outcome itself. Both suppress
-    /// the check, for opposite reasons, and collapsing them into one flag would make a sink and a
-    /// source indistinguishable in the one place the difference decides who reports the outcome.
-    /// </para>
-    /// </summary>
-    internal virtual bool MaySendNoBranch => false;
-
-    /// <summary>
     /// The concrete <c>TConfig</c> this author binds its step payload to, so startup can check the
     /// registered config schema actually describes it.
     /// <para>

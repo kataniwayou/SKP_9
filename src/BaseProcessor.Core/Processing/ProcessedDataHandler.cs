@@ -13,11 +13,9 @@ namespace BaseProcessor.Core.Processing;
 /// <summary>
 /// Finishes one branch: validate the output, persist it, report the outcome.
 /// <para>
-/// <b>It is not the only place an outcome comes from, and it stopped being so on 2026-09-11.</b> An
-/// author that ends the lineage produces no branch, so this handler never runs for it and its
-/// terminal outcome is reported by <c>ProcessDispatchHandler</c> instead — see
-/// <see cref="BaseProcessor.EndsLineage"/>. The summary above is scoped to a branch, and a sink has
-/// none; read it as "every branch's outcome" rather than "every outcome".
+/// <b>A branch with no data</b> is how an author reports Completed with nothing to hand on. It skips
+/// the output schema and the L2 write and reports <see cref="Guid.Empty"/>. See
+/// <see cref="BaseProcessor.SendToPostAsync"/>.
 /// </para>
 /// <para>
 /// <b>Every branch is keyed by an entry id that rides the message body</b>, so a redelivery of THIS

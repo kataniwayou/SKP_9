@@ -42,20 +42,6 @@ public sealed class ProcessDispatchHandlerTests
         public Task SendNullable(byte[]? d) => SendToPostAsync(d, E, CancellationToken.None);
     }
 
-    /// <summary>A source: it may legitimately return having sent nothing, exactly as BaseImporter does.</summary>
-    private sealed class SourceProbe : BaseProcessor<NoConfig>
-    {
-        public bool Ran { get; private set; }
-
-        internal override bool MaySendNoBranch => true;
-
-        protected override Task ProcessAsync(byte[] data, NoConfig? config, Guid executionId, CancellationToken ct)
-        {
-            Ran = true;
-            return Task.CompletedTask;
-        }
-    }
-
     private sealed class Harness
     {
         public IDatabase Db { get; } = Substitute.For<IDatabase>();
@@ -124,21 +110,54 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
-    public async Task LogsAnErrorWhenTheAuthorReturnsWithoutSendingABranch()
+    public async Task ReportsFailedWhenTheAuthorReturnsWithoutSendingABranch()
     {
-        // The chain stops here and nothing else says so. A non-terminal step reports its outcome only
-        // through the branch it sends, so an author who returns normally without sending one ends the
-        // lineage with no outcome at all -- and the "the step returned" line above it is logged
-        // identically by a healthy step, which is what made the two indistinguishable in the record.
+        // Spec D3 as amended: forgetting to send is the one output rule. The outcome names the INPUT
+        // key and the key is left in place, like every other Failed path -- so if this outcome's own
+        // send fails, the redelivery replays the step rather than finding the key gone.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, _) => Task.CompletedTask);   // runs, never sends
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
-        Assert.True(probe.Ran);
         var error = Assert.Single(h.Log.Records, r => r.Level == LogLevel.Error);
         Assert.Contains("without sending a branch", error.Message, StringComparison.Ordinal);
+        Assert.NotNull(sent);
+        Assert.Equal(StepResult.Failed, sent.Result);
+        Assert.Equal(E, sent.EntryId);
+        await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task ScopesTheMissingBranchAsFailed()
+    {
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, _) => Task.CompletedTask);
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        var resultScope = Assert.Single(h.Log.Scopes, s => s.ContainsKey(OutcomeLogScope.Result));
+        Assert.Equal(nameof(StepResult.Failed), resultScope[OutcomeLogScope.Result]);
+    }
+
+    [Fact]
+    public async Task ReportsASourceStepThatSentNothingAsFailedWithNoKey()
+    {
+        var h = new Harness();
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        var probe = new Probe((_, _) => Task.CompletedTask);
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(Guid.Empty)), CancellationToken.None);
+
+        Assert.Equal(StepResult.Failed, sent!.Result);
+        Assert.Equal(Guid.Empty, sent.EntryId);
     }
 
     [Fact]
@@ -209,36 +228,20 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
-    public async Task SaysNothingWhenTheProcessorMaySendNoBranch()
+    public async Task ReplaysRatherThanLosesTheStepWhenTheFailedOutcomeCannotBeSent()
     {
-        // A SOURCE, not a transform. An importer's dispatch is a "go and fetch" instruction: each item
-        // it reads opens its own lineage, so a drained poll opens none, sends none, and has nothing to
-        // report an outcome for. Shipped without this carve-out the check fired twice on
-        // kafka-importer within three minutes of a rollout, on exactly the quiet polls that are its
-        // ordinary behaviour.
+        // Review focus 3. The author swallowed its own failed send (which it must not do), so D3
+        // fires, and the broker is still down, so D3's outcome cannot be sent either. The fault must
+        // escape AND the input must survive: the redelivery then re-runs the step. Reclaiming first
+        // would make the redelivery read "already done" and the outcome would be lost for good.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        var probe = new SourceProbe();
-
-        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
-
-        Assert.True(probe.Ran);
-        Assert.DoesNotContain(h.Log.Records, r => r.Level == LogLevel.Error);
-    }
-
-    [Fact]
-    public async Task StillLogsTheErrorWhenEverySendFailed()
-    {
-        // A send that threw produced no branch, so it must not count as one. Without this the flag
-        // would be set before the send was known to have landed, and a dispatch whose every send
-        // failed would look exactly like one that worked. The dispatch itself still propagates --
-        // this assertion is only about what the flag records.
-        var h = new Harness();
-        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        // SendTransientAsync is an extension method and cannot be substituted; it delegates to
-        // SendAsync and wraps a transport fault, so the stub goes on the interface member.
         h.Sender
             .SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
+                       Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>())
+            .ThrowsAsync(new TransientSendException("broker gone", new InvalidOperationException()));
+        h.Sender
+            .SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<StepOutcome>(),
                        Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>())
             .ThrowsAsync(new TransientSendException("broker gone", new InvalidOperationException()));
 
@@ -247,10 +250,12 @@ public sealed class ProcessDispatchHandlerTests
             try { await p.Send(d); } catch (PostSendException) { /* swallowed on purpose */ }
         });
 
-        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+        await Assert.ThrowsAnyAsync<TransientSendException>(
+            () => h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None));
 
         var error = Assert.Single(h.Log.Records, r => r.Level == LogLevel.Error);
         Assert.Contains("without sending a branch", error.Message, StringComparison.Ordinal);
+        await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
@@ -331,16 +336,21 @@ public sealed class ProcessDispatchHandlerTests
         // happened, with the delivery acknowledged. Escaping lets the L2 classifier trip the gate and
         // requeue, and the replay is harmless: the same author runs again and sends the same derived
         // message ids, so the post handler rewrites identical bytes.
+        //
+        // The probe must actually send a branch: since Task 4, the reclaim only runs when the author
+        // sent (ran && state.BranchSent) — an author that forgot to send is never reclaimed at all, so
+        // that shape can no longer exercise this path.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
         h.Db.KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
             .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
-        var probe = new Probe((_, _) => Task.CompletedTask);
+        var probe = new Probe((_, self) => self.Send(Encoding.UTF8.GetBytes("{}")));
 
         await Assert.ThrowsAsync<RedisConnectionException>(
             () => h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None));
 
-        Assert.Empty(h.Sender.ReceivedCalls());
+        // Only the branch send landed; the reclaim's fault escaped before any StepOutcome could be sent.
+        Assert.Single(h.Sender.ReceivedCalls());
     }
 
     [Fact]
@@ -586,20 +596,6 @@ public sealed class ProcessDispatchHandlerTests
         await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
                                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         await h.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
-    }
-
-    [Fact]
-    public async Task SendsNothingWhenTheAuthorEndsTheBranchSilently()
-    {
-        // A sink or a filter legitimately ends here with nothing to report.
-        var h = new Harness();
-        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        var probe = new Probe((_, _) => Task.CompletedTask);
-
-        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
-
-        await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(),
-                                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
     }
 
     [Fact]

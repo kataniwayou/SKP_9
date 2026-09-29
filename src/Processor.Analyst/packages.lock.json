@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "qWHPbtXcj/MlOl1v8S+6jX5Rkvjiv3rWEnxKrfZ/OTCFqBaQfpt914S2Bwu5NjkdG8jo/xejrWb1xh6AXbP6MA==",
+        "contentHash": "OsonKXdCiO55BVkXaups1xCr/6AFZNkPtNyfRLw7hbqnb/1VKXO5k1UPdoImBbNPwqxEsURfYlClVY1p/3CeTw==",
         "dependencies": {
           "BaseConsole.Core": "[1.0.0]",
           "JsonSchema.Net": "9.2.1",
@@ -317,7 +317,7 @@
         "type": "CentralTransitive",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "iE22HHAq949ImmnWmOuu7gbKn6TredXLU9L9WuDK7MSFfaGltNQp27f/6R+AMlQGXSBC3mIiFt2ZHadbShzQQQ==",
+        "contentHash": "0faYiXpFBJ71wK13h0WcexfBp0cmqOM2aMEEhOS3R7gzQooeEheTYPB/b7b2Zkk1eKRZQG3W/ALlFYiOGuO+aQ==",
         "dependencies": {
           "Messaging.Contracts": "[1.0.0]",
           "Messaging.Transport": "[1.0.0]",
@@ -343,13 +343,13 @@
         "type": "CentralTransitive",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "9F3lDDBub2ILucAw47MCnwkayfbKss4vBaD3oGF7btjDA9uq1/PwTSC4mYJG0REWJCRCBxLW8oS1d6673zBgXw=="
+        "contentHash": "lnewx9cDWBJy+zPr9vW9HJmBTOM/tRJAbOC240x/bWZrg/Cpqe/3jQWo95hrs/5TXqUUMYowSunEunExJVd8Vw=="
       },
       "Messaging.Transport": {
         "type": "CentralTransitive",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "2qM+lAvE09beLGyVd3LgIZlEbt9fl3uRMm8f6NAYGIt2HT3yzVrObZUFfhsPXRzWTdfkJDpclR7gRdXdJncvBQ==",
+        "contentHash": "MVuwjdWFLFu/IfliGqXTy3kSlitdBIAyZQHMJNX0TIY2LHGvB8+lSscdmnvOpqIvD7PNweAzMCQ1oHE6mJmuSw==",
         "dependencies": {
           "Messaging.Contracts": "[1.0.0]",
           "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",
