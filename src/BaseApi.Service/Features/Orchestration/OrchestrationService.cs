@@ -2,7 +2,6 @@ using System.Text.Json;
 using BaseApi.Core.Exceptions;
 using BaseApi.Core.Persistence;
 using BaseApi.Service.Features.Cache;
-using BaseApi.Service.Features.Lookup;
 using BaseApi.Service.Features.Orchestration.Loading;
 using BaseApi.Service.Features.Orchestration.Validation;
 using BaseApi.Service.Features.Workflow;
@@ -41,7 +40,6 @@ public sealed class OrchestrationService
     private readonly PayloadConfigSchemaValidator _payloadConfigSchemaValidator;
     private readonly ProcessorLivenessValidator _processorLivenessValidator;
     private readonly IQueueSender _sender;
-    private readonly IEntityLookupPublisher _lookup;
     private readonly ILogger<OrchestrationService> _logger;
 
     // The constructor is internal rather than public: it accepts internal seam types, which the
@@ -55,7 +53,6 @@ public sealed class OrchestrationService
         PayloadConfigSchemaValidator payloadConfigSchemaValidator,
         ProcessorLivenessValidator processorLivenessValidator,
         IQueueSender sender,
-        IEntityLookupPublisher lookup,
         ILogger<OrchestrationService> logger)
     {
         _db                           = db                           ?? throw new ArgumentNullException(nameof(db));
@@ -65,7 +62,6 @@ public sealed class OrchestrationService
         _payloadConfigSchemaValidator = payloadConfigSchemaValidator ?? throw new ArgumentNullException(nameof(payloadConfigSchemaValidator));
         _processorLivenessValidator   = processorLivenessValidator   ?? throw new ArgumentNullException(nameof(processorLivenessValidator));
         _sender                       = sender                       ?? throw new ArgumentNullException(nameof(sender));
-        _lookup                       = lookup                       ?? throw new ArgumentNullException(nameof(lookup));
         _logger                       = logger                       ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -124,24 +120,6 @@ public sealed class OrchestrationService
         }
 
         var definition = ToDefinition(snapshot, workflowId);
-
-        // THE NAMES GO OUT BEFORE THE START DOES, and that order is the design.
-        //
-        // This workflow's ids reach the log store only once the orchestrator has been told to run it,
-        // and enrichment is frozen at index time: a record written before its id is in the
-        // materialised policy is unnamed permanently, and no later publish repairs it. Publishing
-        // after the send would leave exactly the records of the busiest window unnamed, with every
-        // call still returning success.
-        //
-        // The snapshot is the source, not the entity tables. A running workflow's composition is
-        // frozen at start by the L2 projection, so the graph in hand here IS the set of ids this run
-        // can emit. Tables edited afterwards cannot reach it.
-        //
-        // A FAILURE HERE REFUSES THE START. Unlike the Kibana publisher this replaces -- which
-        // swallowed its own faults because it ran behind a dashboard render -- this runs while there
-        // is still a request to answer, and a start whose names never landed produces a run nobody
-        // can read. Letting it escape is the honest outcome.
-        await _lookup.PublishAsync(LookupRowExtractor.From(snapshot), ct);
 
         // The broker is a hard dependency for this path: a send that fails means the projection will
         // never be applied, and the caller has to learn that now rather than be told the work was
@@ -224,17 +202,37 @@ public sealed class OrchestrationService
                     ?? new Dictionary<string, string>()))
             .ToList();
 
+        // Every entity the start covers, each id once: a processor serving several steps is one entry.
+        // Built here, from the snapshot the gates just approved, so the names projected are the names
+        // of the state that was validated -- not a second read that could see a later edit.
+        var names = new Dictionary<Guid, string>();
+        foreach (var w in snapshot.Workflows.Values)
+        {
+            names[w.Id] = EntityNames.Format(w.Name, w.Version, w.Id);
+        }
+
+        foreach (var s in snapshot.Steps.Values)
+        {
+            names[s.Id] = EntityNames.Format(s.Name, s.Version, s.Id);
+        }
+
+        foreach (var p in snapshot.Processors.Values)
+        {
+            names[p.Id] = EntityNames.Format(p.Name, p.Version, p.Id);
+        }
+
         return new WorkflowL1(
             WorkflowId: workflowId,
             EntryStepIds: workflow.EntryStepIds ?? new List<Guid>(),
             Cron: workflow.CronExpression,
             Steps: steps,
-            Caches: caches);
+            Caches: caches,
+            Names: names);
     }
 
     /// <summary>
     /// Exposes <see cref="ToDefinition"/> to the test assembly. The method is static and pure, and
-    /// reaching it through a constructed service would mean supplying eight dependencies none of
+    /// reaching it through a constructed service would mean supplying seven dependencies none of
     /// which it touches.
     /// </summary>
     internal static WorkflowL1 ToDefinitionForTests(WorkflowGraphSnapshot snapshot, Guid workflowId)
