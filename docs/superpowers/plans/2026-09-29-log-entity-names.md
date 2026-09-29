@@ -2180,19 +2180,28 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ## Rollout (not part of this plan)
 
-This is the combined rebuild with remove-edge-bases. Order matters.
+This is the combined rebuild with remove-edge-bases. Order matters, and it is not "teardown first":
+the OLD BaseApi still executes the enrich policy on every start, so a teardown run against it refuses
+every start (the publish fails and `StartAsync` refuses), and if the old pod restarts after a partial
+teardown it re-provisions `logs@custom` at boot, undoing the delete. The teardown must run only after
+the code that touches Elasticsearch is already gone.
 
-1. **Teardown first, on dev:**
-   `python tools/offline/teardown-entity-lookup.py --es-url http://localhost:19200`.
-2. **Rebuild and deploy** BaseApi, the orchestrator and every processor (`kind load`, SourceHash
-   repoint).
-3. **Restart every running workflow** (stop, then start), so BaseApi projects `skp:name:*`. Re-POST
+1. **Deploy the new BaseApi first, on dev.** Its `StartAsync` no longer calls the Lookup feature, so
+   once it is running, nothing left in the stack can re-provision `logs@custom` or refuse a start over
+   the teardown.
+2. **Teardown:** `python tools/offline/teardown-entity-lookup.py --es-url http://localhost:19200`.
+3. **Deploy the orchestrator and every processor** (`kind load`, SourceHash repoint).
+4. **Restart every running workflow** (stop, then start), so BaseApi projects `skp:name:*`. Re-POST
    the analyst-monitor payload first (remove-edge-bases).
-4. **Pin and import:** run
+5. **Pin and import:** run
    `python tools/offline/pin-workflow-control.py --workflow filefetcher-archiveexpander-chain_1.0.0`,
    commit the export, and import it by API. Then check that the whitelist pies render with
    `multi_terms`.
-5. **Verify:** run `python tools/verify-kibana-dashboard.py`.
-6. **Offline:** ship the delta (`pwsh tools/ship-delta.ps1 -Zip`), then run the teardown against the
-   9.3.4 stack, deploy, restart the workflows, pin against the offline Redis, import, and check that
-   the pies render on 9.3.4.
+6. **Verify:** run `python tools/verify-kibana-dashboard.py`.
+7. **Re-run the teardown as a no-op check:** `python tools/offline/teardown-entity-lookup.py --es-url
+   http://localhost:19200` again. Every step tolerates 404, so a clean second run (all "already
+   absent") confirms nothing re-provisioned the plumbing during steps 3-6.
+8. **Offline:** ship the delta (`pwsh tools/ship-delta.ps1 -Zip`), then deploy the new BaseApi to the
+   9.3.4 stack, teardown, deploy the orchestrator and processors, restart the workflows, pin against
+   the offline Redis, import, check that the pies render on 9.3.4, and re-run the teardown there too
+   as the same no-op check.

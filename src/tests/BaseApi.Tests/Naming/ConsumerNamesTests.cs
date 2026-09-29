@@ -99,6 +99,14 @@ public sealed class ConsumerNamesTests
     {
         // Review focus 1: logged in the consumer's catch, after the unwinding exception disposed every
         // scope opened inside the try.
+        //
+        // This delivery has no real broker channel behind it (OnReceivedAsync is called directly, not
+        // through a live RabbitMqConnection), so the ack/nack the catch attempts fails and it is the
+        // NotParked variant of the line that actually fires here, not Parked. Both templates are
+        // logged from the same catch block and inherit the same names scope, so asserting against
+        // whichever one fires still proves the names survive the unwind; RefusalTemplates.Parked is
+        // asserted below only because ScopeOf matches on a message prefix shared by both templates
+        // ("refusing message of type {Type} on {Queue}").
         var log = new SharedLog();
         var consumer = await Consumer(log, new FakeNameSource(new(Known)),
             () => throw new InvalidOperationException("deterministic"));

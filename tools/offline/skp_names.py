@@ -37,8 +37,13 @@ def _reply(f):
         n = int(rest)
         if n < 0:
             return None
-        data = f.read(n + 2)[:-2]
-        return data.decode("utf-8")
+        data = f.read(n + 2)
+        if len(data) < n + 2:
+            # The connection dropped mid-bulk-string: fewer bytes than the length the server itself
+            # declared, including the trailing \r\n. Silently returning a truncated value would read
+            # as a real (wrong) name; raising makes the failure visible instead.
+            raise RuntimeError(f"short read: expected {n + 2} bytes, got {len(data)}")
+        return data[:-2].decode("utf-8")
     if kind == b"*":
         n = int(rest)
         return None if n < 0 else [_reply(f) for _ in range(n)]

@@ -9,11 +9,20 @@ internal sealed class FakeNameSource(Dictionary<Guid, string>? names = null) : I
 
     public Exception? Fault { get; set; }
 
+    /// <summary>When true, <see cref="ReadNamesAsync"/> returns a task that never completes -- a
+    /// stalled (not faulted) store, e.g. a Redis connection stuck behind CLIENT PAUSE.</summary>
+    public bool Stall { get; set; }
+
     public int Reads { get; private set; }
 
     public Task<IReadOnlyDictionary<Guid, string>> ReadNamesAsync(IReadOnlyCollection<Guid> ids)
     {
         Reads++;
+        if (Stall)
+        {
+            return new TaskCompletionSource<IReadOnlyDictionary<Guid, string>>().Task;
+        }
+
         if (Fault is not null)
         {
             return Task.FromException<IReadOnlyDictionary<Guid, string>>(Fault);

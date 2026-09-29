@@ -19,6 +19,10 @@ namespace BaseConsole.Core.Naming;
 /// </summary>
 public sealed class EntityNameResolver(IEntityNameSource source, ILogger<EntityNameResolver> logger)
 {
+    // A stalled (not faulted) name store must not delay a delivery: the existing catch below turns a
+    // TimeoutException from this cap into the same fallbacks it already gives an outright fault.
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromMilliseconds(250);
+
     private readonly ConcurrentDictionary<Guid, string> _names = new();
 
     /// <summary>
@@ -36,9 +40,15 @@ public sealed class EntityNameResolver(IEntityNameSource source, ILogger<EntityN
         {
             try
             {
-                foreach (var (id, name) in await source.ReadNamesAsync(unknown).ConfigureAwait(false))
+                var found = await source.ReadNamesAsync(unknown).WaitAsync(ReadTimeout).ConfigureAwait(false);
+                foreach (var (id, name) in found)
                 {
-                    _names[id] = name;
+                    // A source returning an empty name would otherwise cache an empty string forever;
+                    // treat it the same as a miss so the entity keeps re-resolving.
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        _names[id] = name;
+                    }
                 }
             }
             catch (Exception ex)

@@ -174,12 +174,17 @@ and held in memory.
 ## Observability changes
 
 - **ES teardown, on every stack BaseApi has booted against: dev (8.15.5) and the offline
-  air-gapped stack (9.3.4).** Delete, in this order, the `logs@custom` pipeline, the
-  `skp-entity-lookup` enrich policy (it cannot be deleted while a pipeline references it), and the
-  `skp-entity-lookup` index. This is mandatory: while the pipeline exists, an enrich match overwrites
-  the name the code set with the old `name_version` format. The three `DELETE` calls ship with the
-  offline delta (`ship/`, via `tools/ship-delta.ps1`) as a runbook step, because the offline machine
-  has no access to this repo's dev forwards.
+  air-gapped stack (9.3.4) -- run only AFTER the new BaseApi is deployed there, never before.** The
+  old BaseApi still executes the enrich policy on every start and its `LookupProvisioningService`
+  re-creates `logs@custom` at boot; teardown while that code is still running refuses every start
+  against a deleted policy, and a restart of the old pod undoes the delete. Delete, in this order,
+  the `logs@custom` pipeline, the `skp-entity-lookup` enrich policy (it cannot be deleted while a
+  pipeline references it), and the `skp-entity-lookup` index. This is mandatory before the
+  orchestrator and processors are deployed: while the pipeline exists, an enrich match overwrites the
+  name the code set with the old `name_version` format. Re-run the same three `DELETE` calls once
+  more after rollout as a no-op check (every step tolerates 404). The three `DELETE` calls ship with
+  the offline delta (`ship/`, via `tools/ship-delta.ps1`) as a runbook step, because the offline
+  machine has no access to this repo's dev forwards.
 - **Kibana (`kibana/kibana-export.ndjson`):**
   - `skp-whitelist-pies` ("Whitelist verdicts by value"): replace the `terms` split on
     `attributes.WhitelistOwner` with a `multi_terms` split on `attributes.StepName` +

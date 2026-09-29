@@ -80,27 +80,32 @@ public sealed class NameProjectionTests
         // Component 3's safety claim: the only KEYS/SCAN in production code is the orphan sweeper's
         // skp:proc:* pattern, which cannot match skp:name:*.
         //
-        // ADAPTED from the brief: a bare "KeysAsync(" substring also matches
-        // ListIndexKeysAsync's interface declaration, implementation and call site -- three false
-        // positives that are not a scan call at all, just a method name that happens to end in those
-        // characters. A negative lookbehind for a preceding letter excludes them while still catching
-        // a genuine standalone KeysAsync(...) call, of which this codebase currently has none.
+        // WIDENED past the plan's single "exactly one hit" check: the property this test pins is
+        // "nothing scans a pattern matching skp:name:*", not "exactly one call site". A second sweeper
+        // copy that also scans skp:proc:* should still pass; only a hit that DOESN'T reference that
+        // pattern should fail. The matcher covers `Keys(`/`KeysAsync(` calls (excluding the false
+        // positives a bare "KeysAsync(" substring would catch, such as ListIndexKeysAsync's own
+        // declaration/implementation/call site, via a negative lookbehind for a preceding letter) plus
+        // the raw RESP command literals "SCAN" and "KEYS", so a hand-rolled RESP scan would be caught
+        // too, not just a StackExchange.Redis call.
         var src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var keysAsyncCall = new System.Text.RegularExpressions.Regex(@"(?<![A-Za-z])KeysAsync\(");
+        var scanCall = new System.Text.RegularExpressions.Regex(@"(?<![A-Za-z])Keys(Async)?\(");
         var hits = Directory.EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}")
                         && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
                         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
             .SelectMany(f => File.ReadLines(f).Select(l => (f, l)))
-            .Where(t => t.l.Contains(".Keys(pattern", StringComparison.Ordinal) || keysAsyncCall.IsMatch(t.l))
+            .Where(t => scanCall.IsMatch(t.l)
+                        || t.l.Contains("\"SCAN\"", StringComparison.Ordinal)
+                        || t.l.Contains("\"KEYS\"", StringComparison.Ordinal))
             .ToList();
 
-        var only = Assert.Single(hits);
+        Assert.NotEmpty(hits);
 
         // ADAPTED from the brief: the pattern is built as $"{L2ProjectionKeys.Prefix}proc:*", not the
         // literal string "skp:proc:*" -- Prefix is "skp:" (see L2ProjectionKeys), so this resolves to
         // exactly that pattern at runtime. Checked against the interpolation's own source text rather
         // than its resolved value, which a source scan cannot evaluate.
-        Assert.Contains("Prefix}proc:*", only.l, StringComparison.Ordinal);
+        Assert.All(hits, t => Assert.Contains("Prefix}proc:*", t.l, StringComparison.Ordinal));
     }
 }

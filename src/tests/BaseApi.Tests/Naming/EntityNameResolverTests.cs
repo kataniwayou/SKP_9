@@ -144,4 +144,48 @@ public sealed class EntityNameResolverTests
             "wf_1.0.0-aaaa-111111111111",
             log.ScopeOf("after the await")[EntityNames.WorkflowName]);
     }
+
+    /// <summary>
+    /// The negative control for the regression above: a scope begun INSIDE an awaited async helper --
+    /// the shape of the original bug -- must NOT reach the caller's own records. This is what proves
+    /// <see cref="SharedLog"/> models AsyncLocal faithfully, which is what that regression test's
+    /// result rests on.
+    /// </summary>
+    [Fact]
+    public async Task AScopeBegunInsideAnAwaitedHelperIsNotVisibleOnTheCallersRecords()
+    {
+        var log = new SharedLog();
+        var logger = log.For<EntityNameResolverTests>();
+
+        async Task<IDisposable?> Helper()
+        {
+            await Task.Yield();
+            return logger.BeginScope(new Dictionary<string, object> { [EntityNames.WorkflowName] = "wf_1.0.0-aaaa-111111111111" });
+        }
+
+        using (await Helper())
+        {
+            logger.LogInformation("logged after the helper returned");
+        }
+
+        Assert.False(log.ScopeOf("logged after the helper returned").ContainsKey(EntityNames.WorkflowName));
+    }
+
+    /// <summary>
+    /// A stalled (not faulted) store -- e.g. Redis stuck behind CLIENT PAUSE -- must not delay a
+    /// delivery indefinitely. <see cref="EntityNameResolver.ScopeAsync"/> caps the read at
+    /// <c>ReadTimeout</c> (250ms); the resulting TimeoutException is caught the same way a source
+    /// fault is, and the scope carries fallbacks.
+    /// </summary>
+    [Fact]
+    public async Task ASourceThatNeverCompletesYieldsFallbacksWithinASecond()
+    {
+        var resolver = Resolver(new FakeNameSource { Stall = true });
+
+        var scope = await resolver.ScopeAsync(W, S, P).WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+
+        Assert.Equal(EntityNames.Fallback(W), scope[EntityNames.WorkflowName]);
+        Assert.Equal(EntityNames.Fallback(S), scope[EntityNames.StepName]);
+        Assert.Equal(EntityNames.Fallback(P), scope[EntityNames.ProcessorName]);
+    }
 }

@@ -57,8 +57,13 @@ nothing pushes to it or triggers it.
 enrich policy, and a `logs@custom` ingest pipeline used to stamp the name onto each record at
 ingest time; BaseApi no longer creates any of the three. Run
 `tools/offline/teardown-entity-lookup.py` against every stack BaseApi has ever booted against — it
-is mandatory before the new processors log there, because while the pipeline exists its enrich step
-overwrites the names the processes set with the old `name_version` format.
+is mandatory before the orchestrator and processors are deployed, because while the pipeline exists
+its enrich step overwrites the names the processes set with the old `name_version` format. **Deploy
+the new BaseApi first, then teardown, then the orchestrator and processors** — the old BaseApi
+still executes the enrich policy on every start (a teardown run against it refuses every start) and
+its provisioning re-creates `logs@custom` if the old pod restarts, so teardown must never run before
+the new BaseApi replaces it. Re-run the teardown once more after rollout; every step tolerates 404,
+so a clean second run confirms nothing re-provisioned the plumbing.
 
 **An unmatched id renders as its own suffix**, not as blank and not as a shared "unknown" string. A
 missing field would give a panel a *missing* bucket that reads as a different entity; one shared
