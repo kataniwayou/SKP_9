@@ -351,7 +351,9 @@ public sealed class ProcessDispatchHandlerTests
             () => h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None));
 
         // Only the branch send landed; the reclaim's fault escaped before any StepOutcome could be sent.
-        Assert.Single(h.Sender.ReceivedCalls());
+        await h.Sender.DidNotReceive().SendAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<StepOutcome>(), Arg.Any<CancellationToken>(),
+            Arg.Any<string?>());
     }
 
     [Fact]

@@ -66,10 +66,11 @@ public static class RunPositions
     /// so a run fans out to as many as it has terminal branches — count distinct
     /// <c>ExecutionId</c> for lineages rather than documents.
     /// <para>
-    /// <b>The reason this value is worth more than the template it accompanies:</b> two different
-    /// templates here begin "the terminal step completed" — the orchestrator's, and a processor's own
-    /// "there is no output to hand on". A prefix or wildcard match over-counts by the second; this
-    /// attribute cannot be confused with it, because only the orchestrator writes it.
+    /// <b>The reason this value is worth more than the template it accompanies:</b> only the
+    /// orchestrator's own "the terminal step completed" line carries it. The exporter's
+    /// processor-side witness — <c>ProcessedDataHandler</c>'s "branch completed in {ElapsedMs}ms" —
+    /// is a different record entirely and never carries this attribute, so a terms aggregation on it
+    /// cannot be confused with that one.
     /// </para>
     /// </summary>
     public const string Terminal = "terminal";

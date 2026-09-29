@@ -357,7 +357,7 @@ public sealed class KafkaImporterLoopTests
         var failed = await Assert.ThrowsAsync<FailedException>(() =>
             processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
 
-        Assert.Contains("records", failed.Message);
+        Assert.Contains("faulted before any record was sent", failed.Message);
         Assert.Contains("consumed 0/10 records; stopped because Faulted", Summary(log));
         Assert.True(consumer.Disposed);
 

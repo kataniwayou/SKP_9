@@ -198,8 +198,9 @@ Completed and dispatch the whole chain on nothing. What has to change is every r
   sent.
 - Post handler: no-data branch writes nothing to L2, skips the output schema, sends Completed with
   `Guid.Empty`.
-- Dispatch handler: return without send -> Error log with `Result=Failed` and a Failed outcome with
-  `Guid.Empty`; a no-data send does not trigger it.
+- Dispatch handler: return without send -> Error log with `Result=Failed` and a Failed outcome
+  naming the input key (`d.EntryId`), with the key not reclaimed; a no-data send does not trigger
+  it.
 - Orchestrator: Failed and Cancelled never read the blob; an absent key (`EXISTS` = 0) advances
   nothing; delete runs after the handoffs when `EntryId` is set; a handoff send fault leaves the key
   in place so the redelivery advances again (duplicate, not loss); successors receive empty data;

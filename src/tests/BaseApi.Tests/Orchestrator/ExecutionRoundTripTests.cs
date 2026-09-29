@@ -233,13 +233,15 @@ public sealed class ExecutionRoundTripTests
         Assert.Empty(h.L2.Keys());
     }
 
-    [Fact]
-    public async Task AFailedOrCancelledOutcomeNeverReadsTheBlob()
+    [Theory]
+    [InlineData(StepResult.Failed)]
+    [InlineData(StepResult.Cancelled)]
+    public async Task AFailedOrCancelledOutcomeNeverReadsTheBlob(StepResult result)
     {
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, Always, "{}"));
         Seed(h, Entry, Output);
 
-        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Cancelled, Entry));
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(result, Entry));
 
         await h.L2.Db.DidNotReceive().StringGetAsync(
             (RedisKey)L2ProjectionKeys.ExecutionData(Entry), Arg.Any<CommandFlags>());
@@ -864,10 +866,11 @@ public sealed class ExecutionRoundTripTests
     [Fact]
     public async Task ATerminalOutcomeCarriesTheTerminalRunPosition()
     {
-        // The termination counter selects on this rather than on the template, because two different
-        // templates in this deployment begin "the terminal step completed" -- this one, and the
-        // exporter's own "there is no output to hand on". A prefix match over-counts by the second;
-        // an attribute cannot be confused with it at all.
+        // The termination counter selects on this rather than on the template, because only the
+        // orchestrator's own "the terminal step completed" line carries it. The exporter's
+        // processor-side witness -- ProcessedDataHandler's "branch completed in {ElapsedMs}ms" -- is
+        // a different record entirely and never carries this attribute, so it cannot be confused
+        // with it at all.
         var h = new Harness(Step(A, PA, 1, "{}"));
         Seed(h, Entry, Output);
 

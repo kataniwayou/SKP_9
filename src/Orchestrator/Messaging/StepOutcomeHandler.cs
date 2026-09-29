@@ -293,7 +293,8 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // One hand-off per matched successor, each with its own freshly minted key. The mint is
         // NewGuid, matching the processor: a redelivery of this outcome mints new keys and hands the
         // successors off a second time, so a step whose ack was lost advances twice. The reclaim below
-        // is what keeps that narrow — the redelivery finds the source blob gone and parks instead.
+        // is what keeps that narrow — the redelivery finds the source blob gone and is acked with a
+        // Warning, treating it as a duplicate delivery, instead.
         foreach (var next in selection.Matches)
         {
             // No blob means no key: the successor is dispatched as a source step rather than pointed
