@@ -126,9 +126,15 @@ internal sealed class L2ProjectionWriter
         // redelivered and this whole method runs again, exactly as for the keys above. Never cleaned up
         // on stop -- entities are shared across workflows and records keep arriving after a stop -- so
         // they are deliberately absent from the root and from L2Cleanup's key list.
-        foreach (var (id, name) in workflow.Names ?? new Dictionary<Guid, string>())
+        // A null guard, not `?? new Dictionary<...>()`: that fallback inside a deconstructing foreach
+        // crashes Roslyn's IDE0028 analyzer (AD0001), which fails the Release build under
+        // EnforceCodeStyleInBuild + TreatWarningsAsErrors.
+        if (workflow.Names is not null)
         {
-            writes.Add(batch.StringSetAsync(L2ProjectionKeys.Name(id), name));
+            foreach (var (id, name) in workflow.Names)
+            {
+                writes.Add(batch.StringSetAsync(L2ProjectionKeys.Name(id), name));
+            }
         }
 
         batch.Execute();
