@@ -60,6 +60,7 @@ internal sealed class RedisFieldWhitelist : IFieldWhitelist
 {
     private readonly IConnectionMultiplexer _multiplexer;
     private readonly ILogger<RedisFieldWhitelist> _logger;
+    private readonly Guid _workflowId;
     private readonly string _address;
     private readonly string _root;
 
@@ -99,7 +100,8 @@ internal sealed class RedisFieldWhitelist : IFieldWhitelist
         // not carry and mislabel a whole board's worth of verdicts with a list they did not come from.
         // Inverting it keeps that guarantee in the other direction and drops the parsing: one root in,
         // the address built from it, and no second value left to disagree.
-        _address = L2ProjectionKeys.Cache(workflowId, _root);
+        _workflowId = workflowId;
+        _address = L2ProjectionKeys.Cache(_workflowId, _root);
     }
 
     /// <summary>
@@ -142,7 +144,7 @@ internal sealed class RedisFieldWhitelist : IFieldWhitelist
 
         EnsureDictionaryProjected(db);
 
-        var stored = db.StringGet($"{_address}:{field}");
+        var stored = db.StringGet(L2ProjectionKeys.CacheEntry(_workflowId, _root, field));
         var listed = !stored.IsNullOrEmpty;
 
         Record(field, listed);
