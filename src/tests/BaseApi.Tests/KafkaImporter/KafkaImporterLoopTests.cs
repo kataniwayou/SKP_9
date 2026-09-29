@@ -3,6 +3,7 @@ using BaseApi.Tests.Support;
 using BaseProcessor.Core.Processing;
 using Messaging.Contracts;
 using Messaging.Transport;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Processor.KafkaImporter;
 using Xunit;
@@ -365,6 +366,11 @@ public sealed class KafkaImporterLoopTests
         Assert.Contains("records", failed.Message);
         Assert.Contains("consumed 0/10 records; stopped because Faulted", Summary(log));
         Assert.True(consumer.Disposed);
+
+        var warning = log.Records.Single(r =>
+            r.Message.Contains("reading from records faulted after 0 item(s)"));
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.NotNull(warning.Exception);
     }
 
     /// <summary>
@@ -506,10 +512,14 @@ public sealed class KafkaImporterLoopTests
     {
         var consumer = new FakeRecordConsumer { CommitThrowsOnCall = 1 }.WithTombstone();
         consumer.WithRecords("value-a");
-        var (processor, _, _) = Build(new FakeRecordConsumerFactory(consumer));
+        var (processor, _, log) = Build(new FakeRecordConsumerFactory(consumer));
 
         await Assert.ThrowsAsync<FailedException>(() =>
             processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains(log.Records, r =>
+            r.Message.Contains("committing a skipped record from records faulted after 0 item(s)"));
+        Assert.DoesNotContain(log.Records, r => r.Message.Contains("its branch has already been sent"));
     }
 
     /// <summary>

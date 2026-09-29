@@ -122,11 +122,8 @@ public sealed class KafkaImporterProcessor(
                 }
                 catch (KafkaException ex)
                 {
-                    if (sent > 0)
-                    {
-                        logger.LogWarning(ex, "reading from {Source} faulted after {Imported} item(s)",
-                            config.Topic, imported);
-                    }
+                    logger.LogWarning(ex, "reading from {Source} faulted after {Imported} item(s)",
+                        config.Topic, imported);
 
                     fault = ex;
                     reason = StopReason.Faulted;
@@ -152,13 +149,9 @@ public sealed class KafkaImporterProcessor(
                     }
                     catch (KafkaException ex)
                     {
-                        if (sent > 0)
-                        {
-                            logger.LogWarning(ex,
-                                "acknowledging an item from {Source} faulted after {Imported} item(s); it "
-                                + "will be read again and its branch has already been sent",
-                                config.Topic, imported);
-                        }
+                        logger.LogWarning(ex,
+                            "committing a skipped record from {Source} faulted after {Imported} item(s)",
+                            config.Topic, imported);
 
                         fault = ex;
                         reason = StopReason.Faulted;
