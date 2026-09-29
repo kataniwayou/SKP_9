@@ -10,7 +10,7 @@ namespace Processor.KafkaExporter;
 /// Writes the branch it is dispatched with to a topic, then reports Completed with a branch that
 /// carries no data.
 /// <para>
-/// <b>Ordinary author code since 2026-09-29.</b> It used to derive from <c>BaseExporter</c>, which
+/// <b>Ordinary author code since 2026-09-29.</b> It used to derive from the edge base class, which
 /// the framework no longer has. Every rule that class enforced is here now, as this processor's own
 /// decisions: it needs the execution it exports, a payload, a delivery timeout at or above the
 /// producer's floor, and non-empty data.

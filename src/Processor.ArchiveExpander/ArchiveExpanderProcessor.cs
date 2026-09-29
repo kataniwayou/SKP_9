@@ -8,8 +8,7 @@ namespace Processor.ArchiveExpander;
 
 /// <summary>
 /// Turns a fetched file into one structured document. A plain downstream transform: it has an input
-/// and it produces output, so it is not an edge and neither <c>BaseImporter</c> nor
-/// <c>BaseExporter</c> applies.
+/// and it produces output, and it sends one branch per input.
 /// <para>
 /// <b>It performs no file IO.</b> The path, the dry inspection and the read all live in
 /// <c>FileFetcher</c>, which hands this processor an envelope. There is no <c>FileInfo</c> in this
@@ -42,7 +41,7 @@ internal sealed class ArchiveExpanderProcessor(
             // exception.
             //
             // ONE TYPE, NOT A LIST OF LIBRARY TYPES. Each extractor wraps its own library's faults,
-            // exactly as BaseExporter's sinks wrap theirs into ExportSinkException, because
+            // so the caller catches one type, because
             // SharpCompress's entire hierarchy descends from SharpCompressException and matched none
             // of the BCL types this used to catch.
             //

@@ -340,12 +340,6 @@ public sealed class KafkaImporterLoopTests
     }
 
     /// <summary>
-    /// Once reading has started nothing fails the step, whatever the fault code. This one is from the
-    /// old deterministic allow-list and it now ends the dispatch at Faulted with the records already
-    /// sent kept — the next dispatch re-subscribes, and if the fault is genuinely permanent it
-    /// surfaces there, where it does fail the step.
-    /// </summary>
-    /// <summary>
     /// A fault before anything was sent fails the step: the source broke, and "no branches" would
     /// otherwise read exactly like an empty topic. The summary line is still written first, so the
     /// poll stays countable.

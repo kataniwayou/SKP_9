@@ -10,7 +10,7 @@ namespace Processor.KafkaImporter;
 /// Reads a topic and opens one lineage per non-empty record, sending each record's value downstream
 /// as is.
 /// <para>
-/// <b>Ordinary author code since 2026-09-29.</b> It used to derive from <c>BaseImporter</c>, which
+/// <b>Ordinary author code since 2026-09-29.</b> It used to derive from the edge base class, which
 /// the framework no longer has. The loop, the one-consumer cache with evict-on-fault, send-then-commit
 /// ordering and the log lines moved here unchanged. Log text is matched by Kibana, the Analyst and the
 /// live tests, so none of it may be reworded.

@@ -47,7 +47,7 @@ internal sealed class OutcomeRecorderProcessor(
         // exception, and the condition is ABSENT LINEAGE rather than any particular outcome: a
         // predecessor that ended before opening one -- an importer, typically -- carries Guid.Empty,
         // and passing that on would dispatch the exporter downstream as an entry step, where
-        // BaseExporter's first guard throws -- "it ends a lineage and cannot open one". The record
+        // kafka-exporter refuses a dispatch with no execution id. The record
         // would never be exported, for exactly the class of outcome that most needs one.
         //
         // The minted id is plumbing. The record's own ExecutionId stays null above, because that

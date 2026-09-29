@@ -1,7 +1,7 @@
 # Design: remove the edge base classes; the send decides the entry
 
 Date: 2026-09-29
-Status: spec reviewed against the code 2026-09-29 and amended; awaiting user review. Nothing implemented.
+Status: implemented on feature/remove-edge-bases 2026-09-29; rollout deferred to the combined rebuild with log-entity-names.
 
 ## Goal
 

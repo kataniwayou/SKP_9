@@ -334,12 +334,13 @@ public sealed class ProcessDispatchHandlerTests
         // The reclaim sits OUTSIDE the catch chain on purpose. Inside it, a Redis fault would be
         // caught by the general catch and reported as StepFailed — a business outcome that never
         // happened, with the delivery acknowledged. Escaping lets the L2 classifier trip the gate and
-        // requeue, and the replay is harmless: the same author runs again and sends the same derived
-        // message ids, so the post handler rewrites identical bytes.
+        // requeue, and the replay is harmless: it re-runs the author, and its branches carry fresh
+        // entry ids, so the successor subtree can run twice — a duplicate, never a loss.
         //
-        // The probe must actually send a branch: since Task 4, the reclaim only runs when the author
-        // sent (ran && state.BranchSent) — an author that forgot to send is never reclaimed at all, so
-        // that shape can no longer exercise this path.
+        // The probe must actually send a branch: since a step that sends nothing is reported Failed
+        // rather than reclaimed, the reclaim only runs when the author sent (ran && state.BranchSent)
+        // — an author that forgot to send is never reclaimed at all, so that shape can no longer
+        // exercise this path.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
         h.Db.KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())

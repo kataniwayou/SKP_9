@@ -385,8 +385,9 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     /// </summary>
     private async Task ReclaimAsync(Guid entryId)
     {
-        // Guid.Empty is not a key: a failed source step, an output that failed its schema and a
-        // cancelled source step all report it, and it means there is no blob to reclaim.
+        // Guid.Empty is not a key: a source step's Failed or Cancelled outcome, an output that failed
+        // its schema, and a branch sent with no data all report it, and it means there is no blob to
+        // reclaim.
         if (entryId == Guid.Empty)
         {
             return;
