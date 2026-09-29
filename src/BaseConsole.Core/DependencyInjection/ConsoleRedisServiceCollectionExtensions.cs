@@ -183,7 +183,8 @@ public static class ConsoleRedisServiceCollectionExtensions
             sp.GetRequiredService<IServiceScopeFactory>(),
             Options.Create(new GatedConsumerOptions { Queue = queue }),
             sp.GetRequiredService<IConsumerAdmission>(),
-            sp.GetRequiredService<ILogger<GatedQueueConsumer>>()));
+            sp.GetRequiredService<ILogger<GatedQueueConsumer>>(),
+            sp.GetService<EntityNameResolver>()));
 
         return services;
     }
