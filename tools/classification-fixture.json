@@ -21,8 +21,9 @@
     "",
     "THE VERDICT THAT MOVED: doc 7, the orchestrator's terminal-step Completed. The old rule counted",
     "it -- it was the entire reason the old rule needed a second clause. The new rule does not,",
-    "because doc 13 now carries that outcome from the processor side, with an EntryId the duplicate",
-    "check can use."
+    "because doc 13 now reports the exporter's success through its no-data branch",
+    "(ProcessedDataHandler's \"branch completed in {ElapsedMs}ms\"). Its EntryId is Guid.Empty and",
+    "therefore absent, and check 5 accepts it as a by-design skip for kafka-exporter."
   ],
 
   "rule_kql": "attributes.Result:* and not resource.attributes.service.name:\"orchestrator\"",
