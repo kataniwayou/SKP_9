@@ -59,21 +59,51 @@ public sealed class KafkaExporterTests
         Assert.Equal(data, value);
     }
 
-    /// <summary>
-    /// A sink. Returning without sending is one of the three legitimate ways an author ends, and it
-    /// is the one that means Complete: the framework reclaims the input key and the lineage stops
-    /// here. A branch sent from this step would open a successor subtree that nothing asked for.
-    /// </summary>
     [Fact]
-    public async Task SendsNoBranchSoTheLineageEndsHere()
+    public async Task ReportsItsSuccessWithOneBranchCarryingNoData()
     {
+        // Spec D4/D5: the exporter no longer ends the lineage itself. It reports Completed through a
+        // no-data send, and the workflow graph decides that the run ends here.
         var (processor, sender, _) = Build(new FakeRecordProducerFactory(new FakeRecordProducer()));
+        var branches = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(branches.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
         await processor.ExecuteAsync(Input("payload"), Payload(), E, CancellationToken.None);
 
-        // SendAsync, not SendTransientAsync: the latter is an extension method over the former, so
-        // it is the interface call that a substitute can witness -- and the one SendToPostAsync
-        // ultimately makes.
+        var branch = Assert.Single(branches);
+        Assert.Empty(branch.Data);
+        Assert.Equal(Guid.Empty, branch.EntryId);
+        Assert.Equal(E, branch.ExecutionId);
+    }
+
+    [Fact]
+    public async Task LetsAFailedCompletionSendPropagateAfterTheWrite()
+    {
+        // Review focus 5 and spec D8. The write landed and the report of it did not, so the dispatch
+        // must be redelivered. The replay writes a second record -- the duplicate this system prefers
+        // to a success reported as a failure.
+        var producer = new FakeRecordProducer();
+        var (processor, sender, _) = Build(new FakeRecordProducerFactory(producer));
+        sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProcessedData>(),
+                         Arg.Any<CancellationToken>(), Arg.Any<string?>())
+              .Returns(_ => throw new TransientSendException("broker gone", new InvalidOperationException()));
+
+        await Assert.ThrowsAsync<PostSendException>(() =>
+            processor.ExecuteAsync(Input("payload"), Payload(), E, CancellationToken.None));
+
+        Assert.Single(producer.Produced);
+    }
+
+    [Fact]
+    public async Task SendsNothingWhenTheExportFails()
+    {
+        var producer = new FakeRecordProducer { ProduceThrowsOnCall = 1 };
+        var (processor, sender, _) = Build(new FakeRecordProducerFactory(producer));
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync(Input("payload"), Payload(), E, CancellationToken.None));
+
         await sender.DidNotReceive().SendAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProcessedData>(),
             Arg.Any<CancellationToken>(), Arg.Any<string?>());

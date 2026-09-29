@@ -1,4 +1,5 @@
-using BaseProcessor.Core.Edge;
+using System.Globalization;
+using BaseProcessor.Core.Processing;
 using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
 using Processor.KafkaExporter.Kafka;
@@ -6,65 +7,145 @@ using Processor.KafkaExporter.Kafka;
 namespace Processor.KafkaExporter;
 
 /// <summary>
-/// Produces a branch's data to a Kafka topic and ends the lineage there.
+/// Writes the branch it is dispatched with to a topic, then reports Completed with a branch that
+/// carries no data.
 /// <para>
-/// <b>Everything about how an edge behaves lives in <see cref="BaseExporter{TConfig}"/>.</b> The edge
-/// guard, the payload and empty-data guards, the cache with evict-on-fault, the one write, the
-/// converge-on-one-throw failure rule and the log line are all there and are the same for every
-/// exporter. What is Kafka here is what is left: a config record, an adapter, the delivery-timeout
-/// floor, and the three answers below.
+/// <b>Ordinary author code since 2026-09-29.</b> It used to derive from <c>BaseExporter</c>, which
+/// the framework no longer has. Every rule that class enforced is here now, as this processor's own
+/// decisions: it needs the execution it exports, a payload, a delivery timeout at or above the
+/// producer's floor, and non-empty data.
+/// </para>
+/// <para>
+/// <b>Kafka faults fail the step and are never redelivered.</b> A <see cref="KafkaException"/> from
+/// building or producing becomes a <see cref="FailedException"/>, and a producer that faulted on a
+/// write is discarded so the next dispatch builds a fresh one.
+/// </para>
+/// <para>
+/// <b>The completion can replay the write, and that is accepted.</b> The no-data send after the
+/// write is a RabbitMQ send. If it fails, the <c>PostSendException</c> propagates, the input key is
+/// still present, and the redelivery writes to Kafka a second time. This system always prefers a
+/// duplicate to a success reported as a failure, so the exception is never caught here.
 /// </para>
 /// </summary>
 public sealed class KafkaExporterProcessor(
     IRecordProducerFactory factory,
     ILogger<KafkaExporterProcessor> logger)
-    : BaseExporter<KafkaExporterConfig>(logger)
+    : BaseProcessor<KafkaExporterConfig>, IDisposable
 {
-    protected override string RequiredPayload => "topic and deliveryTimeoutSeconds";
+    private IRecordProducer? _producer;
+    private string? _key;
 
-    /// <summary>
-    /// <b>The delivery timeout, and nothing else.</b> The topic is not in the key — a producer is not
-    /// bound to one, and building a second producer per topic would pay a connection and a metadata
-    /// fetch for nothing. The timeout IS, because that one is fixed at construction: a cached producer
-    /// carries the timeout it was built with, and without this a dispatch naming a longer timeout
-    /// would silently get the shorter one it inherited.
-    /// <para>
-    /// The broker used to lead this key. It left with the payload field: one deployment writes to one
-    /// org cluster, named once in configuration, so there is nothing left for a step to vary that
-    /// would warrant a second producer.
-    /// </para>
-    /// </summary>
-    protected override string CacheKey(KafkaExporterConfig config) =>
-        config.DeliveryTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-    protected override string Destination(KafkaExporterConfig config) => config.Topic;
-
-    /// <summary>
-    /// Raised above the framework's floor of one because librdkafka's own is: see
-    /// <see cref="KafkaProducerSettings.MinimumDeliveryTimeout"/> for why a <c>message.timeout.ms</c>
-    /// of 0 means "no timeout" and would hold this replica's only lane until the broker answered or
-    /// the pod died.
-    /// </summary>
-    protected override int MinimumDeliveryTimeoutSeconds =>
-        (int)KafkaProducerSettings.MinimumDeliveryTimeout.TotalSeconds;
-
-    /// <summary>
-    /// <b>The factory throws Confluent's exception, so this is where it stops being one</b>, for the
-    /// reason <c>KafkaImporterProcessor.CreateSource</c> gives: building the handle reaches
-    /// librdkafka, which rejects a malformed broker list outright — a deployment's misconfiguration
-    /// now rather than a step's — and the base class must not know what a
-    /// <see cref="KafkaException"/> is.
-    /// </summary>
-    protected override IExportSink CreateSink(KafkaExporterConfig config)
+    protected override async Task ProcessAsync(
+        byte[] data, KafkaExporterConfig? config, Guid executionId, CancellationToken ct)
     {
+        // First, before the payload and data checks, so a mis-wired step names the wiring rather than
+        // a symptom of it.
+        if (executionId == Guid.Empty)
+        {
+            throw new FailedException(
+                "KafkaExporter exports the execution it is dispatched with, and it was dispatched as " +
+                "an entry step with none. Wire it downstream of the step that produces its input.");
+        }
+
+        if (config is null)
+        {
+            throw new FailedException("KafkaExporter needs a step payload naming topic and deliveryTimeoutSeconds");
+        }
+
+        var floor = (int)KafkaProducerSettings.MinimumDeliveryTimeout.TotalSeconds;
+        if (config.DeliveryTimeoutSeconds < floor)
+        {
+            throw new FailedException(
+                $"KafkaExporter needs DeliveryTimeoutSeconds of at least {floor}; " +
+                $"the step payload named {config.DeliveryTimeoutSeconds}");
+        }
+
+        // An empty input is a failure, not an empty export: writing zero bytes would put a record on
+        // the topic no reader can use while reporting Completed.
+        if (data.Length == 0)
+        {
+            throw new FailedException($"KafkaExporter was dispatched with no input to export to {config.Topic}");
+        }
+
+        IRecordProducer producer;
         try
         {
-            return new KafkaExportSink(
-                factory.Create(TimeSpan.FromSeconds(config.DeliveryTimeoutSeconds)));
+            producer = Rent(config);
         }
         catch (KafkaException ex)
         {
-            throw new ExportSinkException(ex.Error.Code.ToString(), ex);
+            throw new FailedException($"building a sink for {config.Topic} failed: {ex.Error.Code}");
         }
+
+        string landed;
+        try
+        {
+            landed = await producer.ProduceAsync(config.Topic, data, ct).ConfigureAwait(false);
+        }
+        catch (KafkaException ex)
+        {
+            Evict();
+            throw new FailedException($"exporting to {config.Topic} failed: {ex.Error.Code}");
+        }
+
+        // The payload is never logged: the execution id already leads back to every step that
+        // touched it.
+        logger.LogInformation(
+            "exported {Bytes} bytes of execution {ExecutionId} to {Destination} at {Offset}",
+            data.Length, executionId, config.Topic, landed);
+
+        // Completed, with nothing to hand on. PostSendException must propagate -- see the summary.
+        await SendToPostAsync([], executionId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A cache of one producer, keyed on the delivery timeout it was built with. The topic is not in
+    /// the key: a producer is not bound to the topic it writes to. Safe because the processor is a
+    /// singleton and prefetch is one.
+    /// </summary>
+    private IRecordProducer Rent(KafkaExporterConfig config)
+    {
+        var key = config.DeliveryTimeoutSeconds.ToString(CultureInfo.InvariantCulture);
+        if (_producer is not null && _key == key)
+        {
+            return _producer;
+        }
+
+        Evict();
+
+        var producer = factory.Create(TimeSpan.FromSeconds(config.DeliveryTimeoutSeconds));
+        _producer = producer;
+        _key = key;
+        return producer;
+    }
+
+    /// <summary>Discards the cached producer. Blanket catch: nothing Dispose throws changes what happens next.</summary>
+    private void Evict()
+    {
+        if (_producer is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _producer.Dispose();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "disposing the export sink failed; discarding it anyway");
+        }
+        finally
+        {
+            _producer = null;
+            _key = null;
+        }
+    }
+
+    /// <summary>The container disposes this singleton at shutdown, which flushes and closes the producer.</summary>
+    public void Dispose()
+    {
+        Evict();
+        GC.SuppressFinalize(this);
     }
 }
