@@ -2,6 +2,7 @@ using BaseApi.Tests.Support;
 using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using StackExchange.Redis;
@@ -114,8 +115,33 @@ public sealed class EntityNameResolverTests
     public async Task TheNoOpHelpersAcceptNoResolver()
     {
         var logger = NullLogger.Instance;
+        EntityNameResolver? none = null;
 
-        Assert.Null(await logger.BeginNamesScopeAsync(null, W, S, P));
+        Assert.Null(await none.ScopeOrNullAsync(W, S, P));
+        Assert.Null(logger.BeginNamesScope(null));
         Assert.Null(logger.BeginCachedNamesScope(null, W, S, P));
+    }
+
+    /// <summary>
+    /// Pins the AsyncLocal rule documented on <see cref="EntityNameScopeExtensions"/>: a scope begun
+    /// AFTER an await, but in the SAME frame that goes on to log, is visible on that frame's own
+    /// records. (The bug this regression guards against is the opposite shape -- BeginScope called
+    /// from inside the awaited async helper itself, whose AsyncLocal write never reaches the caller.)
+    /// </summary>
+    [Fact]
+    public async Task AScopeBegunInTheCallersFrameAfterAnAwaitIsVisibleOnThatFramesOwnRecords()
+    {
+        var log = new SharedLog();
+        var resolver = Resolver(new FakeNameSource(new() { [W] = "wf_1.0.0-aaaa-111111111111" }));
+        var logger = log.For<EntityNameResolverTests>();
+
+        using (logger.BeginNamesScope(await resolver.ScopeOrNullAsync(W, Guid.Empty, Guid.Empty)))
+        {
+            logger.LogInformation("after the await");
+        }
+
+        Assert.Equal(
+            "wf_1.0.0-aaaa-111111111111",
+            log.ScopeOf("after the await")[EntityNames.WorkflowName]);
     }
 }

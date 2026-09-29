@@ -342,21 +342,12 @@ public sealed class GatedQueueConsumer : BackgroundService
             // this level encloses the try AND the catch, so every record of this delivery carries the
             // names: the handler's, the processor's, and the park line. Resolving never throws.
             //
-            // BeginScope is called directly HERE, in this method's own frame, rather than through
-            // EntityNameScopeExtensions.BeginNamesScopeAsync. That helper is itself an async method,
-            // and the CLR's async method builder saves and restores ExecutionContext around every
-            // async call -- an AsyncLocal mutation made inside an async method (which is exactly what
-            // BeginScope does, through the logging framework's AsyncLocal-based scope provider) never
-            // becomes visible to whoever awaits that method; the mutation is undone the instant the
-            // async method returns, before its own return value reaches the caller. Awaiting
-            // ScopeAsync for the VALUE and calling BeginScope on the result in this frame -- instead
-            // of awaiting a helper that calls BeginScope on its own frame -- is what makes the scope
-            // actually take hold for the rest of this delivery.
+            // ScopeOrNullAsync is awaited for the VALUE only; BeginNamesScope then opens it
+            // synchronously, in THIS frame -- see EntityNameScopeExtensions' remarks for why the two
+            // cannot be combined into one awaited helper without the scope silently never taking hold.
             var (workflowId, stepId, processorId) = MessageIdHeaders.ReadIds(headers);
-            var namesScope = _names is null
-                ? null
-                : await _names.ScopeAsync(workflowId, stepId, processorId).ConfigureAwait(false);
-            using var names = namesScope is null ? null : _logger.BeginScope(namesScope);
+            using var names = _logger.BeginNamesScope(
+                await _names.ScopeOrNullAsync(workflowId, stepId, processorId).ConfigureAwait(false));
 
             // Copy out of the transport buffer, which is pooled and valid only for this callback.
             var body = ea.Body.ToArray();
