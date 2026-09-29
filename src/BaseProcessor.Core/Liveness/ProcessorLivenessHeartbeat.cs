@@ -1,6 +1,7 @@
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
+using BaseConsole.Core.Naming;
 using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Identity;
 using Messaging.Contracts.Projections;
@@ -37,6 +38,7 @@ public sealed class ProcessorLivenessHeartbeat : BackgroundService
     private readonly IStartupGate _gate;
     private readonly InstanceId _instanceId;
     private readonly ILogger<ProcessorLivenessHeartbeat> _logger;
+    private readonly EntityNameResolver? _names;
 
     private bool _firstBeat = true;
     private bool _announcedHealthy;
@@ -49,7 +51,8 @@ public sealed class ProcessorLivenessHeartbeat : BackgroundService
         ILoopHeartbeat heartbeat,
         IStartupGate gate,
         InstanceId instanceId,
-        ILogger<ProcessorLivenessHeartbeat> logger)
+        ILogger<ProcessorLivenessHeartbeat> logger,
+        EntityNameResolver? names = null)
     {
         _writer     = writer ?? throw new ArgumentNullException(nameof(writer));
         _context    = context ?? throw new ArgumentNullException(nameof(context));
@@ -59,6 +62,7 @@ public sealed class ProcessorLivenessHeartbeat : BackgroundService
         _gate       = gate ?? throw new ArgumentNullException(nameof(gate));
         _instanceId = instanceId ?? throw new ArgumentNullException(nameof(instanceId));
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
+        _names      = names;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -102,25 +106,32 @@ public sealed class ProcessorLivenessHeartbeat : BackgroundService
             return;
         }
 
-        if (!_announcedHealthy)
+        // Liveness records carry only the processor's own id, so they name it through L2 like any other
+        // record (D3). Until a workflow using this processor has been started, the key does not exist
+        // and the suffix is logged; misses are re-read each beat.
+        using (_logger.BeginNamesScope(
+            await _names.ScopeOrNullAsync(Guid.Empty, Guid.Empty, identity.Id).ConfigureAwait(false)))
         {
-            // The edge, not the tick: every subsequent beat republishes this same value.
-            _logger.LogInformation(
-                "processor {ProcessorId} is healthy; publishing liveness every {Interval}s",
-                identity.Id, _options.IntervalSeconds);
-            _announcedHealthy = true;
+            if (!_announcedHealthy)
+            {
+                // The edge, not the tick: every subsequent beat republishes this same value.
+                _logger.LogInformation(
+                    "processor {ProcessorId} is healthy; publishing liveness every {Interval}s",
+                    identity.Id, _options.IntervalSeconds);
+                _announcedHealthy = true;
+            }
+
+            // Frozen healthy: all outcomes succeed, so Create derives Healthy. The definitions are not
+            // re-examined here — reaching Healthy is what settled them, and re-deriving per beat would
+            // only invent a way for a steady-state replica to contradict its own startup.
+            var entry = ProcessorLivenessEntry.Create(
+                inputOutcome:  SchemaOutcome.Success,
+                outputOutcome: SchemaOutcome.Success,
+                configOutcome: SchemaOutcome.Success,
+                timestamp:     _clock.GetUtcNow().UtcDateTime,
+                interval:      _options.IntervalSeconds);
+
+            await _writer.WriteAsync(identity.Id, _instanceId.Value, entry).ConfigureAwait(false);
         }
-
-        // Frozen healthy: all outcomes succeed, so Create derives Healthy. The definitions are not
-        // re-examined here — reaching Healthy is what settled them, and re-deriving per beat would
-        // only invent a way for a steady-state replica to contradict its own startup.
-        var entry = ProcessorLivenessEntry.Create(
-            inputOutcome:  SchemaOutcome.Success,
-            outputOutcome: SchemaOutcome.Success,
-            configOutcome: SchemaOutcome.Success,
-            timestamp:     _clock.GetUtcNow().UtcDateTime,
-            interval:      _options.IntervalSeconds);
-
-        await _writer.WriteAsync(identity.Id, _instanceId.Value, entry).ConfigureAwait(false);
     }
 }
