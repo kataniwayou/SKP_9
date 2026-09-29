@@ -3,6 +3,7 @@ using BaseConsole.Core.Gating;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
+using BaseConsole.Core.Naming;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -136,6 +137,11 @@ public static class ConsoleRedisServiceCollectionExtensions
                 },
                 HealthStatus.Unhealthy,
                 ["live"]));
+
+        // Names for log records. TryAdd, so a host with a better source registered earlier keeps it:
+        // the orchestrator reads names through L2WorkflowReader, its single point of Redis access.
+        services.TryAddSingleton<IEntityNameSource, RedisEntityNameSource>();
+        services.TryAddSingleton<EntityNameResolver>();
 
         services.TryAddSingleton<IConsumerAdmission, AlwaysOpenAdmission>();
         services.TryAddSingleton<GatedQueueConsumer>();
