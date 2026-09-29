@@ -70,7 +70,11 @@ alone). There is no ingest pipeline and no lookup index any more. The whitelist 
 pair `attributes.StepName` + `attributes.WhitelistRoot` (`multi_terms`, one pie per pair);
 `WhitelistOwner` is retired. The Workflow control's pinned value is environment-specific: run
 `python tools/offline/pin-workflow-control.py --workflow filefetcher-archiveexpander-chain_1.0.0`
-against the stack's Redis before importing this export.
+against the stack's Redis before importing this export. The script resolves the live workflow id
+from BaseApi's own registry (`--api-url`, default `http://localhost:18080`) rather than scanning L2
+directly, because a rebuild leaves stale `skp:name:*` entries behind under the old id; pass
+`--api-url` when the stack's BaseApi is not on the default address (the offline machine's usually
+is not), or `--workflow-id` to skip the registry lookup entirely.
 
 ### What this replaced, and what went with it
 

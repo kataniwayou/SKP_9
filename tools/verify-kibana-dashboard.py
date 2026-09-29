@@ -661,6 +661,19 @@ def _get_text(url):
         return None
 
 
+def _live_workflow_id(api_url, name_version):
+    """The workflow id(s) in BaseApi's registry whose name_version matches. Ideally exactly one.
+
+    D8 never deletes skp:name:* keys, and a rebuild re-creates a workflow row with a fresh GUID - so
+    L2 can hold several filefetcher-archiveexpander-chain_1.0.0-<suffix> names after any rebuild,
+    only one of which is live. Scanning load_names() for a match would silently pick an arbitrary,
+    possibly dead id; the registry has exactly one row per (name, version) and is the source of
+    truth for which id BaseApi will actually run.
+    """
+    workflows = _get_json(f"{api_url}/api/v1/workflows")
+    return [wf["id"] for wf in workflows if f'{wf["name"]}_{wf["version"]}' == name_version]
+
+
 def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DEFAULT_API):
     """Every name drawn on the chain diagram is a name the dashboard renders, and the diagram's
     step-to-processor wiring matches what the index actually shows.
@@ -761,6 +774,7 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--kibana-url", default=DEFAULT_KIBANA)
     parser.add_argument("--es-url", default=DEFAULT_ES)
+    parser.add_argument("--api-url", default=DEFAULT_API)
     parser.add_argument("--redis-host", default=DEFAULT_REDIS[0])
     parser.add_argument("--redis-port", type=int, default=DEFAULT_REDIS[1])
     parser.add_argument("--window", default="now-30m",
@@ -778,11 +792,17 @@ def main():
               f"{type(exc).__name__}: {exc}")
         return 1
 
-    workflow_id = next((i for i, n in names.items() if n == VALIDATION_WORKFLOW), None)
-    if workflow_id is None:
-        print(f"no name in L2 for {VALIDATION_WORKFLOW} - start that workflow once so BaseApi "
-              f"projects its names")
+    # THE LIVE WORKFLOW ID COMES FROM THE REGISTRY, NOT FROM SCANNING names. See _live_workflow_id.
+    try:
+        matches = _live_workflow_id(args.api_url, VALIDATION_WORKFLOW)
+    except Exception as exc:  # noqa: BLE001
+        print(f"could not read {args.api_url}/api/v1/workflows: {type(exc).__name__}: {exc}")
         return 1
+    if len(matches) != 1:
+        print(f"expected exactly one live workflow named {VALIDATION_WORKFLOW} at {args.api_url}, "
+              f"found {matches or 'none'} - start that workflow once so BaseApi registers it")
+        return 1
+    workflow_id = matches[0]
 
     check_1_kibana_reaches_es(checks, args.kibana_url)
     check_4_totals_match_the_cycle(checks, args.es_url, args.window, names, workflow_id)
@@ -793,7 +813,7 @@ def main():
     check_10_rule_classifies_the_fixture(checks, args.es_url)
     check_11_export_states_the_rule_once(checks)
     check_12_published_steps_are_nameable(checks, args.es_url, names)
-    check_13_diagram_agrees_with_the_dashboard(checks, args.es_url, names)
+    check_13_diagram_agrees_with_the_dashboard(checks, args.es_url, names, api_url=args.api_url)
 
     print()
     print(f"{checks.failures} check(s) failed")

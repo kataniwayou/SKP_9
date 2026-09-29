@@ -48,6 +48,24 @@ class SkpNamesTests(unittest.TestCase):
         self.assertIn(b"skp:name:*", sock.sent)
         self.assertIn(b"MGET", sock.sent)
 
+    def test_read_name_from_found(self):
+        value = "chain_1.0.0-9aff-a7f22ee09224"
+        replies = f"${len(value)}\r\n{value}\r\n".encode()
+        sock = Fake(replies)
+
+        name = skp_names.read_name_from(sock, "208cba76-d635-4721-9aff-a7f22ee09224")
+
+        self.assertEqual(value, name)
+        self.assertIn(b"GET", sock.sent)
+        self.assertIn(b"skp:name:208cba76-d635-4721-9aff-a7f22ee09224", sock.sent)
+
+    def test_read_name_from_missing(self):
+        sock = Fake(b"$-1\r\n")
+
+        name = skp_names.read_name_from(sock, "11111111-1111-1111-1111-111111111111")
+
+        self.assertIsNone(name)
+
 
 if __name__ == "__main__":
     unittest.main()

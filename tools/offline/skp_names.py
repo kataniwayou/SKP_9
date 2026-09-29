@@ -75,3 +75,21 @@ def read_names(host="localhost", port=6380, timeout=10):
         return read_names_from(sock)
     finally:
         sock.close()
+
+
+def read_name_from(sock, entity_id):
+    """A single skp:name:{entity_id} value, or None when the key is absent (RESP nil)."""
+    f = sock.makefile("rb")
+    _command(sock, "GET", PREFIX + entity_id)
+    return _reply(f)
+
+
+def read_name(host="localhost", port=6380, entity_id=None, timeout=10):
+    """The one name at skp:name:{entity_id}, or None if it is unset. A single RESP GET, not a scan -
+    used once the caller already knows the id (e.g. resolved from BaseApi's own registry) and wants
+    the exact key rather than a name matched out of a set that may hold several stale entries."""
+    sock = socket.create_connection((host, port), timeout=timeout)
+    try:
+        return read_name_from(sock, entity_id)
+    finally:
+        sock.close()
