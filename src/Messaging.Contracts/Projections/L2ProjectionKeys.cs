@@ -17,6 +17,7 @@ namespace Messaging.Contracts.Projections;
 ///   <item><description>PerInstance: <c>{Prefix}proc:{processorId}:{instanceId}</c> — the per-replica liveness key</description></item>
 ///   <item><description>InstanceIndex: <c>{Prefix}proc:{processorId}</c> — the per-processor instance-index SET key</description></item>
 ///   <item><description>ExecutionData: <c>{Prefix}data:{guid}</c> — the blob for both roles</description></item>
+///   <item><description>Name: <c>{Prefix}name:{id}</c> — an entity's display name</description></item>
 ///   <item><description>Cache: <c>{Prefix}{workflowId}:cache:{root}</c> — the key holding one projected dictionary's key list</description></item>
 ///   <item><description>CacheEntry: <c>{Prefix}{workflowId}:cache:{root}:{key}</c> — one entry of that dictionary</description></item>
 /// </list>
@@ -82,4 +83,13 @@ public static class L2ProjectionKeys
     /// </para>
     /// </summary>
     public static string ExecutionData(Guid entryId) => $"{Prefix}data:{entryId:D}";
+
+    /// <summary>
+    /// An entity's display name, <c>skp:name:{id}</c>: written by BaseApi on every start, read by the
+    /// orchestrator and processors when they log. Its own namespace, so the orphan sweeper (which scans
+    /// only <c>skp:proc:*</c> Sets) cannot see it, and it never collides with a workflow root
+    /// (<c>skp:{id}</c>). Never deleted: entities are shared across workflows, and records keep
+    /// arriving after a stop.
+    /// </summary>
+    public static string Name(Guid id) => $"{Prefix}name:{id:D}";
 }

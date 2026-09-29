@@ -28,12 +28,17 @@ namespace Messaging.Contracts;
 /// <param name="Cron">The five-field cron expression, or null when the workflow is not scheduled.</param>
 /// <param name="Steps">Every step in the validated graph, one entry per L2 step key to be written.</param>
 /// <param name="Caches">Every dictionary this workflow projects into L2 for the duration of a run.</param>
+/// <param name="Names">Maps every workflow, step and processor id in the started graph to its display
+/// name (see <see cref="EntityNames"/>). It rides this control message only, never a dispatch
+/// message. It is optional: a message published before it existed deserializes with null, and the
+/// workflow starts without names.</param>
 public sealed record WorkflowL1(
     Guid WorkflowId,
     List<Guid> EntryStepIds,
     string? Cron,
     List<StepL1> Steps,
-    List<CacheL1> Caches);
+    List<CacheL1> Caches,
+    Dictionary<Guid, string>? Names = null);
 
 /// <summary>
 /// One step of a <see cref="WorkflowL1"/> — the flat projection of a step plus its resolved payload

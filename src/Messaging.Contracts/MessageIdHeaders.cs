@@ -124,6 +124,38 @@ public static class MessageIdHeaders
     }
 
     /// <summary>
+    /// The three entity ids a delivery is about, read from the same headers <see cref="ReadScope"/>
+    /// lifts. An absent or unparsable header reads as <see cref="Guid.Empty"/>: names are resolved
+    /// best-effort and must never fail a delivery.
+    /// </summary>
+    public static (Guid WorkflowId, Guid StepId, Guid ProcessorId) ReadIds(IDictionary<string, object?>? headers)
+    {
+        if (headers is null)
+        {
+            return (Guid.Empty, Guid.Empty, Guid.Empty);
+        }
+
+        return (Read(headers, WorkflowId), Read(headers, StepId), Read(headers, ProcessorId));
+    }
+
+    private static Guid Read(IDictionary<string, object?> headers, string header)
+    {
+        if (!headers.TryGetValue(header, out var raw))
+        {
+            return Guid.Empty;
+        }
+
+        var text = raw switch
+        {
+            byte[] b => System.Text.Encoding.UTF8.GetString(b),
+            string s => s,
+            _ => null,
+        };
+
+        return Guid.TryParse(text, out var id) ? id : Guid.Empty;
+    }
+
+    /// <summary>
     /// Copies one header across under its log-scope name.
     /// <para>
     /// <b>A string written to an AMQP field table comes back as <c>byte[]</c>,</b> because the
