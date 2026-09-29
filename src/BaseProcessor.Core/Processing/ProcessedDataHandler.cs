@@ -134,6 +134,25 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
                 + "validated — the work queue must not be bound before the processor reaches Healthy.");
         }
 
+        // A BRANCH WITH NO DATA (spec D4): the author finished and has nothing to hand on. There is
+        // no document to validate and no blob to write, so neither happens. The outcome names
+        // Guid.Empty, which the orchestrator reads as "nothing to read or reclaim": a terminal step
+        // ends the run there, a non-terminal one hands its successors empty data.
+        if (p.Data is not { Length: > 0 })
+        {
+            await SendAsync(
+                new StepOutcome(p.CorrelationId, p.ExecutionId, p.WorkflowId, p.StepId, p.ProcessorId,
+                                Guid.Empty, StepResult.Completed), ct).ConfigureAwait(false);
+
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Completed)))
+            {
+                _logger.LogInformation(
+                    "branch completed in {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            }
+
+            return;
+        }
+
         if (!ProcessorJsonSchemaValidator.TryValidate(identity.OutputDefinition, p.Data, out var errors))
         {
             // The errors are logged and go nowhere else — StepOutcome has no text field, and validator

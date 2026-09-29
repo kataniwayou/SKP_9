@@ -326,4 +326,51 @@ public sealed class ProcessedDataHandlerTests
         await Assert.ThrowsAsync<TransientSendException>(
             () => h.Build().HandleAsync(Body(Branch(E)), CancellationToken.None));
     }
+
+    [Fact]
+    public async Task ANoDataBranchWritesNothingAndReportsCompletedWithNoKey()
+    {
+        var h = new Harness();
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        await h.Build().HandleAsync(Body(Branch(Guid.Empty, "")), CancellationToken.None);
+
+        await h.Db.DidNotReceive().StringSetAsync(
+            Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
+            Arg.Any<When>(), Arg.Any<CommandFlags>());
+        Assert.NotNull(sent);
+        Assert.Equal(StepResult.Completed, sent.Result);
+        Assert.Equal(Guid.Empty, sent.EntryId);
+    }
+
+    [Fact]
+    public async Task ANoDataBranchSkipsTheOutputSchema()
+    {
+        // An empty document would fail any object schema. A no-data branch has no document, so
+        // validating one would turn every successful export into a Failed outcome.
+        var h = new Harness("""{"type":"object","required":["number"]}""");
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        await h.Build().HandleAsync(Body(Branch(Guid.Empty, "")), CancellationToken.None);
+
+        Assert.Equal(StepResult.Completed, sent!.Result);
+    }
+
+    [Fact]
+    public async Task ANoDataBranchLogsItsCompletionUnderTheCompletedScope()
+    {
+        // This record is the exporter's Result=Completed witness once ProcessDispatchHandler's
+        // terminal line is removed, so it must carry the scope the outcome panels count.
+        var h = new Harness();
+
+        await h.Build().HandleAsync(Body(Branch(Guid.Empty, "")), CancellationToken.None);
+
+        var index = h.Log.Records.Select((r, i) => (r, i))
+            .First(t => t.r.Message.StartsWith("branch completed in", StringComparison.Ordinal)).i;
+        Assert.Equal(nameof(StepResult.Completed), h.Log.RecordScopes[index][OutcomeLogScope.Result]);
+    }
 }

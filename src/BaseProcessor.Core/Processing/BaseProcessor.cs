@@ -155,6 +155,19 @@ public abstract class BaseProcessor
     /// unchanged.
     /// </para>
     /// <para>
+    /// <b>No data is a branch too.</b> <paramref name="processedData"/> null or empty sends a branch
+    /// with <see cref="Guid.Empty"/> as its entry id: nothing is written to L2, the output schema is
+    /// not applied, and the step reports Completed. It still counts as having sent a branch. An
+    /// author that intends to pass data on must check that it is non-empty first.
+    /// </para>
+    /// <para>
+    /// <b>Never catch <see cref="PostSendException"/>.</b> Nothing stops an author catching it, but it
+    /// must propagate: the framework redelivers the dispatch and replays the author, which is a
+    /// duplicate. Swallowing it, or rethrowing it as <see cref="FailedException"/>, reports a
+    /// success as a failure and runs the workflow's PreviousFailed successors. This system always
+    /// takes the duplicate.
+    /// </para>
+    /// <para>
     /// <b>The entry id is random, and that is a decision with a cost.</b> A redelivered dispatch
     /// replays this call and mints a <i>different</i> id, so the replay writes a second blob and
     /// reports a second outcome — the successor subtree runs twice. Two things keep that narrow. The
@@ -177,16 +190,21 @@ public abstract class BaseProcessor
     /// is a decision only they can make. <see cref="NewExecutionId"/> mints one.
     /// </para>
     /// </summary>
-    protected async Task SendToPostAsync(byte[] processedData, Guid executionId, CancellationToken ct)
+    protected async Task SendToPostAsync(byte[]? processedData, Guid executionId, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(processedData);
+        // NO DATA IS A LEGAL BRANCH (spec D4). Null and empty are the same thing, and null never
+        // reaches the wire. A no-data branch names no L2 key: Guid.Empty is the sentinel every hop
+        // already reads as "no blob", so the post handler writes nothing and the orchestrator reads
+        // nothing. An author that means to pass data on must check it is non-empty BEFORE calling
+        // this -- an empty document sent by mistake is a Completed step with no output.
+        var data = processedData ?? [];
 
         var state = Current;
-        var entryId = Guid.NewGuid();
+        var entryId = data.Length == 0 ? Guid.Empty : Guid.NewGuid();
 
         var branch = new ProcessedData(
             state.CorrelationId, executionId, state.WorkflowId, state.StepId, state.ProcessorId,
-            entryId, processedData);
+            entryId, data);
 
         try
         {

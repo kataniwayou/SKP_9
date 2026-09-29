@@ -38,6 +38,8 @@ public sealed class ProcessDispatchHandlerTests
         }
 
         public Task Send(byte[] d) => SendToPostAsync(d, E, CancellationToken.None);
+
+        public Task SendNullable(byte[]? d) => SendToPostAsync(d, E, CancellationToken.None);
     }
 
     /// <summary>A source: it may legitimately return having sent nothing, exactly as BaseImporter does.</summary>
@@ -151,6 +153,59 @@ public sealed class ProcessDispatchHandlerTests
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
         Assert.DoesNotContain(h.Log.Records, r => r.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task SendsANoDataBranchUnderAnEmptyEntryId()
+    {
+        // D4: a send with no data names no L2 key. Guid.Empty is the sentinel every hop already reads
+        // as "no blob", so nothing downstream reads or writes L2 for this branch.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        ProcessedData? branch = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => branch = p),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        var probe = new Probe((_, p) => p.Send([]));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.NotNull(branch);
+        Assert.Equal(Guid.Empty, branch.EntryId);
+        Assert.Empty(branch.Data);
+        Assert.Equal(E, branch.ExecutionId);
+    }
+
+    [Fact]
+    public async Task TreatsANullSendAsNoDataAndPutsAnEmptyArrayOnTheWire()
+    {
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        ProcessedData? branch = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => branch = p),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        var probe = new Probe((_, p) => p.SendNullable(null));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.NotNull(branch);
+        Assert.NotNull(branch.Data);
+        Assert.Empty(branch.Data);
+        Assert.Equal(Guid.Empty, branch.EntryId);
+    }
+
+    [Fact]
+    public async Task CountsANoDataSendAsABranch()
+    {
+        // A no-data send is how an author with nothing to hand on still reports Completed, so it
+        // must never trip the missing-branch rule.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var probe = new Probe((_, p) => p.Send([]));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.DoesNotContain(h.Log.Records, r => r.Level == LogLevel.Error);
+        await h.Db.Received(1).KeyDeleteAsync(L2ProjectionKeys.ExecutionData(E), Arg.Any<CommandFlags>());
     }
 
     [Fact]
