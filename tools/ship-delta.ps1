@@ -68,11 +68,15 @@ if (-not (Test-Path -LiteralPath $Ship)) {
 # them are picked up, which is what makes a new class like Orchestrator/Observability/Foo.cs ship
 # without anyone remembering to add it here. grafana is listed as grafana/dashboards precisely so
 # that the audit scripts beside it do NOT.
+# kibana/ and tools/offline/ ship since 2026-09-29: the export is pinned per stack from L2, and the
+# lookup teardown runs on the offline stack too.
 $Scope = @(
     'src'
     'k8s'
     'nugets'
     'grafana/dashboards'
+    'kibana'
+    'tools/offline'
 )
 
 $RootFiles = @(

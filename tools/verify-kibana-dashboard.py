@@ -15,8 +15,8 @@ WHAT CHANGED WHEN THE ELASTICSEARCH OBJECTS WENT AWAY:
     here rather than being silently absent.
   * The counted set is now one clause, and it is asserted against the dashboard's own query rather
     than a pipeline-written flag (check 10).
-  * Names are no longer fields in the index. They are rendered by the data view's formatters, and
-    this script reads that same formatter map, so it resolves an id exactly as a viewer sees it.
+  * Names are fields on the records, set by the orchestrator and the processors from L2; this
+    script reads the same keys (skp:name:*) and compares on name_version.
   * Check 12 no longer asserts that a never-run step is listable. The naming records that made that
     true were removed from OrchestrationService; see that method and check 12's own docstring.
   * Check 5 skips kafka-importer and kafka-exporter by design (no input key and a no-data branch)
@@ -36,6 +36,10 @@ import time
 
 import requests
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "offline"))
+import skp_names
+
+DEFAULT_REDIS = ("localhost", 6380)
 DEFAULT_ES = "http://localhost:19200"
 DEFAULT_KIBANA = "http://localhost:15601"
 DATA_STREAM = "logs-generic.otel-default"
@@ -146,10 +150,9 @@ PANEL_GUARDS = {
 
 # The one pair-per-pie bucket. Asserted by check 11 so a later edit cannot quietly go back to
 # splitting on ProcessorId alone, which silently merges a processor's two lists into one donut.
-# Stamped onto each record by the logs@custom pipeline from the enriched step name and
-# the root. It replaced a runtime field of the same purpose whose readable half came from
-# a hand-maintained formatter; nothing is hand-maintained now.
-WHITELIST_SPLIT_FIELD = "attributes.WhitelistOwner"
+# multi_terms on the two fields directly -- StepName is set on the record by the processor itself
+# from L2, and WhitelistRoot rides the record as before. No computed field and no pipeline any more.
+WHITELIST_SPLIT_FIELDS = ["attributes.StepName", "attributes.WhitelistRoot"]
 
 
 class Checks:
@@ -168,45 +171,22 @@ class Checks:
 # ---------------------------------------------------------------------------------------------
 # Names
 #
-# The index holds ids. The dashboard renders names through the data view's field formatters, and
-# this script reads that same formatter map so it is checking what a viewer actually sees.
-#
-# IT USED TO READ ELASTICSEARCH. OrchestrationService emitted one naming record per entity on every
-# accepted start, and this resolved ids from those. That emission is gone (see the note in
-# OrchestrationService.StartAsync): it only ever covered entities whose workflow had been explicitly
-# started, it decayed out of the index with retention, and KibanaLookupPublisher already pushes a
-# strictly larger map from the entity tables. Reading the formatter has no time window to get wrong
-# and no start to depend on.
-#
-# A FAILURE HERE NOW MEANS THE PUBLISHER HAS NOT RUN. The map is refreshed when the dashboard's
-# diagram panel fetches lookup/ping.svg, throttled to Kibana:MinimumInterval, and is absent entirely
-# when Kibana:BaseUrl is unset.
+# The orchestrator and the processors stamp {name}_{version}-{suffix} onto their own records,
+# resolved from skp:name:{id} in L2 at the moment each record is built; this script reads that
+# same store instead of Elasticsearch, so it resolves an id exactly as BaseApi resolved it.
 # ---------------------------------------------------------------------------------------------
-KINDS = {"workflow": "WorkflowId", "step": "StepId", "processor": "ProcessorId"}
-LOOKUP_INDEX = "skp-entity-lookup"
-GUID_PREFIX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-")
 DATA_VIEW = "skp-logs"
 
 
-def load_names(es_url):
-    """The id -> {name}_{version} map, read from the lookup index BaseApi writes at every start.
+def load_names(redis_host, redis_port):
+    """{id: name_version} for every entity BaseApi has ever started, read from skp:name:* in L2.
 
-    THE SOURCE MOVED OUT OF KIBANA. This used to read the data view's fieldFormatMap, because the
-    table lived there and something had to push it. Names now ride on the log records themselves,
-    stamped by the logs@custom ingest pipeline from this index, so the data view carries no
-    formatter at all and Kibana is not consulted here.
+    THE SOURCE MOVED OUT OF ELASTICSEARCH. The skp-entity-lookup index and the logs@custom pipeline
+    are gone; the processes stamp names on their own records and the keys in L2 are the single store.
+    Names carry a GUID suffix that differs per environment, so every comparison below is on the
+    base name (name_version) and the expected-count literals stay environment-independent.
     """
-    body = {"size": 10000, "query": {"match_all": {}}}
-    response = requests.post(f"{es_url}/{LOOKUP_INDEX}/_search", json=body, timeout=60)
-    response.raise_for_status()
-
-    out = {kind: {} for kind in KINDS}
-    for hit in response.json()["hits"]["hits"]:
-        row = hit["_source"]
-        kind = row.get("kind")
-        if kind in out:
-            out[kind][row["id"]] = f"{row['name']}_{row['version']}"
-    return out
+    return {i: skp_names.base_name(n) for i, n in skp_names.read_names(redis_host, redis_port).items()}
 
 
 # Spec section 4.4, re-keyed to {name}_{version} per section 13.7. The versions are NOT all 1.0.0 and
@@ -297,7 +277,7 @@ def check_4_totals_match_the_cycle(checks, es_url, window, names, workflow_id):
     boundary, so a partial cycle at either edge shifts the total. Check 5 is the exact one.
     """
     try:
-        by_processor = _terms(es_url, "attributes.ProcessorId", window, workflow_id, names=names["processor"])
+        by_processor = _terms(es_url, "attributes.ProcessorId", window, workflow_id, names=names)
     except Exception as exc:  # noqa: BLE001
         return checks.report(4, "Totals match the cycle", False, f"{type(exc).__name__}: {exc}")
 
@@ -396,7 +376,7 @@ def check_6_every_step_has_a_bin(checks, es_url, window, names, workflow_id):
     virtue of the orchestrator carve-out this design removed.
     """
     try:
-        by_step = _terms(es_url, "attributes.StepId", window, workflow_id, names=names["step"])
+        by_step = _terms(es_url, "attributes.StepId", window, workflow_id, names=names)
     except Exception as exc:  # noqa: BLE001
         return checks.report(6, "Every step has a bin", False, f"{type(exc).__name__}: {exc}")
     missing = [s for s in PER_CYCLE_BY_STEP if by_step.get(s, 0) == 0]
@@ -409,7 +389,7 @@ def check_7_pie_matches_bins(checks, es_url, window, names, workflow_id):
     """The three Result slices sum to the bins total, in roughly 26:3:1 per cycle."""
     try:
         by_result = _terms(es_url, "attributes.Result", window, workflow_id, size=10)
-        by_processor = _terms(es_url, "attributes.ProcessorId", window, workflow_id, names=names["processor"])
+        by_processor = _terms(es_url, "attributes.ProcessorId", window, workflow_id, names=names)
     except Exception as exc:  # noqa: BLE001
         return checks.report(7, "Pie matches bins", False, f"{type(exc).__name__}: {exc}")
     sums_match = sum(by_result.values()) == sum(by_processor.values())
@@ -447,7 +427,7 @@ def check_9_generic_across_workflows(checks, es_url, kibana_url, window, names):
             "?type=dashboard&type=lens&type=search&type=index-pattern&per_page=100",
             headers={"kbn-xsrf": "true"}, timeout=20).json()
         ids = {obj["id"] for obj in found.get("saved_objects", [])}
-        by_workflow = _terms(es_url, "attributes.WorkflowId", window, names=names["workflow"])
+        by_workflow = _terms(es_url, "attributes.WorkflowId", window, names=names)
     except Exception as exc:  # noqa: BLE001
         return checks.report(9, "Genuinely generic", False, f"{type(exc).__name__}: {exc}")
     missing_objects = expected_objects - ids
@@ -601,8 +581,8 @@ def check_11_export_states_the_rule_once(checks):
 
     split = [a for a in vis_states.get("skp-whitelist-pies", {}).get("aggs", [])
              if a.get("schema") == "split"]
-    pair_split = (len(split) == 1
-                  and split[0]["params"]["field"] == WHITELIST_SPLIT_FIELD)
+    pair_split = (len(split) == 1 and split[0].get("type") == "multi_terms"
+                  and split[0]["params"].get("fields") == WHITELIST_SPLIT_FIELDS)
 
     # EVERY dashboard's controls must be bounded, not just the outcomes one: an unbounded Workflow
     # dropdown lists every id in the window whether or not the board can say anything about it.
@@ -630,35 +610,38 @@ def check_12_published_steps_are_nameable(checks, es_url, names):
     onto a record at ingest, so a step that has never executed has no record and therefore no entry.
     Publishing more rows cannot change that - only running the step can.
 
-    NOTHING IS HAND-MAINTAINED HERE ANY MORE. The whitelist board splits on
-    attributes.WhitelistOwner, which the logs@custom pipeline builds from the enriched step name and
-    the root on each record. It used to split on a runtime field whose lookup was keyed by pairs
-    OBSERVED IN THE DATA and derivable from no entity, which nothing regenerated - a newly gated
-    step drew a pie titled "{GUID} - {root}" until somebody hand-edited the export. A pair is now
-    unreadable only when the step's own name was unresolved at ingest, which is the same failure the
-    id fallback already reports, so this check reads the records rather than the export.
+    NOTHING IS HAND-MAINTAINED HERE ANY MORE. The whitelist board splits on the pair
+    attributes.StepName + attributes.WhitelistRoot, one pie per pair, both fields read straight off
+    each record - StepName is set by the processor itself from L2, WhitelistRoot as before. It used
+    to split on a runtime field whose lookup was keyed by pairs OBSERVED IN THE DATA and derivable
+    from no entity, which nothing regenerated - a newly gated step drew a pie titled "{GUID} - {root}"
+    until somebody hand-edited the export. A pair is now unreadable only when the step's own name was
+    unresolved in L2, which is the same failure the id fallback already reports, so this check reads
+    the records rather than the export.
     """
-    resolved = set(names["step"].values())
+    resolved = set(names.values())
     missing = [s for s in PER_CYCLE_BY_STEP if s not in resolved]
 
     body = {"size": 0,
             "query": {"bool": {"filter": [{"exists": {"field": "attributes.WhitelistVerdict"}}]}},
-            "aggs": {"owners": {"terms": {"field": "attributes.WhitelistOwner", "size": 1000}}}}
+            "aggs": {"pairs": {"multi_terms": {
+                "terms": [{"field": "attributes.StepName"}, {"field": "attributes.WhitelistRoot"}],
+                "size": 1000}}}}
     try:
         agg = requests.post(f"{es_url}/{DATA_STREAM}/_search", json=body, timeout=60).json()
-        owners = [b["key"] for b in agg["aggregations"]["owners"]["buckets"]]
+        pairs = [tuple(b["key"]) for b in agg["aggregations"]["pairs"]["buckets"]]
     except Exception as exc:  # noqa: BLE001
         return checks.report(12, "Published steps are nameable", False,
-                             f"whitelist owner read failed: {type(exc).__name__}: {exc}")
+                             f"whitelist pair read failed: {type(exc).__name__}: {exc}")
 
-    # A fallback label is the raw StepId, so an unreadable pair starts with a GUID.
-    unlabelled = sorted(o for o in owners if GUID_PREFIX.match(o))
+    # An unreadable pair is one whose step name is the D2 fallback (the id suffix alone).
+    unlabelled = sorted(f"{s} · {r}" for s, r in pairs if skp_names.is_fallback(s))
 
     ok = not missing and not unlabelled
     return checks.report(12, "Published steps are nameable", ok,
-                         f"{len(resolved)} steps carry a name in the lookup index, "
+                         f"{len(resolved)} steps carry a name in L2, "
                          f"missing={missing or 'none'}, "
-                         f"whitelist_pairs={len(owners)}, "
+                         f"whitelist_pairs={len(pairs)}, "
                          f"unlabelled_pairs={unlabelled or 'none'}")
 
 
@@ -736,8 +719,8 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DE
     except Exception as exc:  # noqa: BLE001
         return checks.report(13, "Diagram agrees with the dashboard", False, f"{type(exc).__name__}: {exc}")
 
-    rendered_steps = set(names["step"].values())
-    rendered_procs = set(names["processor"].values())
+    rendered_steps = set(names.values())
+    rendered_procs = set(names.values())
     unknown = ([s for s in diagram_steps if s not in rendered_steps] +
                [p for p in diagram_procs if p not in rendered_procs])
 
@@ -751,8 +734,8 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DE
         observed = {}
         for bucket in buckets["aggregations"]["pairs"]["buckets"]:
             step_id, processor_id = bucket["key"]
-            step = names["step"].get(step_id)
-            processor = names["processor"].get(processor_id)
+            step = names.get(step_id)
+            processor = names.get(processor_id)
             if step and processor:
                 observed.setdefault(step, set()).add(processor)
     except Exception as exc:  # noqa: BLE001
@@ -778,6 +761,8 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--kibana-url", default=DEFAULT_KIBANA)
     parser.add_argument("--es-url", default=DEFAULT_ES)
+    parser.add_argument("--redis-host", default=DEFAULT_REDIS[0])
+    parser.add_argument("--redis-port", type=int, default=DEFAULT_REDIS[1])
     parser.add_argument("--window", default="now-30m",
                         help="ES date-math lower bound for the counting checks. Unlike the previous "
                              "design there is no forward-only enrichment window to stay inside - "
@@ -787,15 +772,16 @@ def main():
 
     checks = Checks()
     try:
-        names = load_names(args.es_url)
+        names = load_names(args.redis_host, args.redis_port)
     except Exception as exc:  # noqa: BLE001
-        print(f"could not read the {LOOKUP_INDEX} lookup index: {type(exc).__name__}: {exc}")
+        print(f"could not read skp:name:* from Redis at {args.redis_host}:{args.redis_port}: "
+              f"{type(exc).__name__}: {exc}")
         return 1
 
-    workflow_id = next((i for i, n in names["workflow"].items() if n == VALIDATION_WORKFLOW), None)
+    workflow_id = next((i for i, n in names.items() if n == VALIDATION_WORKFLOW), None)
     if workflow_id is None:
-        print(f"no lookup row for {VALIDATION_WORKFLOW} - start that workflow once so BaseApi "
-              f"publishes its entities, or check Elasticsearch:BaseUrl is set on the API")
+        print(f"no name in L2 for {VALIDATION_WORKFLOW} - start that workflow once so BaseApi "
+              f"projects its names")
         return 1
 
     check_1_kibana_reaches_es(checks, args.kibana_url)
