@@ -248,7 +248,7 @@ def _terms(es_url, field, window, workflow_id=None, size=50, names=None):
     buckets = {b["key"]: b["doc_count"] for b in result["aggregations"]["by"]["buckets"]}
     if names is None:
         return buckets
-    # Unresolved ids keep their GUID, which is exactly what the dashboard renders for them.
+    # Unresolved ids keep their GUID suffix fallback, which is exactly what the dashboard renders for them.
     return {names.get(k, k): v for k, v in buckets.items()}
 
 
@@ -267,7 +267,8 @@ def check_1_kibana_reaches_es(checks, kibana_url):
 # checks 2 and 3 are DELETED - spec 13.7. They tested that ingest-time enrichment landed on a new
 # document and that a document with an unmatched id survived the pipeline rather than being dropped.
 # Both were about an ingest pipeline and an enrich policy that no longer exist. Nothing replaces
-# them, because formatting now happens at read time and cannot fail an indexing operation.
+# them, because the name is now stamped by the process that writes the record and cannot fail an
+# indexing operation.
 
 
 def check_4_totals_match_the_cycle(checks, es_url, window, names, workflow_id):
@@ -498,10 +499,11 @@ def check_11_export_states_the_rule_once(checks):
     failure the old design was designed around: the rule restated across four Kibana objects that
     then drift apart.
 
-    It additionally asserts that unknownKeyValue is ABSENT from every formatter. Setting it makes
-    every unmapped entity render as one shared string, so two unlabelled steps collapse into a
-    single legend bucket. Omitted, an unmapped id renders as its own GUID - verified by publishing a
-    partial map and watching split-exporter come back as 9cae7b00-... beside twelve named siblings.
+    It additionally asserts that unknownKeyValue is ABSENT from every formatter - now a guard
+    against re-introducing one, not a live mechanism: the current data view carries no formatters
+    at all, and names ride on the records themselves. Setting it would make every unmapped entity
+    render as one shared string, so two unlabelled steps would collapse into a single legend
+    bucket. This check keeps that from silently coming back.
     """
     try:
         objects = [json.loads(line) for line in open(EXPORT, encoding="utf-8") if line.strip()]
@@ -597,7 +599,7 @@ def check_11_export_states_the_rule_once(checks):
                          f"whitelist_splits_on_the_pair={pair_split}, "
                          f"dashboards_with_unbounded_controls={unbounded or 'none'}, "
                          f"stale_enrichment_references={stale}, "
-                         f"formatters_setting_unknownKeyValue={unknown_keys or 'none'}, "
+                         f"formatters_reintroducing_unknownKeyValue={unknown_keys or 'none'}, "
                          f"control_options_bounded={scoped}")
 
 
@@ -607,8 +609,8 @@ def check_12_published_steps_are_nameable(checks, es_url, names):
     WHAT THIS NO LONGER CLAIMS. It used to assert that a published-but-never-run step would appear
     in the Step dropdown. That guarantee is gone and its absence is now structural rather than
     incidental: an optionsListControl lists values PRESENT IN THE FIELD, and the name is stamped
-    onto a record at ingest, so a step that has never executed has no record and therefore no entry.
-    Publishing more rows cannot change that - only running the step can.
+    onto a record by the process that writes it, so a step that has never executed has no record
+    and therefore no entry. Publishing more rows cannot change that - only running the step can.
 
     NOTHING IS HAND-MAINTAINED HERE ANY MORE. The whitelist board splits on the pair
     attributes.StepName + attributes.WhitelistRoot, one pie per pair, both fields read straight off
@@ -685,8 +687,9 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DE
     labelled with a bare name does not identify a node: the moment a second version is published it
     points at two rows with no way to tell which, and it can silently describe the wrong one.
 
-    That is why the diagram carries {name}_{version}, exactly as the dashboard's field formatters
-    render it. This check is what keeps the two from drifting - the diagram is hand-authored and was
+    That is why the diagram carries {name}_{version}, exactly as the records themselves carry it -
+    there is no field formatter involved any more. This check is what keeps the two from drifting -
+    the diagram is hand-authored and was
     captured from the live API on a particular day, so a rename or a version bump is otherwise
     invisible to it.
 
@@ -780,8 +783,9 @@ def main():
     parser.add_argument("--window", default="now-30m",
                         help="ES date-math lower bound for the counting checks. Unlike the previous "
                              "design there is no forward-only enrichment window to stay inside - "
-                             "formatting happens at read time and covers all history. The bound is "
-                             "only about having enough cycles to compare against.")
+                             "each record is stamped with its name by the process that wrote it, so "
+                             "there is nothing an ingest-time window could miss. The bound is only "
+                             "about having enough cycles to compare against.")
     args = parser.parse_args()
 
     checks = Checks()

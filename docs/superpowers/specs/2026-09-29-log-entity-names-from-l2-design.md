@@ -1,7 +1,7 @@
 # Design: entity names on log records, resolved from L2
 
 Date: 2026-09-29
-Status: spec reviewed against the code 2026-09-29 and amended; awaiting user review
+Status: implemented on feature/log-entity-names 2026-09-29; rollout together with remove-edge-bases.
 
 ## Goal
 

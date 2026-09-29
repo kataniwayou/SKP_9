@@ -93,7 +93,8 @@ in the field**, so a step that has never executed is in no dropdown. Under the c
 is structural rather than incidental — the name is stamped onto records, and a step that never ran
 has none.
 
-The `logs@custom` enrich pipeline that replaced it was itself retired on 2026-09-29.
+The `logs@custom` enrich pipeline that replaced the `static_lookup` formatter was itself retired on
+2026-09-29.
 
 ## Why the dropdowns carry a filter
 
@@ -251,10 +252,10 @@ A refusal is logged from a catch block, where the handler's own log scope has al
 by the unwinding exception — so for a long time these records carried no ids at all and could not be
 paired to anything. `MessageIdHeaders` now stamps six `x-skp-*` AMQP headers at send and the
 consumer lifts them back under the **log-scope** names, so a refusal lands on the same
-`attributes.WorkflowId` / `StepId` / `ProcessorId` fields an outcome does — which is what lets
-`logs@custom` enrich it to `attributes.WorkflowName` and what makes the controls at the top of this
-board filter it like anything else. The headers survive into the dead-letter queue too, so the same
-ids appear on the log line and on the parked message.
+`attributes.WorkflowId` / `StepId` / `ProcessorId` fields an outcome does — which is what lets the
+gated consumer set `attributes.WorkflowName` and the rest directly on the refusal line, and what
+makes the controls at the top of this board filter it like anything else. The headers survive into
+the dead-letter queue too, so the same ids appear on the log line and on the parked message.
 
 **`missingBucket` is true on every dimension of both panels, deliberately.** A refusal whose body
 would not deserialize, or one predating the header stamping, has no workflow id — and a refusal

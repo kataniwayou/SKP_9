@@ -133,38 +133,30 @@ the data view, pushed by BaseApi when a dashboard render fetched `lookup/ping.sv
 came from naming records `OrchestrationService` wrote at start time, which the cron path never
 produced. Both are gone.
 
-The name is now stamped onto each record at ingest by the `logs@custom` pipeline, from a lookup
-index BaseApi writes at every workflow start. Nothing pushes to Kibana and nothing triggers it: the
-data view carries an empty `fieldFormatMap` and an empty `runtimeFieldMap`.
+The name is stamped onto each record by the process that emits it — the orchestrator for a workflow
+or step, the processor for a step it runs — resolved at build time from `skp:name:{id}` in L2, the
+key BaseApi writes for every workflow, step and processor. Nothing pushes to Kibana and nothing
+triggers it: the data view carries an empty `fieldFormatMap` and an empty `runtimeFieldMap`.
 
 What that costs you: **a rename no longer re-labels history.** Formatting happened when you looked,
-so it covered every record ever indexed; stamping happens once, at index time. A record says what
-the entity was called when it ran, which is the correct thing for a log to say, but it is a real
-change in behaviour. It also means a step that has never executed is in no dropdown — structurally,
-since it has no records to carry a name.
+so it covered every record ever indexed; stamping happens once, when the record is written. A record
+says what the entity was called when it ran, which is the correct thing for a log to say, but it is a
+real change in behaviour. It also means a step that has never executed is in no dropdown —
+structurally, since it has no records to carry a name.
 
 An unmatched id still renders as **itself**, never blank and never as a shared "unknown" string —
 the same reason the formatters omitted `unknownKeyValue`.
 
-## What the ingest pipeline costs
+## There is no ingest pipeline any more
 
-`logs@custom` runs on 100% of documents at **0.0232 ms each**, measured on 9.3.4 from
-`_nodes/stats/ingest`.
+A `skp-entity-lookup` index, its enrich policy, and a `logs@custom` ingest pipeline used to stamp
+the name onto each record at ingest time, with a `failed` counter to watch and an
+`ElasticLookupPublisherTests` guard against a `copy_from` throwing on a missing field. BaseApi no
+longer creates any of the three, and the guard test went with the pipeline it protected.
 
-**Watch its `failed` counter, not just its count.** A processor that throws inside `logs@custom`
-fails the whole indexing request: the record is not indexed unnamed, it is *dropped*. This is not
-hypothetical — the first version of this pipeline used `copy_from` on the id fields without guarding
-them, and `copy_from` against an absent path throws. Most records here carry no ids at all, so it
-rejected **4,279 documents out of 29,518** before anybody looked at the counter. Every `set` that
-reads a field now carries an `if` that checks it is there, and
-`ElasticLookupPublisherTests.Every_fallback_set_guards_the_field_it_copies_from` fails the build if
-one loses it.
-
-```
-curl -s localhost:19200/_nodes/stats/ingest | jq '.nodes[].ingest.pipelines["logs@custom"]'
-```
-
-A non-zero `failed` means records are being lost right now.
+Run `tools/offline/teardown-entity-lookup.py` against any stack that still carries them, before
+deploying processors that log the current way — while the old pipeline exists, its enrich step
+overwrites the name the process just set.
 
 ## The counts are an observability signal, not an accounting ledger
 
