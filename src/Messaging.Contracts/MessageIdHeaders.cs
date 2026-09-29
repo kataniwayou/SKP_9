@@ -145,24 +145,11 @@ public static class MessageIdHeaders
             return Guid.Empty;
         }
 
-        var text = raw switch
-        {
-            byte[] b => System.Text.Encoding.UTF8.GetString(b),
-            string s => s,
-            _ => null,
-        };
-
-        return Guid.TryParse(text, out var id) ? id : Guid.Empty;
+        return Guid.TryParse(DecodeHeader(raw), out var id) ? id : Guid.Empty;
     }
 
     /// <summary>
-    /// Copies one header across under its log-scope name.
-    /// <para>
-    /// <b>A string written to an AMQP field table comes back as <c>byte[]</c>,</b> because the
-    /// protocol's longstr carries no encoding — the client hands back the bytes rather than guessing.
-    /// Reading it as a string would silently miss every header on every message, so the byte case is
-    /// the one that actually fires in production and the string case is the in-process test path.
-    /// </para>
+    /// Copies one header across under its log-scope name, via <see cref="DecodeHeader"/>.
     /// </summary>
     private static void Lift(
         IDictionary<string, object?> headers, string header, string scopeKey,
@@ -173,16 +160,25 @@ public static class MessageIdHeaders
             return;
         }
 
-        var value = raw switch
-        {
-            byte[] b => System.Text.Encoding.UTF8.GetString(b),
-            string s => s,
-            _ => null,
-        };
+        var value = DecodeHeader(raw);
 
         if (!string.IsNullOrEmpty(value))
         {
             scope[scopeKey] = value;
         }
     }
+
+    /// <summary>
+    /// The one place a raw header value becomes a string. A string written to an AMQP field table
+    /// comes back as <c>byte[]</c>, because the protocol's longstr carries no encoding — the client
+    /// hands back the bytes rather than guessing. Reading it as a string would silently miss every
+    /// header on every message, so the byte case is the one that actually fires in production and the
+    /// string case is the in-process test path. Anything else decodes to null.
+    /// </summary>
+    private static string? DecodeHeader(object? raw) => raw switch
+    {
+        byte[] b => System.Text.Encoding.UTF8.GetString(b),
+        string s => s,
+        _ => null,
+    };
 }
