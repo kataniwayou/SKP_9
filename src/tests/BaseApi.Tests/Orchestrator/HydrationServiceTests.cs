@@ -1,6 +1,8 @@
 using System.Text.Json;
+using BaseApi.Tests.Support;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -232,6 +234,17 @@ public sealed class HydrationServiceTests
             Heartbeat,
             NullLogger<HydrationService>.Instance);
 
+        public HydrationService BuildNamed(SharedLog log, EntityNameResolver names) => new(
+            Topology,
+            _reader,
+            new WorkflowActivator(_reader, Store, Scheduler, log.For<WorkflowActivator>()),
+            Admission,
+            StartupGate,
+            Clock,
+            Heartbeat,
+            log.For<HydrationService>(),
+            names);
+
         /// <summary>
         /// Advances the fake clock through <paramref name="span"/> a second at a time, giving the pool
         /// a moment to resume the loop between steps. A <see cref="FakeTimeProvider"/> moves only when
@@ -461,5 +474,18 @@ public sealed class HydrationServiceTests
         // not the current one. A teardown that ran in the other order would leave these equal.
         Assert.True(h.Store.TryGetActive(W1, out var w1));
         Assert.DoesNotContain(w1.JobId, h.Scheduler.Unscheduled);
+    }
+
+    [Fact]
+    public async Task EachActivationAtBootCarriesItsWorkflowsName()
+    {
+        var h = new Harness().WithWorkflow(W1, "0 * * * *");
+        var log = new SharedLog();
+        var names = new EntityNameResolver(
+            new FakeNameSource(new() { [W1] = "wf1_1.0.0-x" }), NullLogger<EntityNameResolver>.Instance);
+
+        await h.BuildNamed(log, names).RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal("wf1_1.0.0-x", log.ScopeOf("activated workflow {WorkflowId}")[EntityNames.WorkflowName]);
     }
 }

@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using BaseConsole.Core.Naming;
+using Microsoft.Extensions.Logging;
 using Quartz;
 
 namespace Orchestrator.Scheduling;
@@ -59,7 +60,8 @@ namespace Orchestrator.Scheduling;
 public sealed class WorkflowScheduler<TJob>(
     ISchedulerFactory schedulerFactory,
     TimeProvider timeProvider,
-    ILogger<WorkflowScheduler<TJob>> logger)
+    ILogger<WorkflowScheduler<TJob>> logger,
+    EntityNameResolver? names = null)
     : IWorkflowScheduler
     where TJob : IJob
 {
@@ -127,9 +129,15 @@ public sealed class WorkflowScheduler<TJob>(
         {
             // Never the expression, which is user data — the workflow id is what identifies the
             // projection an operator would go and look at.
-            logger.LogWarning(
-                "cron for workflow {WorkflowId} yields no future fire time; nothing scheduled",
-                workflowId);
+            //
+            // Synchronous and outside a delivery: cache only. The workflow was just activated, so its
+            // name is cached unless the store was unreachable, in which case the fallback is right.
+            using (logger.BeginCachedNamesScope(names, workflowId, Guid.Empty, Guid.Empty))
+            {
+                logger.LogWarning(
+                    "cron for workflow {WorkflowId} yields no future fire time; nothing scheduled",
+                    workflowId);
+            }
         }
 
         return next;

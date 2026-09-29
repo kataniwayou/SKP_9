@@ -1,4 +1,5 @@
 using System.Text.Json;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
@@ -11,9 +12,9 @@ namespace Orchestrator.L1;
 /// one place in the orchestrator that touches Redis at all.
 /// <para>
 /// <b>It reads, and it never writes.</b> The API is the sole writer of L2 (spec invariant 1); the
-/// orchestrator is a consumer of the API's projections. Three operations appear here —
-/// <c>SetMembersAsync</c>, <c>StringGetAsync</c> and <c>KeyExistsAsync</c> — and no fourth is
-/// permitted. A delete or a set here
+/// orchestrator is a consumer of the API's projections. Four operations appear here —
+/// <c>SetMembersAsync</c>, <c>StringGetAsync</c>, <c>KeyExistsAsync</c> and the MGET of
+/// <c>skp:name:{id}</c> keys for log names — and no fifth is permitted. A delete or a set here
 /// would let this replica's view of the world become a fact about the world, which is precisely the
 /// inversion the two invariants exist to prevent.
 /// </para>
@@ -28,7 +29,17 @@ namespace Orchestrator.L1;
 /// </para>
 /// </summary>
 public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2WorkflowReader> logger)
+    : IEntityNameSource
 {
+    /// <summary>
+    /// The fourth read this class makes: entity display names, for log records only, via
+    /// <see cref="RedisEntityNameSource.ReadAsync"/>. UNLIKE the projection reads above, a fault here
+    /// must not requeue a delivery or trip the gate. It propagates to <see cref="EntityNameResolver"/>,
+    /// which catches it and logs the id suffix instead.
+    /// </summary>
+    public Task<IReadOnlyDictionary<Guid, string>> ReadNamesAsync(IReadOnlyCollection<Guid> ids) =>
+        RedisEntityNameSource.ReadAsync(redis.GetDatabase(), ids);
+
     /// <summary>
     /// Every workflow id in the parent-index SET. A member that is not a workflow id is skipped with a
     /// warning rather than failing the read: one unusable index entry must not hide the rest of L2

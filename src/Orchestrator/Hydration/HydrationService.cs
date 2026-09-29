@@ -1,5 +1,6 @@
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
+using BaseConsole.Core.Naming;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -102,6 +103,7 @@ public sealed class HydrationService : BackgroundService
     private readonly TimeProvider _clock;
     private readonly ILoopHeartbeat _heartbeat;
     private readonly ILogger<HydrationService> _logger;
+    private readonly EntityNameResolver? _names;
 
     public HydrationService(
         ITopologyDeclarer topology,
@@ -111,7 +113,8 @@ public sealed class HydrationService : BackgroundService
         IStartupGate startupGate,
         TimeProvider clock,
         [FromKeyedServices(LoopName)] ILoopHeartbeat heartbeat,
-        ILogger<HydrationService> logger)
+        ILogger<HydrationService> logger,
+        EntityNameResolver? names = null)
     {
         _topology    = topology ?? throw new ArgumentNullException(nameof(topology));
         _reader      = reader ?? throw new ArgumentNullException(nameof(reader));
@@ -121,6 +124,7 @@ public sealed class HydrationService : BackgroundService
         _clock       = clock ?? throw new ArgumentNullException(nameof(clock));
         _heartbeat   = heartbeat ?? throw new ArgumentNullException(nameof(heartbeat));
         _logger      = logger ?? throw new ArgumentNullException(nameof(logger));
+        _names       = names;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -202,7 +206,14 @@ public sealed class HydrationService : BackgroundService
             ct.ThrowIfCancellationRequested();
             _heartbeat.Beat();
 
-            await _activator.ActivateAsync(workflowId, ct).ConfigureAwait(false);
+            // Outside any delivery, so the consumer's names scope does not reach here: opened per
+            // workflow, it names the activation records ("activated workflow …", "L2 does not hold …")
+            // and fills the resolver's cache for the fires that follow.
+            using (_logger.BeginNamesScope(
+                       await _names.ScopeOrNullAsync(workflowId, Guid.Empty, Guid.Empty).ConfigureAwait(false)))
+            {
+                await _activator.ActivateAsync(workflowId, ct).ConfigureAwait(false);
+            }
         }
 
         _logger.LogInformation(
