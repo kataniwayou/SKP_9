@@ -15,12 +15,12 @@ WHAT CHANGED WHEN THE ELASTICSEARCH OBJECTS WENT AWAY:
     here rather than being silently absent.
   * The counted set is now one clause, and it is asserted against the dashboard's own query rather
     than a pipeline-written flag (check 10).
-  * Names are no longer fields in the index. They are rendered by the data view's formatters, and
-    this script reads that same formatter map, so it resolves an id exactly as a viewer sees it.
+  * Names are fields on the records, set by the orchestrator and the processors from L2; this
+    script reads the same keys (skp:name:*) and compares on name_version.
   * Check 12 no longer asserts that a never-run step is listable. The naming records that made that
     true were removed from OrchestrationService; see that method and check 12's own docstring.
-  * Check 5 reaches 10 of 10 steps rather than 8, because a terminal step now reports its own
-    outcome and carries an EntryId.
+  * Check 5 skips kafka-importer and kafka-exporter by design (no input key and a no-data branch)
+    and fails on any other entry-less record.
 
 RUN THIS FROM POWERSHELL against live port-forwards:
     ./k8s/port-forward-realstack.ps1
@@ -36,6 +36,10 @@ import time
 
 import requests
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "offline"))
+import skp_names
+
+DEFAULT_REDIS = ("localhost", 6380)
 DEFAULT_ES = "http://localhost:19200"
 DEFAULT_KIBANA = "http://localhost:15601"
 DATA_STREAM = "logs-generic.otel-default"
@@ -62,6 +66,10 @@ COUNTED_KQL = 'attributes.Result:* and not resource.attributes.service.name:"orc
 # The dashboard that owns COUNTED_KQL. Named so check 11 can say "this one states the rule"
 # rather than "there is one dashboard".
 OUTCOMES_DASHBOARD = "skp-operator-outcomes"
+
+# Processors whose counted records legitimately carry no EntryId since 2026-09-29: a source step's
+# dispatch has no input key, and the exporter reports Completed through a branch with no data.
+EXPECTED_ENTRYLESS = {"kafka-importer", "kafka-exporter"}
 
 # A refusal: the one Error record GatedQueueConsumer writes, on both sides, when it rejects a
 # delivery without requeue and the broker dead-letters it. THE SEVERITY HALF IS LOAD-BEARING, not
@@ -142,10 +150,9 @@ PANEL_GUARDS = {
 
 # The one pair-per-pie bucket. Asserted by check 11 so a later edit cannot quietly go back to
 # splitting on ProcessorId alone, which silently merges a processor's two lists into one donut.
-# Stamped onto each record by the logs@custom pipeline from the enriched step name and
-# the root. It replaced a runtime field of the same purpose whose readable half came from
-# a hand-maintained formatter; nothing is hand-maintained now.
-WHITELIST_SPLIT_FIELD = "attributes.WhitelistOwner"
+# multi_terms on the two fields directly -- StepName is set on the record by the processor itself
+# from L2, and WhitelistRoot rides the record as before. No computed field and no pipeline any more.
+WHITELIST_SPLIT_FIELDS = ["attributes.StepName", "attributes.WhitelistRoot"]
 
 
 class Checks:
@@ -164,45 +171,22 @@ class Checks:
 # ---------------------------------------------------------------------------------------------
 # Names
 #
-# The index holds ids. The dashboard renders names through the data view's field formatters, and
-# this script reads that same formatter map so it is checking what a viewer actually sees.
-#
-# IT USED TO READ ELASTICSEARCH. OrchestrationService emitted one naming record per entity on every
-# accepted start, and this resolved ids from those. That emission is gone (see the note in
-# OrchestrationService.StartAsync): it only ever covered entities whose workflow had been explicitly
-# started, it decayed out of the index with retention, and KibanaLookupPublisher already pushes a
-# strictly larger map from the entity tables. Reading the formatter has no time window to get wrong
-# and no start to depend on.
-#
-# A FAILURE HERE NOW MEANS THE PUBLISHER HAS NOT RUN. The map is refreshed when the dashboard's
-# diagram panel fetches lookup/ping.svg, throttled to Kibana:MinimumInterval, and is absent entirely
-# when Kibana:BaseUrl is unset.
+# The orchestrator and the processors stamp {name}_{version}-{suffix} onto their own records,
+# resolved from skp:name:{id} in L2 at the moment each record is built; this script reads that
+# same store instead of Elasticsearch, so it resolves an id exactly as BaseApi resolved it.
 # ---------------------------------------------------------------------------------------------
-KINDS = {"workflow": "WorkflowId", "step": "StepId", "processor": "ProcessorId"}
-LOOKUP_INDEX = "skp-entity-lookup"
-GUID_PREFIX = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-")
 DATA_VIEW = "skp-logs"
 
 
-def load_names(es_url):
-    """The id -> {name}_{version} map, read from the lookup index BaseApi writes at every start.
+def load_names(redis_host, redis_port):
+    """{id: name_version} for every entity BaseApi has ever started, read from skp:name:* in L2.
 
-    THE SOURCE MOVED OUT OF KIBANA. This used to read the data view's fieldFormatMap, because the
-    table lived there and something had to push it. Names now ride on the log records themselves,
-    stamped by the logs@custom ingest pipeline from this index, so the data view carries no
-    formatter at all and Kibana is not consulted here.
+    THE SOURCE MOVED OUT OF ELASTICSEARCH. The skp-entity-lookup index and the logs@custom pipeline
+    are gone; the processes stamp names on their own records and the keys in L2 are the single store.
+    Names carry a GUID suffix that differs per environment, so every comparison below is on the
+    base name (name_version) and the expected-count literals stay environment-independent.
     """
-    body = {"size": 10000, "query": {"match_all": {}}}
-    response = requests.post(f"{es_url}/{LOOKUP_INDEX}/_search", json=body, timeout=60)
-    response.raise_for_status()
-
-    out = {kind: {} for kind in KINDS}
-    for hit in response.json()["hits"]["hits"]:
-        row = hit["_source"]
-        kind = row.get("kind")
-        if kind in out:
-            out[kind][row["id"]] = f"{row['name']}_{row['version']}"
-    return out
+    return {i: skp_names.base_name(n) for i, n in skp_names.read_names(redis_host, redis_port).items()}
 
 
 # Spec section 4.4, re-keyed to {name}_{version} per section 13.7. The versions are NOT all 1.0.0 and
@@ -264,7 +248,7 @@ def _terms(es_url, field, window, workflow_id=None, size=50, names=None):
     buckets = {b["key"]: b["doc_count"] for b in result["aggregations"]["by"]["buckets"]}
     if names is None:
         return buckets
-    # Unresolved ids keep their GUID, which is exactly what the dashboard renders for them.
+    # Unresolved ids keep their GUID suffix fallback, which is exactly what the dashboard renders for them.
     return {names.get(k, k): v for k, v in buckets.items()}
 
 
@@ -283,7 +267,8 @@ def check_1_kibana_reaches_es(checks, kibana_url):
 # checks 2 and 3 are DELETED - spec 13.7. They tested that ingest-time enrichment landed on a new
 # document and that a document with an unmatched id survived the pipeline rather than being dropped.
 # Both were about an ingest pipeline and an enrich policy that no longer exist. Nothing replaces
-# them, because formatting now happens at read time and cannot fail an indexing operation.
+# them, because the name is now stamped by the process that writes the record and cannot fail an
+# indexing operation.
 
 
 def check_4_totals_match_the_cycle(checks, es_url, window, names, workflow_id):
@@ -293,7 +278,7 @@ def check_4_totals_match_the_cycle(checks, es_url, window, names, workflow_id):
     boundary, so a partial cycle at either edge shifts the total. Check 5 is the exact one.
     """
     try:
-        by_processor = _terms(es_url, "attributes.ProcessorId", window, workflow_id, names=names["processor"])
+        by_processor = _terms(es_url, "attributes.ProcessorId", window, workflow_id, names=names)
     except Exception as exc:  # noqa: BLE001
         return checks.report(4, "Totals match the cycle", False, f"{type(exc).__name__}: {exc}")
 
@@ -329,11 +314,10 @@ def check_5_one_witness_per_step(checks, es_url, window):
     sharing one ExecutionId. EntryId separates the branches. Keyed on two fields this check reports
     ~15 "duplicates" per 10 minutes on a perfectly healthy run.
 
-    IT NOW COVERS ALL TEN STEPS. It used to skip the terminal-step Completed records - kafka-exporter
-    and nothing else - because the orchestrator's copy carried no EntryId and two legitimate branch
-    terminations could not be told from one outcome logged twice. The processor now reports that
-    outcome itself, inside the dispatch handler's ambient scope, so it carries the dispatch's own
-    EntryId like every other record here.
+    TWO PROCESSORS ARE SKIPPED BY DESIGN since 2026-09-29. kafka-importer's outcomes belong to a
+    source step, which has no input key, and kafka-exporter reports Completed through a branch with
+    no data. ExecutionLogScope omits an empty EntryId, so neither can join the triple. Any other
+    processor appearing among the skips fails the check.
 
     ONE RESIDUAL GAP, and it is smaller than the one it replaced: a step that is BOTH an entry step
     and a terminal step produced its own input, so its EntryId is Guid.Empty and ExecutionLogScope
@@ -353,7 +337,8 @@ def check_5_one_witness_per_step(checks, es_url, window):
                     "size": 10000, "min_doc_count": 2}}},
             },
             "no_entry": {"filter": {"bool": {"must_not": [{"exists": {"field": "attributes.EntryId"}}]}},
-                         "aggs": {"steps": {"terms": {"field": "attributes.StepId", "size": 20}}}},
+                         "aggs": {"services": {"terms": {"field": "resource.attributes.service.name",
+                                                         "size": 20}}}},
         },
     }
     try:
@@ -361,18 +346,24 @@ def check_5_one_witness_per_step(checks, es_url, window):
         offenders = result["aggregations"]["with_entry"]["triples"]["buckets"]
         checked = result["aggregations"]["with_entry"]["doc_count"]
         skipped = result["aggregations"]["no_entry"]["doc_count"]
+        skip_services = {b["key"]: b["doc_count"]
+                         for b in result["aggregations"]["no_entry"]["services"]["buckets"]}
     except Exception as exc:  # noqa: BLE001
         return checks.report(5, "One witness per step", False, f"{type(exc).__name__}: {exc}")
 
-    detail = f"{checked} records checked, {skipped} skipped for want of an EntryId"
+    unexpected = {s: n for s, n in skip_services.items() if s not in EXPECTED_ENTRYLESS}
+    detail = (f"{checked} records checked, {skipped} skipped for want of an EntryId "
+              f"({skip_services or 'none'})")
     if offenders:
         sample = [(b["key"], b["doc_count"]) for b in offenders[:3]]
         return checks.report(5, "One witness per step", False,
                              f"{len(offenders)} duplicated triple(s), e.g. {sample} - {detail}")
-    # A skip is no longer expected. If one appears, an entry-and-terminal step has been published
-    # and the operator notes need to say so.
-    return checks.report(5, "One witness per step", skipped == 0,
-                         f"no duplicated triple - {detail}")
+    # Skips are expected from the importer (source step) and the exporter (no-data branch) only. A
+    # skip from anything else means a new entry-less outcome shape was introduced, and the operator
+    # notes need to say so.
+    return checks.report(5, "One witness per step", not unexpected,
+                         f"no duplicated triple - {detail}"
+                         + (f"; UNEXPECTED entry-less records from {unexpected}" if unexpected else ""))
 
 
 def check_6_every_step_has_a_bin(checks, es_url, window, names, workflow_id):
@@ -386,7 +377,7 @@ def check_6_every_step_has_a_bin(checks, es_url, window, names, workflow_id):
     virtue of the orchestrator carve-out this design removed.
     """
     try:
-        by_step = _terms(es_url, "attributes.StepId", window, workflow_id, names=names["step"])
+        by_step = _terms(es_url, "attributes.StepId", window, workflow_id, names=names)
     except Exception as exc:  # noqa: BLE001
         return checks.report(6, "Every step has a bin", False, f"{type(exc).__name__}: {exc}")
     missing = [s for s in PER_CYCLE_BY_STEP if by_step.get(s, 0) == 0]
@@ -399,7 +390,7 @@ def check_7_pie_matches_bins(checks, es_url, window, names, workflow_id):
     """The three Result slices sum to the bins total, in roughly 26:3:1 per cycle."""
     try:
         by_result = _terms(es_url, "attributes.Result", window, workflow_id, size=10)
-        by_processor = _terms(es_url, "attributes.ProcessorId", window, workflow_id, names=names["processor"])
+        by_processor = _terms(es_url, "attributes.ProcessorId", window, workflow_id, names=names)
     except Exception as exc:  # noqa: BLE001
         return checks.report(7, "Pie matches bins", False, f"{type(exc).__name__}: {exc}")
     sums_match = sum(by_result.values()) == sum(by_processor.values())
@@ -437,7 +428,7 @@ def check_9_generic_across_workflows(checks, es_url, kibana_url, window, names):
             "?type=dashboard&type=lens&type=search&type=index-pattern&per_page=100",
             headers={"kbn-xsrf": "true"}, timeout=20).json()
         ids = {obj["id"] for obj in found.get("saved_objects", [])}
-        by_workflow = _terms(es_url, "attributes.WorkflowId", window, names=names["workflow"])
+        by_workflow = _terms(es_url, "attributes.WorkflowId", window, names=names)
     except Exception as exc:  # noqa: BLE001
         return checks.report(9, "Genuinely generic", False, f"{type(exc).__name__}: {exc}")
     missing_objects = expected_objects - ids
@@ -508,10 +499,11 @@ def check_11_export_states_the_rule_once(checks):
     failure the old design was designed around: the rule restated across four Kibana objects that
     then drift apart.
 
-    It additionally asserts that unknownKeyValue is ABSENT from every formatter. Setting it makes
-    every unmapped entity render as one shared string, so two unlabelled steps collapse into a
-    single legend bucket. Omitted, an unmapped id renders as its own GUID - verified by publishing a
-    partial map and watching split-exporter come back as 9cae7b00-... beside twelve named siblings.
+    It additionally asserts that unknownKeyValue is ABSENT from every formatter - now a guard
+    against re-introducing one, not a live mechanism: the current data view carries no formatters
+    at all, and names ride on the records themselves. Setting it would make every unmapped entity
+    render as one shared string, so two unlabelled steps would collapse into a single legend
+    bucket. This check keeps that from silently coming back.
     """
     try:
         objects = [json.loads(line) for line in open(EXPORT, encoding="utf-8") if line.strip()]
@@ -591,8 +583,8 @@ def check_11_export_states_the_rule_once(checks):
 
     split = [a for a in vis_states.get("skp-whitelist-pies", {}).get("aggs", [])
              if a.get("schema") == "split"]
-    pair_split = (len(split) == 1
-                  and split[0]["params"]["field"] == WHITELIST_SPLIT_FIELD)
+    pair_split = (len(split) == 1 and split[0].get("type") == "multi_terms"
+                  and split[0]["params"].get("fields") == WHITELIST_SPLIT_FIELDS)
 
     # EVERY dashboard's controls must be bounded, not just the outcomes one: an unbounded Workflow
     # dropdown lists every id in the window whether or not the board can say anything about it.
@@ -607,7 +599,7 @@ def check_11_export_states_the_rule_once(checks):
                          f"whitelist_splits_on_the_pair={pair_split}, "
                          f"dashboards_with_unbounded_controls={unbounded or 'none'}, "
                          f"stale_enrichment_references={stale}, "
-                         f"formatters_setting_unknownKeyValue={unknown_keys or 'none'}, "
+                         f"formatters_reintroducing_unknownKeyValue={unknown_keys or 'none'}, "
                          f"control_options_bounded={scoped}")
 
 
@@ -617,38 +609,41 @@ def check_12_published_steps_are_nameable(checks, es_url, names):
     WHAT THIS NO LONGER CLAIMS. It used to assert that a published-but-never-run step would appear
     in the Step dropdown. That guarantee is gone and its absence is now structural rather than
     incidental: an optionsListControl lists values PRESENT IN THE FIELD, and the name is stamped
-    onto a record at ingest, so a step that has never executed has no record and therefore no entry.
-    Publishing more rows cannot change that - only running the step can.
+    onto a record by the process that writes it, so a step that has never executed has no record
+    and therefore no entry. Publishing more rows cannot change that - only running the step can.
 
-    NOTHING IS HAND-MAINTAINED HERE ANY MORE. The whitelist board splits on
-    attributes.WhitelistOwner, which the logs@custom pipeline builds from the enriched step name and
-    the root on each record. It used to split on a runtime field whose lookup was keyed by pairs
-    OBSERVED IN THE DATA and derivable from no entity, which nothing regenerated - a newly gated
-    step drew a pie titled "{GUID} - {root}" until somebody hand-edited the export. A pair is now
-    unreadable only when the step's own name was unresolved at ingest, which is the same failure the
-    id fallback already reports, so this check reads the records rather than the export.
+    NOTHING IS HAND-MAINTAINED HERE ANY MORE. The whitelist board splits on the pair
+    attributes.StepName + attributes.WhitelistRoot, one pie per pair, both fields read straight off
+    each record - StepName is set by the processor itself from L2, WhitelistRoot as before. It used
+    to split on a runtime field whose lookup was keyed by pairs OBSERVED IN THE DATA and derivable
+    from no entity, which nothing regenerated - a newly gated step drew a pie titled "{GUID} - {root}"
+    until somebody hand-edited the export. A pair is now unreadable only when the step's own name was
+    unresolved in L2, which is the same failure the id fallback already reports, so this check reads
+    the records rather than the export.
     """
-    resolved = set(names["step"].values())
+    resolved = set(names.values())
     missing = [s for s in PER_CYCLE_BY_STEP if s not in resolved]
 
     body = {"size": 0,
             "query": {"bool": {"filter": [{"exists": {"field": "attributes.WhitelistVerdict"}}]}},
-            "aggs": {"owners": {"terms": {"field": "attributes.WhitelistOwner", "size": 1000}}}}
+            "aggs": {"pairs": {"multi_terms": {
+                "terms": [{"field": "attributes.StepName"}, {"field": "attributes.WhitelistRoot"}],
+                "size": 1000}}}}
     try:
         agg = requests.post(f"{es_url}/{DATA_STREAM}/_search", json=body, timeout=60).json()
-        owners = [b["key"] for b in agg["aggregations"]["owners"]["buckets"]]
+        pairs = [tuple(b["key"]) for b in agg["aggregations"]["pairs"]["buckets"]]
     except Exception as exc:  # noqa: BLE001
         return checks.report(12, "Published steps are nameable", False,
-                             f"whitelist owner read failed: {type(exc).__name__}: {exc}")
+                             f"whitelist pair read failed: {type(exc).__name__}: {exc}")
 
-    # A fallback label is the raw StepId, so an unreadable pair starts with a GUID.
-    unlabelled = sorted(o for o in owners if GUID_PREFIX.match(o))
+    # An unreadable pair is one whose step name is the D2 fallback (the id suffix alone).
+    unlabelled = sorted(f"{s} · {r}" for s, r in pairs if skp_names.is_fallback(s))
 
     ok = not missing and not unlabelled
     return checks.report(12, "Published steps are nameable", ok,
-                         f"{len(resolved)} steps carry a name in the lookup index, "
+                         f"{len(resolved)} steps carry a name in L2, "
                          f"missing={missing or 'none'}, "
-                         f"whitelist_pairs={len(owners)}, "
+                         f"whitelist_pairs={len(pairs)}, "
                          f"unlabelled_pairs={unlabelled or 'none'}")
 
 
@@ -668,6 +663,19 @@ def _get_text(url):
         return None
 
 
+def _live_workflow_id(api_url, name_version):
+    """The workflow id(s) in BaseApi's registry whose name_version matches. Ideally exactly one.
+
+    D8 never deletes skp:name:* keys, and a rebuild re-creates a workflow row with a fresh GUID - so
+    L2 can hold several filefetcher-archiveexpander-chain_1.0.0-<suffix> names after any rebuild,
+    only one of which is live. Scanning load_names() for a match would silently pick an arbitrary,
+    possibly dead id; the registry has exactly one row per (name, version) and is the source of
+    truth for which id BaseApi will actually run.
+    """
+    workflows = _get_json(f"{api_url}/api/v1/workflows")
+    return [wf["id"] for wf in workflows if f'{wf["name"]}_{wf["version"]}' == name_version]
+
+
 def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DEFAULT_API):
     """Every name drawn on the chain diagram is a name the dashboard renders, and the diagram's
     step-to-processor wiring matches what the index actually shows.
@@ -679,8 +687,9 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DE
     labelled with a bare name does not identify a node: the moment a second version is published it
     points at two rows with no way to tell which, and it can silently describe the wrong one.
 
-    That is why the diagram carries {name}_{version}, exactly as the dashboard's field formatters
-    render it. This check is what keeps the two from drifting - the diagram is hand-authored and was
+    That is why the diagram carries {name}_{version}, exactly as the records themselves carry it -
+    there is no field formatter involved any more. This check is what keeps the two from drifting -
+    the diagram is hand-authored and was
     captured from the live API on a particular day, so a rename or a version bump is otherwise
     invisible to it.
 
@@ -726,8 +735,8 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DE
     except Exception as exc:  # noqa: BLE001
         return checks.report(13, "Diagram agrees with the dashboard", False, f"{type(exc).__name__}: {exc}")
 
-    rendered_steps = set(names["step"].values())
-    rendered_procs = set(names["processor"].values())
+    rendered_steps = set(names.values())
+    rendered_procs = set(names.values())
     unknown = ([s for s in diagram_steps if s not in rendered_steps] +
                [p for p in diagram_procs if p not in rendered_procs])
 
@@ -741,8 +750,8 @@ def check_13_diagram_agrees_with_the_dashboard(checks, es_url, names, api_url=DE
         observed = {}
         for bucket in buckets["aggregations"]["pairs"]["buckets"]:
             step_id, processor_id = bucket["key"]
-            step = names["step"].get(step_id)
-            processor = names["processor"].get(processor_id)
+            step = names.get(step_id)
+            processor = names.get(processor_id)
             if step and processor:
                 observed.setdefault(step, set()).add(processor)
     except Exception as exc:  # noqa: BLE001
@@ -768,25 +777,36 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--kibana-url", default=DEFAULT_KIBANA)
     parser.add_argument("--es-url", default=DEFAULT_ES)
+    parser.add_argument("--api-url", default=DEFAULT_API)
+    parser.add_argument("--redis-host", default=DEFAULT_REDIS[0])
+    parser.add_argument("--redis-port", type=int, default=DEFAULT_REDIS[1])
     parser.add_argument("--window", default="now-30m",
                         help="ES date-math lower bound for the counting checks. Unlike the previous "
                              "design there is no forward-only enrichment window to stay inside - "
-                             "formatting happens at read time and covers all history. The bound is "
-                             "only about having enough cycles to compare against.")
+                             "each record is stamped with its name by the process that wrote it, so "
+                             "there is nothing an ingest-time window could miss. The bound is only "
+                             "about having enough cycles to compare against.")
     args = parser.parse_args()
 
     checks = Checks()
     try:
-        names = load_names(args.es_url)
+        names = load_names(args.redis_host, args.redis_port)
     except Exception as exc:  # noqa: BLE001
-        print(f"could not read the {LOOKUP_INDEX} lookup index: {type(exc).__name__}: {exc}")
+        print(f"could not read skp:name:* from Redis at {args.redis_host}:{args.redis_port}: "
+              f"{type(exc).__name__}: {exc}")
         return 1
 
-    workflow_id = next((i for i, n in names["workflow"].items() if n == VALIDATION_WORKFLOW), None)
-    if workflow_id is None:
-        print(f"no lookup row for {VALIDATION_WORKFLOW} - start that workflow once so BaseApi "
-              f"publishes its entities, or check Elasticsearch:BaseUrl is set on the API")
+    # THE LIVE WORKFLOW ID COMES FROM THE REGISTRY, NOT FROM SCANNING names. See _live_workflow_id.
+    try:
+        matches = _live_workflow_id(args.api_url, VALIDATION_WORKFLOW)
+    except Exception as exc:  # noqa: BLE001
+        print(f"could not read {args.api_url}/api/v1/workflows: {type(exc).__name__}: {exc}")
         return 1
+    if len(matches) != 1:
+        print(f"expected exactly one live workflow named {VALIDATION_WORKFLOW} at {args.api_url}, "
+              f"found {matches or 'none'} - start that workflow once so BaseApi registers it")
+        return 1
+    workflow_id = matches[0]
 
     check_1_kibana_reaches_es(checks, args.kibana_url)
     check_4_totals_match_the_cycle(checks, args.es_url, args.window, names, workflow_id)
@@ -797,7 +817,7 @@ def main():
     check_10_rule_classifies_the_fixture(checks, args.es_url)
     check_11_export_states_the_rule_once(checks)
     check_12_published_steps_are_nameable(checks, args.es_url, names)
-    check_13_diagram_agrees_with_the_dashboard(checks, args.es_url, names)
+    check_13_diagram_agrees_with_the_dashboard(checks, args.es_url, names, api_url=args.api_url)
 
     print()
     print(f"{checks.failures} check(s) failed")

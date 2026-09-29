@@ -351,13 +351,14 @@ internal sealed class ElasticPanelSource
     }
 
     /// <summary>
-    /// The run-boundary reading: how many runs this workflow began, how many branches ended, and the
-    /// importer polls that explain a gap between them.
+    /// The run-boundary reading: how many runs this workflow began, how many branches ended, and how
+    /// many importer polls found nothing to read.
     /// <para>
-    /// <b>drainedPolls is carried for the model's benefit, not the panel's.</b> An operator seeing
-    /// entries with no terminals can go and read the importer's log; the agent has only what a
-    /// reading contains, and "the source had nothing to read" and "work is being lost" produce the
-    /// identical shape. Without this count the agent must call every idle window inconclusive.
+    /// <b>drainedPolls no longer explains a gap between entry and terminal.</b> An importer poll that
+    /// finds nothing reports Cancelled, which the orchestrator records as that fire's terminal, so a
+    /// drained poll still produces a terminal and an idle workflow sits near 1:1 rather than at
+    /// terminal zero. A fire with no terminal is work that started and did not finish; drainedPolls
+    /// is carried for context, not as an excuse for that shape.
     /// </para>
     /// </summary>
     private static PanelReading BuildRunBoundaries(

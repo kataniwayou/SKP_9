@@ -1,6 +1,5 @@
 using BaseApi.Service.Features.Assignment;
 using BaseApi.Service.Features.Cache;
-using BaseApi.Service.Features.Lookup;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
@@ -33,7 +32,6 @@ internal static class AppFeatures
         services.AddAssignmentFeature();
         services.AddWorkflowFeature();
         services.AddOrchestrationFeature();
-        services.AddLookupFeature(cfg);
         return services;
     }
 }

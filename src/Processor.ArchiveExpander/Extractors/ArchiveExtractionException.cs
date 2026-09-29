@@ -17,15 +17,14 @@ namespace Processor.ArchiveExpander.Extractors;
 /// </para>
 /// <para>
 /// <b>So each extractor wraps the faults its own library raises into this type, and the caller
-/// catches exactly this.</b> That is the same shape <c>BaseExporter</c> already uses for
-/// <c>ExportSinkException</c>: the adapter knows its library, the caller knows only the seam. It also
+/// catches exactly this.</b> The adapter knows its library; the caller knows only this type. It also
 /// keeps the processor free of any SharpCompress reference — coupling it to a package only one
 /// extractor uses is what created the seam in the first place.
 /// </para>
 /// <para>
 /// <b>The alternative — catching bare <see cref="Exception"/> at the call site — is rejected</b> for
-/// the reason <c>ImportSourceException</c> gives: a <see cref="NullReferenceException"/> in the
-/// builder is a programming error, and reporting it to an operator as a corrupt file buries the bug
+/// the same reason: a <see cref="NullReferenceException"/> in the builder is a programming error,
+/// and reporting it to an operator as a corrupt file buries the bug
 /// under a plausible-looking business failure. Anything an extractor throws that is not this type is
 /// deliberately left to escape to the framework's general catch, which reports the same failed step
 /// but logs the stack trace instead of flattening it into one line.

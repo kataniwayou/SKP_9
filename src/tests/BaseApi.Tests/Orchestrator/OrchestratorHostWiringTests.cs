@@ -3,8 +3,10 @@ using BaseConsole.Core.Gating;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
+using BaseConsole.Core.Naming;
 using Orchestrator;
 using Orchestrator.Election;
+using Orchestrator.L1;
 using Orchestrator.Observability;
 using Orchestrator.Hydration;
 using Orchestrator.Messaging;
@@ -191,6 +193,20 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
         Assert.Same(
             _host.Services.GetRequiredService<HydrationAdmission>(),
             _host.Services.GetRequiredService<IConsumerAdmission>());
+    }
+
+    [Fact]
+    public void TheNameSourceIsTheWorkflowReaderNotASeparateRedisConnection()
+    {
+        // L2WorkflowReader is the orchestrator's one point of Redis access (component 4 of the
+        // design). Registering a second IEntityNameSource -- even a correct one -- would open a
+        // Redis connection the reader's own invariant says should not exist. OrchestratorHost
+        // registers IEntityNameSource explicitly ahead of AddBaseConsoleGating's TryAdd, and this
+        // pins that the two resolve to the very same instance rather than two objects of the same
+        // interface.
+        Assert.Same(
+            _host.Services.GetRequiredService<L2WorkflowReader>(),
+            _host.Services.GetRequiredService<IEntityNameSource>());
     }
 
     [Fact]

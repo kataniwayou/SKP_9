@@ -46,37 +46,40 @@ what the retired script wrote (`23`), so the export is the authority on its own 
 ## How names work
 
 Panels and controls aggregate on the **name field** — `attributes.WorkflowName`,
-`attributes.StepName` — which carries `{name}_{version}`. The name is written **into each log
-record at ingest**, so Kibana holds nothing: the `skp-logs` data view has an empty
-`fieldFormatMap` and an empty `runtimeFieldMap`, and nothing pushes to it or triggers it.
+`attributes.StepName` — which carries `{name}_{version}-{last two GUID groups}` (an id whose name
+never resolved in L2 logs the suffix alone, e.g. `9aff-a7f22ee09224`). The name is **set on the
+record by the orchestrator or the processor that emits it**, resolved at build time from
+`skp:name:{id}` in L2 — the key BaseApi writes for every workflow, step and processor. Kibana holds
+nothing: the `skp-logs` data view has an empty `fieldFormatMap` and an empty `runtimeFieldMap`, and
+nothing pushes to it or triggers it.
 
-Three Elasticsearch objects do the work, all created by BaseApi at boot and owned by no human:
+**The Elasticsearch plumbing that used to do this is retired.** A `skp-entity-lookup` index, its
+enrich policy, and a `logs@custom` ingest pipeline used to stamp the name onto each record at
+ingest time; BaseApi no longer creates any of the three. Run
+`tools/offline/teardown-entity-lookup.py` against every stack BaseApi has ever booted against — it
+is mandatory before the orchestrator and processors are deployed, because while the pipeline exists
+its enrich step overwrites the names the processes set with the old `name_version` format. **Deploy
+the new BaseApi first, then teardown, then the orchestrator and processors** — the old BaseApi
+still executes the enrich policy on every start (a teardown run against it refuses every start) and
+its provisioning re-creates `logs@custom` if the old pod restarts, so teardown must never run before
+the new BaseApi replaces it. Re-run the teardown once more after rollout; every step tolerates 404,
+so a clean second run confirms nothing re-provisioned the plumbing.
 
-| Object | Role |
-| --- | --- |
-| `skp-entity-lookup` index | one row per entity, `_id` = its GUID, holding `name`, `version`, `kind` |
-| `skp-entity-lookup` enrich policy | matches a document's id against that index |
-| `logs@custom` ingest pipeline | stamps the name onto each record; x-pack's managed `logs@default-pipeline` already calls it |
-
-**The table is written at workflow start**, from the validated graph snapshot, before the
-`StartOrchestration` message is sent. A workflow's ids reach the log store only once the
-orchestrator has been told to run it, and a running workflow's composition is frozen at start by
-the L2 projection — so the graph in hand at that moment is exactly the set of ids the run can emit.
-Entity rows edited afterwards cannot reach it, which is the point: the label says what the thing was
-called **when it ran**.
-
-The ordering is load-bearing. Enrichment is frozen at index time, so a record written before its id
-is in the materialised policy is unnamed permanently and no later publish repairs it.
-
-**An unmatched id renders as its own GUID**, not as blank and not as a shared "unknown" string. A
+**An unmatched id renders as its own suffix**, not as blank and not as a shared "unknown" string. A
 missing field would give a panel a *missing* bucket that reads as a different entity; one shared
-string would merge two unlabelled entities into one. This is the same choice the retired
-`static_lookup` formatter made by omitting `unknownKeyValue`.
+string would merge two unlabelled entities into one.
 
-`attributes.WhitelistOwner` is built the same way, by a `set` processor joining the enriched step
-name to the record's own `WhitelistRoot`. It replaced a runtime field whose readable half came from
-a formatter nothing regenerated — a newly gated step drew a pie titled `{GUID} · {root}` until
-somebody hand-edited the export.
+Names are set on the records by the orchestrator and the processors themselves, resolved from
+`skp:name:{id}` in L2 (`{name}_{version}-{last two GUID groups}`; an unresolved id logs the suffix
+alone). There is no ingest pipeline and no lookup index any more. The whitelist board splits on the
+pair `attributes.StepName` + `attributes.WhitelistRoot` (`multi_terms`, one pie per pair);
+`WhitelistOwner` is retired. The Workflow control's pinned value is environment-specific: run
+`python tools/offline/pin-workflow-control.py --workflow filefetcher-archiveexpander-chain_1.0.0`
+against the stack's Redis before importing this export. The script resolves the live workflow id
+from BaseApi's own registry (`--api-url`, default `http://localhost:18080`) rather than scanning L2
+directly, because a rebuild leaves stale `skp:name:*` entries behind under the old id; pass
+`--api-url` when the stack's BaseApi is not on the default address (the offline machine's usually
+is not), or `--workflow-id` to skip the registry lookup entirely.
 
 ### What this replaced, and what went with it
 
@@ -94,6 +97,9 @@ One guarantee is common to all three designs and worth restating: a control list
 in the field**, so a step that has never executed is in no dropdown. Under the current design that
 is structural rather than incidental — the name is stamped onto records, and a step that never ran
 has none.
+
+The `logs@custom` enrich pipeline that replaced the `static_lookup` formatter was itself retired on
+2026-09-29.
 
 ## Why the dropdowns carry a filter
 
@@ -251,10 +257,10 @@ A refusal is logged from a catch block, where the handler's own log scope has al
 by the unwinding exception — so for a long time these records carried no ids at all and could not be
 paired to anything. `MessageIdHeaders` now stamps six `x-skp-*` AMQP headers at send and the
 consumer lifts them back under the **log-scope** names, so a refusal lands on the same
-`attributes.WorkflowId` / `StepId` / `ProcessorId` fields an outcome does — which is what lets
-`logs@custom` enrich it to `attributes.WorkflowName` and what makes the controls at the top of this
-board filter it like anything else. The headers survive into the dead-letter queue too, so the same
-ids appear on the log line and on the parked message.
+`attributes.WorkflowId` / `StepId` / `ProcessorId` fields an outcome does — which is what lets the
+gated consumer set `attributes.WorkflowName` and the rest directly on the refusal line, and what
+makes the controls at the top of this board filter it like anything else. The headers survive into
+the dead-letter queue too, so the same ids appear on the log line and on the parked message.
 
 **`missingBucket` is true on every dimension of both panels, deliberately.** A refusal whose body
 would not deserialize, or one predating the header stamping, has no workflow id — and a refusal

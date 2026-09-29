@@ -122,6 +122,15 @@ internal sealed class L2ProjectionWriter
             }
         }
 
+        // THE NAMES, in the same pipelined batch. Not a transaction: if any write fails the message is
+        // redelivered and this whole method runs again, exactly as for the keys above. Never cleaned up
+        // on stop -- entities are shared across workflows and records keep arriving after a stop -- so
+        // they are deliberately absent from the root and from L2Cleanup's key list.
+        foreach (var (id, name) in workflow.Names ?? new Dictionary<Guid, string>())
+        {
+            writes.Add(batch.StringSetAsync(L2ProjectionKeys.Name(id), name));
+        }
+
         batch.Execute();
         await Task.WhenAll(writes).ConfigureAwait(false);
     }

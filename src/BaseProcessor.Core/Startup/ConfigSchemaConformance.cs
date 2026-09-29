@@ -70,9 +70,9 @@ internal static class ConfigSchemaConformance
             : new HashSet<string>(StringComparer.Ordinal);
 
         // The record's own properties. ProcessorConfig declares no instance members — only a static
-        // SerializerOptions — so nothing from the base leaks in, and an inherited positional (see
-        // KafkaImporterConfig, whose MessageCount and IdleTimeoutSeconds are declared on
-        // ImporterConfig) is picked up correctly because GetProperties walks the hierarchy.
+        // SerializerOptions — so nothing from the base leaks in, and an inherited positional (a config
+        // record deriving from another) is picked up correctly because GetProperties walks the
+        // hierarchy.
         var members = configType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(x => x.CanRead && x.Name != "EqualityContract")

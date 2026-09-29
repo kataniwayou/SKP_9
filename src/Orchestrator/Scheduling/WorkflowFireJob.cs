@@ -1,5 +1,6 @@
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Messaging;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging;
@@ -52,7 +53,8 @@ public sealed class WorkflowFireJob(
     IQueueSender sender,
     LeaderState leaderState,
     L2Gate gate,
-    ILogger<WorkflowFireJob> logger) : IJob
+    ILogger<WorkflowFireJob> logger,
+    EntityNameResolver? names = null) : IJob
 {
     /// <summary>
     /// <c>Never</c> from the API's <c>StepEntryCondition</c>, as an int — the same reach-across
@@ -90,6 +92,9 @@ public sealed class WorkflowFireJob(
         using (logger.BeginScope(ExecutionLogScope.BuildScope(
                    Guid.Empty, workflowId, Guid.Empty, Guid.Empty, Guid.Empty)))
         {
+            using var workflowName = logger.BeginNamesScope(
+                await names.ScopeOrNullAsync(workflowId, Guid.Empty, Guid.Empty).ConfigureAwait(false));
+
             // ACTIVE, not merely held. A stop marks the L1 entry and leaves it in place so steps still
             // in flight can resolve against the definition, so "is it in L1" no longer answers "may it
             // dispatch". Reading the marked entry here would have a stopped workflow keep firing.
@@ -260,6 +265,9 @@ public sealed class WorkflowFireJob(
 
             using (logger.BeginScope(state))
             {
+                using var stepNames = logger.BeginNamesScope(
+                    await names.ScopeOrNullAsync(Guid.Empty, step.StepId, step.ProcessorId).ConfigureAwait(false));
+
                 if (step.EntryCondition == Never)
                 {
                     logger.LogInformation(

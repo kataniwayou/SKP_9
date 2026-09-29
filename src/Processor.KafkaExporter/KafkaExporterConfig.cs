@@ -18,11 +18,11 @@ namespace Processor.KafkaExporter;
 /// step.</b> An export handles exactly one input — the branch the orchestrator dispatched — so there
 /// is nothing to count and no group to join. <c>DeliveryTimeoutSeconds</c> is the one field with no
 /// counterpart on the importer: see <c>KafkaProducerSettings</c> for why waiting for an
-/// acknowledgement needs a bound that the author, not the framework, chooses. It lives on
-/// <c>ExporterConfig</c> now, because the framework validates it; it is passed straight through this
-/// record's own primary constructor, so the JSON shape is unchanged.
+/// acknowledgement needs a bound that the author, not the framework, chooses.
+/// <c>KafkaExporterProcessor</c> validates it against <c>KafkaProducerSettings.MinimumDeliveryTimeout</c>
+/// before building a producer. The JSON shape is unchanged.
 /// </para>
 /// </summary>
 public sealed record KafkaExporterConfig(
     string Topic,
-    int DeliveryTimeoutSeconds) : ExporterConfig(DeliveryTimeoutSeconds);
+    int DeliveryTimeoutSeconds) : ProcessorConfig;

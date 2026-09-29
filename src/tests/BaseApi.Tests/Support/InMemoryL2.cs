@@ -132,6 +132,11 @@ internal sealed class InMemoryL2
                 ? (RedisValue)value
                 : RedisValue.Null);
 
+        // MGET. The name resolver reads all of a record's ids in one round trip.
+        target.StringGetAsync(Arg.Any<RedisKey[]>())
+            .Returns(ci => ci.ArgAt<RedisKey[]>(0)
+                .Select(k => _strings.TryGetValue(k.ToString(), out var value) ? (RedisValue)value : RedisValue.Null)
+                .ToArray());
 
         target.KeyExistsAsync(Arg.Any<RedisKey>())
             .Returns(ci => _strings.ContainsKey(ci.ArgAt<RedisKey>(0).ToString()));

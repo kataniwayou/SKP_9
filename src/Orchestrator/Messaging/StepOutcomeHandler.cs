@@ -217,14 +217,30 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // EXACTLY, so a duplicate inflated the count and breached an invariant the chaos
         // ledger checks. Duplicates that genuinely re-advance still log it, because they take
         // the whole path below; only the ones that do nothing are now silent about it.
-        // Guid.Empty is not a key. It arrives on three shapes the processor produces — a failed source
-        // step, an output that failed its schema, and a cancellation of a source step — and it means
-        // there is no blob: nothing to read, nothing to copy, nothing to reclaim. The successors are
-        // handed empty data and dispatched with the same sentinel, which the processor's pre handler
-        // already reads as "no upstream input, the author produces its own".
-        var data = m.EntryId == Guid.Empty
-            ? []
-            : await ReadAsync(m.EntryId).ConfigureAwait(false);
+        // Guid.Empty is not a key. It arrives on three shapes the processor produces — a source step's
+        // Failed or Cancelled outcome, an output that failed its schema, and a branch sent with no
+        // data — and it means there is no blob: nothing to read, nothing to copy, nothing to reclaim.
+        // The successors are handed empty data and dispatched with the same sentinel, which the
+        // processor's pre handler already reads as "no upstream input, the author produces its own".
+        //
+        // ONLY A COMPLETED OUTCOME'S BLOB IS DATA (spec D6). A Failed or Cancelled outcome names the
+        // step's input purely so it can be reclaimed; its successors run on empty data. The existence
+        // check replaces the read as the duplicate guard, and the delete stays LAST, after every
+        // hand-off: a hand-off that fails is redelivered and must still find the key, or the
+        // successors would never be dispatched.
+        byte[]? data;
+        if (m.EntryId == Guid.Empty)
+        {
+            data = [];
+        }
+        else if (m.Result == StepResult.Completed)
+        {
+            data = await ReadAsync(m.EntryId).ConfigureAwait(false);
+        }
+        else
+        {
+            data = await ExistsAsync(m.EntryId).ConfigureAwait(false) ? [] : null;
+        }
 
         // The duplicate-delivery branch. Returning HERE is what makes acking safe: it precedes every
         // hand-off and the reclaim, so a second attempt at an outcome advances nothing and deletes
@@ -277,7 +293,8 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // One hand-off per matched successor, each with its own freshly minted key. The mint is
         // NewGuid, matching the processor: a redelivery of this outcome mints new keys and hands the
         // successors off a second time, so a step whose ack was lost advances twice. The reclaim below
-        // is what keeps that narrow — the redelivery finds the source blob gone and parks instead.
+        // is what keeps that narrow — the redelivery finds the source blob gone and is acked with a
+        // Warning, treating it as a duplicate delivery, instead.
         foreach (var next in selection.Matches)
         {
             // No blob means no key: the successor is dispatched as a source step rather than pointed
@@ -369,8 +386,9 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     /// </summary>
     private async Task ReclaimAsync(Guid entryId)
     {
-        // Guid.Empty is not a key: a failed source step, an output that failed its schema and a
-        // cancelled source step all report it, and it means there is no blob to reclaim.
+        // Guid.Empty is not a key: a source step's Failed or Cancelled outcome, an output that failed
+        // its schema, and a branch sent with no data all report it, and it means there is no blob to
+        // reclaim.
         if (entryId == Guid.Empty)
         {
             return;
@@ -380,6 +398,19 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
         await _redis.GetDatabase()
             .KeyDeleteAsync(L2ProjectionKeys.ExecutionData(entryId))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether a Failed or Cancelled outcome's input key is still present. Absent means an earlier
+    /// delivery of this outcome already advanced and reclaimed it.
+    /// </summary>
+    private async Task<bool> ExistsAsync(Guid entryId)
+    {
+        _logger.LogDebug("checking the finished step's input is still in L2");
+
+        return await _redis.GetDatabase()
+            .KeyExistsAsync(L2ProjectionKeys.ExecutionData(entryId))
             .ConfigureAwait(false);
     }
 

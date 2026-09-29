@@ -1,5 +1,6 @@
 using BaseApi.Tests.Support;
 using BaseConsole.Core.Gating;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -151,6 +152,9 @@ public sealed class WorkflowFireJobTests
 
         public WorkflowFireJob Build() => new(
             Store, Scheduler, Sender, State, Gate, Log);
+
+        public WorkflowFireJob BuildNamed(EntityNameResolver names) => new(
+            Store, Scheduler, Sender, State, Gate, Log, names);
 
         /// <summary>
         /// The flattened scope of the one record matching <paramref name="template"/>, or null if no
@@ -639,5 +643,22 @@ public sealed class WorkflowFireJobTests
         await h.Build().Execute(h.Context(W, h.JobId));
 
         Assert.Null(h.ScopeOf("dispatched an entry step"));
+    }
+
+    [Fact]
+    public async Task AFireNamesTheWorkflowAndEachEntryStepsStepAndProcessor()
+    {
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
+        var names = new EntityNameResolver(
+            new FakeNameSource(new() { [W] = "wf_1.0.0-x", [S1] = "s1_1.0.0-x", [P1] = "p1_1.0.0-x" }),
+            NullLogger<EntityNameResolver>.Instance);
+
+        await h.BuildNamed(names).Execute(h.Context(W, h.JobId));
+
+        var scope = h.ScopeOf("dispatched an entry step");
+        Assert.NotNull(scope);
+        Assert.Equal("wf_1.0.0-x", scope![EntityNames.WorkflowName]);
+        Assert.Equal("s1_1.0.0-x", scope[EntityNames.StepName]);
+        Assert.Equal("p1_1.0.0-x", scope[EntityNames.ProcessorName]);
     }
 }

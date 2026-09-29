@@ -94,47 +94,6 @@ public abstract class BaseProcessor
     internal void EndDispatch() => Volatile.Write(ref _dispatch, null);
 
     /// <summary>
-    /// True for an author that deliberately produces no branch, so returning normally IS the end of
-    /// the lineage. False everywhere else, which is every transform and every source.
-    /// <para>
-    /// <b>The pre handler reports a terminal outcome on this, and it must be a property of the CLASS
-    /// rather than an observation of the dispatch.</b> "Sent no branch" looks like the same
-    /// condition and is not: a <c>BaseImporter</c> whose source drained sends no branch either, and
-    /// reporting Completed for it would advance every successor gated on
-    /// <c>PreviousCompleted</c> — dispatching the rest of the workflow on an empty topic. That step
-    /// produced nothing because there was nothing to produce; this one produces nothing because
-    /// producing nothing is what it does.
-    /// </para>
-    /// </summary>
-    internal virtual bool EndsLineage => false;
-
-    /// <summary>
-    /// Whether this processor may legitimately return having sent no branch at all.
-    /// <para>
-    /// <b>False for a transform, and that is the point.</b> A transform reports its outcome only
-    /// through the branch it sends, so returning without one ends the lineage with no outcome —
-    /// which <c>ProcessDispatchHandler</c> logs as an error, because nothing else says the chain
-    /// stopped.
-    /// </para>
-    /// <para>
-    /// <b>True for a source.</b> An importer's dispatch is a "go and fetch" instruction, not a step
-    /// in a lineage: each item it reads opens its OWN lineage with its own execution id, and the
-    /// outcome is reported per lineage rather than per dispatch. A poll that finds the source drained
-    /// therefore opens no lineage, sends no branch, and has nothing to report an outcome for — it is
-    /// an ordinary empty batch, and it already says so with "consumed 0/{Requested} records". Holding
-    /// it to the transform's rule would fire an error on every quiet poll, which is how a diagnostic
-    /// becomes noise an operator learns to scroll past.
-    /// </para>
-    /// <para>
-    /// Distinct from <see cref="EndsLineage"/>, which is about the other end: a sink consumes a
-    /// lineage and sends nothing onward, and the framework reports ITS outcome itself. Both suppress
-    /// the check, for opposite reasons, and collapsing them into one flag would make a sink and a
-    /// source indistinguishable in the one place the difference decides who reports the outcome.
-    /// </para>
-    /// </summary>
-    internal virtual bool MaySendNoBranch => false;
-
-    /// <summary>
     /// The concrete <c>TConfig</c> this author binds its step payload to, so startup can check the
     /// registered config schema actually describes it.
     /// <para>
@@ -153,6 +112,19 @@ public abstract class BaseProcessor
     /// supplies the bytes and the execution id and nothing else — an author cannot influence the ids
     /// on its own output, and the four it does not supply are the dispatch's own, passed through
     /// unchanged.
+    /// </para>
+    /// <para>
+    /// <b>No data is a branch too.</b> <paramref name="processedData"/> null or empty sends a branch
+    /// with <see cref="Guid.Empty"/> as its entry id: nothing is written to L2, the output schema is
+    /// not applied, and the step reports Completed. It still counts as having sent a branch. An
+    /// author that intends to pass data on must check that it is non-empty first.
+    /// </para>
+    /// <para>
+    /// <b>Never catch <see cref="PostSendException"/>.</b> Nothing stops an author catching it, but it
+    /// must propagate: the framework redelivers the dispatch and replays the author, which is a
+    /// duplicate. Swallowing it, or rethrowing it as <see cref="FailedException"/>, reports a
+    /// success as a failure and runs the workflow's PreviousFailed successors. This system always
+    /// takes the duplicate.
     /// </para>
     /// <para>
     /// <b>The entry id is random, and that is a decision with a cost.</b> A redelivered dispatch
@@ -177,16 +149,21 @@ public abstract class BaseProcessor
     /// is a decision only they can make. <see cref="NewExecutionId"/> mints one.
     /// </para>
     /// </summary>
-    protected async Task SendToPostAsync(byte[] processedData, Guid executionId, CancellationToken ct)
+    protected async Task SendToPostAsync(byte[]? processedData, Guid executionId, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(processedData);
+        // NO DATA IS A LEGAL BRANCH (spec D4). Null and empty are the same thing, and null never
+        // reaches the wire. A no-data branch names no L2 key: Guid.Empty is the sentinel every hop
+        // already reads as "no blob", so the post handler writes nothing and the orchestrator reads
+        // nothing. An author that means to pass data on must check it is non-empty BEFORE calling
+        // this -- an empty document sent by mistake is a Completed step with no output.
+        var data = processedData ?? [];
 
         var state = Current;
-        var entryId = Guid.NewGuid();
+        var entryId = data.Length == 0 ? Guid.Empty : Guid.NewGuid();
 
         var branch = new ProcessedData(
             state.CorrelationId, executionId, state.WorkflowId, state.StepId, state.ProcessorId,
-            entryId, processedData);
+            entryId, data);
 
         try
         {

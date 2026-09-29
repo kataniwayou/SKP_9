@@ -8,8 +8,7 @@ namespace Processor.ArchiveCollapser;
 /// <summary>
 /// Turns one structured document back into one raw file. The inverse of
 /// <c>ArchiveExpanderProcessor</c>, and like it a plain downstream transform: it has an input and it
-/// produces output, so it is not an edge and neither <c>BaseImporter</c> nor <c>BaseExporter</c>
-/// applies.
+/// produces output, and it sends one branch per input.
 /// <para>
 /// <b>It performs no file IO.</b> There is no <c>FileInfo</c> in this assembly and no volume mount
 /// on this pod. The document arrives on the branch and the archive leaves on one.

@@ -94,8 +94,9 @@ public sealed class ProcessorOutcomeRecorderTests
     [Fact]
     public async Task OpensALineageWhenItWasHandedNone()
     {
-        // Without this the exporter step downstream is dispatched as an entry step and trips
-        // BaseExporter's edge guard, so an importer's outcome would never be exported.
+        // Without this the exporter step downstream is dispatched as an entry step and
+        // is refused by kafka-exporter for having no execution id, so an importer's outcome would
+        // never be exported.
         var sent = await Run([], Guid.Empty);
 
         Assert.NotEqual(Guid.Empty, sent.ExecutionId);

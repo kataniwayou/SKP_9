@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using BaseConsole.Core.Gating;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.DependencyInjection;
@@ -50,6 +51,7 @@ public sealed class GatedQueueConsumer : BackgroundService
     private readonly GatedConsumerOptions _options;
     private readonly IConsumerAdmission _admission;
     private readonly ILogger<GatedQueueConsumer> _logger;
+    private readonly EntityNameResolver? _names;
 
     // Initial count 0, maximum 1: a signal arriving while one is already pending is absorbed, because
     // the loop reconciles against current state rather than replaying a queue of edges.
@@ -68,7 +70,8 @@ public sealed class GatedQueueConsumer : BackgroundService
         IServiceScopeFactory scopes,
         IOptions<GatedConsumerOptions> options,
         IConsumerAdmission admission,
-        ILogger<GatedQueueConsumer> logger)
+        ILogger<GatedQueueConsumer> logger,
+        EntityNameResolver? names = null)
     {
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _gate       = gate ?? throw new ArgumentNullException(nameof(gate));
@@ -76,6 +79,7 @@ public sealed class GatedQueueConsumer : BackgroundService
         _options    = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _admission  = admission ?? throw new ArgumentNullException(nameof(admission));
         _logger     = logger ?? throw new ArgumentNullException(nameof(logger));
+        _names      = names;
     }
 
     /// <summary>Whether the consumer currently holds a subscription to the queue.</summary>
@@ -331,6 +335,19 @@ public sealed class GatedQueueConsumer : BackgroundService
                 Record("requeued", "gate_closed");
                 return;
             }
+
+            // THE NAMES SCOPE, opened HERE and not around HandleAsync alone. The park line below is
+            // logged in the catch, after the unwinding exception has disposed every scope opened
+            // inside the try -- which is why that line re-reads its ids from the headers. A scope at
+            // this level encloses the try AND the catch, so every record of this delivery carries the
+            // names: the handler's, the processor's, and the park line. Resolving never throws.
+            //
+            // ScopeOrNullAsync is awaited for the VALUE only; BeginNamesScope then opens it
+            // synchronously, in THIS frame -- see EntityNameScopeExtensions' remarks for why the two
+            // cannot be combined into one awaited helper without the scope silently never taking hold.
+            var (workflowId, stepId, processorId) = MessageIdHeaders.ReadIds(headers);
+            using var names = _logger.BeginNamesScope(
+                await _names.ScopeOrNullAsync(workflowId, stepId, processorId).ConfigureAwait(false));
 
             // Copy out of the transport buffer, which is pooled and valid only for this callback.
             var body = ea.Body.ToArray();

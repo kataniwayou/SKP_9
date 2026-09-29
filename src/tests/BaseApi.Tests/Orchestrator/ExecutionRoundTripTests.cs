@@ -216,11 +216,10 @@ public sealed class ExecutionRoundTripTests
     }
 
     [Fact]
-    public async Task AFailedStepsInputIsHandedToTheFailureBranchAndReclaimed()
+    public async Task AFailedStepsSuccessorReceivesNoDataAndTheInputIsReclaimed()
     {
-        // A failed outcome names the step's own INPUT, because its author never returned and the pre
-        // handler skipped the reclaim. So the failure branch runs on the same input the failed step
-        // had, and the key that would otherwise leak forever is reclaimed on the way through.
+        // Spec D6: a Failed outcome's EntryId is only something to clean up. The failure branch runs
+        // as a source step on empty data, and the failed step's input is still reclaimed.
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 2, "{}"));
         Seed(h, Entry, Output);
 
@@ -229,8 +228,75 @@ public sealed class ExecutionRoundTripTests
 
         var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
         Assert.Equal(B, dispatch.StepId);
-        Assert.Equal(Output, h.L2.Value(L2ProjectionKeys.ExecutionData(dispatch.EntryId)));
+        Assert.Equal(Guid.Empty, dispatch.EntryId);
         Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+        Assert.Empty(h.L2.Keys());
+    }
+
+    [Theory]
+    [InlineData(StepResult.Failed)]
+    [InlineData(StepResult.Cancelled)]
+    public async Task AFailedOrCancelledOutcomeNeverReadsTheBlob(StepResult result)
+    {
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, Always, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(result, Entry));
+
+        await h.L2.Db.DidNotReceive().StringGetAsync(
+            (RedisKey)L2ProjectionKeys.ExecutionData(Entry), Arg.Any<CommandFlags>());
+        await h.L2.Db.Received(1).KeyExistsAsync(
+            (RedisKey)L2ProjectionKeys.ExecutionData(Entry), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task ADuplicateFailedOutcomeAdvancesNothing()
+    {
+        // The existence check is the guard. The first delivery reclaimed the key, so this one finds
+        // it absent and does nothing, exactly as the read-based guard did.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 2, "{}"));
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
+        await h.Drain();
+
+        Assert.Empty(h.Bus.Sent);
+        Assert.Contains(h.PreLog.Records,
+            e => e.Level == LogLevel.Warning && e.Message.Contains("duplicate delivery", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AFailedOutcomeWhoseHandOffFailsKeepsItsKeyForTheReplay()
+    {
+        // Review focus 4, and the reason DEL is last rather than the guard: if DEL ran first, this
+        // redelivery would find the key gone and the failure branch would never be dispatched.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 2, "{}"));
+        Seed(h, Entry, Output);
+        h.Bus.FaultOn = t => t == MessageTypes.NextStepHandoff
+            ? new TransientSendException("broker blip", new IOException("reset"))
+            : null;
+
+        await Assert.ThrowsAsync<TransientSendException>(
+            () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry)));
+        Assert.True(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+
+        h.Bus.FaultOn = null;
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
+        await h.Drain();
+
+        Assert.Single(h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch));
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+    }
+
+    [Fact]
+    public async Task ACompletedOutcomeWithNoKeyEndsATerminalStep()
+    {
+        // The exporter's no-data branch: Completed naming Guid.Empty on a step with no successor.
+        var h = new Harness(Step(A, PA, 1, "{}"));
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Guid.Empty));
+
+        Assert.Empty(h.Bus.Sent);
+        Assert.NotNull(h.ScopeOf(TerminalTemplate));
     }
 
     [Fact]
@@ -800,10 +866,11 @@ public sealed class ExecutionRoundTripTests
     [Fact]
     public async Task ATerminalOutcomeCarriesTheTerminalRunPosition()
     {
-        // The termination counter selects on this rather than on the template, because two different
-        // templates in this deployment begin "the terminal step completed" -- this one, and the
-        // exporter's own "there is no output to hand on". A prefix match over-counts by the second;
-        // an attribute cannot be confused with it at all.
+        // The termination counter selects on this rather than on the template, because only the
+        // orchestrator's own "the terminal step completed" line carries it. The exporter's
+        // processor-side witness -- ProcessedDataHandler's "branch completed in {ElapsedMs}ms" -- is
+        // a different record entirely and never carries this attribute, so it cannot be confused
+        // with it at all.
         var h = new Harness(Step(A, PA, 1, "{}"));
         Seed(h, Entry, Output);
 

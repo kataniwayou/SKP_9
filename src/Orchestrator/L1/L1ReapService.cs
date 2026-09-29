@@ -1,4 +1,6 @@
 using BaseConsole.Core.Loop;
+using BaseConsole.Core.Naming;
+using Messaging.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -75,17 +77,20 @@ public sealed class L1ReapService : BackgroundService
     private readonly TimeProvider _clock;
     private readonly ILoopHeartbeat _heartbeat;
     private readonly ILogger<L1ReapService> _logger;
+    private readonly EntityNameResolver? _names;
 
     public L1ReapService(
         WorkflowL1Store store,
         TimeProvider clock,
         [FromKeyedServices(LoopName)] ILoopHeartbeat heartbeat,
-        ILogger<L1ReapService> logger)
+        ILogger<L1ReapService> logger,
+        EntityNameResolver? names = null)
     {
         _store     = store ?? throw new ArgumentNullException(nameof(store));
         _clock     = clock ?? throw new ArgumentNullException(nameof(clock));
         _heartbeat = heartbeat ?? throw new ArgumentNullException(nameof(heartbeat));
         _logger    = logger ?? throw new ArgumentNullException(nameof(logger));
+        _names     = names;
     }
 
     /// <summary>
@@ -159,8 +164,16 @@ public sealed class L1ReapService : BackgroundService
         // Information, and naming the ids. This is the only record that a stopped workflow stopped
         // being resolvable, so an outcome parked just after one of these lines is explained by it —
         // and without the ids that pairing needs a guess.
-        _logger.LogInformation(
-            "reaped {ReapedCount} workflow(s) stopped more than {GracePeriod} ago: {WorkflowIds}",
-            reaped.Count, GracePeriod, string.Join(", ", reaped));
+        //
+        // One record names several workflows, so a per-workflow scope does not fit: the names ride as
+        // one list beside the ids. From the cache -- a reaped workflow was active, so its name was
+        // resolved when it fired -- and the keys outlive a stop, so the fallback is rare.
+        var reapedNames = string.Join(", ", reaped.Select(id => _names?.NameOrFallback(id) ?? EntityNames.Fallback(id)));
+        using (_logger.BeginScope(new Dictionary<string, object> { [EntityNames.WorkflowNames] = reapedNames }))
+        {
+            _logger.LogInformation(
+                "reaped {ReapedCount} workflow(s) stopped more than {GracePeriod} ago: {WorkflowIds}",
+                reaped.Count, GracePeriod, string.Join(", ", reaped));
+        }
     }
 }

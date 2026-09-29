@@ -8,8 +8,8 @@ namespace Processor.FilePersister;
 
 /// <summary>
 /// Turns a file's bytes and its identity back into a file on disk, and reports where it went. The
-/// mirror of <c>FileFetcherProcessor</c>: a plain transform with an input and an output, so it is
-/// not an edge and neither <c>BaseImporter</c> nor <c>BaseExporter</c> applies.
+/// mirror of <c>FileFetcherProcessor</c>: a plain transform with an input and an output, and it
+/// sends one branch per input.
 /// <para>
 /// <b>The path is minted here, and that is the counterpart of the fetcher discarding it.</b>
 /// FileFetcher receives a path, opens it, and writes no path into the envelope — deliberately, so

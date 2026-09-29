@@ -13,11 +13,9 @@ namespace BaseProcessor.Core.Processing;
 /// <summary>
 /// Finishes one branch: validate the output, persist it, report the outcome.
 /// <para>
-/// <b>It is not the only place an outcome comes from, and it stopped being so on 2026-09-11.</b> An
-/// author that ends the lineage produces no branch, so this handler never runs for it and its
-/// terminal outcome is reported by <c>ProcessDispatchHandler</c> instead — see
-/// <see cref="BaseProcessor.EndsLineage"/>. The summary above is scoped to a branch, and a sink has
-/// none; read it as "every branch's outcome" rather than "every outcome".
+/// <b>A branch with no data</b> is how an author reports Completed with nothing to hand on. It skips
+/// the output schema and the L2 write and reports <see cref="Guid.Empty"/>. See
+/// <see cref="BaseProcessor.SendToPostAsync"/>.
 /// </para>
 /// <para>
 /// <b>Every branch is keyed by an entry id that rides the message body</b>, so a redelivery of THIS
@@ -132,6 +130,25 @@ internal sealed class ProcessedDataHandler : IQueueMessageHandler
             throw new InvalidOperationException(
                 $"Output schema {outputSchemaId:D} has not resolved yet, so the output cannot be "
                 + "validated — the work queue must not be bound before the processor reaches Healthy.");
+        }
+
+        // A BRANCH WITH NO DATA (spec D4): the author finished and has nothing to hand on. There is
+        // no document to validate and no blob to write, so neither happens. The outcome names
+        // Guid.Empty, which the orchestrator reads as "nothing to read or reclaim": a terminal step
+        // ends the run there, a non-terminal one hands its successors empty data.
+        if (p.Data is not { Length: > 0 })
+        {
+            await SendAsync(
+                new StepOutcome(p.CorrelationId, p.ExecutionId, p.WorkflowId, p.StepId, p.ProcessorId,
+                                Guid.Empty, StepResult.Completed), ct).ConfigureAwait(false);
+
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Completed)))
+            {
+                _logger.LogInformation(
+                    "branch completed in {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            }
+
+            return;
         }
 
         if (!ProcessorJsonSchemaValidator.TryValidate(identity.OutputDefinition, p.Data, out var errors))

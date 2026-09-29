@@ -63,6 +63,13 @@ internal sealed class FakeRecordConsumer : IRecordConsumer
         return this;
     }
 
+    /// <summary>A record whose value is null, which is how Confluent hands over a tombstone.</summary>
+    public FakeRecordConsumer WithTombstone()
+    {
+        _records.Enqueue(new KafkaRecord(null, $"records [0] @{_records.Count}"));
+        return this;
+    }
+
     public void Subscribe(string topic) => Subscribed.Add(topic);
 
     public bool WaitForAssignment(TimeSpan timeout)
@@ -130,7 +137,7 @@ internal sealed class FakeRecordConsumer : IRecordConsumer
             throw new KafkaException(Fault);
         }
 
-        Committed.Add(Encoding.UTF8.GetString(record.Value));
+        Committed.Add(record.Value is null ? "<tombstone>" : Encoding.UTF8.GetString(record.Value));
     }
 
     public void Close() => Closed = true;

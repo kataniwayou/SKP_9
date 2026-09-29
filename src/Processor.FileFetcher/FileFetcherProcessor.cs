@@ -8,8 +8,7 @@ namespace Processor.FileFetcher;
 
 /// <summary>
 /// Turns a file path into the file's bytes and its identity. A plain downstream transform: it has an
-/// input and it produces output, so it is not an edge and neither <c>BaseImporter</c> nor
-/// <c>BaseExporter</c> applies.
+/// input and it produces output, and it sends one branch per input.
 /// <para>
 /// <b>It never opens a file it has not already admitted.</b> Every check below reads
 /// <c>FileInfo</c>, which reads metadata only, so a file that fails one is never opened at all.

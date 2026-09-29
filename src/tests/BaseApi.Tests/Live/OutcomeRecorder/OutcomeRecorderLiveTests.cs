@@ -183,7 +183,7 @@ public sealed class OutcomeRecorderLiveTests
     /// <para>
     /// <b>Deliberately no <c>severity_text</c> filter, unlike <see cref="WarningsAsync"/>.</b> The
     /// line that carries the failed FILE PATH is not a warning at all -- it is
-    /// <c>BaseImporter.ProcessAsync</c>'s ordinary "imported record {Record} as execution
+    /// <c>KafkaImporterProcessor.ProcessAsync</c>'s ordinary "imported record {Record} as execution
     /// {ExecutionId} from {Origin}" line, logged at entry time, before anything downstream has had a
     /// chance to fail. Filtering to Warning would silently exclude the only line this test cares
     /// about.
@@ -331,7 +331,7 @@ public sealed class OutcomeRecorderLiveTests
         //   chain, where the literal absolute path ever appears.
         // - KafkaImporterProcessor.Describe renders that record value VERBATIM into the entry-step
         //   log line ("imported record {Record} as execution {ExecutionId} from {Origin}", written
-        //   by BaseImporter.ProcessAsync). That line is logged once, at the moment the path is
+        //   by KafkaImporterProcessor.ProcessAsync). That line is logged once, at the moment the path is
         //   opened, before anything downstream can fail -- so it survives independently of whatever
         //   the normalizer later does to the file's CONTENT.
         // - Every hop after the importer passes an ENVELOPE (bytes + ids), never the source path.
@@ -509,13 +509,13 @@ public sealed class OutcomeRecorderLiveTests
             // accessor in Task 1 exists.
             //
             // CORRECTED FROM THE BRIEF: the brief expected "was not ready within", which is
-            // BaseImporter's message for the OTHER way an importer can fail to open — Open() returning
+            // KafkaImporterProcessor's message for the OTHER way an importer can fail to open — Open() returning
             // false after librdkafka quietly times out waiting for a partition assignment (see
-            // src/BaseProcessor.Core/Edge/BaseImporter.cs, "{SourceName(config)} was not ready within
+            // src/Processor.KafkaImporter/KafkaImporterProcessor.cs, "{SourceName(config)} was not ready within
             // {idle}"). That is what happens against a topic that EXISTS but is never assigned to this
             // group. It is not what happens here: "skp-nothing-publishes-here" does not exist at all, so
             // librdkafka surfaces UnknownTopicOrPart as an exception during WaitForAssignment, which
-            // Open() lets through and BaseImporter converts on the OTHER branch — the catch around
+            // Open() lets through and KafkaImporterProcessor converts on the OTHER branch — the catch around
             // source.Open(idle) — into "opening {SourceName(config)} failed: {ex.Message}". Both branches
             // fail the step before any lineage opens (Rent/Open happens before the read loop that mints
             // an execution id), so the record's shape — no executionId — is exactly what the brief

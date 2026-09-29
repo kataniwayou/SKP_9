@@ -2,6 +2,7 @@ using BaseConsole.Core.DependencyInjection;
 using BaseConsole.Core.Health;
 using BaseConsole.Core.Loop;
 using BaseConsole.Core.Messaging;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Configuration;
@@ -217,6 +218,10 @@ public static class OrchestratorHost
         builder.Services.AddSingleton<WorkflowL1Store>();
         builder.Services.AddSingleton<L2WorkflowReader>();
         builder.Services.AddSingleton<WorkflowActivator>();
+
+        // The orchestrator's name source is its one Redis reader, registered AHEAD of
+        // AddBaseConsoleGating, whose TryAdd of the plain Redis source then does nothing.
+        builder.Services.AddSingleton<IEntityNameSource>(sp => sp.GetRequiredService<L2WorkflowReader>());
 
         // The leadership gate, and the election that writes it. The gate is registered
         // unconditionally because every fire on every replica reads it; the election is registered
