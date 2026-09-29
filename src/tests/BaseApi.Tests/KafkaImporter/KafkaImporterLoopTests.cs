@@ -212,24 +212,11 @@ public sealed class KafkaImporterLoopTests
     }
 
     /// <summary>
-    /// <b>THIS FACT WAS INVERTED, and the inversion is the point of the edge guard.</b> It used to
-    /// assert that a dispatch carrying a lineage was IGNORED — the importer minted per record anyway
-    /// and the inbound id simply went unused. Silently doing the right thing with a wrong dispatch is
-    /// still a wrong dispatch: an importer wired downstream of another step ran on every hand-off and
-    /// nothing said so.
-    /// <para>
-    /// Now it refuses. <c>ExecutionId</c> alone decides what an edge is — an entry dispatch carries
-    /// <see cref="Guid.Empty"/> and a downstream one carries the lineage it belongs to — so a
-    /// non-empty id here means the workflow wires this step downstream, which it cannot be: every
-    /// record is the origin of its own lineage, so there is none it could continue.
-    /// </para>
-    /// <para>
-    /// It refuses BEFORE it opens anything: nothing is consumed and no branch is sent, so a
-    /// mis-wired workflow cannot half-run.
-    /// </para>
+    /// Spec D2: the framework has no executionId rules and this author chose to ignore its input
+    /// id. Every record still opens its own lineage.
     /// </summary>
     [Fact]
-    public async Task FailsTheStepWhenItIsDispatchedInsideALineage()
+    public async Task IgnoresAnInboundExecutionIdAndMintsPerRecord()
     {
         var inbound = Guid.Parse("99999999-9999-9999-9999-999999999999");
         var consumer = new FakeRecordConsumer().WithRecords("value-a", "value-b");
@@ -239,30 +226,11 @@ public sealed class KafkaImporterLoopTests
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        var failed = await Assert.ThrowsAsync<FailedException>(() =>
-            processor.ExecuteAsync([], Payload(2), inbound, CancellationToken.None));
+        await processor.ExecuteAsync([], Payload(2), inbound, CancellationToken.None);
 
-        Assert.Contains(inbound.ToString(), failed.Message);
-        Assert.Empty(sends);
-        Assert.Empty(consumer.Committed);
-    }
-
-    /// <summary>
-    /// The guard runs BEFORE the payload check, so a step that is both mis-wired and mis-authored
-    /// reports the wiring. Reaching the payload check first would name a symptom: an operator would
-    /// go and write the payload the message asked for, and the step would still be in the wrong place.
-    /// </summary>
-    [Fact]
-    public async Task NamesTheWiringRatherThanTheMissingPayloadWhenBothAreWrong()
-    {
-        var inbound = Guid.Parse("99999999-9999-9999-9999-999999999999");
-        var (processor, _, _) = Build(new FakeRecordConsumerFactory(new FakeRecordConsumer()));
-
-        var failed = await Assert.ThrowsAsync<FailedException>(() =>
-            processor.ExecuteAsync([], "", inbound, CancellationToken.None));
-
-        Assert.Contains("entry step", failed.Message);
-        Assert.DoesNotContain("step payload", failed.Message);
+        Assert.Equal(2, sends.Count);
+        Assert.DoesNotContain(inbound, sends.Select(s => s.ExecutionId));
+        Assert.Equal(2, sends.Select(s => s.ExecutionId).Distinct().Count());
     }
 
     // ---- As is -----------------------------------------------------------------------------
@@ -376,8 +344,13 @@ public sealed class KafkaImporterLoopTests
     /// sent kept — the next dispatch re-subscribes, and if the fault is genuinely permanent it
     /// surfaces there, where it does fail the step.
     /// </summary>
+    /// <summary>
+    /// A fault before anything was sent fails the step: the source broke, and "no branches" would
+    /// otherwise read exactly like an empty topic. The summary line is still written first, so the
+    /// poll stays countable.
+    /// </summary>
     [Fact]
-    public async Task StopsAtFaultedWhenConsumeThrowsADeterministicFault()
+    public async Task FailsTheStepWhenConsumeFaultsBeforeAnythingWasSent()
     {
         var consumer = new FakeRecordConsumer
         {
@@ -386,10 +359,12 @@ public sealed class KafkaImporterLoopTests
         }.WithRecords("value-a");
         var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
 
-        var sends = await Run(processor, sender, messageCount: 10);
+        var failed = await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
 
-        Assert.Empty(sends);
+        Assert.Contains("records", failed.Message);
         Assert.Contains("consumed 0/10 records; stopped because Faulted", Summary(log));
+        Assert.True(consumer.Disposed);
     }
 
     /// <summary>
@@ -455,5 +430,103 @@ public sealed class KafkaImporterLoopTests
         await Run(processor, sender, messageCount: 1);
 
         Assert.Equal(["records"], consumer.Subscribed);
+    }
+
+    // ---- Nothing to import -----------------------------------------------------------------
+
+    /// <summary>
+    /// An empty poll is a Cancelled step (spec: "Every empty poll becomes a Cancelled run"). The
+    /// summary line with Consumed=0 comes first, because the Analyst's run-boundary panel counts it.
+    /// </summary>
+    [Fact]
+    public async Task CancelsWhenTheTopicHasNothingToRead()
+    {
+        var consumer = new FakeRecordConsumer();
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        await Assert.ThrowsAsync<CancelledException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("consumed 0/10 records; stopped because Drained", Summary(log));
+        await sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProcessedData>(),
+                                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task SkipsAndCommitsEmptyAndTombstoneRecordsWithoutSendingThem()
+    {
+        var consumer = new FakeRecordConsumer().WithRecords("value-a");
+        consumer.WithTombstone();
+        consumer.WithRecords(Array.Empty<byte>());
+        consumer.WithRecords("value-b");
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        var sends = await Run(processor, sender, messageCount: 10);
+
+        Assert.Equal(["value-a", "value-b"], sends.Select(ValueIn));
+        Assert.Equal(["value-a", "<tombstone>", "", "value-b"], consumer.Committed);
+        Assert.Equal(2, log.Records.Count(r => r.Message.StartsWith("skipped an empty record at", StringComparison.Ordinal)));
+        Assert.Contains("consumed 2/10 records; stopped because Drained", Summary(log));
+    }
+
+    [Fact]
+    public async Task NeverLogsTheContentOfASkippedRecord()
+    {
+        var consumer = new FakeRecordConsumer().WithTombstone();
+        consumer.WithRecords("value-a");
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        await Run(processor, sender, messageCount: 10);
+
+        var skip = log.Records.Single(r => r.Message.StartsWith("skipped an empty record at", StringComparison.Ordinal));
+        Assert.Contains("records [0] @0", skip.Message);
+    }
+
+    [Fact]
+    public async Task CancelsWhenEveryRecordReadWasEmpty()
+    {
+        var consumer = new FakeRecordConsumer().WithTombstone();
+        consumer.WithRecords(Array.Empty<byte>());
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        var cancelled = await Assert.ThrowsAsync<CancelledException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("empty", cancelled.Message);
+        Assert.Equal(["<tombstone>", ""], consumer.Committed);
+        Assert.Contains("consumed 0/10 records; stopped because Drained", Summary(log));
+    }
+
+    /// <summary>
+    /// Review focus 2: the source broke on the commit of a skipped record before anything was sent.
+    /// That is a Failed step, not an empty poll.
+    /// </summary>
+    [Fact]
+    public async Task FailsWhenCommittingASkippedRecordFaultsBeforeAnythingWasSent()
+    {
+        var consumer = new FakeRecordConsumer { CommitThrowsOnCall = 1 }.WithTombstone();
+        consumer.WithRecords("value-a");
+        var (processor, _, _) = Build(new FakeRecordConsumerFactory(consumer));
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// A skipped record takes a slot of MessageCount, so a topic full of tombstones cannot hold one
+    /// dispatch for ever.
+    /// </summary>
+    [Fact]
+    public async Task CountsSkippedRecordsAgainstTheRequestedCount()
+    {
+        var consumer = new FakeRecordConsumer().WithTombstone();
+        consumer.WithTombstone();
+        consumer.WithRecords("value-a");
+        var (processor, _, _) = Build(new FakeRecordConsumerFactory(consumer));
+
+        await Assert.ThrowsAsync<CancelledException>(() =>
+            processor.ExecuteAsync([], Payload(2), Guid.Empty, CancellationToken.None));
+
+        Assert.Equal(["<tombstone>", "<tombstone>"], consumer.Committed);
     }
 }

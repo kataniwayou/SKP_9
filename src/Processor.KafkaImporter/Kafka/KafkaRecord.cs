@@ -22,5 +22,10 @@ namespace Processor.KafkaImporter.Kafka;
 /// contract wants — <c>Commit</c> asks "is this the record I handed out", not "is this an equal one"
 /// — but it is worth knowing before anyone reaches for <c>==</c> expecting a value comparison.
 /// </para>
+/// <para>
+/// <b><paramref name="Value"/> is null for a tombstone.</b> Confluent hands a tombstone's value over
+/// as null. The importer skips it, and skips an empty value too, committing the offset so the record
+/// is never read again.
+/// </para>
 /// </summary>
-public sealed record KafkaRecord(byte[] Value, string Offset);
+public sealed record KafkaRecord(byte[]? Value, string Offset);

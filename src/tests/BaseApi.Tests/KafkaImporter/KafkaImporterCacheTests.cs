@@ -46,7 +46,8 @@ public sealed class KafkaImporterCacheTests
         var processor = Build(factory);
 
         await processor.ExecuteAsync([], Payload("records"), Guid.Empty, CancellationToken.None);
-        await processor.ExecuteAsync([], Payload("records"), Guid.Empty, CancellationToken.None);
+        await Assert.ThrowsAsync<CancelledException>(() =>
+            processor.ExecuteAsync([], Payload("records"), Guid.Empty, CancellationToken.None));
 
         Assert.Equal(1, factory.Created);
     }
@@ -95,7 +96,8 @@ public sealed class KafkaImporterCacheTests
         var factory = new FakeRecordConsumerFactory(faulted, fresh);
         var processor = Build(factory);
 
-        await processor.ExecuteAsync([], Payload("records"), Guid.Empty, CancellationToken.None);
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload("records"), Guid.Empty, CancellationToken.None));
         await processor.ExecuteAsync([], Payload("records"), Guid.Empty, CancellationToken.None);
 
         Assert.Equal(2, factory.Created);
