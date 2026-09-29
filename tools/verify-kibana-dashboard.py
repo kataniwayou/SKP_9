@@ -19,8 +19,8 @@ WHAT CHANGED WHEN THE ELASTICSEARCH OBJECTS WENT AWAY:
     this script reads that same formatter map, so it resolves an id exactly as a viewer sees it.
   * Check 12 no longer asserts that a never-run step is listable. The naming records that made that
     true were removed from OrchestrationService; see that method and check 12's own docstring.
-  * Check 5 reaches 10 of 10 steps rather than 8, because a terminal step now reports its own
-    outcome and carries an EntryId.
+  * Check 5 skips kafka-importer and kafka-exporter by design (no input key and a no-data branch)
+    and fails on any other entry-less record.
 
 RUN THIS FROM POWERSHELL against live port-forwards:
     ./k8s/port-forward-realstack.ps1
@@ -62,6 +62,10 @@ COUNTED_KQL = 'attributes.Result:* and not resource.attributes.service.name:"orc
 # The dashboard that owns COUNTED_KQL. Named so check 11 can say "this one states the rule"
 # rather than "there is one dashboard".
 OUTCOMES_DASHBOARD = "skp-operator-outcomes"
+
+# Processors whose counted records legitimately carry no EntryId since 2026-09-29: a source step's
+# dispatch has no input key, and the exporter reports Completed through a branch with no data.
+EXPECTED_ENTRYLESS = {"kafka-importer", "kafka-exporter"}
 
 # A refusal: the one Error record GatedQueueConsumer writes, on both sides, when it rejects a
 # delivery without requeue and the broker dead-letters it. THE SEVERITY HALF IS LOAD-BEARING, not
@@ -329,11 +333,10 @@ def check_5_one_witness_per_step(checks, es_url, window):
     sharing one ExecutionId. EntryId separates the branches. Keyed on two fields this check reports
     ~15 "duplicates" per 10 minutes on a perfectly healthy run.
 
-    IT NOW COVERS ALL TEN STEPS. It used to skip the terminal-step Completed records - kafka-exporter
-    and nothing else - because the orchestrator's copy carried no EntryId and two legitimate branch
-    terminations could not be told from one outcome logged twice. The processor now reports that
-    outcome itself, inside the dispatch handler's ambient scope, so it carries the dispatch's own
-    EntryId like every other record here.
+    TWO PROCESSORS ARE SKIPPED BY DESIGN since 2026-09-29. kafka-importer's outcomes belong to a
+    source step, which has no input key, and kafka-exporter reports Completed through a branch with
+    no data. ExecutionLogScope omits an empty EntryId, so neither can join the triple. Any other
+    processor appearing among the skips fails the check.
 
     ONE RESIDUAL GAP, and it is smaller than the one it replaced: a step that is BOTH an entry step
     and a terminal step produced its own input, so its EntryId is Guid.Empty and ExecutionLogScope
@@ -353,7 +356,8 @@ def check_5_one_witness_per_step(checks, es_url, window):
                     "size": 10000, "min_doc_count": 2}}},
             },
             "no_entry": {"filter": {"bool": {"must_not": [{"exists": {"field": "attributes.EntryId"}}]}},
-                         "aggs": {"steps": {"terms": {"field": "attributes.StepId", "size": 20}}}},
+                         "aggs": {"services": {"terms": {"field": "resource.attributes.service.name",
+                                                         "size": 20}}}},
         },
     }
     try:
@@ -361,18 +365,24 @@ def check_5_one_witness_per_step(checks, es_url, window):
         offenders = result["aggregations"]["with_entry"]["triples"]["buckets"]
         checked = result["aggregations"]["with_entry"]["doc_count"]
         skipped = result["aggregations"]["no_entry"]["doc_count"]
+        skip_services = {b["key"]: b["doc_count"]
+                         for b in result["aggregations"]["no_entry"]["services"]["buckets"]}
     except Exception as exc:  # noqa: BLE001
         return checks.report(5, "One witness per step", False, f"{type(exc).__name__}: {exc}")
 
-    detail = f"{checked} records checked, {skipped} skipped for want of an EntryId"
+    unexpected = {s: n for s, n in skip_services.items() if s not in EXPECTED_ENTRYLESS}
+    detail = (f"{checked} records checked, {skipped} skipped for want of an EntryId "
+              f"({skip_services or 'none'})")
     if offenders:
         sample = [(b["key"], b["doc_count"]) for b in offenders[:3]]
         return checks.report(5, "One witness per step", False,
                              f"{len(offenders)} duplicated triple(s), e.g. {sample} - {detail}")
-    # A skip is no longer expected. If one appears, an entry-and-terminal step has been published
-    # and the operator notes need to say so.
-    return checks.report(5, "One witness per step", skipped == 0,
-                         f"no duplicated triple - {detail}")
+    # Skips are expected from the importer (source step) and the exporter (no-data branch) only. A
+    # skip from anything else means a new entry-less outcome shape was introduced, and the operator
+    # notes need to say so.
+    return checks.report(5, "One witness per step", not unexpected,
+                         f"no duplicated triple - {detail}"
+                         + (f"; UNEXPECTED entry-less records from {unexpected}" if unexpected else ""))
 
 
 def check_6_every_step_has_a_bin(checks, es_url, window, names, workflow_id):

@@ -461,12 +461,11 @@ internal static class PanelRegistry
                 "entry ABOVE ZERO WITH TERMINAL AT ZERO is the one unambiguous finding: the " +
                 "workflow is alive -- the schedule fired, the leader held the lease, the gate was " +
                 "open, the dispatch reached a queue -- and nothing completed. " +
-                "BEFORE REPORTING THAT, CHECK drainedPolls. An importer that read no records opens " +
-                "no lineage and correctly produces no terminal, so a fire it drove could not have " +
-                "ended and its absence is not loss. drainedPolls out of importerPolls is how many " +
-                "fires were no-ops. If drainedPolls accounts for the missing terminals, the " +
-                "workflow is idle for want of input, which is not a defect and not a finding; if " +
-                "terminals are missing BEYOND what drainedPolls explains, work is being lost. " +
+                "drainedPolls out of importerPolls is how many fires found nothing to read. Such a " +
+                "fire is NOT missing a terminal: the importer reports Cancelled, which the " +
+                "orchestrator records as that fire's terminal, so an idle workflow sits near 1:1 " +
+                "rather than at terminal zero. Never explain missing terminals with drainedPolls; " +
+                "a fire with no terminal is work that started and did not finish. " +
                 "entry AT ZERO means the workflow did not fire at all: stopped, no leader " +
                 "dispatching, or the projection store gate shut. " +
                 "Both counts are records rather than distinct runs, on purpose: deduplicating by " +
