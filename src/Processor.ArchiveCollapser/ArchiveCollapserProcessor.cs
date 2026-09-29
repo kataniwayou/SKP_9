@@ -50,7 +50,7 @@ internal sealed class ArchiveCollapserProcessor(
             // the reason ArchiveWritingException records. Bare Exception is deliberately NOT caught:
             // a NullReferenceException in the builder is a programming error, and reporting it as a
             // bad document buries a bug under a plausible business failure.
-            throw new FailedException($"collapsing {root.Metadata.Name} failed: {ex.Message}");
+            throw new FailedException($"collapsing {root.Metadata.Name} failed: {ex.Message}", ex);
         }
 
         // The SHAPE of the result, never its content. A count, a size and a depth are safe to log;

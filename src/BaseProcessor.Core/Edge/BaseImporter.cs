@@ -178,7 +178,7 @@ public abstract class BaseImporter<TConfig>(ILogger logger) : BaseProcessor<TCon
         catch (ImportSourceException ex)
         {
             // Rent evicts before it builds and caches only on success, so there is nothing left here.
-            throw new FailedException($"opening {SourceName(config)} failed: {ex.Message}");
+            throw new FailedException($"opening {SourceName(config)} failed: {ex.Message}", ex);
         }
 
         bool ready;
@@ -189,7 +189,7 @@ public abstract class BaseImporter<TConfig>(ILogger logger) : BaseProcessor<TCon
         catch (ImportSourceException ex)
         {
             Evict();
-            throw new FailedException($"opening {SourceName(config)} failed: {ex.Message}");
+            throw new FailedException($"opening {SourceName(config)} failed: {ex.Message}", ex);
         }
 
         // A false return, not a throw, is what an outage of the far side actually produces: measured

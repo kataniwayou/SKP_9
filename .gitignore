@@ -442,15 +442,15 @@ analyzer-reports/phase-88-screenshots/
 # Restore is offline: NuGet.config clears nuget.org and every source is a folder in this repo. A
 # clone that did not carry them could not restore at all, and neither could the Docker builds, which
 # copy these folders into the build context before `dotnet restore`. Two feeds are covered -- the
-# vendored third-party one, and each packable project's own nuget/<version>/ output.
+# vendored third-party one, and each packable project's own nugets/<version>/ output.
 #
 # This block used to sit above as `!nugets/` alone and did nothing, because a later `nugets/` rule
 # re-ignored the directory and git cannot un-ignore a file inside an ignored directory. That is why
 # the offline feed was untracked for as long as it was.
 !nugets/
 !nugets/*.nupkg
-!src/*/nuget/
-!src/*/nuget/**
+!src/*/nugets/
+!src/*/nugets/**
 
 # Subagent-driven-development scratch (ledger, briefs, review packages).
 .superpowers/

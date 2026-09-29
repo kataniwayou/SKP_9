@@ -173,7 +173,7 @@ public abstract class BaseExporter<TConfig>(ILogger logger) : BaseProcessor<TCon
         }
         catch (ExportSinkException ex)
         {
-            throw new FailedException($"building a sink for {destination} failed: {ex.Message}");
+            throw new FailedException($"building a sink for {destination} failed: {ex.Message}", ex);
         }
 
         string landed;
@@ -188,7 +188,7 @@ public abstract class BaseExporter<TConfig>(ILogger logger) : BaseProcessor<TCon
             // that fails every write stays cached for the life of the pod, and every dispatch that
             // lands on this replica fails against it.
             Evict();
-            throw new FailedException($"exporting to {destination} failed: {ex.Message}");
+            throw new FailedException($"exporting to {destination} failed: {ex.Message}", ex);
         }
 
         // The record this processor exists to produce, and the counterpart to the importer's

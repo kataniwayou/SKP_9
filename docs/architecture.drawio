@@ -1,0 +1,141 @@
+<mxGraphModel dx="1600" dy="1200" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0" adaptiveColors="auto">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+
+    <mxCell id="clients" value="&lt;b&gt;Operators / HTTP clients&lt;/b&gt;&lt;br&gt;curl · kubectl port-forward · integration tests&lt;br&gt;POST /api/v1/processors, /workflows, /steps, /assignments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;align=center;verticalAlign=middle;" vertex="1" parent="1">
+      <mxGeometry x="560" y="30" width="520" height="70" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="cp" value="Control plane — namespace &lt;b&gt;skp&lt;/b&gt; (kind cluster &quot;desktop&quot;)" style="swimlane;whiteSpace=wrap;html=1;startSize=32;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#1a1a1a;horizontal=1;rounded=1;arcSize=4;" vertex="1" parent="1">
+      <mxGeometry x="40" y="150" width="1560" height="200" as="geometry"/>
+    </mxCell>
+    <mxCell id="api" value="&lt;b&gt;BaseApi.Service&lt;/b&gt; (Deployment)&lt;br&gt;&lt;br&gt;ASP.NET Core REST · EF Core migrations applied on startup&lt;br&gt;Features: Workflow · Step · Assignment · Processor&lt;br&gt;Schema · Lookup · Orchestration · Cache&lt;br&gt;/health/startup flips green only once the schema is in place" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontColor=#1a1a1a;align=center;" vertex="1" parent="cp">
+      <mxGeometry x="40" y="50" width="700" height="130" as="geometry"/>
+    </mxCell>
+    <mxCell id="orch" value="&lt;b&gt;Orchestrator&lt;/b&gt; (StatefulSet, 3 replicas — never scale down)&lt;br&gt;&lt;br&gt;Election: leader election · Scheduling: cron WorkflowScheduler&lt;br&gt;Hydration: L2 read + admission gate · L1: WorkflowL1Store, reaper&lt;br&gt;Dispatch: StepAdvancement · per-replica fan-out queue&lt;br&gt;orchestrator-control.orchestrator-N bound to orchestrator-fanout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontColor=#1a1a1a;align=center;" vertex="1" parent="cp">
+      <mxGeometry x="820" y="50" width="700" height="130" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="mq" value="&lt;b&gt;RabbitMQ&lt;/b&gt; — driven by Messaging.Transport over Messaging.Contracts&lt;br&gt;orchestrator-fanout (Start/Stop announcements, assignment changes) · per-processor work queues · NextStepHandoff · StepResult&lt;br&gt;QueueSender with publisher confirms · QueueDepthProbe / QueueStatsProbe on their own connection (skp-probe) · SendFaultClassifier · dead-letter pairs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#1a1a1a;align=center;verticalAlign=middle;" vertex="1" parent="1">
+      <mxGeometry x="40" y="420" width="1560" height="110" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="procs" value="Processors — every one is the &lt;b&gt;BaseProcessor.Core&lt;/b&gt; shell (Boot · Identity/SourceHash · Liveness · Edge · Processing · Validation · Health)" style="swimlane;whiteSpace=wrap;html=1;startSize=32;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#1a1a1a;rounded=1;arcSize=4;" vertex="1" parent="1">
+      <mxGeometry x="40" y="600" width="1560" height="300" as="geometry"/>
+    </mxCell>
+    <mxCell id="p1" value="&lt;b&gt;Processor.Sample&lt;/b&gt;&lt;br&gt;discovery shell" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="30" y="55" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p2" value="&lt;b&gt;Processor.FileFetcher&lt;/b&gt;&lt;br&gt;acquires source files" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="335" y="55" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p3" value="&lt;b&gt;Processor.ArchiveExpander&lt;/b&gt;&lt;br&gt;unpacks archives" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="640" y="55" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p4" value="&lt;b&gt;Processor.ArchiveCollapser&lt;/b&gt;&lt;br&gt;repacks archives" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="945" y="55" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p5" value="&lt;b&gt;Processor.FilePersister&lt;/b&gt;&lt;br&gt;writes results out" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="1250" y="55" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p6" value="&lt;b&gt;Processor.SKNormalizer&lt;/b&gt;&lt;br&gt;normalises payloads" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="30" y="175" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p7" value="&lt;b&gt;Processor.KafkaImporter&lt;/b&gt;&lt;br&gt;ingests from Kafka" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="335" y="175" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p8" value="&lt;b&gt;Processor.KafkaExporter&lt;/b&gt;&lt;br&gt;publishes to Kafka" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="640" y="175" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p9" value="&lt;b&gt;Processor.OutcomeRecorder&lt;/b&gt;&lt;br&gt;terminal-step outcomes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="945" y="175" width="285" height="95" as="geometry"/>
+    </mxCell>
+    <mxCell id="p10" value="&lt;b&gt;Processor.Analyst&lt;/b&gt;&lt;br&gt;run analysis / monitor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontColor=#1a1a1a;" vertex="1" parent="procs">
+      <mxGeometry x="1250" y="175" width="285" height="95" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="data" value="State" style="swimlane;whiteSpace=wrap;html=1;startSize=30;fillColor=#f8cecc;strokeColor=#b85450;fontColor=#1a1a1a;rounded=1;arcSize=4;" vertex="1" parent="1">
+      <mxGeometry x="40" y="960" width="740" height="180" as="geometry"/>
+    </mxCell>
+    <mxCell id="pg" value="&lt;b&gt;Postgres&lt;/b&gt; · StatefulSet&lt;br&gt;&lt;br&gt;system of record:&lt;br&gt;workflows, steps, assignments,&lt;br&gt;processors, frozen schema&lt;br&gt;definitions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontColor=#1a1a1a;" vertex="1" parent="data">
+      <mxGeometry x="25" y="45" width="220" height="120" as="geometry"/>
+    </mxCell>
+    <mxCell id="redis" value="&lt;b&gt;Redis&lt;/b&gt; · StatefulSet&lt;br&gt;&lt;br&gt;L2 projections, read once at&lt;br&gt;workflow start ·&lt;br&gt;per-replica liveness keys&lt;br&gt;skp:proc:{id}:{pod}, TTL 40s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontColor=#1a1a1a;" vertex="1" parent="data">
+      <mxGeometry x="260" y="45" width="220" height="120" as="geometry"/>
+    </mxCell>
+    <mxCell id="kafka" value="&lt;b&gt;Kafka&lt;/b&gt; · external&lt;br&gt;skp-kafka.kind&lt;br&gt;&lt;br&gt;import / export edge;&lt;br&gt;bootstrap FAIL at startup&lt;br&gt;self-recovers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontColor=#1a1a1a;dashed=1;" vertex="1" parent="data">
+      <mxGeometry x="495" y="45" width="220" height="120" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="obs" value="Observability — OTLP to otel-collector:4317, best-effort (fails quietly if nothing is listening)" style="swimlane;whiteSpace=wrap;html=1;startSize=30;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#1a1a1a;rounded=1;arcSize=4;" vertex="1" parent="1">
+      <mxGeometry x="860" y="960" width="740" height="180" as="geometry"/>
+    </mxCell>
+    <mxCell id="otel" value="&lt;b&gt;OTel Collector&lt;/b&gt;&lt;br&gt;OTLP gRPC 4317&lt;br&gt;metrics · logs · traces" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontColor=#1a1a1a;" vertex="1" parent="obs">
+      <mxGeometry x="25" y="45" width="200" height="120" as="geometry"/>
+    </mxCell>
+    <mxCell id="prom" value="&lt;b&gt;Prometheus&lt;/b&gt;&lt;br&gt;15s per series&lt;br&gt;↓&lt;br&gt;&lt;b&gt;Grafana&lt;/b&gt; 11.1.0&lt;br&gt;hand-imported dashboards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontColor=#1a1a1a;" vertex="1" parent="obs">
+      <mxGeometry x="255" y="45" width="220" height="120" as="geometry"/>
+    </mxCell>
+    <mxCell id="es" value="&lt;b&gt;Elasticsearch&lt;/b&gt;&lt;br&gt;structured log records&lt;br&gt;↓&lt;br&gt;&lt;b&gt;Kibana&lt;/b&gt;&lt;br&gt;skp-logs data view" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontColor=#1a1a1a;" vertex="1" parent="obs">
+      <mxGeometry x="505" y="45" width="210" height="120" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="libs" value="&lt;b&gt;Shared libraries&lt;/b&gt;, consumed as packages from the local nugets/ feed&amp;nbsp;—&amp;nbsp; &lt;b&gt;BaseApi.Core&lt;/b&gt; API host primitives&amp;nbsp;·&amp;nbsp;&lt;b&gt;BaseConsole.Core&lt;/b&gt; console host&amp;nbsp;·&amp;nbsp;&lt;b&gt;BaseProcessor.Core&lt;/b&gt; processor shell&amp;nbsp;·&amp;nbsp;&lt;b&gt;Messaging.Transport&lt;/b&gt; RabbitMQ + metrics&amp;nbsp;·&amp;nbsp;&lt;b&gt;Messaging.Contracts&lt;/b&gt; wire types" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;align=center;" vertex="1" parent="1">
+      <mxGeometry x="40" y="1180" width="1560" height="60" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="e1" value="REST" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#666666;fontColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="clients" target="api">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e2" value="reads workflow / step / assignment rows" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#6c8ebf;fontColor=#1a1a1a;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="cp" source="orch" target="api">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e3" value="EF Core" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#b85450;fontColor=#1a1a1a;exitX=0.08;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="api" target="pg">
+      <mxGeometry x="-0.88" relative="1" as="geometry">
+        <mxPoint as="offset"/>
+        <Array as="points"><mxPoint x="175" y="930"/></Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="e4" value="writes L2 projections" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#b85450;fontColor=#1a1a1a;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="api" target="redis">
+      <mxGeometry x="-0.88" relative="1" as="geometry">
+        <mxPoint as="offset"/>
+        <Array as="points"><mxPoint x="410" y="945"/></Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="e5" value="hydrate L2 at workflow start" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#b85450;fontColor=#1a1a1a;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="orch" target="redis">
+      <mxGeometry x="-0.72" relative="1" as="geometry">
+        <mxPoint as="offset"/>
+        <Array as="points"><mxPoint x="1625" y="1105"/><mxPoint x="800" y="1105"/></Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="e6" value="announcements + dispatch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#d79b00;fontColor=#1a1a1a;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.72;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="orch" target="mq">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e7" value="StepResult / NextStepHandoff" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#d79b00;fontColor=#1a1a1a;exitX=0.93;exitY=0;exitDx=0;exitDy=0;entryX=0.93;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="mq" target="orch">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e8" value="ExecutionMessage on per-processor work queues" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;startArrow=block;strokeColor=#82b366;fontColor=#1a1a1a;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.3;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="mq" target="procs">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e9" value="identity: resolve SourceHash to a processor row (readiness)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#6c8ebf;fontColor=#1a1a1a;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;verticalAlign=bottom;" edge="1" parent="1" source="procs" target="api">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points"><mxPoint x="15" y="750"/><mxPoint x="15" y="330"/></Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="e10" value="liveness beat, 10s" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#b85450;fontColor=#1a1a1a;exitX=0.2;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="procs" target="redis">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e11" value="consume / produce" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;startArrow=block;dashed=1;strokeColor=#b85450;fontColor=#1a1a1a;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="p8" target="kafka">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e12" value="OTLP" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#9673a6;fontColor=#1a1a1a;exitX=0.85;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="procs" target="otel">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e13" value="OTLP" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#9673a6;fontColor=#1a1a1a;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.2;entryDx=0;entryDy=0;" edge="1" parent="1" source="mq" target="obs">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points"><mxPoint x="1635" y="475"/><mxPoint x="1635" y="996"/></Array>
+      </mxGeometry>
+    </mxCell>
+  </root>
+</mxGraphModel>

@@ -132,6 +132,7 @@ public static class ProcessorHost
         // own — configureServices exists for a test to substitute fakes, not because either
         // registration is missing.
         builder.Services.AddSingleton<BitCache>(_ => new BitCache(capacity: 8));
+        builder.Services.AddSingleton<GroundTruthRehearsal>();
         builder.Services.AddSingleton<PreflightBit>();
         builder.Services.AddSingleton<InvestigationLoop>();
 
@@ -161,8 +162,13 @@ public static class ProcessorHost
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             });
 
+        // Every model call goes through this decorator, so the gate's ballots, the rehearsal's two
+        // investigations and the real analysis are all counted without any of them knowing.
+        builder.Services.AddSingleton<Model.TokenMeter>();
         builder.Services.AddSingleton<Model.IAnalystModel>(serviceProvider =>
-            serviceProvider.GetRequiredService<Model.KimiAnalystModel>());
+            new Model.MeteredAnalystModel(
+                serviceProvider.GetRequiredService<Model.KimiAnalystModel>(),
+                serviceProvider.GetRequiredService<Model.TokenMeter>()));
 
         builder.Services.Configure<Panels.PanelSourceOptions>(builder.Configuration.GetSection("Analyst:Panels"));
 

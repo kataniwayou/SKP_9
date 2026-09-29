@@ -15,14 +15,26 @@ namespace BaseProcessor.Core.Processing;
 /// log scope carries. Author-authored text is safe to render verbatim there; a framework-caught
 /// exception's message is not, and no longer has any route to the wire to be kept off.
 /// </para>
+/// <para>
+/// <b>Pass the cause as <paramref name="innerException"/> whenever translating one.</b> The message
+/// summarises; the inner exception is the only thing that says WHY. An author that reports
+/// "the model backend could not be reached" and drops the <c>SocketException</c> underneath has
+/// produced a step failure nobody can diagnose -- the distinction between DNS, a refused connection
+/// and a TLS fault is gone, and the pod holding the detail is usually gone too by the time anyone
+/// looks. <c>ProcessDispatchHandler</c> logs this exception object, so an inner exception reaches
+/// Elasticsearch as exception.type, exception.message and exception.stacktrace. It never reaches the
+/// wire: a StepOutcome still carries no text.
+/// </para>
 /// </summary>
-public abstract class ProcessStatusException(string message) : Exception(message);
+public abstract class ProcessStatusException(string message, Exception? innerException = null)
+    : Exception(message, innerException);
 
 /// <summary>
 /// The step failed for a business reason. Reported as a <c>StepOutcome</c> of
 /// <c>StepResult.Failed</c>, whose entry id names the input this step did not consume.
 /// </summary>
-public sealed class FailedException(string message) : ProcessStatusException(message);
+public sealed class FailedException(string message, Exception? innerException = null)
+    : ProcessStatusException(message, innerException);
 
 /// <summary>
 /// The step ended its branch and wants the orchestrator told. Reported as a <c>StepOutcome</c> of
@@ -33,4 +45,5 @@ public sealed class FailedException(string message) : ProcessStatusException(mes
 /// predecessor needs to know it happened.
 /// </para>
 /// </summary>
-public sealed class CancelledException(string message) : ProcessStatusException(message);
+public sealed class CancelledException(string message, Exception? innerException = null)
+    : ProcessStatusException(message, innerException);

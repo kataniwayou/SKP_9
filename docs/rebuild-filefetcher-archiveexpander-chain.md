@@ -16,7 +16,7 @@ Everything you need is in this file. Follow it top to bottom.
   processor, a processor needs its schemas, an assignment needs its step, the workflow needs
   both. Step 5 exists because a fan-in cannot be written in one pass.
 - If a request fails, stop and read Appendix C before retrying. Most failures here are one of
-  five known shapes and retrying unchanged fixes none of them.
+  nine known shapes and retrying unchanged fixes none of them.
 
 ## The graph you are building
 
@@ -52,14 +52,15 @@ Three things about this shape are easy to get wrong and are checked by the API a
 
 - `split-archivecollapser` is reached from **two** parents — `sk-normalizer-sample` directly and
   `sk-normalizer-alphabeta` after it. That is a diamond, not a cycle, and it is intentional.
-- `record-outcome` is a fan-in from all nine other steps. It is the reason the edges are written
-  in a second pass.
+- `record-outcome` is a fan-in from eight parents — every step on the success path. It is the reason
+  the edges are written in a second pass. Not nine: `export-outcome` is `record-outcome`'s own child
+  and points at nothing, so it is the one step on the graph that does not name it.
 - `sk-normalizer` appears **twice**, as two steps on one processor row. Do not create the
   processor twice — `sourceHash` is unique and the second create returns 409.
 
 ## Step 1 — preconditions
 
-Before the first request, confirm all four. Do not start without them.
+Before the first request, confirm all five. Do not start without them.
 
 1. **BaseApi is reachable and the database is migrated.**
    `GET {API}/api/v1/workflows` must return `200` and a JSON array. A `404` means the route
@@ -82,6 +83,19 @@ Before the first request, confirm all four. Do not start without them.
 
 4. **Redis and the broker are up.** Step 8 reads per-replica liveness out of Redis; the
    processors' identity handshake goes over the broker.
+
+5. **The output folder exists and the three topics exist.** Neither is a row, so no gate looks at
+   either and step 8 returns `202` without them — both fail later, per document, and neither failure
+   resembles its cause.
+   - `/mnt/skp-files/out`, the folder §6.9 writes into, **must already exist on the FilePersister
+     pod's mount.** The processor refuses to create it, because an absent folder means the volume is
+     not mounted rather than that a directory is missing: `FolderPath '…' does not exist; this
+     processor does not create it`. Every persist then fails and takes the `record-outcome` edge.
+   - `skp-paths`, `skp-documents` and `skp-failures` must exist on the broker. This repo does not
+     rely on `auto.create.topics.enable` — it defaults on, but it is a broker setting this repo does
+     not own, so a chain that depends on it breaks when someone else turns it off. An absent
+     `skp-paths` presents exactly as C6: the cron fires, nothing is imported, and nothing anywhere
+     is an error.
 
 ## Step 2 — create the 10 schema rows
 
@@ -283,7 +297,7 @@ Content-Type: application/json
   "name": "kafka-importer",
   "version": "2.2.0",
   "description": "reads a topic, one lineage per record; broker from Kafka__BrokerList, not the payload",
-  "sourceHash": "5845e6092ad7e663c101337abc02c12b0a3c3a91f0dd3f85ccba783ba2c4a146",
+  "sourceHash": "dcd83ec93cfada86eaf477a43a565914de8112fab3d62d54c628f417de56ac62",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": "<file-locator>",
@@ -303,7 +317,7 @@ Content-Type: application/json
   "name": "file-fetcher",
   "version": "1.0.0",
   "description": "path in, file bytes plus identity out",
-  "sourceHash": "027294898cf4b0d2b7ec2572da9e3ca58d19b0f36d73f0f807984a9989ad0a5e",
+  "sourceHash": "8fa4fe0b9c527cb7f50ab79a91bd2d07769cc2569277de8583333ec56c749f22",
   "instanceId": null,
   "inputSchemaId": "<file-locator>",
   "outputSchemaId": "<file-envelope>",
@@ -343,7 +357,7 @@ Content-Type: application/json
   "name": "archive-expander",
   "version": "1.0.0",
   "description": "envelope in, structured document out",
-  "sourceHash": "86a8c25b0031b21917e36334f636171c128ab521027ec7d54c7526d67fa226b8",
+  "sourceHash": "cfefe29785ad7a7089e7616fc2f3ffcee33e48f9909a14a11a459ab2bb070157",
   "instanceId": null,
   "inputSchemaId": "<file-envelope>",
   "outputSchemaId": "<archive-document>",
@@ -363,7 +377,7 @@ Content-Type: application/json
   "name": "kafka-exporter",
   "version": "1.2.0",
   "description": "produces a branch to a topic and ends the lineage; broker from Kafka__BrokerList, not the payload. Input is file-locator, the mirror of what KafkaImporter emits -- so a topic this writes is a topic an importer can read.",
-  "sourceHash": "c734986e5cbd0d12e96823c9d3bbff8d7f660bd4db67e7e1d24bc21148f729af",
+  "sourceHash": "ba7df85269267a1032838c998a926f14ac5b8be14d2472e32675cd2c62c0343c",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": null,
@@ -383,7 +397,7 @@ Content-Type: application/json
   "name": "sk-normalizer",
   "version": "1.0.0",
   "description": "Applies one provider handler, named on the step payload, to the {metadata, content} tree ArchiveExpander produces, and emits a tree of the same contract. Input and output both point at the shared archive-document row: the handler changes contents, never the document's shape.",
-  "sourceHash": "3cbcea12534663cc4bdb17ae73616173f4b0068e3f10e2d5be09bd760969317d",
+  "sourceHash": "8e656abb119e8af86bd75a56df8ab69ae4094eb571849c6308d8f0e5eb8f8585",
   "instanceId": null,
   "inputSchemaId": "<archive-document>",
   "outputSchemaId": "<archive-document>",
@@ -403,7 +417,7 @@ Content-Type: application/json
   "name": "archive-collapser",
   "version": "1.0.0",
   "description": "Packs an ArchiveExpander document back into one archive; emits the raw-file envelope",
-  "sourceHash": "4e5a9b96ad34aa3a6156c9f2b323f34e192fbdf607bcb4b406799772ae0599f3",
+  "sourceHash": "57496c6e0b3bef184f1a567b17ac3636b77f67ef8214b5e1070ae6585a76d3e2",
   "instanceId": null,
   "inputSchemaId": "<archive-document>",
   "outputSchemaId": "<file-envelope>",
@@ -423,7 +437,7 @@ Content-Type: application/json
   "name": "file-persister",
   "version": "1.0.0",
   "description": "writes the envelope's file into a configured folder and reports the absolute path; the mirror of file-fetcher",
-  "sourceHash": "584ebcbe83f6d68a7881e809639777e053d9ba1f5519d2fe37718f4687ade662",
+  "sourceHash": "7352167c645248d37626532c029ec947a0edf24e44e176dfb19243a01c34c6d2",
   "instanceId": null,
   "inputSchemaId": "<file-envelope>",
   "outputSchemaId": "<file-locator>",
@@ -1077,10 +1091,37 @@ A `202 Accepted` means the request was well-formed, all four gates passed, and t
 write has been queued. It does **not** mean the projection is written yet; give it a few seconds
 before expecting the first cron fire.
 
-A `422` means one of the four gates refused the graph. Each names the offending rows. Appendix C
-tells you which mistake produces which.
+A `422` means a gate refused the graph. Each names the offending rows. There are four gates but
+**five** gate names a `422` can carry: the cycle gate's walk also refuses a `nextStepIds` entry
+that resolves to no step, and reports that as `missingStep` rather than `cycle`. Appendix C tells
+you which mistake produces which.
 
 To take it down again: `POST /api/v1/orchestration/stop` with the same body.
+
+## Step 9 — publish the diagram (optional, and not part of the graph)
+
+The workflow row carries one more column than step 7 writes: `diagram`, an SVG served at
+`GET {API}/api/v1/workflows/<workflow>.svg`. It is not a graph entity, no gate looks at it, and a
+workflow with none runs exactly as well — `GET` answers `200` with a placeholder rather than `404`,
+so a missing diagram reads as an un-enriched workflow rather than a wrong id. A rebuild that stops
+at step 8 is complete and correct; it just has no picture, and the dashboard panel that embeds this
+URL will show the placeholder.
+
+The drawing is never authored by hand and never copied into this file, because it is derived: it is
+read from the live graph at publish time, which is what keeps it honest about the ten hops the
+stored `description` still describes as six.
+
+```
+python kibana/publish-diagram.py filefetcher-archiveexpander-chain_1.0.0 --api {API}
+```
+
+The argument is the `EntityName` — `<name>_<version>` — not the id. Add `--dry-run` to draw and gate
+without publishing. The gate refuses to publish a drawing with an undrawn or unlabelled edge, or one
+that escapes its own viewBox, so a `GATE FAILED` here is about the picture and never about the graph
+you just built.
+
+`kibana/` is not in the offline `ship/` baseline. If the folder is absent on the machine you are
+rebuilding on, skip this step: there is nothing to reconstruct and nothing downstream depends on it.
 
 ## Appendix A — `sourceHash`, the one field you may not be able to copy
 
@@ -1102,6 +1143,22 @@ identical sources**. That gives you two cases:
 
 Only the eight values change. Nothing else in step 3 depends on them.
 
+**Provenance, because this is the one section that goes stale silently.** The eight values in step 3
+were last re-derived on **2026-09-28**, and agreed two independent ways: they are what the live rows
+hold, and they are what a `Release` build of this repo prints. Seven of the eight had drifted from
+an earlier edit of this file and were wrong — which is exactly the failure this appendix warns
+about, landing on the appendix's own author. Nothing about a wrong value is visible at rebuild time:
+every request in step 3 still returns `201`, every count in B1 still matches, and the graph still
+starts, because no gate reads a `sourceHash` — only a processor does, by waiting. To re-derive them
+without trusting this file, build the solution and read the line each processor project prints:
+
+```
+dotnet build SK_P.sln -c Release | grep SourceHash
+```
+
+That is the same fold the assembly carries, so it answers for the sources you actually have rather
+than for the sources this file was written against.
+
 ## Appendix B — verifying the rebuild
 
 Three checks, in order. The first two do not need the processors to be running.
@@ -1114,7 +1171,8 @@ Three checks, in order. The first two do not need the processors to be running.
 check the edge sets by name. Confirm specifically:
 
 - exactly one entry step, `split-importer`, with `entryCondition: 4`
-- `record-outcome` has `entryCondition: 2` and is named by nine parents
+- `record-outcome` has `entryCondition: 2` and is named by eight parents — the eight success-path
+  steps, and not `export-outcome`, which is its child
 - `split-archivecollapser` is named by two parents
 - `export-outcome` has an empty `nextStepIds`
 - every other step has `entryCondition: 1`
@@ -1122,7 +1180,9 @@ check the edge sets by name. Confirm specifically:
 
 **B3. It starts.** A `202` from step 8 is the real proof: it means the cycle gate, the schema-edge
 gate, the payload gate and the liveness gate all accepted the graph you built. Nothing short of
-that check exercises all four.
+that check exercises all four. The cycle gate's walk carries a fifth refusal with it — a
+`nextStepIds` entry naming no existing step is refused as `missingStep` — so a `202` also proves
+every edge you wrote in step 5 resolves.
 
 **B4. The dictionary reached L2.** A `202` does **not** cover this — no gate looks at a cache, so
 a workflow with a misspelled address, or with no cache at all, starts exactly as cleanly as a
@@ -1145,7 +1205,7 @@ Then `POST /api/v1/orchestration/stop` and re-run the `KEYS`: both keys must be 
 that outlives its workflow is the one state this design does not allow, and cleanup reads the key
 list out of the root to do it — so a root you edited by hand in Redis will strand its entries.
 
-## Appendix C — the seven ways this fails
+## Appendix C — the nine ways this fails
 
 **C1. `422` naming a mismatched schema edge.** The schema-edge gate compares the parent
 processor's `outputSchemaId` against the child processor's `inputSchemaId` and demands they are
@@ -1240,7 +1300,30 @@ The third shape is the expected one in normal operation — it is what the gate 
 one approved artist, `SKP Live Suite`; every other artist in your fixtures cancels until you add
 it with a `PUT /api/v1/caches/<cache:chain-artists>`.
 
-## Appendix D — one inconsistency, reproduced deliberately
+**C8. `422` naming a missing step, from a gate you did not know you had.** The gate name is
+`missingStep`, not `cycle`, and the detail reads *"Step '…' references missing child step '…'"*.
+It comes out of the cycle gate's own walk rather than a validator of its own, which is why step 8
+describes four gates and five gate names. Two mistakes produce it, both in step 5: a `nextStepIds`
+entry left as a literal `<step:slug>` placeholder that was never substituted, and an id copied from
+a row that a failed earlier attempt deleted. An entry step id that resolves to nothing is the same
+refusal with an all-zero parent id — that one means step 7's `entryStepIds` is wrong, not step 5.
+Neither can reach the schema-edge gate, so a `422` here says nothing about whether the rest of the
+graph is sound.
+
+**C9. A mid-chain step stalls the lineage, and now says so.** Distinct from C6, which is the
+importer having nothing to import. A non-terminal processor reports its outcome only by sending a
+branch; one that returns normally, sends nothing and does not declare `EndsLineage` ends the
+lineage with no outcome of any kind, so the orchestrator never advances and no successor — not even
+`record-outcome` — fires. This used to be byte-identical in the record to a healthy step. It is now
+logged at **Error**: *"the step returned without sending a branch — no StepOutcome will be
+reported…"*. Search for it before suspecting the graph, because the graph is not the cause: this is
+an author bug in the processor, and no gate can see it at start. The line carries no
+`attributes.Result` on purpose — there is no outcome to count — so it joins the run by execution and
+step id but does not appear in any outcome-distribution panel. A **source** is exempt: an importer's
+drained poll legitimately opens no lineage, so the diagnostic cannot fire on `kafka-importer` and
+C6's silence is still C6's silence.
+
+## Appendix D — the stale descriptions, reproduced deliberately
 
 The assignment `sk-normalizer-sample-assignment` is named for the `Sample` handler and its
 description says "handler Sample: identity", but its payload is `{"handler": "Acme"}`. That is
@@ -1249,9 +1332,30 @@ this file copies values, not intentions. If you want the graph to agree with its
 name and description — never the payload, which is load-bearing for the AlphaBeta step
 downstream, whose whole job is to lift out the XML the Acme handler renders.
 
+**The step row carries the same stale sentence, and is the easier one to miss.** §4.6's
+`description` reads "Wired with the Sample handler, which is identity, so this step is a proven
+no-op" — describing the same handler the payload contradicts, one row earlier in the rebuild and
+three sections away from the payload that settles it. It is copied verbatim for the same reason.
+Two rows are therefore stale about one fact: the step in §4.6 and the assignment in §6.6. Only the
+payload in §6.6 executes.
+
 There is no second pass in which to quietly improve it. The payload is written once, in §6.6, and
 the stale description is copied alongside it rather than corrected — inventing a better one would
 make this appendix false on your machine while it stays true on ours.
+
+`kafka-exporter`'s `description` in §3.5 is stale about a different fact, and this one describes a
+field sitting three lines below it. It says "Input is file-locator, the mirror of what KafkaImporter
+emits", while the row's `inputSchemaId` is `null`. Send the `null`.
+
+**The trap here is that "correcting" it appears to work.** Put `<file-locator>` on that row and this
+graph still starts: both of the exporter's parent edges pass the schema-edge gate — the one from
+`split-filepersister` because its output is `file-locator` and the ids then match, and the one from
+`record-outcome` because its processor's output is `null` and a null on either side passes. Nothing
+refuses the edit, so nothing tells you it was an edit. What it actually does is narrow the input of a
+processor row that other workflows share: `kafka-exporter` carries two steps in this chain alone, and
+any other workflow that hands it a branch from a processor with a non-null output must now match
+`file-locator` exactly or fail its own start. The description is a sentence about what the topic
+contains, not an unfilled slot — the `null` is the contract.
 
 The workflow's own `description` field is likewise stale in the same way: it lists a six-hop
 chain and mentions neither `sk-normalizer` nor the AlphaBeta fork nor the failure path. It is

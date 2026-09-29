@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "M6oUqtJHfT0ULC3Bo/N109tcVA+TFM50jBl333Dj0eMK5Lbrghhi/AvpL5BwcxDlz5aiaeyZGUANJ5cexie8MQ==",
+        "contentHash": "pAHG2N5eLMVj/X5ySqxJAXXCmumxLrlWD78hv4GLKebpn/VoQNTJN89MGrPoVnDTCBD3G2V0Z3bXoL4NePxfBA==",
         "dependencies": {
           "Messaging.Contracts": "[1.0.0]",
           "Messaging.Transport": "[1.0.0]",
@@ -39,7 +39,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "oA3OB4vBZW+5Ap6Renf0tIlxidaCkS20iHobF4Pq4fx744mihKE0PS+lMTa+sJnQr32idB9xERoxQMadrtWn0w=="
+        "contentHash": "RMNuRVxk3BH91iwRpZz/LgA93hum44D3q8X46fEdM0wpjzOKp6GMwbIbVnqFqLCPlZyweDRcIODuJ978ROWxiQ=="
       },
       "Microsoft.Extensions.Logging.Console": {
         "type": "Direct",
@@ -362,7 +362,7 @@
         "type": "CentralTransitive",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "biZDZBXzcPJgjalhfWl5c6QbhIUMNS3E8LX1oK+nQuE+P1KxxPbXm8e1YBNFYQVdItNAyVBm5ehT3IM+SUMxww==",
+        "contentHash": "HCLMTAYuYFQePW6Sk8dP0L44lZHzrdmBctogBnhMDYj6eVJ5pcknpzBfINeuWLnwp/sin8vZuKOFAOpov3kQFQ==",
         "dependencies": {
           "Messaging.Contracts": "[1.0.0]",
           "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",

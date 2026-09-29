@@ -2,6 +2,7 @@ using BaseProcessor.Core.Processing;
 using Microsoft.Extensions.Logging;
 using Processor.Analyst.Bit;
 using Processor.Analyst.Loop;
+using Processor.Analyst.Model;
 using Processor.Analyst.Panels;
 
 namespace Processor.Analyst;
@@ -16,7 +17,8 @@ namespace Processor.Analyst;
 internal sealed class AnalystProcessor(
     PreflightBit bit,
     InvestigationLoop loop,
-    ILogger<AnalystProcessor> logger)
+    ILogger<AnalystProcessor> logger,
+    TokenMeter? meter = null)
     : BaseProcessor<AnalystConfig>
 {
     /// <summary>The longest window any panel source here can honestly answer.</summary>
@@ -52,6 +54,29 @@ internal sealed class AnalystProcessor(
     /// </summary>
     private const int MaxTokenBudget = 10_000_000;
 
+    /// <summary>How much of one quoted objection reaches the failure message.</summary>
+    private const int MaxQuotedChars = 500;
+
+    /// <summary>
+    /// One judge's quoted objection, made safe to put in a single log record: newlines collapsed so
+    /// it cannot fake a second line, and capped so a verbose judge cannot dominate the record. The
+    /// cap is generous — the objections measured on this exam ran 200-600 characters — because the
+    /// quote is the whole reason this text is carried at all.
+    /// </summary>
+    private static string Quote(string? offending)
+    {
+        if (string.IsNullOrWhiteSpace(offending))
+        {
+            return "(the judge quoted nothing)";
+        }
+
+        var flat = string.Join(" ", offending.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+        return flat.Length <= MaxQuotedChars
+            ? $"\"{flat}\""
+            : $"\"{flat[..MaxQuotedChars]}…\" (truncated from {flat.Length})";
+    }
+
     protected override async Task ProcessAsync(
         byte[] data, AnalystConfig? config, Guid executionId, CancellationToken ct)
     {
@@ -64,7 +89,19 @@ internal sealed class AnalystProcessor(
 
         var finding = await AnalyseAsync(config, ct).ConfigureAwait(false);
 
-        await SendToPostAsync(AnalystFinding.Serialize(finding), executionId, ct).ConfigureAwait(false);
+        // The Analyst is its workflow's ENTRY step, so `executionId` arrives as Guid.Empty and there
+        // is no lineage yet -- opening one is a decision only the author can make, and forwarding the
+        // empty id instead silently declines to make it. The branch still went out and the entry step
+        // still reported Completed, so this looked like a working chain from the orchestrator's side;
+        // what actually happened is that the exporter received a dispatch carrying no execution and
+        // failed with "it was dispatched as an entry step, with no execution to export". Every finding
+        // this processor ever produced was discarded that way.
+        //
+        // The conditional, rather than always minting: a dispatch that DOES arrive with an execution
+        // is continuing someone else's lineage, and must stay in it.
+        var branchExecutionId = executionId == Guid.Empty ? NewExecutionId() : executionId;
+
+        await SendToPostAsync(AnalystFinding.Serialize(finding), branchExecutionId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -75,6 +112,28 @@ internal sealed class AnalystProcessor(
     internal async Task<AnalystFinding> AnalyseAsync(AnalystConfig config, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(config);
+
+        // Reported in a finally, so a dispatch that dies partway through the gate still says what it
+        // spent. That is the case that matters: a failure is not retried in process, it reschedules
+        // and pays for the whole gate again, so the cost of the ATTEMPTS is the real running cost.
+        var before = meter?.Snapshot();
+
+        try
+        {
+            return await RunAsync(config, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (meter is not null && before is not null)
+            {
+                logger.LogInformation(
+                    "the dispatch spent {Spend}", (meter.Snapshot() - before.Value).ToString());
+            }
+        }
+    }
+
+    private async Task<AnalystFinding> RunAsync(AnalystConfig config, CancellationToken ct)
+    {
 
         // Checks the schema cannot express, before anything is spent.
         if (string.IsNullOrWhiteSpace(config.Prompt))
@@ -123,9 +182,20 @@ internal sealed class AnalystProcessor(
             var verdict = await bit.CheckAsync(config.Prompt, ct).ConfigureAwait(false);
             if (!verdict.Fit)
             {
-                var summary = string.Join("; ", verdict.Problems.Select(p => $"{p.Stage}: {p.Kind}"));
-                logger.LogWarning("the payload prompt failed its preflight check: {Problems}", summary);
+                // Offending is included, not just stage and kind. The judge is asked to quote the
+                // text it objects to, and dropping that quote leaves a rejection saying WHICH stage
+                // is wrong but never WHY -- so the only way to act on it was to re-run the exam by
+                // hand against the same prompt and hope to draw the same verdict. Capped per problem
+                // and flattened to one line, matching how the panel sources cap an error body: this
+                // is model-authored text of unbounded length arriving in a log record.
+                var summary = string.Join("; ", verdict.Problems.Select(p =>
+                    $"{p.Stage}: {p.Kind} -- {Quote(p.Offending)}"));
 
+                // No log here. ProcessDispatchHandler writes this message verbatim when it catches
+                // the exception, so a line here emitted every preflight rejection twice -- this was
+                // the one processor breaking that rule, and the duplicate carried nothing the
+                // framework's line does not: the same summary, one scope earlier.
+                //
                 // NOT Cancelled. An agent that failed its fitness exam has analysed nothing, and
                 // silence is the all-clear.
                 throw new FailedException($"the payload prompt is unfit: {summary}");
@@ -140,7 +210,7 @@ internal sealed class AnalystProcessor(
         }
         catch (AnalysisImpossibleException ex)
         {
-            throw new FailedException(ex.Message);
+            throw new FailedException(ex.Message, ex);
         }
         // The worst failure this design can have is a monitor that reports all-clear because it
         // broke. Cancelled is reserved for a run that reached a terminal tool and found nothing —
@@ -160,7 +230,7 @@ internal sealed class AnalystProcessor(
         // a deliberate, loud disposition.
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            throw new FailedException($"the analysis was cancelled before it finished: {ex.Message}");
+            throw new FailedException($"the analysis was cancelled before it finished: {ex.Message}", ex);
         }
 
         return outcome switch

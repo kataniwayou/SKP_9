@@ -13,5 +13,5 @@ obj/
 # did not carry it could not restore at all. The negations are stated here rather than left to the
 # root so they survive an extraction, and because the deepest .gitignore wins -- a `*.nupkg` rule
 # added at any level above cannot silently untrack this feed.
-!nuget/
-!nuget/**
+!nugets/
+!nugets/**

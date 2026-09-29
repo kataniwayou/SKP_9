@@ -15,11 +15,21 @@ public sealed class AnalystProcessorTests
     // registry before the loop runs, so a fictitious id like the old "queue-depth" would now fail
     // every test in this file at that check rather than reaching what each test actually means to
     // exercise.
-    private static AnalystConfig Config(string prompt = "look for drift", int window = 360)
+    // Structurally valid, because PromptStructure now rejects a prompt with no stage headings before
+    // the judge is ever called -- "look for drift" would short-circuit every test here at that check.
+    internal static readonly string StagedPrompt = string.Join("\n\n",
+        "Look for drift.",
+        "STAGE 1 - RESEARCH. " + new string('x', 100),
+        "STAGE 2 - VALIDATE. " + new string('x', 100),
+        "STAGE 3 - PLAN. " + new string('x', 100),
+        "STAGE 4 - EXECUTE. " + new string('x', 100),
+        "STAGE 5 - VERIFY. " + new string('x', 100));
+
+    private static AnalystConfig Config(string? prompt = null, int window = 360)
         => new(
             TargetWorkflowId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             WindowMinutes: window,
-            Prompt: prompt,
+            Prompt: prompt ?? StagedPrompt,
             PanelSet: ["queue-wait"],
             MaxIterations: 20,
             MaxTokens: 100_000,
@@ -40,7 +50,7 @@ public sealed class AnalystProcessorTests
     public async Task AConfigWithNoPromptFails()
     {
         // The schema guarantees the field is present; it cannot guarantee it survived trimming.
-        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel());
+        var processor = Processor(new ScriptedModel(FitBit(), FitBit(), FitBit()), new ScriptedModel());
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.AnalyseAsync(Config(prompt: "   "), CancellationToken.None));
@@ -50,7 +60,7 @@ public sealed class AnalystProcessorTests
     public async Task AWindowLongerThanTheRetentionFails()
     {
         // A well-formed config the processor cannot work with is still an analysis that could not run.
-        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel());
+        var processor = Processor(new ScriptedModel(FitBit(), FitBit(), FitBit()), new ScriptedModel());
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.AnalyseAsync(Config(window: 60 * 24 * 400), CancellationToken.None));
@@ -64,7 +74,7 @@ public sealed class AnalystProcessorTests
         // own -- a config row can set it to anything -- so AnalystProcessor.MaxTokenBudget is the
         // compiled ceiling that keeps a config edit from being the only thing standing between the
         // pod and its manifest memory limit.
-        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel());
+        var processor = Processor(new ScriptedModel(FitBit(), FitBit(), FitBit()), new ScriptedModel());
 
         var config = Config() with { MaxTokens = 10_000_001 };
 
@@ -84,7 +94,7 @@ public sealed class AnalystProcessorTests
         // "the transform faulted", stack trace and all -- instead of a clean failed step. This is
         // live today: AnalystConfigSchemaTests' own canonical "valid" payload used to name
         // "arrival-mean", which PanelRegistryTests explicitly asserts is NOT in the registry.
-        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel());
+        var processor = Processor(new ScriptedModel(FitBit(), FitBit(), FitBit()), new ScriptedModel());
 
         var config = Config() with { PanelSet = ["queue-wait", "arrival-mean"] };
 
@@ -104,7 +114,7 @@ public sealed class AnalystProcessorTests
         // (CancellationToken.None here) un-cancelled, which AnalyseAsync's existing filtered catch
         // maps to FailedException -- the disposition falls out correctly with no special-casing.
         var clock = new FakeTimeProvider();
-        var processor = Processor(new ScriptedModel(FitBit()), new HangingModel(clock, TimeSpan.FromSeconds(300)), clock);
+        var processor = Processor(new ScriptedModel(FitBit(), FitBit(), FitBit()), new HangingModel(clock, TimeSpan.FromSeconds(300)), clock);
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.AnalyseAsync(Config() with { WallClockSeconds = 300 }, CancellationToken.None));
@@ -119,12 +129,53 @@ public sealed class AnalystProcessorTests
         {
             problems = new[] { new { stage = "verify", kind = "missing", offending = "…" } },
         }));
-        var processor = Processor(new ScriptedModel(unfit), new ScriptedModel());
+        var processor = Processor(
+            new ScriptedModel(unfit, unfit, unfit, unfit, unfit), new ScriptedModel());
 
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => processor.AnalyseAsync(Config(), CancellationToken.None));
 
         Assert.Contains("verify", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnUnfitPromptReportsWhatTheJudgeObjectedTo()
+    {
+        // Stage and kind say WHICH stage is wrong; only the quote says why. Without it the single
+        // actionable detail in a rejection had to be recovered by re-running the exam by hand and
+        // hoping to draw the same verdict.
+        var quoted = "Decide whether anything in this window deserves an operator's attention";
+        var unfit = ModelReply.Of(ScriptedModel.Call("report_fitness", new
+        {
+            problems = new[] { new { stage = "plan", kind = "missing", offending = quoted } },
+        }));
+        var processor = Processor(
+            new ScriptedModel(unfit, unfit, unfit, unfit, unfit), new ScriptedModel());
+
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => processor.AnalyseAsync(Config(), CancellationToken.None));
+
+        Assert.Contains(quoted, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AVerboseObjectionIsCappedRatherThanDominatingTheRecord()
+    {
+        var unfit = ModelReply.Of(ScriptedModel.Call("report_fitness", new
+        {
+            problems = new[]
+            {
+                new { stage = "plan", kind = "missing", offending = new string('q', 4000) },
+            },
+        }));
+        var processor = Processor(
+            new ScriptedModel(unfit, unfit, unfit, unfit, unfit), new ScriptedModel());
+
+        var ex = await Assert.ThrowsAsync<FailedException>(
+            () => processor.AnalyseAsync(Config(), CancellationToken.None));
+
+        Assert.Contains("truncated from 4000", ex.Message, StringComparison.Ordinal);
+        Assert.True(ex.Message.Length < 1000, $"message was {ex.Message.Length} chars");
     }
 
     [Fact]
@@ -135,13 +186,16 @@ public sealed class AnalystProcessorTests
         // same "the analysis could not run" signal. AnalyseAsync's catch has to cover this call site
         // too, not just loop.RunAsync, or this escapes as a raw AnalysisImpossibleException instead
         // of the FailedException every other "could not run" path produces.
-        var noToolCall = new ScriptedModel(ModelReply.Of());
+        var noToolCall = new ScriptedModel(
+            ModelReply.Of(), ModelReply.Of(), ModelReply.Of(), ModelReply.Of(), ModelReply.Of());
         var processor = Processor(noToolCall, new ScriptedModel());
 
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => processor.AnalyseAsync(Config(), CancellationToken.None));
 
-        Assert.Contains("report_fitness", ex.Message, StringComparison.Ordinal);
+        // The quorum reports the spoiled election rather than any one ballot; the point of the
+        // test is unchanged -- it arrives as FailedException, not a raw escape.
+        Assert.Contains("usable verdict", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -190,7 +244,7 @@ public sealed class AnalystProcessorTests
         // C1: report_no_finding still needs its five stages recorded -- the check is presence-only,
         // but it applies to this branch too now.
         var processor = Processor(
-            new ScriptedModel(FitBit()),
+            new ScriptedModel(FitBit(), FitBit(), FitBit()),
             new ScriptedModel(
                 [
                     .. AnalystScript.Stages("queue-wait"),
@@ -210,7 +264,7 @@ public sealed class AnalystProcessorTests
         // nothing -- that must not read as the same quiet, all-clear disposition as a run that
         // actually reached verification and found nothing worth reporting.
         var processor = Processor(
-            new ScriptedModel(FitBit()),
+            new ScriptedModel(FitBit(), FitBit(), FitBit()),
             new ScriptedModel(ModelReply.Of(
                 ScriptedModel.Call("report_no_finding", new { reason = "nothing moved" }))));
 
@@ -222,7 +276,7 @@ public sealed class AnalystProcessorTests
     public async Task AnAnalysisThatCannotRunFails()
     {
         var processor = Processor(
-            new ScriptedModel(FitBit()),
+            new ScriptedModel(FitBit(), FitBit(), FitBit()),
             new ScriptedModel(new ModelReply([], Text: "hmm", 0, 0)));
 
         await Assert.ThrowsAsync<FailedException>(
@@ -233,11 +287,11 @@ public sealed class AnalystProcessorTests
     public async Task ThePromptHashOnTheFindingIsTheHashOfThePayloadPrompt()
     {
         // The one check that makes "edit payload -> restart workflow -> confirm it took" performable.
-        var processor = Processor(new ScriptedModel(FitBit()), new ScriptedModel([.. AnalystScript.Stages("queue-wait"), AnalystScript.Submit("queue-wait")]));
+        var processor = Processor(new ScriptedModel(FitBit(), FitBit(), FitBit()), new ScriptedModel([.. AnalystScript.Stages("queue-wait"), AnalystScript.Submit("queue-wait")]));
 
         var finding = await processor.AnalyseAsync(Config(), CancellationToken.None);
 
-        Assert.Equal(PromptHash.Of("look for drift"), finding.PromptHash);
+        Assert.Equal(PromptHash.Of(StagedPrompt), finding.PromptHash);
     }
 
     [Fact]

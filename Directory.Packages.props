@@ -133,7 +133,7 @@
     <PackageVersion Include="KubernetesClient" Version="18.0.13" />
 
     <!-- This repo's own libraries, consumed as packages rather than project references. Each is
-         packed by its own project into src/<Project>/nuget/<version>/ and resolved from there
+         packed by its own project into src/<Project>/nugets/<version>/ and resolved from there
          through the folder sources in NuGet.config.
 
          Pinned EXACTLY, in bracket notation, so a consumer can never float onto a version that

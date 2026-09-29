@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Packs this repo's own libraries, in dependency order, into each project's nuget/<version>/ folder.
+# Packs this repo's own libraries, in dependency order, into each project's nugets/<version>/ folder.
 #
 # Run this after changing any library. `dotnet build SK_P.sln` does NOT pack: packing is a separate,
 # deliberate act, so a library edit that has not been packed leaves consumers compiling against the
@@ -44,4 +44,4 @@ dotnet restore SK_P.sln --force-evaluate --nologo -v q
 
 echo
 echo "Packed:"
-find src -path '*/nuget/*' -name '*.nupkg' | sort | sed 's/^/  /'
+find src -path '*/nugets/*' -name '*.nupkg' | sort | sed 's/^/  /'

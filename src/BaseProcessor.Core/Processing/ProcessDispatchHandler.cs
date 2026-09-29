@@ -257,7 +257,11 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // the wire. Scoped, not templated — see the input-schema rejection above for why.
             using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed)))
             {
-                _logger.LogWarning("the author reported the step failed: {Reason}", ex.Message);
+                // The exception object, not just its message: an author that passed the cause as an
+                // inner exception gets exception.type/message/stacktrace onto the record, which is
+                // the difference between a diagnosable failure and a category name. Authors do not
+                // log at their own throw sites -- this is the one line per failure.
+                _logger.LogWarning(ex, "the author reported the step failed: {Reason}", ex.Message);
             }
 
             await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);

@@ -16,15 +16,15 @@ WORKDIR /src
 # The local nugets/ feed plus NuGet.config make this an offline restore.
 COPY ["NuGet.config", "Directory.Packages.props", "Directory.Build.props", "global.json", "./"]
 COPY nugets/ nugets/
-# The repo's own libraries arrive as packages, from each packable project's own nuget/ folder.
+# The repo's own libraries arrive as packages, from each packable project's own nugets/ folder.
 #
 # ALL FIVE feeds are copied, not just the ones this image consumes: NuGet validates every source in
 # NuGet.config at restore time.
-COPY src/Messaging.Contracts/nuget/ src/Messaging.Contracts/nuget/
-COPY src/Messaging.Transport/nuget/ src/Messaging.Transport/nuget/
-COPY src/BaseConsole.Core/nuget/ src/BaseConsole.Core/nuget/
-COPY src/BaseApi.Core/nuget/ src/BaseApi.Core/nuget/
-COPY src/BaseProcessor.Core/nuget/ src/BaseProcessor.Core/nuget/
+COPY src/Messaging.Contracts/nugets/ src/Messaging.Contracts/nugets/
+COPY src/Messaging.Transport/nugets/ src/Messaging.Transport/nugets/
+COPY src/BaseConsole.Core/nugets/ src/BaseConsole.Core/nugets/
+COPY src/BaseApi.Core/nugets/ src/BaseApi.Core/nugets/
+COPY src/BaseProcessor.Core/nugets/ src/BaseProcessor.Core/nugets/
 COPY ["src/Processor.FileFetcher/Processor.FileFetcher.csproj", "src/Processor.FileFetcher/"]
 RUN dotnet restore "src/Processor.FileFetcher/Processor.FileFetcher.csproj"
 

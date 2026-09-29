@@ -19,11 +19,11 @@ COPY nugets/ nugets/
 # ALL FIVE feeds are copied, not just the ones this image consumes: NuGet validates every source in
 # NuGet.config at restore and fails one that is missing (NU1301), whether or not the project resolves
 # anything from it. They are a few hundred KB in total.
-COPY src/Messaging.Contracts/nuget/ src/Messaging.Contracts/nuget/
-COPY src/Messaging.Transport/nuget/ src/Messaging.Transport/nuget/
-COPY src/BaseConsole.Core/nuget/ src/BaseConsole.Core/nuget/
-COPY src/BaseApi.Core/nuget/ src/BaseApi.Core/nuget/
-COPY src/BaseProcessor.Core/nuget/ src/BaseProcessor.Core/nuget/
+COPY src/Messaging.Contracts/nugets/ src/Messaging.Contracts/nugets/
+COPY src/Messaging.Transport/nugets/ src/Messaging.Transport/nugets/
+COPY src/BaseConsole.Core/nugets/ src/BaseConsole.Core/nugets/
+COPY src/BaseApi.Core/nugets/ src/BaseApi.Core/nugets/
+COPY src/BaseProcessor.Core/nugets/ src/BaseProcessor.Core/nugets/
 COPY ["src/Processor.OutcomeRecorder/Processor.OutcomeRecorder.csproj", "src/Processor.OutcomeRecorder/"]
 RUN dotnet restore "src/Processor.OutcomeRecorder/Processor.OutcomeRecorder.csproj"
 

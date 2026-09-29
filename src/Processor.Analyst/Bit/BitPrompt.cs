@@ -34,8 +34,20 @@ internal static class BitPrompt
         Instructions fit for this scenario must: require observations before hypotheses; require the
         agent to decide whether absent data means "nothing happened" or "nothing was reported", and
         to stop rather than guess when it cannot tell; require a disconfirming criterion per
-        hypothesis, stated before the evidence is read; and require the verification to be able to
-        conclude that nothing is worth reporting.
+        hypothesis, stated before the evidence that criterion names has been read; and require the
+        verification to be able to conclude that nothing is worth reporting.
+
+        That criterion rule is enforced at runtime and is unforgiving: a finding is discarded
+        outright if any panel a hypothesis names as its disconfirming criterion was first read
+        BEFORE that hypothesis was planned. Judge the instructions against that rule, not merely
+        against whether they contain the words "state the criterion first".
+
+        It follows that an observation stage which reads every panel available leaves no unread
+        evidence for any criterion to name. Such instructions satisfy the letter of "criterion
+        first" while making it impossible to carry out, and that is MALFORMED at the plan stage —
+        report it there, quoting the instruction that reads everything. Fit instructions bound the
+        observation stage: they say which evidence it may spend and which it must leave unread for
+        the criteria to draw on.
 
         Report every stage that is MISSING (the instructions never ask for it), MALFORMED (they ask
         for it in a way that cannot be carried out), or CONTRADICTING (they ask for something that

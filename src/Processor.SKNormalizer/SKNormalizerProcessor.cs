@@ -44,7 +44,7 @@ internal sealed class SKNormalizerProcessor(
             // Bare Exception is deliberately NOT caught: a NullReferenceException in a handler is a
             // programming error, and reporting it as a bad provider document buries a bug under a
             // plausible business failure.
-            throw new FailedException($"normalizing {root.Metadata.Name} failed: {ex.Message}");
+            throw new FailedException($"normalizing {root.Metadata.Name} failed: {ex.Message}", ex);
         }
 
         // The SHAPE of the result, never its content. Counts, a size and the handler name — an

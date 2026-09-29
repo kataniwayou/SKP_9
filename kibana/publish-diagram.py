@@ -190,6 +190,21 @@ BYPASS_LABEL_Y = BYPASS_Y - 6
 LEGEND_GAP = 26
 CAPTION_BAND = 36
 
+# HOW WIDE ONE LEGEND CONFIG ROW MAY GET BEFORE IT WRAPS. Derived, not chosen, from a --dry-run sweep
+# of every existing workflow:
+#
+#   - UPPER BOUND ~1100px. vb_w is X0 + 260 + this + VB_W_PAD, and text_w's slack has to stay under
+#     MAX_MARGIN (160). `kafka-import-export` calibrates it -- structurally identical to
+#     `analyst-monitor` at 2 boxes and 13 texts -- showing 110px of slack on a 961px canvas, so slack
+#     runs 11-13% of content at this shape. Under 160 caps the canvas at ~1430px.
+#   - LOWER BOUND ~640px. The widest existing single-row config line, again `kafka-import-export`.
+#     Below that an existing drawing gains a row and its committed diagram changes.
+#
+# 900 sits between with room at both ends. The slack is intrinsic to a generous estimate at this
+# shape, not something one payload introduced -- which is why the line is bounded rather than the
+# gate loosened.
+LEGEND_CFG_MAX_W = 900
+
 
 def api(base, path):
     with urllib.request.urlopen(f"{base}/api/v1/{path}", timeout=30) as r:
@@ -275,24 +290,89 @@ def esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+# A VALUE LONGER THAN THIS IS ELIDED, AND THE ELLIPSIS IS THE WHOLE POINT. Eliding a value is not
+# the mistake this file already records under `EVERY KEY AND ITS VALUE`: that one was `list(cfg)[:2]`,
+# which dropped whole keys and said nothing, so `allowedExtensions` vanished with no trace that
+# anything had been hidden. A key never disappears here, and a shortened value announces itself.
+#
+# 80 IS MEASURED, NOT CHOSEN. Across all 89 payload values in this deployment the longest are the
+# Analyst's `prompt` at 524 characters and its `panelSet` at 67; every other value is 36 or shorter.
+# So 80 elides exactly one value in the whole system and leaves every existing drawing byte-identical
+# -- including `panelSet`, which is the Analyst's read boundary and worth seeing whole. Lower it to 60
+# and you start hiding that.
+#
+# WHY IT EXISTS AT ALL: the Analyst's payload carries a prose prompt, which no other processor's does.
+# Rendered on one unwrapped line it made a 5455px canvas for a two-box graph, and the width estimate
+# below -- deliberately generous, since Python has no text engine -- overshot it by 619px, four times
+# MAX_MARGIN. The render check refused the publish, correctly. Shortening the prompt to satisfy a
+# diagram would be the wrong trade; bounding what the diagram draws is the right one.
+MAX_VALUE_CHARS = 80
+
+
 def fmt_value(v):
-    """What a payload value reads as on one line.
+    """What a payload value reads as on one line, elided past MAX_VALUE_CHARS.
 
     Strings unquoted - they are the common case and the quotes are noise; everything else as
     compact JSON, so a list stays a list and `4` is not mistaken for "4".
+
+    The elision happens here, at the single choke point every payload value passes through, so the
+    drawing and the width estimate can never disagree about how wide a line is: `cfg_text` builds the
+    gate's plain-text line from this same output. A long collection is cut mid-JSON and will not
+    re-parse -- that is intended. The line is a label for a human reading a diagram, not a document,
+    and a trailing `...` inside a bracket says "there is more here" more honestly than a closing
+    bracket that would imply the list ended.
     """
     if isinstance(v, str):
-        return v
-    if isinstance(v, bool) or v is None:
-        return json.dumps(v)
-    if isinstance(v, (int, float)):
-        return repr(v)
-    return json.dumps(v, separators=(", ", ": "))
+        s = v
+    elif isinstance(v, bool) or v is None:
+        s = json.dumps(v)
+    elif isinstance(v, (int, float)):
+        s = repr(v)
+    else:
+        s = json.dumps(v, separators=(", ", ": "))
+
+    # Truncate to MAX_VALUE_CHARS *including* the ellipsis, so the bound the estimate relies on is
+    # the length of what actually renders rather than three characters more than it.
+    return s if len(s) <= MAX_VALUE_CHARS else s[:MAX_VALUE_CHARS - 3] + "..."
 
 
 def cfg_text(pairs):
     """The same line as plain text - what the width estimate and the gate compare against."""
     return ", ".join(f"{k}: {v}" for k, v in pairs) if pairs else "no config"
+
+
+def cfg_rows(pairs, budget_px=LEGEND_CFG_MAX_W):
+    """The config pairs packed into rows, each row's estimated width within budget_px.
+
+    WRAPPING RATHER THAN A LINE-LEVEL CAP, and the difference matters. Capping the joined line would
+    drop trailing keys, which is the mistake recorded above under `EVERY KEY AND ITS VALUE`: the
+    legend once showed `list(cfg)[:2]` and lost `allowedExtensions` - the whitelist deciding one of
+    the chain's five outcomes - with nothing to say a key was hidden. Wrapping spends vertical space
+    instead, which this drawing has, and loses nothing.
+
+    WHY THE LINE NEEDED BOUNDING AT ALL: width here is driven by key COUNT, not value length. The
+    Analyst payload carries seven keys where nothing else carries more than four, so ~107 characters
+    are spent on key names and separators before a single value renders. Capping every value to 40
+    characters still left a 222px right margin - the number asymptotes, because per-value truncation
+    cannot reduce how many pairs share a row. MAX_VALUE_CHARS is still needed, for a different
+    reason: it guarantees no single pair is wider than a row, so every pair can always be placed.
+
+    A PAIR IS NEVER SPLIT. Each row keeps its key attached to its value and its
+    lg-key/lg-punct/lg-val span structure intact. A pair that exceeds the budget on its own takes a
+    row of its own rather than being broken.
+
+    Returns one empty row for a step with no config, so the caller still draws its `no config` line.
+    """
+    rows, cur = [], []
+    for pair in pairs:
+        if cur and text_w(cfg_text(cur + [pair]), 11) > budget_px:
+            rows.append(cur)
+            cur = [pair]
+        else:
+            cur.append(pair)
+    if cur:
+        rows.append(cur)
+    return rows or [[]]
 
 
 def text_w(s, size, mono=True):
@@ -454,28 +534,39 @@ def render(g):
     # drawn, so a graph with no failure sink has no failure row and the legend rises to meet the
     # boxes instead of clearing a lane that nothing is in.
     legend_y0 = max(y for _x, y in pos.values()) + H + LEGEND_GAP
-    vb_h = legend_y0 + LEGEND_DY * len(spine) + CAPTION_BAND
+
+    # ONE ROW PER WRAPPED LINE, NOT ONE PER STEP. Packed once here and reused by both the emitter
+    # below and the vb_w computation further down, for the reason fmt_value already gives: the
+    # drawing and the width estimate must never disagree about how wide a line is.
+    step_rows = [cfg_rows(config(sid)) for sid in spine]
+    vb_h = legend_y0 + LEGEND_DY * sum(len(r) for r in step_rows) + CAPTION_BAND
 
     # THE LEGEND BAND. The config keys used to sit inside the 150px rectangle, truncated to two
     # with nothing to say more existed. They hang off the step's NAME down here, where there is
     # width for the whole list - the name is what ties a line to its box now that neither carries
     # a numeral, and it is the same string the box prints.
-    for k, sid in enumerate(spine):
-        ly = legend_y0 + LEGEND_DY * k
-        emit(f'    <text class="lg-step" x="{X0}" y="{ly}">{esc(steps[sid]["name"])}</text>\n',
-             "lg-step")
-        pairs = config(sid)
-        if pairs:
-            spans = []
-            for n, (k, v) in enumerate(pairs):
-                sep = '<tspan class="lg-punct">, </tspan>' if n else ""
-                spans.append(f'{sep}<tspan class="lg-key">{esc(k)}</tspan>'
-                             f'<tspan class="lg-punct">: </tspan>'
-                             f'<tspan class="lg-val">{esc(v)}</tspan>')
-            emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">' + "".join(spans) + '</text>\n',
-                 "lg-cfg", "lg-key", "lg-val", "lg-punct")
-        else:
-            emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">no config</text>\n', "lg-cfg")
+    # THE STEP NAME SITS ON ITS FIRST ROW ONLY. Repeating it down a wrapped block would read as
+    # several steps sharing a name; continuation rows start at the same X0+260 column as the first,
+    # so the config reads as one left-aligned paragraph under the name that ties it to its box.
+    row_i = 0
+    for sid, rows in zip(spine, step_rows):
+        for j, row in enumerate(rows):
+            ly = legend_y0 + LEGEND_DY * row_i
+            row_i += 1
+            if j == 0:
+                emit(f'    <text class="lg-step" x="{X0}" y="{ly}">'
+                     f'{esc(steps[sid]["name"])}</text>\n', "lg-step")
+            if row:
+                spans = []
+                for n, (key, val) in enumerate(row):
+                    sep = '<tspan class="lg-punct">, </tspan>' if n else ""
+                    spans.append(f'{sep}<tspan class="lg-key">{esc(key)}</tspan>'
+                                 f'<tspan class="lg-punct">: </tspan>'
+                                 f'<tspan class="lg-val">{esc(val)}</tspan>')
+                emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">' + "".join(spans)
+                     + '</text>\n', "lg-cfg", "lg-key", "lg-val", "lg-punct")
+            else:
+                emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">no config</text>\n', "lg-cfg")
 
     # THE SCHEDULE, ABOVE THE DRAWING AND TO THE LEFT. A workflow with no cron is not a workflow
     # that runs continuously - it is one nothing starts, which the drawing should say rather than
@@ -496,9 +587,12 @@ def render(g):
     right = [max(x for x, _y in pos.values()) + W,
              X0 + text_w(caption, 12, mono=False),
              X0 + text_w("cron " + cron_txt, 11)]
-    for sid in spine:
+    for sid, rows in zip(spine, step_rows):
         right.append(X0 + text_w(steps[sid]["name"], 11))
-        right.append(X0 + 260 + text_w(cfg_text(config(sid)), 11))
+        # Each WRAPPED row, not the joined line: the same rows the emitter drew, so the canvas is
+        # sized to the widest line that actually renders.
+        for row in rows:
+            right.append(X0 + 260 + text_w(cfg_text(row), 11))
     vb_w = max(VB_W_MIN, int(math.ceil(max(right) + VB_W_PAD)))
 
     label = f'{g["wf"]["name"]}: {len(spine)} steps left to right'

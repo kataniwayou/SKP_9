@@ -53,7 +53,7 @@ internal sealed class ArchiveExpanderProcessor(
             // IT NAMES THE FILE, NOT A PATH. There is no path in this assembly any more. The name
             // came from the envelope, and FileFetcher's own log line is what ties it back to a
             // location on disk — under the same ExecutionId and CorrelationId.
-            throw new FailedException($"extracting {file.Name} failed: {ex.Message}");
+            throw new FailedException($"extracting {file.Name} failed: {ex.Message}", ex);
         }
 
         // The SHAPE of the result, never its content. A count, a size and a depth are safe to log;

@@ -6,7 +6,7 @@ WORKDIR /src
 # Restore first, from csproj and lock files only, so a source-only edit does not invalidate the layer.
 COPY ["NuGet.config", "Directory.Packages.props", "Directory.Build.props", "global.json", "./"]
 COPY nugets/ nugets/
-# The repo's own libraries arrive as packages now, from each packable project's own nuget/ folder,
+# The repo's own libraries arrive as packages now, from each packable project's own nugets/ folder,
 # so their csproj files are not copied and their sources are not built here.
 #
 # ALL FIVE feeds are copied, not just the ones this image consumes: NuGet validates every source in
@@ -16,11 +16,11 @@ COPY nugets/ nugets/
 # Copied BEFORE restore, because a PackageReference is resolved at restore time. Restore stays
 # offline -- every source is a folder in this build context and nuget.org is cleared, so this build
 # cannot reach the network.
-COPY src/Messaging.Contracts/nuget/ src/Messaging.Contracts/nuget/
-COPY src/Messaging.Transport/nuget/ src/Messaging.Transport/nuget/
-COPY src/BaseConsole.Core/nuget/ src/BaseConsole.Core/nuget/
-COPY src/BaseApi.Core/nuget/ src/BaseApi.Core/nuget/
-COPY src/BaseProcessor.Core/nuget/ src/BaseProcessor.Core/nuget/
+COPY src/Messaging.Contracts/nugets/ src/Messaging.Contracts/nugets/
+COPY src/Messaging.Transport/nugets/ src/Messaging.Transport/nugets/
+COPY src/BaseConsole.Core/nugets/ src/BaseConsole.Core/nugets/
+COPY src/BaseApi.Core/nugets/ src/BaseApi.Core/nugets/
+COPY src/BaseProcessor.Core/nugets/ src/BaseProcessor.Core/nugets/
 COPY ["src/BaseApi.Service/BaseApi.Service.csproj", "src/BaseApi.Service/"]
 RUN dotnet restore "src/BaseApi.Service/BaseApi.Service.csproj"
 
