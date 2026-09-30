@@ -1,3 +1,5 @@
+using BaseProcessor.Core.Identity;
+using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
@@ -43,21 +45,25 @@ public sealed class ProcessorLivenessWriter
     /// </summary>
     public static int DeriveTtlSeconds(int interval) => interval * 4;
 
-    public async Task WriteAsync(Guid processorId, string instanceId, ProcessorLivenessEntry entry)
+    public async Task WriteAsync(ProcessorIdentity identity, string instanceId, ProcessorLivenessEntry entry)
     {
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(entry);
         try
         {
             var db = _redis.GetDatabase();
             var ttl = TimeSpan.FromSeconds(DeriveTtlSeconds(entry.Interval));
 
+            // Liveness first: it is what the start gate reads, so a failure further down (a WRONGTYPE
+            // against a pre-migration key, a timeout) must not cost it.
+            //
             // When/flags passed explicitly, matching ProcessedDataHandler. Behaviourally identical to
             // the bare three-argument call, but StackExchange.Redis overloads that shape between a
             // keepTtl-bool overload and an Expiration-struct one — the compiler picks silently, and
             // that trap has already produced a test here that matched a method the code never called.
             // Naming all five parameters pins the overload for the reader and for the matcher.
             await db.StringSetAsync(
-                L2ProjectionKeys.PerInstance(processorId, instanceId),
+                L2ProjectionKeys.PerInstance(identity.Id, instanceId),
                 System.Text.Json.JsonSerializer.Serialize(entry),
                 ttl,
                 When.Always,
@@ -66,13 +72,22 @@ public sealed class ProcessorLivenessWriter
             // The set gets the liveness TTL too, refreshed by every replica's beat: while one replica
             // lives the set stays and the sweeper prunes the dead members; once none does, the set
             // expires with them and nothing is left behind for BaseApi to clean.
-            var instances = L2ProjectionKeys.ProcessorInstances(processorId);
+            var instances = L2ProjectionKeys.ProcessorInstances(identity.Id);
             await db.SetAddAsync(instances, instanceId).ConfigureAwait(false);
             await db.KeyExpireAsync(instances, ttl, ExpireWhen.Always, CommandFlags.None).ConfigureAwait(false);
+
+            // THE PROCESSOR OWNS ITS NAME. Written on every beat with the same TTL, so a flushed key
+            // heals within one interval and a processor that is gone for good leaves nothing. The id
+            // suffix, never the instance id: every replica writes this one key.
+            var processorKey = L2ProjectionKeys.Processor(identity.Id);
+            await db.HashSetAsync(
+                processorKey, L2ProjectionKeys.NameField,
+                EntityNames.Format(identity.Name, identity.Version, identity.Id)).ConfigureAwait(false);
+            await db.KeyExpireAsync(processorKey, ttl, ExpireWhen.Always, CommandFlags.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "liveness write failed for {ProcessorId}/{InstanceId}", processorId, instanceId);
+            _logger.LogWarning(ex, "liveness write failed for {ProcessorId}/{InstanceId}", identity.Id, instanceId);
         }
     }
 }

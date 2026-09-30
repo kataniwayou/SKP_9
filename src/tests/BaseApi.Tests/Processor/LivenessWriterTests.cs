@@ -1,6 +1,8 @@
 using BaseApi.Tests.Support;
 using BaseProcessor.Core.Configuration;
+using BaseProcessor.Core.Identity;
 using BaseProcessor.Core.Liveness;
+using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,6 +19,11 @@ namespace BaseApi.Tests.Processor;
 /// </summary>
 public sealed class LivenessWriterTests
 {
+    private static readonly Guid P = Guid.Parse("44444444-4444-4444-dddd-444444444444");
+
+    private static ProcessorIdentity Identity() =>
+        new(P, null, null, null, "shared-proc", "1.2.0", null, null);
+
     private static ProcessorLivenessEntry Entry() => ProcessorLivenessEntry.Create(
         inputOutcome: SchemaOutcome.Success,
         outputOutcome: SchemaOutcome.Success,
@@ -39,7 +46,7 @@ public sealed class LivenessWriterTests
             ConnectionFailureType.SocketFailure, "no connection"));
         var (writer, log) = Build(redis);
 
-        await writer.WriteAsync(Guid.NewGuid(), "instance-1", Entry());
+        await writer.WriteAsync(Identity(), "instance-1", Entry());
 
         var record = Assert.Single(log.Records);
         Assert.Equal(LogLevel.Warning, record.Level);
@@ -63,7 +70,7 @@ public sealed class LivenessWriterTests
         redis.GetDatabase().Returns(db);
         var (writer, log) = Build(redis);
 
-        await writer.WriteAsync(Guid.NewGuid(), "instance-1", Entry());
+        await writer.WriteAsync(Identity(), "instance-1", Entry());
 
         var record = Assert.Single(log.Records);
         Assert.Equal(LogLevel.Warning, record.Level);
@@ -83,7 +90,7 @@ public sealed class LivenessWriterTests
         redis.GetDatabase().Returns(db);
         var (writer, log) = Build(redis);
 
-        await writer.WriteAsync(Guid.NewGuid(), "instance-1", Entry());
+        await writer.WriteAsync(Identity(), "instance-1", Entry());
 
         Assert.Single(log.Records);
     }
@@ -93,15 +100,14 @@ public sealed class LivenessWriterTests
     {
         var l2 = new InMemoryL2();
         var (writer, log) = Build(l2.Multiplexer);
-        var processorId = Guid.NewGuid();
 
-        await writer.WriteAsync(processorId, "instance-1", Entry());
+        await writer.WriteAsync(Identity(), "instance-1", Entry());
 
         // TTL is four times the entry's own recorded interval: 10 * 4 = 40. The instance set carries
         // the same TTL, so a processor whose replicas are all gone leaves nothing behind.
-        Assert.Equal(TimeSpan.FromSeconds(40), l2.Ttl(L2ProjectionKeys.PerInstance(processorId, "instance-1")));
-        Assert.Equal(["instance-1"], l2.Members(L2ProjectionKeys.ProcessorInstances(processorId)));
-        Assert.Equal(TimeSpan.FromSeconds(40), l2.Ttl(L2ProjectionKeys.ProcessorInstances(processorId)));
+        Assert.Equal(TimeSpan.FromSeconds(40), l2.Ttl(L2ProjectionKeys.PerInstance(P, "instance-1")));
+        Assert.Equal(["instance-1"], l2.Members(L2ProjectionKeys.ProcessorInstances(P)));
+        Assert.Equal(TimeSpan.FromSeconds(40), l2.Ttl(L2ProjectionKeys.ProcessorInstances(P)));
         Assert.Empty(log.Records);
     }
 
@@ -113,6 +119,59 @@ public sealed class LivenessWriterTests
         var (writer, _) = Build(Substitute.For<IConnectionMultiplexer>());
 
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => writer.WriteAsync(Guid.NewGuid(), "instance-1", null!));
+            () => writer.WriteAsync(Identity(), "instance-1", null!));
+    }
+
+    [Fact]
+    public async Task NullIdentityStillThrows()
+    {
+        var (writer, _) = Build(Substitute.For<IConnectionMultiplexer>());
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => writer.WriteAsync(null!, "instance-1", Entry()));
+    }
+
+    [Fact]
+    public async Task WritesItsOwnFullNameWithTheLivenessTtl()
+    {
+        var l2 = new InMemoryL2();
+        var (writer, _) = Build(l2.Multiplexer);
+
+        await writer.WriteAsync(Identity(), "pod-0", Entry());
+
+        Assert.Equal(EntityNames.Format("shared-proc", "1.2.0", P),
+                     l2.HashValue(L2ProjectionKeys.Processor(P), L2ProjectionKeys.NameField));
+        Assert.Equal(TimeSpan.FromSeconds(40), l2.Ttl(L2ProjectionKeys.Processor(P)));
+    }
+
+    [Fact]
+    public async Task EveryReplicaWritesTheSameNameWithNoInstanceIdInIt()
+    {
+        var l2 = new InMemoryL2();
+        var (writer, _) = Build(l2.Multiplexer);
+
+        await writer.WriteAsync(Identity(), "pod-0", Entry());
+        var first = l2.HashValue(L2ProjectionKeys.Processor(P), L2ProjectionKeys.NameField);
+        await writer.WriteAsync(Identity(), "pod-1", Entry());
+
+        Assert.Equal(first, l2.HashValue(L2ProjectionKeys.Processor(P), L2ProjectionKeys.NameField));
+        Assert.DoesNotContain("pod-", first);
+    }
+
+    [Fact]
+    public async Task ANameWriteFailureStillLeavesTheLivenessKey()
+    {
+        // During rollout the old SET still sits at skp:proc:{id}, so HSET there answers WRONGTYPE. The
+        // liveness key is what the start gate reads; it must already be written when the name fails.
+        var l2 = new InMemoryL2();
+        l2.Db.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                           Arg.Any<When>(), Arg.Any<CommandFlags>())
+            .Throws(new RedisServerException("WRONGTYPE Operation against a key holding the wrong kind of value"));
+        var (writer, log) = Build(l2.Multiplexer);
+
+        await writer.WriteAsync(Identity(), "pod-0", Entry());
+
+        Assert.True(l2.Has(L2ProjectionKeys.PerInstance(P, "pod-0")));
+        Assert.Equal(["pod-0"], l2.Members(L2ProjectionKeys.ProcessorInstances(P)));
+        Assert.Equal(LogLevel.Warning, Assert.Single(log.Records).Level);
     }
 }

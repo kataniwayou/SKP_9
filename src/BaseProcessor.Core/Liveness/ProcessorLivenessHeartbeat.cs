@@ -131,7 +131,7 @@ public sealed class ProcessorLivenessHeartbeat : BackgroundService
                 timestamp:     _clock.GetUtcNow().UtcDateTime,
                 interval:      _options.IntervalSeconds);
 
-            await _writer.WriteAsync(identity.Id, _instanceId.Value, entry).ConfigureAwait(false);
+            await _writer.WriteAsync(identity, _instanceId.Value, entry).ConfigureAwait(false);
         }
     }
 }
