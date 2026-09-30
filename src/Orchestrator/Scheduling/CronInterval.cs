@@ -33,7 +33,7 @@ public static class CronInterval
     /// </summary>
     /// <param name="cron">
     /// A 5-field standard or 6-field seconds cron expression. Nullable on purpose: the thing callers
-    /// hold is <c>WorkflowRootProjection.Cron</c>, which is <c>string?</c> because a null cron is a
+    /// hold is <c>WorkflowStoreProjection.Cron</c>, which is <c>string?</c> because a null cron is a
     /// valid projection meaning unscheduled. Taking a non-nullable string here would push every caller
     /// into a null check whose only possible answer is the one this method already gives, and under
     /// TreatWarningsAsErrors a caller that skipped it would not compile.

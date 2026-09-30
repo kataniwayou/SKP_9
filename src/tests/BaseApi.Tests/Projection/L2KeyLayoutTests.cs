@@ -74,6 +74,20 @@ public sealed class L2KeyLayoutTests
     }
 
     [Fact]
+    public void TheRetiredShapesAreGone()
+    {
+        var keys = typeof(L2ProjectionKeys);
+        Assert.Null(keys.GetMethod("ParentIndex"));
+        Assert.Null(keys.GetMethod("Root"));
+        Assert.Null(keys.GetMethod("Step"));
+        Assert.Null(keys.GetMethod("Name"));
+        Assert.Null(keys.GetMethod("InstanceIndex"));
+        Assert.Null(keys.Assembly.GetType("Messaging.Contracts.Projections.WorkflowRootProjection"));
+        Assert.Null(keys.Assembly.GetType("Messaging.Contracts.Projections.StepProjection"));
+        Assert.Null(keys.Assembly.GetType("Messaging.Contracts.Projections.LivenessProjection"));
+    }
+
+    [Fact]
     public void TheStoreRoundTripsWithItsFieldNames()
     {
         var store = new WorkflowStoreProjection(

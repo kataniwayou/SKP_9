@@ -41,35 +41,4 @@ public sealed class CacheKeyTests
             L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "acme"));
     }
 
-    [Fact]
-    public void ACacheKeyCannotCollideWithAStepKey()
-    {
-        // A step key is skp:{workflowId}:{stepId} and a cache key is skp:wf:{workflowId}:cache:… —
-        // different type segments, so they cannot collide.
-        var step = L2ProjectionKeys.Step(W, Guid.Parse("22222222-2222-2222-2222-222222222222"));
-
-        Assert.NotEqual(step, L2ProjectionKeys.Cache(W, "sk-whitelist"));
-        Assert.StartsWith($"skp:wf:{W:D}:cache:", L2ProjectionKeys.Cache(W, "sk-whitelist"));
-    }
-
-    [Fact]
-    public void ARootProjectionWrittenBeforeCachesExistedReadsAsNoCaches()
-    {
-        // The compatibility guarantee cleanup depends on: an in-flight workflow projected by the
-        // previous writer has no cacheRoots field at all, and must deserialize to null rather than
-        // throwing, so its graph can still be removed.
-        // The liveness names are timestamp/interval/status — see LivenessProjection's
-        // JsonPropertyName attributes. Inventing them here would make this test pass against a
-        // record that never round-trips.
-        const string legacy = """
-            {"entryStepIds":[],"stepIds":[],"cron":null,
-             "liveness":{"timestamp":"2026-08-21T12:00:00Z","interval":0,"status":"Pending"}}
-            """;
-
-        var root = System.Text.Json.JsonSerializer.Deserialize<WorkflowRootProjection>(
-            legacy, global::Messaging.Contracts.MessagingJson.Options);
-
-        Assert.NotNull(root);
-        Assert.Null(root!.CacheRoots);
-    }
 }

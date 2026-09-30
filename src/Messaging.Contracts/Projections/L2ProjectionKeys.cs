@@ -5,9 +5,9 @@ namespace Messaging.Contracts.Projections;
 /// consume one shape and a future GUID-format or suffix change cannot silently desynchronize them.
 /// <para>
 /// The scheme is flat: a single prefix followed by GUIDs, with no type discriminator. GUIDs render
-/// in the default hyphenated "D" format, not the 32-digit "N" format; <see cref="Root"/> states the
-/// <c>:D</c> specifier explicitly, which is byte-identical to a bare interpolation. The prefix is a
-/// compile-time const owned here rather than a config value or a builder parameter, which removes
+/// in the default hyphenated "D" format, not the 32-digit "N" format; <see cref="Workflow"/> states
+/// the <c>:D</c> specifier explicitly, which is byte-identical to a bare interpolation. The prefix is
+/// a compile-time const owned here rather than a config value or a builder parameter, which removes
 /// any config-injection path into key names.
 /// </para>
 /// <list type="bullet">
@@ -20,7 +20,6 @@ namespace Messaging.Contracts.Projections;
 ///   <item><description>Cache: <c>skp:wf:{workflowId}:cache:{root}</c> — one dictionary's key list</description></item>
 ///   <item><description>CacheEntry: <c>skp:wf:{workflowId}:cache:{root}:{key}</c> — one entry</description></item>
 ///   <item><description>ExecutionData: <c>skp:data:{guid}</c> — the blob for both roles</description></item>
-///   <item><description>Retiring (removed by later tasks): ParentIndex <c>skp:</c>, Root <c>skp:{workflowId}</c>, Step <c>skp:{workflowId}:{stepId}</c></description></item>
 /// </list>
 /// </summary>
 public static class L2ProjectionKeys
@@ -80,19 +79,13 @@ public static class L2ProjectionKeys
         return Guid.TryParseExact(id, "D", out processorId);
     }
 
-    public static string ParentIndex() => Prefix;
-
-    public static string Root(Guid workflowId) => $"{Prefix}{workflowId:D}";
-
-    public static string Step(Guid workflowId, Guid stepId) => $"{Prefix}{workflowId:D}:{stepId:D}";
-
     /// <summary>
     /// The cache root: the key holding the JSON array of key names in one projected dictionary.
     /// <para>
     /// <b>This is the first key to place a literal segment after the workflow id.</b> Every other
     /// discriminator in this scheme — <c>proc:</c>, <c>data:</c> — sits immediately after the
-    /// prefix. It cannot collide with <see cref="Step"/>, because <c>cache</c> is not a GUID, and
-    /// keeping a workflow's keys contiguous under one scan prefix is worth more here than symmetry
+    /// prefix. It cannot collide with <see cref="StepEntity"/>, because <c>cache</c> is not a GUID,
+    /// and keeping a workflow's keys contiguous under one scan prefix is worth more here than symmetry
     /// with the other two.
     /// </para>
     /// <para>
