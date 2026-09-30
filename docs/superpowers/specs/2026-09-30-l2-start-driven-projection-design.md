@@ -184,8 +184,14 @@ participants recorded in L2 (the previous `store` and `roots`, and each root's k
 
 - Redis is ephemeral; a Redis restart wipes everything until each workflow is started again. Whether
   to persist it is a resource-allocation decision outside this design.
-- A deleted step's key is removed by the next start of a workflow that dropped it; a deleted
-  workflow's own keys persist (nothing starts it again); nobody reads them.
+- A step's key is removed only by a start that drops the step when its row is **already** gone. Two
+  orders leave it in L2 for good:
+  - the workflow drops the step and restarts while the row still exists (the key is kept), and the
+    row is deleted afterwards — the step is no longer in that workflow's `store`, so no later start
+    sees it as dropped;
+  - the workflow is deleted and its steps are deleted after it — nothing starts it again.
+- A deleted workflow's own keys (`skp:wf:{id}` and its cache keys) persist; nothing starts it again.
+- These leftovers are small hashes and strings that nobody reads; a Redis restart clears them.
 - A failed start consumer is repaired only by the next start of that workflow.
 - A rename is visible for workflow/step names at the workflow's next start; for a processor at pod
   restart.
@@ -199,5 +205,5 @@ participants recorded in L2 (the previous `store` and `roots`, and each root's k
 ## 7. Deleting a referenced entity
 
 Not a gap: referential integrity refuses the delete while any workflow references the entity
-(§3.5), and a workflow that stopped referencing it keeps running from L1 unaffected. Its key is aligned
-at the next start of a workflow that dropped it.
+(§3.5), and a workflow that stopped referencing it keeps running from L1 unaffected. A step's key is
+removed only when a start drops the step after its row is gone; in any other order it stays (§6).
