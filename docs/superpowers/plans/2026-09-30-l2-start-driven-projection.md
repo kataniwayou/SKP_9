@@ -2450,16 +2450,17 @@ Confirm the forwards are alive (never judge by netstat on default ports) and rec
 
 - [ ] **Step 2: Stop every workflow through BaseApi** (`POST /…/stop` per workflow id listed in `skp:` / the registry), so no lineage is mid-flight on old keys.
 
-- [ ] **Step 3: Build and load the images** — BaseApi, Orchestrator, and every processor (the framework packages changed; a framework-only edit moves no processor SourceHash, but `Processor.SKNormalizer` also carries 4d8a013's project change, so repoint its SourceHash after rebuild). `kind load` each image.
+- [ ] **Step 3: Build and load the images** — BaseApi, Orchestrator, and every processor (the framework packages changed; a framework-only edit moves no processor SourceHash, but `Processor.SKNormalizer` also carries 4d8a013's project change and the final fix wave's doc-comment edits to `RedisFieldWhitelist.cs`/`SKNormalizerConfig.cs`, so repoint its SourceHash after rebuild). `kind load` each image.
 
-- [ ] **Step 4: Delete the retired keys** (after BaseApi and the orchestrator are scaled to the new image, before the processors):
+- [ ] **Step 4: Roll out in order, BEFORE deleting anything** — BaseApi → orchestrator → processors; wait for each to be Ready, and for the processors wait until **every** processor pod runs the new image (`kubectl -n skp get pods -o jsonpath` on the image, no old-image pod left, none Terminating). Order matters: an old-image processor re-`SADD`s `skp:proc:{guid}` as a SET on every beat, so deleting that key while one still runs only brings it back. (Since the final fix wave a new-image processor that meets the SET heals it itself — it deletes its own `skp:proc:{id}` on WRONGTYPE and rewrites the name hash — but during a mixed rollout the two images then fight over the key each beat, so do not rely on that as the ordering.)
+
+- [ ] **Step 5: Delete the retired keys** (only after Step 4 has finished for every service):
   - `DEL skp:` (old parent index)
   - every `skp:{guid}` and `skp:{guid}:{guid}` (old roots and steps) and `skp:{guid}:cache:*` (old cache keys)
   - every `skp:name:*`
   - every `skp:proc:{guid}` whose `TYPE` is `set` (old instance index — it blocks the new name hash with WRONGTYPE)
   Use `--scan` + `TYPE` filtering; never `FLUSHALL` (it wipes live L2 that other pods rely on).
-
-- [ ] **Step 5: Roll out in order** — BaseApi → orchestrator → processors; wait for each to be Ready.
+  Then check, for every processor id: `TYPE skp:proc:{id}` is `hash`, or `none` until that processor's next beat (one interval, 10s by default) writes it. A `set` here means an old-image pod is still running — go back to Step 4.
 
 - [ ] **Step 6: Restart the workflows** that were running (start each through BaseApi).
 
@@ -2470,7 +2471,7 @@ Confirm the forwards are alive (never judge by netstat on default ports) and rec
   - Orchestrator logs "activated workflow …" once per replica per workflow; no "L2 does not hold".
   - Stop one workflow → its orchestrator logs "unscheduled the workflow's job and marked it stopped"; `HGET skp:wf:{id} store` still present.
 
-- [ ] **Step 8: Record** the rollout in memory (the key-layout notes in `MEMORY.md` that mention `skp:name:*`, `skp:proc:*` as a SET, or the parent index are now wrong and must be updated). The offline machine needs its own ship delta (`tools/ship-delta.ps1`) with the same key cleanup; that is a separate, approved step.
+- [ ] **Step 8: Record** the rollout in memory (the key-layout notes in `MEMORY.md` that mention `skp:name:*`, `skp:proc:*` as a SET, or the parent index are now wrong and must be updated). The offline machine needs its own ship delta (`tools/ship-delta.ps1`) with the same key cleanup, in the same order — roll out BaseApi → orchestrator → processors first, confirm no old-image processor remains, and only then delete the retired keys and run the `TYPE skp:proc:{id}` check; that is a separate, approved step.
 
 ---
 

@@ -160,8 +160,9 @@ public sealed class LivenessWriterTests
     [Fact]
     public async Task ANameWriteFailureStillLeavesTheLivenessKey()
     {
-        // During rollout the old SET still sits at skp:proc:{id}, so HSET there answers WRONGTYPE. The
-        // liveness key is what the start gate reads; it must already be written when the name fails.
+        // A WRONGTYPE that survives the delete-and-retry (another writer re-created the old SET in
+        // between, as an old-image replica does every beat) still just logs. The liveness key is what
+        // the start gate reads; it must already be written when the name fails.
         var l2 = new InMemoryL2();
         l2.Db.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
                            Arg.Any<When>(), Arg.Any<CommandFlags>())
@@ -173,5 +174,79 @@ public sealed class LivenessWriterTests
         Assert.True(l2.Has(L2ProjectionKeys.PerInstance(P, "pod-0")));
         Assert.Equal(["pod-0"], l2.Members(L2ProjectionKeys.ProcessorInstances(P)));
         Assert.Equal(LogLevel.Warning, Assert.Single(log.Records).Level);
+        Assert.Equal("processor name write failed for {ProcessorId}", Assert.Single(log.Templates));
+    }
+
+    [Fact]
+    public async Task APreMigrationSetAtTheNameKeyIsReplacedByTheNameHash()
+    {
+        // Ruling R9: during a mis-ordered rollout the retired SET still sits at skp:proc:{id} and HSET
+        // there answers WRONGTYPE. The processor owns that key, so it deletes it and writes once more.
+        var l2 = new InMemoryL2();
+        await l2.Db.SetAddAsync(L2ProjectionKeys.Processor(P), "old-instance");
+        var (writer, log) = Build(l2.Multiplexer);
+
+        await writer.WriteAsync(Identity(), "pod-0", Entry());
+
+        Assert.Equal(EntityNames.Format("shared-proc", "1.2.0", P),
+                     l2.HashValue(L2ProjectionKeys.Processor(P), L2ProjectionKeys.NameField));
+        Assert.Empty(l2.Members(L2ProjectionKeys.Processor(P)));
+        Assert.Equal(TimeSpan.FromSeconds(40), l2.Ttl(L2ProjectionKeys.Processor(P)));
+        Assert.True(l2.Has(L2ProjectionKeys.PerInstance(P, "pod-0")));
+        Assert.Equal(["pod-0"], l2.Members(L2ProjectionKeys.ProcessorInstances(P)));
+        Assert.DoesNotContain(log.Records, r => r.Level >= LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task AWrongTypeOnTheFirstNameWriteOnlyIsHealedByOneRetry()
+    {
+        // The same heal against a store that faults exactly once: the delete happens, the retry lands.
+        var l2 = new InMemoryL2();
+        var calls = 0;
+        l2.Db.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                           Arg.Any<When>(), Arg.Any<CommandFlags>())
+            .Returns(_ => ++calls == 1
+                ? Task.FromException<bool>(new RedisServerException("WRONGTYPE Operation against a key holding the wrong kind of value"))
+                : Task.FromResult(true));
+        var (writer, log) = Build(l2.Multiplexer);
+
+        await writer.WriteAsync(Identity(), "pod-0", Entry());
+
+        Assert.Equal(2, calls);
+        await l2.Db.Received(1).KeyDeleteAsync(L2ProjectionKeys.Processor(P), Arg.Any<CommandFlags>());
+        Assert.DoesNotContain(log.Records, r => r.Level >= LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task ANonWrongTypeNameFaultIsNotRetriedAndDeletesNothing()
+    {
+        var l2 = new InMemoryL2();
+        l2.Db.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                           Arg.Any<When>(), Arg.Any<CommandFlags>())
+            .Throws(new RedisTimeoutException("timed out", CommandStatus.WaitingInBacklog));
+        var (writer, log) = Build(l2.Multiplexer);
+
+        await writer.WriteAsync(Identity(), "pod-0", Entry());
+
+        await l2.Db.DidNotReceive().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
+        Assert.True(l2.Has(L2ProjectionKeys.PerInstance(P, "pod-0")));
+        Assert.Equal("processor name write failed for {ProcessorId}", Assert.Single(log.Templates));
+    }
+
+    [Fact]
+    public async Task ALivenessFaultKeepsItsOwnTemplate()
+    {
+        var db = Substitute.For<IDatabase>();
+        db.StringSetAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
+                Arg.Any<When>(), Arg.Any<CommandFlags>())
+            .Throws(new RedisTimeoutException("timed out", CommandStatus.WaitingInBacklog));
+        var redis = Substitute.For<IConnectionMultiplexer>();
+        redis.GetDatabase().Returns(db);
+        var (writer, log) = Build(redis);
+
+        await writer.WriteAsync(Identity(), "instance-1", Entry());
+
+        Assert.Equal("liveness write failed for {ProcessorId}/{InstanceId}", Assert.Single(log.Templates));
     }
 }

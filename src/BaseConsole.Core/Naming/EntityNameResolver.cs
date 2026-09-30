@@ -13,9 +13,15 @@ namespace BaseConsole.Core.Naming;
 /// delivery, fail a step or trip the gate the way a projection-read fault deliberately does.
 /// </para>
 /// <para>
-/// <b>Hits are cached forever and misses never.</b> A name is fixed for an entity's life except
-/// across a rename and restart, which is the accepted limit (a processor keeps the old name until
-/// its pod restarts). A miss is often a start still in flight, so it is re-read next time.
+/// <b>Hits are cached and misses never.</b> <see cref="ScopeAsync"/> and <see cref="PreloadAsync"/>
+/// read only ids the cache lacks, so a processor keeps a name until its pod restarts (spec §5). A
+/// miss is often a start still in flight, so it is re-read next time.
+/// </para>
+/// <para>
+/// <b>The orchestrator refreshes at every activation.</b> Spec §6 freezes a workflow's and its steps'
+/// names only until the workflow's next start, so <see cref="RefreshAsync"/> re-reads every id and
+/// overwrites cached hits. A refresh that finds nothing or faults keeps the cached name: an old name
+/// is better on a record than an id suffix.
 /// </para>
 /// </summary>
 public sealed class EntityNameResolver(IEntityNameSource source, ILogger<EntityNameResolver> logger)
@@ -37,33 +43,40 @@ public sealed class EntityNameResolver(IEntityNameSource source, ILogger<EntityN
             new EntityRef(L2EntityKind.Workflow, workflowId),
             new EntityRef(L2EntityKind.Step, stepId),
             new EntityRef(L2EntityKind.Processor, processorId),
-        ]).ConfigureAwait(false);
+        ], refresh: false).ConfigureAwait(false);
 
         return CachedScope(workflowId, stepId, processorId);
     }
 
     /// <summary>
-    /// Fills the cache ahead of use — the orchestrator calls this at activation with the workflow, its
-    /// steps and their processors, so the first fire's records are already named. Never throws: a read
-    /// that fails or times out leaves those ids to fall back, exactly as <see cref="ScopeAsync"/> does.
+    /// Fills the cache ahead of use with the ids it does not yet hold. Never throws: a read that fails
+    /// or times out leaves those ids to fall back, exactly as <see cref="ScopeAsync"/> does. The
+    /// orchestrator uses <see cref="RefreshAsync"/> instead, so a restart also picks up renames.
     /// </summary>
-    public Task PreloadAsync(IEnumerable<EntityRef> refs) => LoadAsync(refs);
+    public Task PreloadAsync(IEnumerable<EntityRef> refs) => LoadAsync(refs, refresh: false);
 
-    private async Task LoadAsync(IEnumerable<EntityRef> refs)
+    /// <summary>
+    /// Re-reads every id, cached or not, and overwrites the cached names it finds — the orchestrator
+    /// calls this at each activation so a rename shows from the workflow's next start (spec §6). A miss
+    /// or a failed read keeps whatever name is cached. Never throws.
+    /// </summary>
+    public Task RefreshAsync(IEnumerable<EntityRef> refs) => LoadAsync(refs, refresh: true);
+
+    private async Task LoadAsync(IEnumerable<EntityRef> refs, bool refresh)
     {
-        var unknown = refs
-            .Where(r => r.Id != Guid.Empty && !_names.ContainsKey(r.Id))
+        var toRead = refs
+            .Where(r => r.Id != Guid.Empty && (refresh || !_names.ContainsKey(r.Id)))
             .Distinct()
             .ToArray();
 
-        if (unknown.Length == 0)
+        if (toRead.Length == 0)
         {
             return;
         }
 
         try
         {
-            var found = await source.ReadNamesAsync(unknown).WaitAsync(ReadTimeout).ConfigureAwait(false);
+            var found = await source.ReadNamesAsync(toRead).WaitAsync(ReadTimeout).ConfigureAwait(false);
             foreach (var (id, name) in found)
             {
                 // A source returning an empty name would otherwise cache an empty string forever;

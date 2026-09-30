@@ -117,6 +117,33 @@ public sealed class LiveSetActivationTests
     }
 
     [Fact]
+    public async Task ARestartPicksUpRenamedWorkflowAndStepNames()
+    {
+        // Spec §6: names are frozen only until the workflow's next start. One resolver lives for the
+        // replica's lifetime, so the second activation must re-read names it already holds.
+        var l2 = new InMemoryL2();
+        var resolver = new EntityNameResolver(
+            new RedisEntityNameSource(l2.Multiplexer), NullLogger<EntityNameResolver>.Instance);
+        var activator = new WorkflowActivator(
+            new L2WorkflowReader(l2.Multiplexer, NullLogger<L2WorkflowReader>.Instance),
+            new WorkflowL1Store(), new RecordingWorkflowScheduler(),
+            NullLogger<WorkflowActivator>.Instance, resolver);
+
+        await L2Seed.LiveAsync(l2, Def(W));
+        await l2.Db.HashSetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.NameField, "old-wf_1.0.0-5555-555555555555");
+        await l2.Db.HashSetAsync(L2ProjectionKeys.StepEntity(S), L2ProjectionKeys.NameField, "old-step_1.0.0-6666-666666666666");
+        await activator.ActivateAsync(W, CancellationToken.None);
+        Assert.Equal("old-wf_1.0.0-5555-555555555555", resolver.NameOrFallback(W));
+
+        await l2.Db.HashSetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.NameField, "new-wf_1.0.0-5555-555555555555");
+        await l2.Db.HashSetAsync(L2ProjectionKeys.StepEntity(S), L2ProjectionKeys.NameField, "new-step_1.0.0-6666-666666666666");
+        await activator.ActivateAsync(W, CancellationToken.None);
+
+        Assert.Equal("new-wf_1.0.0-5555-555555555555", resolver.NameOrFallback(W));
+        Assert.Equal("new-step_1.0.0-6666-666666666666", resolver.NameOrFallback(S));
+    }
+
+    [Fact]
     public async Task ARestartOverwritesTheL1EntryWithTheNewDefinition()
     {
         var h = new Harness();

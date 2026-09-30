@@ -28,9 +28,10 @@ namespace Orchestrator.L1;
 /// truth. The store outlives a stop, so reading it anyway would resurrect a workflow an operator stopped.
 /// </para>
 /// <para>
-/// <b>Names are preloaded, best-effort.</b> When a resolver is supplied, the workflow's, its steps' and
-/// their processors' names are read in one round trip after scheduling, so the records the workflow is
-/// about to produce carry names from the first tick. A miss never blocks activation.
+/// <b>Names are refreshed, best-effort.</b> When a resolver is supplied, the workflow's, its steps' and
+/// their processors' names are re-read in one round trip after scheduling — cached ones included, so a
+/// rename made while the workflow was stopped shows from this start (spec §6). A miss keeps the cached
+/// name or falls back, and never blocks activation.
 /// </para>
 /// </summary>
 public sealed class WorkflowActivator(
@@ -58,13 +59,11 @@ public sealed class WorkflowActivator(
         var definition = await reader.ReadAsync(workflowId, ct).ConfigureAwait(false);
         if (definition is null)
         {
-            // Warning: an activation announcement that found nothing to activate is work asked for and
-            // not done, and the announcement's sender has no way to learn that. It is reachable
-            // benignly — a start and a delete crossing on the wire leaves this replica reading an L2
-            // that no longer holds the definition — but a benign race and a workflow that was never
-            // projected are the same record here, and the second is a fault nobody would otherwise
-            // see. Raised 2026-09-11 with the {Result} lines in StepOutcomeHandler; if this proves
-            // noisy in normal operation it is the one of that set to reconsider first.
+            // Warning, and behind the live guard above this is a FAULT, not a race: a start writes the
+            // store before it adds the id to the live set, and a stop removes the id but keeps the
+            // store, so a live id whose store is missing or unreadable means L2 was flushed or holds an
+            // odd key state (a corrupt store field, a key of the wrong type). The announcement's sender
+            // has no way to learn that work it asked for was not done, so this record is the only trace.
             logger.LogWarning(
                 "L2 does not hold workflow {WorkflowId}; nothing to activate", workflowId);
             return;
@@ -94,11 +93,13 @@ public sealed class WorkflowActivator(
             await scheduler.ScheduleAsync(workflowId, jobId, cron, ct).ConfigureAwait(false);
         }
 
-        // Names for the records this workflow is about to produce, in one read. Best-effort: the
-        // resolver never throws, and a miss falls back to the id suffix and is retried on use.
+        // Names for the records this workflow is about to produce, in one read. A REFRESH, not a
+        // preload: the resolver lives as long as the replica, and a preload would skip every id it
+        // already holds, so a workflow or step renamed while stopped would keep its old name past this
+        // start. Best-effort: the resolver never throws, and a miss keeps the cached name or falls back.
         if (names is not null)
         {
-            await names.PreloadAsync(
+            await names.RefreshAsync(
                 new[] { new EntityRef(L2EntityKind.Workflow, workflowId) }
                     .Concat(definition.Steps.Select(s => new EntityRef(L2EntityKind.Step, s.StepId)))
                     .Concat(definition.Steps.Select(s => new EntityRef(L2EntityKind.Processor, s.ProcessorId))))

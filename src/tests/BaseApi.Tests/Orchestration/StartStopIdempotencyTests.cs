@@ -357,7 +357,11 @@ public sealed class StartStopIdempotencyTests
 
         Assert.Equal([live.JobId], c.Scheduler.Unscheduled);
         Assert.Equal(0, c.Scheduler.LiveJobCount);
-        Assert.Empty(c.L2.Keys());
+
+        // The stop takes the id out of the live set and nothing else: the store outlives it, so the
+        // next start aligns against it rather than rebuilding from nothing.
+        Assert.Empty(c.L2.Members(L2ProjectionKeys.Live()));
+        Assert.NotNull(c.L2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField));
     }
 
     [Fact]

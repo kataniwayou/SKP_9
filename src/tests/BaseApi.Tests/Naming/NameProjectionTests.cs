@@ -78,13 +78,15 @@ public sealed class NameProjectionTests
     [Fact]
     public void NoProductionSourceScansTheKeySpace()
     {
-        // Component 3's safety claim: the only KEYS/SCAN in production code is the orphan sweeper's
-        // skp:proc:* pattern, which cannot match skp:name:*.
+        // The safety claim: the only KEYS/SCAN in production code is the orphan sweeper's
+        // skp:proc:*:instances pattern. It cannot match an entity hash (skp:wf:{id}, skp:step:{id},
+        // skp:proc:{id} — none ends in :instances), a workflow's cache keys, the live set or a
+        // skp:data:{id} blob, so no scan can pick up and act on a key the start or a processor owns.
         //
         // WIDENED past the plan's single "exactly one hit" check: the property this test pins is
-        // "nothing scans a pattern matching skp:name:*", not "exactly one call site". A second sweeper
-        // copy that also scans skp:proc:* should still pass; only a hit that DOESN'T reference that
-        // pattern should fail. The matcher covers `Keys(`/`KeysAsync(` calls (excluding the false
+        // "nothing scans a pattern other than skp:proc:*:instances", not "exactly one call site". A
+        // second sweeper copy that also scans that pattern should still pass; only a hit that DOESN'T
+        // reference it should fail. The matcher covers `Keys(`/`KeysAsync(` calls (excluding the false
         // positives a bare "KeysAsync(" substring would catch, such as ListIndexKeysAsync's own
         // declaration/implementation/call site, via a negative lookbehind for a preceding letter) plus
         // the raw RESP command literals "SCAN" and "KEYS", so a hand-rolled RESP scan would be caught

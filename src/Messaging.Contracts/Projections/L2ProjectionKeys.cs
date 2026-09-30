@@ -4,7 +4,8 @@ namespace Messaging.Contracts.Projections;
 /// Single source of truth for the L2 (Redis) projection key formats, so the writer and the reader
 /// consume one shape and a future GUID-format or suffix change cannot silently desynchronize them.
 /// <para>
-/// The scheme is flat: a single prefix followed by GUIDs, with no type discriminator. GUIDs render
+/// The scheme is flat: a single prefix, a kind discriminator (<c>wf:</c>, <c>step:</c>, <c>proc:</c>,
+/// <c>data:</c>) and a GUID, plus the one shared <c>skp:live</c> set. GUIDs render
 /// in the default hyphenated "D" format, not the 32-digit "N" format; <see cref="Workflow"/> states
 /// the <c>:D</c> specifier explicitly, which is byte-identical to a bare interpolation. The prefix is
 /// a compile-time const owned here rather than a config value or a builder parameter, which removes
@@ -68,7 +69,10 @@ public static class L2ProjectionKeys
         processorId = Guid.Empty;
         var head = $"{Prefix}proc:";
 
+        // The length guard first: "skp:proc:instances" matches both the head and the suffix, which
+        // overlap in it, and would otherwise slice a negative length.
         if (key is null
+            || key.Length < head.Length + InstancesSuffix.Length
             || !key.StartsWith(head, StringComparison.Ordinal)
             || !key.EndsWith(InstancesSuffix, StringComparison.Ordinal))
         {
@@ -82,11 +86,12 @@ public static class L2ProjectionKeys
     /// <summary>
     /// The cache root: the key holding the JSON array of key names in one projected dictionary.
     /// <para>
-    /// <b>This is the first key to place a literal segment after the workflow id.</b> Every other
-    /// discriminator in this scheme — <c>proc:</c>, <c>data:</c> — sits immediately after the
-    /// prefix. It cannot collide with <see cref="StepEntity"/>, because <c>cache</c> is not a GUID,
-    /// and keeping a workflow's keys contiguous under one scan prefix is worth more here than symmetry
-    /// with the other two.
+    /// <b>It nests under the workflow's own key.</b> Every entity kind has its own discriminator right
+    /// after the prefix — <c>wf:</c>, <c>step:</c>, <c>proc:</c>, <c>data:</c> — so a cache key can
+    /// collide with no other kind's key: it starts <c>skp:wf:</c>, which no step, processor or data key
+    /// does. Within <c>skp:wf:{id}</c> it adds a literal <c>:cache:</c> segment, and the workflow hash
+    /// itself has no suffix at all, so the two never meet. Nesting it there keeps every key a workflow
+    /// owns under that workflow's one prefix.
     /// </para>
     /// <para>
     /// <paramref name="root"/> is interpolated verbatim, which is safe because the cache validator

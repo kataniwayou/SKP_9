@@ -141,6 +141,62 @@ public sealed class EntityNameResolverTests
     }
 
     [Fact]
+    public async Task ARefreshOverwritesACachedName()
+    {
+        // Spec §6: a workflow or step renamed while stopped shows its new name from the next start.
+        // The orchestrator refreshes at every activation, so a cached hit must not shield the old name.
+        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
+        var resolver = Resolver(source);
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, W)]);
+
+        source.Names[W] = "new_1.0.0-aaaa-111111111111";
+        await resolver.RefreshAsync([new(L2EntityKind.Workflow, W)]);
+
+        Assert.Equal("new_1.0.0-aaaa-111111111111", resolver.NameOrFallback(W));
+    }
+
+    [Fact]
+    public async Task ARefreshThatFindsNothingKeepsTheCachedName()
+    {
+        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
+        var resolver = Resolver(source);
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, W)]);
+
+        source.Names.Remove(W);
+        await resolver.RefreshAsync([new(L2EntityKind.Workflow, W)]);
+
+        Assert.Equal("old_1.0.0-aaaa-111111111111", resolver.NameOrFallback(W));
+    }
+
+    [Fact]
+    public async Task ARefreshThatFaultsKeepsTheCachedNameAndDoesNotThrow()
+    {
+        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
+        var resolver = Resolver(source);
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, W)]);
+
+        source.Fault = new RedisConnectionException(ConnectionFailureType.SocketFailure, "down");
+        await resolver.RefreshAsync([new(L2EntityKind.Workflow, W)]);
+
+        Assert.Equal("old_1.0.0-aaaa-111111111111", resolver.NameOrFallback(W));
+    }
+
+    [Fact]
+    public async Task AScopeStillReadsACachedNameFromTheCacheAlone()
+    {
+        // The refresh is the orchestrator's; a processor's ScopeAsync keeps cache-first (spec §5).
+        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
+        var resolver = Resolver(source);
+        await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
+
+        source.Names[W] = "new_1.0.0-aaaa-111111111111";
+        var scope = await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
+
+        Assert.Equal("old_1.0.0-aaaa-111111111111", scope[EntityNames.WorkflowName]);
+        Assert.Equal(1, source.Reads);
+    }
+
+    [Fact]
     public async Task APreloadAgainstAFaultingStoreDoesNotThrow()
     {
         var source = new FakeNameSource { Fault = new InvalidOperationException("down") };

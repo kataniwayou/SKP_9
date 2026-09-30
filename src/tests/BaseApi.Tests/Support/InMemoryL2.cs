@@ -125,6 +125,17 @@ internal sealed class InMemoryL2
         return removed;
     }
 
+    /// <summary>
+    /// Whether an HSET on <paramref name="key"/> would answer WRONGTYPE on a real server: the key holds
+    /// a string or a non-empty set. Modelled for the single-field HSET only — the one write that can
+    /// meet a retired key shape (the pre-migration <c>skp:proc:{id}</c> SET).
+    /// </summary>
+    private bool HoldsNonHash(string key)
+        => _strings.ContainsKey(key) || (_sets.TryGetValue(key, out var set) && set.Count > 0);
+
+    private static RedisServerException WrongType()
+        => new("WRONGTYPE Operation against a key holding the wrong kind of value");
+
     private Dictionary<string, string> Hash(string key)
     {
         if (!_hashes.TryGetValue(key, out var h))
@@ -137,7 +148,9 @@ internal sealed class InMemoryL2
     }
 
     /// <summary>
-    /// Backs the six operations these paths use onto the dictionaries. <see cref="IBatch"/> derives
+    /// Backs the string, set, hash, key-existence, delete and expire operations these paths use onto
+    /// the dictionaries (both string-set overloads, GET and MGET, SADD/SREM/SMEMBERS/SISMEMBER, both
+    /// HSET overloads and HGET, EXISTS, single- and multi-key DEL, EXPIRE). <see cref="IBatch"/> derives
     /// from <see cref="IDatabaseAsync"/>, so the database and its batches are wired by one method and
     /// cannot drift apart.
     /// </summary>
@@ -218,11 +231,16 @@ internal sealed class InMemoryL2
                             Arg.Any<When>(), Arg.Any<CommandFlags>())
             .Returns(ci =>
             {
+                if (HoldsNonHash(ci.ArgAt<RedisKey>(0).ToString()))
+                {
+                    return Task.FromException<bool>(WrongType());
+                }
+
                 var h = Hash(ci.ArgAt<RedisKey>(0).ToString());
                 var field = ci.ArgAt<RedisValue>(1).ToString();
                 var added = !h.ContainsKey(field);
                 h[field] = ci.ArgAt<RedisValue>(2).ToString();
-                return added;
+                return Task.FromResult(added);
             });
 
         target.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<HashEntry[]>(), Arg.Any<CommandFlags>())

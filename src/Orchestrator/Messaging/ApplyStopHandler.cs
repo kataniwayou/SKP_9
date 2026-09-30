@@ -11,12 +11,13 @@ namespace Orchestrator.Messaging;
 /// Applies an <see cref="OrchestrationStopped"/> announcement.
 /// <para>
 /// <b>Spec §7.3 — verify first, then act.</b> The API can process a stop and then a start for the same
-/// workflow: it cleans L2, publishes the stop, writes L2 again, publishes the start — and both
-/// announcements can be sitting on this replica's queue in that order. By the time the stop is
-/// handled, L2 may already hold the re-written workflow. Unscheduling first would halt a workflow L2
-/// says is live, until the start behind it in the queue is processed. Reading L2 before touching
-/// anything makes that window not exist: L2 is the source of truth, and if it still holds the
-/// workflow, the correct action is none.
+/// workflow: it removes the id from the live set and publishes the stop, then writes the store, adds
+/// the id back to the live set and publishes the start — and both announcements can be sitting on this
+/// replica's queue in that order. By the time the stop is handled, the workflow may already be live
+/// again. Unscheduling first would halt a workflow L2 says is live, until the start behind it in the
+/// queue is processed. Checking the live set before touching anything makes that window not exist: the
+/// live set is the source of truth, and if it still holds the workflow, the correct action is none.
+/// The store is not consulted — it outlives a stop and says nothing about whether the workflow runs.
 /// </para>
 /// <para>
 /// <b>A workflow this replica never activated is a no-op, not a fault.</b> The replica may have missed
@@ -31,6 +32,12 @@ namespace Orchestrator.Messaging;
 /// parked. The job is still torn down here — a stopped workflow dispatches nothing from this moment —
 /// and the entry is marked instead, so those in-flight steps resolve and their run drains. The marked
 /// entry then stays until the workflow restarts or the pod restarts — nothing prunes it.
+/// </para>
+/// <para>
+/// <b>Two templates keep historical wording.</b> "stop announced but the workflow is still projected —
+/// ignoring" now means "still in the live set", and "…steps still in flight will resolve until it is
+/// reaped" predates the removal of the reaper (the entry stays until a restart). Both are kept verbatim
+/// because log selectors match on them.
 /// </para>
 /// </summary>
 internal sealed class ApplyStopHandler : IQueueMessageHandler

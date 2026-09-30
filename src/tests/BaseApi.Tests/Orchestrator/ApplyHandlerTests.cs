@@ -134,7 +134,7 @@ public sealed class ApplyHandlerTests
     [Fact]
     public async Task AStartForAWorkflowNoLongerLiveIsANoOpNotAPark()
     {
-        // A stop cleaned L2 after this announcement was published. Applying it would resurrect a
+        // A stop took the id out of the live set after this announcement was published. Applying it would resurrect a
         // workflow an operator stopped; parking it would DLX a legitimate race rather than a defect.
         var h = new Harness();
 

@@ -63,6 +63,7 @@ public sealed class L2KeyLayoutTests
     [InlineData("skp:proc:33333333-3333-3333-3333-333333333333:pod-0")]
     [InlineData("skp:proc:not-a-guid:instances")]
     [InlineData("skp:wf:33333333-3333-3333-3333-333333333333:instances")]
+    [InlineData("skp:proc:instances")]
     public void AnythingElseDoesNotParseAsAnInstancesKey(string key)
         => Assert.False(L2ProjectionKeys.TryParseProcessorInstances(key, out _));
 

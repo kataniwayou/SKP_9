@@ -6,7 +6,7 @@ namespace Processor.SKNormalizer;
 /// The step payload this processor binds.
 /// <para>
 /// <b><see cref="CacheRoot"/> is the NAME of one projected dictionary, never its address.</b> The full
-/// L2 address is <c>skp:{workflowId}:cache:{root}</c>, and the workflow id half is composed at dispatch
+/// L2 address is <c>skp:wf:{workflowId}:cache:{root}</c>, and the workflow id half is composed at dispatch
 /// from <c>BaseProcessor.WorkflowId</c> rather than authored here.
 /// </para>
 /// <para>
