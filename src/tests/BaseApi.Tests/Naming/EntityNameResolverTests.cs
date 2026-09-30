@@ -164,6 +164,59 @@ public sealed class EntityNameResolverTests
         Assert.Equal("proc_1.0.0-dddd-444444444444", found[p]);
     }
 
+    /// <summary>
+    /// Pins the "one round trip" claim in <see cref="RedisEntityNameSource.ReadAsync"/>'s doc comment:
+    /// every <c>HashGetAsync</c> is issued before any of them is awaited. A regression that awaited each
+    /// read sequentially would still pass every other test in this file -- they only assert on the final
+    /// result -- so this one holds each read open with its own <see cref="TaskCompletionSource{TResult}"/>
+    /// and checks all three calls already reached the database before <c>ReadAsync</c>'s own task can
+    /// possibly have completed.
+    /// </summary>
+    [Fact]
+    public async Task TheRedisSourceIssuesEveryReadBeforeAwaitingAny()
+    {
+        var w = Guid.NewGuid(); var s = Guid.NewGuid(); var p = Guid.NewGuid();
+        var sources = new Dictionary<(RedisKey Key, RedisValue Field), TaskCompletionSource<RedisValue>>();
+        var db = Substitute.For<IDatabaseAsync>();
+
+        db.HashGetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>())
+            .Returns(ci =>
+            {
+                var key = (ci.ArgAt<RedisKey>(0), ci.ArgAt<RedisValue>(1));
+                var tcs = new TaskCompletionSource<RedisValue>();
+                sources[key] = tcs;
+                return tcs.Task;
+            });
+
+        var refs = new[]
+        {
+            new EntityRef(L2EntityKind.Workflow, w),
+            new EntityRef(L2EntityKind.Step, s),
+            new EntityRef(L2EntityKind.Processor, p),
+        };
+
+        var result = RedisEntityNameSource.ReadAsync(db, refs);
+
+        // All three calls must have already reached the database -- unawaited -- before this line, or
+        // the lookups below throw KeyNotFoundException.
+        Assert.False(result.IsCompleted);
+        await db.Received(1).HashGetAsync(L2ProjectionKeys.Workflow(w), L2ProjectionKeys.NameField, Arg.Any<CommandFlags>());
+        await db.Received(1).HashGetAsync(L2ProjectionKeys.StepEntity(s), L2ProjectionKeys.NameField, Arg.Any<CommandFlags>());
+        await db.Received(1).HashGetAsync(L2ProjectionKeys.Processor(p), L2ProjectionKeys.NameField, Arg.Any<CommandFlags>());
+        Assert.Equal(3, sources.Count);
+
+        sources[(L2ProjectionKeys.Workflow(w), L2ProjectionKeys.NameField)].SetResult("chain_1.0.0-aaaa-111111111111");
+        sources[(L2ProjectionKeys.StepEntity(s), L2ProjectionKeys.NameField)].SetResult(RedisValue.Null);
+        sources[(L2ProjectionKeys.Processor(p), L2ProjectionKeys.NameField)].SetResult("proc_1.0.0-dddd-444444444444");
+
+        var found = await result;
+
+        Assert.Equal(2, found.Count);
+        Assert.Equal("chain_1.0.0-aaaa-111111111111", found[w]);
+        Assert.Equal("proc_1.0.0-dddd-444444444444", found[p]);
+        Assert.False(found.ContainsKey(s));
+    }
+
     [Fact]
     public async Task TheNoOpHelpersAcceptNoResolver()
     {
