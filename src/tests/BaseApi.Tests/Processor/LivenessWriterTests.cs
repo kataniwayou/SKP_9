@@ -89,24 +89,19 @@ public sealed class LivenessWriterTests
     }
 
     [Fact]
-    public async Task WritesTheKeyAndTheIndexOnTheHappyPath()
+    public async Task WritesTheKeyAndTheInstanceSetBothWithTheTtl()
     {
-        var db = Substitute.For<IDatabase>();
-        var redis = Substitute.For<IConnectionMultiplexer>();
-        redis.GetDatabase().Returns(db);
-        var (writer, log) = Build(redis);
+        var l2 = new InMemoryL2();
+        var (writer, log) = Build(l2.Multiplexer);
         var processorId = Guid.NewGuid();
 
         await writer.WriteAsync(processorId, "instance-1", Entry());
 
-        // TTL is four times the entry's own recorded interval: 10 * 4 = 40.
-        await db.Received(1).StringSetAsync(
-            L2ProjectionKeys.PerInstance(processorId, "instance-1"),
-            Arg.Any<RedisValue>(),
-            TimeSpan.FromSeconds(40),
-            Arg.Any<When>(), Arg.Any<CommandFlags>());
-        await db.Received(1).SetAddAsync(
-            L2ProjectionKeys.InstanceIndex(processorId), "instance-1", Arg.Any<CommandFlags>());
+        // TTL is four times the entry's own recorded interval: 10 * 4 = 40. The instance set carries
+        // the same TTL, so a processor whose replicas are all gone leaves nothing behind.
+        Assert.Equal(TimeSpan.FromSeconds(40), l2.Ttl(L2ProjectionKeys.PerInstance(processorId, "instance-1")));
+        Assert.Equal(["instance-1"], l2.Members(L2ProjectionKeys.ProcessorInstances(processorId)));
+        Assert.Equal(TimeSpan.FromSeconds(40), l2.Ttl(L2ProjectionKeys.ProcessorInstances(processorId)));
         Assert.Empty(log.Records);
     }
 

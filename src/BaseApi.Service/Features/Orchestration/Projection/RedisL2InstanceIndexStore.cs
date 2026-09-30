@@ -6,12 +6,12 @@ namespace BaseApi.Service.Features.Orchestration.Projection;
 /// <summary>
 /// Redis implementation of the instance-index store.
 /// <para>
-/// <b>Index keys are discovered by type, not by parsing.</b> The <c>skp:proc:</c> prefix covers both
-/// the per-processor index and the per-instance keys beneath it, and both halves of
-/// <c>skp:proc:{processorId}:{instanceId}</c> can be split at a colon, so no pattern reliably tells
-/// them apart. The index is a set and the per-instance key is a string, so scanning with a type
-/// filter separates them exactly. It also finds indexes belonging to processors that have since been
-/// deleted, which an enumeration driven from the database would miss.
+/// <b>Index keys are found by a narrowed scan pattern, backed by a type check.</b> The
+/// <c>:instances</c> suffix on <see cref="L2ProjectionKeys.ProcessorInstances"/> already excludes the
+/// processor's name hash and every per-instance key beneath it, so the pattern alone finds the right
+/// keys. The type check stays so a stray non-set key under that suffix can never be reported as an
+/// index. It also finds indexes belonging to processors that have since been deleted, which an
+/// enumeration driven from the database would miss.
 /// </para>
 /// </summary>
 internal sealed class RedisL2InstanceIndexStore : IL2InstanceIndexStore
@@ -34,13 +34,12 @@ internal sealed class RedisL2InstanceIndexStore : IL2InstanceIndexStore
                 continue;
             }
 
-            foreach (var key in server.Keys(pattern: $"{L2ProjectionKeys.Prefix}proc:*", pageSize: 250))
+            foreach (var key in server.Keys(pattern: $"{L2ProjectionKeys.Prefix}proc:*:instances", pageSize: 250))
             {
                 ct.ThrowIfCancellationRequested();
 
-                // The scan pattern also matches the per-instance keys beneath each index. Filtering
-                // here rather than at use keeps the returned list a true list of indexes, which is
-                // what the caller counts when it reports how many processors it swept.
+                // The pattern already excludes the name hash and the per-instance keys; the type check
+                // stays so a stray non-set key under this suffix can never be reported as an index.
                 if (await db.KeyTypeAsync(key).ConfigureAwait(false) is RedisType.Set)
                 {
                     keys.Add(key!);
@@ -69,8 +68,13 @@ internal sealed class RedisL2InstanceIndexStore : IL2InstanceIndexStore
     /// </summary>
     public async Task<bool> TryRemoveIfAbsentAsync(string indexKey, string instanceId, CancellationToken ct)
     {
+        if (!L2ProjectionKeys.TryParseProcessorInstances(indexKey, out var processorId))
+        {
+            return false;   // not an instances key; nothing this sweeper may touch
+        }
+
         var db = _multiplexer.GetDatabase();
-        var perInstance = $"{indexKey}:{instanceId}";
+        var perInstance = L2ProjectionKeys.PerInstance(processorId, instanceId);
 
         var tran = db.CreateTransaction();
         tran.AddCondition(Condition.KeyNotExists(perInstance));

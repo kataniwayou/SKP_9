@@ -20,7 +20,7 @@ namespace Messaging.Contracts.Projections;
 ///   <item><description>Cache: <c>skp:wf:{workflowId}:cache:{root}</c> — one dictionary's key list</description></item>
 ///   <item><description>CacheEntry: <c>skp:wf:{workflowId}:cache:{root}:{key}</c> — one entry</description></item>
 ///   <item><description>ExecutionData: <c>skp:data:{guid}</c> — the blob for both roles</description></item>
-///   <item><description>Retiring (removed by later tasks): ParentIndex <c>skp:</c>, Root <c>skp:{workflowId}</c>, Step <c>skp:{workflowId}:{stepId}</c>, InstanceIndex <c>skp:proc:{processorId}</c> as a SET, Name <c>skp:name:{id}</c></description></item>
+///   <item><description>Retiring (removed by later tasks): ParentIndex <c>skp:</c>, Root <c>skp:{workflowId}</c>, Step <c>skp:{workflowId}:{stepId}</c>, Name <c>skp:name:{id}</c></description></item>
 /// </list>
 /// </summary>
 public static class L2ProjectionKeys
@@ -115,11 +115,6 @@ public static class L2ProjectionKeys
     /// already-resolved pod identity — a plain string, not a Guid.</summary>
     public static string PerInstance(Guid processorId, string instanceId)
         => $"{Processor(processorId)}:{instanceId}";
-
-    /// <summary>The per-processor instance-index SET key that each replica adds its instance id to.
-    /// It is exactly the prefix of <see cref="PerInstance"/> before the trailing instance id.</summary>
-    public static string InstanceIndex(Guid processorId)
-        => $"{Prefix}proc:{processorId:D}";
 
     /// <summary>
     /// The execution blob key, and the only one. A step's output is written here under the

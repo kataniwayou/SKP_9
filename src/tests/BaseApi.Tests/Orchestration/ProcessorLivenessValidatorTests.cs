@@ -44,7 +44,7 @@ public sealed class ProcessorLivenessValidatorTests
         /// <summary>Registers the index members and what each per-instance key returns.</summary>
         public void Replicas(params (string InstanceId, RedisValue Value)[] replicas)
         {
-            Db.SetMembersAsync(L2ProjectionKeys.InstanceIndex(ProcessorId))
+            Db.SetMembersAsync(L2ProjectionKeys.ProcessorInstances(ProcessorId))
                 .Returns(replicas.Select(r => (RedisValue)r.InstanceId).ToArray());
 
             foreach (var (instanceId, value) in replicas)

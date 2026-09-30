@@ -106,6 +106,6 @@ public sealed class NameProjectionTests
         // literal string "skp:proc:*" -- Prefix is "skp:" (see L2ProjectionKeys), so this resolves to
         // exactly that pattern at runtime. Checked against the interpolation's own source text rather
         // than its resolved value, which a source scan cannot evaluate.
-        Assert.All(hits, t => Assert.Contains("Prefix}proc:*", t.l, StringComparison.Ordinal));
+        Assert.All(hits, t => Assert.Contains("Prefix}proc:*:instances", t.l, StringComparison.Ordinal));
     }
 }

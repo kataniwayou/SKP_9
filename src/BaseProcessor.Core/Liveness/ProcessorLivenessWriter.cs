@@ -63,8 +63,12 @@ public sealed class ProcessorLivenessWriter
                 When.Always,
                 CommandFlags.None).ConfigureAwait(false);
 
-            await db.SetAddAsync(
-                L2ProjectionKeys.InstanceIndex(processorId), instanceId).ConfigureAwait(false);
+            // The set gets the liveness TTL too, refreshed by every replica's beat: while one replica
+            // lives the set stays and the sweeper prunes the dead members; once none does, the set
+            // expires with them and nothing is left behind for BaseApi to clean.
+            var instances = L2ProjectionKeys.ProcessorInstances(processorId);
+            await db.SetAddAsync(instances, instanceId).ConfigureAwait(false);
+            await db.KeyExpireAsync(instances, ttl, ExpireWhen.Always, CommandFlags.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
