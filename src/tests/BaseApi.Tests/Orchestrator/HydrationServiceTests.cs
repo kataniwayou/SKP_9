@@ -81,56 +81,50 @@ public sealed class HydrationServiceTests
             _reader = new L2WorkflowReader(redis, NullLogger<L2WorkflowReader>.Instance);
             Heartbeat = new LoopHeartbeat(Clock);
 
-            // Nothing stubs the parent index by default: an unstubbed array-returning member yields an
+            // Nothing stubs the live set by default: an unstubbed array-returning member yields an
             // empty array, which is what an empty L2 looks like to the reader.
         }
 
         /// <summary>
-        /// Puts <paramref name="workflowId"/> in the parent index and writes the same root and step
-        /// keys <c>L2ProjectionWriter</c> writes, so hydration reads the store the API produces rather
-        /// than one shaped for the test.
+        /// Puts <paramref name="workflowId"/> in the live set and writes the same store
+        /// <c>L2ProjectionWriter</c> writes, so hydration reads the store the API produces rather than
+        /// one shaped for the test.
         /// </summary>
         public Harness WithWorkflow(Guid workflowId, string? cron)
         {
             Index(workflowId);
 
-            Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
-                .Returns(RootJson(cron));
-
-            Db.StringGetAsync(L2ProjectionKeys.Step(workflowId, S), Arg.Any<CommandFlags>())
-                .Returns(StepJson());
+            Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
+                .Returns(StoreJson(cron));
 
             return this;
         }
 
         /// <summary>
-        /// The stored root, as <c>L2ProjectionWriter</c> writes it. Shared by every stub that has to
+        /// The stored workflow, as <c>L2ProjectionWriter</c> writes it. Shared by every stub that has to
         /// produce one, so a stub that answers on the second attempt cannot describe a different
         /// workflow from the one that answers on the first.
         /// </summary>
-        private static RedisValue RootJson(string? cron) => JsonSerializer.Serialize(
-            new WorkflowRootProjection(
+        private static RedisValue StoreJson(string? cron) => JsonSerializer.Serialize(
+            new WorkflowStoreProjection(
                 EntryStepIds: [S],
-                StepIds: [S],
                 Cron: cron,
-                Liveness: new LivenessProjection(DateTime.UtcNow, 3600, "Pending")),
-            MessagingJson.Options);
-
-        /// <summary>The one stored step, as <c>L2ProjectionWriter</c> writes it.</summary>
-        private static RedisValue StepJson() => JsonSerializer.Serialize(
-            new StepProjection(EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []),
+                Steps: [new StepL1(S, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])]),
             MessagingJson.Options);
 
         /// <summary>
-        /// Adds one id to the parent index. The stub is replaced rather than appended to, so the last
-        /// call carries every id added so far and index order is the order they were added in — which
-        /// is what makes "mirrored W1, then failed on W2" a thing a test can arrange.
+        /// Adds one id to the live set. The members stub is replaced rather than appended to, so the
+        /// last call carries every id added so far and set order is the order they were added in —
+        /// which is what makes "mirrored W1, then failed on W2" a thing a test can arrange. The
+        /// membership check the activator makes answers yes for the same id.
         /// </summary>
         private void Index(Guid workflowId)
         {
             _index.Add(workflowId.ToString("D"));
-            Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
+            Db.SetMembersAsync(L2ProjectionKeys.Live(), Arg.Any<CommandFlags>())
                 .Returns(_index.ToArray());
+            Db.SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D"), Arg.Any<CommandFlags>())
+                .Returns(true);
         }
 
         /// <summary>A broker this replica cannot reach, so its topology cannot be declared.</summary>
@@ -158,30 +152,30 @@ public sealed class HydrationServiceTests
             return this;
         }
 
-        /// <summary>An L2 that cannot be reached at all — the index read itself faults.</summary>
+        /// <summary>An L2 that cannot be reached at all — the live-set read itself faults.</summary>
         public Harness WithStoreFault()
         {
-            Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
+            Db.SetMembersAsync(L2ProjectionKeys.Live(), Arg.Any<CommandFlags>())
                 .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
 
             return this;
         }
 
         /// <summary>
-        /// A workflow the index lists but whose root read faults — the store going away partway
+        /// A workflow the live set lists but whose store read faults — the store going away partway
         /// through a pass, rather than before it started.
         /// </summary>
         public Harness WithWorkflowFault(Guid workflowId)
         {
             Index(workflowId);
-            Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
+            Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
                 .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
 
             return this;
         }
 
         /// <summary>
-        /// A workflow the index lists whose root read faults the first <paramref name="failures"/>
+        /// A workflow the live set lists whose store read faults the first <paramref name="failures"/>
         /// times and answers normally after that: the store going away partway through a pass and
         /// coming back before the retry. <see cref="WithWorkflowFault"/> never recovers, which ends
         /// the run at one failed pass; this one lets a second, complete pass follow the first.
@@ -191,22 +185,19 @@ public sealed class HydrationServiceTests
             Index(workflowId);
             var attempts = 0;
 
-            Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
+            Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
                 .Returns(_ => Interlocked.Increment(ref attempts) <= failures
                     ? throw new RedisConnectionException(ConnectionFailureType.SocketFailure, "down")
-                    : RootJson(cron));
-
-            Db.StringGetAsync(L2ProjectionKeys.Step(workflowId, S), Arg.Any<CommandFlags>())
-                .Returns(StepJson());
+                    : StoreJson(cron));
 
             return this;
         }
 
         /// <summary>
-        /// An L2 that faults the first <paramref name="failures"/> index reads and answers normally
+        /// An L2 that faults the first <paramref name="failures"/> live-set reads and answers normally
         /// after that — a store that was down and came back.
         /// <para>
-        /// Must be the last <c>With…</c> call in a chain: it replaces the index stub, and reads the
+        /// Must be the last <c>With…</c> call in a chain: it replaces the members stub, and reads the
         /// ids lazily so whatever <see cref="WithWorkflow"/> added still arrives on the attempt that
         /// succeeds.
         /// </para>
@@ -215,7 +206,7 @@ public sealed class HydrationServiceTests
         {
             var attempts = 0;
 
-            Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
+            Db.SetMembersAsync(L2ProjectionKeys.Live(), Arg.Any<CommandFlags>())
                 .Returns(_ => Interlocked.Increment(ref attempts) <= failures
                     ? throw new RedisConnectionException(ConnectionFailureType.SocketFailure, "down")
                     : _index.ToArray());
@@ -262,7 +253,7 @@ public sealed class HydrationServiceTests
     }
 
     [Fact]
-    public async Task MirrorsEveryWorkflowInTheParentIndex()
+    public async Task MirrorsEveryWorkflowInTheLiveSet()
     {
         var h = new Harness().WithWorkflow(W1, "0 * * * *").WithWorkflow(W2, null);
 
@@ -285,7 +276,7 @@ public sealed class HydrationServiceTests
         Received.InOrder(() =>
         {
             h.Topology.EnsureDeclaredAsync(Arg.Any<CancellationToken>());
-            h.Db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>());
+            h.Db.SetMembersAsync(L2ProjectionKeys.Live(), Arg.Any<CommandFlags>());
         });
     }
 
@@ -301,7 +292,7 @@ public sealed class HydrationServiceTests
             () => h.Build().RunOnceAsync(CancellationToken.None));
 
         await h.Db.DidNotReceive().SetMembersAsync(
-            L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>());
+            L2ProjectionKeys.Live(), Arg.Any<CommandFlags>());
         Assert.False(h.Admission.IsOpen);
 
         // Ready all the same: the gate reports that the loop is turning, and the beat that opens it

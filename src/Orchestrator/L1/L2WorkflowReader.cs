@@ -12,27 +12,23 @@ namespace Orchestrator.L1;
 /// one place in the orchestrator that touches Redis at all.
 /// <para>
 /// <b>It reads, and it never writes.</b> The API is the sole writer of L2 (spec invariant 1); the
-/// orchestrator is a consumer of the API's projections. Four operations appear here —
-/// <c>SetMembersAsync</c>, <c>StringGetAsync</c>, <c>KeyExistsAsync</c> and the HGETs of each entity
-/// hash's <c>name</c> field for log names — and no fifth is permitted. A delete or a set here
-/// would let this replica's view of the world become a fact about the world, which is precisely the
-/// inversion the two invariants exist to prevent.
+/// orchestrator is a consumer of the API's projections. Three operations appear here —
+/// <c>SetMembersAsync</c> (the live set, for hydration), <c>SetContainsAsync</c> (the live guard on
+/// both announcements) and <c>HashGetAsync</c> (a workflow's store, and each entity hash's
+/// <c>name</c> field for log names) — and no fourth is permitted. A delete or a set here would let
+/// this replica's view of the world become a fact about the world, which is precisely the inversion
+/// the two invariants exist to prevent.
 /// </para>
 /// <para>
-/// <b>A torn projection is survivable; a broken store is not this type's problem.</b> A step the root
-/// still lists but L2 has no usable value for — the key is gone, or what is under it will not
-/// deserialize — is skipped with a warning: the workflow is worth running with the steps that are
-/// there, and the next start rewrites the whole key set anyway. A Redis fault, by contrast, propagates
-/// untouched — spec §7.4 classifies an L2 read fault as RequeueAndTrip, and that decision belongs to
-/// the consumer that can act on it, not to the reader. That split is why the only <c>catch</c> in this
-/// file sits around a single <c>Deserialize</c> call and cannot reach a read.
+/// <b>A store that will not deserialize reads as absent, with a warning; a Redis fault propagates
+/// untouched</b> (spec §7.4 RequeueAndTrip). The only catch sits around one Deserialize call.
 /// </para>
 /// </summary>
 public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2WorkflowReader> logger)
     : IEntityNameSource
 {
     /// <summary>
-    /// The fourth read this class makes: entity display names, for log records only, via
+    /// The name read this class makes: entity display names, for log records only, via
     /// <see cref="RedisEntityNameSource.ReadAsync"/>. UNLIKE the projection reads above, a fault here
     /// must not requeue a delivery or trip the gate. It propagates to <see cref="EntityNameResolver"/>,
     /// which catches it and logs the id suffix instead.
@@ -41,16 +37,17 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
         RedisEntityNameSource.ReadAsync(redis.GetDatabase(), refs);
 
     /// <summary>
-    /// Every workflow id in the parent-index SET. A member that is not a workflow id is skipped with a
-    /// warning rather than failing the read: one unusable index entry must not hide the rest of L2
-    /// from a hydration pass.
+    /// Every workflow id in the live set — exactly the workflows that are running; a stopped workflow's
+    /// store stays in L2 but is not here. A member that is not a workflow id is skipped with a warning
+    /// rather than failing the read: one unusable entry must not hide the rest of L2 from a hydration
+    /// pass.
     /// </summary>
     public async Task<IReadOnlyList<Guid>> ReadAllIdsAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         var members = await redis.GetDatabase()
-            .SetMembersAsync(L2ProjectionKeys.ParentIndex()).ConfigureAwait(false);
+            .SetMembersAsync(L2ProjectionKeys.Live()).ConfigureAwait(false);
 
         var ids = new List<Guid>(members.Length);
         foreach (var member in members)
@@ -63,7 +60,7 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
             {
                 // The member itself is not logged: it is whatever happens to be in the store, and this
                 // service logs ids and outcomes only.
-                logger.LogWarning("parent index holds a member that is not a workflow id; skipping it");
+                logger.LogWarning("the live set holds a member that is not a workflow id; skipping it");
             }
         }
 
@@ -71,91 +68,39 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
     }
 
     /// <summary>
-    /// The workflow <paramref name="workflowId"/> as L2 holds it, or null when the root key is absent —
-    /// which is not a fault. A stop may have cleaned L2 after the announcement that brought us here was
-    /// published, and L2 saying the workflow is gone is L2 being the source of truth.
+    /// The workflow <paramref name="workflowId"/> as its last start stored it, or null when there is no
+    /// usable store. Caches stay empty and names absent on purpose: nothing on the activation path reads
+    /// them — processors address their cache keys directly, and names load through the resolver.
     /// </summary>
     public async Task<WorkflowL1?> ReadAsync(Guid workflowId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        var db = redis.GetDatabase();
+        // Outside ReadStore: a Redis fault must propagate, so no catch may sit near the read.
+        var raw = await redis.GetDatabase()
+            .HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField).ConfigureAwait(false);
 
-        var rootJson = await db.StringGetAsync(L2ProjectionKeys.Root(workflowId)).ConfigureAwait(false);
-        if (rootJson.IsNullOrEmpty)
+        if (raw.IsNullOrEmpty)
         {
             return null;
         }
 
-        var root = JsonSerializer.Deserialize<WorkflowRootProjection>(rootJson!, MessagingJson.Options);
-        if (root is null)
+        var store = ReadStore(raw);
+        if (store is null)
         {
+            logger.LogWarning("workflow {WorkflowId} holds a store that will not deserialize; treating it as absent", workflowId);
             return null;
         }
 
-        var stepIds = root.StepIds ?? new List<Guid>();
-        var steps = new List<StepL1>(stepIds.Count);
-
-        foreach (var stepId in stepIds)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            // The read is deliberately outside ReadStep: a Redis fault must propagate, and the only way
-            // to be sure it cannot be swallowed is for no catch to be anywhere near it.
-            var stepJson = await db.StringGetAsync(L2ProjectionKeys.Step(workflowId, stepId))
-                .ConfigureAwait(false);
-
-            var step = ReadStep(stepJson);
-            if (step is null)
-            {
-                logger.LogWarning(
-                    "workflow {WorkflowId} lists step {StepId} but L2 holds no usable value for it; skipping the step",
-                    workflowId, stepId);
-                continue;
-            }
-
-            steps.Add(new StepL1(
-                stepId, step.EntryCondition, step.ProcessorId, step.Payload, step.NextStepIds));
-        }
-
-        // Caches is always empty here, permanently, not as a stub. This read-back exists to activate and
-        // schedule a workflow -- entry steps, cron, steps -- and nothing on that path ever consumes a
-        // dictionary. A cache root is its own set of L2 keys, addressed directly by the processor that
-        // needs it via the full address handed to it in its step payload; this record never carries the
-        // data. Populating this list would mean an extra Redis read on every single activation to hydrate
-        // something nothing downstream of this method reads.
         return new WorkflowL1(
-            workflowId, root.EntryStepIds ?? new List<Guid>(), root.Cron, steps, new List<CacheL1>());
+            workflowId, store.EntryStepIds ?? new List<Guid>(), store.Cron, store.Steps ?? new List<StepL1>(), new List<CacheL1>());
     }
 
-    /// <summary>
-    /// One stored step value, or null when there is nothing usable there — the key is gone, or what is
-    /// under it will not deserialize.
-    /// <para>
-    /// <b>The two are one outcome, and the catch is deliberately this narrow.</b> A torn projection is
-    /// survivable by design, and a value corrupt in place is torn in exactly the way a missing key is:
-    /// the root names a step this workflow can no longer run, the rest of the workflow is still worth
-    /// running, and the next start rewrites the whole key set. Without this the workflow's own damage
-    /// would surface as a <see cref="JsonException"/> escaping <see cref="ReadAsync"/> — indistinguishable
-    /// to a caller from the Redis fault that must escape, and enough to end a hydration pass over every
-    /// other workflow in the store.
-    /// </para>
-    /// <para>
-    /// It takes an already-read value rather than a key precisely so the catch cannot reach the read.
-    /// A <c>try</c> one line wider would put a Redis outage inside a swallow, and spec §7.4's
-    /// RequeueAndTrip depends on that fault escaping.
-    /// </para>
-    /// </summary>
-    private static StepProjection? ReadStep(RedisValue stepJson)
+    private static WorkflowStoreProjection? ReadStore(RedisValue raw)
     {
-        if (stepJson.IsNullOrEmpty)
-        {
-            return null;
-        }
-
         try
         {
-            return JsonSerializer.Deserialize<StepProjection>(stepJson!, MessagingJson.Options);
+            return JsonSerializer.Deserialize<WorkflowStoreProjection>(raw.ToString(), MessagingJson.Options);
         }
         catch (JsonException)
         {
@@ -164,15 +109,14 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
     }
 
     /// <summary>
-    /// Whether L2 still holds a root for <paramref name="workflowId"/>. The stop path's verify step:
-    /// it asks whether the removal it was told about has actually happened before tearing anything
-    /// down.
+    /// Whether <paramref name="workflowId"/> is in the live set — the guard for both announcements. The
+    /// store outlives a stop, so "the key exists" no longer says anything about whether it runs.
     /// </summary>
-    public async Task<bool> ExistsAsync(Guid workflowId, CancellationToken ct)
+    public async Task<bool> IsLiveAsync(Guid workflowId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         return await redis.GetDatabase()
-            .KeyExistsAsync(L2ProjectionKeys.Root(workflowId)).ConfigureAwait(false);
+            .SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D")).ConfigureAwait(false);
     }
 }

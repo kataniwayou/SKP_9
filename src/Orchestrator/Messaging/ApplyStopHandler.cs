@@ -73,10 +73,10 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
                    Guid.Empty, m.WorkflowId, Guid.Empty, Guid.Empty, Guid.Empty)))
         {
             // Verify before acting. The API can process a stop and then a start, so by the time this stop
-            // is handled L2 may already hold the re-written workflow — and unscheduling first would halt a
-            // workflow L2 says is live until the start behind this message in the queue is processed.
-            // L2 is the source of truth; if it still holds the workflow, the correct action is none.
-            if (await _reader.ExistsAsync(m.WorkflowId, ct).ConfigureAwait(false))
+            // is handled the workflow may be live again — and unscheduling would halt a workflow the API
+            // just restarted. The live set is the source of truth; the store outlives a stop and says
+            // nothing about whether the workflow runs.
+            if (await _reader.IsLiveAsync(m.WorkflowId, ct).ConfigureAwait(false))
             {
                 _logger.LogInformation("stop announced but the workflow is still projected — ignoring");
                 return;

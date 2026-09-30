@@ -12,17 +12,16 @@ namespace BaseApi.Tests.Orchestrator;
 
 /// <summary>
 /// The reader is the one place that knows L2's key layout, and the only place the orchestrator touches
-/// L2 at all. The activation tests drive its happy path; these cover the damaged-store paths they
-/// cannot reach — a root listing a step key that is not there, a step value that will not deserialize,
-/// and an index member that is not a workflow id — because all three are survivable by design and none
-/// of them may take a hydration pass down. The last test is the fence on the other side: what is
-/// survivable stops exactly where the store's own faults begin.
+/// L2 at all. The activation tests drive its happy path; these cover the paths they cannot reach — a
+/// live-set member that is not a workflow id, which is survivable by design and may not take a
+/// hydration pass down, and a Redis fault on the store read, which is the fence on the other side:
+/// what is survivable stops exactly where the store's own faults begin. A store that will not
+/// deserialize is <c>LiveSetActivationTests.ACorruptStoreReadsAsAbsentAndDoesNotThrow</c>.
 /// </summary>
 public sealed class L2WorkflowReaderTests
 {
     private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid S1 = Guid.Parse("22222222-2222-2222-2222-222222222222");
-    private static readonly Guid S2 = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
     private readonly IDatabase _db = Substitute.For<IDatabase>();
@@ -35,28 +34,21 @@ public sealed class L2WorkflowReaderTests
         _reader = new L2WorkflowReader(redis, NullLogger<L2WorkflowReader>.Instance);
     }
 
-    private void WriteRoot(string? cron, params Guid[] stepIds) =>
-        _db.StringGetAsync(L2ProjectionKeys.Root(W), Arg.Any<CommandFlags>())
+    private void WriteStore(string? cron, params Guid[] stepIds) =>
+        _db.HashGetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
             .Returns((RedisValue)JsonSerializer.Serialize(
-                new WorkflowRootProjection(
+                new WorkflowStoreProjection(
                     EntryStepIds: [stepIds.Length > 0 ? stepIds[0] : Guid.Empty],
-                    StepIds: [.. stepIds],
                     Cron: cron,
-                    Liveness: new LivenessProjection(DateTime.UtcNow, 3600, "Pending")),
-                MessagingJson.Options));
-
-    private void WriteStep(Guid stepId) =>
-        _db.StringGetAsync(L2ProjectionKeys.Step(W, stepId), Arg.Any<CommandFlags>())
-            .Returns((RedisValue)JsonSerializer.Serialize(
-                new StepProjection(
-                    EntryCondition: 1, ProcessorId: P, Payload: "{\"k\":1}", NextStepIds: []),
+                    Steps: stepIds
+                        .Select(id => new StepL1(id, EntryCondition: 1, ProcessorId: P, Payload: "{\"k\":1}", NextStepIds: []))
+                        .ToList()),
                 MessagingJson.Options));
 
     [Fact]
     public async Task ReadsTheRootAndItsStepsIntoOneDefinition()
     {
-        WriteRoot("0 * * * *", S1);
-        WriteStep(S1);
+        WriteStore("0 * * * *", S1);
 
         var definition = await _reader.ReadAsync(W, CancellationToken.None);
 
@@ -74,51 +66,18 @@ public sealed class L2WorkflowReaderTests
     [Fact]
     public async Task ReturnsNullWhenTheRootKeyIsAbsent()
     {
-        // Nothing stubbed: an unstubbed StringGetAsync yields default(RedisValue), which is what an
-        // absent key looks like.
+        // Nothing stubbed: an unstubbed HashGetAsync yields default(RedisValue), which is what an
+        // absent key or field looks like.
         Assert.Null(await _reader.ReadAsync(W, CancellationToken.None));
     }
 
     [Fact]
-    public async Task SkipsAStepTheRootListsButL2NoLongerHolds()
+    public async Task LetsARedisFaultOnTheStoreReadEscape()
     {
-        // A torn projection is survivable: the workflow is still worth running with the steps that are
-        // there, and the next start rewrites the whole key set anyway.
-        WriteRoot("0 * * * *", S1, S2);
-        WriteStep(S1);
-
-        var definition = await _reader.ReadAsync(W, CancellationToken.None);
-
-        Assert.NotNull(definition);
-        Assert.Equal(S1, Assert.Single(definition.Steps).StepId);
-    }
-
-    [Fact]
-    public async Task SkipsAStepWhoseStoredValueWillNotDeserialize()
-    {
-        // Corrupt in place is torn in the same way missing is: the root names a step this workflow can
-        // no longer run. Letting the JsonException escape would end a hydration pass over every other
-        // workflow in the store, and would reach the consumer looking exactly like the Redis fault that
-        // is supposed to trip the gate.
-        WriteRoot("0 * * * *", S1, S2);
-        WriteStep(S1);
-        _db.StringGetAsync(L2ProjectionKeys.Step(W, S2), Arg.Any<CommandFlags>())
-            .Returns((RedisValue)"{\"entryCondition\": not-json");
-
-        var definition = await _reader.ReadAsync(W, CancellationToken.None);
-
-        Assert.NotNull(definition);
-        Assert.Equal(S1, Assert.Single(definition.Steps).StepId);
-    }
-
-    [Fact]
-    public async Task LetsARedisFaultOnAStepReadEscape()
-    {
-        // The other half of the same decision. The skip above must not be wide enough to swallow this:
-        // spec §7.4 classifies an L2 read fault as RequeueAndTrip, which only the consumer can do, and
-        // only if the fault reaches it.
-        WriteRoot("0 * * * *", S1);
-        _db.StringGetAsync(L2ProjectionKeys.Step(W, S1), Arg.Any<CommandFlags>())
+        // The other half of the corrupt-store decision. Reading a bad store as absent must not be wide
+        // enough to swallow this: spec §7.4 classifies an L2 read fault as RequeueAndTrip, which only
+        // the consumer can do, and only if the fault reaches it.
+        _db.HashGetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
             .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
 
         await Assert.ThrowsAsync<RedisConnectionException>(
@@ -126,9 +85,9 @@ public sealed class L2WorkflowReaderTests
     }
 
     [Fact]
-    public async Task ReadsEveryWorkflowIdFromTheParentIndexAndSkipsWhatIsNotOne()
+    public async Task ReadsEveryWorkflowIdFromTheLiveSetAndSkipsWhatIsNotOne()
     {
-        _db.SetMembersAsync(L2ProjectionKeys.ParentIndex(), Arg.Any<CommandFlags>())
+        _db.SetMembersAsync(L2ProjectionKeys.Live(), Arg.Any<CommandFlags>())
             .Returns([W.ToString("D"), "not-a-workflow-id", S1.ToString("D")]);
 
         var ids = await _reader.ReadAllIdsAsync(CancellationToken.None);
@@ -137,15 +96,15 @@ public sealed class L2WorkflowReaderTests
     }
 
     [Fact]
-    public async Task ExistenceIsAskedOfTheRootKeyOfTheWorkflowAskedAbout()
+    public async Task LivenessIsAskedOfTheLiveSetForTheWorkflowAskedAbout()
     {
         // Both answers are stubbed, and they differ. Leaving the negative to the substitute's default
         // would have let an implementation that ignores its argument pass — which is precisely the
         // implementation the stop path cannot survive, since it verifies one workflow's removal.
-        _db.KeyExistsAsync(L2ProjectionKeys.Root(W), Arg.Any<CommandFlags>()).Returns(true);
-        _db.KeyExistsAsync(L2ProjectionKeys.Root(S1), Arg.Any<CommandFlags>()).Returns(false);
+        _db.SetContainsAsync(L2ProjectionKeys.Live(), W.ToString("D"), Arg.Any<CommandFlags>()).Returns(true);
+        _db.SetContainsAsync(L2ProjectionKeys.Live(), S1.ToString("D"), Arg.Any<CommandFlags>()).Returns(false);
 
-        Assert.True(await _reader.ExistsAsync(W, CancellationToken.None));
-        Assert.False(await _reader.ExistsAsync(S1, CancellationToken.None));
+        Assert.True(await _reader.IsLiveAsync(W, CancellationToken.None));
+        Assert.False(await _reader.IsLiveAsync(S1, CancellationToken.None));
     }
 }

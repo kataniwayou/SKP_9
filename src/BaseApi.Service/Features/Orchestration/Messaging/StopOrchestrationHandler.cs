@@ -7,29 +7,24 @@ using Microsoft.Extensions.Logging;
 namespace BaseApi.Service.Features.Orchestration.Messaging;
 
 /// <summary>
-/// Removes a workflow's projection from the store.
+/// Takes a workflow out of the live set and announces it. Nothing is deleted: the store, the caches
+/// and the names stay, so a start can restore the workflow and outcomes still in flight resolve.
 /// <para>
-/// <b>A workflow that is not projected is a success, not a failure.</b> The message asks for an end
-/// state rather than for an action, and that end state already holds — so a repeat, a redelivery, or a
-/// stop for something that was never started all complete quietly. Treating an absent root as an error
-/// would make the second of two identical stops fail, and park a message whose work was already done.
-/// </para>
-/// <para>
-/// It shares its cleanup with the start path, which runs the same removal before writing. One
-/// implementation rather than two means the walk that discovers step keys cannot drift between the
-/// path that deletes a graph and the path that replaces one.
+/// <b>Remove, then announce — the order is the correctness.</b> Every replica's stop handler ignores a
+/// stop while the id is still live (a later start may have overtaken it). Announcing first would let a
+/// replica read the id as live and ignore the stop for good.
 /// </para>
 /// </summary>
 internal sealed class StopOrchestrationHandler : IQueueMessageHandler
 {
-    private readonly L2Cleanup _cleanup;
+    private readonly L2LiveSet _live;
     private readonly IQueueFanoutPublisher _publisher;
     private readonly ILogger<StopOrchestrationHandler> _logger;
 
     public StopOrchestrationHandler(
-        L2Cleanup cleanup, IQueueFanoutPublisher publisher, ILogger<StopOrchestrationHandler> logger)
+        L2LiveSet live, IQueueFanoutPublisher publisher, ILogger<StopOrchestrationHandler> logger)
     {
-        _cleanup   = cleanup ?? throw new ArgumentNullException(nameof(cleanup));
+        _live      = live ?? throw new ArgumentNullException(nameof(live));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
         _logger    = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -48,17 +43,12 @@ internal sealed class StopOrchestrationHandler : IQueueMessageHandler
             throw new JsonException("stop message carries an empty workflow id");
         }
 
-        _logger.LogInformation("removing projection for workflow {WorkflowId}", message.WorkflowId);
+        _logger.LogInformation("removing workflow {WorkflowId} from the live set", message.WorkflowId);
 
-        await _cleanup.RemoveAsync(message.WorkflowId, ct).ConfigureAwait(false);
+        await _live.RemoveAsync(message.WorkflowId).ConfigureAwait(false);
 
-        // The announcement goes out only now, because only now is the removal committed. A replica
-        // reading L2 on an announcement published any earlier could still find the projection that is
-        // about to be removed, and would have no way to tell that from a stale read.
-        //
-        // A failure here escapes as a transient send fault, so the delivery is requeued and the whole
-        // handler runs again — the clean is unconditional and idempotent by design, so the repeat is
-        // safe, and the replicas learn about the removal on the retry.
+        // A failure here escapes as a transient send fault, so the delivery is requeued and the handler
+        // runs again: the removal is idempotent and the replicas learn about the stop on the retry.
         await _publisher.PublishAsync(
             OrchestratorFanout.Exchange, MessageTypes.OrchestrationStopped,
             new OrchestrationStopped(message.WorkflowId), ct).ConfigureAwait(false);

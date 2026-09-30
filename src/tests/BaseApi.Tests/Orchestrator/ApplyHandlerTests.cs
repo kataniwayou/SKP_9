@@ -56,56 +56,36 @@ public sealed class ApplyHandlerTests
         }
 
         /// <summary>
-        /// Puts <paramref name="workflowId"/> in L2: <see cref="L2WorkflowReader.ExistsAsync"/> and
-        /// <see cref="L2WorkflowReader.ReadAsync"/> both answer as they would against the real root
-        /// and step keys <c>L2ProjectionWriter</c> writes.
+        /// Puts <paramref name="workflowId"/> in L2 and in the live set:
+        /// <see cref="L2WorkflowReader.IsLiveAsync"/> and <see cref="L2WorkflowReader.ReadAsync"/> both
+        /// answer as they would against the live set and the store hash a start writes.
         /// </summary>
         public Harness WithWorkflow(Guid workflowId, string? cron)
         {
             _live.Add(workflowId);
 
-            Db.KeyExistsAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
+            Db.SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D"), Arg.Any<CommandFlags>())
                 .Returns(_ => _live.Contains(workflowId));
 
-            Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
-                .Returns(_ => _live.Contains(workflowId)
-                    ? (RedisValue)JsonSerializer.Serialize(
-                        new WorkflowRootProjection(
-                            EntryStepIds: [S],
-                            StepIds: [S],
-                            Cron: cron,
-                            Liveness: new LivenessProjection(DateTime.UtcNow, 3600, "Pending")),
-                        MessagingJson.Options)
-                    : RedisValue.Null);
-
-            Db.StringGetAsync(L2ProjectionKeys.Step(workflowId, S), Arg.Any<CommandFlags>())
+            // The store is NOT gated on _live: it outlives a stop.
+            Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
                 .Returns((RedisValue)JsonSerializer.Serialize(
-                    new StepProjection(
-                        EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []),
+                    new WorkflowStoreProjection([S], cron, [new StepL1(S, 0, P, "{}", [])]),
                     MessagingJson.Options));
 
             return this;
         }
 
-        /// <summary>
-        /// The clean the API runs before it publishes a stop: L2 no longer holds the workflow, as
-        /// far as <see cref="L2WorkflowReader.ExistsAsync"/> and <see cref="L2WorkflowReader.ReadAsync"/>
-        /// are concerned.
-        /// </summary>
+        /// <summary>What the API's stop does before it announces: the id leaves the live set.</summary>
         public void RemoveWorkflowFromL2(Guid workflowId) => _live.Remove(workflowId);
 
-        /// <summary>
-        /// The write the API runs before it publishes a start: L2 holds the workflow again. The
-        /// stubbed reads are closures over <c>_live</c>, so putting the id back is all it takes.
-        /// </summary>
+        /// <summary>What the API's start does before it announces: the id joins the live set.</summary>
         public void RestoreWorkflowToL2(Guid workflowId) => _live.Add(workflowId);
 
         /// <summary>An L2 that cannot be reached at all.</summary>
         public Harness WithStoreFault()
         {
-            Db.StringGetAsync(L2ProjectionKeys.Root(W), Arg.Any<CommandFlags>())
-                .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
-            Db.KeyExistsAsync(L2ProjectionKeys.Root(W), Arg.Any<CommandFlags>())
+            Db.SetContainsAsync(L2ProjectionKeys.Live(), W.ToString("D"), Arg.Any<CommandFlags>())
                 .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
 
             return this;
@@ -152,7 +132,7 @@ public sealed class ApplyHandlerTests
     }
 
     [Fact]
-    public async Task AStartForAWorkflowL2NoLongerHoldsIsANoOpNotAPark()
+    public async Task AStartForAWorkflowNoLongerLiveIsANoOpNotAPark()
     {
         // A stop cleaned L2 after this announcement was published. Applying it would resurrect a
         // workflow an operator stopped; parking it would DLX a legitimate race rather than a defect.

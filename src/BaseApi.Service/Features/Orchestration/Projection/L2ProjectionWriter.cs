@@ -6,119 +6,72 @@ using StackExchange.Redis;
 namespace BaseApi.Service.Features.Orchestration.Projection;
 
 /// <summary>
-/// Writes one workflow definition into the projection store: the root, its entry in the parent index,
-/// one key per step, and one key per projected cache dictionary and its entries.
+/// Writes one workflow into L2 and aligns what that workflow owns: <c>skp:wf:{id}</c> (name, store,
+/// roots), its cache dictionaries, and each of its steps' names.
 /// <para>
-/// <b>The write is an overwrite, and the whole graph goes in one batch.</b> Writing the keys
-/// individually would let a failure leave a root pointing at steps that were never written — a graph
-/// that walks into nothing, and one that looks complete to every reader. Batched, a failure leaves the
-/// previous state, which the caller's clean has usually already removed; either way the message is
-/// returned to the queue and the whole sequence runs again from the top.
+/// <b>Overwrite, never clean.</b> The workflow hash and the step hashes are overwritten; the only keys
+/// deleted are this workflow's own leftovers — cache roots it no longer binds and cache items the
+/// database no longer holds — found from the <c>roots</c> field and each root's key list that the
+/// previous start recorded. Step name keys are never deleted: a step can belong to other workflows.
 /// </para>
 /// <para>
-/// <b>Nothing here compensates for a partial failure, and nothing needs to.</b> The sequence is
-/// clean-then-write and it is driven by a message that is only acknowledged once it completes — so a
-/// failure at any point is repaired by running it again, not by unwinding. That is the difference
-/// between doing this work behind a queue and doing it inside a request that has to answer someone.
+/// <b>One batch.</b> The deletes are disjoint from the writes by construction, so their order inside
+/// the batch is unobservable. A failure requeues the control message and the whole method runs again;
+/// the previous state it reads back is still there, so the rerun computes the same leftovers.
 /// </para>
 /// </summary>
 internal sealed class L2ProjectionWriter
 {
     private readonly IConnectionMultiplexer _multiplexer;
-    private readonly TimeProvider _clock;
 
-    public L2ProjectionWriter(IConnectionMultiplexer multiplexer, TimeProvider clock)
-    {
-        _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
-        _clock       = clock ?? throw new ArgumentNullException(nameof(clock));
-    }
+    public L2ProjectionWriter(IConnectionMultiplexer multiplexer)
+        => _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
 
-    /// <summary>Projects <paramref name="workflow"/> into the store, replacing whatever it names.</summary>
     public async Task WriteAsync(WorkflowL1 workflow, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(workflow);
 
-        var now = _clock.GetUtcNow().UtcDateTime;
-
-        // Interval is left at zero and status at pending: this writer knows when the definition was
-        // stored, not how often it will run. Deriving an interval here would mean parsing the cron in
-        // a component that has no other reason to understand one, and would go stale the moment
-        // whoever schedules it computes its own.
-        var liveness = new LivenessProjection(now, 0, "Pending");
-
+        var db = _multiplexer.GetDatabase();
+        var workflowId = workflow.WorkflowId;
+        var workflowKey = L2ProjectionKeys.Workflow(workflowId);
         var steps = workflow.Steps ?? new List<StepL1>();
 
-        // Deduplicated by root: the junction's composite key already prevents a repeat, but the
-        // writer should not depend on a constraint two layers away — and a repeat here would put the
-        // same root in the record twice, making the stop path delete it twice. A blank or
-        // whitespace-only root is filtered out for the same reason L2Cleanup skips one when it reads
-        // CacheRoots back: unreachable today, because CacheRules.CheckRoot rejects it at validation
-        // and CacheEntity.Root trims on assignment, but if one were ever written here, cleanup would
-        // never find it to delete — a key with no root left to reach it.
+        // Deduplicated by root, blank roots dropped — unchanged from the previous writer, for the same
+        // reason: a root written twice or blank is a key set nothing would find again.
         var caches = (workflow.Caches ?? new List<CacheL1>())
             .Where(c => !string.IsNullOrWhiteSpace(c.Root))
             .GroupBy(c => c.Root, StringComparer.Ordinal)
             .Select(g => g.First())
             .ToList();
 
-        // Recorded from the same list the step keys are written from, in this method, so the root
-        // cannot describe a key set the write did not produce. Deriving it anywhere else — from the
-        // entry steps, or by walking successors — would let the two drift, and a step missing from
-        // this list is a key nothing will ever delete.
-        var root = new WorkflowRootProjection(
-            EntryStepIds: workflow.EntryStepIds ?? new List<Guid>(),
-            StepIds: steps.Select(s => s.StepId).ToList(),
-            Cron: workflow.Cron,
-            Liveness: liveness,
-            // Recorded from the same list the cache keys are written from, in this method, so the
-            // root cannot name a dictionary the write did not produce — the same rule the step ids
-            // above follow, and for the same reason: a root missing from this list is a set of keys
-            // nothing will ever delete.
-            CacheRoots: caches.Select(c => c.Root).ToList());
+        var stale = await FindOwnLeftoversAsync(db, workflowId, workflowKey, caches).ConfigureAwait(false);
 
-        var db = _multiplexer.GetDatabase();
+        var store = new WorkflowStoreProjection(workflow.EntryStepIds ?? new List<Guid>(), workflow.Cron, steps);
+
         var batch = db.CreateBatch();
         var writes = new List<Task>
         {
-            batch.StringSetAsync(
-                L2ProjectionKeys.Root(workflow.WorkflowId),
-                JsonSerializer.Serialize(root, MessagingJson.Options)),
-
-            // Adding a member that is already present is a no-op, so this needs no existence check
-            // and stays correct when the same definition is written twice.
-            batch.SetAddAsync(
-                L2ProjectionKeys.ParentIndex(),
-                workflow.WorkflowId.ToString("D")),
+            batch.HashSetAsync(workflowKey,
+            [
+                new HashEntry(L2ProjectionKeys.StoreField, JsonSerializer.Serialize(store, MessagingJson.Options)),
+                new HashEntry(L2ProjectionKeys.RootsField,
+                    JsonSerializer.Serialize(caches.Select(c => c.Root).ToList(), MessagingJson.Options)),
+            ]),
         };
-
-        foreach (var step in steps)
-        {
-            var projection = new StepProjection(
-                step.EntryCondition,
-                step.ProcessorId,
-                step.Payload,
-                step.NextStepIds ?? new List<Guid>());
-
-            writes.Add(batch.StringSetAsync(
-                L2ProjectionKeys.Step(workflow.WorkflowId, step.StepId),
-                JsonSerializer.Serialize(projection, MessagingJson.Options)));
-        }
 
         foreach (var cache in caches)
         {
             var items = cache.Items ?? new Dictionary<string, string>();
 
-            // The key list goes at the cache root, so an operator reading one key sees the
-            // dictionary's contents by name, and so cleanup can remove the entries without a scan.
+            // The key list goes at the cache root, so the next start can find the entries it has to
+            // delete without a scan, and an operator reading one key sees the dictionary by name.
             writes.Add(batch.StringSetAsync(
-                L2ProjectionKeys.Cache(workflow.WorkflowId, cache.Root),
+                L2ProjectionKeys.Cache(workflowId, cache.Root),
                 JsonSerializer.Serialize(items.Keys.ToList(), MessagingJson.Options)));
 
             foreach (var (key, value) in items)
             {
-                writes.Add(batch.StringSetAsync(
-                    L2ProjectionKeys.CacheEntry(workflow.WorkflowId, cache.Root, key),
-                    value));
+                writes.Add(batch.StringSetAsync(L2ProjectionKeys.CacheEntry(workflowId, cache.Root, key), value));
             }
         }
 
@@ -144,7 +97,65 @@ internal sealed class L2ProjectionWriter
             }
         }
 
+        if (stale.Count > 0)
+        {
+            writes.Add(batch.KeyDeleteAsync(stale.ToArray()));
+        }
+
         batch.Execute();
         await Task.WhenAll(writes).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The cache keys the previous start of this workflow wrote that this start does not: every key of
+    /// a root no longer bound, and every item no longer in a root that still is. Read before anything is
+    /// written, from what the previous start recorded. A root or list that is missing or unreadable
+    /// contributes nothing — its keys are already unreachable, and aborting would strand the rest.
+    /// </summary>
+    private static async Task<List<RedisKey>> FindOwnLeftoversAsync(
+        IDatabase db, Guid workflowId, string workflowKey, List<CacheL1> next)
+    {
+        var stale = new List<RedisKey>();
+        var nextByRoot = next.ToDictionary(c => c.Root, c => c.Items ?? new Dictionary<string, string>(), StringComparer.Ordinal);
+
+        var previousRoots = ReadList(await db.HashGetAsync(workflowKey, L2ProjectionKeys.RootsField).ConfigureAwait(false));
+
+        foreach (var root in previousRoots.Where(r => !string.IsNullOrWhiteSpace(r)).Distinct(StringComparer.Ordinal))
+        {
+            var rootKey = L2ProjectionKeys.Cache(workflowId, root);
+            var previousKeys = ReadList(await db.StringGetAsync(rootKey).ConfigureAwait(false))
+                .Where(k => !string.IsNullOrEmpty(k))
+                .Distinct(StringComparer.Ordinal);
+
+            if (!nextByRoot.TryGetValue(root, out var items))
+            {
+                stale.Add(rootKey);
+                stale.AddRange(previousKeys.Select(k => (RedisKey)L2ProjectionKeys.CacheEntry(workflowId, root, k)));
+                continue;
+            }
+
+            stale.AddRange(previousKeys
+                .Where(k => !items.ContainsKey(k))
+                .Select(k => (RedisKey)L2ProjectionKeys.CacheEntry(workflowId, root, k)));
+        }
+
+        return stale;
+    }
+
+    private static List<string> ReadList(RedisValue json)
+    {
+        if (json.IsNullOrEmpty)
+        {
+            return new List<string>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json.ToString(), MessagingJson.Options) ?? new List<string>();
+        }
+        catch (JsonException)
+        {
+            return new List<string>();
+        }
     }
 }

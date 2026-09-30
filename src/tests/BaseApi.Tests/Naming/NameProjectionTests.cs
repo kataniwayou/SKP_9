@@ -7,7 +7,6 @@ using BaseApi.Tests.Support;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace BaseApi.Tests.Naming;
@@ -55,7 +54,7 @@ public sealed class NameProjectionTests
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
         var l2 = new InMemoryL2();
 
-        await new L2ProjectionWriter(l2.Multiplexer, new FakeTimeProvider()).WriteAsync(definition, CancellationToken.None);
+        await new L2ProjectionWriter(l2.Multiplexer).WriteAsync(definition, CancellationToken.None);
 
         Assert.Equal(definition.Names![W], l2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.NameField));
         Assert.Equal(definition.Names![S1], l2.HashValue(L2ProjectionKeys.StepEntity(S1), L2ProjectionKeys.NameField));
@@ -69,7 +68,7 @@ public sealed class NameProjectionTests
         var stranger = Guid.NewGuid();
         var l2 = new InMemoryL2();
 
-        await new L2ProjectionWriter(l2.Multiplexer, new FakeTimeProvider())
+        await new L2ProjectionWriter(l2.Multiplexer)
             .WriteAsync(new WorkflowL1(W, [], null, [], [], new() { [stranger] = "x_1-0000-000000000000" }), CancellationToken.None);
 
         Assert.False(l2.HasHash(L2ProjectionKeys.StepEntity(stranger)));

@@ -12,8 +12,8 @@ namespace BaseApi.Tests.Orchestrator;
 /// <summary>
 /// The activation path is the single method hydration and the start handler both call, so what it
 /// does with one workflow is the whole of what either of them does with one workflow. These cover the
-/// four outcomes spec §7.1 distinguishes: a scheduled workflow, an unscheduled one, one L2 no longer
-/// holds, and a second activation of one already live.
+/// four outcomes spec §7.1 distinguishes: a scheduled workflow, an unscheduled one, one that is not
+/// live, and a second activation of one already live.
 /// </summary>
 public sealed class WorkflowActivatorTests
 {
@@ -37,30 +37,28 @@ public sealed class WorkflowActivatorTests
             Redis = Substitute.For<IConnectionMultiplexer>();
             Redis.GetDatabase().Returns(Db);
 
-            // No "absent workflow" stub: NSubstitute returns default(RedisValue) for an unstubbed
-            // StringGetAsync, and default(RedisValue).IsNullOrEmpty is true — which is exactly what an
-            // absent key looks like to the reader.
+            // No "absent workflow" stub: NSubstitute returns false for an unstubbed SetContainsAsync —
+            // not in the live set — and default(RedisValue) for an unstubbed HashGetAsync, whose
+            // IsNullOrEmpty is true — which is exactly what an absent store looks like to the reader.
         }
 
-        /// <summary>Writes the same JSON <c>L2ProjectionWriter</c> writes: a root, and one step key.</summary>
+        /// <summary>
+        /// What a start leaves in L2: the id in the live set, and the same store JSON
+        /// <c>L2ProjectionWriter</c> writes on the workflow hash.
+        /// </summary>
         public Harness WithWorkflow(Guid workflowId, string? cron, Guid entry, Guid processor)
         {
-            var root = JsonSerializer.Serialize(
-                new WorkflowRootProjection(
-                    EntryStepIds: [entry],
-                    StepIds: [entry],
-                    Cron: cron,
-                    Liveness: new LivenessProjection(DateTime.UtcNow, 3600, "Pending")),
-                MessagingJson.Options);
-            Db.StringGetAsync(L2ProjectionKeys.Root(workflowId), Arg.Any<CommandFlags>())
-                .Returns((RedisValue)root);
+            Db.SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D"), Arg.Any<CommandFlags>())
+                .Returns(true);
 
-            var step = JsonSerializer.Serialize(
-                new StepProjection(
-                    EntryCondition: 0, ProcessorId: processor, Payload: "{}", NextStepIds: []),
+            var store = JsonSerializer.Serialize(
+                new WorkflowStoreProjection(
+                    EntryStepIds: [entry],
+                    Cron: cron,
+                    Steps: [new StepL1(entry, EntryCondition: 0, ProcessorId: processor, Payload: "{}", NextStepIds: [])]),
                 MessagingJson.Options);
-            Db.StringGetAsync(L2ProjectionKeys.Step(workflowId, entry), Arg.Any<CommandFlags>())
-                .Returns((RedisValue)step);
+            Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
+                .Returns((RedisValue)store);
 
             return this;
         }
@@ -106,8 +104,8 @@ public sealed class WorkflowActivatorTests
     [Fact]
     public async Task DoesNothingAtAllWhenL2DoesNotHoldTheWorkflow()
     {
-        // Reachable: a stop cleaned L2 after the announcement was published. L2 is the source of
-        // truth, so the correct action is none.
+        // Reachable: a stop took the workflow out of the live set after the announcement was
+        // published. The live set is the source of truth, so the correct action is none.
         var h = new Harness();   // no workflow written
 
         await h.Build().ActivateAsync(W, CancellationToken.None);

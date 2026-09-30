@@ -7,7 +7,6 @@ using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using Orchestrator.L1;
 using Orchestrator.Messaging;
 using Xunit;
@@ -72,8 +71,8 @@ public sealed class StartStopIdempotencyTests
     }
 
     /// <summary>
-    /// The whole path over one store: the API's two control handlers write and clean L2 and announce,
-    /// and the replica's two apply handlers read the same L2 back. Both sides share one
+    /// The whole path over one store: the API's two control handlers write L2, move the live set and
+    /// announce, and the replica's two apply handlers read the same L2 back. Both sides share one
     /// <see cref="InMemoryL2"/>, which is the point — the replica must see what the API actually wrote,
     /// not what a stub says it wrote.
     /// </summary>
@@ -88,27 +87,25 @@ public sealed class StartStopIdempotencyTests
 
         public InMemoryL2 L2 { get; } = new();
 
-        public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 8, 21, 12, 0, 0, TimeSpan.Zero));
-
         public CapturingPublisher Publisher { get; } = new();
 
         public WorkflowL1Store L1 { get; } = new();
 
         public RecordingWorkflowScheduler Scheduler { get; } = new();
 
-        /// <summary>The API's start: clean, write, announce.</summary>
+        /// <summary>The API's start: write, join the live set, announce.</summary>
         public Task ApiStartAsync(WorkflowL1 definition) =>
             new StartOrchestrationHandler(
-                    new L2Cleanup(L2.Multiplexer),
-                    new L2ProjectionWriter(L2.Multiplexer, Clock),
+                    new L2ProjectionWriter(L2.Multiplexer),
+                    new L2LiveSet(L2.Multiplexer),
                     Publisher,
                     NullLogger<StartOrchestrationHandler>.Instance)
                 .HandleAsync(Body(new StartOrchestration(definition)), CancellationToken.None);
 
-        /// <summary>The API's stop: clean, announce.</summary>
+        /// <summary>The API's stop: leave the live set, announce.</summary>
         public Task ApiStopAsync(Guid workflowId) =>
             new StopOrchestrationHandler(
-                    new L2Cleanup(L2.Multiplexer), Publisher,
+                    new L2LiveSet(L2.Multiplexer), Publisher,
                     NullLogger<StopOrchestrationHandler>.Instance)
                 .HandleAsync(Body(new StopOrchestration(workflowId)), CancellationToken.None);
 
@@ -162,9 +159,9 @@ public sealed class StartStopIdempotencyTests
     private static string Shape(WorkflowL1 definition) =>
         JsonSerializer.Serialize(definition, MessagingJson.Options);
 
-    private static WorkflowRootProjection Root(Chain c) =>
-        JsonSerializer.Deserialize<WorkflowRootProjection>(
-            c.L2.Value(L2ProjectionKeys.Root(W))!, MessagingJson.Options)!;
+    private static WorkflowStoreProjection Store(Chain c) =>
+        JsonSerializer.Deserialize<WorkflowStoreProjection>(
+            c.L2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField)!, MessagingJson.Options)!;
 
     // ---- the API side: what repeated control messages leave in L2 -------------------------------
 
@@ -182,78 +179,62 @@ public sealed class StartStopIdempotencyTests
     }
 
     [Fact]
-    public async Task ARepeatedStartRewritesTheRootsStoredTimestampButNothingElse()
+    public async Task ARepeatedStartLeavesAByteIdenticalStore()
     {
-        // The one part of the projection a repeat does not leave byte-identical. L2ProjectionWriter
-        // stamps the root's liveness with the time of the write, so a redelivery an hour later stores
-        // a later timestamp for the same graph. Worth pinning rather than papering over: it means
-        // "identical bytes" is the wrong test for this path, and the graph — the step ids the root
-        // records, and every step key — is the right one.
+        // The store carries no timestamp — the root's liveness stamp went with the root — so a
+        // redelivery leaves every byte where the first run put it, the store included.
         var c = new Chain();
 
         await c.ApiStartAsync(Definition(S1, S2));
-        var firstRootJson = c.L2.Value(L2ProjectionKeys.Root(W));
-        var firstStep = c.L2.Value(L2ProjectionKeys.Step(W, S1));
-        var firstStamp = Root(c).Liveness.Timestamp;
-
-        c.Clock.Advance(TimeSpan.FromHours(1));
-        await c.ApiStartAsync(Definition(S1, S2));
-
-        Assert.NotEqual(firstRootJson, c.L2.Value(L2ProjectionKeys.Root(W)));
-        Assert.Equal(firstStamp.AddHours(1), Root(c).Liveness.Timestamp);
-
-        // Everything the readers actually walk is unchanged.
-        Assert.Equal([S1, S2], Root(c).StepIds);
-        Assert.Equal([S1], Root(c).EntryStepIds);
-        Assert.Equal(Cron, Root(c).Cron);
-        Assert.Equal(firstStep, c.L2.Value(L2ProjectionKeys.Step(W, S1)));
-    }
-
-    [Fact]
-    public async Task ARestartThatDropsAStepLeavesNoKeyForIt()
-    {
-        // The reason the start path cleans before it writes. The second definition does not name S2,
-        // so nothing overwrites its key — and it is unreachable from the new root, so no later stop
-        // would find it either. Without the clean it would leak for the life of the store.
-        var c = new Chain();
-
-        await c.ApiStartAsync(Definition(S1, S2));
-        Assert.True(c.L2.Has(L2ProjectionKeys.Step(W, S2)));
-
-        await c.ApiStartAsync(Definition(S1));
-
-        Assert.False(c.L2.Has(L2ProjectionKeys.Step(W, S2)));
-        Assert.Equal([S1], Root(c).StepIds);
-        Assert.Equal(
-            [L2ProjectionKeys.Root(W), L2ProjectionKeys.Step(W, S1)],
-            c.L2.Keys().Order(StringComparer.Ordinal));
-    }
-
-    [Fact]
-    public async Task AStopAppliedTwiceLeavesL2EmptyBothTimes()
-    {
-        var c = new Chain();
-        await c.ApiStartAsync(Definition(S1, S2));
-
-        await c.ApiStopAsync(W);
         var afterFirst = c.L2.Snapshot();
 
-        // The second stop finds an absent root and returns without touching a batch. It must not
-        // throw: parking a message whose work is already done would need an operator to clear it.
-        await c.ApiStopAsync(W);
+        await c.ApiStartAsync(Definition(S1, S2));
 
-        Assert.Empty(c.L2.Keys());
-        Assert.Empty(c.L2.Members(L2ProjectionKeys.ParentIndex()));
         Assert.Equal(afterFirst, c.L2.Snapshot());
     }
 
     [Fact]
-    public async Task AWorkflowWithCachesConvergesOnRestartAndStopRemovesEveryCacheKey()
+    public async Task ARestartThatDropsAStepDropsItFromTheStore()
+    {
+        // The steps live inside the store, which a start overwrites whole, so a step the new definition
+        // does not name is gone from it with no clean. Its name key is deliberately kept: steps are
+        // shared across workflows (StartDrivenProjectionTests.ARestartThatDropsAStepLeavesItsNameKey).
+        var c = new Chain();
+
+        await c.ApiStartAsync(Definition(S1, S2));
+        Assert.Equal([S1, S2], Store(c).Steps.Select(s => s.StepId));
+
+        await c.ApiStartAsync(Definition(S1));
+
+        Assert.Equal([S1], Store(c).Steps.Select(s => s.StepId));
+    }
+
+    [Fact]
+    public async Task AStopAppliedTwiceOnlyLeavesTheLiveSetBothTimes()
+    {
+        var c = new Chain();
+        await c.ApiStartAsync(Definition(S1, S2));
+
+        await c.ApiStopAsync(W);
+        Assert.Empty(c.L2.Members(L2ProjectionKeys.Live()));
+        Assert.NotNull(c.L2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField));
+        var afterFirst = c.L2.Snapshot();
+
+        // The second stop removes an id that is already gone, which is a no-op. It must not throw:
+        // parking a message whose work is already done would need an operator to clear it.
+        await c.ApiStopAsync(W);
+
+        Assert.Empty(c.L2.Members(L2ProjectionKeys.Live()));
+        Assert.NotNull(c.L2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField));
+        Assert.Equal(afterFirst, c.L2.Snapshot());
+    }
+
+    [Fact]
+    public async Task AWorkflowWithCachesConvergesOnRestartAndStopKeepsItsCacheKeys()
     {
         // Every other test in this file uses Definition's cacheless overload, so none of them ever
-        // writes or deletes a cache key — a cleanup that finds the roots but misses the entries would
-        // pass every one of them. This is the one that actually exercises a cache-bearing workflow
-        // through start, restart, and stop over one store.
+        // writes a cache key. This is the one that exercises a cache-bearing workflow through start,
+        // restart, and stop over one store.
         var caches = new List<CacheL1>
         {
             new("sk-whitelist", new() { ["acme"] = "1", ["beta"] = "2" }),
@@ -262,7 +243,7 @@ public sealed class StartStopIdempotencyTests
 
         await c.ApiStartAsync(Definition([S1, S2], caches));
 
-        // The write actually happened, so the assertions below are about convergence and removal,
+        // The write actually happened, so the assertions below are about convergence and retention,
         // not about a write that silently produced nothing.
         Assert.True(c.L2.Has(L2ProjectionKeys.Cache(W, "sk-whitelist")));
         Assert.True(c.L2.Has(L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "acme")));
@@ -278,12 +259,11 @@ public sealed class StartStopIdempotencyTests
 
         await c.ApiStopAsync(W);
 
-        // Complete removal: the assertion that would fail if L2Cleanup went back to deleting only the
-        // root and step keys. Reverting that change leaves both the cache root key and its two
-        // CacheEntry keys untouched by the stop, so L2.Keys() would still hold all three and the
-        // ":cache:" filter below would catch them.
-        Assert.DoesNotContain(c.L2.Keys(), k => k.Contains(":cache:"));
-        Assert.Empty(c.L2.Keys());
+        // Retention: a stop only leaves the live set. The caches stay so a restart finds them and an
+        // outcome still in flight can resolve its lookups; the next start is what aligns them.
+        Assert.True(c.L2.Has(L2ProjectionKeys.Cache(W, "sk-whitelist")));
+        Assert.True(c.L2.Has(L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "acme")));
+        Assert.True(c.L2.Has(L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "beta")));
     }
 
     [Fact]
@@ -299,22 +279,7 @@ public sealed class StartStopIdempotencyTests
     }
 
     [Fact]
-    public async Task AStopStillClearsARootWhoseIndexEntryIsAlreadyGone()
-    {
-        // The state a clean interrupted after its index removal leaves: the parent index no longer
-        // names the workflow, but the root and step keys are still there. L2Cleanup removes the index
-        // entry above its absent-root return precisely so the retry that follows still reaches these.
-        var c = new Chain();
-        await c.ApiStartAsync(Definition(S1, S2));
-        c.L2.ForgetMember(L2ProjectionKeys.ParentIndex(), W.ToString("D"));
-
-        await c.ApiStopAsync(W);
-
-        Assert.Empty(c.L2.Keys());
-    }
-
-    [Fact]
-    public async Task StartStopStartLeavesTheWorkflowInTheParentIndexExactlyOnce()
+    public async Task StartStopStartLeavesTheWorkflowInTheLiveSetExactlyOnce()
     {
         var c = new Chain();
 
@@ -322,8 +287,8 @@ public sealed class StartStopIdempotencyTests
         await c.ApiStopAsync(W);
         await c.ApiStartAsync(Definition(S1));
 
-        Assert.Equal([W.ToString("D")], c.L2.Members(L2ProjectionKeys.ParentIndex()));
-        Assert.Equal([S1], Root(c).StepIds);
+        Assert.Equal([W.ToString("D")], c.L2.Members(L2ProjectionKeys.Live()));
+        Assert.Equal([S1], Store(c).Steps.Select(s => s.StepId));
     }
 
     // ---- the whole chain: control message, announcement, replica --------------------------------
@@ -377,7 +342,7 @@ public sealed class StartStopIdempotencyTests
         await c.ApiStopAsync(W);
         await c.DeliverAsync();
 
-        // The redelivery: the API cleans an already-absent projection and announces again, and the
+        // The redelivery: the API removes an already-absent live-set entry and announces again, and the
         // replica finds the entry its predecessor already marked. Neither half has anything left to
         // do — and in particular the second delivery must not unschedule a second time, which is what
         // the single-element Unscheduled assertion below pins.
@@ -421,6 +386,7 @@ public sealed class StartStopIdempotencyTests
     public async Task TheWholeCycleRunTwiceEndsWhereItStarted()
     {
         var c = new Chain();
+        var ends = new List<string>();
 
         for (var i = 0; i < 2; i++)
         {
@@ -428,14 +394,19 @@ public sealed class StartStopIdempotencyTests
             await c.DeliverAsync();
             await c.ApiStopAsync(W);
             await c.DeliverAsync();
+            ends.Add(c.L2.Snapshot());
         }
 
-        Assert.Empty(c.L2.Keys());
-        Assert.Empty(c.L2.Members(L2ProjectionKeys.ParentIndex()));
+        // The end of a cycle is "store present, live empty": a stop only leaves the live set, so the
+        // store and the names stay. Where it started is therefore the end of the first cycle, and the
+        // second must land on exactly the same bytes.
+        Assert.Equal(ends[0], ends[1]);
+        Assert.Empty(c.L2.Members(L2ProjectionKeys.Live()));
+        Assert.NotNull(c.L2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField));
 
-        // L2 is empty and nothing is scheduled, which is what "where it started" means for the two
-        // things that outlive the process. L1 still holds the marked entry — it is a per-replica
-        // mirror with a grace period on it, and the reap loop is what returns it to empty.
+        // L2 holds no running workflow and nothing is scheduled, which is what "where it started" means
+        // for the two things that outlive the process. L1 still holds the marked entry — it is a
+        // per-replica mirror with a grace period on it, and the reap loop is what returns it to empty.
         Assert.False(c.L1.TryGetActive(W, out _));
         Assert.Equal(0, c.Scheduler.LiveJobCount);
         Assert.Equal(2, c.Scheduler.Scheduled.Count);
