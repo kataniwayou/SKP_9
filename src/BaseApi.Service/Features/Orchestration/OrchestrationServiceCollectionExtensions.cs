@@ -59,6 +59,7 @@ internal static class OrchestrationServiceCollectionExtensions
         // resolved per delivery gets its own, matching every other dependency in this folder; both
         // are stateless over an injected multiplexer, so the lifetime costs nothing.
         services.AddScoped<L2LiveSet>();
+        services.AddScoped<IStepRowLookup, DbStepRowLookup>();
         services.AddScoped<L2ProjectionWriter>();
 
         // The instance-index sweep. Singleton rather than scoped, because its only consumer is a

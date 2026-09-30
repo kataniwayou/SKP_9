@@ -1,6 +1,7 @@
 using System.Text.Json;
 using BaseApi.Service.Features.Orchestration.Messaging;
 using BaseApi.Service.Features.Orchestration.Projection;
+using BaseApi.Tests.Support;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
@@ -47,7 +48,7 @@ public sealed class FanoutPublishTests
         }
 
         public StartOrchestrationHandler BuildStart() => new(
-            new L2ProjectionWriter(Redis), new L2LiveSet(Redis), Publisher,
+            new L2ProjectionWriter(Redis, FakeStepRows.Everything()), new L2LiveSet(Redis), Publisher,
             NullLogger<StartOrchestrationHandler>.Instance);
 
         public StopOrchestrationHandler BuildStop() => new(

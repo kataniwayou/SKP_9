@@ -32,7 +32,7 @@ public sealed class CacheProjectionWriteTests
     {
         var l2 = new InMemoryL2();
 
-        await new L2ProjectionWriter(l2.Multiplexer)
+        await new L2ProjectionWriter(l2.Multiplexer, FakeStepRows.Everything())
             .WriteAsync(definition, TestContext.Current.CancellationToken);
 
         return l2;

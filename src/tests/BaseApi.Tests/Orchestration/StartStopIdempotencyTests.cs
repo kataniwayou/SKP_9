@@ -96,7 +96,7 @@ public sealed class StartStopIdempotencyTests
         /// <summary>The API's start: write, join the live set, announce.</summary>
         public Task ApiStartAsync(WorkflowL1 definition) =>
             new StartOrchestrationHandler(
-                    new L2ProjectionWriter(L2.Multiplexer),
+                    new L2ProjectionWriter(L2.Multiplexer, FakeStepRows.Everything()),
                     new L2LiveSet(L2.Multiplexer),
                     Publisher,
                     NullLogger<StartOrchestrationHandler>.Instance)

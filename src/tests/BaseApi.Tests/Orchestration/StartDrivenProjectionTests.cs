@@ -32,9 +32,13 @@ public sealed class StartDrivenProjectionTests
         public InMemoryL2 L2 { get; } = new();
         public IQueueFanoutPublisher Publisher { get; } = Substitute.For<IQueueFanoutPublisher>();
 
+        /// <summary>The database's step rows, as the writer sees them. Every step exists unless a test
+        /// says otherwise.</summary>
+        public FakeStepRows Rows { get; set; } = FakeStepRows.Everything();
+
         public Task StartAsync(WorkflowL1 d) =>
             new StartOrchestrationHandler(
-                    new L2ProjectionWriter(L2.Multiplexer), new L2LiveSet(L2.Multiplexer), Publisher,
+                    new L2ProjectionWriter(L2.Multiplexer, Rows), new L2LiveSet(L2.Multiplexer), Publisher,
                     NullLogger<StartOrchestrationHandler>.Instance)
                 .HandleAsync(JsonSerializer.SerializeToUtf8Bytes(new StartOrchestration(d), MessagingJson.Options),
                              CancellationToken.None);
@@ -175,6 +179,93 @@ public sealed class StartDrivenProjectionTests
         await h.StartAsync(Def(W, [S1]));
 
         Assert.NotNull(h.L2.HashValue(L2ProjectionKeys.StepEntity(S2), L2ProjectionKeys.NameField));
+    }
+
+    [Fact]
+    public async Task ARemovedStepWhoseRowIsGoneLosesItsNameKey()
+    {
+        // W dropped S2 and the operator then deleted S2 — which referential integrity only allows once
+        // no workflow references it. W's next start is what aligns S2's key with the database.
+        var h = new Harness();
+        await h.StartAsync(Def(W, [S1, S2]));
+        h.Rows = FakeStepRows.Only(S1);
+
+        await h.StartAsync(Def(W, [S1]));
+
+        Assert.False(h.L2.HasHash(L2ProjectionKeys.StepEntity(S2)));
+        Assert.NotNull(h.L2.HashValue(L2ProjectionKeys.StepEntity(S1), L2ProjectionKeys.NameField));
+    }
+
+    [Fact]
+    public async Task OnlyTheRemovedStepsAreLookedUp()
+    {
+        // One database read, and only about the steps this start dropped: kept and added steps are
+        // participants, so they exist by definition.
+        var h = new Harness();
+        await h.StartAsync(Def(W, [S1, S2]));
+        var s3 = Guid.NewGuid();
+        h.Rows = FakeStepRows.Only(S1, s3);
+
+        await h.StartAsync(Def(W, [S1, s3]));
+
+        Assert.Equal([S2], h.Rows.Asked);
+    }
+
+    [Fact]
+    public async Task AStartThatDropsNothingReadsNoStepRows()
+    {
+        var h = new Harness();
+        await h.StartAsync(Def(W, [S1, S2]));
+        h.Rows = FakeStepRows.Only(S1, S2);
+
+        await h.StartAsync(Def(W, [S1, S2]));
+
+        Assert.Empty(h.Rows.Asked);
+    }
+
+    [Fact]
+    public async Task AnAddedStepGetsItsNameKey()
+    {
+        var h = new Harness();
+        await h.StartAsync(Def(W, [S1]));
+
+        await h.StartAsync(Def(W, [S1, S2]));
+
+        Assert.NotNull(h.L2.HashValue(L2ProjectionKeys.StepEntity(S2), L2ProjectionKeys.NameField));
+    }
+
+    [Fact]
+    public async Task ARestartAfterARemovalLeavesTheSameState()
+    {
+        var h = new Harness();
+        await h.StartAsync(Def(W, [S1, S2]));
+        h.Rows = FakeStepRows.Only(S1);
+        await h.StartAsync(Def(W, [S1]));
+        var once = h.L2.Snapshot();
+
+        await h.StartAsync(Def(W, [S1]));
+
+        Assert.Equal(once, h.L2.Snapshot());
+    }
+
+    [Fact]
+    public async Task TheRemovedStepKeyIsDeletedInTheLeadingDelete()
+    {
+        // Same torn-batch argument as the cache leftovers: the delete precedes the store overwrite, so a
+        // batch torn in between leaves the previous store for the rerun to recompute the same removal.
+        var h = new Harness();
+        await h.StartAsync(Def(W, [S1, S2]));
+        h.Rows = FakeStepRows.Only(S1);
+        var order = new List<string>();
+        var batch = h.L2.Db.CreateBatch();
+        batch.When(b => b.KeyDeleteAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>()))
+             .Do(ci => order.Add(ci.ArgAt<RedisKey[]>(0).Any(k => k == L2ProjectionKeys.StepEntity(S2)) ? "delete-step" : "delete"));
+        batch.When(b => b.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<HashEntry[]>(), Arg.Any<CommandFlags>()))
+             .Do(_ => order.Add("store"));
+
+        await h.StartAsync(Def(W, [S1]));
+
+        Assert.Equal("delete-step", order.First());
     }
 
     [Fact]

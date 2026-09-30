@@ -6,18 +6,30 @@ using StackExchange.Redis;
 namespace BaseApi.Service.Features.Orchestration.Projection;
 
 /// <summary>
-/// Writes one workflow into L2 and aligns what that workflow owns: <c>skp:wf:{id}</c> (name, store,
-/// roots), its cache dictionaries, and each of its steps' names.
+/// Writes one workflow into L2 and aligns every entity that participates in it with the database:
+/// <c>skp:wf:{id}</c> (name, store, roots), its cache dictionaries, and each of its steps' names.
 /// <para>
-/// <b>Overwrite, never clean.</b> The workflow hash and the step hashes are overwritten; the only keys
-/// deleted are this workflow's own leftovers — cache roots it no longer binds and cache items the
-/// database no longer holds — found from the <c>roots</c> field and each root's key list that the
-/// previous start recorded. Step name keys are never deleted: a step can belong to other workflows.
+/// <b>Added and kept participants are overwritten; removed ones follow the database.</b> The previous
+/// start's participants are read back from what it recorded (the <c>store</c>'s step ids, the
+/// <c>roots</c> field and each root's key list) and compared with this start's:
+/// </para>
+/// <list type="bullet">
+///   <item><description>cache roots no longer bound and cache items no longer held are deleted — those
+///   keys belong to this workflow alone;</description></item>
+///   <item><description>a step this workflow dropped loses its <c>skp:step:{id}</c> key only when its
+///   database row is gone. Every reference to a step is <c>ON DELETE RESTRICT</c>, so a missing row means
+///   no workflow references it any more; a dropped step that still exists may belong to another
+///   workflow and keeps its key.</description></item>
+/// </list>
+/// <para>
+/// Processors and schemas are not aligned here: each processor instance owns its own keys, and
+/// schemas have none.
 /// </para>
 /// <para>
 /// <b>One batch, and the delete goes first in it.</b> A batch is pipelined, not MULTI: a connection that
 /// dies part-way through leaves a prefix of it applied. The leftovers are computed from the
-/// <c>roots</c> field and the key lists the previous start recorded, and this batch overwrites both — so
+/// <c>store</c>, the <c>roots</c> field and the key lists the previous start recorded, and this batch
+/// overwrites all three — so
 /// were the delete queued last, a batch torn after the writes would leave the NEW records in place, the
 /// rerun would find no leftovers, and a removed item would stay readable for good. Queued first, and
 /// commands on one connection apply in order, any torn prefix either has not deleted yet or has deleted
@@ -29,9 +41,13 @@ namespace BaseApi.Service.Features.Orchestration.Projection;
 internal sealed class L2ProjectionWriter
 {
     private readonly IConnectionMultiplexer _multiplexer;
+    private readonly IStepRowLookup _stepRows;
 
-    public L2ProjectionWriter(IConnectionMultiplexer multiplexer)
-        => _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
+    public L2ProjectionWriter(IConnectionMultiplexer multiplexer, IStepRowLookup stepRows)
+    {
+        _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
+        _stepRows    = stepRows ?? throw new ArgumentNullException(nameof(stepRows));
+    }
 
     public async Task WriteAsync(WorkflowL1 workflow, CancellationToken ct)
     {
@@ -51,6 +67,7 @@ internal sealed class L2ProjectionWriter
             .ToList();
 
         var stale = await FindOwnLeftoversAsync(db, workflowId, workflowKey, caches).ConfigureAwait(false);
+        stale.AddRange(await FindRemovedStepsAsync(db, workflowKey, steps, ct).ConfigureAwait(false));
 
         var store = new WorkflowStoreProjection(workflow.EntryStepIds ?? new List<Guid>(), workflow.Cron, steps);
 
@@ -88,8 +105,9 @@ internal sealed class L2ProjectionWriter
         }
 
         // THE NAMES, in the same pipelined batch, each on its own entity hash. Only the workflow and its
-        // own steps: an id that is neither has no key this start owns. Never deleted -- entities are
-        // shared across workflows and records keep arriving after a stop.
+        // own steps: an id that is neither has no key this start owns. A name key is deleted only by
+        // FindRemovedStepsAsync, for a dropped step whose row is gone -- never because another workflow
+        // or a stop stopped using it, since entities are shared and records keep arriving after a stop.
         // A null guard, not `?? new Dictionary<...>()`: that fallback inside a deconstructing foreach
         // crashes Roslyn's IDE0028 analyzer (AD0001), which fails the Release build under
         // EnforceCodeStyleInBuild + TreatWarningsAsErrors.
@@ -111,6 +129,50 @@ internal sealed class L2ProjectionWriter
 
         batch.Execute();
         await Task.WhenAll(writes).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The step name keys of steps this workflow dropped since its previous start and the database no
+    /// longer holds. Only the dropped steps are looked up — kept and added steps are participants, so
+    /// they exist by definition — and a start that dropped nothing makes no database read. A previous
+    /// store that is missing or unreadable contributes nothing: without it there is no record of what
+    /// was dropped, and deleting on a guess is the one thing this must not do.
+    /// </summary>
+    private async Task<IEnumerable<RedisKey>> FindRemovedStepsAsync(
+        IDatabase db, string workflowKey, List<StepL1> next, CancellationToken ct)
+    {
+        var previous = ReadStore(await db.HashGetAsync(workflowKey, L2ProjectionKeys.StoreField).ConfigureAwait(false));
+        if (previous?.Steps is not { Count: > 0 } previousSteps)
+        {
+            return [];
+        }
+
+        var current = next.Select(s => s.StepId).ToHashSet();
+        var dropped = previousSteps.Select(s => s.StepId).Where(id => !current.Contains(id)).Distinct().ToList();
+        if (dropped.Count == 0)
+        {
+            return [];
+        }
+
+        var existing = await _stepRows.ExistingAsync(dropped, ct).ConfigureAwait(false);
+        return dropped.Where(id => !existing.Contains(id)).Select(id => (RedisKey)L2ProjectionKeys.StepEntity(id));
+    }
+
+    private static WorkflowStoreProjection? ReadStore(RedisValue json)
+    {
+        if (json.IsNullOrEmpty)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<WorkflowStoreProjection>(json.ToString(), MessagingJson.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
