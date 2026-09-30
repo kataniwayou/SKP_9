@@ -15,9 +15,15 @@ namespace BaseApi.Service.Features.Orchestration.Projection;
 /// previous start recorded. Step name keys are never deleted: a step can belong to other workflows.
 /// </para>
 /// <para>
-/// <b>One batch.</b> The deletes are disjoint from the writes by construction, so their order inside
-/// the batch is unobservable. A failure requeues the control message and the whole method runs again;
-/// the previous state it reads back is still there, so the rerun computes the same leftovers.
+/// <b>One batch, and the delete goes first in it.</b> A batch is pipelined, not MULTI: a connection that
+/// dies part-way through leaves a prefix of it applied. The leftovers are computed from the
+/// <c>roots</c> field and the key lists the previous start recorded, and this batch overwrites both — so
+/// were the delete queued last, a batch torn after the writes would leave the NEW records in place, the
+/// rerun would find no leftovers, and a removed item would stay readable for good. Queued first, and
+/// commands on one connection apply in order, any torn prefix either has not deleted yet or has deleted
+/// with the old records still intact; the rerun reads the same previous state and computes the same
+/// leftovers. The deletes and the writes are disjoint by construction, so putting the delete first
+/// costs nothing. A failure requeues the control message and the whole method runs again.
 /// </para>
 /// </summary>
 internal sealed class L2ProjectionWriter
@@ -49,15 +55,21 @@ internal sealed class L2ProjectionWriter
         var store = new WorkflowStoreProjection(workflow.EntryStepIds ?? new List<Guid>(), workflow.Cron, steps);
 
         var batch = db.CreateBatch();
-        var writes = new List<Task>
+        var writes = new List<Task>();
+
+        // FIRST, before anything that overwrites the records the leftovers were computed from — see the
+        // class summary: a batch torn after this point still leaves the rerun the same previous state.
+        if (stale.Count > 0)
         {
-            batch.HashSetAsync(workflowKey,
-            [
-                new HashEntry(L2ProjectionKeys.StoreField, JsonSerializer.Serialize(store, MessagingJson.Options)),
-                new HashEntry(L2ProjectionKeys.RootsField,
-                    JsonSerializer.Serialize(caches.Select(c => c.Root).ToList(), MessagingJson.Options)),
-            ]),
-        };
+            writes.Add(batch.KeyDeleteAsync(stale.ToArray()));
+        }
+
+        writes.Add(batch.HashSetAsync(workflowKey,
+        [
+            new HashEntry(L2ProjectionKeys.StoreField, JsonSerializer.Serialize(store, MessagingJson.Options)),
+            new HashEntry(L2ProjectionKeys.RootsField,
+                JsonSerializer.Serialize(caches.Select(c => c.Root).ToList(), MessagingJson.Options)),
+        ]));
 
         foreach (var cache in caches)
         {
@@ -95,11 +107,6 @@ internal sealed class L2ProjectionWriter
                     writes.Add(batch.HashSetAsync(L2ProjectionKeys.Entity(k, id), L2ProjectionKeys.NameField, name));
                 }
             }
-        }
-
-        if (stale.Count > 0)
-        {
-            writes.Add(batch.KeyDeleteAsync(stale.ToArray()));
         }
 
         batch.Execute();

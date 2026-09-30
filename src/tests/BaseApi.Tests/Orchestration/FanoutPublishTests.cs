@@ -124,5 +124,8 @@ public sealed class FanoutPublishTests
         await h.BuildStop().HandleAsync(Body(Stop(W)), CancellationToken.None);
 
         Assert.Equal(["leave", "announce"], order);
+        await h.Publisher.Received(1).PublishAsync(
+            OrchestratorFanout.Exchange, MessageTypes.OrchestrationStopped,
+            Arg.Is<OrchestrationStopped>(a => a.WorkflowId == W), Arg.Any<CancellationToken>());
     }
 }

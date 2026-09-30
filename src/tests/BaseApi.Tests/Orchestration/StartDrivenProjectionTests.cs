@@ -124,6 +124,34 @@ public sealed class StartDrivenProjectionTests
     }
 
     [Fact]
+    public async Task ARestartQueuesItsLeftoverDeleteBeforeItOverwritesTheRecords()
+    {
+        // The batch is pipelined, not MULTI, so a connection lost part-way leaves a prefix applied. The
+        // delete must be in that prefix before the roots field and key lists it was computed from are
+        // overwritten, or a torn batch leaves a rerun with nothing to find. InMemoryL2 applies each
+        // batch call eagerly, so the order is observed on the batch substitute's calls.
+        var h = new Harness();
+        await h.StartAsync(Def(W, [S1], [Whitelist("acme", "globex")]));
+        var order = new List<string>();
+        var batch = h.L2.Db.CreateBatch();
+        batch.When(b => b.KeyDeleteAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>()))
+             .Do(_ => order.Add("delete"));
+        batch.When(b => b.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<HashEntry[]>(), Arg.Any<CommandFlags>()))
+             .Do(_ => order.Add("store"));
+        // The same call form the writer uses, so the hook binds to the overload it resolves to.
+        batch.When(b => b.StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>()))
+             .Do(_ => order.Add("cache"));
+
+        await h.StartAsync(Def(W, [S1], [Whitelist("acme")]));
+
+        Assert.Equal("delete", order.First());
+        Assert.Single(order, "delete");
+        Assert.Contains("store", order);
+        Assert.Contains("cache", order);
+        Assert.False(h.L2.Has(L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "globex")));
+    }
+
+    [Fact]
     public async Task AnItemRemovedBeforeARestartIsUnlistedAfterIt()
     {
         var h = new Harness();
