@@ -68,9 +68,11 @@ confirmed by the user.
   deleted, except a dropped step whose row still exists (§3.5). Specifically:
   - **Not at the HTTP response.** `202 Accepted` means validated and enqueued. Until the consumer runs,
     L2 still holds the previous definition (or nothing); while the L2 gate is closed (Redis unreachable)
-    the write waits; a failure part-way requeues and reruns the whole handler, and a torn batch leaves
-    a prefix applied until that rerun. `OrchestrationStarted` is the signal: it is published only after
-    the write and the `SADD`.
+    the write waits. A Redis fault (gate trips) or a failed send requeues and reruns the whole handler,
+    and a torn batch leaves a prefix applied until that rerun. Any other failure — including a database
+    fault in the dropped-step lookup — parks the message: the start is not applied, L2 keeps the previous
+    definition, and only the next start repairs it (§6). `OrchestrationStarted` is the signal: it is
+    published only after the write and the `SADD`.
   - **The database as of validation.** The definition is built at HTTP time and carried in the
     message; an edit between the response and the consumer reaches L2 at the next start (§1, principle 5).
   - **Deliberately left unaligned:** a dropped step whose row still exists keeps its key and its
