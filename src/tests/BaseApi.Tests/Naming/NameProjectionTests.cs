@@ -35,20 +35,21 @@ public sealed class NameProjectionTests
     }
 
     [Fact]
-    public void TheDefinitionNamesEveryEntityOnce()
+    public void TheDefinitionNamesTheWorkflowAndEachStepButNoProcessor()
     {
         using var snapshot = Snapshot();
 
         var names = OrchestrationService.ToDefinitionForTests(snapshot, W).Names!;
 
-        Assert.Equal(4, names.Count);   // one workflow, two steps, and ONE processor although two steps use it
+        // Processors own their own name key now; BaseApi never writes one.
+        Assert.Equal(3, names.Count);
         Assert.Equal(EntityNames.Format("chain", "1.0.0", W), names[W]);
         Assert.Equal(EntityNames.Format("step-b", "2.0.0", S2), names[S2]);
-        Assert.Equal(EntityNames.Format("shared-proc", "1.2.0", P), names[P]);
+        Assert.False(names.ContainsKey(P));
     }
 
     [Fact]
-    public async Task TheWriterPutsEveryNameUnderItsOwnKeyAndLeavesTheRootAlone()
+    public async Task TheWriterPutsEachNameOnItsEntityHash()
     {
         using var snapshot = Snapshot();
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
@@ -56,22 +57,23 @@ public sealed class NameProjectionTests
 
         await new L2ProjectionWriter(l2.Multiplexer, new FakeTimeProvider()).WriteAsync(definition, CancellationToken.None);
 
-        Assert.Equal(definition.Names![P], l2.Value(L2ProjectionKeys.Name(P)));
-        Assert.Equal(definition.Names![S1], l2.Value(L2ProjectionKeys.Name(S1)));
-        Assert.Equal(4, l2.Keys().Count(k => k.StartsWith("skp:name:", StringComparison.Ordinal)));
-        Assert.DoesNotContain("chain_1.0.0", l2.Value(L2ProjectionKeys.Root(W)));
+        Assert.Equal(definition.Names![W], l2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.NameField));
+        Assert.Equal(definition.Names![S1], l2.HashValue(L2ProjectionKeys.StepEntity(S1), L2ProjectionKeys.NameField));
+        Assert.Equal(definition.Names![S2], l2.HashValue(L2ProjectionKeys.StepEntity(S2), L2ProjectionKeys.NameField));
+        Assert.False(l2.HasHash(L2ProjectionKeys.Processor(P)));
     }
 
     [Fact]
-    public async Task ADefinitionWithoutNamesWritesNoNameKeys()
+    public async Task ANameForAnIdThatIsNeitherTheWorkflowNorOneOfItsStepsIsNotWritten()
     {
+        var stranger = Guid.NewGuid();
         var l2 = new InMemoryL2();
 
         await new L2ProjectionWriter(l2.Multiplexer, new FakeTimeProvider())
-            .WriteAsync(new WorkflowL1(W, [], null, [], []), CancellationToken.None);
+            .WriteAsync(new WorkflowL1(W, [], null, [], [], new() { [stranger] = "x_1-0000-000000000000" }), CancellationToken.None);
 
-        Assert.DoesNotContain(l2.Keys(), k => k.StartsWith("skp:name:", StringComparison.Ordinal));
-        Assert.True(l2.Has(L2ProjectionKeys.Root(W)));
+        Assert.False(l2.HasHash(L2ProjectionKeys.StepEntity(stranger)));
+        Assert.False(l2.HasHash(L2ProjectionKeys.Workflow(stranger)));
     }
 
     [Fact]

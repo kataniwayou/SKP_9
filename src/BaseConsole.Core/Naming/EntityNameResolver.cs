@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Messaging.Contracts;
+using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
 
 namespace BaseConsole.Core.Naming;
@@ -31,35 +32,54 @@ public sealed class EntityNameResolver(IEntityNameSource source, ILogger<EntityN
     /// </summary>
     public async Task<Dictionary<string, object>> ScopeAsync(Guid workflowId, Guid stepId, Guid processorId)
     {
-        var unknown = new[] { workflowId, stepId, processorId }
-            .Where(id => id != Guid.Empty && !_names.ContainsKey(id))
+        await LoadAsync(
+        [
+            new EntityRef(L2EntityKind.Workflow, workflowId),
+            new EntityRef(L2EntityKind.Step, stepId),
+            new EntityRef(L2EntityKind.Processor, processorId),
+        ]).ConfigureAwait(false);
+
+        return CachedScope(workflowId, stepId, processorId);
+    }
+
+    /// <summary>
+    /// Fills the cache ahead of use — the orchestrator calls this at activation with the workflow, its
+    /// steps and their processors, so the first fire's records are already named. Never throws: a read
+    /// that fails or times out leaves those ids to fall back, exactly as <see cref="ScopeAsync"/> does.
+    /// </summary>
+    public Task PreloadAsync(IEnumerable<EntityRef> refs) => LoadAsync(refs);
+
+    private async Task LoadAsync(IEnumerable<EntityRef> refs)
+    {
+        var unknown = refs
+            .Where(r => r.Id != Guid.Empty && !_names.ContainsKey(r.Id))
             .Distinct()
             .ToArray();
 
-        if (unknown.Length > 0)
+        if (unknown.Length == 0)
         {
-            try
-            {
-                var found = await source.ReadNamesAsync(unknown).WaitAsync(ReadTimeout).ConfigureAwait(false);
-                foreach (var (id, name) in found)
-                {
-                    // A source returning an empty name would otherwise cache an empty string forever;
-                    // treat it the same as a miss so the entity keeps re-resolving.
-                    if (!string.IsNullOrEmpty(name))
-                    {
-                        _names[id] = name;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Debug, not Warning: a store outage is already reported loudly by the gate, and a
-                // line per delivery here would bury it. The records still carry the fallbacks.
-                logger.LogDebug(ex, "entity names could not be read; logging the id suffix instead");
-            }
+            return;
         }
 
-        return CachedScope(workflowId, stepId, processorId);
+        try
+        {
+            var found = await source.ReadNamesAsync(unknown).WaitAsync(ReadTimeout).ConfigureAwait(false);
+            foreach (var (id, name) in found)
+            {
+                // A source returning an empty name would otherwise cache an empty string forever;
+                // treat it the same as a miss so the entity keeps re-resolving.
+                if (!string.IsNullOrEmpty(name))
+                {
+                    _names[id] = name;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Debug, not Warning: a store outage is already reported loudly by the gate, and a
+            // line per delivery here would bury it. The records still carry the fallbacks.
+            logger.LogDebug(ex, "entity names could not be read; logging the id suffix instead");
+        }
     }
 
     /// <summary>The same scope from the cache alone, for synchronous sites. It never reads the store.</summary>

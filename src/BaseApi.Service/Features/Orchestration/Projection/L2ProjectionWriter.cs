@@ -122,18 +122,25 @@ internal sealed class L2ProjectionWriter
             }
         }
 
-        // THE NAMES, in the same pipelined batch. Not a transaction: if any write fails the message is
-        // redelivered and this whole method runs again, exactly as for the keys above. Never cleaned up
-        // on stop -- entities are shared across workflows and records keep arriving after a stop -- so
-        // they are deliberately absent from the root and from L2Cleanup's key list.
+        // THE NAMES, in the same pipelined batch, each on its own entity hash. Only the workflow and its
+        // own steps: an id that is neither has no key this start owns. Never deleted -- entities are
+        // shared across workflows and records keep arriving after a stop.
         // A null guard, not `?? new Dictionary<...>()`: that fallback inside a deconstructing foreach
         // crashes Roslyn's IDE0028 analyzer (AD0001), which fails the Release build under
         // EnforceCodeStyleInBuild + TreatWarningsAsErrors.
         if (workflow.Names is not null)
         {
+            var stepIds = steps.Select(s => s.StepId).ToHashSet();
             foreach (var (id, name) in workflow.Names)
             {
-                writes.Add(batch.StringSetAsync(L2ProjectionKeys.Name(id), name));
+                L2EntityKind? kind = id == workflow.WorkflowId ? L2EntityKind.Workflow
+                    : stepIds.Contains(id) ? L2EntityKind.Step
+                    : null;
+
+                if (kind is { } k)
+                {
+                    writes.Add(batch.HashSetAsync(L2ProjectionKeys.Entity(k, id), L2ProjectionKeys.NameField, name));
+                }
             }
         }
 

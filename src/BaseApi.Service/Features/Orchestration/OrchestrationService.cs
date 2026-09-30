@@ -202,9 +202,8 @@ public sealed class OrchestrationService
                     ?? new Dictionary<string, string>()))
             .ToList();
 
-        // Every entity the start covers, each id once: a processor serving several steps is one entry.
-        // Built here, from the snapshot the gates just approved, so the names projected are the names
-        // of the state that was validated -- not a second read that could see a later edit.
+        // The workflow and each of its steps, each id once. Processors are absent on purpose: every
+        // processor instance writes its own name key.
         var names = new Dictionary<Guid, string>();
         foreach (var w in snapshot.Workflows.Values)
         {
@@ -214,11 +213,6 @@ public sealed class OrchestrationService
         foreach (var s in snapshot.Steps.Values)
         {
             names[s.Id] = EntityNames.Format(s.Name, s.Version, s.Id);
-        }
-
-        foreach (var p in snapshot.Processors.Values)
-        {
-            names[p.Id] = EntityNames.Format(p.Name, p.Version, p.Id);
         }
 
         return new WorkflowL1(

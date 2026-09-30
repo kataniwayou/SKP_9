@@ -24,7 +24,7 @@ public sealed class EntityNamesTests
 
     [Fact]
     public void TheNameKeyIsItsOwnNamespace() =>
-        Assert.Equal("skp:name:208cba76-d635-4721-9aff-a7f22ee09224", L2ProjectionKeys.Name(Id));
+        Assert.Equal("skp:wf:208cba76-d635-4721-9aff-a7f22ee09224", L2ProjectionKeys.Entity(L2EntityKind.Workflow, Id));
 
     [Fact]
     public void ReadsTheThreeIdsFromStringAndByteHeaders()

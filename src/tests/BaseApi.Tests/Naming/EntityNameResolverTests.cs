@@ -103,12 +103,65 @@ public sealed class EntityNameResolverTests
     public async Task TheRedisSourceReadsNameKeysInOneMget()
     {
         var l2 = new InMemoryL2();
-        await l2.Db.StringSetAsync(L2ProjectionKeys.Name(W), "wf_1.0.0-aaaa-111111111111");
+        await l2.Db.HashSetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.NameField, "wf_1.0.0-aaaa-111111111111");
 
-        var found = await new RedisEntityNameSource(l2.Multiplexer).ReadNamesAsync([W, S]);
+        var found = await new RedisEntityNameSource(l2.Multiplexer)
+            .ReadNamesAsync([new EntityRef(L2EntityKind.Workflow, W), new EntityRef(L2EntityKind.Step, S)]);
 
         Assert.Equal("wf_1.0.0-aaaa-111111111111", Assert.Single(found).Value);
-        await l2.Db.Received(1).StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task EachIdIsAskedForUnderItsOwnKind()
+    {
+        var w = Guid.NewGuid(); var s = Guid.NewGuid(); var p = Guid.NewGuid();
+        var source = new FakeNameSource();
+        var resolver = new EntityNameResolver(source, NullLogger<EntityNameResolver>.Instance);
+
+        await resolver.ScopeAsync(w, s, p);
+
+        Assert.Equal(
+            [new EntityRef(L2EntityKind.Workflow, w), new EntityRef(L2EntityKind.Step, s), new EntityRef(L2EntityKind.Processor, p)],
+            source.Requested);
+    }
+
+    [Fact]
+    public async Task APreloadFillsTheCacheSoTheNextScopeReadsNothing()
+    {
+        var w = Guid.NewGuid(); var s = Guid.NewGuid();
+        var source = new FakeNameSource(new() { [w] = "chain_1.0.0-aaaa-111111111111", [s] = "step-a_1.0.0-bbbb-222222222222" });
+        var resolver = new EntityNameResolver(source, NullLogger<EntityNameResolver>.Instance);
+
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, w), new(L2EntityKind.Step, s)]);
+        var reads = source.Reads;
+        await resolver.ScopeAsync(w, s, Guid.Empty);
+
+        Assert.Equal(reads, source.Reads);
+        Assert.Equal("chain_1.0.0-aaaa-111111111111", resolver.NameOrFallback(w));
+    }
+
+    [Fact]
+    public async Task APreloadAgainstAFaultingStoreDoesNotThrow()
+    {
+        var source = new FakeNameSource { Fault = new InvalidOperationException("down") };
+        var resolver = new EntityNameResolver(source, NullLogger<EntityNameResolver>.Instance);
+
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, Guid.NewGuid())]);
+    }
+
+    [Fact]
+    public async Task TheRedisSourceReadsTheNameFieldOfEachKindsHash()
+    {
+        var w = Guid.NewGuid(); var p = Guid.NewGuid();
+        var l2 = new InMemoryL2();
+        await l2.Db.HashSetAsync(L2ProjectionKeys.Workflow(w), L2ProjectionKeys.NameField, "chain_1.0.0-aaaa-111111111111");
+        await l2.Db.HashSetAsync(L2ProjectionKeys.Processor(p), L2ProjectionKeys.NameField, "proc_1.0.0-dddd-444444444444");
+
+        var found = await RedisEntityNameSource.ReadAsync(l2.Db,
+            [new(L2EntityKind.Workflow, w), new(L2EntityKind.Processor, p), new(L2EntityKind.Step, Guid.NewGuid())]);
+
+        Assert.Equal(2, found.Count);
+        Assert.Equal("proc_1.0.0-dddd-444444444444", found[p]);
     }
 
     [Fact]

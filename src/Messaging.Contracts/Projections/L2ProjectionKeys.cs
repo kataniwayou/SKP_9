@@ -20,7 +20,7 @@ namespace Messaging.Contracts.Projections;
 ///   <item><description>Cache: <c>skp:wf:{workflowId}:cache:{root}</c> — one dictionary's key list</description></item>
 ///   <item><description>CacheEntry: <c>skp:wf:{workflowId}:cache:{root}:{key}</c> — one entry</description></item>
 ///   <item><description>ExecutionData: <c>skp:data:{guid}</c> — the blob for both roles</description></item>
-///   <item><description>Retiring (removed by later tasks): ParentIndex <c>skp:</c>, Root <c>skp:{workflowId}</c>, Step <c>skp:{workflowId}:{stepId}</c>, Name <c>skp:name:{id}</c></description></item>
+///   <item><description>Retiring (removed by later tasks): ParentIndex <c>skp:</c>, Root <c>skp:{workflowId}</c>, Step <c>skp:{workflowId}:{stepId}</c></description></item>
 /// </list>
 /// </summary>
 public static class L2ProjectionKeys
@@ -132,13 +132,4 @@ public static class L2ProjectionKeys
     /// </para>
     /// </summary>
     public static string ExecutionData(Guid entryId) => $"{Prefix}data:{entryId:D}";
-
-    /// <summary>
-    /// An entity's display name, <c>skp:name:{id}</c>: written by BaseApi on every start, read by the
-    /// orchestrator and processors when they log. Its own namespace, so the orphan sweeper (which scans
-    /// only <c>skp:proc:*</c> Sets) cannot see it, and it never collides with a workflow root
-    /// (<c>skp:{id}</c>). Never deleted: entities are shared across workflows, and records keep
-    /// arriving after a stop.
-    /// </summary>
-    public static string Name(Guid id) => $"{Prefix}name:{id:D}";
 }

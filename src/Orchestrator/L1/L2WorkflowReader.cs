@@ -13,8 +13,8 @@ namespace Orchestrator.L1;
 /// <para>
 /// <b>It reads, and it never writes.</b> The API is the sole writer of L2 (spec invariant 1); the
 /// orchestrator is a consumer of the API's projections. Four operations appear here —
-/// <c>SetMembersAsync</c>, <c>StringGetAsync</c>, <c>KeyExistsAsync</c> and the MGET of
-/// <c>skp:name:{id}</c> keys for log names — and no fifth is permitted. A delete or a set here
+/// <c>SetMembersAsync</c>, <c>StringGetAsync</c>, <c>KeyExistsAsync</c> and the HGETs of each entity
+/// hash's <c>name</c> field for log names — and no fifth is permitted. A delete or a set here
 /// would let this replica's view of the world become a fact about the world, which is precisely the
 /// inversion the two invariants exist to prevent.
 /// </para>
@@ -37,8 +37,8 @@ public sealed class L2WorkflowReader(IConnectionMultiplexer redis, ILogger<L2Wor
     /// must not requeue a delivery or trip the gate. It propagates to <see cref="EntityNameResolver"/>,
     /// which catches it and logs the id suffix instead.
     /// </summary>
-    public Task<IReadOnlyDictionary<Guid, string>> ReadNamesAsync(IReadOnlyCollection<Guid> ids) =>
-        RedisEntityNameSource.ReadAsync(redis.GetDatabase(), ids);
+    public Task<IReadOnlyDictionary<Guid, string>> ReadNamesAsync(IReadOnlyCollection<EntityRef> refs) =>
+        RedisEntityNameSource.ReadAsync(redis.GetDatabase(), refs);
 
     /// <summary>
     /// Every workflow id in the parent-index SET. A member that is not a workflow id is skipped with a
