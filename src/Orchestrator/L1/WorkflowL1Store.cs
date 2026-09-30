@@ -129,8 +129,10 @@ public sealed class WorkflowL1Store
     /// whether this call is what stamped it.
     /// <para>
     /// <b>An already-stamped entry is left alone, and that is what makes a redelivered stop safe.</b>
-    /// Refreshing the stamp would push the reap out by a full grace period per duplicate delivery, so a
-    /// stop redelivered on a loop would keep a stopped workflow resolvable indefinitely.
+    /// Refreshing the stamp per duplicate delivery would move when this entry reads as having been
+    /// stopped, which matters because <see cref="L1Entry.DeletedAt"/> is read as the fact of when the
+    /// stop actually landed, not as an input to a timer — stopped entries are kept until the workflow
+    /// restarts or the pod restarts; nothing prunes them by age.
     /// </para>
     /// <para>
     /// The retry loop is a compare-and-swap against the entry that was read, so a concurrent
@@ -160,14 +162,20 @@ public sealed class WorkflowL1Store
     /// <summary>
     /// Drop every entry stopped at or before <paramref name="cutoff"/>, returning the ids dropped.
     /// <para>
+    /// <b>Not called in production.</b> Stopped entries are kept until the workflow restarts or the
+    /// pod restarts; nothing else prunes them by age. This exists so
+    /// <c>ExecutionRoundTripTests</c> can model a replica that no longer holds a workflow — the
+    /// post-restart case.
+    /// </para>
+    /// <para>
     /// <b>Non-strict, matching the other thresholds in this codebase</b> — the boundary instant counts
     /// as expired, so a grace period reads as the number it is written as.
     /// </para>
     /// <para>
     /// The removal is a compare-and-remove against the entry the scan saw, so a workflow restarted
-    /// between the scan and the removal is not reaped: the restart wrote a new entry, the pair no
-    /// longer matches, and the reap skips it. A plain single-argument <c>TryRemove</c> would delete the
-    /// running workflow an operator had just restarted.
+    /// between the scan and this call does not lose its restart: the restart wrote a new entry, the
+    /// pair no longer matches, and the call leaves it alone. A plain single-argument <c>TryRemove</c>
+    /// would delete the running workflow an operator had just restarted.
     /// </para>
     /// </summary>
     public IReadOnlyList<Guid> ReapDeletedBefore(DateTimeOffset cutoff)

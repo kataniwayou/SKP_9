@@ -103,12 +103,174 @@ public sealed class EntityNameResolverTests
     public async Task TheRedisSourceReadsNameKeysInOneMget()
     {
         var l2 = new InMemoryL2();
-        await l2.Db.StringSetAsync(L2ProjectionKeys.Name(W), "wf_1.0.0-aaaa-111111111111");
+        await l2.Db.HashSetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.NameField, "wf_1.0.0-aaaa-111111111111");
 
-        var found = await new RedisEntityNameSource(l2.Multiplexer).ReadNamesAsync([W, S]);
+        var found = await new RedisEntityNameSource(l2.Multiplexer)
+            .ReadNamesAsync([new EntityRef(L2EntityKind.Workflow, W), new EntityRef(L2EntityKind.Step, S)]);
 
         Assert.Equal("wf_1.0.0-aaaa-111111111111", Assert.Single(found).Value);
-        await l2.Db.Received(1).StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task EachIdIsAskedForUnderItsOwnKind()
+    {
+        var w = Guid.NewGuid(); var s = Guid.NewGuid(); var p = Guid.NewGuid();
+        var source = new FakeNameSource();
+        var resolver = new EntityNameResolver(source, NullLogger<EntityNameResolver>.Instance);
+
+        await resolver.ScopeAsync(w, s, p);
+
+        Assert.Equal(
+            [new EntityRef(L2EntityKind.Workflow, w), new EntityRef(L2EntityKind.Step, s), new EntityRef(L2EntityKind.Processor, p)],
+            source.Requested);
+    }
+
+    [Fact]
+    public async Task APreloadFillsTheCacheSoTheNextScopeReadsNothing()
+    {
+        var w = Guid.NewGuid(); var s = Guid.NewGuid();
+        var source = new FakeNameSource(new() { [w] = "chain_1.0.0-aaaa-111111111111", [s] = "step-a_1.0.0-bbbb-222222222222" });
+        var resolver = new EntityNameResolver(source, NullLogger<EntityNameResolver>.Instance);
+
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, w), new(L2EntityKind.Step, s)]);
+        var reads = source.Reads;
+        await resolver.ScopeAsync(w, s, Guid.Empty);
+
+        Assert.Equal(reads, source.Reads);
+        Assert.Equal("chain_1.0.0-aaaa-111111111111", resolver.NameOrFallback(w));
+    }
+
+    [Fact]
+    public async Task ARefreshOverwritesACachedName()
+    {
+        // Spec §6: a workflow or step renamed while stopped shows its new name from the next start.
+        // The orchestrator refreshes at every activation, so a cached hit must not shield the old name.
+        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
+        var resolver = Resolver(source);
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, W)]);
+
+        source.Names[W] = "new_1.0.0-aaaa-111111111111";
+        await resolver.RefreshAsync([new(L2EntityKind.Workflow, W)]);
+
+        Assert.Equal("new_1.0.0-aaaa-111111111111", resolver.NameOrFallback(W));
+    }
+
+    [Fact]
+    public async Task ARefreshThatFindsNothingKeepsTheCachedName()
+    {
+        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
+        var resolver = Resolver(source);
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, W)]);
+
+        source.Names.Remove(W);
+        await resolver.RefreshAsync([new(L2EntityKind.Workflow, W)]);
+
+        Assert.Equal("old_1.0.0-aaaa-111111111111", resolver.NameOrFallback(W));
+    }
+
+    [Fact]
+    public async Task ARefreshThatFaultsKeepsTheCachedNameAndDoesNotThrow()
+    {
+        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
+        var resolver = Resolver(source);
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, W)]);
+
+        source.Fault = new RedisConnectionException(ConnectionFailureType.SocketFailure, "down");
+        await resolver.RefreshAsync([new(L2EntityKind.Workflow, W)]);
+
+        Assert.Equal("old_1.0.0-aaaa-111111111111", resolver.NameOrFallback(W));
+    }
+
+    [Fact]
+    public async Task AScopeStillReadsACachedNameFromTheCacheAlone()
+    {
+        // The refresh is the orchestrator's; a processor's ScopeAsync keeps cache-first (spec §5).
+        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
+        var resolver = Resolver(source);
+        await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
+
+        source.Names[W] = "new_1.0.0-aaaa-111111111111";
+        var scope = await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
+
+        Assert.Equal("old_1.0.0-aaaa-111111111111", scope[EntityNames.WorkflowName]);
+        Assert.Equal(1, source.Reads);
+    }
+
+    [Fact]
+    public async Task APreloadAgainstAFaultingStoreDoesNotThrow()
+    {
+        var source = new FakeNameSource { Fault = new InvalidOperationException("down") };
+        var resolver = new EntityNameResolver(source, NullLogger<EntityNameResolver>.Instance);
+
+        await resolver.PreloadAsync([new(L2EntityKind.Workflow, Guid.NewGuid())]);
+    }
+
+    [Fact]
+    public async Task TheRedisSourceReadsTheNameFieldOfEachKindsHash()
+    {
+        var w = Guid.NewGuid(); var p = Guid.NewGuid();
+        var l2 = new InMemoryL2();
+        await l2.Db.HashSetAsync(L2ProjectionKeys.Workflow(w), L2ProjectionKeys.NameField, "chain_1.0.0-aaaa-111111111111");
+        await l2.Db.HashSetAsync(L2ProjectionKeys.Processor(p), L2ProjectionKeys.NameField, "proc_1.0.0-dddd-444444444444");
+
+        var found = await RedisEntityNameSource.ReadAsync(l2.Db,
+            [new(L2EntityKind.Workflow, w), new(L2EntityKind.Processor, p), new(L2EntityKind.Step, Guid.NewGuid())]);
+
+        Assert.Equal(2, found.Count);
+        Assert.Equal("proc_1.0.0-dddd-444444444444", found[p]);
+    }
+
+    /// <summary>
+    /// Pins the "one round trip" claim in <see cref="RedisEntityNameSource.ReadAsync"/>'s doc comment:
+    /// every <c>HashGetAsync</c> is issued before any of them is awaited. A regression that awaited each
+    /// read sequentially would still pass every other test in this file -- they only assert on the final
+    /// result -- so this one holds each read open with its own <see cref="TaskCompletionSource{TResult}"/>
+    /// and checks all three calls already reached the database before <c>ReadAsync</c>'s own task can
+    /// possibly have completed.
+    /// </summary>
+    [Fact]
+    public async Task TheRedisSourceIssuesEveryReadBeforeAwaitingAny()
+    {
+        var w = Guid.NewGuid(); var s = Guid.NewGuid(); var p = Guid.NewGuid();
+        var sources = new Dictionary<(RedisKey Key, RedisValue Field), TaskCompletionSource<RedisValue>>();
+        var db = Substitute.For<IDatabaseAsync>();
+
+        db.HashGetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>())
+            .Returns(ci =>
+            {
+                var key = (ci.ArgAt<RedisKey>(0), ci.ArgAt<RedisValue>(1));
+                var tcs = new TaskCompletionSource<RedisValue>();
+                sources[key] = tcs;
+                return tcs.Task;
+            });
+
+        var refs = new[]
+        {
+            new EntityRef(L2EntityKind.Workflow, w),
+            new EntityRef(L2EntityKind.Step, s),
+            new EntityRef(L2EntityKind.Processor, p),
+        };
+
+        var result = RedisEntityNameSource.ReadAsync(db, refs);
+
+        // All three calls must have already reached the database -- unawaited -- before this line, or
+        // the lookups below throw KeyNotFoundException.
+        Assert.False(result.IsCompleted);
+        await db.Received(1).HashGetAsync(L2ProjectionKeys.Workflow(w), L2ProjectionKeys.NameField, Arg.Any<CommandFlags>());
+        await db.Received(1).HashGetAsync(L2ProjectionKeys.StepEntity(s), L2ProjectionKeys.NameField, Arg.Any<CommandFlags>());
+        await db.Received(1).HashGetAsync(L2ProjectionKeys.Processor(p), L2ProjectionKeys.NameField, Arg.Any<CommandFlags>());
+        Assert.Equal(3, sources.Count);
+
+        sources[(L2ProjectionKeys.Workflow(w), L2ProjectionKeys.NameField)].SetResult("chain_1.0.0-aaaa-111111111111");
+        sources[(L2ProjectionKeys.StepEntity(s), L2ProjectionKeys.NameField)].SetResult(RedisValue.Null);
+        sources[(L2ProjectionKeys.Processor(p), L2ProjectionKeys.NameField)].SetResult("proc_1.0.0-dddd-444444444444");
+
+        var found = await result;
+
+        Assert.Equal(2, found.Count);
+        Assert.Equal("chain_1.0.0-aaaa-111111111111", found[w]);
+        Assert.Equal("proc_1.0.0-dddd-444444444444", found[p]);
+        Assert.False(found.ContainsKey(s));
     }
 
     [Fact]

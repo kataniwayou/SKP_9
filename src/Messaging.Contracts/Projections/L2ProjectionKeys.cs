@@ -4,42 +4,94 @@ namespace Messaging.Contracts.Projections;
 /// Single source of truth for the L2 (Redis) projection key formats, so the writer and the reader
 /// consume one shape and a future GUID-format or suffix change cannot silently desynchronize them.
 /// <para>
-/// The scheme is flat: a single prefix followed by GUIDs, with no type discriminator. GUIDs render
-/// in the default hyphenated "D" format, not the 32-digit "N" format; <see cref="Root"/> states the
-/// <c>:D</c> specifier explicitly, which is byte-identical to a bare interpolation. The prefix is a
-/// compile-time const owned here rather than a config value or a builder parameter, which removes
+/// The scheme is flat: a single prefix, a kind discriminator (<c>wf:</c>, <c>step:</c>, <c>proc:</c>,
+/// <c>data:</c>) and a GUID, plus the one shared <c>skp:live</c> set. GUIDs render
+/// in the default hyphenated "D" format, not the 32-digit "N" format; <see cref="Workflow"/> states
+/// the <c>:D</c> specifier explicitly, which is byte-identical to a bare interpolation. The prefix is
+/// a compile-time const owned here rather than a config value or a builder parameter, which removes
 /// any config-injection path into key names.
 /// </para>
 /// <list type="bullet">
-///   <item><description>ParentIndex: <c>{Prefix}</c> — the bare prefix, used as the parent-index SET key</description></item>
-///   <item><description>Root: <c>{Prefix}{workflowId}</c></description></item>
-///   <item><description>Step: <c>{Prefix}{workflowId}:{stepId}</c></description></item>
-///   <item><description>PerInstance: <c>{Prefix}proc:{processorId}:{instanceId}</c> — the per-replica liveness key</description></item>
-///   <item><description>InstanceIndex: <c>{Prefix}proc:{processorId}</c> — the per-processor instance-index SET key</description></item>
-///   <item><description>ExecutionData: <c>{Prefix}data:{guid}</c> — the blob for both roles</description></item>
-///   <item><description>Name: <c>{Prefix}name:{id}</c> — an entity's display name</description></item>
-///   <item><description>Cache: <c>{Prefix}{workflowId}:cache:{root}</c> — the key holding one projected dictionary's key list</description></item>
-///   <item><description>CacheEntry: <c>{Prefix}{workflowId}:cache:{root}:{key}</c> — one entry of that dictionary</description></item>
+///   <item><description>Live: <c>skp:live</c> — SET of running workflow ids</description></item>
+///   <item><description>Workflow: <c>skp:wf:{workflowId}</c> — HASH <c>name</c>, <c>store</c>, <c>roots</c></description></item>
+///   <item><description>StepEntity: <c>skp:step:{stepId}</c> — HASH <c>name</c></description></item>
+///   <item><description>Processor: <c>skp:proc:{processorId}</c> — HASH <c>name</c>, written by the processor, TTL</description></item>
+///   <item><description>ProcessorInstances: <c>skp:proc:{processorId}:instances</c> — SET, TTL</description></item>
+///   <item><description>PerInstance: <c>skp:proc:{processorId}:{instanceId}</c> — liveness, TTL</description></item>
+///   <item><description>Cache: <c>skp:wf:{workflowId}:cache:{root}</c> — one dictionary's key list</description></item>
+///   <item><description>CacheEntry: <c>skp:wf:{workflowId}:cache:{root}:{key}</c> — one entry</description></item>
+///   <item><description>ExecutionData: <c>skp:data:{guid}</c> — the blob for both roles</description></item>
 /// </list>
 /// </summary>
 public static class L2ProjectionKeys
 {
     public const string Prefix = "skp:";
 
-    public static string ParentIndex() => Prefix;
+    /// <summary>The display-name field on every entity hash.</summary>
+    public const string NameField = "name";
 
-    public static string Root(Guid workflowId) => $"{Prefix}{workflowId:D}";
+    /// <summary>The flattened L1 structure on <see cref="Workflow"/>; see <see cref="WorkflowStoreProjection"/>.</summary>
+    public const string StoreField = "store";
 
-    public static string Step(Guid workflowId, Guid stepId) => $"{Prefix}{workflowId:D}:{stepId:D}";
+    /// <summary>The JSON list of cache roots on <see cref="Workflow"/>, read back by the next start to find its own leftovers.</summary>
+    public const string RootsField = "roots";
+
+    private const string InstancesSuffix = ":instances";
+
+    /// <summary>The SET of running workflow ids: start adds, stop removes, hydration reads.</summary>
+    public static string Live() => $"{Prefix}live";
+
+    public static string Workflow(Guid workflowId) => $"{Prefix}wf:{workflowId:D}";
+
+    /// <summary>A step's own key. Global, not per workflow: a step can be shared by several workflows.</summary>
+    public static string StepEntity(Guid stepId) => $"{Prefix}step:{stepId:D}";
+
+    /// <summary>A processor's name hash. Written only by the processor's own instances, with a TTL.</summary>
+    public static string Processor(Guid processorId) => $"{Prefix}proc:{processorId:D}";
+
+    public static string Entity(L2EntityKind kind, Guid id) => kind switch
+    {
+        L2EntityKind.Workflow  => Workflow(id),
+        L2EntityKind.Step      => StepEntity(id),
+        L2EntityKind.Processor => Processor(id),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown entity kind"),
+    };
+
+    /// <summary>The SET each replica adds its instance id to. TTL, refreshed by every heartbeat.</summary>
+    public static string ProcessorInstances(Guid processorId) => $"{Processor(processorId)}{InstancesSuffix}";
+
+    /// <summary>
+    /// The inverse of <see cref="ProcessorInstances"/>, for the orphan sweeper, which finds these keys
+    /// by scan and has to rebuild each member's <see cref="PerInstance"/> key from them.
+    /// </summary>
+    public static bool TryParseProcessorInstances(string key, out Guid processorId)
+    {
+        processorId = Guid.Empty;
+        var head = $"{Prefix}proc:";
+
+        // The length guard first: "skp:proc:instances" matches both the head and the suffix, which
+        // overlap in it, and would otherwise slice a negative length.
+        if (key is null
+            || key.Length < head.Length + InstancesSuffix.Length
+            || !key.StartsWith(head, StringComparison.Ordinal)
+            || !key.EndsWith(InstancesSuffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var id = key.AsSpan(head.Length, key.Length - head.Length - InstancesSuffix.Length);
+        return Guid.TryParseExact(id, "D", out processorId);
+    }
 
     /// <summary>
     /// The cache root: the key holding the JSON array of key names in one projected dictionary.
     /// <para>
-    /// <b>This is the first key to place a literal segment after the workflow id.</b> Every other
-    /// discriminator in this scheme — <c>proc:</c>, <c>data:</c> — sits immediately after the
-    /// prefix. It cannot collide with <see cref="Step"/>, because <c>cache</c> is not a GUID, and
-    /// keeping a workflow's keys contiguous under one scan prefix is worth more here than symmetry
-    /// with the other two.
+    /// <b>It nests under the workflow's own key.</b> Every entity kind has its own discriminator right
+    /// after the prefix — <c>wf:</c>, <c>step:</c>, <c>proc:</c>, <c>data:</c> — so a cache key can
+    /// collide with no other kind's key: it starts <c>skp:wf:</c>, which no step, processor or data key
+    /// does. Within <c>skp:wf:{id}</c> it adds a literal <c>:cache:</c> segment, and the workflow hash
+    /// itself has no suffix at all, so the two never meet. Nesting it there keeps every key a workflow
+    /// owns under that workflow's one prefix.
     /// </para>
     /// <para>
     /// <paramref name="root"/> is interpolated verbatim, which is safe because the cache validator
@@ -47,7 +99,7 @@ public static class L2ProjectionKeys
     /// </para>
     /// </summary>
     public static string Cache(Guid workflowId, string root)
-        => $"{Prefix}{workflowId:D}:cache:{root}";
+        => $"{Workflow(workflowId)}:cache:{root}";
 
     /// <summary>
     /// One entry of a projected dictionary: exactly <see cref="Cache"/> followed by the key. The two
@@ -60,12 +112,7 @@ public static class L2ProjectionKeys
     /// <summary>The per-instance processor-liveness key. <paramref name="instanceId"/> is the
     /// already-resolved pod identity — a plain string, not a Guid.</summary>
     public static string PerInstance(Guid processorId, string instanceId)
-        => $"{Prefix}proc:{processorId:D}:{instanceId}";
-
-    /// <summary>The per-processor instance-index SET key that each replica adds its instance id to.
-    /// It is exactly the prefix of <see cref="PerInstance"/> before the trailing instance id.</summary>
-    public static string InstanceIndex(Guid processorId)
-        => $"{Prefix}proc:{processorId:D}";
+        => $"{Processor(processorId)}:{instanceId}";
 
     /// <summary>
     /// The execution blob key, and the only one. A step's output is written here under the
@@ -83,13 +130,4 @@ public static class L2ProjectionKeys
     /// </para>
     /// </summary>
     public static string ExecutionData(Guid entryId) => $"{Prefix}data:{entryId:D}";
-
-    /// <summary>
-    /// An entity's display name, <c>skp:name:{id}</c>: written by BaseApi on every start, read by the
-    /// orchestrator and processors when they log. Its own namespace, so the orphan sweeper (which scans
-    /// only <c>skp:proc:*</c> Sets) cannot see it, and it never collides with a workflow root
-    /// (<c>skp:{id}</c>). Never deleted: entities are shared across workflows, and records keep
-    /// arriving after a stop.
-    /// </summary>
-    public static string Name(Guid id) => $"{Prefix}name:{id:D}";
 }

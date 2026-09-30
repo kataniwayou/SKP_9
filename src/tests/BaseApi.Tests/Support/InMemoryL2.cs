@@ -4,8 +4,8 @@ using StackExchange.Redis;
 namespace BaseApi.Tests.Support;
 
 /// <summary>
-/// An L2 that actually stores what is written to it: strings and sets in two dictionaries, behind a
-/// substituted <see cref="IConnectionMultiplexer"/>.
+/// An L2 that actually stores what is written to it: strings, sets and hashes in three dictionaries,
+/// plus the TTL last applied to each key, behind a substituted <see cref="IConnectionMultiplexer"/>.
 /// <para>
 /// <b>Why a store rather than the usual per-key stubs.</b> Stubbing <c>StringGetAsync</c> to return a
 /// canned root answers "what does the code do when L2 says X". Idempotency is a different question —
@@ -28,6 +28,8 @@ internal sealed class InMemoryL2
 {
     private readonly Dictionary<string, string> _strings = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SortedSet<string>> _sets = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Dictionary<string, string>> _hashes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TimeSpan> _ttls = new(StringComparer.Ordinal);
 
     public InMemoryL2()
     {
@@ -73,6 +75,16 @@ internal sealed class InMemoryL2
     /// <summary>Every string key that holds a value, sorted.</summary>
     public IReadOnlyList<string> Keys() => _strings.Keys.Order(StringComparer.Ordinal).ToList();
 
+    /// <summary>One hash field, or null when the key or the field is absent.</summary>
+    public string? HashValue(string key, string field)
+        => _hashes.TryGetValue(key, out var h) && h.TryGetValue(field, out var v) ? v : null;
+
+    /// <summary>Whether a hash key exists right now.</summary>
+    public bool HasHash(string key) => _hashes.ContainsKey(key);
+
+    /// <summary>The TTL last applied to <paramref name="key"/>, or null when none was. Recorded, not enforced.</summary>
+    public TimeSpan? Ttl(string key) => _ttls.TryGetValue(key, out var t) ? t : null;
+
     /// <summary>
     /// The whole store as one canonical string: every string key with its value, then every set key
     /// with its members, all sorted. Two runs that left L2 in the same state produce the same text,
@@ -84,6 +96,7 @@ internal sealed class InMemoryL2
             .Select(kv => $"str {kv.Key} = {kv.Value}")
             .Concat(_sets.Where(kv => kv.Value.Count > 0)
                 .Select(kv => $"set {kv.Key} = [{string.Join(",", kv.Value)}]"))
+            .Concat(_hashes.SelectMany(kv => kv.Value.Select(f => $"hash {kv.Key}.{f.Key} = {f.Value}")))
             .Order(StringComparer.Ordinal);
 
         return string.Join("\n", lines);
@@ -101,8 +114,43 @@ internal sealed class InMemoryL2
         }
     }
 
+    private bool Exists(string key)
+        => _strings.ContainsKey(key) || _hashes.ContainsKey(key)
+           || (_sets.TryGetValue(key, out var set) && set.Count > 0);
+
+    private bool Delete(string key)
+    {
+        var removed = _strings.Remove(key) | _hashes.Remove(key) | _sets.Remove(key);
+        _ttls.Remove(key);
+        return removed;
+    }
+
     /// <summary>
-    /// Backs the six operations these paths use onto the dictionaries. <see cref="IBatch"/> derives
+    /// Whether an HSET on <paramref name="key"/> would answer WRONGTYPE on a real server: the key holds
+    /// a string or a non-empty set. Modelled for the single-field HSET only — the one write that can
+    /// meet a retired key shape (the pre-migration <c>skp:proc:{id}</c> SET).
+    /// </summary>
+    private bool HoldsNonHash(string key)
+        => _strings.ContainsKey(key) || (_sets.TryGetValue(key, out var set) && set.Count > 0);
+
+    private static RedisServerException WrongType()
+        => new("WRONGTYPE Operation against a key holding the wrong kind of value");
+
+    private Dictionary<string, string> Hash(string key)
+    {
+        if (!_hashes.TryGetValue(key, out var h))
+        {
+            h = new Dictionary<string, string>(StringComparer.Ordinal);
+            _hashes[key] = h;
+        }
+
+        return h;
+    }
+
+    /// <summary>
+    /// Backs the string, set, hash, key-existence, delete and expire operations these paths use onto
+    /// the dictionaries (both string-set overloads, GET and MGET, SADD/SREM/SMEMBERS/SISMEMBER, both
+    /// HSET overloads and HGET, EXISTS, single- and multi-key DEL, EXPIRE). <see cref="IBatch"/> derives
     /// from <see cref="IDatabaseAsync"/>, so the database and its batches are wired by one method and
     /// cannot drift apart.
     /// </summary>
@@ -125,7 +173,17 @@ internal sealed class InMemoryL2
 
         target.StringSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<TimeSpan?>(),
                               Arg.Any<When>(), Arg.Any<CommandFlags>())
-            .Returns(Store);
+            .Returns(ci =>
+            {
+                var key = ci.ArgAt<RedisKey>(0).ToString();
+                _strings[key] = ci.ArgAt<RedisValue>(1).ToString();
+                if (ci.ArgAt<TimeSpan?>(2) is { } ttl)
+                {
+                    _ttls[key] = ttl;
+                }
+
+                return Task.FromResult(true);
+            });
 
         target.StringGetAsync(Arg.Any<RedisKey>())
             .Returns(ci => _strings.TryGetValue(ci.ArgAt<RedisKey>(0).ToString(), out var value)
@@ -139,14 +197,13 @@ internal sealed class InMemoryL2
                 .ToArray());
 
         target.KeyExistsAsync(Arg.Any<RedisKey>())
-            .Returns(ci => _strings.ContainsKey(ci.ArgAt<RedisKey>(0).ToString()));
+            .Returns(ci => Exists(ci.ArgAt<RedisKey>(0).ToString()));
 
         target.KeyDeleteAsync(Arg.Any<RedisKey>())
-            .Returns(ci => _strings.Remove(ci.ArgAt<RedisKey>(0).ToString()));
+            .Returns(ci => Delete(ci.ArgAt<RedisKey>(0).ToString()));
 
         target.KeyDeleteAsync(Arg.Any<RedisKey[]>())
-            .Returns(ci => (long)ci.ArgAt<RedisKey[]>(0)
-                .Count(k => _strings.Remove(k.ToString())));
+            .Returns(ci => (long)ci.ArgAt<RedisKey[]>(0).Count(k => Delete(k.ToString())));
 
         target.SetAddAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>())
             .Returns(ci =>
@@ -169,5 +226,58 @@ internal sealed class InMemoryL2
             .Returns(ci => _sets.TryGetValue(ci.ArgAt<RedisKey>(0).ToString(), out var set)
                 ? set.Select(m => (RedisValue)m).ToArray()
                 : []);
+
+        target.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<RedisValue>(),
+                            Arg.Any<When>(), Arg.Any<CommandFlags>())
+            .Returns(ci =>
+            {
+                if (HoldsNonHash(ci.ArgAt<RedisKey>(0).ToString()))
+                {
+                    return Task.FromException<bool>(WrongType());
+                }
+
+                var h = Hash(ci.ArgAt<RedisKey>(0).ToString());
+                var field = ci.ArgAt<RedisValue>(1).ToString();
+                var added = !h.ContainsKey(field);
+                h[field] = ci.ArgAt<RedisValue>(2).ToString();
+                return Task.FromResult(added);
+            });
+
+        target.HashSetAsync(Arg.Any<RedisKey>(), Arg.Any<HashEntry[]>(), Arg.Any<CommandFlags>())
+            .Returns(ci =>
+            {
+                var h = Hash(ci.ArgAt<RedisKey>(0).ToString());
+                foreach (var entry in ci.ArgAt<HashEntry[]>(1))
+                {
+                    h[entry.Name.ToString()] = entry.Value.ToString();
+                }
+
+                return Task.CompletedTask;
+            });
+
+        target.HashGetAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>())
+            .Returns(ci => HashValue(ci.ArgAt<RedisKey>(0).ToString(), ci.ArgAt<RedisValue>(1).ToString())
+                           is { } v ? (RedisValue)v : RedisValue.Null);
+
+        target.SetContainsAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue>(), Arg.Any<CommandFlags>())
+            .Returns(ci => _sets.TryGetValue(ci.ArgAt<RedisKey>(0).ToString(), out var set)
+                           && set.Contains(ci.ArgAt<RedisValue>(1).ToString()));
+
+        target.KeyExpireAsync(Arg.Any<RedisKey>(), Arg.Any<TimeSpan?>(), Arg.Any<ExpireWhen>(), Arg.Any<CommandFlags>())
+            .Returns(ci =>
+            {
+                var key = ci.ArgAt<RedisKey>(0).ToString();
+                if (!Exists(key))
+                {
+                    return false;
+                }
+
+                if (ci.ArgAt<TimeSpan?>(1) is { } ttl)
+                {
+                    _ttls[key] = ttl;
+                }
+
+                return true;
+            });
     }
 }

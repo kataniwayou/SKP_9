@@ -10,7 +10,7 @@ namespace Processor.SKNormalizer;
 /// and the root the step payload named.
 /// <para>
 /// <b>One key per lookup, composed and never scanned.</b> The address is
-/// <c>skp:{workflowId}:cache:{root}</c>, built through the same <see cref="L2ProjectionKeys.Cache"/>
+/// <c>skp:wf:{workflowId}:cache:{root}</c>, built through the same <see cref="L2ProjectionKeys.Cache"/>
 /// the projection writer uses, and an entry is that string, a colon, and the field.
 /// </para>
 /// <para>

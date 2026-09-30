@@ -6,8 +6,10 @@ namespace BaseApi.Tests.Orchestrator;
 
 /// <summary>
 /// L1 is a dictionary, and the activation tests already drive <c>Set</c> and the lookups through the
-/// real path. This covers what that path does not reach: the mark a stop leaves, and the reap that
-/// eventually collects it.
+/// real path. This covers what that path does not reach: the mark a stop leaves, and
+/// <see cref="WorkflowL1Store.ReapDeletedBefore"/>, which stands in for a restarted replica in tests
+/// but is not called in production — a marked entry is kept until the workflow restarts or the pod
+/// restarts.
 /// <para>
 /// <b>Why a stop marks instead of removing.</b> Removing the entry settled the control plane instantly
 /// and broke the data plane for the length of one round trip — every step still running when the stop
@@ -67,10 +69,9 @@ public sealed class WorkflowL1StoreTests
     [Fact]
     public void ASecondMarkDoesNotMoveTheStampThatBoundsTheGracePeriod()
     {
-        // The reap is what bounds how long a stopped workflow stays resolvable, and it reads this
-        // stamp. Refreshing it per delivery would postpone the reap by a full grace period each time,
-        // so a stop redelivered on a loop would keep the entry alive forever — a leak that looks
-        // exactly like correct idempotency from the outside.
+        // DeletedAt is the record of when the stop actually landed. Refreshing it per delivery would
+        // make a stop redelivered on a loop keep looking freshly stopped forever — indistinguishable
+        // from correct idempotency from the outside, but wrong for anything that reads this stamp.
         var store = Holding(W);
         store.MarkDeleted(W, T0);
 

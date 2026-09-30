@@ -3,7 +3,6 @@ using BaseApi.Service.Features.Orchestration.Projection;
 using BaseApi.Tests.Support;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
-using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace BaseApi.Tests.Cache;
@@ -32,9 +31,8 @@ public sealed class CacheProjectionWriteTests
     private static async Task<InMemoryL2> WriteAsync(WorkflowL1 definition)
     {
         var l2 = new InMemoryL2();
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 9, 14, 12, 0, 0, TimeSpan.Zero));
 
-        await new L2ProjectionWriter(l2.Multiplexer, clock)
+        await new L2ProjectionWriter(l2.Multiplexer)
             .WriteAsync(definition, TestContext.Current.CancellationToken);
 
         return l2;
@@ -69,13 +67,13 @@ public sealed class CacheProjectionWriteTests
             new CacheL1("sk-whitelist", new() { ["acme"] = "1" }),
             new CacheL1("other-list", new() { ["beta"] = "2" })));
 
-        var root = JsonSerializer.Deserialize<WorkflowRootProjection>(
-            l2.Value(L2ProjectionKeys.Root(W))!, MessagingJson.Options)!;
+        var roots = JsonSerializer.Deserialize<List<string>>(
+            l2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.RootsField)!, MessagingJson.Options);
 
-        Assert.NotNull(root.CacheRoots);
+        Assert.NotNull(roots);
         Assert.Equal(
             new[] { "other-list", "sk-whitelist" },
-            root.CacheRoots!.OrderBy(r => r, StringComparer.Ordinal));
+            roots!.OrderBy(r => r, StringComparer.Ordinal));
     }
 
     [Fact]
@@ -103,11 +101,11 @@ public sealed class CacheProjectionWriteTests
         // Empty rather than null, so cleanup reads one shape from anything this writer produced.
         var l2 = await WriteAsync(Definition());
 
-        var root = JsonSerializer.Deserialize<WorkflowRootProjection>(
-            l2.Value(L2ProjectionKeys.Root(W))!, MessagingJson.Options)!;
+        var roots = JsonSerializer.Deserialize<List<string>>(
+            l2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.RootsField)!, MessagingJson.Options);
 
-        Assert.NotNull(root.CacheRoots);
-        Assert.Empty(root.CacheRoots!);
+        Assert.NotNull(roots);
+        Assert.Empty(roots!);
     }
 
     [Fact]
@@ -119,9 +117,9 @@ public sealed class CacheProjectionWriteTests
             new CacheL1("sk-whitelist", new() { ["acme"] = "1" }),
             new CacheL1("sk-whitelist", new() { ["acme"] = "1" })));
 
-        var root = JsonSerializer.Deserialize<WorkflowRootProjection>(
-            l2.Value(L2ProjectionKeys.Root(W))!, MessagingJson.Options)!;
+        var roots = JsonSerializer.Deserialize<List<string>>(
+            l2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.RootsField)!, MessagingJson.Options);
 
-        Assert.Single(root.CacheRoots!);
+        Assert.Single(roots!);
     }
 }

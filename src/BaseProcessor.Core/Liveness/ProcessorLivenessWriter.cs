@@ -1,3 +1,5 @@
+using BaseProcessor.Core.Identity;
+using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
@@ -5,10 +7,12 @@ using StackExchange.Redis;
 namespace BaseProcessor.Core.Liveness;
 
 /// <summary>
-/// Writes the per-instance liveness key and keeps the instance index current.
+/// Writes the per-instance liveness key, keeps the instance index current, and writes the
+/// processor's own name hash.
 /// <para>
 /// A Redis fault is logged and swallowed. The caller is a loop whose next iteration will write
-/// again, and a write failure must never end it.
+/// again, and a write failure must never end it. Liveness and name are reported under separate
+/// templates, because only the first is what the start gate reads.
 /// </para>
 /// </summary>
 public sealed class ProcessorLivenessWriter
@@ -43,32 +47,86 @@ public sealed class ProcessorLivenessWriter
     /// </summary>
     public static int DeriveTtlSeconds(int interval) => interval * 4;
 
-    public async Task WriteAsync(Guid processorId, string instanceId, ProcessorLivenessEntry entry)
+    public async Task WriteAsync(ProcessorIdentity identity, string instanceId, ProcessorLivenessEntry entry)
     {
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(entry);
+
+        IDatabase db;
+        TimeSpan ttl;
         try
         {
-            var db = _redis.GetDatabase();
-            var ttl = TimeSpan.FromSeconds(DeriveTtlSeconds(entry.Interval));
+            db = _redis.GetDatabase();
+            ttl = TimeSpan.FromSeconds(DeriveTtlSeconds(entry.Interval));
 
+            // Liveness first: it is what the start gate reads, so a failure of the name write below (a
+            // WRONGTYPE against a pre-migration key, a timeout) must not cost it.
+            //
             // When/flags passed explicitly, matching ProcessedDataHandler. Behaviourally identical to
             // the bare three-argument call, but StackExchange.Redis overloads that shape between a
             // keepTtl-bool overload and an Expiration-struct one — the compiler picks silently, and
             // that trap has already produced a test here that matched a method the code never called.
             // Naming all five parameters pins the overload for the reader and for the matcher.
             await db.StringSetAsync(
-                L2ProjectionKeys.PerInstance(processorId, instanceId),
+                L2ProjectionKeys.PerInstance(identity.Id, instanceId),
                 System.Text.Json.JsonSerializer.Serialize(entry),
                 ttl,
                 When.Always,
                 CommandFlags.None).ConfigureAwait(false);
 
-            await db.SetAddAsync(
-                L2ProjectionKeys.InstanceIndex(processorId), instanceId).ConfigureAwait(false);
+            // The set gets the liveness TTL too, refreshed by every replica's beat: while one replica
+            // lives the set stays and the sweeper prunes the dead members; once none does, the set
+            // expires with them and nothing is left behind for BaseApi to clean.
+            var instances = L2ProjectionKeys.ProcessorInstances(identity.Id);
+            await db.SetAddAsync(instances, instanceId).ConfigureAwait(false);
+            await db.KeyExpireAsync(instances, ttl, ExpireWhen.Always, CommandFlags.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "liveness write failed for {ProcessorId}/{InstanceId}", processorId, instanceId);
+            // The name write is skipped too: a store that just refused liveness would almost surely
+            // refuse it as well, and one Warning per beat is enough to say so.
+            _logger.LogWarning(ex, "liveness write failed for {ProcessorId}/{InstanceId}", identity.Id, instanceId);
+            return;
+        }
+
+        // THE PROCESSOR OWNS ITS NAME. Written on every beat with the same TTL, so a flushed key heals
+        // within one interval and a processor that is gone for good leaves nothing. The id suffix, never
+        // the instance id: every replica writes this one key. Its own catch and its own template, so a
+        // failure here is not reported as a liveness failure — liveness was written above.
+        var processorKey = L2ProjectionKeys.Processor(identity.Id);
+        var name = EntityNames.Format(identity.Name, identity.Version, identity.Id);
+        try
+        {
+            try
+            {
+                await WriteNameAsync(db, processorKey, name, ttl).ConfigureAwait(false);
+            }
+            catch (RedisServerException ex) when (IsWrongType(ex))
+            {
+                // A pre-migration SET still sits at skp:proc:{id} (a rollout that deleted the retired
+                // keys before every processor ran the new image, and an old-image replica re-created
+                // it). This key is the processor's own (principle 6), so delete it and write once more.
+                // A second WRONGTYPE — an old replica re-created it in between — falls to the catch
+                // below and is retried next beat.
+                await db.KeyDeleteAsync(processorKey).ConfigureAwait(false);
+                await WriteNameAsync(db, processorKey, name, ttl).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "processor name key for {ProcessorId} held a retired type; replaced it with the name hash",
+                    identity.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "processor name write failed for {ProcessorId}", identity.Id);
         }
     }
+
+    private static async Task WriteNameAsync(IDatabase db, string processorKey, string name, TimeSpan ttl)
+    {
+        await db.HashSetAsync(processorKey, L2ProjectionKeys.NameField, name).ConfigureAwait(false);
+        await db.KeyExpireAsync(processorKey, ttl, ExpireWhen.Always, CommandFlags.None).ConfigureAwait(false);
+    }
+
+    private static bool IsWrongType(RedisServerException ex)
+        => ex.Message.StartsWith("WRONGTYPE", StringComparison.Ordinal);
 }

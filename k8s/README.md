@@ -100,19 +100,22 @@ returns a bare 404 with no body, which is easy to mistake for the API not being 
 kubectl -n skp exec sts/redis -- redis-cli KEYS 'skp:proc:*'
 ```
 
-Expect three keys for one processor with two replicas: the index set at `skp:proc:{processorId}` and
-one entry per replica at `skp:proc:{processorId}:{podName}`. Two distinct instance keys is the
+Expect four keys for one processor with two replicas: the name hash at `skp:proc:{processorId}`, the
+instance set at `skp:proc:{processorId}:instances`, and one entry per replica at
+`skp:proc:{processorId}:{podName}`. Two distinct instance keys is the
 per-replica liveness scheme working — one shared key would mean the replicas were overwriting each
 other.
 
 ```bash
-kubectl -n skp exec sts/redis -- redis-cli SMEMBERS 'skp:proc:<processorId>'
+kubectl -n skp exec sts/redis -- redis-cli SMEMBERS 'skp:proc:<processorId>:instances'
+kubectl -n skp exec sts/redis -- redis-cli HGET 'skp:proc:<processorId>' name
 kubectl -n skp exec sts/redis -- redis-cli GET 'skp:proc:<processorId>:<podName>'
 ```
 
 The set members should be the two pod names, matching `service.instance.id` on those pods' telemetry
 — that correspondence is the whole reason the instance id is resolved once from `POD_NAME` rather
-than defaulted separately in three places. The entry should read `"status":"Healthy"` with
+than defaulted separately in three places. The name should be the processor's full name
+(`{name}_{version}-{idSuffix}`, never a pod name), with the same TTL as the entry. The entry should read `"status":"Healthy"` with
 `"interval":10`, and its TTL should be 40s — four times that interval — refreshed every 10s by the
 liveness loop. The reader calls the same entry stale at twice its interval, so between 20s and 40s
 without a beat the key still exists but no longer counts, which is what lets the gate distinguish a

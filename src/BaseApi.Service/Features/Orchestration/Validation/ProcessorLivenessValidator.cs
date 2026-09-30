@@ -50,7 +50,7 @@ internal sealed class ProcessorLivenessValidator
             // client takes no token of its own, so this is the only place cancellation can land.
             ct.ThrowIfCancellationRequested();
 
-            var members = await db.SetMembersAsync(L2ProjectionKeys.InstanceIndex(proc.Id));
+            var members = await db.SetMembersAsync(L2ProjectionKeys.ProcessorInstances(proc.Id));
 
             // Every read is issued BEFORE any is awaited, so the client writes them to the connection
             // as one batch and the cost is a single round trip's latency instead of one per replica.

@@ -5,7 +5,6 @@ using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using StackExchange.Redis;
@@ -16,8 +15,8 @@ namespace BaseApi.Tests.Orchestration;
 /// <summary>
 /// The API is the only writer of L2, and it announces to the orchestrator fan-out exchange once a
 /// write has committed, so every replica knows to re-read L2. These cover both handlers that mutate
-/// L2: the announcement must carry only the workflow id, must go out only after the write (or clean)
-/// has committed, and a failed publish must escape so the control message is requeued.
+/// L2: the announcement must carry only the workflow id, must go out only after the write (or the
+/// live-set removal) has committed, and a failed publish must escape so the control message is requeued.
 /// </summary>
 public sealed class FanoutPublishTests
 {
@@ -27,13 +26,12 @@ public sealed class FanoutPublishTests
     {
         public IDatabase Db { get; } = Substitute.For<IDatabase>();
 
-        // L2ProjectionWriter and L2Cleanup are internal sealed classes with no interface, so neither
+        // L2ProjectionWriter and L2LiveSet are internal sealed classes with no interface, so neither
         // can be substituted directly — NSubstitute cannot proxy a sealed type. The write they commit
-        // is observed one layer down instead, at the batch they build and dispatch to Redis.
+        // is observed one layer down instead, at the batch and the set command they send to Redis.
         public IBatch Batch { get; } = Substitute.For<IBatch>();
         public IConnectionMultiplexer Redis { get; }
         public IQueueFanoutPublisher Publisher { get; } = Substitute.For<IQueueFanoutPublisher>();
-        private readonly FakeTimeProvider _clock = new(DateTimeOffset.UtcNow);
 
         public Harness()
         {
@@ -44,18 +42,16 @@ public sealed class FanoutPublishTests
             // No explicit "no prior projection" stub here: NSubstitute already returns a completed
             // Task whose RedisValue is default, and default(RedisValue).IsNullOrEmpty is true — the
             // same thing RedisValue.Null would assert, so a stub saying so was dead weight rather than
-            // a precondition. The start-path tests below rely on exactly that default: an absent root
-            // makes L2Cleanup.RemoveAsync return before it ever touches a batch, so only the writer's
-            // own batch exercises Batch for those. The stop-path test needs the opposite — a root that
-            // IS present, so its own clean reaches a batch too — and stubs that itself.
+            // a precondition. The start-path tests rely on exactly that default: an absent roots field
+            // gives the writer no leftovers to find, so its one batch is the only one Batch sees.
         }
 
         public StartOrchestrationHandler BuildStart() => new(
-            new L2Cleanup(Redis), new L2ProjectionWriter(Redis, _clock), Publisher,
+            new L2ProjectionWriter(Redis), new L2LiveSet(Redis), Publisher,
             NullLogger<StartOrchestrationHandler>.Instance);
 
         public StopOrchestrationHandler BuildStop() => new(
-            new L2Cleanup(Redis), Publisher, NullLogger<StopOrchestrationHandler>.Instance);
+            new L2LiveSet(Redis), Publisher, NullLogger<StopOrchestrationHandler>.Instance);
     }
 
     private static StartOrchestration Start(Guid workflowId) =>
@@ -68,15 +64,6 @@ public sealed class FanoutPublishTests
 
     private static byte[] Body(StopOrchestration m)
         => JsonSerializer.SerializeToUtf8Bytes(m, MessagingJson.Options);
-
-    /// <summary>A stored root for <see cref="W"/>, serialized the way L2Cleanup expects to read it.</summary>
-    private static string ExistingRoot() => JsonSerializer.Serialize(
-        new WorkflowRootProjection(
-            EntryStepIds: new List<Guid>(),
-            StepIds: new List<Guid>(),
-            Cron: null,
-            Liveness: new LivenessProjection(DateTime.UtcNow, 0, "Pending")),
-        MessagingJson.Options);
 
     [Fact]
     public async Task AnnouncesOnlyAfterTheProjectionHasBeenWritten()
@@ -112,7 +99,7 @@ public sealed class FanoutPublishTests
     public async Task AFailedAnnouncementEscapesSoTheControlMessageIsRequeued()
     {
         // TransientSendException classifies as Requeue, so the redelivery re-runs the idempotent
-        // clean-and-write and announces again. Anything else would PARK the control message and the
+        // write and live-set add and announces again. Anything else would PARK the control message and the
         // replicas would never learn about a workflow the API has already projected.
         var h = new Harness();
         h.Publisher.PublishAsync(Arg.Any<string>(), Arg.Any<string>(),
@@ -124,24 +111,19 @@ public sealed class FanoutPublishTests
     }
 
     [Fact]
-    public async Task TheStopPathAnnouncesAfterItsCleanToo()
+    public async Task TheStopPathAnnouncesAfterItLeavesTheLiveSet()
     {
-        // A stop that cleans L2 without telling the replicas leaves three schedulers firing a workflow
-        // that no longer exists. A stop only reaches a batch when there is something stored to remove
-        // — an absent root returns early inside L2Cleanup and never calls Execute() — so this stubs a
-        // real stored root rather than the harness's "nothing stored" default, which would let the
-        // announce-after-clean ordering pass unchecked.
         var h = new Harness();
         var order = new List<string>();
-        h.Db.StringGetAsync(L2ProjectionKeys.Root(W), Arg.Any<CommandFlags>()).Returns((RedisValue)ExistingRoot());
-        h.Batch.When(b => b.Execute()).Do(_ => order.Add("write"));
+        h.Db.When(d => d.SetRemoveAsync(L2ProjectionKeys.Live(), W.ToString("D"), Arg.Any<CommandFlags>()))
+            .Do(_ => order.Add("leave"));
         h.Publisher.When(p => p.PublishAsync(
                     Arg.Any<string>(), Arg.Any<string>(), Arg.Any<OrchestrationStopped>(), Arg.Any<CancellationToken>()))
                 .Do(_ => order.Add("announce"));
 
         await h.BuildStop().HandleAsync(Body(Stop(W)), CancellationToken.None);
 
-        Assert.Equal(["write", "announce"], order);
+        Assert.Equal(["leave", "announce"], order);
         await h.Publisher.Received(1).PublishAsync(
             OrchestratorFanout.Exchange, MessageTypes.OrchestrationStopped,
             Arg.Is<OrchestrationStopped>(a => a.WorkflowId == W), Arg.Any<CancellationToken>());

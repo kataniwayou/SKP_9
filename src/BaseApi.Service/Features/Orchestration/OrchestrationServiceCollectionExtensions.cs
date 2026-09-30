@@ -58,7 +58,7 @@ internal static class OrchestrationServiceCollectionExtensions
         // The projection read/write pair, used only by the queue handlers. Scoped so a handler
         // resolved per delivery gets its own, matching every other dependency in this folder; both
         // are stateless over an injected multiplexer, so the lifetime costs nothing.
-        services.AddScoped<L2Cleanup>();
+        services.AddScoped<L2LiveSet>();
         services.AddScoped<L2ProjectionWriter>();
 
         // The instance-index sweep. Singleton rather than scoped, because its only consumer is a

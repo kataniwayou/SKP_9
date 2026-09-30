@@ -7,7 +7,6 @@ using BaseApi.Tests.Support;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace BaseApi.Tests.Naming;
@@ -35,55 +34,59 @@ public sealed class NameProjectionTests
     }
 
     [Fact]
-    public void TheDefinitionNamesEveryEntityOnce()
+    public void TheDefinitionNamesTheWorkflowAndEachStepButNoProcessor()
     {
         using var snapshot = Snapshot();
 
         var names = OrchestrationService.ToDefinitionForTests(snapshot, W).Names!;
 
-        Assert.Equal(4, names.Count);   // one workflow, two steps, and ONE processor although two steps use it
+        // Processors own their own name key now; BaseApi never writes one.
+        Assert.Equal(3, names.Count);
         Assert.Equal(EntityNames.Format("chain", "1.0.0", W), names[W]);
         Assert.Equal(EntityNames.Format("step-b", "2.0.0", S2), names[S2]);
-        Assert.Equal(EntityNames.Format("shared-proc", "1.2.0", P), names[P]);
+        Assert.False(names.ContainsKey(P));
     }
 
     [Fact]
-    public async Task TheWriterPutsEveryNameUnderItsOwnKeyAndLeavesTheRootAlone()
+    public async Task TheWriterPutsEachNameOnItsEntityHash()
     {
         using var snapshot = Snapshot();
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
         var l2 = new InMemoryL2();
 
-        await new L2ProjectionWriter(l2.Multiplexer, new FakeTimeProvider()).WriteAsync(definition, CancellationToken.None);
+        await new L2ProjectionWriter(l2.Multiplexer).WriteAsync(definition, CancellationToken.None);
 
-        Assert.Equal(definition.Names![P], l2.Value(L2ProjectionKeys.Name(P)));
-        Assert.Equal(definition.Names![S1], l2.Value(L2ProjectionKeys.Name(S1)));
-        Assert.Equal(4, l2.Keys().Count(k => k.StartsWith("skp:name:", StringComparison.Ordinal)));
-        Assert.DoesNotContain("chain_1.0.0", l2.Value(L2ProjectionKeys.Root(W)));
+        Assert.Equal(definition.Names![W], l2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.NameField));
+        Assert.Equal(definition.Names![S1], l2.HashValue(L2ProjectionKeys.StepEntity(S1), L2ProjectionKeys.NameField));
+        Assert.Equal(definition.Names![S2], l2.HashValue(L2ProjectionKeys.StepEntity(S2), L2ProjectionKeys.NameField));
+        Assert.False(l2.HasHash(L2ProjectionKeys.Processor(P)));
     }
 
     [Fact]
-    public async Task ADefinitionWithoutNamesWritesNoNameKeys()
+    public async Task ANameForAnIdThatIsNeitherTheWorkflowNorOneOfItsStepsIsNotWritten()
     {
+        var stranger = Guid.NewGuid();
         var l2 = new InMemoryL2();
 
-        await new L2ProjectionWriter(l2.Multiplexer, new FakeTimeProvider())
-            .WriteAsync(new WorkflowL1(W, [], null, [], []), CancellationToken.None);
+        await new L2ProjectionWriter(l2.Multiplexer)
+            .WriteAsync(new WorkflowL1(W, [], null, [], [], new() { [stranger] = "x_1-0000-000000000000" }), CancellationToken.None);
 
-        Assert.DoesNotContain(l2.Keys(), k => k.StartsWith("skp:name:", StringComparison.Ordinal));
-        Assert.True(l2.Has(L2ProjectionKeys.Root(W)));
+        Assert.False(l2.HasHash(L2ProjectionKeys.StepEntity(stranger)));
+        Assert.False(l2.HasHash(L2ProjectionKeys.Workflow(stranger)));
     }
 
     [Fact]
     public void NoProductionSourceScansTheKeySpace()
     {
-        // Component 3's safety claim: the only KEYS/SCAN in production code is the orphan sweeper's
-        // skp:proc:* pattern, which cannot match skp:name:*.
+        // The safety claim: the only KEYS/SCAN in production code is the orphan sweeper's
+        // skp:proc:*:instances pattern. It cannot match an entity hash (skp:wf:{id}, skp:step:{id},
+        // skp:proc:{id} — none ends in :instances), a workflow's cache keys, the live set or a
+        // skp:data:{id} blob, so no scan can pick up and act on a key the start or a processor owns.
         //
         // WIDENED past the plan's single "exactly one hit" check: the property this test pins is
-        // "nothing scans a pattern matching skp:name:*", not "exactly one call site". A second sweeper
-        // copy that also scans skp:proc:* should still pass; only a hit that DOESN'T reference that
-        // pattern should fail. The matcher covers `Keys(`/`KeysAsync(` calls (excluding the false
+        // "nothing scans a pattern other than skp:proc:*:instances", not "exactly one call site". A
+        // second sweeper copy that also scans that pattern should still pass; only a hit that DOESN'T
+        // reference it should fail. The matcher covers `Keys(`/`KeysAsync(` calls (excluding the false
         // positives a bare "KeysAsync(" substring would catch, such as ListIndexKeysAsync's own
         // declaration/implementation/call site, via a negative lookbehind for a preceding letter) plus
         // the raw RESP command literals "SCAN" and "KEYS", so a hand-rolled RESP scan would be caught
@@ -106,6 +109,6 @@ public sealed class NameProjectionTests
         // literal string "skp:proc:*" -- Prefix is "skp:" (see L2ProjectionKeys), so this resolves to
         // exactly that pattern at runtime. Checked against the interpolation's own source text rather
         // than its resolved value, which a source scan cannot evaluate.
-        Assert.All(hits, t => Assert.Contains("Prefix}proc:*", t.l, StringComparison.Ordinal));
+        Assert.All(hits, t => Assert.Contains("Prefix}proc:*:instances", t.l, StringComparison.Ordinal));
     }
 }

@@ -15,9 +15,14 @@ internal sealed class FakeNameSource(Dictionary<Guid, string>? names = null) : I
 
     public int Reads { get; private set; }
 
-    public Task<IReadOnlyDictionary<Guid, string>> ReadNamesAsync(IReadOnlyCollection<Guid> ids)
+    /// <summary>Every reference asked for, in order, across all reads — so a test can assert the kind
+    /// each id was asked under.</summary>
+    public List<EntityRef> Requested { get; } = new();
+
+    public Task<IReadOnlyDictionary<Guid, string>> ReadNamesAsync(IReadOnlyCollection<EntityRef> refs)
     {
         Reads++;
+        Requested.AddRange(refs);
         if (Stall)
         {
             return new TaskCompletionSource<IReadOnlyDictionary<Guid, string>>().Task;
@@ -28,7 +33,8 @@ internal sealed class FakeNameSource(Dictionary<Guid, string>? names = null) : I
             return Task.FromException<IReadOnlyDictionary<Guid, string>>(Fault);
         }
 
-        IReadOnlyDictionary<Guid, string> found = ids.Where(Names.ContainsKey).ToDictionary(id => id, id => Names[id]);
+        IReadOnlyDictionary<Guid, string> found = refs.Select(r => r.Id).Where(Names.ContainsKey)
+            .ToDictionary(id => id, id => Names[id]);
         return Task.FromResult(found);
     }
 }

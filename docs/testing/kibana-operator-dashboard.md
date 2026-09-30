@@ -134,8 +134,9 @@ came from naming records `OrchestrationService` wrote at start time, which the c
 produced. Both are gone.
 
 The name is stamped onto each record by the process that emits it — the orchestrator for a workflow
-or step, the processor for a step it runs — resolved at build time from `skp:name:{id}` in L2, the
-key BaseApi writes for every workflow, step and processor. Nothing pushes to Kibana and nothing
+or step, the processor for a step it runs — resolved at build time from the `name` field of the entity hashes in L2 —
+`skp:wf:{id}` and `skp:step:{id}`, which a workflow's start writes, and `skp:proc:{id}`, which each
+processor writes for itself. Nothing pushes to Kibana and nothing
 triggers it: the data view carries an empty `fieldFormatMap` and an empty `runtimeFieldMap`.
 
 What that costs you: **a rename no longer re-labels history.** Formatting happened when you looked,

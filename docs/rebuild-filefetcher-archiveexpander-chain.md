@@ -230,7 +230,7 @@ Content-Type: application/json
 Record the returned id as `<sk-normalizer-config-v4>`.
 
 **Why the payload names a root and not an address.** The address is
-`skp:{workflowId}:cache:{root}`, and the workflow id half is the workflow's own. Putting the whole
+`skp:wf:{workflowId}:cache:{root}`, and the workflow id half is the workflow's own. Putting the whole
 address on the payload meant an operator transcribed that id into JSON by hand, and nothing anywhere
 kept the copy equal to the id it came from — not the four gates in step 8, none of which inspects a
 cache address, and not the payload gate, which evaluates the payload against this definition and so

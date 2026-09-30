@@ -331,7 +331,7 @@ public sealed class ProcessorStartupOrchestrator : BackgroundService
             timestamp:     _clock.GetUtcNow().UtcDateTime,
             interval:      _options.StartupIntervalSeconds);
 
-        await _writer.WriteAsync(identity.Id, _instanceId.Value, entry).ConfigureAwait(false);
+        await _writer.WriteAsync(identity, _instanceId.Value, entry).ConfigureAwait(false);
     }
 
     /// <summary>Waits out the current delay and returns the next one, doubling up to the cap.</summary>

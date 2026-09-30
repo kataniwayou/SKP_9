@@ -11,12 +11,13 @@ namespace Orchestrator.Messaging;
 /// Applies an <see cref="OrchestrationStopped"/> announcement.
 /// <para>
 /// <b>Spec §7.3 — verify first, then act.</b> The API can process a stop and then a start for the same
-/// workflow: it cleans L2, publishes the stop, writes L2 again, publishes the start — and both
-/// announcements can be sitting on this replica's queue in that order. By the time the stop is
-/// handled, L2 may already hold the re-written workflow. Unscheduling first would halt a workflow L2
-/// says is live, until the start behind it in the queue is processed. Reading L2 before touching
-/// anything makes that window not exist: L2 is the source of truth, and if it still holds the
-/// workflow, the correct action is none.
+/// workflow: it removes the id from the live set and publishes the stop, then writes the store, adds
+/// the id back to the live set and publishes the start — and both announcements can be sitting on this
+/// replica's queue in that order. By the time the stop is handled, the workflow may already be live
+/// again. Unscheduling first would halt a workflow L2 says is live, until the start behind it in the
+/// queue is processed. Checking the live set before touching anything makes that window not exist: the
+/// live set is the source of truth, and if it still holds the workflow, the correct action is none.
+/// The store is not consulted — it outlives a stop and says nothing about whether the workflow runs.
 /// </para>
 /// <para>
 /// <b>A workflow this replica never activated is a no-op, not a fault.</b> The replica may have missed
@@ -29,8 +30,14 @@ namespace Orchestrator.Messaging;
 /// instantly and broke the data plane for the length of one round trip: every step still running when
 /// the stop landed came back to <see cref="StepOutcomeHandler"/>, found no workflow in L1, and was
 /// parked. The job is still torn down here — a stopped workflow dispatches nothing from this moment —
-/// and the entry is marked instead, so those in-flight steps resolve and their run drains.
-/// <see cref="L1ReapService"/> drops the mark once nothing can still be in flight.
+/// and the entry is marked instead, so those in-flight steps resolve and their run drains. The marked
+/// entry then stays until the workflow restarts or the pod restarts — nothing prunes it.
+/// </para>
+/// <para>
+/// <b>Two templates keep historical wording.</b> "stop announced but the workflow is still projected —
+/// ignoring" now means "still in the live set", and "…steps still in flight will resolve until it is
+/// reaped" predates the removal of the reaper (the entry stays until a restart). Both are kept verbatim
+/// because log selectors match on them.
 /// </para>
 /// </summary>
 internal sealed class ApplyStopHandler : IQueueMessageHandler
@@ -73,10 +80,10 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
                    Guid.Empty, m.WorkflowId, Guid.Empty, Guid.Empty, Guid.Empty)))
         {
             // Verify before acting. The API can process a stop and then a start, so by the time this stop
-            // is handled L2 may already hold the re-written workflow — and unscheduling first would halt a
-            // workflow L2 says is live until the start behind this message in the queue is processed.
-            // L2 is the source of truth; if it still holds the workflow, the correct action is none.
-            if (await _reader.ExistsAsync(m.WorkflowId, ct).ConfigureAwait(false))
+            // is handled the workflow may be live again — and unscheduling would halt a workflow the API
+            // just restarted. The live set is the source of truth; the store outlives a stop and says
+            // nothing about whether the workflow runs.
+            if (await _reader.IsLiveAsync(m.WorkflowId, ct).ConfigureAwait(false))
             {
                 _logger.LogInformation("stop announced but the workflow is still projected — ignoring");
                 return;
@@ -90,8 +97,8 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
                 // An entry already marked has had both halves done to it, and neither is worth
                 // repeating. The unschedule would be a second DeleteJob against a job that is already
                 // gone, and the mark is deliberately not refreshed — see MarkDeleted: refreshing would
-                // push the reap out by a full grace period per duplicate, so a stop redelivered on a
-                // loop would never be collected at all.
+                // move when the entry reads as having been stopped, for no benefit, since nothing
+                // prunes it by age either way.
                 if (entry.DeletedAt is not null)
                 {
                     _logger.LogInformation("stop applied; the workflow was already marked stopped");
@@ -99,8 +106,9 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
                 else
                 {
                     // Unschedule strictly first. This is what makes the stop take effect now rather
-                    // than at the reap: the mark only keeps the definition resolvable for outcomes
-                    // already in flight, and the job is what would otherwise keep dispatching new work.
+                    // than only once the mark is read: the mark only keeps the definition resolvable
+                    // for outcomes already in flight, and the job is what would otherwise keep
+                    // dispatching new work.
                     await _scheduler.UnscheduleAsync(entry.JobId, ct).ConfigureAwait(false);
 
                     // False here would mean a concurrent delivery marked it between the read above and

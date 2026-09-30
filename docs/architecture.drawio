@@ -13,7 +13,7 @@
     <mxCell id="api" value="&lt;b&gt;BaseApi.Service&lt;/b&gt; (Deployment)&lt;br&gt;&lt;br&gt;ASP.NET Core REST · EF Core migrations applied on startup&lt;br&gt;Features: Workflow · Step · Assignment · Processor&lt;br&gt;Schema · Lookup · Orchestration · Cache&lt;br&gt;/health/startup flips green only once the schema is in place" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontColor=#1a1a1a;align=center;" vertex="1" parent="cp">
       <mxGeometry x="40" y="50" width="700" height="130" as="geometry"/>
     </mxCell>
-    <mxCell id="orch" value="&lt;b&gt;Orchestrator&lt;/b&gt; (StatefulSet, 3 replicas — never scale down)&lt;br&gt;&lt;br&gt;Election: leader election · Scheduling: cron WorkflowScheduler&lt;br&gt;Hydration: L2 read + admission gate · L1: WorkflowL1Store, reaper&lt;br&gt;Dispatch: StepAdvancement · per-replica fan-out queue&lt;br&gt;orchestrator-control.orchestrator-N bound to orchestrator-fanout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontColor=#1a1a1a;align=center;" vertex="1" parent="cp">
+    <mxCell id="orch" value="&lt;b&gt;Orchestrator&lt;/b&gt; (StatefulSet, 3 replicas — never scale down)&lt;br&gt;&lt;br&gt;Election: leader election · Scheduling: cron WorkflowScheduler&lt;br&gt;Hydration: L2 read + admission gate · L1: WorkflowL1Store (stopped entries kept until restart)&lt;br&gt;Dispatch: StepAdvancement · per-replica fan-out queue&lt;br&gt;orchestrator-control.orchestrator-N bound to orchestrator-fanout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontColor=#1a1a1a;align=center;" vertex="1" parent="cp">
       <mxGeometry x="820" y="50" width="700" height="130" as="geometry"/>
     </mxCell>
 

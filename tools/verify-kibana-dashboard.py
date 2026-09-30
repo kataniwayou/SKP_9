@@ -16,7 +16,7 @@ WHAT CHANGED WHEN THE ELASTICSEARCH OBJECTS WENT AWAY:
   * The counted set is now one clause, and it is asserted against the dashboard's own query rather
     than a pipeline-written flag (check 10).
   * Names are fields on the records, set by the orchestrator and the processors from L2; this
-    script reads the same keys (skp:name:*) and compares on name_version.
+    script reads the same keys (skp:{wf|step|proc}:{id} name) and compares on name_version.
   * Check 12 no longer asserts that a never-run step is listable. The naming records that made that
     true were removed from OrchestrationService; see that method and check 12's own docstring.
   * Check 5 skips kafka-importer and kafka-exporter by design (no input key and a no-data branch)
@@ -172,14 +172,14 @@ class Checks:
 # Names
 #
 # The orchestrator and the processors stamp {name}_{version}-{suffix} onto their own records,
-# resolved from skp:name:{id} in L2 at the moment each record is built; this script reads that
+# resolved from skp:{wf|step|proc}:{id} name in L2 at the moment each record is built; this script reads that
 # same store instead of Elasticsearch, so it resolves an id exactly as BaseApi resolved it.
 # ---------------------------------------------------------------------------------------------
 DATA_VIEW = "skp-logs"
 
 
 def load_names(redis_host, redis_port):
-    """{id: name_version} for every entity BaseApi has ever started, read from skp:name:* in L2.
+    """{id: name_version} for every entity BaseApi has ever started, read from skp:{wf|step|proc}:{id} name in L2.
 
     THE SOURCE MOVED OUT OF ELASTICSEARCH. The skp-entity-lookup index and the logs@custom pipeline
     are gone; the processes stamp names on their own records and the keys in L2 are the single store.
@@ -666,7 +666,7 @@ def _get_text(url):
 def _live_workflow_id(api_url, name_version):
     """The workflow id(s) in BaseApi's registry whose name_version matches. Ideally exactly one.
 
-    D8 never deletes skp:name:* keys, and a rebuild re-creates a workflow row with a fresh GUID - so
+    Workflow and step name keys are never deleted, and a rebuild re-creates a workflow row with a fresh GUID - so
     L2 can hold several filefetcher-archiveexpander-chain_1.0.0-<suffix> names after any rebuild,
     only one of which is live. Scanning load_names() for a match would silently pick an arbitrary,
     possibly dead id; the registry has exactly one row per (name, version) and is the source of
@@ -792,7 +792,7 @@ def main():
     try:
         names = load_names(args.redis_host, args.redis_port)
     except Exception as exc:  # noqa: BLE001
-        print(f"could not read skp:name:* from Redis at {args.redis_host}:{args.redis_port}: "
+        print(f"could not read skp:{{wf|step|proc}}:{{id}} name from Redis at {args.redis_host}:{args.redis_port}: "
               f"{type(exc).__name__}: {exc}")
         return 1
 

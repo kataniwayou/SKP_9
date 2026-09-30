@@ -7,18 +7,19 @@ using Microsoft.Extensions.Logging;
 namespace BaseApi.Service.Features.Orchestration.Messaging;
 
 /// <summary>
-/// Projects a workflow definition into the store. The only component that writes a workflow root.
+/// Projects a workflow definition into L2 and marks it live. The only component that writes a workflow store.
 /// <para>
-/// <b>Clean, then write, unconditionally.</b> There is no check for whether the workflow is already
-/// projected: a start is a statement about what the stored graph should be, not a request to create
-/// something new, so it applies whether or not something is there. Running it twice with the same
-/// definition leaves the same state, which is what lets the message be redelivered freely — after a
-/// failure part-way through, after a broker redelivery, or after the gate reopens.
+/// <b>Write, then join the live set, unconditionally.</b> There is no check for whether the workflow is
+/// already projected: a start is a statement about what the stored workflow should be, not a request to
+/// create something new, so it applies whether or not something is there. Running it twice with the
+/// same definition leaves the same state, which is what lets the message be redelivered freely — after
+/// a failure part-way through, after a broker redelivery, or after the gate reopens.
 /// </para>
 /// <para>
-/// <b>The clean is not an optimisation and cannot be skipped.</b> The write only replaces the keys the
-/// new definition names, so a graph that has lost steps would leave the old ones behind — present,
-/// unreferenced by the new root, and picked up by the next walk as though they belonged.
+/// <b>The live set is joined only after the write.</b> Every orchestrator hydrates from the live set and
+/// reads the store of each id it finds there, so an id that joined first could be read before its store
+/// exists. The write itself aligns only what this workflow owns — its hash, its caches and its steps'
+/// names — and deletes nothing that belongs to any other workflow.
 /// </para>
 /// <para>
 /// <b>Validation already happened, upstream, before this message existed.</b> Nothing is re-checked
@@ -29,17 +30,17 @@ namespace BaseApi.Service.Features.Orchestration.Messaging;
 /// </summary>
 internal sealed class StartOrchestrationHandler : IQueueMessageHandler
 {
-    private readonly L2Cleanup _cleanup;
     private readonly L2ProjectionWriter _writer;
+    private readonly L2LiveSet _live;
     private readonly IQueueFanoutPublisher _publisher;
     private readonly ILogger<StartOrchestrationHandler> _logger;
 
     public StartOrchestrationHandler(
-        L2Cleanup cleanup, L2ProjectionWriter writer, IQueueFanoutPublisher publisher,
+        L2ProjectionWriter writer, L2LiveSet live, IQueueFanoutPublisher publisher,
         ILogger<StartOrchestrationHandler> logger)
     {
-        _cleanup   = cleanup ?? throw new ArgumentNullException(nameof(cleanup));
         _writer    = writer ?? throw new ArgumentNullException(nameof(writer));
+        _live      = live ?? throw new ArgumentNullException(nameof(live));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
         _logger    = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -66,17 +67,20 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
             "projecting workflow {WorkflowId} with {StepCount} step(s)",
             workflow.WorkflowId, workflow.Steps?.Count ?? 0);
 
-        await _cleanup.RemoveAsync(workflow.WorkflowId, ct).ConfigureAwait(false);
         await _writer.WriteAsync(workflow, ct).ConfigureAwait(false);
 
+        // Live only once written: a replica hydrating from the live set must never find an id whose
+        // store is not there yet.
+        await _live.AddAsync(workflow.WorkflowId).ConfigureAwait(false);
+
         // The announcement goes out only now, because only now is "validated AND written" true. The
-        // service validated before it sent this message; the write happened two lines up. A replica
+        // service validated before it sent this message; the write happened just above. A replica
         // reading L2 on an announcement published any earlier could see the previous definition, or
         // none, and could not distinguish that from a workflow that was never started.
         //
         // A failure here escapes as a transient send fault, so the delivery is requeued and the whole
-        // handler runs again — the clean and write are unconditional and idempotent by design, so the
-        // repeat is safe, and the replicas learn about the projection on the retry.
+        // handler runs again — the write and the live-set add are unconditional and idempotent by
+        // design, so the repeat is safe, and the replicas learn about the projection on the retry.
         await _publisher.PublishAsync(
             OrchestratorFanout.Exchange, MessageTypes.OrchestrationStarted,
             new OrchestrationStarted(workflow.WorkflowId), ct).ConfigureAwait(false);
