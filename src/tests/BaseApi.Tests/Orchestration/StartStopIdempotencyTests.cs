@@ -406,7 +406,8 @@ public sealed class StartStopIdempotencyTests
 
         // L2 holds no running workflow and nothing is scheduled, which is what "where it started" means
         // for the two things that outlive the process. L1 still holds the marked entry — it is a
-        // per-replica mirror with a grace period on it, and the reap loop is what returns it to empty.
+        // per-replica mirror, and nothing but a restart of the workflow or of the pod returns it to
+        // empty.
         Assert.False(c.L1.TryGetActive(W, out _));
         Assert.Equal(0, c.Scheduler.LiveJobCount);
         Assert.Equal(2, c.Scheduler.Scheduled.Count);

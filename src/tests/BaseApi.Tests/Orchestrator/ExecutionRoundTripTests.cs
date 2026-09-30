@@ -553,8 +553,9 @@ public sealed class ExecutionRoundTripTests
     {
         // This used to be the commonest way to reach the park: a stop removed the workflow from L1 and
         // every outcome still on the wire landed here. A stop now marks instead, so an outcome that
-        // arrives during the grace period resolves — and the way to actually reach the park is to
-        // outlast it, which is what the reap below stands for. A park is a nack with requeue:false
+        // arrives while the mark stands resolves, and nothing in production ever ages that mark out —
+        // the way to actually reach the park is a replica that no longer holds the workflow at all, the
+        // post-restart case ReapDeletedBefore below stands in for. A park is a nack with requeue:false
         // (the message leaves for the dead-letter exchange and never returns), so without the reclaim
         // this leaks one blob per in-flight step, forever.
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));

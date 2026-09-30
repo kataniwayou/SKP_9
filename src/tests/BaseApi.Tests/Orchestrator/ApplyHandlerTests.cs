@@ -215,11 +215,11 @@ public sealed class ApplyHandlerTests
     }
 
     [Fact]
-    public async Task ARedeliveredStopDoesNotRefreshTheMarkThatWouldPostponeTheReap()
+    public async Task ARedeliveredStopDoesNotRefreshTheStampThatRecordsWhenItStopped()
     {
-        // The reap is what bounds how long a stopped workflow stays resolvable. Re-stamping on every
-        // delivery would push that out by a full grace period each time, so a stop redelivered on a
-        // loop would keep the entry alive indefinitely — a leak that looks like correct idempotency.
+        // DeletedAt is read as the fact of when the stop actually landed. Re-stamping on every
+        // delivery would move that fact forward each time, so a stop redelivered on a loop would keep
+        // making the workflow look freshly stopped — a bug that looks like correct idempotency.
         var h = new Harness().WithWorkflow(W, "0 * * * *");
         await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
         h.RemoveWorkflowFromL2(W);
@@ -237,8 +237,8 @@ public sealed class ApplyHandlerTests
     [Fact]
     public async Task AStartInsideTheGracePeriodClearsTheMarkAndMakesTheWorkflowActiveAgain()
     {
-        // The other half of the lifecycle: a workflow stopped and started again before the reap must
-        // come back fully, not as a marked entry that resolves outcomes but never fires. Nothing in
+        // The other half of the lifecycle: a workflow stopped and started again must come back fully,
+        // not as a marked entry that resolves outcomes but never fires. Nothing in
         // the activation path clears the mark explicitly — Store.Set writes a fresh entry — so this
         // asserts that the un-marking actually happens rather than that someone remembered to do it.
         var h = new Harness().WithWorkflow(W, "0 * * * *");

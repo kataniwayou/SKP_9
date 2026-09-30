@@ -1926,7 +1926,7 @@
       "id": 47,
       "type": "timeseries",
       "title": "Loop iterations by loop",
-      "description": "Measures the rate of `pipeline.loop.iterations` by loop. Measured on this host: l2-gate 0.2/s, queue-depth 0.1/s, orchestrator-l1-reap 0.003/s (a 5-minute period).\n\nLegend: `{{loop}} {{service_instance_id}}`",
+      "description": "Measures the rate of `pipeline.loop.iterations` by loop. Measured on this host: l2-gate 0.2/s, queue-depth 0.1/s.\n\nLegend: `{{loop}} {{service_instance_id}}`",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
