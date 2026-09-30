@@ -17,7 +17,8 @@ namespace BaseApi.Tests.Live;
 /// <para>
 /// <b>Self-contained and inert.</b> Every row is created here and deleted afterwards. The workflow has
 /// no cron, so starting it activates it without ever dispatching a step; the only borrowed thing is a
-/// live processor id, which the steps reference and nothing here writes. Redis is only read.
+/// live processor id, which the steps reference and nothing here writes. Redis is read, and written
+/// only at the very end to remove this run's own keys — see the <c>finally</c>.
 /// </para>
 /// <para>
 /// <b>"Processed", not "accepted".</b> A start answers 202 before the consumer runs (spec §3.2), so
@@ -44,13 +45,21 @@ public sealed class L2AlignmentLiveTests
         var root = $"l2align-{run}";
 
         Guid a = Guid.Empty, b = Guid.Empty, c = Guid.Empty, cache = Guid.Empty, workflow = Guid.Empty;
+        var ownKeys = new List<RedisKey>();
         try
         {
             a = await CreateAsync(http, "steps", Step($"l2align-a-{run}", processorId), ct);
+            ownKeys.Add(L2ProjectionKeys.StepEntity(a));
             b = await CreateAsync(http, "steps", Step($"l2align-b-{run}", processorId), ct);
+            ownKeys.Add(L2ProjectionKeys.StepEntity(b));
             c = await CreateAsync(http, "steps", Step($"l2align-c-{run}", processorId), ct);
+            ownKeys.Add(L2ProjectionKeys.StepEntity(c));
             cache = await CreateAsync(http, "caches", Cache(root, """{"x":"1","y":"2"}""", run), ct);
             workflow = await CreateAsync(http, "workflows", Workflow(run, [a, b, c], [cache]), ct);
+            ownKeys.Add(L2ProjectionKeys.Workflow(workflow));
+            ownKeys.Add(L2ProjectionKeys.Cache(workflow, root));
+            ownKeys.Add(L2ProjectionKeys.CacheEntry(workflow, root, "x"));
+            ownKeys.Add(L2ProjectionKeys.CacheEntry(workflow, root, "y"));
 
             // ── Start 1: every participant is added. ─────────────────────────────────────────────
             await StartAsync(http, workflow, ct);
@@ -129,6 +138,21 @@ public sealed class L2AlignmentLiveTests
             if (cache != Guid.Empty)
             {
                 await TryAsync(() => http.DeleteAsync($"/api/v1/caches/{cache}"));
+            }
+
+            // This run's own L2 keys, removed by the test because the product never will: nothing
+            // cleans a deleted workflow's keys, nor a step dropped while its row existed and deleted
+            // after (spec §6), and both happen above. Without this every run leaves them on the shared
+            // dev Redis. Test hygiene only — the product rule that only a start writes L2 is untouched.
+            if (ownKeys.Count > 0)
+            {
+                try
+                {
+                    await db.KeyDeleteAsync(ownKeys.ToArray());
+                }
+                catch (RedisException)
+                {
+                }
             }
         }
     }
