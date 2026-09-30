@@ -49,7 +49,8 @@ Panels and controls aggregate on the **name field** — `attributes.WorkflowName
 `attributes.StepName` — which carries `{name}_{version}-{last two GUID groups}` (an id whose name
 never resolved in L2 logs the suffix alone, e.g. `9aff-a7f22ee09224`). The name is **set on the
 record by the orchestrator or the processor that emits it**, resolved at build time from
-`skp:name:{id}` in L2 — the key BaseApi writes for every workflow, step and processor. Kibana holds
+the name field of `skp:wf:{id}` / `skp:step:{id}` / `skp:proc:{id}` in L2 — BaseApi writes the
+workflow and step names on every start; each processor instance writes its own. Kibana holds
 nothing: the `skp-logs` data view has an empty `fieldFormatMap` and an empty `runtimeFieldMap`, and
 nothing pushes to it or triggers it.
 
@@ -70,14 +71,14 @@ missing field would give a panel a *missing* bucket that reads as a different en
 string would merge two unlabelled entities into one.
 
 Names are set on the records by the orchestrator and the processors themselves, resolved from
-`skp:name:{id}` in L2 (`{name}_{version}-{last two GUID groups}`; an unresolved id logs the suffix
+the name field of `skp:wf:{id}` / `skp:step:{id}` / `skp:proc:{id}` in L2 (`{name}_{version}-{last two GUID groups}`; an unresolved id logs the suffix
 alone). There is no ingest pipeline and no lookup index any more. The whitelist board splits on the
 pair `attributes.StepName` + `attributes.WhitelistRoot` (`multi_terms`, one pie per pair);
 `WhitelistOwner` is retired. The Workflow control's pinned value is environment-specific: run
 `python tools/offline/pin-workflow-control.py --workflow filefetcher-archiveexpander-chain_1.0.0`
 against the stack's Redis before importing this export. The script resolves the live workflow id
 from BaseApi's own registry (`--api-url`, default `http://localhost:18080`) rather than scanning L2
-directly, because a rebuild leaves stale `skp:name:*` entries behind under the old id; pass
+directly, because a rebuild leaves stale name keys behind under the old id; pass
 `--api-url` when the stack's BaseApi is not on the default address (the offline machine's usually
 is not), or `--workflow-id` to skip the registry lookup entirely.
 

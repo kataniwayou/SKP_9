@@ -4,8 +4,8 @@ The board opens on one workflow, because pie shares across two workflows describ
 carry a GUID suffix that differs per environment, so the pinned value is rewritten per stack from L2
 before the export is imported. Run it on dev (then commit) and on the offline machine (before import).
 
-THE WORKFLOW ID COMES FROM BASEAPI'S REGISTRY, NOT FROM SCANNING L2. D8 never deletes skp:name:*
-keys, and a rebuild re-creates a workflow row with a fresh GUID - so after any rebuild L2 can hold
+THE WORKFLOW ID COMES FROM BASEAPI'S REGISTRY, NOT FROM SCANNING L2. Workflow name keys are never
+deleted, and a rebuild re-creates a workflow row with a fresh GUID - so after any rebuild L2 can hold
 several filefetcher-archiveexpander-chain_1.0.0-<suffix> names, only one of which is live. Matching
 against GET {api_url}/api/v1/workflows finds the row BaseApi will actually run when the workflow next
 starts; --workflow-id skips this lookup when the id is already known.

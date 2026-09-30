@@ -1,15 +1,17 @@
-"""Read entity display names from L2 (skp:name:{id}) without a redis client library.
+"""Read entity display names from L2 (HASH skp:{wf|step|proc}:{id}, field "name") without a redis
+client library.
 
-The single store of names since 2026-09-29: BaseApi writes one key per workflow, step and
-processor on every start. Used by the Kibana verify script and the offline pin script, so neither
-depends on an Elasticsearch index or on a package the offline machine may not have.
+BaseApi writes workflow and step names on every start; each processor instance writes its own. Used
+by the Kibana verify script and the offline pin script, so neither depends on an Elasticsearch index
+or on a package the offline machine may not have.
 """
 import re
 import socket
 
 _SUFFIX = re.compile(r"-[0-9a-f]{4}-[0-9a-f]{12}$")
 _FALLBACK = re.compile(r"^[0-9a-f]{4}-[0-9a-f]{12}$")
-PREFIX = "skp:name:"
+KINDS = ("wf", "step", "proc")
+_ENTITY_KEY = re.compile(r"^skp:(wf|step|proc):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
 
 
 def base_name(name):
@@ -56,25 +58,27 @@ def _reply(f):
 
 def read_names_from(sock):
     f = sock.makefile("rb")
-    keys, cursor = [], "0"
-    while True:
-        _command(sock, "SCAN", cursor, "MATCH", PREFIX + "*", "COUNT", "1000")
-        cursor, batch = _reply(f)
-        keys += batch
-        if cursor == "0":
-            break
+    keys = []
+    for kind in KINDS:
+        cursor = "0"
+        while True:
+            _command(sock, "SCAN", cursor, "MATCH", f"skp:{kind}:*", "COUNT", "1000")
+            cursor, batch = _reply(f)
+            keys += [k for k in batch if _ENTITY_KEY.match(k)]
+            if cursor == "0":
+                break
     names = {}
-    for i in range(0, len(keys), 500):
-        chunk = keys[i:i + 500]
-        _command(sock, "MGET", *chunk)
-        for key, value in zip(chunk, _reply(f)):
-            if value is not None:
-                names[key[len(PREFIX):]] = value
+    for key in keys:
+        _command(sock, "HGET", key, "name")
+        value = _reply(f)
+        if value is not None:
+            names[_ENTITY_KEY.match(key).group(2)] = value
     return names
 
 
 def read_names(host="localhost", port=6380, timeout=10):
-    """{id: full name} for every skp:name:* key. The default port is the supervised dev forward."""
+    """{id: full name} for every workflow, step and processor hash. The default port is the
+    supervised dev forward."""
     sock = socket.create_connection((host, port), timeout=timeout)
     try:
         return read_names_from(sock)
@@ -82,19 +86,19 @@ def read_names(host="localhost", port=6380, timeout=10):
         sock.close()
 
 
-def read_name_from(sock, entity_id):
-    """A single skp:name:{entity_id} value, or None when the key is absent (RESP nil)."""
+def read_name_from(sock, entity_id, kind="wf"):
+    """The name field of skp:{kind}:{entity_id}, or None when the key or field is absent (RESP nil)."""
     f = sock.makefile("rb")
-    _command(sock, "GET", PREFIX + entity_id)
+    _command(sock, "HGET", f"skp:{kind}:{entity_id}", "name")
     return _reply(f)
 
 
-def read_name(host="localhost", port=6380, entity_id=None, timeout=10):
-    """The one name at skp:name:{entity_id}, or None if it is unset. A single RESP GET, not a scan -
+def read_name(host="localhost", port=6380, entity_id=None, kind="wf", timeout=10):
+    """The one name at skp:{kind}:{entity_id}, or None if it is unset. A single HGET, not a scan -
     used once the caller already knows the id (e.g. resolved from BaseApi's own registry) and wants
     the exact key rather than a name matched out of a set that may hold several stale entries."""
     sock = socket.create_connection((host, port), timeout=timeout)
     try:
-        return read_name_from(sock, entity_id)
+        return read_name_from(sock, entity_id, kind)
     finally:
         sock.close()
