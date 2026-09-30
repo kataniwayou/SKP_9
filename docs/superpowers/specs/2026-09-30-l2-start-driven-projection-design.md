@@ -1,12 +1,14 @@
 # Spec: L2 projection, start-driven (final)
 
-Status: design approved 2026-09-30, not implemented. Brainstormed in one session; every decision below
-was confirmed by the user.
+Status: approved 2026-09-30; implemented on `feature/path-importer` (merge b2667d8, participant
+alignment f7a8cf1) and live on dev. The offline machine is not migrated. Every decision below was
+confirmed by the user.
 
 ## 1. Principles
 
 1. **The database is the only source of truth.** L2 (Redis) is a projection of it. **Only a workflow
-   start aligns L2 — and only for the entities of the workflow being started.**
+   start aligns L2 — for every entity that participates in the workflow being started, including
+   entities shared with other workflows** (§3.5).
 2. **Nothing else writes the projection.** CRUD, entity deletion and BaseApi startup never touch L2.
 3. **A parent key is never deleted while its row exists.** Values and child keys may be overwritten,
    or deleted and rewritten.
@@ -21,10 +23,10 @@ was confirmed by the user.
 
 | Key | Type | Content | Writer | Removed by |
 |---|---|---|---|---|
-| `skp:wf:{id}` | HASH | `name`, `store` (flattened L1 structure), `roots` (cache root list) | start | never |
+| `skp:wf:{id}` | HASH | `name`, `store` (flattened L1 structure), `roots` (cache root list) | start | never (a deleted workflow is never started again) |
 | `skp:wf:{id}:cache:{root}` | STRING | JSON key list | start | start, when the root is unbound |
 | `skp:wf:{id}:cache:{root}:{key}` | STRING | one value | start | start, when the item or root is gone |
-| `skp:step:{id}` | HASH | `name` | start (each step of the workflow) | never (steps are shared) |
+| `skp:step:{id}` | HASH | `name` | start (each step of the workflow) | start, when the workflow dropped the step and its row is gone (§3.5) |
 | `skp:live` | SET | running workflow ids | start `SADD` / stop `SREM` | never |
 | `skp:proc:{id}` | HASH + TTL | `name` | processor instance, every heartbeat | TTL |
 | `skp:proc:{id}:instances` | SET + TTL | instance ids | processor instance, every heartbeat | TTL; `L2OrphanSweeper` removes dead ids |
@@ -51,13 +53,15 @@ was confirmed by the user.
   liveness), build the definition, enqueue. The liveness read is the one L2 read on the HTTP path
   (422 for a dead processor; 500 `redisOp=ProcessorLiveness` when Redis is unreachable).
 - **Consumer, in order:**
-  1. Write the workflow's keys (overwrite): `skp:wf:{id}` (`name`, `store`, `roots`), its cache rows,
-     `skp:step:{id}` `name` for each of its steps.
-  2. Delete its own leftovers only: cache roots no longer bound (via the previous `roots`) and cache
-     items removed (via each root's previous key list). Never step keys, never other workflows' keys.
-  3. `SADD skp:live {id}`.
-  4. Publish `OrchestrationStarted(workflowId)` (id only), only after the writes.
-  A failed publish requeues; steps 1–4 are idempotent.
+  1. Align the participants with the database (§3.5), in ONE pipelined batch whose deletes come
+     first: delete removed participants' keys, then write every added and kept participant's keys.
+  2. `SADD skp:live {id}`.
+  3. Publish `OrchestrationStarted(workflowId)` (id only), only after the writes.
+  A failed publish requeues; steps 1–3 are idempotent.
+- **Why deletes come first:** the batch is pipelined, not MULTI, so a dropped connection applies a
+  prefix of it. The removals are computed from what the previous start recorded (`store`, `roots`,
+  each root's key list), which this batch overwrites. With the deletes first, a torn batch leaves those
+  records intact and the rerun computes the same removals. Deletes and writes never touch the same key.
 
 ### 3.3 Stop
 - **HTTP:** enqueue; a send failure returns 500.
@@ -69,11 +73,76 @@ was confirmed by the user.
 - `L2Cleanup` on stop.
 - Processor names in `ToDefinition` / `Names`.
 
+### 3.5 Participant alignment
+
+**Referential integrity is the foundation.** Every reference between entities is a foreign key with
+`ON DELETE RESTRICT`; BaseApi adds no application check (`BaseService.DeleteAsync` loads, deletes,
+commits). A delete of a referenced row fails in Postgres (SQLSTATE 23001) and BaseApi answers 422.
+
+| If A references B… | …B cannot be deleted while A exists | Foreign key |
+|---|---|---|
+| workflow → entry step | step | `workflow_entry_steps.step_id` |
+| workflow → assignment | assignment | `workflow_assignments.assignment_id` |
+| workflow → cache | cache | `workflow_caches.cache_id` |
+| step → next step | next step (and a step with successors is itself blocked) | `step_next_steps.next_step_id` / `.step_id` |
+| step → processor | processor | `steps.processor_id` |
+| assignment → step | step | `assignments.step_id` |
+| processor → input/output/config schema | schema | `processors.*_schema_id` |
+
+Deleting a workflow is never blocked: it cascades only its own junction rows, and the entities it
+referenced become deletable once nothing else references them.
+
+**Consequences.**
+- At a start, every participant exists — validation just passed against the same rows.
+- A participant's row can only disappear after every workflow has stopped referencing it. So a start
+  that deletes the key of a removed participant whose row is gone can never take a key from another
+  workflow; and overwriting a shared participant's key cannot disturb another RUNNING workflow, which
+  works from L1.
+- Database work never affects an operational workflow: renames, edits and deletes reach a workflow
+  only at its next start.
+
+**Participants of one start** (`WorkflowGraphLoader.LoadL1Async`):
+
+| Entity | Found through | In L2 |
+|---|---|---|
+| Workflow | the requested id | `skp:wf:{id}` (`name`, `store`, `roots`), `skp:live` |
+| Steps | `workflow_entry_steps`, then every step reachable through `step_next_steps` (breadth-first) | structure inside `store`; `skp:step:{id}` `name` |
+| Assignments | `workflow_assignments` | no key: each payload is embedded in its step inside `store` |
+| Caches | `workflow_caches` | `skp:wf:{id}:cache:{root}` (key list) and `…:{key}` (entries); root list in `roots` |
+| Processors | each step's `processor_id` | read at HTTP start (liveness); keys owned by the processor instances (§5) |
+| Schemas | each processor's input/output/config schema | none; used only for validation at HTTP start |
+
+**The alignment**: the start compares its participants from the database with the previous
+participants recorded in L2 (the previous `store` and `roots`, and each root's key list):
+
+| | Steps | Caches | Assignments | Workflow |
+|---|---|---|---|---|
+| **Added** | write `skp:step:{id}` name | write the root and its entries | embedded in the new `store` | — |
+| **Kept** | overwrite the name with the database value | overwrite; delete the entries whose items were removed | overwritten with `store` | overwrite `name`, `store`, `roots` |
+| **Removed** | delete `skp:step:{id}` if the row is gone; keep it if the row still exists (another workflow may use it) | delete the root and its entries (these keys belong to the workflow) | leave with the old `store` | — |
+
+- Only removed step ids are looked up in the database, in one query; a start that removed nothing makes
+  no database read.
+- A previous `store` or list that is missing or unreadable contributes no removals: without a record of
+  what was removed, nothing is deleted on a guess.
+- If two workflows dropped the same step, whichever starts first deletes its key; the other's delete
+  is a no-op.
+
+**Outside start alignment, by design:**
+- **Processors.** Each processor instance owns `skp:proc:{id}` (§5). A deleted processor's keys expire
+  by TTL about 4 heartbeat intervals after its last instance stops — never while one still runs, since
+  every beat refreshes them. A restarted pod whose row is gone does not resolve its identity and writes
+  nothing.
+- **Schemas.** No L2 keys; processors fetch their definitions from BaseApi at boot.
+- **A deleted workflow's own keys.** Nothing starts a deleted workflow, so its `skp:wf:{id}` hash and
+  cache keys are never cleaned (a few small keys per deleted workflow; nobody reads them).
+
 ## 4. Orchestrator
 
 - **Start announcement:** if the id is not in `skp:live`, do nothing. Otherwise read `skp:wf:{id}`
-  `store` → build the L1 entry (**overwrite**), preload workflow/step/processor names into the name
-  dictionary, schedule if `Cron` is set.
+  `store` → build the L1 entry (**overwrite**), schedule if `Cron` is set, and **refresh** the
+  workflow, step and processor names in the name dictionary (a found name overwrites the cached one; a
+  miss or a failed read keeps it), so a rename shows from the workflow's next start.
 - **Startup (hydration):** `SMEMBERS skp:live` → the same `ActivateAsync` per id.
 - **Stop announcement:** guard is `SISMEMBER skp:live` (was: root key exists). Still live → ignore
   (a later start overtook it). Otherwise unschedule and mark the L1 entry stopped. No L2 or L1 cleanup.
@@ -83,15 +152,24 @@ was confirmed by the user.
 
 ## 5. Processor
 
-- Every heartbeat: `name` on `skp:proc:{id}` (from `ProcessorIdentity`), `SADD` to
-  `skp:proc:{id}:instances`, the liveness key — all with the TTL.
+- Every heartbeat, all with the TTL, in this order: the liveness key `skp:proc:{id}:{instanceId}`,
+  `SADD` the instance id to `skp:proc:{id}:instances`, then `name` on `skp:proc:{id}` =
+  `{name}_{version}-{idSuffix}` (the version is inside the name; there is no separate field).
+- **Identity is fixed at pod boot.** `Id`, `Name`, `Version` and the schema ids are resolved once from
+  BaseApi (by SourceHash) and never re-read; the name hash, the `IdentityName` log attribute and the
+  OTel resource (`service.name`/`service.version`) all come from it. A database rename or version change
+  of a processor takes effect only when its pods restart; a workflow start cannot change it.
+- A new-image processor that finds a retired SET at `skp:proc:{id}` (WRONGTYPE) deletes it and rewrites
+  the name hash once; the liveness key is written before the name, so a name failure never costs it.
 - Workflow/step names load lazily into L1 via `EntityNameResolver`, cached until pod restart.
 - SKNormalizer reads `skp:wf:{id}:cache:{root}[:{key}]` per lookup (values change only at start).
 
 ## 6. Accepted behaviour
 
-- Redis is ephemeral; a Redis restart wipes everything until each workflow is started again.
-- Keys of deleted workflows and steps persist forever; nobody reads them.
+- Redis is ephemeral; a Redis restart wipes everything until each workflow is started again. Whether
+  to persist it is a resource-allocation decision outside this design.
+- A deleted step's key is removed by the next start of a workflow that dropped it; a deleted
+  workflow's own keys persist (nothing starts it again); nobody reads them.
 - A failed start consumer is repaired only by the next start of that workflow.
 - A rename is visible for workflow/step names at the workflow's next start; for a processor at pod
   restart.
@@ -102,6 +180,8 @@ was confirmed by the user.
 - An orchestrator restart loses a stopped workflow's in-flight lineages (hydration reads only
   `skp:live`).
 
-## 7. Deferred
+## 7. Deleting a referenced entity
 
-- Deleting an entity that a running workflow references.
+Not a gap: referential integrity refuses the delete while any workflow references the entity
+(§3.5), and a workflow that stopped referencing it keeps running from L1 unaffected. Its key is aligned
+at the next start of a workflow that dropped it.
