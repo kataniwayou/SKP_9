@@ -11,20 +11,74 @@ namespace Messaging.Contracts.Projections;
 /// any config-injection path into key names.
 /// </para>
 /// <list type="bullet">
-///   <item><description>ParentIndex: <c>{Prefix}</c> — the bare prefix, used as the parent-index SET key</description></item>
-///   <item><description>Root: <c>{Prefix}{workflowId}</c></description></item>
-///   <item><description>Step: <c>{Prefix}{workflowId}:{stepId}</c></description></item>
-///   <item><description>PerInstance: <c>{Prefix}proc:{processorId}:{instanceId}</c> — the per-replica liveness key</description></item>
-///   <item><description>InstanceIndex: <c>{Prefix}proc:{processorId}</c> — the per-processor instance-index SET key</description></item>
-///   <item><description>ExecutionData: <c>{Prefix}data:{guid}</c> — the blob for both roles</description></item>
-///   <item><description>Name: <c>{Prefix}name:{id}</c> — an entity's display name</description></item>
-///   <item><description>Cache: <c>{Prefix}{workflowId}:cache:{root}</c> — the key holding one projected dictionary's key list</description></item>
-///   <item><description>CacheEntry: <c>{Prefix}{workflowId}:cache:{root}:{key}</c> — one entry of that dictionary</description></item>
+///   <item><description>Live: <c>skp:live</c> — SET of running workflow ids</description></item>
+///   <item><description>Workflow: <c>skp:wf:{workflowId}</c> — HASH <c>name</c>, <c>store</c>, <c>roots</c></description></item>
+///   <item><description>StepEntity: <c>skp:step:{stepId}</c> — HASH <c>name</c></description></item>
+///   <item><description>Processor: <c>skp:proc:{processorId}</c> — HASH <c>name</c>, written by the processor, TTL</description></item>
+///   <item><description>ProcessorInstances: <c>skp:proc:{processorId}:instances</c> — SET, TTL</description></item>
+///   <item><description>PerInstance: <c>skp:proc:{processorId}:{instanceId}</c> — liveness, TTL</description></item>
+///   <item><description>Cache: <c>skp:wf:{workflowId}:cache:{root}</c> — one dictionary's key list</description></item>
+///   <item><description>CacheEntry: <c>skp:wf:{workflowId}:cache:{root}:{key}</c> — one entry</description></item>
+///   <item><description>ExecutionData: <c>skp:data:{guid}</c> — the blob for both roles</description></item>
+///   <item><description>Retiring (removed by later tasks): ParentIndex <c>skp:</c>, Root <c>skp:{workflowId}</c>, Step <c>skp:{workflowId}:{stepId}</c>, InstanceIndex <c>skp:proc:{processorId}</c> as a SET, Name <c>skp:name:{id}</c></description></item>
 /// </list>
 /// </summary>
 public static class L2ProjectionKeys
 {
     public const string Prefix = "skp:";
+
+    /// <summary>The display-name field on every entity hash.</summary>
+    public const string NameField = "name";
+
+    /// <summary>The flattened L1 structure on <see cref="Workflow"/>; see <see cref="WorkflowStoreProjection"/>.</summary>
+    public const string StoreField = "store";
+
+    /// <summary>The JSON list of cache roots on <see cref="Workflow"/>, read back by the next start to find its own leftovers.</summary>
+    public const string RootsField = "roots";
+
+    private const string InstancesSuffix = ":instances";
+
+    /// <summary>The SET of running workflow ids: start adds, stop removes, hydration reads.</summary>
+    public static string Live() => $"{Prefix}live";
+
+    public static string Workflow(Guid workflowId) => $"{Prefix}wf:{workflowId:D}";
+
+    /// <summary>A step's own key. Global, not per workflow: a step can be shared by several workflows.</summary>
+    public static string StepEntity(Guid stepId) => $"{Prefix}step:{stepId:D}";
+
+    /// <summary>A processor's name hash. Written only by the processor's own instances, with a TTL.</summary>
+    public static string Processor(Guid processorId) => $"{Prefix}proc:{processorId:D}";
+
+    public static string Entity(L2EntityKind kind, Guid id) => kind switch
+    {
+        L2EntityKind.Workflow  => Workflow(id),
+        L2EntityKind.Step      => StepEntity(id),
+        L2EntityKind.Processor => Processor(id),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown entity kind"),
+    };
+
+    /// <summary>The SET each replica adds its instance id to. TTL, refreshed by every heartbeat.</summary>
+    public static string ProcessorInstances(Guid processorId) => $"{Processor(processorId)}{InstancesSuffix}";
+
+    /// <summary>
+    /// The inverse of <see cref="ProcessorInstances"/>, for the orphan sweeper, which finds these keys
+    /// by scan and has to rebuild each member's <see cref="PerInstance"/> key from them.
+    /// </summary>
+    public static bool TryParseProcessorInstances(string key, out Guid processorId)
+    {
+        processorId = Guid.Empty;
+        var head = $"{Prefix}proc:";
+
+        if (key is null
+            || !key.StartsWith(head, StringComparison.Ordinal)
+            || !key.EndsWith(InstancesSuffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var id = key.AsSpan(head.Length, key.Length - head.Length - InstancesSuffix.Length);
+        return Guid.TryParseExact(id, "D", out processorId);
+    }
 
     public static string ParentIndex() => Prefix;
 
@@ -47,7 +101,7 @@ public static class L2ProjectionKeys
     /// </para>
     /// </summary>
     public static string Cache(Guid workflowId, string root)
-        => $"{Prefix}{workflowId:D}:cache:{root}";
+        => $"{Workflow(workflowId)}:cache:{root}";
 
     /// <summary>
     /// One entry of a projected dictionary: exactly <see cref="Cache"/> followed by the key. The two
@@ -60,7 +114,7 @@ public static class L2ProjectionKeys
     /// <summary>The per-instance processor-liveness key. <paramref name="instanceId"/> is the
     /// already-resolved pod identity — a plain string, not a Guid.</summary>
     public static string PerInstance(Guid processorId, string instanceId)
-        => $"{Prefix}proc:{processorId:D}:{instanceId}";
+        => $"{Processor(processorId)}:{instanceId}";
 
     /// <summary>The per-processor instance-index SET key that each replica adds its instance id to.
     /// It is exactly the prefix of <see cref="PerInstance"/> before the trailing instance id.</summary>

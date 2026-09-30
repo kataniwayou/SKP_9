@@ -18,7 +18,7 @@ public sealed class CacheKeyTests
     public void TheCacheRootIsTheWorkflowScopeFollowedByTheRoot()
     {
         Assert.Equal(
-            "skp:11111111-1111-1111-1111-111111111111:cache:sk-whitelist",
+            "skp:wf:11111111-1111-1111-1111-111111111111:cache:sk-whitelist",
             L2ProjectionKeys.Cache(W, "sk-whitelist"));
     }
 
@@ -26,7 +26,7 @@ public sealed class CacheKeyTests
     public void AnEntryIsItsCacheRootPlusTheKey()
     {
         Assert.Equal(
-            "skp:11111111-1111-1111-1111-111111111111:cache:sk-whitelist:acme",
+            "skp:wf:11111111-1111-1111-1111-111111111111:cache:sk-whitelist:acme",
             L2ProjectionKeys.CacheEntry(W, "sk-whitelist", "acme"));
     }
 
@@ -44,13 +44,12 @@ public sealed class CacheKeyTests
     [Fact]
     public void ACacheKeyCannotCollideWithAStepKey()
     {
-        // Both are skp:{workflowId}:… — the discriminator is that a step key's third segment is a
-        // GUID and a cache key's is the literal "cache", which CacheEntity's validator guarantees no
-        // root can impersonate, since it refuses a root containing ':'.
+        // A step key is skp:{workflowId}:{stepId} and a cache key is skp:wf:{workflowId}:cache:… —
+        // different type segments, so they cannot collide.
         var step = L2ProjectionKeys.Step(W, Guid.Parse("22222222-2222-2222-2222-222222222222"));
 
         Assert.NotEqual(step, L2ProjectionKeys.Cache(W, "sk-whitelist"));
-        Assert.StartsWith($"skp:{W:D}:cache:", L2ProjectionKeys.Cache(W, "sk-whitelist"));
+        Assert.StartsWith($"skp:wf:{W:D}:cache:", L2ProjectionKeys.Cache(W, "sk-whitelist"));
     }
 
     [Fact]
