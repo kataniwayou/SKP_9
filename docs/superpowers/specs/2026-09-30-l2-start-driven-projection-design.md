@@ -62,6 +62,20 @@ confirmed by the user.
   prefix of it. The removals are computed from what the previous start recorded (`store`, `roots`,
   each root's key list), which this batch overwrites. With the deletes first, a torn batch leaves those
   records intact and the rerun computes the same removals. Deletes and writes never touch the same key.
+- **What a start guarantees, and when.** Once a start has been *processed* — the id is in `skp:live`
+  and `OrchestrationStarted` has been published — `skp:wf:{id}` and the keys of every current
+  participant match the database as it was at validation, and the keys of removed participants are
+  deleted, except a dropped step whose row still exists (§3.5). Specifically:
+  - **Not at the HTTP response.** `202 Accepted` means validated and enqueued. Until the consumer runs,
+    L2 still holds the previous definition (or nothing); while the L2 gate is closed (Redis unreachable)
+    the write waits; a failure part-way requeues and reruns the whole handler, and a torn batch leaves
+    a prefix applied until that rerun. `OrchestrationStarted` is the signal: it is published only after
+    the write and the `SADD`.
+  - **The database as of validation.** The definition is built at HTTP time and carried in the
+    message; an edit between the response and the consumer reaches L2 at the next start (§1, principle 5).
+  - **Deliberately left unaligned:** a dropped step whose row still exists keeps its key and its
+    last-written name until a workflow that uses it starts; a previous `store` or list that is missing
+    or unreadable yields no removals (§3.5); a deleted workflow's own keys; processor keys (§5).
 
 ### 3.3 Stop
 - **HTTP:** enqueue; a send failure returns 500.
