@@ -106,6 +106,26 @@ REFUSED_KQL = 'severity_text:"Error" and attributes.Queue:*'
 # the same failure the refusal table shipped with, twice over.
 RUNPOSITION_KQL = "attributes.RunPosition:*"
 
+# The run-boundary pie's own query, since 2026-10-01 an ES|QL panel. ENTRY is the fires in range --
+# every CorrelationId with an entry record; TERMINAL is every branch end whose CorrelationId is one
+# of those fires, however far it fanned out. A terminal of a fire that entered before the range is
+# not counted. Lens cannot express this: it needs a per-CorrelationId join ("has an entry"), and a
+# Lens pie counts each slice independently, which is what the record-counting pie before it did.
+# Kept byte-identical to the export so check 11 catches the panel drifting from it.
+RUNPOSITION_ESQL = (
+    "FROM logs-generic.otel-default\n"
+    "| WHERE attributes.RunPosition IS NOT NULL\n"
+    "| EVAL e = CASE(attributes.RunPosition == \"entry\", 1, 0),\n"
+    "       t = CASE(attributes.RunPosition == \"terminal\", 1, 0)\n"
+    "| STATS e = MAX(e), t = SUM(t) BY attributes.CorrelationId, attributes.WorkflowName\n"
+    "| WHERE e == 1\n"
+    "| STATS entry = COUNT(*), terminal = SUM(t) BY attributes.WorkflowName\n"
+    "| EVAL boundary = [\"entry\", \"terminal\"]\n"
+    "| MV_EXPAND boundary\n"
+    "| EVAL count = CASE(boundary == \"entry\", entry, terminal)\n"
+    "| KEEP boundary, attributes.WorkflowName, count"
+)
+
 DASHBOARD_KQL = (
     f'({COUNTED_KQL}) or attributes.WhitelistVerdict:* or ({REFUSED_KQL}) or {RUNPOSITION_KQL}')
 
@@ -141,11 +161,10 @@ PANEL_GUARDS = {
     # union query would let step outcomes into a panel whose whole claim is "this work was thrown
     # away", and an operator would read 181,732 completed steps as lost messages.
     "skp-parked-table": REFUSED_KQL,
-    # The run-boundary pie. Its guard is load-bearing in the OPPOSITE direction to the others': this
-    # panel's metric is a unique count of CorrelationId, and every other atom on this dashboard
-    # carries a CorrelationId too, so without the guard both slices would count every outcome,
-    # whitelist lookup and refusal in the window as though it were a run boundary.
-    "skp-runposition-pie": RUNPOSITION_KQL,
+    # The run-boundary pie. An ES|QL panel, so its guard is its whole query: the WHERE on
+    # attributes.RunPosition is what keeps every other atom out -- each carries a CorrelationId, and
+    # without it the per-CorrelationId join would see outcomes, lookups and refusals as runs.
+    "skp-runposition-pie": RUNPOSITION_ESQL,
 }
 
 # The one pair-per-pie bucket. Asserted by check 11 so a later edit cannot quietly go back to
@@ -535,7 +554,9 @@ def check_11_export_states_the_rule_once(checks):
             for flt in source.get("filter", []):
                 option_scope.append(json.dumps(flt.get("query", {}), sort_keys=True))
         if obj.get("type") == "lens":
-            panel_queries[obj["id"]] = obj["attributes"]["state"].get("query", {}).get("query", "")
+            # A KQL panel states its query under "query", an ES|QL panel under "esql".
+            query = obj["attributes"]["state"].get("query", {})
+            panel_queries[obj["id"]] = query.get("query") or query.get("esql", "")
         if obj.get("type") == "visualization":
             source = json.loads(obj["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
             panel_queries[obj["id"]] = source.get("query", {}).get("query", "")
