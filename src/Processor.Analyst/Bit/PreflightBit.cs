@@ -37,8 +37,12 @@ internal sealed class PreflightBit(
     IAnalystModel model,
     BitCache cache,
     GroundTruthRehearsal? rehearsal = null,
-    ILogger<PreflightBit>? logger = null)
+    ILogger<PreflightBit>? logger = null,
+    Microsoft.Extensions.Options.IOptions<AnalystBitOptions>? options = null)
 {
+    /// <summary>Read once, at construction: an unparseable mode fails the first resolve, not a dispatch.</summary>
+    private readonly BitMode _mode = options?.Value.Mode ?? BitMode.Full;
+
     /// <summary>
     /// Ballots cast on a cold prompt. Odd, so a majority always exists. Paid once per prompt, and
     /// what stops a single unlucky draw from deciding a prompt's fate for every replica.
@@ -68,6 +72,11 @@ internal sealed class PreflightBit(
 
     internal async Task<FitnessVerdict> CheckAsync(string prompt, CancellationToken ct)
     {
+        if (_mode == BitMode.StructureOnly)
+        {
+            return CheckStructureOnly(prompt);
+        }
+
         var hash = PromptHash.Of(prompt);
 
         if (await cache.GetAsync(hash).ConfigureAwait(false) is { } cached)
@@ -107,6 +116,35 @@ internal sealed class PreflightBit(
         await cache.PutAsync(hash, verdict).ConfigureAwait(false);
 
         return verdict;
+    }
+
+    /// <summary>
+    /// The proof-of-concept gate: the free heading check and nothing else.
+    /// <para>
+    /// <b>It never touches the shared store, in either direction.</b> Writing would be the dangerous
+    /// half: a "fit" recorded here was never earned, and switching back to <see cref="BitMode.Full"/>
+    /// under the same prompt, model and image would inherit it as if the judge and the rehearsal had
+    /// passed. Reading is skipped too, so a stored unfit verdict cannot block a prompt the operator has
+    /// deliberately chosen to run unexamined.
+    /// </para>
+    /// <para>
+    /// A Warning on every dispatch, not once at startup, so no finding produced in this mode can be
+    /// read later as having passed the gate.
+    /// </para>
+    /// </summary>
+    private FitnessVerdict CheckStructureOnly(string prompt)
+    {
+        var structural = PromptStructure.Check(prompt);
+
+        if (structural.Count == 0)
+        {
+            logger?.LogWarning(
+                "the preflight BIT is in {Mode} mode: the prompt's structure passed, the judge and the "
+                + "ground-truth rehearsal were skipped, and no verdict was read from or written to L2",
+                BitMode.StructureOnly);
+        }
+
+        return FitnessVerdict.From(structural);
     }
 
     /// <summary>

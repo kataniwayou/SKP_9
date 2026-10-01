@@ -1,0 +1,6 @@
+{
+  "WorkflowId": "1a56b3ca-e276-4815-87fa-5c2f48ab6dad",
+  "From": "2026-10-01T19:08:00.0199331+00:00",
+  "To": "2026-10-01T19:23:00.0199331+00:00",
+  "AnswerKey": "Verified 2026-10-01 against the importer's per-poll intake and every outcome record, independently of the panels. 15 importer polls took in 125 records: 35 good files from simulate-approved-feed (7 cycles) and 90 from simulate-endless-feed (18 cycles x 5 roles). Expected and observed: Failed 54 = 18 badext (filefetcher) + 18 corrupt (archiveexpander) + 18 triple (sk-normalizer), all deliberate bad input; Cancelled 18, all 'Unapproved Sim Artist' (whitelist policy); good records 53, so 106 terminals; terminal total 54+18+106 = 178. 16 entries vs 15 polls: the 16th is the 19:23:00 fire, still running at window end, terminal 0. No loss: 23 dead-letter queues flat 0, 0 refusals. queue-wait not fully covered only because BaseApi, both Analyst replicas and the outcome recorder were idle at window start (the recorder's first point, 19:12:15, is when the first failures reached it). Correct verdict: Quiet."
+}

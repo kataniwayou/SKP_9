@@ -23,6 +23,39 @@ internal sealed class FixturePanelReader : IPanelReader
     }
 
     /// <summary>A panel that answered, but whose series was not there — the orphaned-instrument case.</summary>
+    /// <summary>
+    /// A reading captured from a live window, served verbatim and described with the production
+    /// registry's own text, so the model sees what it would see deployed.
+    /// </summary>
+    internal FixturePanelReader Captured(PanelReading reading)
+    {
+        _readings[reading.PanelId] = reading;
+        var definition = PanelRegistry.All.FirstOrDefault(p => p.PanelId == reading.PanelId);
+        _descriptors[reading.PanelId] = definition is null
+            ? new PanelDescriptor(reading.PanelId, reading.Layer, $"fixture panel {reading.PanelId}")
+            : new PanelDescriptor(definition.PanelId, definition.Layer, definition.Description);
+        return this;
+    }
+
+    /// <summary>
+    /// Plants a fault on a captured panel: the value is replaced and everything else — layer,
+    /// description, trust — stays as captured unless given.
+    /// </summary>
+    internal FixturePanelReader Planted(string panelId, string valueJson, int? samples = null, PanelTrust? trust = null)
+    {
+        var captured = _readings[panelId];
+        _readings[panelId] = captured with
+        {
+            ValueJson = valueJson,
+            SampleCount = samples ?? captured.SampleCount,
+            Trust = trust ?? captured.Trust,
+        };
+        return this;
+    }
+
+    /// <summary>The value currently served for a panel, for a scenario to edit and plant back.</summary>
+    internal string ValueOf(string panelId) => _readings[panelId].ValueJson;
+
     internal FixturePanelReader MissingSeries(string panelId, string layer = "ops")
     {
         _readings[panelId] = new PanelReading(

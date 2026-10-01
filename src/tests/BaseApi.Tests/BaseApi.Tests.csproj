@@ -72,6 +72,9 @@
          No live system is contacted to produce these; each is a hand-built shape matching what those
          APIs actually return for the case its filename names. -->
     <None Include="Analyst\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Real panel readings captured from a live window, for the replay harness. Unlike the files
+         above these ARE taken from a live system, by AnalystReplayCapture, and are not hand-built. -->
+    <None Include="Analyst\Fixtures\replay\**\*.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The schema definitions, one file per SHAPE rather than one per processor. No processor
          ships these any more: nothing in src/ can read a schema file, and validation is driven by
          database rows resolved over the broker. They live here because the tests are their only

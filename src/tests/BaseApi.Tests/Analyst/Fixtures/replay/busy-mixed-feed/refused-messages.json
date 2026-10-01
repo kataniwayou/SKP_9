@@ -1,0 +1,11 @@
+{
+  "PanelId": "refused-messages",
+  "Layer": "business",
+  "ValueJson": "{\u0022totalWorkflowRecords\u0022:6215,\u0022refusedCount\u0022:0,\u0022parked\u0022:0,\u0022notParked\u0022:0,\u0022byQueue\u0022:{},\u0022samples\u0022:[]}",
+  "SampleCount": 6215,
+  "Trust": {
+    "SeriesPresent": true,
+    "WindowFullyCovered": true,
+    "NoDataDistinguishable": true
+  }
+}

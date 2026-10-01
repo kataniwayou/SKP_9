@@ -1,0 +1,11 @@
+{
+  "PanelId": "run-boundaries",
+  "Layer": "business",
+  "ValueJson": "{\u0022totalWorkflowRecords\u0022:6215,\u0022entry\u0022:16,\u0022terminal\u0022:178,\u0022importerPolls\u0022:15,\u0022drainedPolls\u0022:0}",
+  "SampleCount": 6215,
+  "Trust": {
+    "SeriesPresent": true,
+    "WindowFullyCovered": true,
+    "NoDataDistinguishable": true
+  }
+}

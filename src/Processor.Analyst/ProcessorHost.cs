@@ -148,6 +148,9 @@ public static class ProcessorHost
         builder.Services.AddSingleton<InvestigationLoop>();
 
         builder.Services.Configure<Model.AnalystModelOptions>(builder.Configuration.GetSection("Analyst:Model"));
+        // Env-only, like the model options: Analyst__Bit__Mode=StructureOnly skips the judge and the
+        // rehearsal for a proof of concept. Unset means Full.
+        builder.Services.Configure<AnalystBitOptions>(builder.Configuration.GetSection("Analyst:Bit"));
 
         // Timeout.InfiniteTimeSpan is deliberate, not an oversight. Thinking is always on for this
         // model and cannot be disabled, so a single call at `high` effort can legitimately run for

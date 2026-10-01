@@ -74,7 +74,7 @@ public sealed class AnalystGroundTruthLiveTests
     /// never has to be pasted into a test, falling back to the checked-in appsettings the deployment
     /// itself uses.
     /// </summary>
-    private static KimiAnalystModel RealModel()
+    internal static KimiAnalystModel RealModel()
     {
         var settings = Path.Combine(RepoRoot(), "src", "Processor.Analyst", "appsettings.json");
         using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(settings));
@@ -102,7 +102,7 @@ public sealed class AnalystGroundTruthLiveTests
         return new KimiAnalystModel(http, Options.Create(options));
     }
 
-    private static AnalystConfig Config(string prompt, params string[] panels)
+    internal static AnalystConfig Config(string prompt, params string[] panels)
         => new(
             TargetWorkflowId: Guid.Parse("1a56b3ca-e276-4815-87fa-5c2f48ab6dad"),
             WindowMinutes: 15,

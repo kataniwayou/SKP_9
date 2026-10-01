@@ -220,4 +220,70 @@ public sealed class PreflightBitTests
         Assert.False(back.Fit);
         Assert.Equal(new StageProblem("plan", "malformed", "quoted text"), Assert.Single(back.Problems));
     }
+
+    private static PreflightBit StructureOnly(ScriptedModel model, BaseApi.Tests.Support.InMemorySharedState shared,
+        BaseApi.Tests.Support.RecordingLogger<PreflightBit>? logger = null)
+        => new(model, new BitCache(shared, "test-model/high"), logger: logger,
+            options: Microsoft.Extensions.Options.Options.Create(new AnalystBitOptions { Mode = BitMode.StructureOnly }));
+
+    [Fact]
+    public async Task StructureOnlyPassesAStructuredPromptWithoutCallingTheModel()
+    {
+        var model = new ScriptedModel();
+        var logger = new BaseApi.Tests.Support.RecordingLogger<PreflightBit>();
+
+        var verdict = await StructureOnly(model, new BaseApi.Tests.Support.InMemorySharedState(), logger)
+            .CheckAsync(Structured(), CancellationToken.None);
+
+        Assert.True(verdict.Fit);
+        Assert.Empty(model.Received);
+        // Every dispatch says the gate was skipped, so no finding from this mode passes as gated.
+        Assert.Contains(logger.Records, r => r.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && r.Message.Contains("StructureOnly", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StructureOnlyStillRejectsAPromptWithNoStages()
+    {
+        var verdict = await StructureOnly(new ScriptedModel(), new BaseApi.Tests.Support.InMemorySharedState())
+            .CheckAsync("just look around and tell me if anything is wrong", CancellationToken.None);
+
+        Assert.False(verdict.Fit);
+    }
+
+    [Fact]
+    public async Task StructureOnlyNeverWritesAVerdictForFullModeToInherit()
+    {
+        // The dangerous half: an unearned "fit" in the shared store would pass as the judge's when the
+        // mode is switched back under the same prompt, model and image.
+        var shared = new BaseApi.Tests.Support.InMemorySharedState();
+
+        await StructureOnly(new ScriptedModel(), shared).CheckAsync(Structured(), CancellationToken.None);
+
+        Assert.Empty(shared.Entries);
+    }
+
+    [Fact]
+    public async Task StructureOnlyIgnoresAStoredUnfitVerdict()
+    {
+        var shared = new BaseApi.Tests.Support.InMemorySharedState();
+        await new BitCache(shared, "test-model/high").PutAsync(
+            PromptHash.Of(Structured()), FitnessVerdict.From([new StageProblem("plan", "malformed", "x")]));
+
+        var verdict = await StructureOnly(new ScriptedModel(), shared).CheckAsync(Structured(), CancellationToken.None);
+
+        Assert.True(verdict.Fit);
+    }
+
+    [Fact]
+    public async Task FullIsTheDefaultMode()
+    {
+        // No options at all, and options left at their default, both run the judge.
+        var model = new ScriptedModel(Fit(), Fit(), Fit());
+        await new PreflightBit(model, new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "m"),
+                options: Microsoft.Extensions.Options.Options.Create(new AnalystBitOptions()))
+            .CheckAsync(Structured(), CancellationToken.None);
+
+        Assert.Equal(3, model.Received.Count);
+    }
 }
