@@ -4,7 +4,7 @@ You are an AI model on a machine with no access to the cluster this graph came f
 Everything you need is in this file. Follow it top to bottom.
 
 **This workflow spends money on every fire.** Step 8 starts a cron that calls a paid model API
-every five minutes, unattended, until someone stops it. Read Appendix D before you run step 8, not
+twice an hour, unattended, until someone stops it. Read Appendix D before you run step 8, not
 after. Every step before step 8 is free and reversible.
 
 ## How to use this file
@@ -25,7 +25,7 @@ after. Every step before step 8 is free and reversible.
 ## The graph you are building
 
 Two steps, two processors -- **one of which this file does not create** -- two schemas, no cache,
-one workflow, fired by cron every five minutes at second `0`.
+one workflow, fired by cron twice an hour, at minutes `:09` and `:39`.
 
 ```
 analyst-monitor              (analyst, Always)          <-- entry step; cron dispatches it
@@ -66,7 +66,7 @@ Before the first request, confirm all seven. Do not start without them.
    and the export assignment's payload is validated against `kafka-exporter-config`. Both are rows,
    not copies:
    - `GET {API}/api/v1/processors` and find the one whose `sourceHash` is
-     `ba7df85269267a1032838c998a926f14ac5b8be14d2472e32675cd2c62c0343c`. Record its id as
+     `56c32dfb727f56bfc2109a122f7a20f1c49334b4e49213bec853b9e2d5ed8297`. Record its id as
      `<proc:kafka-exporter>`. **Do not create a second one** -- `sourceHash` is unique among rows
      with no `instanceId` (one row per `(SourceHash, InstanceId)`, counting "no instance" as a
      value), so the create returns `409` and the correct response is to go and find the row that
@@ -156,19 +156,43 @@ Content-Type: application/json
 
 {
   "name": "analyst-finding",
-  "version": "1.0.0",
-  "description": "Analyst output document. Quiet and Indeterminate verdicts are deliberately absent: a quiet run cancels the step and an unanalysable one fails it, so neither reaches a document.",
-  "definition": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"title\": \"Analyst finding\",\n  \"type\": \"object\",\n  \"properties\": {\n    \"verdict\": {\n      \"type\": \"string\",\n      \"enum\": [\"Drifting\", \"Notable\"],\n      \"description\": \"Quiet and Indeterminate are deliberately absent: a quiet run cancels the step and an unanalysable one fails it, so neither reaches a document.\"\n    },\n    \"window\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"from\": { \"type\": \"string\", \"format\": \"date-time\" },\n        \"to\": { \"type\": \"string\", \"format\": \"date-time\" },\n        \"samplesExamined\": { \"type\": \"integer\", \"minimum\": 0 }\n      },\n      \"required\": [\"from\", \"to\", \"samplesExamined\"],\n      \"additionalProperties\": false,\n      \"description\": \"The REALIZED window, not the configured one. Precision here is what lets two consecutive answers be compared, which is the only liveness signal a stateless agent has. format:date-time on from/to is documentation only -- ProcessorJsonSchemaValidator does not set RequireFormatValidation, so it is never enforced. No pattern is added either: unlike a hand-authored payload field, these values come from this processor's own serializer writing DateTimeOffset, so the only way they could be malformed is a bug in code we already test; the actual guarantee is the serializer, not this schema.\"\n    },\n    \"narrative\": { \"type\": \"string\", \"minLength\": 1 },\n    \"evidence\": {\n      \"type\": \"array\",\n      \"minItems\": 1,\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"panelId\": { \"type\": \"string\", \"minLength\": 1 },\n          \"layer\": { \"type\": \"string\", \"minLength\": 1 },\n          \"label\": { \"type\": \"string\", \"minLength\": 1 },\n          \"value\": { \"type\": \"string\" }\n        },\n        \"required\": [\"panelId\", \"layer\", \"label\", \"value\"],\n        \"additionalProperties\": false\n      }\n    },\n    \"ruledOut\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"hypothesis\": { \"type\": \"string\", \"minLength\": 1 },\n          \"disconfirmingCriterion\": { \"type\": \"string\", \"minLength\": 1 },\n          \"whatWasSeen\": { \"type\": \"string\", \"minLength\": 1 }\n        },\n        \"required\": [\"hypothesis\", \"disconfirmingCriterion\", \"whatWasSeen\"],\n        \"additionalProperties\": false\n      }\n    },\n    \"trace\": {\n      \"type\": \"array\",\n      \"minItems\": 1,\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"ordinal\": { \"type\": \"integer\", \"minimum\": 1 },\n          \"panelId\": { \"type\": \"string\", \"minLength\": 1 },\n          \"dataReturned\": { \"type\": \"boolean\" }\n        },\n        \"required\": [\"ordinal\", \"panelId\", \"dataReturned\"],\n        \"additionalProperties\": false\n      },\n      \"description\": \"How a reader tells 'checked and it was clean' from 'never looked'. Without it a wrong conclusion is unauditable.\"\n    },\n    \"promptHash\": { \"type\": \"string\", \"minLength\": 1 }\n  },\n  \"required\": [\"verdict\", \"window\", \"narrative\", \"evidence\", \"ruledOut\", \"trace\", \"promptHash\"],\n  \"additionalProperties\": false\n}\n"
+  "version": "2.0.0",
+  "description": "Analyst output document v2: target, insights (each correlating two or more read panels) instead of a narrative, and usage against the budget. Quiet and Indeterminate verdicts are absent: no insight or unbelievable evidence cancels the step, a failed facility fails it.",
+  "definition": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"title\": \"Analyst finding v2\",\n  \"type\": \"object\",\n  \"properties\": {\n    \"verdict\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"Drifting\",\n        \"Notable\"\n      ],\n      \"description\": \"Quiet and Indeterminate are deliberately absent: a run that reaches no insight, or judges its evidence unbelievable, cancels the step, and one whose facilities failed fails it, so neither reaches a document.\"\n    },\n    \"target\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"workflowId\": {\n          \"type\": \"string\",\n          \"format\": \"uuid\"\n        },\n        \"name\": {\n          \"type\": [\n            \"string\",\n            \"null\"\n          ]\n        }\n      },\n      \"required\": [\n        \"workflowId\",\n        \"name\"\n      ],\n      \"additionalProperties\": false,\n      \"description\": \"The workflow investigated. name is read from L2 at export time and is null when it could not be read; workflowId is authoritative.\"\n    },\n    \"window\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"from\": {\n          \"type\": \"string\",\n          \"format\": \"date-time\"\n        },\n        \"to\": {\n          \"type\": \"string\",\n          \"format\": \"date-time\"\n        },\n        \"samplesExamined\": {\n          \"type\": \"integer\",\n          \"minimum\": 0\n        }\n      },\n      \"required\": [\n        \"from\",\n        \"to\",\n        \"samplesExamined\"\n      ],\n      \"additionalProperties\": false,\n      \"description\": \"The REALIZED window, not the configured one. Precision here is what lets two consecutive answers be compared, which is the only liveness signal a stateless agent has. format:date-time on from/to is documentation only -- ProcessorJsonSchemaValidator does not set RequireFormatValidation, so it is never enforced. No pattern is added either: unlike a hand-authored payload field, these values come from this processor's own serializer writing DateTimeOffset, so the only way they could be malformed is a bug in code we already test; the actual guarantee is the serializer, not this schema.\"\n    },\n    \"insights\": {\n      \"type\": \"array\",\n      \"minItems\": 1,\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"claim\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"why\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"panels\": {\n            \"type\": \"array\",\n            \"minItems\": 2,\n            \"uniqueItems\": true,\n            \"items\": {\n              \"type\": \"string\",\n              \"minLength\": 1\n            }\n          }\n        },\n        \"required\": [\n          \"claim\",\n          \"why\",\n          \"panels\"\n        ],\n        \"additionalProperties\": false\n      },\n      \"description\": \"What the analyst inferred, never what a panel showed. Each insight correlates at least two panels into a cause, a consequence or a contradiction no single panel shows; the readings themselves live in evidence. A run that reaches no insight reports nothing, so this is never empty.\"\n    },\n    \"evidence\": {\n      \"type\": \"array\",\n      \"minItems\": 1,\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"panelId\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"layer\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"label\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"value\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"panelId\",\n          \"layer\",\n          \"label\",\n          \"value\"\n        ],\n        \"additionalProperties\": false\n      }\n    },\n    \"ruledOut\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"hypothesis\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"disconfirmingCriterion\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"whatWasSeen\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          }\n        },\n        \"required\": [\n          \"hypothesis\",\n          \"disconfirmingCriterion\",\n          \"whatWasSeen\"\n        ],\n        \"additionalProperties\": false\n      }\n    },\n    \"trace\": {\n      \"type\": \"array\",\n      \"minItems\": 1,\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"ordinal\": {\n            \"type\": \"integer\",\n            \"minimum\": 1\n          },\n          \"panelId\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"dataReturned\": {\n            \"type\": \"boolean\"\n          }\n        },\n        \"required\": [\n          \"ordinal\",\n          \"panelId\",\n          \"dataReturned\"\n        ],\n        \"additionalProperties\": false\n      },\n      \"description\": \"How a reader tells 'checked and it was clean' from 'never looked'. Without it a wrong conclusion is unauditable.\"\n    },\n    \"usage\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"calls\": {\n          \"type\": \"integer\",\n          \"minimum\": 0\n        },\n        \"inputTokens\": {\n          \"type\": \"integer\",\n          \"minimum\": 0\n        },\n        \"outputTokens\": {\n          \"type\": \"integer\",\n          \"minimum\": 0\n        },\n        \"elapsedSeconds\": {\n          \"type\": \"integer\",\n          \"minimum\": 0\n        },\n        \"budget\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"maxIterations\": {\n              \"type\": \"integer\",\n              \"minimum\": 1\n            },\n            \"maxTokens\": {\n              \"type\": \"integer\",\n              \"minimum\": 1\n            },\n            \"wallClockSeconds\": {\n              \"type\": \"integer\",\n              \"minimum\": 1\n            }\n          },\n          \"required\": [\n            \"maxIterations\",\n            \"maxTokens\",\n            \"wallClockSeconds\"\n          ],\n          \"additionalProperties\": false\n        },\n        \"dispatch\": {\n          \"type\": [\n            \"object\",\n            \"null\"\n          ],\n          \"properties\": {\n            \"calls\": {\n              \"type\": \"integer\",\n              \"minimum\": 0\n            },\n            \"inputTokens\": {\n              \"type\": \"integer\",\n              \"minimum\": 0\n            },\n            \"outputTokens\": {\n              \"type\": \"integer\",\n              \"minimum\": 0\n            }\n          },\n          \"required\": [\n            \"calls\",\n            \"inputTokens\",\n            \"outputTokens\"\n          ],\n          \"additionalProperties\": false\n        }\n      },\n      \"required\": [\n        \"calls\",\n        \"inputTokens\",\n        \"outputTokens\",\n        \"elapsedSeconds\",\n        \"budget\",\n        \"dispatch\"\n      ],\n      \"additionalProperties\": false,\n      \"description\": \"calls/tokens/elapsedSeconds are the investigation's own spend, the thing budget limits. dispatch is everything the dispatch spent at the model, the fitness gate included, which the budget does not cover; null only where no meter is wired.\"\n    },\n    \"promptHash\": {\n      \"type\": \"string\",\n      \"minLength\": 1\n    }\n  },\n  \"required\": [\n    \"verdict\",\n    \"target\",\n    \"window\",\n    \"insights\",\n    \"evidence\",\n    \"ruledOut\",\n    \"trace\",\n    \"usage\",\n    \"promptHash\"\n  ],\n  \"additionalProperties\": false\n}\n"
 }
 ```
 
 Record the returned id as `<analyst-finding>`.
 
+This is **version 2.0.0**. Version 1.0.0 carried a free-text `narrative`; a v1 row may still exist
+on a database rebuilt from an older copy of this file, but nothing references it and nothing should.
+
 The `verdict` enum is exactly `Drifting` and `Notable`. `Quiet` and `Indeterminate` are absent on
-purpose and adding them would be a design change, not a fix: a quiet run throws
-`CancelledException` and an unanalysable one throws `FailedException`, so neither ever reaches a
-document. A verdict enum that could express "nothing happened" would give the agent a way to
-publish silence as a finding.
+purpose and adding them would be a design change, not a fix. **The step result reports whether the
+facilities worked, never what the model concluded:**
+
+- A payload, model or panel source that did not work -- or a reply that is not a valid result --
+  throws `FailedException`. A failed step.
+- A run that reached no insight, or whose model judged the evidence it got back unbelievable, throws
+  `CancelledException`. A cancelled step, with the reason in its log line. Nothing is exported.
+
+So neither ever reaches a document. A verdict enum that could express "nothing happened" would give
+the agent a way to publish silence as a finding.
+
+Three fields carry the v2 contract:
+
+- **`insights`** replaces the narrative, and is the point of the document. Each insight is a
+  `claim`, the `why` that connects it, and the `panels` it correlates -- **at least two, distinct**,
+  and every one of them must have actually been read (the processor checks the panels against its
+  own trace and refuses the finding otherwise). A reading restated, or a list of what is healthy,
+  is not an insight: the operator already has the dashboards. `minItems: 1`, because a run that
+  reaches no insight cancels rather than producing an empty document.
+- **`target`** is the workflow investigated: `workflowId` from the payload, and `name` read from L2
+  at export time -- `null` if that read fails, because a display name must never cost a finding.
+- **`usage`** is what the finding cost. `calls`, `inputTokens`, `outputTokens` and `elapsedSeconds`
+  are the investigation's own spend, which is what `budget` (copied from the payload) limits.
+  `dispatch` is everything the dispatch spent at the model, the fitness gate included -- which runs
+  before the investigation and **outside** its budget, so it is usually the larger number. Appendix D.
 
 ## Step 3 -- create the 1 processor row
 
@@ -186,7 +210,7 @@ Content-Type: application/json
   "name": "analyst",
   "version": "1.0.0",
   "description": "Reads the same Kibana and Grafana panels an operator reads, drives kimi-k3 through a five-stage investigation, and either writes a finding or says nothing. Read-only.",
-  "sourceHash": "7f126f9e355b69083ec027e1c3178c9cbece289025176bcf6e7074274b2dacb4",
+  "sourceHash": "c219666871ebdb82f7763464e0d7f386328ad574c71714112de5e356fe663889",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": "<analyst-finding>",
@@ -314,7 +338,7 @@ Content-Type: application/json
   "version": "1.0.0",
   "description": "5-minute sweep; 15m window overlaps the cadence so nothing falls in a gap",
   "stepId": "<step:analyst-monitor>",
-  "payload": "{\"targetWorkflowId\":\"1a56b3ca-e276-4815-87fa-5c2f48ab6dad\",\"windowMinutes\":15,\"prompt\":\"You are reviewing a document-processing chain. Decide whether anything in this window deserves an operator's attention tonight. Treat trust flags on panel reads as facts about the evidence, not about the system: an absent series, a partly-covered window, or a 'no data' that cannot be told apart from 'no problem' are all reasons to doubt your own reading rather than to conclude health. A single slow step is not a finding; a trend, a repeated failure, or a step-outcome mix that changed is. A dead-letter queue standing above zero is ALWAYS worth reporting, however small and however old: it is work this deployment threw away and has not dealt with, it produced no step outcome of any kind, and it will not resolve on its own. A queue missing from that panel entirely is not a queue that is empty. Read refused-messages as the other half of that number, not as a duplicate of it: dead-letter depth is a level with no attribution, refusals are events in this window scoped to this workflow, and the exception on a sample is why the message was refused. Depth above zero with no refusals in window is loss from before this window or from another workflow -- still worth reporting, but not evidence that anything is failing now; refusals in window mean this workflow is losing work now. Those two disagreeing is not a contradiction to resolve, and it is not a reason to doubt either panel: a refusal that carries no workflow id never reaches refused-messages at all, so that panel under-reports by construction and a zero on it never overrides a non-zero depth. A notParked refusal is not in any dead-letter queue -- it was redelivered, so do not tell an operator to go and look for it. run-boundaries says whether this workflow began and finished runs at all. Do NOT expect its two counts to be equal: one entry per fire against one terminal per branch end, so the healthy ratio belongs to the workflow and you cannot know it from one dispatch. The one unambiguous finding is entry above zero with terminal at zero -- the workflow is alive and nothing is completing -- and even then check drainedPolls first, because an importer that read nothing opens no lineage and correctly produces no terminal. Entry at zero means it did not fire at all. If nothing contributes, say so.\",\"panelSet\":[\"step-outcomes\",\"step-failures\",\"refused-messages\",\"run-boundaries\",\"queue-wait\",\"processor-liveness\",\"dead-letter-depth\"],\"maxIterations\":12,\"maxTokens\":400000,\"wallClockSeconds\":240}"
+  "payload": "{\"prompt\": \"You are reviewing a document-processing chain to decide whether anything in this window deserves an operator's attention tonight. Work through five stages in order. Do not begin a stage before the one before it is finished. No stage but the last may decide that something is or is not worth reporting; the earlier stages observe, judge the evidence, plan, and gather, and nothing else.\\n\\nSTAGE 1 - RESEARCH. Orient yourself before explaining anything, and do it with exactly ONE read: step-outcomes. Record what it returned - the value, how much of the window it covers, and whether it returned a series at all. Form no hypothesis during this stage: observations first, explanations later.\\n\\nRead nothing else here, and this restraint is mechanical rather than stylistic. A panel you read in this stage can never afterwards serve as a disconfirming criterion, because a criterion whose evidence is already in hand was written after the answer was known. Every panel you spend a read on now is a panel you have disqualified as evidence. step-outcomes is spent deliberately, to tell you where to look; the other six stay unread and therefore stay usable. A panel you did not read is not a panel that said nothing.\\n\\nSTAGE 2 - VALIDATE. Decide whether evidence can be believed, and never carry an observation forward until you have. This stage defines a rule you apply to EVERY observation at the moment you make it: to the stage 1 read now, and to each stage 4 read as it arrives. It is not a one-time pass over stage 1, because most of the evidence does not exist yet - classify each later read the instant you have it, before it can influence anything. Every observation, whenever it is made, falls into exactly one of these five cases, and they are exhaustive:\\n\\n(a) BELIEVABLE - the panel returned a value, it covers the window, and the value means what it says.\\n(b) DEMONSTRABLY NOTHING - the panel returned no series, and another believable observation shows the thing it measures did not happen.\\n(c) UNREADABLE ABSENCE - the panel returned no series, and you cannot tell \\\"nothing happened\\\" apart from \\\"nothing was reported\\\".\\n(d) UNREADABLE READING - the panel returned a value, but the value cannot be believed: it covers only part of the window, it is scoped to something other than what you are asking about, or its read carries a trust flag.\\n(e) DEMONSTRABLY NOT REPORTING - the panel returned no series, and another believable observation shows the thing it measures DID happen. The absence is then a fact about the instrument, not about the system.\\n\\nTreat trust flags on panel reads as facts about the evidence, not about the system. For every observation in case (c), (d) or (e) you must STOP using it as evidence about the system: you may not carry it forward, you may not read it as health, and you may not guess which way it falls. A queue missing from the dead-letter panel entirely is case (c) unless another believable observation makes it case (e); either way it is not a queue that is empty.\\n\\nSTAGE 3 - PLAN. Now, and only now, write down every hypothesis worth testing, each with its disconfirming criterion: the specific observation that would KILL that hypothesis. Fix each criterion by asking what would have to be true for the hypothesis to be false, and fix it without tailoring it to what stage 1 happened to record. Once written, do not weaken, widen or reword it; comparing it against the evidence happens in stage 5 and nowhere earlier. A hypothesis with no stated criterion that could kill it is not admissible and must be dropped here and now.\\n\\nA criterion may only name a panel you have not yet read. step-outcomes was spent in stage 1 and is therefore disqualified: it may inform which hypotheses are worth raising, but it may never be the evidence that kills one. If the only criterion you can state for a hypothesis names an already-read panel, that hypothesis is not admissible either - drop it, or find a criterion on a panel still unread.\\n\\nTwo hypotheses are always planned and never skipped:\\n\\n1. THIS DEPLOYMENT THREW WORK AWAY IN THIS WINDOW. Two things kill it. Either every queue listed on the dead-letter depth panel read zero, as a case (a) observation; or every queue above zero held the same depth from the start of the window to its end, as a case (a) observation, while refused-messages showed no parked refusal and run-boundaries showed fires finishing - then nothing was thrown away in this window and the depth is a backlog from before it. A depth that grew during the window is never killed this way, and neither a small depth nor the panel being case (c), (d) or (e) kills it.\\n2. AN INSTRUMENT THAT SHOULD REPORT IS NOT REPORTING. The only thing that kills it: every panel you read in stage 4 yielded a case (a) or case (b) observation. Scope this criterion to the unread panels only; step-outcomes is excluded from it, having been spent in stage 1.\\n\\nOther hypotheses worth planning include: a trend in step outcomes, a repeated failure, a step-outcome mix that changed, and the workflow not firing at all. A single slow step is not a hypothesis worth planning; a trend, a repeated failure, or a changed mix is.\\n\\nSTAGE 4 - EXECUTE. Gather exactly the evidence each stated criterion calls for, hypothesis by hypothesis. Classify every read against the stage 2 taxonomy as you make it, and record the case alongside the value; an unclassified reading may not be used in stage 5. Reach no conclusion here; only collect, read and classify. The rules below define what each datum means in this deployment. They are definitions of meaning, not verdicts: none of them decides that anything is worth reporting, and that decision belongs to stage 5 alone.\\n\\n- Dead-letter depth is a level with no attribution. Refused-messages are events in this window scoped to this workflow, and the exception on a sample is why the message was refused. They are two halves of one picture, not duplicates of each other.\\n- Refused-messages under-reports by construction: a refusal carrying no workflow id never reaches that panel at all. A zero on it therefore never overrides a non-zero depth, and the two disagreeing is not a contradiction to resolve nor a reason to disbelieve either panel.\\n- Because of that under-reporting, depth above zero with no refusals in window leaves the age and ownership of that work unknown. It is consistent with work lost before this window or belonging to another workflow, but does not establish it; record the age and ownership as unknown unless a case (a) observation settles them. A depth that sat flat from the start of the window to its end is such an observation for age: that work was lost before the window.\\n- Among refusals in window, a refusal whose template is a park denotes work lost now. A notParked refusal was redelivered: it denotes no loss and it sits in no dead-letter queue. Exclude notParked refusals before reading the refusal count as loss.\\n- run-boundaries: entry is the fires that entered in this window; terminal is every branch end of those fires, however far they fanned out. Terminals of fires that entered before the window are not counted. There is no fixed ratio between the two: terminals per fire follow from this workflow's graph and from how many records each fire imported, so a busy window and an idle one read very differently and both are healthy. The one unambiguous finding is entry above zero with terminal at zero - fires go out and nothing ends. Never explain that away with drainedPolls: an importer poll that finds nothing reports Cancelled, which is that fire's terminal, so a fire with no terminal is work that started and did not finish. Entry at zero means the workflow did not fire.\\n- THE GRAPH OF THIS WORKFLOW (filefetcher-archiveexpander-chain, as of 2026-10-01) decides what the business panels should show. Each record the importer reads follows one path: a good record forks at sk-normalizer-sample into two branches that both end at split-exporter, so it ends twice; a record that fails at any step goes to record-outcome and then export-outcome and ends once; a record that is cancelled (its artist is not on the whitelist) ends once, where it was cancelled. An importer poll that reads nothing ends once, as Cancelled.\\n- From that graph: run-boundaries terminal, minus step-outcomes Failed, minus step-outcomes Cancelled, is twice the number of good records, so it is even and not negative. A few either way can come from runs that straddle the window edges; a larger shortfall is branches that started and did not end.\\n- From that graph: step-outcomes Completed is not a success rate. A good record contributes eleven Completed records, because the steps after the fork run twice, and every failure adds two more in record-outcome and export-outcome, so the Completed share moves with the mix of records, not with health.\\n- The graph is the definition as it stands now. A run uses the definition from its workflow's last start, so a recent edit can put the graph ahead of the run. What a step does inside it, such as which step can cancel and why, is not in the graph.\\n\\nSTAGE 5 - VERIFY. Judge each hypothesis from stage 3 against the disconfirming criterion you stated for it there, not against a criterion you have since adjusted. A hypothesis whose criterion was met is dead: say so and drop it. A surviving hypothesis is reportable only if every observation it rests on was case (a), with one exception: the instrumentation hypothesis is reportable on case (e) evidence, because a proven reporting failure is what that hypothesis is about. A hypothesis that survives only on case (c) or case (d) evidence is not a finding and contributes nothing.\\n\\nA surviving hypothesis becomes a finding only as an insight: an inference that correlates at least two panels into a cause, a consequence, or a contradiction that no single panel shows. A reading restated is not an insight, and neither is a list of what is healthy - the operator already has the dashboards. If what survives cannot be correlated into an insight, report no finding.\\n\\nYou must be able to end here with nothing. If every hypothesis is dead, then nothing contributes: say so plainly and report no finding. Concluding that the window is quiet is a valid and expected result, not a failure to find something.\", \"panelSet\": [\"step-outcomes\", \"step-failures\", \"refused-messages\", \"run-boundaries\", \"queue-wait\", \"processor-liveness\", \"dead-letter-depth\"], \"maxTokens\": 1500000, \"maxIterations\": 12, \"windowMinutes\": 15, \"targetWorkflowId\": \"1a56b3ca-e276-4815-87fa-5c2f48ab6dad\", \"wallClockSeconds\": 240}"
 }
 ```
 
@@ -324,18 +348,27 @@ The `targetWorkflowId` in that payload is the live id this file was written agai
 with `<target-workflow>`.** If you leave it, and that row does not exist on your database, you get
 no error from anywhere -- see C1.
 
+**The prompt is `tools/analyst-prompt-v9.txt`**, verbatim. If that file is on the machine you are
+rebuilding on, prefer generating the payload from it over trusting the escaping above. Every prompt
+edit changes the `promptHash` the fitness gate (the BIT) caches on, so the first dispatch after an
+edit -- and the first on every freshly started pod -- pays for the gate again. Appendix D.
+
 Four numbers in that payload are chosen against ceilings that are compiled, not configured:
 
-- `wallClockSeconds: 240` sits deliberately under the 300-second cron interval, so one run cannot
-  still be going when the next fires. Raise the cron interval before raising this.
-- `maxTokens: 400000` sits well under the compiled `MaxTokenBudget` of `10_000_000`
-  (`AnalystProcessor.cs:53`), which is itself paired with the manifest's `384Mi` memory limit
-  rather than being a free number -- one dispatch accumulates its whole transcript in memory. A
-  payload above the ceiling is refused by the processor, not by a gate.
+- `wallClockSeconds: 240` bounds the **investigation only**. The fitness gate runs before it and
+  outside it, and on a fresh pod it has taken about nine minutes on its own, so a whole dispatch
+  observed 10-13 minutes on 2026-10-01. That is why the cron is thirty minutes apart, not five: a
+  shorter interval can have the next fire arrive while the last is still running.
+- `maxTokens: 1500000` sits under the compiled `MaxTokenBudget` of `10_000_000`
+  (`AnalystProcessor.cs`), which is itself paired with the manifest's `384Mi` memory limit rather
+  than being a free number -- one dispatch accumulates its whole transcript in memory. A payload
+  above the ceiling is refused by the processor, not by a gate.
 - `maxIterations: 12` is the ceiling on model turns. Exhaustion with no terminal tool call is a
   **failed** step, never a quiet one.
-- `windowMinutes: 15` overlaps the five-minute cadence on purpose. The agent is stateless across
-  dispatches, so this window is the only history it has.
+- `windowMinutes: 15` is the window each dispatch reads, measured back from when the investigation
+  starts -- not from the fire, which the gate can precede by minutes. The agent is stateless across
+  dispatches, so this window is the only history it has; with fires thirty minutes apart, half of
+  each half-hour is read by nothing.
 
 `panelSet` is the read boundary: the tool surface handed to the model *is* the panel list. The
 seven named there are a subset of the nine in `PanelRegistry` -- `produce-duration` and
@@ -377,7 +410,7 @@ Content-Type: application/json
 {
   "name": "analyst-monitor",
   "version": "1.0.0",
-  "description": "Analyst -> KafkaExporter. Investigates filefetcher-archiveexpander-chain every five minutes and publishes any finding to skp-analyst-findings.",
+  "description": "Analyst -> KafkaExporter. Investigates filefetcher-archiveexpander-chain every thirty minutes and publishes any finding to skp-analyst-findings.",
   "entryStepIds": [
     "<step:analyst-monitor>"
   ],
@@ -386,7 +419,7 @@ Content-Type: application/json
     "<asg:analyst-finding-export-cfg>"
   ],
   "cacheIds": null,
-  "cronExpression": "0 */5 * * * *"
+  "cronExpression": "0 9,39 * * * *"
 }
 ```
 
@@ -395,16 +428,16 @@ Record the returned id as `<workflow>`.
 `cacheIds` is `null`: this graph projects no dictionary into L2. The sibling chain's cache is not
 shared with it and must not be named here.
 
-**`cronExpression` is six-field, seconds first.** `0 */5 * * * *` is second `0` of every fifth
-minute. The validator accepts 5- or 6-field expressions and picks the format **by field count**,
-which is what makes this field one keystroke from a disaster: `*/5 * * * * *` is also six fields
-and means every 5 **seconds** -- twelve paid investigations a minute. Count the fields before you
+**`cronExpression` is six-field, seconds first.** `0 9,39 * * * *` is second `0` of minutes 9 and
+39 of every hour. The validator accepts 5- or 6-field expressions and picks the format **by field count**,
+which is what makes this field one keystroke from a disaster: `*/9 * * * * *` is also six fields
+and means every 9 **seconds** -- several paid investigations a minute. Count the fields before you
 send, and count them again after any edit.
 
 ## Step 8 -- start the workflow
 
 **Stop. Read Appendix D.** Creating the rows above runs nothing and costs nothing. This request is
-what begins spending money every five minutes, unattended, until someone issues the stop.
+what begins spending money twice an hour, unattended, until someone issues the stop.
 
 ```http
 POST /api/v1/orchestration/start
@@ -449,15 +482,13 @@ dotnet build SK_P.sln -c Release | grep SourceHash
 ```
 
 **Provenance, and a worked example of this going wrong.** The value in step 3 was re-derived on
-**2026-09-28** from a `Release` build of this repo, and both the `Debug` and `Release` builds agree
-on it. It is **not** the value in `docs/task-16-analyst-monitor.http`, which this document is
-otherwise derived from: that file was generated on 2026-09-26 and carries
-`29ea6590a4a9221647b34059081f87bd8bc5d483bc3949168739c5af1f5595c1`, read out of the built image at
-the time and correct then. Four commits touched `src/Processor.Analyst/` afterwards -- among them
-the refusals panel, the run-boundary panel and the panel-drift rule -- and the fold moved with them.
-Nothing announced that. The `.http` file still returns `201` on every request, its counts still
-match, and the graph still starts, because **no gate reads a `sourceHash`** -- only a processor
-does, by waiting. If you are rebuilding from that file rather than this one, re-derive the hash
+**2026-10-01**, when the finding contract moved to v2, and agreed two independent ways: it is what the
+live row holds, and it is what the fold in `SourceHash.targets` computes over `src/Processor.Analyst`.
+It has moved four times in a week -- `29ea6590...` (2026-09-26, in `docs/task-16-analyst-monitor.http`),
+`7f126f9e...` (2026-09-28), `28bbcd10...` and now `c2196668...` -- and nothing announced any of it.
+Every request in this file still returns `201` with a stale value, its counts still match, and the
+graph still starts, because **no gate reads a `sourceHash`** -- only a processor does, by waiting. If
+you are rebuilding from an older copy of this file or from that `.http` file, re-derive the hash
 before you trust it.
 
 ## Appendix B -- verifying the rebuild
@@ -478,7 +509,7 @@ confirm:
 - `analyst-finding-export` has an empty `nextStepIds`
 - both steps have exactly one assignment pointing at them
 - `analyst-finding-export`'s `processorId` is the *existing* `kafka-exporter` row, not a new one:
-  there must still be exactly one processor row whose `sourceHash` is `ba7df852...`
+  there must still be exactly one processor row whose `sourceHash` is `56c32dfb...`
 - the workflow's `cacheIds` is empty and its `cronExpression` has **six** fields
 
 **B3. The payload names the right workflow.** This is the check no gate performs. Read the
@@ -502,7 +533,7 @@ workflow.** The one defect in this file with no error anywhere. `targetWorkflowI
 query the agent issues; point it at a workflow with no records in the window and every panel reads
 empty, which the agent correctly reports as nothing to say, which is a `CancelledException`, which
 is a cancelled step, which under `entryCondition: 1` publishes nothing. No error, no document, no
-finding, a bill every five minutes, and a monitor that looks healthy in every panel an operator
+finding, a bill every half hour, and a monitor that looks healthy in every panel an operator
 would check.
 
 Three ways to write it wrong, none of them caught:
@@ -525,8 +556,11 @@ B3 is the only check that catches any of them.
 evidence is its step outcome in Elasticsearch and its log line; a **cancelled** run's evidence is
 thinner still, because a cancel is not a failure and is logged at Information while failures are
 Warnings. A log query filtered to Warning and above shows a clean system that is reporting nothing.
-When in doubt, count fires against findings: the cron is deterministic, so 288 fires a day against
-N documents on `skp-analyst-findings` is the whole story.
+A cancel does carry its reason: the Analyst pod logs `the author cancelled the branch: nothing to
+report: ...` with the model's own account of what it killed and why, and an evidence-unbelievable
+cancel says `the evidence could not be believed: ...`. When in doubt, count fires against findings:
+the cron is deterministic, so 48 fires a day against N documents on `skp-analyst-findings` is the
+whole story.
 
 **C3. `422` naming a count of unhealthy processors.** The liveness gate reads per-replica
 registrations out of Redis and requires at least one present, healthy and fresh replica for **every**
@@ -551,13 +585,13 @@ it is an array of strings and passes -- and is caught by the processor instead, 
 naming the unknown ids.
 
 **C6. `409` on the processor create.** You created `kafka-exporter` a second time instead of finding
-the row that already holds `ba7df852...`. `sourceHash` is unique among rows with no `instanceId`.
+the row that already holds `56c32dfb...`. `sourceHash` is unique among rows with no `instanceId`.
 Delete the duplicate and re-point the step; do not paper over it with a second row, because the
 schema-edge gate compares ids and two byte-identical rows are two different rows.
 
 **C7. The workflow starts, the cron is armed, and it never fires.** A workflow needs a cron **and**
 an explicit start; with only one of the two the orchestrator logs nothing and looks broken. If step
-8 returned `202` and nothing has fired after five minutes, re-read the `cronExpression` field count:
+8 returned `202` and nothing has fired by the next `:09` or `:39`, re-read the `cronExpression` field count:
 a 5-field expression is accepted and means something different from what you meant.
 
 **C8. Every run fails the moment it starts thinking.** Non-2xx from the model API becomes
@@ -575,20 +609,26 @@ finding changed. That hash is what makes a prompt change confirmable at all.
 
 Read this before step 8.
 
-Every five minutes is **288 investigations a day**. Thinking is always on and billed as output. A
-modest 30k-in/3k-out run is a few cents, which is single-digit dollars a day and low hundreds a
-month; a heavier 100k-in/10k-out run is several times that. Those figures move with the vendor's
-pricing and are not worth reproducing precisely in a document that will be read later -- derive them
-from the current rate and the token counts the findings report.
+Twice an hour is **48 dispatches a day**. Thinking is always on and billed as output. Each finding
+reports its own cost in `usage` -- read `usage.dispatch`, not the investigation's own figures, because
+the fitness gate is outside the budget and is often most of the bill. On 2026-10-01 single dispatches
+ran 364k-551k tokens over 27-30 model calls; the largest of those included a fresh gate on a pod that
+had just restarted. A dispatch that cancels exports nothing, so its cost is only in the pod's log
+line `the dispatch spent N call(s), ...`. Prices move with the vendor and are not worth reproducing
+here -- derive them from the current rate and those counts.
 
-**The cron is by far the biggest lever.** `0 */30 * * * *` is 6x cheaper than the interval in step 7.
-`0 0 * * * *` is 12x. Nothing about the graph changes; you are buying resolution, and a monitor that
-reports every thirty minutes is still a monitor. Decide the interval on what an operator will
-actually act on overnight, then set it once -- not the other way round.
+**The gate is paid once per prompt per pod.** Its verdict is cached in memory and dies with the
+process, so every rollout, every pod restart and every prompt edit pays it again, on each replica.
+Batch prompt edits, and do not restart the Analyst to "refresh" anything.
 
-Two smaller levers, both already set conservatively in section 6.1: `maxIterations` bounds turns and
-`maxTokens` bounds accumulated tokens per dispatch. Both are ceilings on the worst case, not
-targets, so lowering them makes runs fail rather than making them cheap. Change the cron.
+**The cron is still the biggest lever.** `0 9 * * * *` is half the cost of the interval in step 7.
+Nothing about the graph changes; you are buying resolution, and a monitor that reports hourly is
+still a monitor. Decide the interval on what an operator will actually act on overnight, then set it
+once -- not the other way round.
+
+Two smaller levers, both set in section 6.1: `maxIterations` bounds turns and `maxTokens` bounds
+accumulated tokens per investigation. Both are ceilings on the worst case, not targets, so lowering
+them makes runs fail rather than making them cheap. Change the cron.
 
 **Before funding the account, run it broken once.** With a spent key every fire ends `Failed`
 loudly, which costs nothing and proves the failure path reaches `Failed` instead of silence. That is

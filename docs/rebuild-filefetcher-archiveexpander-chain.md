@@ -20,8 +20,8 @@ Everything you need is in this file. Follow it top to bottom.
 
 ## The graph you are building
 
-Ten steps, eight processors, ten schemas, one cache, one workflow, fired by cron every 30 seconds
-at `:05` and `:35`.
+Ten steps, eight processors, ten schemas, one cache, one workflow, fired by cron once a minute,
+at second `:00`.
 
 The cache is the one row that is not part of the graph and still belongs to it: a named
 dictionary the workflow references, projected into L2 when the workflow starts and deleted when
@@ -297,7 +297,7 @@ Content-Type: application/json
   "name": "kafka-importer",
   "version": "2.2.0",
   "description": "reads a topic, one lineage per record; broker from Kafka__BrokerList, not the payload",
-  "sourceHash": "dcd83ec93cfada86eaf477a43a565914de8112fab3d62d54c628f417de56ac62",
+  "sourceHash": "f635203b158ba92dd25689aa84b071b27cd9a644a39e0646a746bba174b1e680",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": "<file-locator>",
@@ -317,7 +317,7 @@ Content-Type: application/json
   "name": "file-fetcher",
   "version": "1.0.0",
   "description": "path in, file bytes plus identity out",
-  "sourceHash": "8fa4fe0b9c527cb7f50ab79a91bd2d07769cc2569277de8583333ec56c749f22",
+  "sourceHash": "023a4e2836621088ba2ac69e64a5ba972b24b8228d5b3e0d95afd0df19a4b1eb",
   "instanceId": null,
   "inputSchemaId": "<file-locator>",
   "outputSchemaId": "<file-envelope>",
@@ -337,7 +337,7 @@ Content-Type: application/json
   "name": "outcome-recorder",
   "version": "1.0.0",
   "description": "records that a step reached a terminal outcome and where to look; carries no reason and no payload",
-  "sourceHash": "f772623e05972790328e14bd58b30339a5a84abb10717e751bd10f9f480af63d",
+  "sourceHash": "34daca973e15ae4091f50af0020c1eeb2edd20e57b094b364f8b446ec9f743c6",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": null,
@@ -357,7 +357,7 @@ Content-Type: application/json
   "name": "archive-expander",
   "version": "1.0.0",
   "description": "envelope in, structured document out",
-  "sourceHash": "cfefe29785ad7a7089e7616fc2f3ffcee33e48f9909a14a11a459ab2bb070157",
+  "sourceHash": "c45b47afb177bf6cec4e8759b3fe86b98689e706e701ee5cf7f12de1897aa737",
   "instanceId": null,
   "inputSchemaId": "<file-envelope>",
   "outputSchemaId": "<archive-document>",
@@ -377,7 +377,7 @@ Content-Type: application/json
   "name": "kafka-exporter",
   "version": "1.2.0",
   "description": "produces a branch to a topic and ends the lineage; broker from Kafka__BrokerList, not the payload. Input is file-locator, the mirror of what KafkaImporter emits -- so a topic this writes is a topic an importer can read.",
-  "sourceHash": "ba7df85269267a1032838c998a926f14ac5b8be14d2472e32675cd2c62c0343c",
+  "sourceHash": "56c32dfb727f56bfc2109a122f7a20f1c49334b4e49213bec853b9e2d5ed8297",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": null,
@@ -397,7 +397,7 @@ Content-Type: application/json
   "name": "sk-normalizer",
   "version": "1.0.0",
   "description": "Applies one provider handler, named on the step payload, to the {metadata, content} tree ArchiveExpander produces, and emits a tree of the same contract. Input and output both point at the shared archive-document row: the handler changes contents, never the document's shape.",
-  "sourceHash": "8e656abb119e8af86bd75a56df8ab69ae4094eb571849c6308d8f0e5eb8f8585",
+  "sourceHash": "f4698086b369fbca344ce3554eb6c216f7975d126d3dd7a468fc3b651fb64d0a",
   "instanceId": null,
   "inputSchemaId": "<archive-document>",
   "outputSchemaId": "<archive-document>",
@@ -417,7 +417,7 @@ Content-Type: application/json
   "name": "archive-collapser",
   "version": "1.0.0",
   "description": "Packs an ArchiveExpander document back into one archive; emits the raw-file envelope",
-  "sourceHash": "57496c6e0b3bef184f1a567b17ac3636b77f67ef8214b5e1070ae6585a76d3e2",
+  "sourceHash": "ec18fdf8fac74e10d66729c472aae873d1ad353ccc48cc8f77284410772a67a3",
   "instanceId": null,
   "inputSchemaId": "<archive-document>",
   "outputSchemaId": "<file-envelope>",
@@ -437,7 +437,7 @@ Content-Type: application/json
   "name": "file-persister",
   "version": "1.0.0",
   "description": "writes the envelope's file into a configured folder and reports the absolute path; the mirror of file-fetcher",
-  "sourceHash": "7352167c645248d37626532c029ec947a0edf24e44e176dfb19243a01c34c6d2",
+  "sourceHash": "8795b78d99a1b7bfc5a13f00af4304d368d9d6aeb46f192c015c9cf14927d140",
   "instanceId": null,
   "inputSchemaId": "<file-envelope>",
   "outputSchemaId": "<file-locator>",
@@ -1064,7 +1064,7 @@ Content-Type: application/json
   "cacheIds": [
     "<cache:chain-artists>"
   ],
-  "cronExpression": "5,35 * * * * *"
+  "cronExpression": "0 * * * * *"
 }
 ```
 
@@ -1144,10 +1144,11 @@ identical sources**. That gives you two cases:
 Only the eight values change. Nothing else in step 3 depends on them.
 
 **Provenance, because this is the one section that goes stale silently.** The eight values in step 3
-were last re-derived on **2026-09-28**, and agreed two independent ways: they are what the live rows
-hold, and they are what a `Release` build of this repo prints. Seven of the eight had drifted from
-an earlier edit of this file and were wrong — which is exactly the failure this appendix warns
-about, landing on the appendix's own author. Nothing about a wrong value is visible at rebuild time:
+were last re-derived on **2026-10-01**, and agreed two independent ways: they are what the live rows
+hold, and they are what the fold in `SourceHash.targets` computes over each processor's `src/`
+project. All eight had drifted since the previous re-derivation on 2026-09-28, which had itself
+found seven of eight wrong — this is exactly the failure this appendix warns about, landing twice
+on the appendix's own authors. Nothing about a wrong value is visible at rebuild time:
 every request in step 3 still returns `201`, every count in B1 still matches, and the graph still
 starts, because no gate reads a `sourceHash` — only a processor does, by waiting. To re-derive them
 without trusting this file, build the solution and read the line each processor project prints:
