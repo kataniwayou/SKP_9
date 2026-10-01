@@ -89,9 +89,14 @@ What goes in, for `filefetcher-archiveexpander-chain` (from the analysis, §1 to
   record), the failure sink (`record-outcome` then `export-outcome`, once per Failed), and that a
   cancel ends at the step that cancelled. Plus the importer: one Completed per record, and one
   Cancelled per empty poll.
-- **The expectations they give, as cross-checks between panels:** post-fork steps at 2× alphabeta; the
-  sink equal to the sum of Failed; terminal = 2G + F + C + E; Unlisted equal to the sample
-  normalizer's Cancelled; the Completed share of the outcome pie is not a success rate.
+- **The expectation they give, limited to what the Analyst's panels show.** Its `step-outcomes`
+  panel returns totals by result, not per step, and it has no whitelist panel, so the per-step checks
+  in the analysis (post-fork at 2× alphabeta, Unlisted equal to the sample normalizer's Cancelled)
+  are operator-only. The one check its panels support: **run-boundaries terminal − step-outcomes
+  Failed − step-outcomes Cancelled = 2 × good records**, so it is even and not negative, give or take
+  runs that straddle the window edges. Verified on all three analysis windows (225 − 111 − 40 = 74;
+  1069 − 0 − 69 = 1000; 60 − 0 − 60 = 0). Plus: the Completed share of `step-outcomes` is not a
+  success rate (11 Completed per good record, 2 more per failure).
 - **Its limits:** the graph is the current definition and the run may still be on an older one; the
   handler facts (only the sample normalizer has a whitelist; triple fails before the lookup) are
   measured, not derivable from the rows.
@@ -124,8 +129,9 @@ in the prompt.
 **The live prompt** (`analyst-monitor-cfg` payload) has its run-boundaries line replaced to match, and
 gains the §4 graph section. The five-stage structure is not touched.
 
-`tools/analyst-prompt-v7.txt` is replaced with the live prompt after the update. It is stale today: it
-differs from the live payload on the run-boundaries line.
+`tools/analyst-prompt-v7.txt` is corrected to the live prompt as it stands before this change (it
+differs today on the run-boundaries line), and the new prompt is `tools/analyst-prompt-v8.txt`, so
+the files keep one version each.
 
 ## 6. Rehearsal fixture
 
@@ -153,4 +159,5 @@ boundaries. That limitation is accepted.
 5. Watch the next fire: the BIT runs again on the new prompt hash (structure, judge, rehearsal). The
    judge passes the same prompt 50 to 90 percent of the time, so a single UNFIT is not a verdict;
    the next roll re-runs it.
-6. Sync `tools/analyst-prompt-v7.txt`; add the changed files to the offline ship delta.
+6. Commit `tools/analyst-prompt-v7.txt` (corrected) and `tools/analyst-prompt-v8.txt` (published);
+   add the changed files to the offline ship delta.
