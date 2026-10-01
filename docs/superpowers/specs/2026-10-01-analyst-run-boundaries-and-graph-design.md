@@ -1,7 +1,12 @@
-# Spec: Analyst run boundaries follow the operator pie, and the Analyst reads the workflow graph
+# Spec: Analyst run boundaries follow the operator pie, and the Analyst reads panels through the graph
 
-Status: draft 2026-10-01, for approval. Extends `2026-09-24-analyst-processor-design.md` §7 (the panel
-tool surface). Nothing here is implemented.
+Status: draft 2026-10-01, revised the same day, for approval. Extends
+`2026-09-24-analyst-processor-design.md` §7 (the panel tool surface). Nothing here is implemented.
+The graph analysis it rests on is `docs/testing/kibana-panels-through-the-graph.md`.
+
+Revision: the first draft added a `workflow-graph` panel backed by BaseApi. That was not the intent
+and is withdrawn. The graph is knowledge the Analyst needs in order to read the panels, not another
+panel to read (§4).
 
 ## 1. Why
 
@@ -21,7 +26,12 @@ analyst design:
 2026-10-01: about 1:1 idle (60 entry / 59 terminal), 5 : 90 with the approved feed at a 60s cron. What
 is constant is the number of terminals **per input record**, and only the workflow graph says what
 that is. An agent taught a fixed ratio would report a load change as a fault, and it has no way to
-derive the right expectation, because the graph is not among its panels.
+derive the right expectation, because it is never told the graph.
+
+The same holds for every panel, not only this one. The analysis shows that each board's numbers are a
+function of the graph and of what each fire imported, exactly, across three verified windows: the
+fork doubles everything after `sk-normalizer-sample`, the failure sink repeats every Failed twice as
+Completed, and a cancel ends where it happens.
 
 ## 2. Terminals follow from the graph
 
@@ -68,76 +78,77 @@ size cap is flagged `WindowFullyCovered = false`, never silently truncated.
 
 The run-position key and values stay substituted from `RunPositions` (`WithRunPositions`), as today.
 
-## 4. A `workflow-graph` panel
+## 4. The graph reaches the Analyst through its prompt
 
-A new panel, `workflow-graph`, layer `business`. The operator already sees the graph: it is the
-published workflow diagram (`kibana/publish-diagram.py`, served at `/api/v1/workflows/{id}.svg`).
-This gives the agent the same view, as data.
+**No new panel and no new panel kind.** The Analyst needs the graph to read the panels, not as one
+more reading. Each `analyst-monitor` assignment already targets one workflow (`targetWorkflowId`), and
+its prompt is per assignment, so the graph facts for that workflow belong in the prompt.
 
-- **New kind `PanelKind.BaseApi`**, routed by `LivePanelReader` to a new `BaseApiPanelSource`. It
-  issues GET requests only, to `/api/v1/workflows/{id}`, `/steps` and `/processors`. A new
-  `Analyst__Panels__BaseApiBaseUrl` setting (`http://baseapi-service:8080`) is added to
-  `k8s/43-processor-analyst.yaml`. The panel's `Query` holds no query; the source builds the reading
-  from the target workflow id.
-- **The reading** (`ValueJson`): the workflow name and cron, then, for every step reachable from the
-  entry steps (breadth-first over `nextStepIds`, as `read_graph()` walks it), its name, processor
-  name, `entryCondition`, next-step names, and its terminal outcomes per §2. Plus the derived
-  per-record expectation where the graph fixes it: the fork points, and the terminals per record
-  outcome (good, failed, cancelled).
-- **Trust:** a graph is a definition, not a series. `SeriesPresent = true` when the workflow
-  resolves, `WindowFullyCovered = true` (the graph has no time axis), `NoDataDistinguishable = true`.
-  An unknown workflow or unreachable BaseApi throws `PanelUnavailableException`, like any other
-  source.
-- **A caveat the description must state:** the graph is the definition **as it is now**. A running
-  workflow uses the definition from its last start (spec `2026-09-30-l2-start-driven-projection`
-  §1.5), so an edit since then makes the graph ahead of the run. The rows also carry wiring, not
-  meaning: which step can cancel, and why, lives in the handlers (see the header of
-  `publish-diagram.py`).
-- `workflow-graph` is added to the `analyst-monitor-cfg` panel set.
+What goes in, for `filefetcher-archiveexpander-chain` (from the analysis, §1 to §3):
+- **The three shapes:** the fork at `sk-normalizer-sample` (everything after it runs twice per good
+  record), the failure sink (`record-outcome` then `export-outcome`, once per Failed), and that a
+  cancel ends at the step that cancelled. Plus the importer: one Completed per record, and one
+  Cancelled per empty poll.
+- **The expectations they give, as cross-checks between panels:** post-fork steps at 2× alphabeta; the
+  sink equal to the sum of Failed; terminal = 2G + F + C + E; Unlisted equal to the sample
+  normalizer's Cancelled; the Completed share of the outcome pie is not a success rate.
+- **Its limits:** the graph is the current definition and the run may still be on an older one; the
+  handler facts (only the sample normalizer has a whitelist; triple fails before the lookup) are
+  measured, not derivable from the rows.
+
+These facts are **evidence about meaning, not observations of the window**, so they do not conflict
+with the five-stage rule that a criterion may only name an unread panel. A criterion can be written as
+"`split-exporter` is not 2× `sk-normalizer-alphabeta`", which names panels, not the prompt.
+
+**Keeping them true.** The graph lives in BaseApi; the prompt copy can drift when the workflow is
+edited. The prompt states the date and the graph it was written against, and a workflow edit that
+changes the graph's shape requires the prompt to be revised with it. `publish-diagram.py` already
+reads the live graph; extending it to print these facts is a possible follow-up, not part of this
+change.
 
 ## 5. Description and prompt
 
 **`run-boundaries` description** is rewritten to:
 - define entry and terminal as in §3;
-- state that no fixed ratio exists, and that expected terminals per fire come from `workflow-graph`
-  (§2) and the importer's record count;
+- state that no fixed ratio exists: expected terminals per fire follow from the workflow's graph (§2)
+  and what each fire imported, which the prompt describes for the target workflow;
 - keep the zero rules: entry above zero with terminal at zero is the one unambiguous finding; an
   empty poll ends as Cancelled and is that fire's terminal; entry at zero means the workflow did not
   fire;
 - drop the claim that the operator reads "the same two counts" as records, and the "1:2 / 1:6"
   examples.
 
+The description stays generic (it is compiled and shared by every workflow). Workflow specifics stay
+in the prompt.
+
 **The live prompt** (`analyst-monitor-cfg` payload) has its run-boundaries line replaced to match, and
-gains one line telling the agent that `workflow-graph` is the reference for reading `step-outcomes`
-volumes and `run-boundaries` ratios. The five-stage structure is not touched: `workflow-graph` is one
-more unread panel the plan stage may name.
+gains the §4 graph section. The five-stage structure is not touched.
 
 `tools/analyst-prompt-v7.txt` is replaced with the live prompt after the update. It is stale today: it
 differs from the live payload on the run-boundaries line.
 
 ## 6. Rehearsal fixture
 
-Only kept valid, not extended (the user's decision, 2026-10-01). `RehearsalPanels` must serve every
-panel in the set, so it gains a `workflow-graph` fixture: a small fixed graph consistent with its
-existing clean `run-boundaries` reading (`entry 30 / terminal 30`, `drainedPolls 0`), for example a
-linear graph with one terminal per record. No new scenario is added, so the BIT still cannot catch a
-wrong reading of run boundaries. That limitation is accepted.
+Unchanged (the user's decision, 2026-10-01). Its clean `run-boundaries` reading (`entry 30 /
+terminal 30`, `drainedPolls 0`) is still a valid quiet window under the new rule: 30 empty polls, one
+terminal each. No new scenario is added, so the BIT still cannot catch a wrong reading of run
+boundaries. That limitation is accepted.
 
 ## 7. Out of scope
 
 - The BIT's exam, judge and scenarios (§8 of the analyst design).
 - The operator dashboard. It already has the new pie.
+- Any new panel or panel kind.
 - The AlphaBeta branch persisting a bare `track01.xml` under one shared name. That is a separate
   finding, not touched here.
 
 ## 8. Rollout
 
-1. Code: `PanelKind.BaseApi`, `BaseApiPanelSource`, the `run-boundaries` query and description, the
-   `workflow-graph` definition, the rehearsal fixture; unit tests for the terminal rule (§2) and for
-   the join's size cap (§3).
+1. Code: the `run-boundaries` query and description in `PanelRegistry`; unit tests for the join's
+   size cap (§3).
 2. Hermetic suite: 0 failed, exit 0.
 3. Rebuild the Analyst image, `kind load`, repoint its SourceHash, roll the deployment.
-4. PUT `analyst-monitor-cfg` through BaseApi (new prompt and panel set), then stop and start
+4. PUT `analyst-monitor-cfg` through BaseApi with the new prompt, then stop and start
    `analyst-monitor` so the start projects the payload.
 5. Watch the next fire: the BIT runs again on the new prompt hash (structure, judge, rehearsal). The
    judge passes the same prompt 50 to 90 percent of the time, so a single UNFIT is not a verdict;
