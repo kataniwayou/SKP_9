@@ -19,10 +19,15 @@ internal sealed class RehearsalPanels : IPanelReader
     internal static RehearsalPanels Quiet() => new(deadLetterDepth: 0);
 
     /// <summary>
-    /// The same window with one unambiguous fault: a dead-letter queue holding work this deployment
-    /// threw away. Chosen because the deployed prompt states plainly that a non-zero depth is
-    /// reportable, so a prompt that stays silent here has contradicted its own instructions rather
-    /// than merely exercised judgement.
+    /// The same window with one unambiguous fault: work thrown away DURING the window. A dead-letter
+    /// queue grows from 0 to 17 while 17 parked refusals land in the same window, so two panels agree
+    /// on the same loss and the insight is there to be drawn.
+    /// <para>
+    /// <b>Not a standing depth.</b> A depth that sits flat across the window with no refusals is an
+    /// old backlog, which the prompt is allowed to rule out from other panels; planting one here
+    /// would fail every prompt that reasons correctly. Growth matched by parked refusals cannot be
+    /// explained away, so a prompt that stays silent here has missed real loss.
+    /// </para>
     /// </summary>
     internal static RehearsalPanels HoldingDiscardedWork() => new(deadLetterDepth: 17);
 
@@ -41,7 +46,12 @@ internal sealed class RehearsalPanels : IPanelReader
             ["step-failures"] = Clean("step-failures", "business",
                 """{"failed":0,"samples":[]}""", 0),
             ["refused-messages"] = Clean("refused-messages", "business",
-                """{"refusals":0,"samples":[]}""", 0),
+                deadLetterDepth == 0
+                    ? """{"refusals":0,"parked":0,"notParked":0,"samples":[]}"""
+                    : "{\"refusals\":" + deadLetterDepth + ",\"parked\":" + deadLetterDepth
+                      + ",\"notParked\":0,\"samples\":[{\"template\":\"the delivery was parked\","
+                      + "\"exception\":\"the step's input could not be read from L2\"}]}",
+                deadLetterDepth),
             ["run-boundaries"] = Clean("run-boundaries", "business",
                 """{"entry":30,"terminal":30,"drainedPolls":0}""", 60),
             ["queue-wait"] = Clean("queue-wait", "ops",
@@ -49,7 +59,8 @@ internal sealed class RehearsalPanels : IPanelReader
             ["processor-liveness"] = Clean("processor-liveness", "ops",
                 """{"readyRatio":1.0,"replicas":2}""", 60),
             ["dead-letter-depth"] = Clean("dead-letter-depth", "ops",
-                "{\"queues\":{\"processor-a.dead\":" + deadLetterDepth + ",\"processor-b.dead\":0}}", 60),
+                "{\"queues\":{\"processor-a.dead\":{\"windowStart\":0,\"windowEnd\":" + deadLetterDepth
+                + "},\"processor-b.dead\":{\"windowStart\":0,\"windowEnd\":0}}}", 60),
         };
     }
 

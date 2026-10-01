@@ -88,7 +88,8 @@ public sealed class TokenMeterTests
         var processor = new AnalystProcessor(
             new PreflightBit(model, new BitCache(4)),
             new InvestigationLoop(model, new FixturePanelReader()
-                    .Reading("queue-wait", "ops", """{"max":4}""", samples: 91),
+                    .Reading("queue-wait", "ops", """{"max":4}""", samples: 91)
+                    .Reading("step-outcomes", "business", """{"Completed":12}""", samples: 12),
                 new FakeTimeProvider(), NullLogger<InvestigationLoop>.Instance),
             logger,
             meter);
@@ -99,7 +100,7 @@ public sealed class TokenMeterTests
                     TargetWorkflowId: Guid.NewGuid(),
                     WindowMinutes: 15,
                     Prompt: AnalystProcessorTests.StagedPrompt,
-                    PanelSet: ["queue-wait"],
+                    PanelSet: ["queue-wait", "step-outcomes"],
                     MaxIterations: 12,
                     MaxTokens: 1_000_000,
                     WallClockSeconds: 240),

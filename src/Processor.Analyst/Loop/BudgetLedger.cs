@@ -11,9 +11,13 @@ namespace Processor.Analyst.Loop;
 /// </summary>
 internal sealed class BudgetLedger(int maxIterations, int maxTokens, TimeSpan wallClock, TimeProvider clock)
 {
-    private readonly DateTimeOffset _deadline = clock.GetUtcNow() + wallClock;
+    private readonly DateTimeOffset _started = clock.GetUtcNow();
     private int _iterations;
     private int _tokens;
+    private long _input;
+    private long _output;
+
+    private DateTimeOffset Deadline => _started + wallClock;
 
     internal string? Why { get; private set; }
 
@@ -22,7 +26,7 @@ internal sealed class BudgetLedger(int maxIterations, int maxTokens, TimeSpan wa
     /// <summary>Called before each model turn. Returns false when a ceiling is already reached.</summary>
     internal bool BeginTurn()
     {
-        if (clock.GetUtcNow() >= _deadline)
+        if (clock.GetUtcNow() >= Deadline)
         {
             Why = $"wall clock exhausted after {wallClock.TotalSeconds:F0}s";
             return false;
@@ -42,10 +46,19 @@ internal sealed class BudgetLedger(int maxIterations, int maxTokens, TimeSpan wa
     internal void RecordUsage(int input, int output)
     {
         _tokens += input + output;
+        _input += input;
+        _output += output;
 
         if (_tokens > maxTokens && Why is null)
         {
             Why = $"token ceiling of {maxTokens} exceeded ({_tokens} used)";
         }
     }
+
+    /// <summary>
+    /// What the investigation spent so far: the turns begun, the tokens recorded and the time since
+    /// the ledger opened. Read once, when a finding is assembled, so it reaches the document.
+    /// </summary>
+    internal (int Calls, long InputTokens, long OutputTokens, TimeSpan Elapsed) Spent
+        => (_iterations, _input, _output, clock.GetUtcNow() - _started);
 }

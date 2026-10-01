@@ -68,14 +68,15 @@ internal sealed class GroundTruthRehearsal(
         if (fault is LoopOutcome.NoFinding missed)
         {
             return [new StageProblem("verify", "contradicting",
-                "against a rehearsal window holding 17 messages in a dead-letter queue, the prompt "
-                + $"reported nothing: \"{missed.Reason}\" -- work this deployment threw away went "
-                + "unreported, which is the one reading the instructions call always worth reporting")];
+                "against a rehearsal window in which a dead-letter queue grew from 0 to 17 while 17 "
+                + "parked refusals landed, the prompt "
+                + $"reported nothing: \"{missed.Reason}\" -- work this deployment threw away during "
+                + "the window went unreported, though two panels agree on the loss")];
         }
 
         logger.LogInformation(
             "the payload prompt passed its ground-truth rehearsal: quiet window silent, planted "
-            + "dead-letter depth reported");
+            + "loss reported");
 
         return [];
     }

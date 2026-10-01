@@ -44,7 +44,9 @@ public sealed class AnalystOpensItsOwnLineageTests
             new PreflightBit(new ScriptedModel(FitBit(), FitBit(), FitBit()), new BitCache(4)),
             new InvestigationLoop(
                 new ScriptedModel([.. AnalystScript.Stages("queue-wait"), AnalystScript.Submit("queue-wait")]),
-                new FixturePanelReader().Reading("queue-wait", "ops", """{"max":4}""", samples: 91),
+                new FixturePanelReader()
+                    .Reading("queue-wait", "ops", """{"max":4}""", samples: 91)
+                    .Reading("step-outcomes", "business", """{"Completed":12}""", samples: 12),
                 new FakeTimeProvider(), NullLogger<InvestigationLoop>.Instance),
             NullLogger<AnalystProcessor>.Instance);
 
@@ -56,7 +58,7 @@ public sealed class AnalystOpensItsOwnLineageTests
                 targetWorkflowId = Guid.NewGuid(),
                 windowMinutes = 15,
                 prompt = AnalystProcessorTests.StagedPrompt,
-                panelSet = new[] { "queue-wait" },
+                panelSet = new[] { "queue-wait", "step-outcomes" },
                 maxIterations = 12,
                 maxTokens = 1_000_000,
                 wallClockSeconds = 240,

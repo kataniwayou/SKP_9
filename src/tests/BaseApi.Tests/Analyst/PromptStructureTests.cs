@@ -24,9 +24,9 @@ public sealed class PromptStructureTests
         => Assert.Empty(PromptStructure.Check(WellFormed()));
 
     [Fact]
-    public void ThePublishedV8PromptHasAllFiveStages()
+    public void ThePublishedV9PromptHasAllFiveStages()
     {
-        // tools/analyst-prompt-v8.txt is what the dev rollout PUTs into the analyst-monitor payload.
+        // tools/analyst-prompt-v9.txt is what the dev rollout PUTs into the analyst-monitor payload.
         // The deterministic half of the BIT runs on it there; running it here first means a stage
         // broken by the graph bullets fails the build rather than the next scheduled fire.
         var root = AppContext.BaseDirectory;
@@ -35,7 +35,7 @@ public sealed class PromptStructureTests
             root = parent.FullName;
         }
 
-        var prompt = File.ReadAllText(Path.Combine(root, "tools", "analyst-prompt-v8.txt"));
+        var prompt = File.ReadAllText(Path.Combine(root, "tools", "analyst-prompt-v9.txt"));
 
         Assert.Empty(PromptStructure.Check(prompt));
     }

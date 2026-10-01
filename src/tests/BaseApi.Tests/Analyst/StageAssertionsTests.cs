@@ -35,7 +35,7 @@ public sealed class StageAssertionsTests
     }
 
     private static JsonElement Finding(string evidencePanel = "queue-depth") => Json($$"""
-        {"verdict":"Drifting","narrative":"n","samplesExamined":91,
+        {"verdict":"Drifting","insights":[],"samplesExamined":91,
          "evidence":[{"panelId":"{{evidencePanel}}","layer":"ops","label":"l","value":"v"}],
          "ruledOut":[{"hypothesis":"broker slow","disconfirmingCriterion":"queue depth over 100",
                       "whatWasSeen":"max 4"}]}
@@ -204,7 +204,7 @@ public sealed class StageAssertionsTests
         // the three that actually reaches the operator -- so a hypothesis invented at submit time,
         // with no plan or verification behind it, must be caught here.
         var finding = Json("""
-            {"verdict":"Drifting","narrative":"n","samplesExamined":91,
+            {"verdict":"Drifting","insights":[],"samplesExamined":91,
              "evidence":[{"panelId":"queue-depth","layer":"ops","label":"l","value":"v"}],
              "ruledOut":[{"hypothesis":"disk full","disconfirmingCriterion":"disk over 90 percent",
                           "whatWasSeen":"n/a"}]}
@@ -223,7 +223,7 @@ public sealed class StageAssertionsTests
         // The finding can name a real, planned hypothesis and still misquote what would have killed
         // it -- a softer or harder criterion than the one actually pre-committed to.
         var finding = Json("""
-            {"verdict":"Drifting","narrative":"n","samplesExamined":91,
+            {"verdict":"Drifting","insights":[],"samplesExamined":91,
              "evidence":[{"panelId":"queue-depth","layer":"ops","label":"l","value":"v"}],
              "ruledOut":[{"hypothesis":"broker slow","disconfirmingCriterion":"queue depth over 1000",
                           "whatWasSeen":"max 4"}]}
@@ -441,7 +441,7 @@ public sealed class StageAssertionsTests
         // not otherwise loosened (see ARuledOutCriterionThatDoesNotMatchRecordPlansIsAProblem for a
         // genuine mismatch that must still fail).
         var finding = Json("""
-            {"verdict":"Drifting","narrative":"n","samplesExamined":91,
+            {"verdict":"Drifting","insights":[],"samplesExamined":91,
              "evidence":[{"panelId":"queue-depth","layer":"ops","label":"l","value":"v"}],
              "ruledOut":[{"hypothesis":"broker slow","disconfirmingCriterion":"  queue depth  over 100 ",
                           "whatWasSeen":"max 4"}]}
@@ -517,7 +517,7 @@ public sealed class StageAssertionsTests
 
         // Trailing space.
         var finding = Json("""
-            {"verdict":"Drifting","narrative":"n","samplesExamined":91,
+            {"verdict":"Drifting","insights":[],"samplesExamined":91,
              "evidence":[{"panelId":"queue-depth","layer":"ops","label":"l","value":"v"}],
              "ruledOut":[{"hypothesis":"broker slow ","disconfirmingCriterion":"queue depth over 100",
                           "whatWasSeen":"max 4"}]}

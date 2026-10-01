@@ -1,3 +1,4 @@
+using BaseConsole.Core.Naming;
 using BaseProcessor.Core.Processing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -30,18 +31,26 @@ public sealed class AnalystProcessorTests
             TargetWorkflowId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             WindowMinutes: window,
             Prompt: prompt ?? StagedPrompt,
-            PanelSet: ["queue-wait"],
+            PanelSet: ["queue-wait", "step-outcomes"],
             MaxIterations: 20,
             MaxTokens: 100_000,
             WallClockSeconds: 300);
 
-    private static AnalystProcessor Processor(IAnalystModel bitModel, IAnalystModel loopModel, FakeTimeProvider? clock = null)
+    private static AnalystProcessor Processor(
+        IAnalystModel bitModel,
+        IAnalystModel loopModel,
+        FakeTimeProvider? clock = null,
+        TokenMeter? meter = null,
+        IEntityNameSource? names = null)
         => new(
             new PreflightBit(bitModel, new BitCache(4)),
             new InvestigationLoop(loopModel, new FixturePanelReader()
-                    .Reading("queue-wait", "ops", """{"max":4}""", samples: 91),
+                    .Reading("queue-wait", "ops", """{"max":4}""", samples: 91)
+                    .Reading("step-outcomes", "business", """{"Completed":12}""", samples: 12),
                 clock ?? new FakeTimeProvider(), NullLogger<InvestigationLoop>.Instance),
-            NullLogger<AnalystProcessor>.Instance);
+            NullLogger<AnalystProcessor>.Instance,
+            meter,
+            names);
 
     private static ModelReply FitBit() => ModelReply.Of(
         ScriptedModel.Call("report_fitness", new { problems = Array.Empty<object>() }));
@@ -295,6 +304,56 @@ public sealed class AnalystProcessorTests
     }
 
     [Fact]
+    public async Task TheFindingNamesItsTargetFromL2()
+    {
+        var names = new StubNames(new Dictionary<Guid, string>
+        {
+            [Guid.Parse("11111111-1111-1111-1111-111111111111")] = "filefetcher-archiveexpander-chain",
+        });
+        var processor = Processor(
+            new ScriptedModel(FitBit(), FitBit(), FitBit()),
+            new ScriptedModel([.. AnalystScript.Stages("queue-wait"), AnalystScript.Submit("queue-wait")]),
+            names: names);
+
+        var finding = await processor.AnalyseAsync(Config(), CancellationToken.None);
+
+        Assert.Equal("filefetcher-archiveexpander-chain", finding.Target.Name);
+    }
+
+    [Fact]
+    public async Task AnUnreadableTargetNameNeverCostsTheFinding()
+    {
+        var processor = Processor(
+            new ScriptedModel(FitBit(), FitBit(), FitBit()),
+            new ScriptedModel([.. AnalystScript.Stages("queue-wait"), AnalystScript.Submit("queue-wait")]),
+            names: new StubNames(fault: new InvalidOperationException("redis down")));
+
+        var finding = await processor.AnalyseAsync(Config(), CancellationToken.None);
+
+        Assert.Null(finding.Target.Name);
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), finding.Target.WorkflowId);
+    }
+
+    [Fact]
+    public async Task TheDispatchTotalIncludesTheGateThatTheBudgetDoesNotCover()
+    {
+        // The budget bounds only the investigation; the fitness gate runs first and outside it.
+        // The dispatch total is what the finding really cost, so it must count both.
+        var meter = new TokenMeter();
+        var bit = new MeteredAnalystModel(new ScriptedModel(FitBit(), FitBit(), FitBit()), meter);
+        var loopModel = new MeteredAnalystModel(
+            new ScriptedModel([.. AnalystScript.Stages("queue-wait"), AnalystScript.Submit("queue-wait")]), meter);
+        var processor = Processor(bit, loopModel, meter: meter);
+
+        var finding = await processor.AnalyseAsync(Config(), CancellationToken.None);
+
+        var investigationCalls = AnalystScript.Stages("queue-wait").Length + 1;
+        Assert.Equal(investigationCalls, finding.Usage.Calls);
+        Assert.NotNull(finding.Usage.Dispatch);
+        Assert.True(finding.Usage.Dispatch!.Calls > investigationCalls);
+    }
+
+    [Fact]
     public void TheContractPromptDelimitsThePayloadPromptAndKeepsTheStagesCompiled()
     {
         var composed = ContractPrompt.Compose("payload judgment here");
@@ -324,4 +383,13 @@ internal sealed class ThrowingModel(Exception toThrow) : IAnalystModel
     public Task<ModelReply> SendAsync(
         string system, IReadOnlyList<ModelTurn> transcript, IReadOnlyList<ToolSpec> tools, CancellationToken ct)
         => throw toThrow;
+}
+
+/// <summary>A name source that answers from a dictionary, or throws the given fault.</summary>
+internal sealed class StubNames(IReadOnlyDictionary<Guid, string>? found = null, Exception? fault = null) : IEntityNameSource
+{
+    public Task<IReadOnlyDictionary<Guid, string>> ReadNamesAsync(IReadOnlyCollection<EntityRef> refs)
+        => fault is not null
+            ? throw fault
+            : Task.FromResult<IReadOnlyDictionary<Guid, string>>(found ?? new Dictionary<Guid, string>());
 }

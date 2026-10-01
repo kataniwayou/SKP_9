@@ -1,4 +1,6 @@
+using BaseConsole.Core.Naming;
 using BaseProcessor.Core.Processing;
+using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
 using Processor.Analyst.Bit;
 using Processor.Analyst.Loop;
@@ -18,7 +20,8 @@ internal sealed class AnalystProcessor(
     PreflightBit bit,
     InvestigationLoop loop,
     ILogger<AnalystProcessor> logger,
-    TokenMeter? meter = null)
+    TokenMeter? meter = null,
+    IEntityNameSource? names = null)
     : BaseProcessor<AnalystConfig>
 {
     /// <summary>The longest window any panel source here can honestly answer.</summary>
@@ -120,7 +123,20 @@ internal sealed class AnalystProcessor(
 
         try
         {
-            return await RunAsync(config, ct).ConfigureAwait(false);
+            var finding = await RunAsync(config, ct).ConfigureAwait(false);
+
+            // The two parts of the finding the loop cannot know: the target's display name, which
+            // lives in L2, and what the whole dispatch spent, gate included, which only the meter saw.
+            var spent = meter is not null && before is not null ? meter.Snapshot() - before.Value : (TokenMeter.Reading?)null;
+
+            return finding with
+            {
+                Target = finding.Target with { Name = await TargetNameAsync(config.TargetWorkflowId).ConfigureAwait(false) },
+                Usage = finding.Usage with
+                {
+                    Dispatch = spent is { } s ? new DispatchSpend(s.Calls, s.Input, s.Output) : null,
+                },
+            };
         }
         finally
         {
@@ -129,6 +145,33 @@ internal sealed class AnalystProcessor(
                 logger.LogInformation(
                     "the dispatch spent {Spend}", (meter.Snapshot() - before.Value).ToString());
             }
+        }
+    }
+
+    /// <summary>
+    /// The target's name from L2, or null. A name is a convenience for whoever reads the topic; a
+    /// missing key, an unreachable store or no name source at all must never cost the finding.
+    /// </summary>
+    private async Task<string?> TargetNameAsync(Guid workflowId)
+    {
+        if (names is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var found = await names
+                .ReadNamesAsync([new EntityRef(L2EntityKind.Workflow, workflowId)])
+                .WaitAsync(TimeSpan.FromSeconds(2))
+                .ConfigureAwait(false);
+
+            return found.TryGetValue(workflowId, out var name) ? name : null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            logger.LogWarning(ex, "the target workflow's name could not be read; the finding carries its id only");
+            return null;
         }
     }
 

@@ -11,11 +11,18 @@ public sealed class AnalystFindingSchemaTests
 
     private static AnalystFinding Sample() => new(
         Verdict: "Drifting",
+        Target: new FindingTarget(Guid.Parse("1a56b3ca-e276-4815-87fa-5c2f48ab6dad"), "filefetcher-archiveexpander-chain"),
         Window: new RealizedWindow(
             From: new DateTimeOffset(2026, 9, 24, 0, 0, 0, TimeSpan.Zero),
             To: new DateTimeOffset(2026, 9, 24, 6, 0, 0, TimeSpan.Zero),
             SamplesExamined: 91),
-        Narrative: "Arrival mean rose from 40ms to 180ms across the window.",
+        Insights:
+        [
+            new FindingInsight(
+                Claim: "The broker is not the bottleneck; consumers are falling behind.",
+                Why: "Arrival mean rose fourfold while produce duration stayed flat at 12ms.",
+                Panels: ["arrival-mean", "produce-duration"]),
+        ],
         Evidence:
         [
             new FindingEvidence("arrival-mean", "ops", "arrival mean, last hour", "180ms"),
@@ -34,6 +41,13 @@ public sealed class AnalystFindingSchemaTests
             new TraceEntry(2, "queue-depth", true),
             new TraceEntry(3, "produce-duration", true),
         ],
+        Usage: new FindingUsage(
+            Calls: 9,
+            InputTokens: 120_000,
+            OutputTokens: 6_000,
+            ElapsedSeconds: 214,
+            Budget: new FindingBudget(MaxIterations: 12, MaxTokens: 1_500_000, WallClockSeconds: 240),
+            Dispatch: new DispatchSpend(Calls: 27, InputTokens: 347_528, OutputTokens: 17_001)),
         PromptHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
     [Fact]
@@ -65,14 +79,19 @@ public sealed class AnalystFindingSchemaTests
         // Top level.
         Assert.Contains("\"verdict\"", json, StringComparison.Ordinal);
         Assert.Contains("\"window\"", json, StringComparison.Ordinal);
-        Assert.Contains("\"narrative\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"target\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"insights\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"usage\"", json, StringComparison.Ordinal);
         Assert.Contains("\"evidence\"", json, StringComparison.Ordinal);
         Assert.Contains("\"ruledOut\"", json, StringComparison.Ordinal);
         Assert.Contains("\"trace\"", json, StringComparison.Ordinal);
         Assert.Contains("\"promptHash\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"Verdict\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"Window\"", json, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"Narrative\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Target\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Insights\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Usage\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"narrative\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"Evidence\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"RuledOut\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"Trace\"", json, StringComparison.Ordinal);
@@ -103,6 +122,20 @@ public sealed class AnalystFindingSchemaTests
         Assert.DoesNotContain("\"Hypothesis\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"DisconfirmingCriterion\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"WhatWasSeen\"", json, StringComparison.Ordinal);
+
+        // FindingTarget, FindingInsight, FindingUsage, FindingBudget, DispatchSpend.
+        Assert.Contains("\"workflowId\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"claim\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"why\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"panels\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"inputTokens\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"elapsedSeconds\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"maxIterations\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"dispatch\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"WorkflowId\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Claim\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"InputTokens\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"MaxIterations\"", json, StringComparison.Ordinal);
 
         // TraceEntry.
         Assert.Contains("\"ordinal\"", json, StringComparison.Ordinal);
@@ -138,5 +171,50 @@ public sealed class AnalystFindingSchemaTests
             Definition(), System.Text.Encoding.UTF8.GetBytes(stripped.ToJsonString()), out _);
 
         Assert.False(ok);
+    }
+
+    [Fact]
+    public void AnInsightCitingOnePanelIsRejected()
+    {
+        // One panel restated is a reading, not an insight. The schema refuses it so a finding that
+        // only describes what a panel showed can never be exported.
+        var json = System.Text.Json.Nodes.JsonNode.Parse(AnalystFinding.Serialize(Sample()))!.AsObject();
+        json["insights"]![0]!["panels"] = new System.Text.Json.Nodes.JsonArray("arrival-mean");
+
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), System.Text.Encoding.UTF8.GetBytes(json.ToJsonString()), out _);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public void AFindingWithNoInsightIsRejected()
+    {
+        // A run that reaches no insight cancels; it never produces a document with nothing to say.
+        var json = System.Text.Json.Nodes.JsonNode.Parse(AnalystFinding.Serialize(Sample()))!.AsObject();
+        json["insights"] = new System.Text.Json.Nodes.JsonArray();
+
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), System.Text.Encoding.UTF8.GetBytes(json.ToJsonString()), out _);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public void AFindingWithAnUnreadableTargetNameAndNoMeterStillValidates()
+    {
+        // The name is a convenience read from L2 and the dispatch total needs a meter; neither may
+        // stop a finding from being exported.
+        var sample = Sample();
+        var finding = sample with
+        {
+            Target = sample.Target with { Name = null },
+            Usage = sample.Usage with { Dispatch = null },
+        };
+
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), AnalystFinding.Serialize(finding), out var errors);
+
+        Assert.True(ok, string.Join("; ", errors));
     }
 }

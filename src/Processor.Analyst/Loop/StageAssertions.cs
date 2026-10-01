@@ -268,6 +268,20 @@ internal static class StageAssertions
             }
         }
 
+        // An insight is an inference across panels. One citing a panel the trace never read is
+        // correlating evidence it does not have -- the same fabrication as unread evidence below,
+        // and the more damaging one, because the insight is the part an operator acts on.
+        foreach (var insight in finding.GetProperty("insights").EnumerateArray())
+        {
+            var claim = insight.GetProperty("claim").GetString()!;
+
+            foreach (var panel in insight.GetProperty("panels").EnumerateArray()
+                         .Select(p => p.GetString()!).Where(p => !read.Contains(p)))
+            {
+                problems.Add($"the insight '{claim}' correlates {panel}, which the trace shows was never read");
+            }
+        }
+
         foreach (var evidence in finding.GetProperty("evidence").EnumerateArray())
         {
             var panelId = evidence.GetProperty("panelId").GetString()!;

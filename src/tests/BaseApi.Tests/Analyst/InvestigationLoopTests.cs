@@ -87,25 +87,86 @@ public sealed class InvestigationLoopTests
     }
 
     [Fact]
-    public async Task AnUnanalysableValidationFailsRatherThanProceedingToReportNoFinding()
+    public async Task AnUnbelievableWindowEndsQuietlyBecauseAConclusionNeverFailsTheStep()
     {
-        // F2: record_validation's analysable flag is the field design §15/§18.6 say owns the
-        // Cancelled-vs-Failed call, and before this fix nothing in production code read it. A model
-        // that correctly said "I could not see this window" had no terminal tool that said so --
-        // report_no_finding's own description was the closest match -- so "I could not see" and
-        // "everything is fine" would reach the operator as the same event.
+        // The step result reports whether the facilities worked, never what the model concluded. The
+        // panel answered; judging its answer unbelievable is a conclusion, so the run ends as
+        // NoFinding (Cancelled) -- carrying the reason -- rather than failing the step.
+        var model = new ScriptedModel(
+            ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "queue-depth" })),
+            ModelReply.Of(ScriptedModel.Call("record_validation", new
+            {
+                analysable = false,
+                concerns = new[] { "queue-depth covers only part of the window" },
+                reason = "partial coverage; cannot tell no-data from no-problem",
+            })));
+
+        var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
+
+        var quiet = Assert.IsType<LoopOutcome.NoFinding>(outcome);
+        Assert.Contains("partial coverage", quiet.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnUnbelievableVerdictWithNothingReadFails()
+    {
+        // "Unbelievable" must rest on evidence the sources returned. With no panel read there is no
+        // evidence to judge, so this is not a conclusion but an invalid result, and it fails.
         var model = new ScriptedModel(
             ModelReply.Of(ScriptedModel.Call("record_validation", new
             {
                 analysable = false,
-                concerns = new[] { "queue-depth series absent for the whole window" },
-                reason = "series absent; cannot tell no-data from no-problem",
+                concerns = new[] { "nothing looked at" },
+                reason = "cannot see",
             })));
 
         var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
             () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
 
-        Assert.Contains("unanalysable", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("before reading any panel", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheFindingCarriesItsTargetInsightsAndUsageAgainstTheBudget()
+    {
+        var model = new ScriptedModel([.. AnalystScript.Stages(), AnalystScript.Submit()]);
+
+        var outcome = await Loop(model).RunAsync(
+            "sys", Config(maxIterations: 20, maxTokens: 100_000, wallClock: 300), Window, Hash, CancellationToken.None);
+
+        var finding = Assert.IsType<LoopOutcome.Finding>(outcome).Value;
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), finding.Target.WorkflowId);
+        Assert.Equal(["queue-depth", "arrival-mean"], Assert.Single(finding.Insights).Panels);
+        Assert.Equal(AnalystScript.Stages().Length + 1, finding.Usage.Calls);
+        Assert.Equal(new FindingBudget(20, 100_000, 300), finding.Usage.Budget);
+        Assert.Null(finding.Usage.Dispatch);
+    }
+
+    [Fact]
+    public async Task AnInsightCorrelatingAnUnreadPanelIsNotExported()
+    {
+        // The insight is the part an operator acts on; one built on a panel never read is fabricated.
+        var fabricated = ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
+        {
+            verdict = "Notable",
+            insights = new[]
+            {
+                new { claim = "c", why = "w", panels = new[] { "queue-depth", "never-read" } },
+            },
+            samplesExamined = 91,
+            evidence = new[] { new { panelId = "queue-depth", layer = "ops", label = "max", value = "4" } },
+            ruledOut = new[]
+            {
+                new { hypothesis = "broker slow", disconfirmingCriterion = "queue depth over 100", whatWasSeen = "max 4" },
+            },
+        });
+
+        var model = new ScriptedModel([.. AnalystScript.Stages(), ModelReply.Of(fabricated)]);
+
+        var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
+
+        Assert.Contains("never-read", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -146,11 +207,11 @@ public sealed class InvestigationLoopTests
     public async Task TheTraceIsAssembledFromWhatWasActuallyRead()
     {
         // Ground truth, not a model claim. This is what lets a reader tell "checked the ops layer
-        // and it was clean" from "never looked".
+        // and it was clean" from "never looked". Stages("arrival-mean") reads arrival-mean and then
+        // its corroborating panel, queue-depth, which is what the default submit cites.
         var model = new ScriptedModel(
             [
                 .. AnalystScript.Stages("arrival-mean"),
-                ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "queue-depth" })),
                 AnalystScript.Submit(),
             ]);
 
@@ -357,7 +418,7 @@ public sealed class InvestigationLoopTests
         var invalidFinding = ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
         {
             verdict = "Quiet",
-            narrative = "nothing much",
+            insights = new[] { new { claim = "c", why = "w", panels = new[] { "arrival-mean", "queue-depth" } } },
             samplesExamined = 10,
             evidence = new[] { new { panelId = "arrival-mean", layer = "ops", label = "mean", value = "1ms" } },
             ruledOut = Array.Empty<object>(),
@@ -424,16 +485,15 @@ public sealed class InvestigationLoopTests
     {
         // I2: DataReturned is the field that distinguishes "looked at the ops layer and saw nothing"
         // from "never looked" -- the trace's entire reason for existing. AnalystScript.Stages("arrival-mean") is
-        // the ONLY read in this run, so the assertions below (Assert.Single, in particular) still
-        // prove exactly what they proved before Task 9's stages existed.
+        // the ONLY read of arrival-mean in this run (the other read is its corroborating panel), so
+        // the single matching entry is the one this test is about.
         var panels = Panels().MissingSeries("arrival-mean");
         var model = new ScriptedModel([.. AnalystScript.Stages("arrival-mean"), AnalystScript.Submit("arrival-mean")]);
 
         var outcome = await Loop(model, panels).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
 
         var finding = Assert.IsType<LoopOutcome.Finding>(outcome);
-        var entry = Assert.Single(finding.Value.Trace);
-        Assert.Equal("arrival-mean", entry.PanelId);
+        var entry = Assert.Single(finding.Value.Trace, t => t.PanelId == "arrival-mean");
         Assert.False(entry.DataReturned);
     }
 
@@ -448,15 +508,15 @@ public sealed class InvestigationLoopTests
         // Task 9's assertions require submit_finding's own evidence to cite a panel that was
         // genuinely read, so this run can no longer end with an EMPTY trace the way the original
         // version of this test did -- AnalystScript.Stages() legitimately reads "queue-depth" beforehand, which is
-        // what submit_finding now cites. The invariant under test is unchanged: the "arrival-mean"
-        // read that arrives alongside the terminal call must never reach the trace, regardless of
-        // what else is in it.
+        // what submit_finding now cites, and then its corroborating panel. The invariant under test
+        // is unchanged: the read that arrives alongside the terminal call must never reach the
+        // trace, so the trace holds exactly the two reads the stages made.
         var model = new ScriptedModel(
             [
                 .. AnalystScript.Stages(),
                 new ModelReply(
                     [
-                        ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "arrival-mean" }),
+                        ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "queue-depth" }),
                         AnalystScript.SubmitFinding(),
                     ],
                     Text: null, InputTokens: 0, OutputTokens: 0),
@@ -465,7 +525,7 @@ public sealed class InvestigationLoopTests
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
 
         var finding = Assert.IsType<LoopOutcome.Finding>(outcome);
-        Assert.DoesNotContain(finding.Value.Trace, t => t.PanelId == "arrival-mean");
+        Assert.Equal(["queue-depth", "arrival-mean"], finding.Value.Trace.Select(t => t.PanelId).ToArray());
     }
 
     [Fact]

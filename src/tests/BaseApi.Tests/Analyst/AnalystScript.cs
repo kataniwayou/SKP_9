@@ -11,13 +11,29 @@ namespace BaseApi.Tests.Analyst;
 /// </summary>
 internal static class AnalystScript
 {
-    /// <summary>The five stage calls, one reply each, ending with the one read_panel the default plan names.</summary>
+    /// <summary>
+    /// The second panel a compliant run reads, so its insight has two panels to correlate. One per
+    /// primary panel the tests use, each a panel that fixture or registry actually serves.
+    /// </summary>
+    internal static string CorroboratingPanel(string panelId) => panelId switch
+    {
+        "arrival-mean" => "queue-depth",
+        "queue-wait" => "step-outcomes",
+        "dead-letter-depth" => "refused-messages",
+        _ => "arrival-mean",
+    };
+
+    /// <summary>
+    /// The five stage calls, one reply each, reading the panel the default plan names and then the
+    /// corroborating one -- an insight must correlate two panels, so a run that read one has none.
+    /// </summary>
     internal static ModelReply[] Stages(string panelId = "queue-depth") =>
     [
         ModelReply.Of(ScriptedModel.Call("record_research", new { observations = new[] { "arrival mean rose" } })),
         ModelReply.Of(ScriptedModel.Call("record_validation", new { analysable = true, concerns = Array.Empty<string>(), reason = "series present" })),
         ModelReply.Of(ScriptedModel.Call("record_plan", new { hypotheses = new[] { new { hypothesis = "broker slow", disconfirmingCriterion = "queue depth over 100", panelsToRead = new[] { panelId } } } })),
         ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId })),
+        ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = CorroboratingPanel(panelId) })),
         ModelReply.Of(ScriptedModel.Call("record_readings", new { readings = new[] { new { panelId, summary = "max 4", trusted = true } } })),
         ModelReply.Of(ScriptedModel.Call("record_verification", new { verdicts = new[] { new { hypothesis = "broker slow", survived = false, whatWasSeen = "max 4", citedPanels = new[] { panelId } } } })),
     ];
@@ -43,7 +59,15 @@ internal static class AnalystScript
     internal static ModelToolCall SubmitFinding(string panelId = "queue-depth") => ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
     {
         verdict = "Drifting",
-        narrative = "arrival mean rose",
+        insights = new[]
+        {
+            new
+            {
+                claim = "consumers are falling behind, not the broker",
+                why = "arrival rose while the corroborating panel stayed flat",
+                panels = new[] { panelId, CorroboratingPanel(panelId) },
+            },
+        },
         samplesExamined = 91,
         evidence = new[] { new { panelId, layer = "ops", label = "mean", value = "180ms" } },
         ruledOut = new[]

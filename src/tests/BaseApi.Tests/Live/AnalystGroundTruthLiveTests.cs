@@ -51,7 +51,7 @@ public sealed class AnalystGroundTruthLiveTests
     /// <summary>The prompt under test, read from the file that is deployed rather than a copy.</summary>
     private static string DeployedPrompt()
     {
-        var path = Path.Combine(RepoRoot(), "tools", "analyst-prompt-v7.txt");
+        var path = Path.Combine(RepoRoot(), "tools", "analyst-prompt-v9.txt");
         Assert.True(File.Exists(path), $"prompt not found at {path}");
         return File.ReadAllText(path).Trim();
     }
@@ -131,20 +131,34 @@ public sealed class AnalystGroundTruthLiveTests
     private static FixturePanelReader QuietWindow() => new FixturePanelReader()
         .Reading("step-outcomes", "ops", """{"Completed":412,"Failed":0,"Cancelled":3}""", samples: 415)
         .Reading("step-failures", "ops", """{"failed":0,"samples":[]}""", samples: 0)
-        .Reading("refused-messages", "ops", """{"refusals":0,"samples":[]}""", samples: 0)
+        .Reading("refused-messages", "ops", """{"refusals":0,"parked":0,"notParked":0,"samples":[]}""", samples: 0)
         .Reading("run-boundaries", "business", """{"entry":30,"terminal":30,"drainedPolls":0}""", samples: 60)
         .Reading("queue-wait", "ops", """{"meanSeconds":0.013,"max":0.021}""", samples: 91)
         .Reading("processor-liveness", "ops", """{"ready":1.0,"replicas":2}""", samples: 60)
         .Reading("dead-letter-depth", "ops", """{"queues":{"processor-a.dead":0,"processor-b.dead":0}}""", samples: 60);
 
     /// <summary>
-    /// The same window with one unambiguous fault planted: a dead-letter queue holding work, with no
-    /// refusals in window. The deployed prompt states that this is reportable and that the age and
-    /// ownership of the work are unknown without a believable observation settling them.
+    /// The same window with one unambiguous fault planted: work thrown away DURING the window. A
+    /// dead-letter queue grows from 0 to 17 while 17 parked refusals land, so two panels agree on the
+    /// same loss -- the insight a prompt is expected to draw.
     /// </summary>
-    private static FixturePanelReader WindowHoldingDiscardedWork() => QuietWindow()
+    private static FixturePanelReader WindowLosingWork() => QuietWindow()
         .Reading("dead-letter-depth", "ops",
-            """{"queues":{"processor-a.dead":17,"processor-b.dead":0}}""", samples: 60);
+            """{"queues":{"processor-a.dead":{"windowStart":0,"windowEnd":17},"processor-b.dead":{"windowStart":0,"windowEnd":0}}}""",
+            samples: 60)
+        .Reading("refused-messages", "ops",
+            """{"refusals":17,"parked":17,"notParked":0,"samples":[{"template":"the delivery was parked","exception":"the step's input could not be read from L2"}]}""",
+            samples: 17);
+
+    /// <summary>
+    /// An old backlog: a dead-letter depth that sits flat across the whole window, with no parked
+    /// refusals and every run finishing. Nothing was thrown away in this window, so other panels rule
+    /// the dead-letter hypothesis out and there is no insight to report.
+    /// </summary>
+    private static FixturePanelReader WindowWithAStandingBacklog() => QuietWindow()
+        .Reading("dead-letter-depth", "ops",
+            """{"queues":{"processor-a.dead":{"windowStart":10,"windowEnd":10},"processor-b.dead":{"windowStart":0,"windowEnd":0}}}""",
+            samples: 60);
 
     private static readonly string[] AllPanels =
     [
@@ -173,11 +187,29 @@ public sealed class AnalystGroundTruthLiveTests
     }
 
     [Fact]
-    public async Task APlantedDeadLetterDepthIsFoundAndNamed()
+    public async Task AStandingBacklogIsRuledOutAndProducesNoFinding()
     {
         SkipUnlessEnabled();
 
-        var processor = Processor(WindowHoldingDiscardedWork());
+        var processor = Processor(WindowWithAStandingBacklog());
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(12));
+
+        var quiet = await Record.ExceptionAsync(
+            () => processor.AnalyseAsync(Config(DeployedPrompt(), AllPanels), cts.Token));
+
+        Assert.True(
+            quiet is CancelledException,
+            "a flat dead-letter depth with no parked refusals and every run finishing is an old "
+            + "backlog, not loss in this window, and restating it is not an insight. Got: "
+            + $"{quiet?.GetType().Name ?? "a finding"} -- {quiet?.Message}");
+    }
+
+    [Fact]
+    public async Task PlantedLossIsFoundAndCorrelated()
+    {
+        SkipUnlessEnabled();
+
+        var processor = Processor(WindowLosingWork());
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(12));
 
         var finding = await processor.AnalyseAsync(Config(DeployedPrompt(), AllPanels), cts.Token);
@@ -191,9 +223,9 @@ public sealed class AnalystGroundTruthLiveTests
 
         Assert.Contains("dead-letter-depth", cited);
 
-        // And it must not claim the loss is old or foreign: refused-messages under-reports by
-        // construction, so zero refusals cannot establish either.
-        Assert.DoesNotContain("no refusals in window means the loss is old",
-            finding.Narrative, StringComparison.OrdinalIgnoreCase);
+        // And the loss must be an insight, not a reading: some insight has to correlate the
+        // growing depth with the parked refusals that account for it.
+        Assert.Contains(finding.Insights, i =>
+            i.Panels.Contains("dead-letter-depth") && i.Panels.Contains("refused-messages"));
     }
 }

@@ -89,7 +89,7 @@ internal sealed class InvestigationLoop(
                 // other call before it is trusted. A terminal call ends the run even if it arrived
                 // alongside others: there is nothing after the end, so nothing else in this reply is
                 // executed and no non-terminal sibling leaves a trace entry behind.
-                return Terminate(terminalCalls[0], artifacts, trace, window, promptHash);
+                return Terminate(terminalCalls[0], artifacts, trace, window, promptHash, config, budget);
             }
 
             // Either there was no terminal call, or the one terminal call failed its own schema. A
@@ -102,9 +102,19 @@ internal sealed class InvestigationLoop(
             // EVERY result for this reply goes back in ONE user turn. Splitting them across several
             // silently trains the model to stop making parallel calls.
             var results = new List<ModelToolResult>(reply.ToolCalls.Count);
-            foreach (var call in reply.ToolCalls)
+            try
             {
-                results.Add(await ExecuteAsync(call, window, trace, artifacts, config, tools, dispatchCt).ConfigureAwait(false));
+                foreach (var call in reply.ToolCalls)
+                {
+                    results.Add(await ExecuteAsync(call, window, trace, artifacts, config, tools, dispatchCt).ConfigureAwait(false));
+                }
+            }
+            catch (EvidenceNotBelievedException ex)
+            {
+                // The model judged the evidence it gathered unbelievable. That is a conclusion, and a
+                // conclusion never decides the step: the sources answered, so the run ends quietly,
+                // exactly as if it had found nothing. Only a facility that failed fails the step.
+                return new LoopOutcome.NoFinding("the evidence could not be believed: " + ex.Message);
             }
 
             transcript.Add(new ModelTurn(ModelRole.User, null, [], results));
@@ -170,18 +180,21 @@ internal sealed class InvestigationLoop(
             case ToolNames.RecordValidation:
                 artifacts.Record(call.ToolName, call.Input, trace.Entries.Count);
 
-                // F2 / design §15, §18.6: validate OWNS the Cancelled-vs-Failed call. `analysable`
-                // is the field that call is made through, and before this nothing in production
-                // code read it -- a compliant model that correctly concluded it could not see the
-                // window had no terminal tool that said so, and report_no_finding's own description
-                // ("the analysis ran and its result does not contribute") was the closest match it
-                // would find. That reaches the operator as the same event as "everything is fine",
-                // which §3.1 exists to prevent. An unanalysable window is not a quiet ending; it is
-                // an analysis that could not run.
+                // validate decides whether the evidence can be believed. A "no" is the model's
+                // conclusion about evidence the sources DID return, so it ends the run quietly
+                // (Cancelled) rather than failing the step -- the step result reports whether the
+                // facilities worked, never what the model concluded. It must rest on something read,
+                // though: "unbelievable" with no panel behind it is not a judgement of any evidence,
+                // and buying silence that way would make "could not see" free.
                 if (!call.Input.GetProperty("analysable").GetBoolean())
                 {
-                    throw new AnalysisImpossibleException(
-                        "validate found the window unanalysable: " + call.Input.GetProperty("reason").GetString());
+                    if (trace.Entries.Count == 0)
+                    {
+                        throw new AnalysisImpossibleException(
+                            "validate judged the evidence unbelievable before reading any panel");
+                    }
+
+                    throw new EvidenceNotBelievedException(call.Input.GetProperty("reason").GetString()!);
                 }
 
                 return new ModelToolResult(call.CallId, "recorded", IsError: false);
@@ -216,7 +229,13 @@ internal sealed class InvestigationLoop(
     }
 
     private static LoopOutcome Terminate(
-        ModelToolCall terminal, StageArtifacts artifacts, InvestigationTrace trace, TimeRange window, string promptHash)
+        ModelToolCall terminal,
+        StageArtifacts artifacts,
+        InvestigationTrace trace,
+        TimeRange window,
+        string promptHash,
+        AnalystConfig config,
+        BudgetLedger budget)
     {
         if (terminal.ToolName == ToolNames.ReportNoFinding)
         {
@@ -250,10 +269,17 @@ internal sealed class InvestigationLoop(
                 "the investigation's own record does not support its finding: " + string.Join("; ", problems));
         }
 
+        var spent = budget.Spent;
+
         var finding = new AnalystFinding(
             Verdict: input.GetProperty("verdict").GetString()!,
+            // The name is filled by AnalystProcessor, which can read L2; the loop knows only the id.
+            Target: new FindingTarget(config.TargetWorkflowId, Name: null),
             Window: new RealizedWindow(window.From, window.To, input.GetProperty("samplesExamined").GetInt32()),
-            Narrative: input.GetProperty("narrative").GetString()!,
+            Insights: [.. input.GetProperty("insights").EnumerateArray().Select(i => new FindingInsight(
+                i.GetProperty("claim").GetString()!,
+                i.GetProperty("why").GetString()!,
+                [.. i.GetProperty("panels").EnumerateArray().Select(p => p.GetString()!)]))],
             Evidence: [.. input.GetProperty("evidence").EnumerateArray().Select(e => new FindingEvidence(
                 e.GetProperty("panelId").GetString()!,
                 e.GetProperty("layer").GetString()!,
@@ -267,8 +293,23 @@ internal sealed class InvestigationLoop(
             // reference so the finding does not alias live loop state that a caller could still be
             // writing to.
             Trace: [.. trace.Entries],
+            // The investigation's own spend, against the payload's ceilings. The dispatch total, gate
+            // included, is added by AnalystProcessor, which holds the meter.
+            Usage: new FindingUsage(
+                spent.Calls,
+                spent.InputTokens,
+                spent.OutputTokens,
+                (int)spent.Elapsed.TotalSeconds,
+                new FindingBudget(config.MaxIterations, config.MaxTokens, config.WallClockSeconds),
+                Dispatch: null),
             PromptHash: promptHash);
 
         return new LoopOutcome.Finding(finding);
     }
 }
+
+/// <summary>
+/// validate judged the gathered evidence unbelievable. Private to the loop: it only carries the
+/// reason out of tool execution to where the run is ended quietly.
+/// </summary>
+internal sealed class EvidenceNotBelievedException(string reason) : Exception(reason);

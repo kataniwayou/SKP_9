@@ -59,13 +59,16 @@ internal static class ToolCatalog
                 SchemaFor(ToolNames.RecordVerification)),
 
             new ToolSpec(ToolNames.SubmitFinding,
-                "End the investigation with a finding that contributes to understanding whether "
-                + "something is broken or heading that way.",
+                "End the investigation with a finding. Every insight is an inference that correlates "
+                + "at least two panels you read into a cause, a consequence or a contradiction no "
+                + "single panel shows. Never restate a reading as an insight, and never report what "
+                + "is healthy: the readings belong in evidence.",
                 SchemaFor(ToolNames.SubmitFinding)),
 
             new ToolSpec(ToolNames.ReportNoFinding,
-                "End the investigation with nothing to report. The analysis ran and its result does "
-                + "not contribute. This is the honest ending when no hypothesis survived.",
+                "End the investigation with nothing to report. The analysis ran and reached no "
+                + "insight. This is the honest ending when no hypothesis survived, or when what "
+                + "survived cannot be correlated into an insight.",
                 SchemaFor(ToolNames.ReportNoFinding)),
         ];
     }
@@ -139,7 +142,14 @@ internal static class ToolCatalog
             {"type":"object",
              "properties":{
                "verdict":{"type":"string","enum":["Drifting","Notable"]},
-               "narrative":{"type":"string","minLength":1},
+               "insights":{"type":"array","minItems":1,"items":{
+                 "type":"object",
+                 "properties":{
+                   "claim":{"type":"string","minLength":1},
+                   "why":{"type":"string","minLength":1},
+                   "panels":{"type":"array","minItems":2,"uniqueItems":true,"items":{"type":"string","minLength":1}}},
+                 "required":["claim","why","panels"],
+                 "additionalProperties":false}},
                "samplesExamined":{"type":"integer","minimum":0},
                "evidence":{"type":"array","minItems":1,"items":{
                  "type":"object",
@@ -158,7 +168,7 @@ internal static class ToolCatalog
                    "whatWasSeen":{"type":"string","minLength":1}},
                  "required":["hypothesis","disconfirmingCriterion","whatWasSeen"],
                  "additionalProperties":false}}},
-             "required":["verdict","narrative","samplesExamined","evidence","ruledOut"],
+             "required":["verdict","insights","samplesExamined","evidence","ruledOut"],
              "additionalProperties":false}
             """,
 

@@ -1,37 +1,122 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Analyst finding",
+  "title": "Analyst finding v2",
   "type": "object",
   "properties": {
     "verdict": {
       "type": "string",
-      "enum": ["Drifting", "Notable"],
-      "description": "Quiet and Indeterminate are deliberately absent: a quiet run cancels the step and an unanalysable one fails it, so neither reaches a document."
+      "enum": [
+        "Drifting",
+        "Notable"
+      ],
+      "description": "Quiet and Indeterminate are deliberately absent: a run that reaches no insight, or judges its evidence unbelievable, cancels the step, and one whose facilities failed fails it, so neither reaches a document."
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "workflowId",
+        "name"
+      ],
+      "additionalProperties": false,
+      "description": "The workflow investigated. name is read from L2 at export time and is null when it could not be read; workflowId is authoritative."
     },
     "window": {
       "type": "object",
       "properties": {
-        "from": { "type": "string", "format": "date-time" },
-        "to": { "type": "string", "format": "date-time" },
-        "samplesExamined": { "type": "integer", "minimum": 0 }
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "samplesExamined": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
-      "required": ["from", "to", "samplesExamined"],
+      "required": [
+        "from",
+        "to",
+        "samplesExamined"
+      ],
       "additionalProperties": false,
       "description": "The REALIZED window, not the configured one. Precision here is what lets two consecutive answers be compared, which is the only liveness signal a stateless agent has. format:date-time on from/to is documentation only -- ProcessorJsonSchemaValidator does not set RequireFormatValidation, so it is never enforced. No pattern is added either: unlike a hand-authored payload field, these values come from this processor's own serializer writing DateTimeOffset, so the only way they could be malformed is a bug in code we already test; the actual guarantee is the serializer, not this schema."
     },
-    "narrative": { "type": "string", "minLength": 1 },
+    "insights": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string",
+            "minLength": 1
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1
+          },
+          "panels": {
+            "type": "array",
+            "minItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "claim",
+          "why",
+          "panels"
+        ],
+        "additionalProperties": false
+      },
+      "description": "What the analyst inferred, never what a panel showed. Each insight correlates at least two panels into a cause, a consequence or a contradiction no single panel shows; the readings themselves live in evidence. A run that reaches no insight reports nothing, so this is never empty."
+    },
     "evidence": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
         "properties": {
-          "panelId": { "type": "string", "minLength": 1 },
-          "layer": { "type": "string", "minLength": 1 },
-          "label": { "type": "string", "minLength": 1 },
-          "value": { "type": "string" }
+          "panelId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "layer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string"
+          }
         },
-        "required": ["panelId", "layer", "label", "value"],
+        "required": [
+          "panelId",
+          "layer",
+          "label",
+          "value"
+        ],
         "additionalProperties": false
       }
     },
@@ -40,11 +125,24 @@
       "items": {
         "type": "object",
         "properties": {
-          "hypothesis": { "type": "string", "minLength": 1 },
-          "disconfirmingCriterion": { "type": "string", "minLength": 1 },
-          "whatWasSeen": { "type": "string", "minLength": 1 }
+          "hypothesis": {
+            "type": "string",
+            "minLength": 1
+          },
+          "disconfirmingCriterion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "whatWasSeen": {
+            "type": "string",
+            "minLength": 1
+          }
         },
-        "required": ["hypothesis", "disconfirmingCriterion", "whatWasSeen"],
+        "required": [
+          "hypothesis",
+          "disconfirmingCriterion",
+          "whatWasSeen"
+        ],
         "additionalProperties": false
       }
     },
@@ -54,17 +152,122 @@
       "items": {
         "type": "object",
         "properties": {
-          "ordinal": { "type": "integer", "minimum": 1 },
-          "panelId": { "type": "string", "minLength": 1 },
-          "dataReturned": { "type": "boolean" }
+          "ordinal": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "panelId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dataReturned": {
+            "type": "boolean"
+          }
         },
-        "required": ["ordinal", "panelId", "dataReturned"],
+        "required": [
+          "ordinal",
+          "panelId",
+          "dataReturned"
+        ],
         "additionalProperties": false
       },
       "description": "How a reader tells 'checked and it was clean' from 'never looked'. Without it a wrong conclusion is unauditable."
     },
-    "promptHash": { "type": "string", "minLength": 1 }
+    "usage": {
+      "type": "object",
+      "properties": {
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "elapsedSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "maxIterations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxTokens": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "wallClockSeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "maxIterations",
+            "maxTokens",
+            "wallClockSeconds"
+          ],
+          "additionalProperties": false
+        },
+        "dispatch": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "calls": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "inputTokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "outputTokens": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "calls",
+            "inputTokens",
+            "outputTokens"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "calls",
+        "inputTokens",
+        "outputTokens",
+        "elapsedSeconds",
+        "budget",
+        "dispatch"
+      ],
+      "additionalProperties": false,
+      "description": "calls/tokens/elapsedSeconds are the investigation's own spend, the thing budget limits. dispatch is everything the dispatch spent at the model, the fitness gate included, which the budget does not cover; null only where no meter is wired."
+    },
+    "promptHash": {
+      "type": "string",
+      "minLength": 1
+    }
   },
-  "required": ["verdict", "window", "narrative", "evidence", "ruledOut", "trace", "promptHash"],
+  "required": [
+    "verdict",
+    "target",
+    "window",
+    "insights",
+    "evidence",
+    "ruledOut",
+    "trace",
+    "usage",
+    "promptHash"
+  ],
   "additionalProperties": false
 }
