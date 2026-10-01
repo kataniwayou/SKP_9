@@ -212,7 +212,7 @@ public sealed class AnalystReplayScenarios
 
         card.AppendLine($"score: {passes}/{runs}");
 
-        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "TestResults", $"replay-{scenario}.txt");
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "TestResults", $"replay-{System.IO.Path.GetFileNameWithoutExtension(promptPath)}-{(WithGraph() ? "graph" : "nograph")}-{scenario}.txt");
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file)!);
         await File.WriteAllTextAsync(file, card.ToString(), TestContext.Current.CancellationToken);
         TestContext.Current.TestOutputHelper?.WriteLine(card.ToString());
@@ -239,7 +239,11 @@ public sealed class AnalystReplayScenarios
             NullLogger<AnalystProcessor>.Instance,
             graphs: WithGraph()
                 ? new FixedGraphSource(global::Processor.Analyst.Graph.GraphBriefing.Of(ReplayFixtures.Graph(Window)))
-                : null);
+                : null,
+            // "Now" is the captured window's end, so the window the model is asked about is the one
+            // the readings came from. Left at the real clock, every replay asked about the last
+            // fifteen minutes and served data timestamped hours earlier -- and the model noticed.
+            clock: new Microsoft.Extensions.Time.Testing.FakeTimeProvider(ReplayFixtures.Window(Window).To));
     }
 
     /// <summary>

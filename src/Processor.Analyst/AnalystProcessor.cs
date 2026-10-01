@@ -22,7 +22,8 @@ internal sealed class AnalystProcessor(
     ILogger<AnalystProcessor> logger,
     TokenMeter? meter = null,
     IEntityNameSource? names = null,
-    Graph.IWorkflowGraphSource? graphs = null)
+    Graph.IWorkflowGraphSource? graphs = null,
+    TimeProvider? clock = null)
     : BaseProcessor<AnalystConfig>
 {
     /// <summary>The longest window any panel source here can honestly answer.</summary>
@@ -246,7 +247,9 @@ internal sealed class AnalystProcessor(
                 throw new FailedException($"the payload prompt is unfit: {summary}");
             }
 
-            var to = DateTimeOffset.UtcNow;
+            // The window ends now. Injectable so a replay can investigate the window its captured
+            // readings actually came from, rather than "now" against data timestamped hours earlier.
+            var to = (clock ?? TimeProvider.System).GetUtcNow();
             var range = new TimeRange(to - window, to);
 
             // Read by the processor, never by the model: the model gets the whole running graph every
