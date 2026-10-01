@@ -323,15 +323,19 @@ public sealed class PanelRegistryTests
     }
 
     [Fact]
-    public void RunBoundariesTellsTheModelTheRatioIsAWorkflowConstant()
+    public void RunBoundariesTellsTheModelThereIsNoFixedRatio()
     {
-        // The single most available misreading: that entry and terminal "should" be equal. They are
-        // not -- one entry record per fire, one terminal record per branch END -- and the healthy
-        // ratio belongs to the workflow, not to the panel. A model that does not know this reports a
-        // perfectly healthy 1:2 chain as losing half its work.
+        // Measured 2026-10-01 on filefetcher-archiveexpander-chain: 60:60 idle, 40:225 with the mixed
+        // feed, 159:1069 with the approved feed. The ratio is terminals per fire, so it moves with the
+        // records each fire imported. The old description called it "a constant OF THIS WORKFLOW";
+        // a model taught that reports a load change as a fault.
         var description = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Description;
 
-        Assert.Contains("NOT 1:1", description, StringComparison.Ordinal);
+        Assert.Contains("NO FIXED RATIO", description, StringComparison.Ordinal);
+        Assert.Contains("graph", description, StringComparison.Ordinal);
         Assert.Contains("drained", description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("entered", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("constant OF THIS WORKFLOW", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("1:6", description, StringComparison.Ordinal);
     }
 }

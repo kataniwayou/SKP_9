@@ -438,43 +438,40 @@ internal static class PanelRegistry
                 }
                 """)),
 
-        // THE AGENT'S COUNTERPART TO THE OPERATOR'S RUN-BOUNDARY PIE (skp-runposition-pie), added
-        // under the maintenance rule above in the same change that put the pie on the board -- the
-        // drift this registry has no detector for, closed deliberately this time rather than left.
-        // It reads attributes.RunPosition, the same attribute the board selects on.
+        // THE AGENT'S COUNTERPART TO THE OPERATOR'S RUN-BOUNDARY PIE (skp-runposition-pie). Since
+        // 2026-10-01 both count the same thing: fires that entered in the range, and every terminal
+        // record of those fires. The pie does it in ES|QL; this panel does it with a terms join on
+        // CorrelationId, because ElasticPanelSource reads _search. Keep the two in step -- the
+        // maintenance rule above is the only thing that detects drift between them.
         new PanelDefinition(
             PanelId: "run-boundaries",
             Layer: "business",
             Description:
-                "Where this workflow's runs began and ended in the window: how many entry steps the " +
-                "orchestrator dispatched, and how many branches reached an end because no successor " +
-                "accepted their outcome. The operator reads the same two counts as a pie beside the " +
-                "outcome distribution. " +
-                "THE TWO ARE DELIBERATELY NOT 1:1, AND EXPECTING THEM TO BE EQUAL IS THE MOST " +
-                "AVAILABLE MISREADING HERE. One entry record per fire, but one terminal record per " +
-                "branch END, so a workflow whose entry step opens several lineages ends several " +
-                "times per fire. The healthy ratio is a constant OF THIS WORKFLOW, not a number " +
-                "that should approach parity: a two-lineage chain sits at 1:2, a wider one at 1:6. " +
-                "You cannot know that constant from one dispatch, so do NOT report a shortfall " +
-                "against an assumed 1:1 -- read the ratio, and report only the shapes below, which " +
-                "are unambiguous without a baseline. " +
+                "Where this workflow's runs began and ended in the window. entry is the number of " +
+                "fires that ENTERED in the window (distinct CorrelationIds with an entry record); " +
+                "terminal is the number of branch ends belonging to those fires (terminal records " +
+                "whose CorrelationId is one of them), however far each fire fanned out. A terminal " +
+                "of a fire that entered before the window is not counted. The operator reads the " +
+                "same two numbers as the run-boundaries pie on the Kibana board. " +
+                "THERE IS NO FIXED RATIO between the two. A branch ends where no next step accepts " +
+                "its outcome, and a fork multiplies the branches after it, so terminals per fire " +
+                "follow from the workflow's graph AND from how many records each fire imported: the " +
+                "same healthy workflow reads about 1:1 idle and many terminals per fire when busy. " +
+                "Do NOT report a shortfall against an assumed ratio; the prompt describes the " +
+                "target workflow's graph. " +
                 "entry ABOVE ZERO WITH TERMINAL AT ZERO is the one unambiguous finding: the " +
                 "workflow is alive -- the schedule fired, the leader held the lease, the gate was " +
                 "open, the dispatch reached a queue -- and nothing completed. " +
-                "drainedPolls out of importerPolls is how many fires sent nothing downstream (an " +
-                "empty topic, only empty records, or a fault before the first send). Such a " +
-                "fire is NOT missing a terminal: the importer reports Cancelled, which the " +
+                "drainedPolls out of importerPolls is how many fires sent nothing downstream. Such " +
+                "a fire is NOT missing a terminal: the importer reports Cancelled, which the " +
                 "orchestrator records as that fire's terminal, so an idle workflow sits near 1:1 " +
                 "rather than at terminal zero. Never explain missing terminals with drainedPolls; " +
                 "a fire with no terminal is work that started and did not finish. " +
                 "entry AT ZERO means the workflow did not fire at all: stopped, no leader " +
                 "dispatching, or the projection store gate shut. " +
-                "Both counts are records rather than distinct runs, on purpose: deduplicating by " +
-                "run collapses a fire's several branch ends into one, which hides the loss of SOME " +
-                "branches of a run while others finish. " +
-                "Scoped to the target workflow by attributes.WorkflowId, so unlike the operator's " +
-                "pie this panel cannot blend two workflows' different ratios into one that " +
-                "describes neither.",
+                "A reading NOT fully covering the window here can also mean more runs touched the " +
+                "window than the reading could hold; entry and terminal are then lower bounds. " +
+                "Scoped to the target workflow by attributes.WorkflowId.",
             Kind: PanelKind.Elastic,
             Query: WithRunPositions(
                 """
