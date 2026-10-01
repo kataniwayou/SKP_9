@@ -14,19 +14,27 @@ namespace Processor.Analyst;
 /// </para>
 /// </summary>
 /// <param name="Verdict">
-/// <c>Drifting</c> or <c>Notable</c>. There is no <c>Quiet</c> and no <c>Indeterminate</c>: a quiet
-/// run cancels and an unanalysable one fails, so neither ever reaches a document.
+/// What the analysis concluded. <c>Drifting</c> or <c>Notable</c> carry at least one insight.
+/// <c>Quiet</c> means the analysis ran and nothing correlated into anything wrong; <c>Inconclusive</c>
+/// means the model judged the evidence the sources returned unbelievable. Both of those are published
+/// too: every run whose facilities worked completes and exports a document, so a consumer can tell a
+/// healthy window from a monitor that did not run. Only a facility failure (payload, model, panel
+/// source, budget, an invalid reply) fails the step, and that produces no document.
 /// </param>
 /// <param name="Window">
 /// The window actually examined, not the one configured. They diverge the moment a query truncates
 /// or a source lags, and the realized one is what makes two consecutive answers comparable.
 /// </param>
 /// <param name="Target">Which workflow was investigated. Without it a consumer of the topic cannot tell one monitor's finding from another's.</param>
+/// <param name="Reason">
+/// Why there is no insight -- set on <c>Quiet</c> and <c>Inconclusive</c>, null on a finding. It says
+/// what killed each hypothesis or why the evidence could not be believed, not what was healthy.
+/// </param>
 /// <param name="Insights">
 /// What the analyst inferred, never what a panel showed. Each one correlates at least two panels into
 /// a cause, a consequence or a contradiction no single panel shows. This replaced a free-text
 /// narrative that described the panels back to the operator, which added nothing the dashboards do
-/// not already show. A run that reaches no insight cancels, so a document always carries one.
+/// not already show. Empty exactly when the verdict is <c>Quiet</c> or <c>Inconclusive</c>.
 /// </param>
 /// <param name="Evidence">The readings the insights rest on, so a reader can disagree with the inference without re-running the investigation.</param>
 /// <param name="RuledOut">Hypotheses killed, with the criterion that killed them. Often the more valuable half.</param>
@@ -37,6 +45,7 @@ internal sealed record AnalystFinding(
     string Verdict,
     FindingTarget Target,
     RealizedWindow Window,
+    string? Reason,
     IReadOnlyList<FindingInsight> Insights,
     IReadOnlyList<FindingEvidence> Evidence,
     IReadOnlyList<RuledOutHypothesis> RuledOut,

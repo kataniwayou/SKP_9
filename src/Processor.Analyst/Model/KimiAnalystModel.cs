@@ -283,7 +283,7 @@ internal sealed class KimiAnalystModel : IAnalystModel
         // The response envelope is validated here, where it is read, rather than by adding an
         // exception type per shape to SendAsync's catch chain. Every one of these is "reached the
         // backend, got a 2xx, cannot read the answer" -- which is an analysis that could not run, not
-        // one that found nothing. Silence is the all-clear, so this must never become Cancelled.
+        // one that found nothing. A Quiet verdict is the all-clear, so this must never become one.
         if (!body.TryGetProperty("choices", out var choices)
             || choices.ValueKind != JsonValueKind.Array
             || choices.GetArrayLength() == 0)

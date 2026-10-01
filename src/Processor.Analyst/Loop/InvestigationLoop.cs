@@ -112,9 +112,11 @@ internal sealed class InvestigationLoop(
             catch (EvidenceNotBelievedException ex)
             {
                 // The model judged the evidence it gathered unbelievable. That is a conclusion, and a
-                // conclusion never decides the step: the sources answered, so the run ends quietly,
-                // exactly as if it had found nothing. Only a facility that failed fails the step.
-                return new LoopOutcome.NoFinding("the evidence could not be believed: " + ex.Message);
+                // conclusion never decides the step: the sources answered, so the run completes and
+                // publishes an Inconclusive document. Only a facility that failed fails the step.
+                var reason = "the evidence could not be believed: " + ex.Message;
+                return new LoopOutcome.NoFinding(
+                    reason, NoFindingDocument("Inconclusive", reason, trace, window, promptHash, config, budget));
             }
 
             transcript.Add(new ModelTurn(ModelRole.User, null, [], results));
@@ -174,15 +176,15 @@ internal sealed class InvestigationLoop(
                     throw new AnalysisImpossibleException(ex.Message, ex);
                 }
 
-                trace.Record(panelId, reading.SampleCount > 0);
+                trace.Record(panelId, reading.SampleCount > 0, reading.SampleCount);
                 return new ModelToolResult(call.CallId, JsonSerializer.Serialize(reading), IsError: false);
 
             case ToolNames.RecordValidation:
                 artifacts.Record(call.ToolName, call.Input, trace.Entries.Count);
 
                 // validate decides whether the evidence can be believed. A "no" is the model's
-                // conclusion about evidence the sources DID return, so it ends the run quietly
-                // (Cancelled) rather than failing the step -- the step result reports whether the
+                // conclusion about evidence the sources DID return, so it ends the run as an
+                // Inconclusive document rather than failing the step -- the step result reports whether the
                 // facilities worked, never what the model concluded. It must rest on something read,
                 // though: "unbelievable" with no panel behind it is not a judgement of any evidence,
                 // and buying silence that way would make "could not see" free.
@@ -255,7 +257,9 @@ internal sealed class InvestigationLoop(
                     + string.Join("; ", stageProblems));
             }
 
-            return new LoopOutcome.NoFinding(terminal.Input.GetProperty("reason").GetString()!);
+            var reason = terminal.Input.GetProperty("reason").GetString()!;
+            return new LoopOutcome.NoFinding(
+                reason, NoFindingDocument("Quiet", reason, trace, window, promptHash, config, budget));
         }
 
         var input = terminal.Input;
@@ -269,13 +273,12 @@ internal sealed class InvestigationLoop(
                 "the investigation's own record does not support its finding: " + string.Join("; ", problems));
         }
 
-        var spent = budget.Spent;
-
         var finding = new AnalystFinding(
             Verdict: input.GetProperty("verdict").GetString()!,
             // The name is filled by AnalystProcessor, which can read L2; the loop knows only the id.
             Target: new FindingTarget(config.TargetWorkflowId, Name: null),
             Window: new RealizedWindow(window.From, window.To, input.GetProperty("samplesExamined").GetInt32()),
+            Reason: null,
             Insights: [.. input.GetProperty("insights").EnumerateArray().Select(i => new FindingInsight(
                 i.GetProperty("claim").GetString()!,
                 i.GetProperty("why").GetString()!,
@@ -293,23 +296,58 @@ internal sealed class InvestigationLoop(
             // reference so the finding does not alias live loop state that a caller could still be
             // writing to.
             Trace: [.. trace.Entries],
-            // The investigation's own spend, against the payload's ceilings. The dispatch total, gate
-            // included, is added by AnalystProcessor, which holds the meter.
-            Usage: new FindingUsage(
-                spent.Calls,
-                spent.InputTokens,
-                spent.OutputTokens,
-                (int)spent.Elapsed.TotalSeconds,
-                new FindingBudget(config.MaxIterations, config.MaxTokens, config.WallClockSeconds),
-                Dispatch: null),
+            Usage: UsageOf(budget, config),
             PromptHash: promptHash);
 
         return new LoopOutcome.Finding(finding);
+    }
+
+    /// <summary>
+    /// The document for a run that reached no insight. Same target, window, trace, usage and prompt
+    /// hash as a finding -- those are facts about the run, not about what it concluded -- with the
+    /// reason in place of insights. The window's sample count is the loop's own sum of what the
+    /// reads returned, since no terminal tool reported one.
+    /// </summary>
+    private static AnalystFinding NoFindingDocument(
+        string verdict,
+        string reason,
+        InvestigationTrace trace,
+        TimeRange window,
+        string promptHash,
+        AnalystConfig config,
+        BudgetLedger budget)
+        => new(
+            Verdict: verdict,
+            Target: new FindingTarget(config.TargetWorkflowId, Name: null),
+            Window: new RealizedWindow(window.From, window.To, trace.SamplesRead),
+            Reason: reason,
+            Insights: [],
+            Evidence: [],
+            RuledOut: [],
+            Trace: [.. trace.Entries],
+            Usage: UsageOf(budget, config),
+            PromptHash: promptHash);
+
+    /// <summary>
+    /// The investigation's own spend, against the payload's ceilings. The dispatch total, gate
+    /// included, is added by AnalystProcessor, which holds the meter.
+    /// </summary>
+    private static FindingUsage UsageOf(BudgetLedger budget, AnalystConfig config)
+    {
+        var spent = budget.Spent;
+
+        return new FindingUsage(
+            spent.Calls,
+            spent.InputTokens,
+            spent.OutputTokens,
+            (int)spent.Elapsed.TotalSeconds,
+            new FindingBudget(config.MaxIterations, config.MaxTokens, config.WallClockSeconds),
+            Dispatch: null);
     }
 }
 
 /// <summary>
 /// validate judged the gathered evidence unbelievable. Private to the loop: it only carries the
-/// reason out of tool execution to where the run is ended quietly.
+/// reason out of tool execution to where the run ends as an Inconclusive document.
 /// </summary>
 internal sealed class EvidenceNotBelievedException(string reason) : Exception(reason);

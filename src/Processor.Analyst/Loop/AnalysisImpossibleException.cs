@@ -7,8 +7,9 @@ namespace Processor.Analyst.Loop;
 /// <para>
 /// It covers the facilities only: a payload, model or panel source that did not work, or a reply
 /// that is not a valid result. The model's own conclusions -- including "the evidence it returned
-/// cannot be believed" -- never land here; they end the run quietly instead. A facility failure is
-/// different: silence is the all-clear, so an agent whose tools did not answer must not be silent.
+/// cannot be believed" -- never land here; they complete as a Quiet or Inconclusive document. A
+/// facility failure is different: it fails the step and publishes nothing, so a Quiet verdict can
+/// only ever come from a run whose tools answered.
 /// </para>
 /// </summary>
 internal sealed class AnalysisImpossibleException(string why, Exception? innerException = null)

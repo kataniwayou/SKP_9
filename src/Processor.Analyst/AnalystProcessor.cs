@@ -109,7 +109,8 @@ internal sealed class AnalystProcessor(
 
     /// <summary>
     /// The whole dispatch minus the send, so it can be tested without a <c>DispatchState</c>.
-    /// Returns a finding, throws <c>CancelledException</c> for a quiet run, <c>FailedException</c>
+    /// Returns the document to publish -- a finding, or a Quiet or Inconclusive verdict -- and throws
+    /// <c>FailedException</c>
     /// for everything else.
     /// </summary>
     internal async Task<AnalystFinding> AnalyseAsync(AnalystConfig config, CancellationToken ct)
@@ -239,8 +240,8 @@ internal sealed class AnalystProcessor(
                 // the one processor breaking that rule, and the duplicate carried nothing the
                 // framework's line does not: the same summary, one scope earlier.
                 //
-                // NOT Cancelled. An agent that failed its fitness exam has analysed nothing, and
-                // silence is the all-clear.
+                // Failed, NOT a Quiet document. An agent that failed its fitness exam has analysed
+                // nothing, and a Quiet verdict is the all-clear.
                 throw new FailedException($"the payload prompt is unfit: {summary}");
             }
 
@@ -256,7 +257,7 @@ internal sealed class AnalystProcessor(
             throw new FailedException(ex.Message, ex);
         }
         // The worst failure this design can have is a monitor that reports all-clear because it
-        // broke. Cancelled is reserved for a run that reached a terminal tool and found nothing —
+        // broke. A Quiet document is reserved for a run that reached a terminal tool and found nothing —
         // NOT for a run that never got there — so an OperationCanceledException from a library call
         // (an HTTP timeout is the common shape) must be mapped to FailedException deliberately rather
         // than left to the framework's generic fault branch, which logs it as a code bug.
@@ -268,7 +269,7 @@ internal sealed class AnalystProcessor(
         // genuine shutdown into FailedException here would acknowledge the delivery with a fabricated
         // outcome and lose the message. Letting THAT case escape unfiltered creates no hazard this
         // design is guarding against: an escaping OperationCanceledException parks the delivery with
-        // no StepOutcome sent at all, so nothing downstream ever reads Cancelled. The filter is what
+        // no StepOutcome sent at all, so nothing downstream ever reads an all-clear. The filter is what
         // keeps this catch confined to "something else's cancellation", the case that genuinely needs
         // a deliberate, loud disposition.
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
@@ -280,9 +281,11 @@ internal sealed class AnalystProcessor(
         {
             LoopOutcome.Finding f => f.Value,
 
-            // The analysis ran to completion and does not contribute. The exporter is gated on
-            // Completed, so nothing leaves: silence is the all-clear.
-            LoopOutcome.NoFinding n => throw new CancelledException($"nothing to report: {n.Reason}"),
+            // The analysis ran and reached no insight. That is a conclusion, and a conclusion never
+            // decides the step: it completes and publishes a Quiet or Inconclusive document, so a
+            // healthy window reaches the topic as plainly as a finding and silence there means only
+            // that the monitor did not run.
+            LoopOutcome.NoFinding n => n.Value,
 
             _ => throw new FailedException($"unrecognised loop outcome {outcome.GetType().Name}"),
         };

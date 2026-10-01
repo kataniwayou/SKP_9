@@ -18,6 +18,15 @@ internal sealed class InvestigationTrace
     /// <summary>The distinct panels read, for the cross-reference assertions in <c>StageAssertions</c>.</summary>
     internal IReadOnlySet<string> PanelsRead => _entries.Select(e => e.PanelId).ToHashSet();
 
-    internal void Record(string panelId, bool dataReturned)
-        => _entries.Add(new TraceEntry(_entries.Count + 1, panelId, dataReturned));
+    /// <summary>
+    /// The samples every read returned, summed. A no-finding document has no model-reported count to
+    /// carry, so this is what fills its window -- the loop's own record again, not a claim.
+    /// </summary>
+    internal int SamplesRead { get; private set; }
+
+    internal void Record(string panelId, bool dataReturned, int samples = 0)
+    {
+        _entries.Add(new TraceEntry(_entries.Count + 1, panelId, dataReturned));
+        SamplesRead += samples;
+    }
 }

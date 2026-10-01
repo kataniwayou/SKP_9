@@ -248,7 +248,7 @@ public sealed class AnalystProcessorTests
     }
 
     [Fact]
-    public async Task AnAnalysisThatFindsNothingCancels()
+    public async Task AnAnalysisThatFindsNothingCompletesWithAQuietDocument()
     {
         // C1: report_no_finding still needs its five stages recorded -- the check is presence-only,
         // but it applies to this branch too now.
@@ -260,10 +260,12 @@ public sealed class AnalystProcessorTests
                     ModelReply.Of(ScriptedModel.Call("report_no_finding", new { reason = "nothing moved" })),
                 ]));
 
-        var ex = await Assert.ThrowsAsync<CancelledException>(
-            () => processor.AnalyseAsync(Config(), CancellationToken.None));
+        // No cancel any more: the run completes and its verdict is published, so a healthy window
+        // reaches the topic as plainly as a finding does.
+        var document = await processor.AnalyseAsync(Config(), CancellationToken.None);
 
-        Assert.Contains("nothing moved", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("Quiet", document.Verdict);
+        Assert.Equal("nothing moved", document.Reason);
     }
 
     [Fact]

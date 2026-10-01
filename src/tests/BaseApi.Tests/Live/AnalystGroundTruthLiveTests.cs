@@ -174,16 +174,14 @@ public sealed class AnalystGroundTruthLiveTests
         var processor = Processor(QuietWindow());
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(12));
 
-        // NoFinding is surfaced as a cancellation: silence is the all-clear, and the exporter is
-        // gated on Completed so nothing leaves.
-        var quiet = await Record.ExceptionAsync(
-            () => processor.AnalyseAsync(Config(DeployedPrompt(), AllPanels), cts.Token));
+        // No finding is published as a Quiet verdict: the run completes either way.
+        var quiet = await processor.AnalyseAsync(Config(DeployedPrompt(), AllPanels), cts.Token);
 
         Assert.True(
-            quiet is CancelledException,
+            quiet.Verdict == "Quiet",
             "a window with no fault must produce no finding, because a monitor that cries wolf twice "
-            + $"an hour is one an operator learns to ignore. Got: {quiet?.GetType().Name ?? "a finding"} "
-            + $"-- {quiet?.Message}");
+            + $"an hour is one an operator learns to ignore. Got: {quiet.Verdict} -- "
+            + string.Join("; ", quiet.Insights.Select(i => i.Claim)));
     }
 
     [Fact]
@@ -194,14 +192,13 @@ public sealed class AnalystGroundTruthLiveTests
         var processor = Processor(WindowWithAStandingBacklog());
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(12));
 
-        var quiet = await Record.ExceptionAsync(
-            () => processor.AnalyseAsync(Config(DeployedPrompt(), AllPanels), cts.Token));
+        var quiet = await processor.AnalyseAsync(Config(DeployedPrompt(), AllPanels), cts.Token);
 
         Assert.True(
-            quiet is CancelledException,
+            quiet.Verdict == "Quiet",
             "a flat dead-letter depth with no parked refusals and every run finishing is an old "
             + "backlog, not loss in this window, and restating it is not an insight. Got: "
-            + $"{quiet?.GetType().Name ?? "a finding"} -- {quiet?.Message}");
+            + $"{quiet.Verdict} -- " + string.Join("; ", quiet.Insights.Select(i => i.Claim)));
     }
 
     [Fact]

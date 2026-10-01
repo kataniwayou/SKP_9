@@ -16,6 +16,7 @@ public sealed class AnalystFindingSchemaTests
             From: new DateTimeOffset(2026, 9, 24, 0, 0, 0, TimeSpan.Zero),
             To: new DateTimeOffset(2026, 9, 24, 6, 0, 0, TimeSpan.Zero),
             SamplesExamined: 91),
+        Reason: null,
         Insights:
         [
             new FindingInsight(
@@ -82,6 +83,7 @@ public sealed class AnalystFindingSchemaTests
         Assert.Contains("\"target\"", json, StringComparison.Ordinal);
         Assert.Contains("\"insights\"", json, StringComparison.Ordinal);
         Assert.Contains("\"usage\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"reason\"", json, StringComparison.Ordinal);
         Assert.Contains("\"evidence\"", json, StringComparison.Ordinal);
         Assert.Contains("\"ruledOut\"", json, StringComparison.Ordinal);
         Assert.Contains("\"trace\"", json, StringComparison.Ordinal);
@@ -147,10 +149,10 @@ public sealed class AnalystFindingSchemaTests
     [Fact]
     public void AVerdictOutsideTheEnumIsRejected()
     {
-        // Quiet and Indeterminate deliberately do not exist here: they are step dispositions, not
-        // values. A finding document only ever describes a real finding.
+        // Four verdicts and no more. "Indeterminate" is not one: a run that could not see because a
+        // facility failed is a Failed step with no document, not a verdict.
         var json = System.Text.Encoding.UTF8.GetString(AnalystFinding.Serialize(Sample()))
-            .Replace("\"Drifting\"", "\"Quiet\"", StringComparison.Ordinal);
+            .Replace("\"Drifting\"", "\"Indeterminate\"", StringComparison.Ordinal);
 
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(), System.Text.Encoding.UTF8.GetBytes(json), out _);
@@ -190,7 +192,8 @@ public sealed class AnalystFindingSchemaTests
     [Fact]
     public void AFindingWithNoInsightIsRejected()
     {
-        // A run that reaches no insight cancels; it never produces a document with nothing to say.
+        // A Drifting or Notable verdict with nothing inferred is a contradiction; a run that reaches
+        // no insight publishes Quiet instead.
         var json = System.Text.Json.Nodes.JsonNode.Parse(AnalystFinding.Serialize(Sample()))!.AsObject();
         json["insights"] = new System.Text.Json.Nodes.JsonArray();
 
@@ -216,5 +219,60 @@ public sealed class AnalystFindingSchemaTests
             Definition(), AnalystFinding.Serialize(finding), out var errors);
 
         Assert.True(ok, string.Join("; ", errors));
+    }
+
+    private static AnalystFinding QuietSample()
+    {
+        var sample = Sample();
+        return sample with
+        {
+            Verdict = "Quiet",
+            Reason = "the thrown-work hypothesis died on a flat depth with no parked refusals",
+            Insights = [],
+            Evidence = [],
+            RuledOut = [],
+        };
+    }
+
+    [Theory]
+    [InlineData("Quiet")]
+    [InlineData("Inconclusive")]
+    public void ANoFindingVerdictWithAReasonAndNoInsightValidates(string verdict)
+    {
+        // Every run whose facilities worked is published, so "nothing wrong" and "could not
+        // believe the evidence" must be documents the schema accepts.
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), AnalystFinding.Serialize(QuietSample() with { Verdict = verdict }), out var errors);
+
+        Assert.True(ok, string.Join("; ", errors));
+    }
+
+    [Fact]
+    public void AQuietVerdictWithoutAReasonIsRejected()
+    {
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), AnalystFinding.Serialize(QuietSample() with { Reason = null }), out _);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public void AQuietVerdictCarryingAnInsightIsRejected()
+    {
+        // An insight is a finding; publishing one under Quiet would hide it from any consumer that
+        // filters on the verdict.
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), AnalystFinding.Serialize(QuietSample() with { Insights = Sample().Insights }), out _);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public void AFindingCarryingAReasonIsRejected()
+    {
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), AnalystFinding.Serialize(Sample() with { Reason = "why not" }), out _);
+
+        Assert.False(ok);
     }
 }

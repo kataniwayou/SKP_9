@@ -22,9 +22,9 @@ internal static class ToolNames
     /// <summary>
     /// The only two ways an investigation may end.
     /// <para>
-    /// They map one-to-one onto step dispositions: <see cref="SubmitFinding"/> → Completed → the
-    /// exporter runs; <see cref="ReportNoFinding"/> → Cancelled → silence, which is the all-clear.
-    /// Every other ending — budget exhausted, malformed input, an assertion violated — is Failed.
+    /// Both complete the step and publish a document: <see cref="SubmitFinding"/> a finding,
+    /// <see cref="ReportNoFinding"/> a Quiet verdict. Every other ending — budget exhausted,
+    /// malformed input, an assertion violated — is Failed and publishes nothing.
     /// </para>
     /// </summary>
     internal static readonly IReadOnlySet<string> Terminal =

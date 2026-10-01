@@ -1,15 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Analyst finding v2",
+  "title": "Analyst finding v3",
   "type": "object",
   "properties": {
     "verdict": {
       "type": "string",
       "enum": [
         "Drifting",
-        "Notable"
+        "Notable",
+        "Quiet",
+        "Inconclusive"
       ],
-      "description": "Quiet and Indeterminate are deliberately absent: a run that reaches no insight, or judges its evidence unbelievable, cancels the step, and one whose facilities failed fails it, so neither reaches a document."
+      "description": "Drifting and Notable carry at least one insight. Quiet means the analysis ran and nothing correlated into anything wrong; Inconclusive means the model judged the evidence it got back unbelievable. All four are published: every run whose facilities worked completes and exports a document, and only a facility failure fails the step and publishes nothing."
     },
     "target": {
       "type": "object",
@@ -56,9 +58,16 @@
       "additionalProperties": false,
       "description": "The REALIZED window, not the configured one. Precision here is what lets two consecutive answers be compared, which is the only liveness signal a stateless agent has. format:date-time on from/to is documentation only -- ProcessorJsonSchemaValidator does not set RequireFormatValidation, so it is never enforced. No pattern is added either: unlike a hand-authored payload field, these values come from this processor's own serializer writing DateTimeOffset, so the only way they could be malformed is a bug in code we already test; the actual guarantee is the serializer, not this schema."
     },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why there is no insight: set on Quiet and Inconclusive, null on Drifting and Notable."
+    },
     "insights": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "items": {
         "type": "object",
         "properties": {
@@ -87,11 +96,11 @@
         ],
         "additionalProperties": false
       },
-      "description": "What the analyst inferred, never what a panel showed. Each insight correlates at least two panels into a cause, a consequence or a contradiction no single panel shows; the readings themselves live in evidence. A run that reaches no insight reports nothing, so this is never empty."
+      "description": "What the analyst inferred, never what a panel showed. Each insight correlates at least two panels into a cause, a consequence or a contradiction no single panel shows; the readings themselves live in evidence. Non-empty exactly on Drifting and Notable."
     },
     "evidence": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "items": {
         "type": "object",
         "properties": {
@@ -262,12 +271,51 @@
     "verdict",
     "target",
     "window",
+    "reason",
     "insights",
     "evidence",
     "ruledOut",
     "trace",
     "usage",
     "promptHash"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "enum": [
+              "Drifting",
+              "Notable"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "insights": {
+            "minItems": 1
+          },
+          "evidence": {
+            "minItems": 1
+          },
+          "reason": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "insights": {
+            "maxItems": 0
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
   ],
   "additionalProperties": false
 }

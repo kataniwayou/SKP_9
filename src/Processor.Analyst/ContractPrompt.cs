@@ -62,8 +62,9 @@ internal static class ContractPrompt
            {ToolNames.RecordValidation}. A series that was absent, a window only partly covered, or a
            "no data" you cannot tell apart from "no problem" are facts about the EVIDENCE, not about
            the system. If the evidence you gathered cannot be believed, say so here rather than
-           guessing: recording analysable as false ENDS the investigation with nothing reported, and
-           the reason you give is kept. Base that judgement on panels you have actually read.
+           guessing: recording analysable as false ENDS the investigation, and the reason you give
+           is published as an Inconclusive verdict. Base that judgement on panels you have actually
+           read.
         3. Plan — for each hypothesis, state the evidence that would KILL it, before you read that
            evidence. Record with {ToolNames.RecordPlan}. A criterion stated afterwards is not a
            criterion, and neither is one built on a panel you have already looked at — if you saw it
@@ -100,9 +101,11 @@ internal static class ContractPrompt
         hypothesis, copy its disconfirming criterion into the finding VERBATIM, exactly as you wrote
         it in stage 3 — do not summarize it or restate it in your own words, even if the restatement
         means the same thing. Call {ToolNames.ReportNoFinding} when the analysis ran and reached no
-        insight — including when something survived but you cannot correlate it into one. Reporting
-        nothing is a correct and complete outcome; restating a reading, or inventing a trend, to have
-        something to say is not.
+        insight — including when something survived but you cannot correlate it into one. Its reason
+        is published as a Quiet verdict, under the same rule as an insight: say what killed each
+        hypothesis, or why a survivor could not be correlated, and never list what was healthy.
+        Reaching no insight is a correct and complete outcome; restating a reading, or inventing a
+        trend, to have something to say is not.
 
         The following is the analytical judgment for this particular monitor.
 

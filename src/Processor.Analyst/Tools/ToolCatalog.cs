@@ -66,9 +66,10 @@ internal static class ToolCatalog
                 SchemaFor(ToolNames.SubmitFinding)),
 
             new ToolSpec(ToolNames.ReportNoFinding,
-                "End the investigation with nothing to report. The analysis ran and reached no "
-                + "insight. This is the honest ending when no hypothesis survived, or when what "
-                + "survived cannot be correlated into an insight.",
+                "End the investigation with no insight. The analysis ran and reached none: no "
+                + "hypothesis survived, or what survived cannot be correlated into an insight. The "
+                + "reason is published as a Quiet verdict: state what killed each hypothesis, or why "
+                + "a survivor could not be correlated. Do not list what was healthy.",
                 SchemaFor(ToolNames.ReportNoFinding)),
         ];
     }

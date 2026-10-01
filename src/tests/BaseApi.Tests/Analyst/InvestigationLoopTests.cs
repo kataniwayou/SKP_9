@@ -64,6 +64,15 @@ public sealed class InvestigationLoopTests
 
         var none = Assert.IsType<LoopOutcome.NoFinding>(outcome);
         Assert.Equal("nothing moved", none.Reason);
+
+        // It still carries a publishable document: Quiet, the reason, no insight, and the same
+        // facts about the run a finding carries.
+        Assert.Equal("Quiet", none.Value.Verdict);
+        Assert.Equal("nothing moved", none.Value.Reason);
+        Assert.Empty(none.Value.Insights);
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), none.Value.Target.WorkflowId);
+        Assert.Equal(["queue-depth", "arrival-mean"], none.Value.Trace.Select(t => t.PanelId).ToArray());
+        Assert.Equal(182, none.Value.Window.SamplesExamined);
     }
 
     [Fact]
@@ -87,11 +96,11 @@ public sealed class InvestigationLoopTests
     }
 
     [Fact]
-    public async Task AnUnbelievableWindowEndsQuietlyBecauseAConclusionNeverFailsTheStep()
+    public async Task AnUnbelievableWindowIsInconclusiveBecauseAConclusionNeverFailsTheStep()
     {
         // The step result reports whether the facilities worked, never what the model concluded. The
-        // panel answered; judging its answer unbelievable is a conclusion, so the run ends as
-        // NoFinding (Cancelled) -- carrying the reason -- rather than failing the step.
+        // panel answered; judging its answer unbelievable is a conclusion, so the run ends as an
+        // Inconclusive document -- carrying the reason -- rather than failing the step.
         var model = new ScriptedModel(
             ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "queue-depth" })),
             ModelReply.Of(ScriptedModel.Call("record_validation", new
@@ -105,6 +114,8 @@ public sealed class InvestigationLoopTests
 
         var quiet = Assert.IsType<LoopOutcome.NoFinding>(outcome);
         Assert.Contains("partial coverage", quiet.Reason, StringComparison.Ordinal);
+        Assert.Equal("Inconclusive", quiet.Value.Verdict);
+        Assert.Contains("partial coverage", quiet.Value.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
