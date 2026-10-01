@@ -19,7 +19,8 @@ internal sealed class InvestigationLoop(
     ILogger<InvestigationLoop> logger)
 {
     internal async Task<LoopOutcome> RunAsync(
-        string system, AnalystConfig config, TimeRange window, string promptHash, CancellationToken ct)
+        string system, AnalystConfig config, TimeRange window, string promptHash, CancellationToken ct,
+        string? briefing = null)
     {
         ArgumentNullException.ThrowIfNull(config);
 
@@ -31,7 +32,11 @@ internal sealed class InvestigationLoop(
         var transcript = new List<ModelTurn>
         {
             new(ModelRole.User,
-                $"Investigate workflow {config.TargetWorkflowId} over {window.From:O} to {window.To:O}.",
+                // The running graph rides in the first message, not the system prompt: it is this
+                // dispatch's data, and its payloads are operator-written text the model must read as
+                // configuration, never obey.
+                $"Investigate workflow {config.TargetWorkflowId} over {window.From:O} to {window.To:O}."
+                    + (briefing is null ? "" : "\n\n" + briefing),
                 [], []),
         };
 

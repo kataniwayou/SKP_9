@@ -49,6 +49,53 @@ namespace Processor.Analyst;
 /// </summary>
 internal static class ContractPrompt
 {
+    /// <summary>
+    /// How every workflow on this platform behaves: the static half of understanding the target. The
+    /// dynamic half — this workflow's steps, routes and schedule — arrives with each dispatch as the
+    /// <c>running-graph</c> block, and these rules are what make that block readable.
+    /// <para>
+    /// <b>Compiled because it only changes when the framework does.</b> Every statement here is a rule
+    /// some framework code enforces (advancement in <c>StepResult</c>'s wire values, terminals and
+    /// entries in <c>RunPositions</c>, refusals in <c>RefusalTemplates</c>), so it moves with the image
+    /// and the SourceHash, and a stored BIT verdict is re-judged when it does. Nothing here is specific
+    /// to one workflow; that belongs to the graph or the payload.
+    /// </para>
+    /// </summary>
+    internal const string FrameworkPrimer = """
+        How every workflow on this platform behaves. These are rules of the framework, true of any
+        target; the running-graph block in the first message applies them to this one.
+
+        - A workflow is fired by its cron: six fields, SECONDS first ("0 * * * * *" is once a minute,
+          at second 0). One fire is one run, identified by one correlation id, and dispatches every
+          entry step once.
+        - A step runs one processor with its assignment payload (its configuration) and ends in exactly
+          one result: Completed, Failed or Cancelled. Cancelled is a step ending its branch on purpose,
+          such as a policy rejecting an item; it is not a fault.
+        - A successor is entered only when its entry condition accepts the predecessor's result: the
+          same result, or Always. Every successor that accepts starts its own branch, so the branches
+          after a fork multiply. An importer entry step turns one fire into one branch per item it read.
+        - A branch ends where no successor accepts the step's result; that step is the branch's
+          terminal for that result, and a step can be terminal for one result and not another. Every
+          branch ends exactly once. A failure routed to a failure-handling step ends at the end of that
+          handler's path, not where it failed. The running-graph block lists, for every step and
+          result, where the branch goes or that it ends: use it, do not re-derive it.
+        - run-boundaries: an entry record is written once per entry step per fire, after the dispatch
+          reached its queue; a terminal record once per branch end. An importer poll that reads nothing
+          ends Cancelled, and that is its fire's terminal, so a fire always produces at least one
+          terminal. Entry above zero with terminal at zero therefore means not even the shortest path
+          ended: something every branch shares is not working, or ends are not being recorded.
+        - step-outcomes counts one record per step execution, summed over every step: it has no step
+          dimension, so it can confirm a total but never which step produced it. Never attribute a
+          count to a step the panel cannot name.
+        - A refused message produced no result at all and is invisible to step-outcomes. Parked means
+          it sits in a dead-letter queue; not parked means it was redelivered and nothing was lost.
+        - The pods run the graph projected at the workflow's last start; an edit since then is not in
+          effect until it is restarted. The running-graph block is that projection.
+        - Expectations come from the routing: an item that takes a path produces one outcome record per
+          step on it and one terminal per branch it ends in. A count that the routing explains is
+          expected, however large; a fault is a count the routing does not explain.
+        """;
+
     internal static string Compose(string payloadPrompt) => $"""
         You are standing in for an operator who glances at a system's dashboards. You are not looking
         for a specific fault. You are looking for a trend in how the system is behaving, and an
@@ -106,6 +153,8 @@ internal static class ContractPrompt
         hypothesis, or why a survivor could not be correlated, and never list what was healthy.
         Reaching no insight is a correct and complete outcome; restating a reading, or inventing a
         trend, to have something to say is not.
+
+        {FrameworkPrimer}
 
         The following is the analytical judgment for this particular monitor.
 

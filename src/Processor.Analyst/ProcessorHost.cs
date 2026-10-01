@@ -146,6 +146,8 @@ public static class ProcessorHost
         builder.Services.AddSingleton<GroundTruthRehearsal>();
         builder.Services.AddSingleton<PreflightBit>();
         builder.Services.AddSingleton<InvestigationLoop>();
+        // The target's running graph, from the projection its last start wrote to L2.
+        builder.Services.AddSingleton<Graph.IWorkflowGraphSource, Graph.L2WorkflowGraphSource>();
 
         builder.Services.Configure<Model.AnalystModelOptions>(builder.Configuration.GetSection("Analyst:Model"));
         // Env-only, like the model options: Analyst__Bit__Mode=StructureOnly skips the judge and the

@@ -39,6 +39,11 @@ internal static class ReplayFixtures
     /// <summary>The copy beside the test assembly, for a replay to read.</summary>
     private static string OutputRoot() => Path.Combine(AppContext.BaseDirectory, "Analyst", "Fixtures", "replay");
 
+    /// <summary>The running graph captured with the window, names included.</summary>
+    internal static global::Processor.Analyst.Graph.RunningGraph Graph(string name)
+        => JsonSerializer.Deserialize<global::Processor.Analyst.Graph.RunningGraph>(
+            File.ReadAllText(Path.Combine(OutputRoot(), name, "running-graph.json")))!;
+
     internal static ReplayWindow Window(string name)
         => JsonSerializer.Deserialize<ReplayWindow>(File.ReadAllText(Path.Combine(OutputRoot(), name, "window.json")))!;
 
@@ -64,4 +69,11 @@ internal static class ReplayFixtures
 
         return reader;
     }
+}
+
+/// <summary>A graph source that serves one fixed briefing: a captured graph, or a reason it is missing.</summary>
+internal sealed class FixedGraphSource(global::Processor.Analyst.Graph.GraphBriefing briefing) : global::Processor.Analyst.Graph.IWorkflowGraphSource
+{
+    public Task<global::Processor.Analyst.Graph.GraphBriefing> ReadAsync(Guid workflowId, CancellationToken ct)
+        => Task.FromResult(briefing);
 }

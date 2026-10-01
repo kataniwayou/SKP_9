@@ -21,7 +21,8 @@ internal sealed class AnalystProcessor(
     InvestigationLoop loop,
     ILogger<AnalystProcessor> logger,
     TokenMeter? meter = null,
-    IEntityNameSource? names = null)
+    IEntityNameSource? names = null,
+    Graph.IWorkflowGraphSource? graphs = null)
     : BaseProcessor<AnalystConfig>
 {
     /// <summary>The longest window any panel source here can honestly answer.</summary>
@@ -248,8 +249,16 @@ internal sealed class AnalystProcessor(
             var to = DateTimeOffset.UtcNow;
             var range = new TimeRange(to - window, to);
 
+            // Read by the processor, never by the model: the model gets the whole running graph every
+            // dispatch, with no turn spent fetching it and no way to reach anything else.
+            var briefing = graphs is null
+                ? null
+                : Graph.GraphRenderer.Render(
+                    await graphs.ReadAsync(config.TargetWorkflowId, ct).ConfigureAwait(false));
+
             outcome = await loop
-                .RunAsync(ContractPrompt.Compose(config.Prompt), config, range, PromptHash.Of(config.Prompt), ct)
+                .RunAsync(ContractPrompt.Compose(config.Prompt), config, range, PromptHash.Of(config.Prompt), ct,
+                    briefing)
                 .ConfigureAwait(false);
         }
         catch (AnalysisImpossibleException ex)

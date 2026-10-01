@@ -178,7 +178,8 @@ public sealed class AnalystReplayScenarios
         var (promptPath, prompt) = Prompt();
         var runs = Runs();
         var card = new StringBuilder()
-            .AppendLine($"=== {scenario}  prompt={System.IO.Path.GetFileName(promptPath)}  hash={PromptHash.Of(prompt)[..12]}  runs={runs}")
+            .AppendLine($"=== {scenario}  prompt={System.IO.Path.GetFileName(promptPath)}  hash={PromptHash.Of(prompt)[..12]}  "
+                + $"graph={(WithGraph() ? "on" : "off")}  runs={runs}")
             .AppendLine($"expected: {expected}");
         var passes = 0;
 
@@ -235,6 +236,15 @@ public sealed class AnalystReplayScenarios
                 new BitCache(new InMemorySharedState(), "replay"),
                 options: Options.Create(new AnalystBitOptions { Mode = BitMode.StructureOnly })),
             new InvestigationLoop(model, panels, TimeProvider.System, NullLogger<InvestigationLoop>.Instance),
-            NullLogger<AnalystProcessor>.Instance);
+            NullLogger<AnalystProcessor>.Instance,
+            graphs: WithGraph()
+                ? new FixedGraphSource(global::Processor.Analyst.Graph.GraphBriefing.Of(ReplayFixtures.Graph(Window)))
+                : null);
     }
+
+    /// <summary>
+    /// The captured running graph is injected unless <c>SKP_ANALYST_REPLAY_GRAPH=0</c>, so the same prompt
+    /// can be scored with and without it.
+    /// </summary>
+    private static bool WithGraph() => Environment.GetEnvironmentVariable("SKP_ANALYST_REPLAY_GRAPH") != "0";
 }
