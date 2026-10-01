@@ -392,13 +392,21 @@ internal sealed class ElasticPanelSource
         var terminal = (long)boundaries.GetProperty("entered_terminals").GetProperty("value").GetDouble();
         var capped = boundaries.GetProperty("by_run").GetProperty("sum_other_doc_count").GetInt64() > 0;
 
+        var importerPolls = polls.GetProperty("doc_count").GetInt64();
+        var drainedPolls = polls.GetProperty("drained").GetProperty("doc_count").GetInt64();
+
+        // pollsThatImported is the subtraction done here rather than by the model. Read the other way
+        // round, drainedPolls=0 sounds like "every poll was empty" -- it means the opposite -- and the
+        // model made exactly that inversion in replay, prompt rule against it notwithstanding. A count
+        // stated positively cannot be inverted.
         var valueJson = JsonSerializer.Serialize(new
         {
             totalWorkflowRecords = total,
             entry,
             terminal,
-            importerPolls = polls.GetProperty("doc_count").GetInt64(),
-            drainedPolls = polls.GetProperty("drained").GetProperty("doc_count").GetInt64(),
+            importerPolls,
+            pollsThatImported = importerPolls - drainedPolls,
+            drainedPolls,
         });
 
         return new PanelReading(

@@ -462,6 +462,10 @@ internal static class PanelRegistry
                 "entry ABOVE ZERO WITH TERMINAL AT ZERO is the one unambiguous finding: the " +
                 "workflow is alive -- the schedule fired, the leader held the lease, the gate was " +
                 "open, the dispatch reached a queue -- and nothing completed. " +
+                "pollsThatImported is how many fires' importer polls read at least one item and sent it " +
+                "downstream; drainedPolls is how many read nothing (the two sum to importerPolls). Only " +
+                "a drained poll ends Cancelled at the importer; a poll that imported ends wherever its " +
+                "items' paths end. " +
                 "drainedPolls out of importerPolls is how many fires sent nothing downstream. Such " +
                 "a fire is NOT missing a terminal: the importer reports Cancelled, which the " +
                 "orchestrator records as that fire's terminal, so an idle workflow sits near 1:1 " +

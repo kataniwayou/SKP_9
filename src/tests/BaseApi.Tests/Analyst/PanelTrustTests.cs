@@ -360,10 +360,11 @@ public sealed class PanelTrustTests
         Assert.Equal(20, root.GetProperty("entry").GetInt64());
         Assert.Equal(40, root.GetProperty("terminal").GetInt64());
 
-        // The discriminator. 8 of the 20 polls read nothing, so 8 fires COULD NOT have produced a
-        // terminal and their absence is not loss.
+        // 8 of the 20 polls read nothing; the other 12 imported, stated positively so it cannot be
+        // read the wrong way round.
         Assert.Equal(20, root.GetProperty("importerPolls").GetInt64());
         Assert.Equal(8, root.GetProperty("drainedPolls").GetInt64());
+        Assert.Equal(12, root.GetProperty("pollsThatImported").GetInt64());
     }
 
     [Fact]

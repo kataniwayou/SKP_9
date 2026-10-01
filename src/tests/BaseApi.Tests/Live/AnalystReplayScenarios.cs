@@ -75,6 +75,13 @@ public sealed class AnalystReplayScenarios
     /// <summary>
     /// Work thrown away during the window: the file-persister's dead-letter queue climbs from 0 to 17
     /// halfway through while 17 parked refusals land for this workflow. Two panels agree on one loss.
+    /// <para>
+    /// <b>Consistent with the loss, not just decorated with it.</b> Each of the 17 is a good item's
+    /// branch whose dispatch to S9 (split-filepersister) was refused: it never produced its S9 or S10
+    /// Completed record and never ended. So the outcome totals lose 34 Completed and run-boundaries loses
+    /// 17 terminals. Leaving the captured totals untouched planted a loss that left no trace in the
+    /// counts -- which cannot happen -- and the model spent an insight hunting the inconsistency.
+    /// </para>
     /// </summary>
     private static FixturePanelReader LosingWork()
     {
@@ -119,7 +126,20 @@ public sealed class AnalystReplayScenarios
 
         return reader
             .Planted("dead-letter-depth", depth.ToJsonString())
-            .Planted("refused-messages", refusals.ToJsonString(), samples: 6215);
+            .Planted("refused-messages", refusals.ToJsonString(), samples: 6215)
+            .Planted("step-outcomes",
+                """{"totalOutcomeRecords":891,"completed":819,"failed":54,"cancelled":18}""", samples: 891)
+            .Planted("step-failures", ReplaceTotal(reader.ValueOf("step-failures"), 891), samples: 891)
+            .Planted("run-boundaries",
+                """{"totalWorkflowRecords":6215,"entry":16,"terminal":161,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0}""");
+    }
+
+    /// <summary>The captured step-failures value with its outcome total changed and its samples kept.</summary>
+    private static string ReplaceTotal(string stepFailures, int total)
+    {
+        var node = JsonNode.Parse(stepFailures)!;
+        node["totalOutcomeRecords"] = total;
+        return node.ToJsonString();
     }
 
     /// <summary>
@@ -130,7 +150,7 @@ public sealed class AnalystReplayScenarios
         .Planted("step-outcomes", """{"totalOutcomeRecords":15,"completed":15,"failed":0,"cancelled":0}""", samples: 15)
         .Planted("step-failures", """{"totalOutcomeRecords":15,"failedCount":0,"samples":[]}""", samples: 15)
         .Planted("run-boundaries",
-            """{"totalWorkflowRecords":1874,"entry":16,"terminal":0,"importerPolls":15,"drainedPolls":0}""",
+            """{"totalWorkflowRecords":1874,"entry":16,"terminal":0,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0}""",
             samples: 1874);
 
     /// <summary>
@@ -139,7 +159,7 @@ public sealed class AnalystReplayScenarios
     /// </summary>
     private static FixturePanelReader EndsNotRecorded() => BusyAndHealthy()
         .Planted("run-boundaries",
-            """{"totalWorkflowRecords":6215,"entry":16,"terminal":0,"importerPolls":15,"drainedPolls":0}""");
+            """{"totalWorkflowRecords":6215,"entry":16,"terminal":0,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0}""");
 
     [Fact]
     public Task ABusyHealthyWindowIsQuiet() => Score(
