@@ -215,7 +215,7 @@ Content-Type: application/json
   "name": "analyst",
   "version": "1.0.0",
   "description": "Reads the same Kibana and Grafana panels an operator reads, drives kimi-k3 through a five-stage investigation, and either writes a finding or says nothing. Read-only.",
-  "sourceHash": "37be8b4297f0c69b8d52bb50043d3706bad4af6a27e1845582ed83921e935d3b",
+  "sourceHash": "9b21b0142debdd58e785a246940b9d1c912816d022ef4675c8562b9c2d4a24b1",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": "<analyst-finding>",
@@ -494,9 +494,9 @@ dotnet build SK_P.sln -c Release | grep SourceHash
 **Provenance, and a worked example of this going wrong.** The value in step 3 was re-derived on
 **2026-10-01**, when the finding contract moved to v3, and agreed two independent ways: it is what the
 live row holds, and it is what the fold in `SourceHash.targets` computes over `src/Processor.Analyst`.
-It has moved six times in a week -- `29ea6590...` (2026-09-26, in `docs/task-16-analyst-monitor.http`),
+It has moved seven times in a week -- `29ea6590...` (2026-09-26, in `docs/task-16-analyst-monitor.http`),
 `7f126f9e...` (2026-09-28), `28bbcd10...`, `c2196668...` (finding v2), `cfc12ba1...` (finding v3)
-and now `37be8b42...` (spoiled judge ballots logged) -- and nothing announced any of it.
+`37be8b42...` (spoiled judge ballots logged) and now `9b21b014...` (BIT verdict shared across replicas) -- and nothing announced any of it.
 Every request in this file still returns `201` with a stale value, its counts still match, and the
 graph still starts, because **no gate reads a `sourceHash`** -- only a processor does, by waiting. If
 you are rebuilding from an older copy of this file or from that `.http` file, re-derive the hash
