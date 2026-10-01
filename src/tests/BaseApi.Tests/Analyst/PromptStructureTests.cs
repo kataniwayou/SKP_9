@@ -23,8 +23,10 @@ public sealed class PromptStructureTests
     public void AWellFormedPromptHasNoStructuralFaults()
         => Assert.Empty(PromptStructure.Check(WellFormed()));
 
-    [Fact]
-    public void ThePublishedV9PromptHasAllFiveStages()
+    [Theory]
+    [InlineData("analyst-prompt-v9.txt")]
+    [InlineData("analyst-prompt-v10.txt")]
+    public void EachPublishedPromptHasAllFiveStages(string file)
     {
         // tools/analyst-prompt-v9.txt is what the dev rollout PUTs into the analyst-monitor payload.
         // The deterministic half of the BIT runs on it there; running it here first means a stage
@@ -35,7 +37,7 @@ public sealed class PromptStructureTests
             root = parent.FullName;
         }
 
-        var prompt = File.ReadAllText(Path.Combine(root, "tools", "analyst-prompt-v9.txt"));
+        var prompt = File.ReadAllText(Path.Combine(root, "tools", file));
 
         Assert.Empty(PromptStructure.Check(prompt));
     }
