@@ -131,7 +131,18 @@ public static class ProcessorHost
         // their real, live implementations, so the whole-graph ValidateOnBuild form resolves on its
         // own — configureServices exists for a test to substitute fakes, not because either
         // registration is missing.
-        builder.Services.AddSingleton<BitCache>(_ => new BitCache(capacity: 8));
+        // Stamped with the model, the effort and this image's SourceHash, so a verdict another replica
+        // proved on a different model or under a different exam reads as a miss rather than a pass.
+        builder.Services.AddSingleton<BitCache>(sp =>
+        {
+            var model = sp.GetRequiredService<IOptions<Model.AnalystModelOptions>>().Value;
+            return new BitCache(
+                sp.GetRequiredService<BaseProcessor.Core.Shared.IProcessorSharedState>(),
+                BitCache.Stamp(
+                    model.ModelId,
+                    model.ReasoningEffort,
+                    BitCache.ExamSourceHash()));
+        });
         builder.Services.AddSingleton<GroundTruthRehearsal>();
         builder.Services.AddSingleton<PreflightBit>();
         builder.Services.AddSingleton<InvestigationLoop>();

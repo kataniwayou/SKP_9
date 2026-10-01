@@ -145,6 +145,9 @@ public static class BaseProcessorServiceCollectionExtensions
         // deterministic id — a test, say — wins.
         services.TryAddSingleton(InstanceId.Resolve());
         services.TryAddSingleton<ProcessorLivenessWriter>();
+        // Data shared across this processor's replicas, kept alive by the writer above. TryAdd, so a
+        // test can pin an in-memory one.
+        services.TryAddSingleton<Shared.IProcessorSharedState, Shared.RedisProcessorSharedState>();
 
         // One slot shared by both startup loops: they never ask concurrently, and each drains it
         // before its own ask, so a leftover reply can never be mistaken for an answer.

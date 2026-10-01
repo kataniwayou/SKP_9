@@ -1,11 +1,12 @@
 using Json.Schema;
+using Microsoft.Extensions.Logging;
 using Processor.Analyst.Loop;
 using Processor.Analyst.Model;
 
 namespace Processor.Analyst.Bit;
 
 /// <summary>
-/// Checked every dispatch, decided once per prompt per process.
+/// Checked every dispatch, decided once per prompt and model for every replica of the processor.
 /// <para>
 /// <b>The judge is a sampler, not a function.</b> Identical prompt text returns different verdicts
 /// run to run: measured against <c>kimi-k3</c>, <c>temperature</c> other than 1 is rejected
@@ -24,21 +25,23 @@ namespace Processor.Analyst.Bit;
 /// must never cost a rehearsal.
 /// </para>
 /// <para>
-/// <b>The verdict is held in memory and dies with the process, deliberately.</b> A durable,
-/// cross-replica store was tried and removed: it made the answer identical everywhere and forever,
-/// but the thing it was freezing is a proof about THIS process — its image, its model, its wiring —
-/// and a proof outliving the thing it was made about is worth less than re-earning it. A restart is
-/// the right moment to re-prove fitness, and it is also the only way a wrong verdict ever clears
-/// itself. The cost is honest and should be priced: every replica re-pays the gate on every roll.
+/// <b>The verdict is shared by every replica and dies with the last one.</b> It lives in L2 as a
+/// shared entry (see <see cref="BitCache"/>), re-armed by every replica's heartbeat, so a replica that
+/// joins inherits the verdict its siblings earned instead of re-paying the gate. This reverses an
+/// earlier per-process design, and with it the property that a restart re-proves fitness: a rolling
+/// deploy never lets the entry lapse. What still clears a verdict is a changed prompt (a new hash), a
+/// changed model, effort or image (a stamp mismatch), or every replica gone for one liveness TTL.
 /// </para>
 /// </summary>
 internal sealed class PreflightBit(
-    IAnalystModel model, BitCache cache, GroundTruthRehearsal? rehearsal = null)
+    IAnalystModel model,
+    BitCache cache,
+    GroundTruthRehearsal? rehearsal = null,
+    ILogger<PreflightBit>? logger = null)
 {
     /// <summary>
-    /// Ballots cast on a cold prompt. Odd, so a majority always exists. Paid once per prompt per
-    /// process, and what stops a single unlucky draw from deciding a prompt's fate for this
-    /// replica's lifetime.
+    /// Ballots cast on a cold prompt. Odd, so a majority always exists. Paid once per prompt, and
+    /// what stops a single unlucky draw from deciding a prompt's fate for every replica.
     /// </summary>
     private const int QuorumSize = 5;
 
@@ -67,7 +70,7 @@ internal sealed class PreflightBit(
     {
         var hash = PromptHash.Of(prompt);
 
-        if (cache.TryGet(hash, out var cached))
+        if (await cache.GetAsync(hash).ConfigureAwait(false) is { } cached)
         {
             return cached;
         }
@@ -101,7 +104,7 @@ internal sealed class PreflightBit(
         // Cached fit or unfit alike. A known-bad prompt must not re-pay the full quorum on every
         // dispatch, and the operator is never stuck by it: tuning the prompt changes the hash, which
         // is a different entry and a fresh judgement.
-        cache.Put(hash, verdict);
+        await cache.PutAsync(hash, verdict).ConfigureAwait(false);
 
         return verdict;
     }
@@ -112,7 +115,7 @@ internal sealed class PreflightBit(
     /// <b>Sequential, and it stops as soon as the outcome is settled.</b> Once enough ballots are in
     /// and no stage can still reach corroboration, nothing later can change the answer, so the rest
     /// are never cast. Sequential rather than concurrent because the only thing concurrency buys is
-    /// latency on a path that runs once per prompt per process, and the BIT sits outside
+    /// latency on a path that runs once per prompt, and the BIT sits outside
     /// <c>WallClockSeconds</c> — <see cref="Loop.InvestigationLoop"/> opens that budget after the
     /// gate — so there is nothing for the saved seconds to protect.
     /// </para>
@@ -121,7 +124,7 @@ internal sealed class PreflightBit(
     /// <see cref="AnalysisImpossibleException"/> — the judge answering in prose instead of calling
     /// the tool is the common one, and no request parameter can prevent it here because a forced
     /// <c>tool_choice</c> is incompatible with this model's thinking. Those ballots are discarded.
-    /// But a verdict that will stand for this replica's lifetime must not rest on one voice, so fewer
+    /// But a verdict every replica will inherit must not rest on one voice, so fewer
     /// than <see cref="CorroborationThreshold"/> valid ballots throws rather than deciding, leaving
     /// the prompt unjudged for the next dispatch to retry.
     /// </para>
@@ -136,8 +139,15 @@ internal sealed class PreflightBit(
             {
                 cast.Add(await JudgeAsync(prompt, ct).ConfigureAwait(false));
             }
-            catch (AnalysisImpossibleException)
+            catch (AnalysisImpossibleException ex)
             {
+                // Discarded, but never silently. A check that ends on "0 usable verdicts" is
+                // undiagnosable without this: a prose answer, a refusing backend and a connection
+                // that never opened all look the same from the count alone. The exception carries
+                // the transport or HTTP cause as its inner exception.
+                logger?.LogWarning(
+                    ex, "the fitness judge's ballot {Ballot} of {Quorum} was spoiled and discarded: {Why}",
+                    i + 1, QuorumSize, ex.Message);
                 continue;
             }
 
@@ -161,7 +171,7 @@ internal sealed class PreflightBit(
         {
             throw new AnalysisImpossibleException(
                 $"the fitness judge returned {cast.Count} usable verdict(s) out of {QuorumSize}; "
-                + $"a verdict standing for this replica's lifetime needs at least {CorroborationThreshold}");
+                + $"a verdict every replica inherits needs at least {CorroborationThreshold}");
         }
 
         // A stage is condemned only when enough judges independently name it. One judge's reading is

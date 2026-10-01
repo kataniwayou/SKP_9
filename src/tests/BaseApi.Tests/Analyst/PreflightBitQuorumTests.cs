@@ -38,7 +38,7 @@ public sealed class PreflightBitQuorumTests
     private static (PreflightBit Bit, ScriptedModel Model) Build(params ModelReply[] script)
     {
         var model = new ScriptedModel(script);
-        return (new PreflightBit(model, new BitCache(4)), model);
+        return (new PreflightBit(model, new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "test-model/high")), model);
     }
 
     [Fact]
@@ -130,23 +130,38 @@ public sealed class PreflightBitQuorumTests
     }
 
     /// <summary>
-    /// The deliberate boundary of the cache's lifetime. A durable cross-replica store was built and
-    /// removed: the verdict is a proof about one process — its image, its model, its wiring — so a
-    /// new process must earn it again rather than inherit it. This is also the only thing that ever
-    /// clears a verdict that was drawn badly.
+    /// The boundary of the verdict's lifetime: it is shared while any replica lives, and gone once
+    /// they all are. A fresh shared store is what L2 holds after the last replica's TTL lapses.
     /// </summary>
     [Fact]
-    public async Task ANewProcessJudgesThePromptAgainRatherThanInheritingTheVerdict()
+    public async Task OnceEveryReplicaIsGoneThePromptIsJudgedAgain()
     {
         var (first, firstModel) = Build(Fit(), Fit(), Fit());
         await first.CheckAsync(Structured, CancellationToken.None);
         Assert.Equal(3, firstModel.Received.Count);
 
-        // A restart: same prompt, a fresh BitCache, and a model that must be asked all over again.
+        // Every replica gone: same prompt, an empty shared store, and a model asked all over again.
         var (second, secondModel) = Build(Fit(), Fit(), Fit());
         var verdict = await second.CheckAsync(Structured, CancellationToken.None);
 
         Assert.True(verdict.Fit);
         Assert.Equal(3, secondModel.Received.Count);
+    }
+
+    [Fact]
+    public async Task ASpoiledBallotIsLoggedWithItsCause()
+    {
+        // A discarded ballot used to leave no trace, so a check that failed on "0 usable verdicts"
+        // could not say whether the judge answered in prose, the backend refused, or the connection
+        // never opened. Each spoiled ballot is now a Warning carrying the exception that spoiled it.
+        var logger = new BaseApi.Tests.Support.RecordingLogger<PreflightBit>();
+        var bit = new PreflightBit(new ScriptedModel(Prose(), Fit(), Fit(), Fit()), new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "test-model/high"), logger: logger);
+
+        var verdict = await bit.CheckAsync(Structured, CancellationToken.None);
+
+        Assert.True(verdict.Fit);
+        var spoiled = Assert.Single(logger.Records, r => r.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.Contains("ballot 1 of 5", spoiled.Message, StringComparison.Ordinal);
+        Assert.IsType<AnalysisImpossibleException>(spoiled.Exception);
     }
 }

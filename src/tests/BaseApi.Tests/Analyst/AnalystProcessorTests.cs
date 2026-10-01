@@ -43,7 +43,7 @@ public sealed class AnalystProcessorTests
         TokenMeter? meter = null,
         IEntityNameSource? names = null)
         => new(
-            new PreflightBit(bitModel, new BitCache(4)),
+            new PreflightBit(bitModel, new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "test-model/high")),
             new InvestigationLoop(loopModel, new FixturePanelReader()
                     .Reading("queue-wait", "ops", """{"max":4}""", samples: 91)
                     .Reading("step-outcomes", "business", """{"Completed":12}""", samples: 12),

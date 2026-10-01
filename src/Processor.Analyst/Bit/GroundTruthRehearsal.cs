@@ -23,11 +23,12 @@ namespace Processor.Analyst.Bit;
 /// </para>
 /// <para>
 /// <b>Cost, stated plainly.</b> Each scenario is a full investigation against the real model: minutes
-/// and real credit, paid once per prompt per process. Because <see cref="BitCache"/> dies with the
-/// process, every replica pays this on every roll. A single rehearsal per scenario is also a single
-/// stochastic draw — not corroborated the way the judge's ballots are, because corroboration here
-/// would multiply an already expensive step. The mitigation is that a wrong rehearsal result is not
-/// permanent: it lives only as long as the process, and the next roll re-runs it.
+/// and real credit, paid once per prompt and model: <see cref="BitCache"/> shares the verdict with
+/// every replica. A single rehearsal per scenario is also a single stochastic draw — not corroborated
+/// the way the judge's ballots are, because corroboration here would multiply an already expensive
+/// step. A wrong rehearsal result is therefore shared too, and a rolling deploy does not clear it;
+/// it clears when the prompt changes, the model, effort or image changes, or every replica is gone for one
+/// liveness TTL.
 /// </para>
 /// </summary>
 internal sealed class GroundTruthRehearsal(

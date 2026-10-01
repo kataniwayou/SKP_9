@@ -7,8 +7,8 @@ using StackExchange.Redis;
 namespace BaseProcessor.Core.Liveness;
 
 /// <summary>
-/// Writes the per-instance liveness key, keeps the instance index current, and writes the
-/// processor's own name hash.
+/// Writes the per-instance liveness key, keeps the instance index current, writes the processor's
+/// own name hash, and re-arms the processor's shared entries.
 /// <para>
 /// A Redis fault is logged and swallowed. The caller is a loop whose next iteration will write
 /// again, and a write failure must never end it. Liveness and name are reported under separate
@@ -118,6 +118,46 @@ public sealed class ProcessorLivenessWriter
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "processor name write failed for {ProcessorId}", identity.Id);
+        }
+
+        // Shared entries live as long as any replica does, so every replica re-arms all of them, not
+        // only the ones it wrote. Last, with its own catch and template, for the same reason as the
+        // name: liveness is what the start gate reads, and nothing after it may cost it.
+        try
+        {
+            await RefreshSharedAsync(db, identity.Id, ttl).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "shared entry refresh failed for {ProcessorId}", identity.Id);
+        }
+    }
+
+    /// <summary>
+    /// Re-arms the shared index and every entry it names. A name whose entry has already expired is
+    /// pruned from the index rather than kept: re-arming a missing key does nothing, so the line would
+    /// otherwise sit there forever. If that races a fresh write of the same name, the entry survives
+    /// unindexed and simply expires one TTL later — the writer recomputes it, a duplicate rather than
+    /// a loss.
+    /// </summary>
+    private static async Task RefreshSharedAsync(IDatabase db, Guid processorId, TimeSpan ttl)
+    {
+        var index = L2ProjectionKeys.ProcessorShared(processorId);
+
+        // No index, nothing shared: one round trip, which is all most processors ever pay.
+        if (!await db.KeyExpireAsync(index, ttl, ExpireWhen.Always, CommandFlags.None).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        foreach (var name in await db.SetMembersAsync(index).ConfigureAwait(false))
+        {
+            var entry = L2ProjectionKeys.ProcessorSharedEntry(processorId, name.ToString());
+
+            if (!await db.KeyExpireAsync(entry, ttl, ExpireWhen.Always, CommandFlags.None).ConfigureAwait(false))
+            {
+                await db.SetRemoveAsync(index, name).ConfigureAwait(false);
+            }
         }
     }
 

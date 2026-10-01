@@ -52,7 +52,7 @@ public sealed class GroundTruthRehearsalTests
             model, TimeProvider.System, NullLoggerFactory.Instance,
             NullLogger<GroundTruthRehearsal>.Instance);
 
-        return (new PreflightBit(model, new BitCache(4), rehearsal), model);
+        return (new PreflightBit(model, new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "test-model/high"), rehearsal), model);
     }
 
     [Fact]

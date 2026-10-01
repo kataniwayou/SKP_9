@@ -14,19 +14,19 @@ public sealed class PromptHashTests
         => Assert.NotEqual(PromptHash.Of("look for drift"), PromptHash.Of("look for spikes"));
 
     [Fact]
-    public void WhitespaceIsNormalizedBeforeHashing()
-    {
-        // Two prompts that differ only in how they were wrapped are the same prompt. Without this
-        // the cache misses on every reformat and the BIT silently runs every dispatch -- restoring
-        // the doubled cost with nothing to show it.
-        Assert.Equal(
-            PromptHash.Of("look for drift\r\n  across the window"),
-            PromptHash.Of("look for drift\n across the window"));
-    }
+    public void TheHashIsTheSha256OfThePromptStringExactly()
+        // Empty string: the well-known SHA-256 of zero bytes, so nothing is mixed in.
+        => Assert.Equal("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", PromptHash.Of(""));
 
     [Fact]
-    public void LeadingAndTrailingWhitespaceDoesNotChangeTheHash()
-        => Assert.Equal(PromptHash.Of("look for drift"), PromptHash.Of("  look for drift\n\n"));
+    public void WhitespaceIsPartOfThePrompt()
+    {
+        // No canonicalization: the hash is of the prompt string as given, so a reflow is a new prompt.
+        Assert.NotEqual(
+            PromptHash.Of("look for drift\r\n  across the window"),
+            PromptHash.Of("look for drift\n across the window"));
+        Assert.NotEqual(PromptHash.Of("look for drift"), PromptHash.Of("  look for drift\n\n"));
+    }
 
     [Fact]
     public void TheHashIsLowercaseHexAndFixedLength()

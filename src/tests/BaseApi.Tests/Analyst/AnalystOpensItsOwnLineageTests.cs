@@ -41,7 +41,7 @@ public sealed class AnalystOpensItsOwnLineageTests
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
         var processor = new AnalystProcessor(
-            new PreflightBit(new ScriptedModel(FitBit(), FitBit(), FitBit()), new BitCache(4)),
+            new PreflightBit(new ScriptedModel(FitBit(), FitBit(), FitBit()), new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "test-model/high")),
             new InvestigationLoop(
                 new ScriptedModel([.. AnalystScript.Stages("queue-wait"), AnalystScript.Submit("queue-wait")]),
                 new FixturePanelReader()

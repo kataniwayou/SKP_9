@@ -18,6 +18,8 @@ namespace Messaging.Contracts.Projections;
 ///   <item><description>Processor: <c>skp:proc:{processorId}</c> — HASH <c>name</c>, written by the processor, TTL</description></item>
 ///   <item><description>ProcessorInstances: <c>skp:proc:{processorId}:instances</c> — SET, TTL</description></item>
 ///   <item><description>PerInstance: <c>skp:proc:{processorId}:{instanceId}</c> — liveness, TTL</description></item>
+///   <item><description>ProcessorShared: <c>skp:proc:{processorId}:shared</c> — SET of shared entry names, TTL</description></item>
+///   <item><description>ProcessorSharedEntry: <c>skp:proc:{processorId}:shared:{name}</c> — one shared entry, TTL</description></item>
 ///   <item><description>Cache: <c>skp:wf:{workflowId}:cache:{root}</c> — one dictionary's key list</description></item>
 ///   <item><description>CacheEntry: <c>skp:wf:{workflowId}:cache:{root}:{key}</c> — one entry</description></item>
 ///   <item><description>ExecutionData: <c>skp:data:{guid}</c> — the blob for both roles</description></item>
@@ -113,6 +115,25 @@ public static class L2ProjectionKeys
     /// already-resolved pod identity — a plain string, not a Guid.</summary>
     public static string PerInstance(Guid processorId, string instanceId)
         => $"{Processor(processorId)}:{instanceId}";
+
+    /// <summary>
+    /// The index of a processor's shared entries: a SET of entry names, which every replica's heartbeat
+    /// walks to refresh each entry's TTL. It exists so the refresh never has to scan for them.
+    /// <para>
+    /// Data here is visible to every replica of the processor and lives exactly as long as one of them
+    /// does: each beat re-arms the liveness TTL on the index and on every entry it names, so the set
+    /// and its entries expire together once the last replica stops beating.
+    /// </para>
+    /// </summary>
+    public static string ProcessorShared(Guid processorId) => $"{Processor(processorId)}:shared";
+
+    /// <summary>
+    /// One shared entry. <paramref name="name"/> is interpolated verbatim and may itself contain
+    /// colons (<c>bit:{hash}</c>); the <c>shared:</c> segment keeps every such name clear of the
+    /// framework's own keys under <c>skp:proc:{id}</c>.
+    /// </summary>
+    public static string ProcessorSharedEntry(Guid processorId, string name)
+        => $"{ProcessorShared(processorId)}:{name}";
 
     /// <summary>
     /// The execution blob key, and the only one. A step's output is written here under the

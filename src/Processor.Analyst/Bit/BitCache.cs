@@ -1,49 +1,78 @@
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using BaseProcessor.Core.Shared;
+
 namespace Processor.Analyst.Bit;
 
 /// <summary>
-/// Per-replica, in memory, bounded, and lost on restart — which the deploy loop causes constantly.
+/// The BIT's verdicts, shared by every Analyst replica through L2 and gone once the last one dies.
 /// <para>
-/// <b>That scope is the design, not a limitation.</b> Each replica proves its own fitness with its
-/// own model backend and its own wiring, and a proof is only as good as the process holding it. A
-/// Redis-backed store was built to make the verdict identical across replicas and survive restarts;
-/// it was removed again, because it kept serving a proof about a process that no longer existed.
-/// Losing the entry on restart is what re-earns the proof against the image actually running, and
-/// it is also the only thing that ever clears a verdict drawn badly.
+/// <b>One shared entry per prompt:</b> <c>bit:{hash}</c>, so the key is
+/// <c>skp:proc:{id}:shared:bit:{hash}</c>, re-armed by every replica's heartbeat. A replica that
+/// joins finds the verdict its siblings earned instead of re-paying the ~10-minute gate.
 /// </para>
 /// <para>
-/// One or two entries is the realistic working set. The bound exists because a cache keyed on payload
-/// content is otherwise a slow leak if anything churns.
+/// <b>What the verdict was proved against rides in the value, not the key.</b> The key is the prompt
+/// alone, but a verdict is earned against one model at one effort, under one exam (<see
+/// cref="BitPrompt"/>, <see cref="RehearsalPanels"/>, both compiled in). A rolling deploy never lets
+/// the entry expire, so a model change or a rebuilt exam would otherwise inherit a verdict proved
+/// under the old one. The stamp is the model, the effort and the image's SourceHash; an entry with a
+/// different stamp reads as a miss and is overwritten by the fresh judgement.
+/// </para>
+/// <para>
+/// <b>Anything unreadable is a miss.</b> An unreachable store, a malformed value, another model's
+/// stamp — each re-runs the gate rather than guessing. That costs a duplicate judgement, never a
+/// wrong one.
 /// </para>
 /// </summary>
-internal sealed class BitCache(int capacity)
+internal sealed class BitCache(IProcessorSharedState shared, string modelStamp)
 {
-    private readonly Dictionary<string, FitnessVerdict> _entries = [];
-    private readonly Queue<string> _order = new();
-    private readonly object _gate = new();
+    internal const string NamePrefix = "bit:";
 
-    internal bool TryGet(string hash, out FitnessVerdict verdict)
+    internal static string EntryName(string hash) => NamePrefix + hash;
+
+    /// <summary>What a verdict was proved against: the model id, the reasoning effort, and the
+    /// SourceHash of the image that holds the exam.</summary>
+    internal static string Stamp(string? modelId, string? effort, string sourceHash)
+        => $"{modelId}/{effort}/{sourceHash}";
+
+    /// <summary>
+    /// The SourceHash stamped on THIS assembly, the one that compiles the exam in. Read from the
+    /// assembly rather than through <c>ISourceHashProvider</c>, which reads the entry assembly: in the
+    /// image the two are the same file, but only this one is still the Analyst when hosted elsewhere.
+    /// </summary>
+    internal static string ExamSourceHash()
+        => typeof(BitCache).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+               .FirstOrDefault(a => a.Key == "SourceHash")?.Value
+           ?? throw new InvalidOperationException(
+               "Processor.Analyst carries no SourceHash metadata, so a shared BIT verdict could not be "
+               + "tied to the exam that earned it");
+
+    internal async Task<FitnessVerdict?> GetAsync(string hash)
     {
-        lock (_gate)
+        var raw = await shared.GetAsync(EntryName(hash)).ConfigureAwait(false);
+
+        if (raw is null)
         {
-            return _entries.TryGetValue(hash, out verdict!);
+            return null;
+        }
+
+        try
+        {
+            var stored = JsonSerializer.Deserialize<Stored>(raw);
+            return stored is { Verdict: { } verdict } && stored.Model == modelStamp ? verdict : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
-    internal void Put(string hash, FitnessVerdict verdict)
-    {
-        lock (_gate)
-        {
-            if (!_entries.TryAdd(hash, verdict))
-            {
-                return;
-            }
+    internal Task<bool> PutAsync(string hash, FitnessVerdict verdict)
+        => shared.SetAsync(EntryName(hash), JsonSerializer.Serialize(new Stored(modelStamp, verdict)));
 
-            _order.Enqueue(hash);
-
-            while (_order.Count > capacity)
-            {
-                _entries.Remove(_order.Dequeue());
-            }
-        }
-    }
+    private sealed record Stored(
+        [property: JsonPropertyName("model")]   string Model,
+        [property: JsonPropertyName("verdict")] FitnessVerdict Verdict);
 }

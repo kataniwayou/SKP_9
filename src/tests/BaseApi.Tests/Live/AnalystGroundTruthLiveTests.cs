@@ -113,15 +113,15 @@ public sealed class AnalystGroundTruthLiveTests
             WallClockSeconds: 240);
 
     /// <summary>
-    /// The processor with real judgement and invented evidence. The BIT is given no store, so the
-    /// replay never reads or writes the deployment's frozen verdict.
+    /// The processor with real judgement and invented evidence. The BIT is given a private in-memory
+    /// store, so the replay never reads or writes the deployment's shared verdict.
     /// </summary>
     private static AnalystProcessor Processor(FixturePanelReader panels)
     {
         var model = RealModel();
 
         return new AnalystProcessor(
-            new PreflightBit(model, new BitCache(4)),
+            new PreflightBit(model, new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "live-replay")),
             new InvestigationLoop(model, panels, TimeProvider.System,
                 NullLogger<InvestigationLoop>.Instance),
             NullLogger<AnalystProcessor>.Instance);

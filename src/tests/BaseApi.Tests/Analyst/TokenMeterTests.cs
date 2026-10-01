@@ -86,7 +86,7 @@ public sealed class TokenMeterTests
             new ScriptedModel(unfit, unfit, unfit, unfit, unfit), meter);
 
         var processor = new AnalystProcessor(
-            new PreflightBit(model, new BitCache(4)),
+            new PreflightBit(model, new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "test-model/high")),
             new InvestigationLoop(model, new FixturePanelReader()
                     .Reading("queue-wait", "ops", """{"max":4}""", samples: 91)
                     .Reading("step-outcomes", "business", """{"Completed":12}""", samples: 12),

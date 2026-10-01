@@ -215,7 +215,7 @@ Content-Type: application/json
   "name": "analyst",
   "version": "1.0.0",
   "description": "Reads the same Kibana and Grafana panels an operator reads, drives kimi-k3 through a five-stage investigation, and either writes a finding or says nothing. Read-only.",
-  "sourceHash": "cfc12ba191b57e5a6e9b675b43329a9b6270055598c88f888f97d8251bf926ae",
+  "sourceHash": "37be8b4297f0c69b8d52bb50043d3706bad4af6a27e1845582ed83921e935d3b",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": "<analyst-finding>",
@@ -494,9 +494,9 @@ dotnet build SK_P.sln -c Release | grep SourceHash
 **Provenance, and a worked example of this going wrong.** The value in step 3 was re-derived on
 **2026-10-01**, when the finding contract moved to v3, and agreed two independent ways: it is what the
 live row holds, and it is what the fold in `SourceHash.targets` computes over `src/Processor.Analyst`.
-It has moved five times in a week -- `29ea6590...` (2026-09-26, in `docs/task-16-analyst-monitor.http`),
-`7f126f9e...` (2026-09-28), `28bbcd10...`, `c2196668...` (finding v2) and now `cfc12ba1...`
-(finding v3, no-finding verdicts published) -- and nothing announced any of it.
+It has moved six times in a week -- `29ea6590...` (2026-09-26, in `docs/task-16-analyst-monitor.http`),
+`7f126f9e...` (2026-09-28), `28bbcd10...`, `c2196668...` (finding v2), `cfc12ba1...` (finding v3)
+and now `37be8b42...` (spoiled judge ballots logged) -- and nothing announced any of it.
 Every request in this file still returns `201` with a stale value, its counts still match, and the
 graph still starts, because **no gate reads a `sourceHash`** -- only a processor does, by waiting. If
 you are rebuilding from an older copy of this file or from that `.http` file, re-derive the hash
@@ -625,9 +625,12 @@ had just restarted. A dispatch that fails publishes nothing, so its cost is only
 line `the dispatch spent N call(s), ...`. Prices move with the vendor and are not worth reproducing
 here -- derive them from the current rate and those counts.
 
-**The gate is paid once per prompt per pod.** Its verdict is cached in memory and dies with the
-process, so every rollout, every pod restart and every prompt edit pays it again, on each replica.
-Batch prompt edits, and do not restart the Analyst to "refresh" anything.
+**The gate is paid once per prompt and model, for all replicas together.** Its verdict is a shared
+entry in L2, `skp:proc:{analystId}:shared:bit:{sha256 of the prompt string}`, re-armed by every
+replica's heartbeat, so a pod that restarts or joins inherits it. It is paid again only when the
+prompt string changes (any edit, whitespace included), when the model id or reasoning effort changes,
+when a rebuilt Analyst image (a new SourceHash) takes the first dispatch, or when every Analyst replica
+has been gone for one liveness TTL (40s). A restart or a rollout of the SAME image does not clear it. To force a fresh judgement, delete that key, or scale the Analyst to zero for longer than 40s.
 
 **The cron is still the biggest lever.** `0 9 * * * *` is half the cost of the interval in step 7.
 Nothing about the graph changes; you are buying resolution, and a monitor that reports hourly is
