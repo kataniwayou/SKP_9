@@ -24,6 +24,23 @@ public sealed class PromptStructureTests
         => Assert.Empty(PromptStructure.Check(WellFormed()));
 
     [Fact]
+    public void ThePublishedV8PromptHasAllFiveStages()
+    {
+        // tools/analyst-prompt-v8.txt is what the dev rollout PUTs into the analyst-monitor payload.
+        // The deterministic half of the BIT runs on it there; running it here first means a stage
+        // broken by the graph bullets fails the build rather than the next scheduled fire.
+        var root = AppContext.BaseDirectory;
+        while (!File.Exists(Path.Combine(root, "SK_P.sln")) && Directory.GetParent(root) is { } parent)
+        {
+            root = parent.FullName;
+        }
+
+        var prompt = File.ReadAllText(Path.Combine(root, "tools", "analyst-prompt-v8.txt"));
+
+        Assert.Empty(PromptStructure.Check(prompt));
+    }
+
+    [Fact]
     public void ProseWithNoStagesIsRejectedWithoutAskingAnyone()
     {
         // The original analyst-monitor prompt: real domain guidance, no stage structure at all.
