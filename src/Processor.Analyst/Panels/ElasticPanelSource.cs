@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -80,7 +81,8 @@ internal sealed class ElasticPanelSource
         var body = definition.Query
             .Replace("{{FROM}}", range.From.UtcDateTime.ToString("o"), StringComparison.Ordinal)
             .Replace("{{TO}}", range.To.UtcDateTime.ToString("o"), StringComparison.Ordinal)
-            .Replace("{{WORKFLOW}}", targetWorkflowId.ToString("D"), StringComparison.Ordinal);
+            .Replace("{{WORKFLOW}}", targetWorkflowId.ToString("D"), StringComparison.Ordinal)
+            .Replace("{{RUNS}}", RunsFor(range).ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/{PanelRegistry.ElasticIndex}/_search")
         {
@@ -198,6 +200,18 @@ internal sealed class ElasticPanelSource
             _ => throw new PanelUnavailableException(
                 definition.PanelId, $"no elasticsearch response parser registered for panel '{definition.PanelId}'"),
         };
+    }
+
+    /// <summary>
+    /// The terms size for a per-run aggregation: one bucket per second of the range, because the cron
+    /// floor is one fire per second. Clamped to [1, 60000] -- below Elasticsearch's 65,536
+    /// search.max_buckets, so a long range still reads (as a lower bound, flagged by
+    /// sum_other_doc_count) rather than failing the request.
+    /// </summary>
+    internal static int RunsFor(TimeRange range)
+    {
+        var seconds = Math.Ceiling((range.To - range.From).TotalSeconds);
+        return (int)Math.Clamp(seconds, 1, 60000);
     }
 
     private static bool IsWindowFullyCovered(JsonElement aggregations, TimeRange range)
@@ -351,8 +365,15 @@ internal sealed class ElasticPanelSource
     }
 
     /// <summary>
-    /// The run-boundary reading: how many runs this workflow began, how many branches ended, and how
-    /// many importer polls found nothing to read.
+    /// The run-boundary reading: how many fires entered in the window, how many branch ends belong to
+    /// those fires, and how many importer polls found nothing to read.
+    /// <para>
+    /// <b>Elasticsearch's sibling totals, never a sum over the returned buckets.</b> entered_runs and
+    /// entered_terminals are computed after bucket_selector dropped the fires that entered before the
+    /// window, which is the whole join. If the terms size could not hold every run that touched the
+    /// window (sum_other_doc_count above zero), both counts are lower bounds and the reading is not
+    /// trusted as covering the window.
+    /// </para>
     /// <para>
     /// <b>drainedPolls no longer explains a gap between entry and terminal.</b> An importer poll that
     /// finds nothing reports Cancelled, which the orchestrator records as that fire's terminal, so a
@@ -364,22 +385,25 @@ internal sealed class ElasticPanelSource
     private static PanelReading BuildRunBoundaries(
         PanelDefinition definition, long total, JsonElement aggregations, bool windowFullyCovered)
     {
-        var positions = aggregations.GetProperty("boundaries").GetProperty("by_position")
-            .GetProperty("buckets");
+        var boundaries = aggregations.GetProperty("boundaries");
         var polls = aggregations.GetProperty("polls");
+
+        var entry = boundaries.GetProperty("entered_runs").GetProperty("count").GetInt64();
+        var terminal = (long)boundaries.GetProperty("entered_terminals").GetProperty("value").GetDouble();
+        var capped = boundaries.GetProperty("by_run").GetProperty("sum_other_doc_count").GetInt64() > 0;
 
         var valueJson = JsonSerializer.Serialize(new
         {
             totalWorkflowRecords = total,
-            entry = BucketCount(positions, "entry"),
-            terminal = BucketCount(positions, "terminal"),
+            entry,
+            terminal,
             importerPolls = polls.GetProperty("doc_count").GetInt64(),
             drainedPolls = polls.GetProperty("drained").GetProperty("doc_count").GetInt64(),
         });
 
         return new PanelReading(
             definition.PanelId, definition.Layer, valueJson, SampleCount: checked((int)total),
-            new PanelTrust(SeriesPresent: true, windowFullyCovered, NoDataDistinguishable: true));
+            new PanelTrust(SeriesPresent: true, windowFullyCovered && !capped, NoDataDistinguishable: true));
     }
 
     private static long BucketCount(JsonElement buckets, string name)

@@ -384,6 +384,60 @@ public sealed class PanelTrustTests
     }
 
     [Fact]
+    public void Elastic_RunBoundaries_ReadsTheSiblingTotalsNotTheReturnedBuckets()
+    {
+        // The present fixture returns ONE bucket, yet 20 fires and 40 terminals. A parser that summed
+        // the buckets itself would report 1 and 2 -- and, worse, would count a fire bucket_selector
+        // kept by mistake. The totals are computed by Elasticsearch after the selector ran.
+        var reading = ElasticPanelSource.Parse(
+            Def("run-boundaries"), Window, Fixture("elastic-run-boundaries-present.json"));
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(20, value.RootElement.GetProperty("entry").GetInt64());
+        Assert.Equal(40, value.RootElement.GetProperty("terminal").GetInt64());
+        Assert.True(reading.Trust.WindowFullyCovered);
+    }
+
+    [Fact]
+    public void Elastic_RunBoundaries_MoreRunsThanBucketsIsNotFullyCovered()
+    {
+        // sum_other_doc_count > 0: some runs never got a bucket, so entry and terminal are lower
+        // bounds. The reading is still returned -- a lower bound is evidence -- but it must not be
+        // trusted as covering the window.
+        var reading = ElasticPanelSource.Parse(
+            Def("run-boundaries"), Window, Fixture("elastic-run-boundaries-capped.json"));
+
+        Assert.True(reading.Trust.SeriesPresent);
+        Assert.False(reading.Trust.WindowFullyCovered);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(900, 900)]
+    [InlineData(21600, 21600)]
+    [InlineData(86400, 60000)]
+    public void RunsPlaceholderIsClampedToTheBucketLimit(int seconds, int expected)
+    {
+        var from = DateTimeOffset.FromUnixTimeSeconds(1790208000);
+        Assert.Equal(expected, ElasticPanelSource.RunsFor(new TimeRange(from, from.AddSeconds(seconds))));
+    }
+
+    [Fact]
+    public async Task ElasticPanelSource_RunBoundariesSubstitutesTheRunsBucketSize()
+    {
+        var handler = new RecordingHandler(HttpStatusCode.OK, Fixture("elastic-run-boundaries-present.json"));
+        var source = new ElasticPanelSource(
+            new HttpClient(handler, disposeHandler: false),
+            Options.Create(new PanelSourceOptions { ElasticBaseUrl = "http://elasticsearch:9200" }));
+
+        await source.ReadAsync(Def("run-boundaries"), TargetWorkflowId, Window, CancellationToken.None);
+
+        // Window is six hours: 21,600 seconds, one bucket per possible one-second fire.
+        Assert.Contains("\"size\": 21600", handler.LastBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("{{RUNS}}", handler.LastBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Elastic_RunBoundaries_QueryCarriesTheValuesTheOrchestratorActuallyWrites()
     {
         // End-to-end pin: the panel selects on the same constants WorkflowFireJob and

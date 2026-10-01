@@ -495,14 +495,21 @@ internal static class PanelRegistry
                         "terms": { "attributes.$KEY$": [ "$ENTRY$", "$TERMINAL$" ] }
                       },
                       "aggs": {
-                        "by_position": {
-                          "filters": {
-                            "filters": {
-                              "entry": { "term": { "attributes.$KEY$": "$ENTRY$" } },
-                              "terminal": { "term": { "attributes.$KEY$": "$TERMINAL$" } }
+                        "by_run": {
+                          "terms": { "field": "attributes.CorrelationId", "size": {{RUNS}} },
+                          "aggs": {
+                            "entry": { "filter": { "term": { "attributes.$KEY$": "$ENTRY$" } } },
+                            "terminal": { "filter": { "term": { "attributes.$KEY$": "$TERMINAL$" } } },
+                            "entered": {
+                              "bucket_selector": {
+                                "buckets_path": { "e": "entry._count" },
+                                "script": "params.e > 0"
+                              }
                             }
                           }
-                        }
+                        },
+                        "entered_runs": { "stats_bucket": { "buckets_path": "by_run>entry._count" } },
+                        "entered_terminals": { "sum_bucket": { "buckets_path": "by_run>terminal._count" } }
                       }
                     },
                     "polls": {

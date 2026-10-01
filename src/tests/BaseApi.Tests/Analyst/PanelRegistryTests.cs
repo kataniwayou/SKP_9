@@ -290,16 +290,23 @@ public sealed class PanelRegistryTests
     }
 
     [Fact]
-    public void RunBoundariesCountsRecordsRatherThanDedupingByRun()
+    public void RunBoundariesCountsEnteredFiresAndEveryTerminalOfThem()
     {
-        // The operator panel learned this the hard way: deduping boundary records by CorrelationId
-        // collapses a fire's several terminal records into one, so a workflow that opens two lineages
-        // per fire reads 50/50 instead of 1:2 -- and a run that lost ONE of two lineages still reads
-        // 50/50, hiding partial loss entirely. Counting records is what makes the shortfall visible.
+        // The operator pie's rule since 2026-10-01: fires are distinct CorrelationIds with an entry
+        // in the window, and terminals are RECORDS (not deduplicated) whose CorrelationId is one of
+        // those fires. Counting terminal records keeps partial loss visible -- a fire that lost one
+        // of its two branches shows one terminal fewer -- which was the reason the old panel refused
+        // to deduplicate at all.
         var query = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Query;
 
+        Assert.Contains("\"field\": \"attributes.CorrelationId\"", query, StringComparison.Ordinal);
+        Assert.Contains("\"size\": {{RUNS}}", query, StringComparison.Ordinal);
+        Assert.Contains("bucket_selector", query, StringComparison.Ordinal);
+        Assert.Contains("\"entered_runs\": { \"stats_bucket\": { \"buckets_path\": \"by_run>entry._count\" } }",
+            query, StringComparison.Ordinal);
+        Assert.Contains("\"entered_terminals\": { \"sum_bucket\": { \"buckets_path\": \"by_run>terminal._count\" } }",
+            query, StringComparison.Ordinal);
         Assert.DoesNotContain("cardinality", query, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("CorrelationId", query, StringComparison.Ordinal);
     }
 
     [Fact]
