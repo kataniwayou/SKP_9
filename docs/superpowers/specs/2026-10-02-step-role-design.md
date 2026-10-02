@@ -28,9 +28,9 @@ Success: on a known window the pie's per-step counts equal what the input implie
 | D2 | Roles are per workflow. A step shared by two workflows may be `terminal` in one and `intermediate` in the other, so the role never lives on the global step key `skp:step:{id}`. |
 | D3 | BaseApi computes the roles when it writes a workflow's projection (at start) and stores one key per step: `skp:wf:{workflowId}:step:{stepId}`, a HASH with field `role`. |
 | D4 | A step removed from the workflow has its role key deleted at the next start, unconditionally (it belongs to this workflow alone). Keys are kept on stop, as names are: records keep arriving after a stop. |
-| D5 | The orchestrator stamps `StepRole` at exactly two points, both resolving the role from the D3 key for the step concerned: (1) the scheduler, on the record of each entry-step dispatch; (2) outcome handling, on the record written when a step returns any outcome (Completed, Failed or Cancelled). Nothing in the orchestrator derives a role itself. |
+| D5 | The orchestrator stamps `StepRole` at exactly one point, resolving the role from the D3 key for the step concerned: outcome handling, on the record written when a step returns any outcome (Completed, Failed or Cancelled). Nothing in the orchestrator derives a role itself. *Amended 2026-10-02: a second point, on the scheduler's entry-dispatch record, shipped first and was removed. It marked a dispatch, not a returned outcome, so `entry` labelled two different events; the entry step's own outcome record already marks a fire as entered.* |
 | D6 | The role is the step's static role regardless of the outcome: an intermediate step that cancels is stamped `intermediate`. |
-| D7 | The Kibana pie: first the correlation ids of fires that entered in the selected time range, then those fires' outcome records counted by `StepRole` (inner ring) and `StepName` (outer ring). Only outcome records are counted; the scheduler's entry record only decides which fires entered. |
+| D7 | The Kibana pie: first the correlation ids of fires that entered in the selected time range, then those fires' outcome records counted by `StepRole` (inner ring) and `StepName` (outer ring). Only outcome records are counted, and only they carry `StepRole`: a fire has entered when its entry step's outcome record is in range. |
 | D8 | The Analyst's `run-boundaries` panel becomes the same funnel. |
 | D9 | `RunPosition` is removed entirely: contract, emitters, pie, Analyst panel, prompt, tests. |
 | D10 | The `ends-not-recorded` replay scenario is deleted: with no run-end records, the fault it tested no longer exists. |
@@ -74,9 +74,11 @@ Applied to `filefetcher-archiveexpander-chain`: split-importer is `entry`, expor
   lookup keyed by (workflow, step), read from the D3 key and cached like names. The cache must not
   outlive a start: a restarted workflow can change roles, so the cached roles for a workflow are
   dropped when the orchestrator re-reads that workflow's projection.
-- **Point 1, scheduler (`WorkflowFireJob`):** where `RunPositions.Entry` is scoped today, scope
-  `StepRole` = the resolved role of the entry step being dispatched.
-- **Point 2, outcome handling (`StepOutcomeHandler`):** the handler writes exactly one record per
+- **Scheduler (`WorkflowFireJob`):** stamps nothing. Its "dispatched an entry step" record carries
+  no `StepRole` (amended 2026-10-02; see D5). A fire whose entry step never returns is therefore
+  invisible to the funnel, and the Analyst panel reads such a window as untrusted (`roleRecords` 0)
+  rather than as a stall.
+- **Outcome handling (`StepOutcomeHandler`):** the handler writes exactly one record per
   returned outcome (the "no successor accepts it" line or the "advanced" line). Both carry
   `StepRole` = the resolved role of the step that returned, replacing today's `RunPositions.Terminal`
   scope on the first.
@@ -103,8 +105,8 @@ FROM logs-generic.otel-default
 | STATS outcomes = COUNT(*) BY attributes.StepRole, attributes.StepName
 ```
 
-`entered` may come from either `entry` record of the fire (the scheduler's, or the entry step's
-outcome); both carry the fire's correlation id. `counted` selects the outcome handler's records by
+`entered` comes from the entry step's outcome record, which carries the fire's correlation id (the
+scheduler's dispatch record carries no `StepRole` since the D5 amendment). `counted` selects the outcome handler's records by
 their two message templates, which move into `Messaging.Contracts` beside the `StepRole` key for the
 same reason `RefusalTemplates` live there: the pie and the Analyst select on text the orchestrator
 writes.
@@ -155,7 +157,7 @@ files (v0–v9) and dated plans/specs stay as history.
 1. Spike: Lens two-ring pie over ES|QL on dev (read-only until approved to save).
 2. BaseApi: compute, write and delete the role keys; `L2ProjectionKeys` entry.
 3. Framework: resolver role lookup and cache invalidation; repack the packages.
-4. Orchestrator: stamp at the two points; remove `RunPosition`.
+4. Orchestrator: stamp outcome records; remove `RunPosition`.
 5. Kibana: the pie, its checker and its doc.
 6. Analyst: the funnel panel, primer, prompt v11, `RehearsalPanels`; delete `ends-not-recorded`.
 7. Deploy to dev; capture a new replay window; verify its answer key; re-enable the scenarios.

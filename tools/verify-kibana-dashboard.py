@@ -87,7 +87,7 @@ REFUSED_KQL = 'severity_text:"Error" and attributes.Queue:*'
 
 # The dashboard hosts FOUR atoms since 2026-09-26: a step outcome (one record per step), a
 # whitelist lookup (one record per field checked), a refusal (one record per message thrown away),
-# and a step role (the orchestrator's entry-dispatch record and its per-outcome records). Its query is
+# and a step role (the orchestrator's per-outcome records). Its query is
 # their union, with COUNTED_KQL kept verbatim as a parenthesised clause so the rule is still stated
 # exactly once in the export.
 #
@@ -97,18 +97,19 @@ REFUSED_KQL = 'severity_text:"Error" and attributes.Queue:*'
 # until this clause existed. Widening it moves no count: checked against the live store, the
 # outcome selector under the widened filter still matches 181,732 records and zero refusals.
 #
-# The step-role selector. Exactly the records the orchestrator tags with a StepRole: the scheduler's
-# "dispatched an entry step" record and the one per-outcome record for each returned outcome
-# (Completed, Failed or Cancelled). Nothing else in the store carries the field.
+# The step-role selector. Exactly the records the orchestrator tags with a StepRole: the one
+# per-outcome record for each returned outcome (Completed, Failed or Cancelled), plus the
+# "advancing ... on a {Result} step" warning written under the same scope. The scheduler's
+# "dispatched an entry step" record carries none. Nothing else in the store carries the field.
 #
 # THIS CLAUSE HAD TO GO IN THE DASHBOARD QUERY FOR A SHARPER REASON THAN THE REFUSAL ONE. Both kinds
-# of record were excluded, and by DIFFERENT clauses: "dispatched an entry step" carries no Result at
-# all, and an outcome record carries one but is emitted BY the orchestrator, which COUNTED_KQL
-# excludes by name. So the funnel would have rendered permanently empty on both rings -- the same
-# failure the refusal table shipped with, twice over.
+# of record were excluded: an outcome record carries a Result but is emitted BY the orchestrator,
+# which COUNTED_KQL excludes by name, and the "advanced" record carries no Result at all. So the
+# funnel would have rendered permanently empty on both rings -- the same failure the refusal table
+# shipped with, twice over.
 STEPROLE_KQL = "attributes.StepRole:*"
 
-# The funnel pie's own query, an ES|QL panel. A fire ENTERS when its entry-dispatch record is in range;
+# The funnel pie's own query, an ES|QL panel. A fire ENTERS when its entry step's outcome record is in range;
 # the pie then counts the per-outcome records (the two OutcomeTemplates) of exactly those fires,
 # split by the step's per-workflow role and its name. A fire that began before the range does not
 # appear as phantom downstream outcomes. Lens cannot express this: it needs a per-CorrelationId join

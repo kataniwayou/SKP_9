@@ -143,19 +143,13 @@ public sealed class WorkflowFireJobTests
         }
 
         /// <summary>
-        /// A real recording logger rather than a null one, so a test can assert on what a fire WROTE.
-        /// The dispatch counter on the operator dashboard is a document count over this record, and
-        /// StepRole is the field it selects on — an attribute no test looked at could be dropped by
-        /// a refactor without a single failure.
+        /// A real recording logger rather than a null one, so a test can assert on what a fire WROTE:
+        /// the dispatch record is the orchestrator's only trace of a fire, and what it must not carry
+        /// (StepRole) matters as much as what it does.
         /// </summary>
         public RecordingLogger<WorkflowFireJob> Log { get; } = new();
 
-        /// <summary>The roles the resolver reads, keyed by (workflow, step); empty means every role is unresolved.</summary>
-        public Dictionary<(Guid Workflow, Guid Step), string> Roles { get; } = new();
-
-        public WorkflowFireJob Build() => new(
-            Store, Scheduler, Sender, State, Gate, Log,
-            roles: new StepRoleResolver(new FakeStepRoleSource(Roles), NullLogger<StepRoleResolver>.Instance));
+        public WorkflowFireJob Build() => new(Store, Scheduler, Sender, State, Gate, Log);
 
         public WorkflowFireJob BuildNamed(EntityNameResolver names) => new(
             Store, Scheduler, Sender, State, Gate, Log, names);
@@ -549,24 +543,22 @@ public sealed class WorkflowFireJobTests
     }
 
     // ---------------------------------------------------------------------------------------
-    // StepRole: the attribute the start-trip counter selects on
+    // The dispatch record: one per entry step that reached a queue, and never a StepRole
     // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task ADispatchedEntryStepCarriesItsRole()
+    public async Task NoRecordAFireWritesCarriesAStepRole()
     {
-        // The operator's start-trip counter is a document count over this record, selected by
-        // StepRole rather than by the English template. It rides the log SCOPE, not the template:
-        // the message text is a pinned contract (tools/verify-kibana-dashboard.py, the live suite's
-        // ledger) and adding a parameter to it would break every existing reader.
+        // StepRole is a graph role stamped only where a step returns an outcome, so every record
+        // carrying it is the same kind of event. A fire dispatches; it returns nothing. If the
+        // dispatch carried "entry" too, the role would mark two different events and every reader
+        // would have to tell them apart by template.
         var h = new Harness().AsLeader().WithWorkflow(W, [(S1, P1)]);
-        h.Roles[(W, S1)] = StepRoles.Entry;
 
         await h.Build().Execute(h.Context(W, h.JobId));
 
-        var scope = h.ScopeOf("dispatched an entry step");
-        Assert.NotNull(scope);
-        Assert.Equal(StepRoles.Entry, Assert.Contains(StepRoles.Key, scope!));
+        Assert.NotNull(h.ScopeOf("dispatched an entry step"));
+        Assert.All(h.Log.RecordScopes, scope => Assert.DoesNotContain(StepRoles.Key, scope));
     }
 
     [Fact]
@@ -577,8 +569,6 @@ public sealed class WorkflowFireJobTests
         // panel and they only coincide while every workflow has a single entry step, which is true of
         // this deployment today and is not a property of the design.
         var h = new Harness().AsLeader().WithWorkflow(W, [(S1, P1), (S2, P2)]);
-        h.Roles[(W, S1)] = StepRoles.Entry;
-        h.Roles[(W, S2)] = StepRoles.Entry;
 
         await h.Build().Execute(h.Context(W, h.JobId));
 
@@ -592,7 +582,6 @@ public sealed class WorkflowFireJobTests
             }
 
             dispatches++;
-            Assert.Equal(StepRoles.Entry, h.Log.RecordScopes[i][StepRoles.Key]);
             correlations.Add(h.Log.RecordScopes[i][CorrelationKeys.LogScope].ToString()!);
         }
 
@@ -601,32 +590,25 @@ public sealed class WorkflowFireJobTests
     }
 
     [Fact]
-    public async Task AFrozenEntryStepCarriesNoRole()
+    public async Task AFrozenEntryStepWritesNoDispatchRecord()
     {
-        // A frozen step was never dispatched. If its skip record carried the same StepRole the
-        // counter would report a dispatch that did not happen -- and the freeze exists precisely so an
-        // operator can take one entry step out without stopping the workflow, which is a state the
-        // panel has to render honestly.
+        // A frozen step was never dispatched, so a count of dispatch records must not include it --
+        // and the freeze exists precisely so an operator can take one entry step out without stopping
+        // the workflow, which is a state a count has to report honestly.
         var h = new Harness().AsLeader().WithGatedWorkflow(W, [(S1, P1, Never)]);
-        h.Roles[(W, S1)] = StepRoles.Entry;
 
         await h.Build().Execute(h.Context(W, h.JobId));
 
         Assert.Null(h.ScopeOf("dispatched an entry step"));
-
-        var frozen = h.ScopeOf("the entry step is frozen \u2014 its entry condition is Never; skipping it");
-        Assert.NotNull(frozen);
-        Assert.DoesNotContain(StepRoles.Key, frozen!);
+        Assert.NotNull(h.ScopeOf("the entry step is frozen \u2014 its entry condition is Never; skipping it"));
     }
 
     [Fact]
-    public async Task AFailedSendCarriesNoRole()
+    public async Task AFailedSendWritesNoDispatchRecord()
     {
         // The record is written AFTER a successful send, so a broker fault must not be counted as a
-        // dispatch. Same reasoning as the frozen case: the counter is "entry steps that actually went
-        // onto a queue", and a fire that failed to send left no work anywhere.
+        // dispatch: a fire that failed to send left no work anywhere.
         var h = new Harness().AsLeader().WithWorkflow(W, [(S1, P1)]);
-        h.Roles[(W, S1)] = StepRoles.Entry;
         h.Sender
             .SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new IOException("broker gone"));
@@ -634,10 +616,7 @@ public sealed class WorkflowFireJobTests
         await h.Build().Execute(h.Context(W, h.JobId));
 
         Assert.Null(h.ScopeOf("dispatched an entry step"));
-
-        var failed = h.ScopeOf("the entry-step dispatch failed to send; continuing");
-        Assert.NotNull(failed);
-        Assert.DoesNotContain(StepRoles.Key, failed!);
+        Assert.NotNull(h.ScopeOf("the entry-step dispatch failed to send; continuing"));
     }
 
     [Fact]

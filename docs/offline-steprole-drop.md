@@ -54,7 +54,7 @@ Every step is needed. BaseApi must be first, since it is what writes the role ke
 1. **BaseApi** (`baseapi-service`): rebuild image, load it, restart. It writes
    `skp:wf:{workflowId}:step:{stepId}` (a HASH, field `role`) at each workflow start.
 2. **Orchestrator** (`orchestrator`, the StatefulSet): rebuild, load, restart. It reads those keys to
-   stamp StepRole on the dispatch record and on each step outcome record.
+   stamp StepRole on each step outcome record (the dispatch record carries none).
 3. **Analyst** (`processor-analyst`): rebuild the image and load it, then do these **before** rolling
    out, so the pod never sits unready on a hash no row holds. Never create a new `analyst` row: the
    hash is unique and the assignment edges point at the existing row's id.

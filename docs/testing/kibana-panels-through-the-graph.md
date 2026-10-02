@@ -124,8 +124,9 @@ empty polls in that window), not the 15 fires. The three 50s are the post-fork s
 the two 75s are the failure sink. If a post-fork step is not 2 x alphabeta, or the sink is
 not the sum of the Failed bars, branches started and did not end.
 
-The Step and Outcome dashboard controls do **not** apply to this panel. They filter out the scheduler's
-entry record, which carries no Result, so they empty or skew the pie. The workflow control scopes it.
+The Step and Outcome dashboard controls do **not** apply to this panel. They filter out the entry
+step's outcome records, which are what mark a fire as entered, so they empty or skew the pie. The
+workflow control scopes it.
 
 ### 3.4 Whitelist pies
 

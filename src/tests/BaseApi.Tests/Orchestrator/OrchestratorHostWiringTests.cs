@@ -140,7 +140,6 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
         var handler = scope.ServiceProvider.GetServices<IQueueMessageHandler>().OfType<StepOutcomeHandler>().Single();
         Assert.NotNull(Held(handler));
         Assert.NotNull(Held(_host.Services.GetRequiredService<WorkflowActivator>()));
-        Assert.NotNull(Held(_host.Services.GetRequiredService<WorkflowFireJob>()));
         Assert.Same(_host.Services.GetRequiredService<StepRoleResolver>(), Held(handler));
     }
 
