@@ -334,7 +334,7 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             // this result ends its branch too, but it is not an edge and carries nothing. The graph is
             // the L1 entry this outcome was just routed from, so a step shared by two workflows is
             // classified per workflow. See StepRoles.
-            using (completed.NextStepIds.Count == 0 ? _logger.BeginScope(StepRoles.Scope(StepRoles.Terminal)) : null)
+            using (completed.NextStepIds is not { Count: > 0 } ? _logger.BeginScope(StepRoles.Scope(StepRoles.Terminal)) : null)
             {
                 _logger.Log(level, OutcomeTemplates.BranchEnds, m.Result);
             }

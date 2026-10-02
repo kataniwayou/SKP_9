@@ -909,16 +909,41 @@ public sealed class ExecutionRoundTripTests
     [Fact]
     public async Task ASharedStepIsTerminalOnlyInTheWorkflowWhereItHasNoSuccessors()
     {
-        // A has no successors in W (the harness) and one successor in W2.
+        // A has no successors in W (the harness) and one successor in W2, which accepts only Completed.
         var w2 = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var entry2 = Guid.Parse("88888888-8888-8888-8888-888888888889");
         var h = new Harness(Step(A, PA, 1, "{}"));
         h.Store.Set(w2, new WorkflowL1(w2, [A], "* * * * *", [Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}""")], []), Guid.NewGuid());
         Seed(h, Entry, Output);
+        Seed(h, entry2, Output);
 
-        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry) with { WorkflowId = w2 });
+        // Under W2 a Cancelled A ends its branch (B declines it) but has a successor: no role.
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Cancelled, entry2) with { WorkflowId = w2 });
+        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!);
 
-        Assert.Null(h.ScopeOf(OutcomeTemplates.BranchEnds));
-        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf(OutcomeTemplates.Advanced)!);
+        // Under W the same step has no successors: terminal.
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Cancelled, Entry));
+        var ends = h.PreLog.Templates
+            .Select((t, i) => (t, i))
+            .Where(x => x.t == OutcomeTemplates.BranchEnds)
+            .Select(x => h.PreLog.RecordScopes[x.i])
+            .ToList();
+        Assert.Equal(2, ends.Count);
+        Assert.DoesNotContain(StepRoles.Key, ends[0]);
+        Assert.Equal(StepRoles.Terminal, Assert.Contains(StepRoles.Key, ends[1]));
+    }
+
+    [Fact]
+    public async Task AStepWithNoSuccessorListIsTerminalAndDoesNotThrow()
+    {
+        // L2WorkflowReader does not normalise NextStepIds, so a missing list must not throw before the
+        // branch-ends record and the reclaim.
+        var h = new Harness(new StepL1(A, 1, PA, "{}", null!));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Equal(StepRoles.Terminal, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!));
     }
 
     [Fact]

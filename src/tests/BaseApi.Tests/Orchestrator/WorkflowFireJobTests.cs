@@ -600,6 +600,7 @@ public sealed class WorkflowFireJobTests
 
         Assert.Null(h.ScopeOf("dispatched an entry step"));
         Assert.NotNull(h.ScopeOf("the entry step is frozen \u2014 its entry condition is Never; skipping it"));
+        Assert.All(h.Log.RecordScopes, scope => Assert.DoesNotContain(StepRoles.Key, scope));
     }
 
     [Fact]
