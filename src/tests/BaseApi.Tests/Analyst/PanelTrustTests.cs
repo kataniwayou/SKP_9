@@ -378,6 +378,51 @@ public sealed class PanelTrustTests
     }
 
     [Fact]
+    public async Task TheFunnelCarriesTheWorkflowsScopeCount()
+    {
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+            .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(6213, value.RootElement.GetProperty("totalWorkflowRecords").GetInt64());
+        Assert.True(reading.Trust.SeriesPresent);
+        Assert.True(reading.Trust.NoDataDistinguishable);
+    }
+
+    [Fact]
+    public async Task AWindowWithNoWorkflowRecordsAtAllIsIndistinguishableFromNothingReported()
+    {
+        // The workflow logged nothing in the window: dead logging and an idle workflow read the same,
+        // so -- as on the _search panels -- every trust flag is false, never a trusted fires:0.
+        const string noFunnel =
+            """{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
+        const string noPolls =
+            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"}],"values":[[0,null]]}""";
+
+        var reading = await ElasticSource(Fixture("esql-fires-no-records.json"), noFunnel, noPolls)
+            .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(0, value.RootElement.GetProperty("totalWorkflowRecords").GetInt64());
+        Assert.False(reading.Trust.SeriesPresent);
+        Assert.False(reading.Trust.WindowFullyCovered);
+        Assert.False(reading.Trust.NoDataDistinguishable);
+        Assert.Equal(0, reading.SampleCount);
+    }
+
+    [Fact]
+    public async Task APartialEsqlResponseIsPanelUnavailableNotATrustedUndercount()
+    {
+        // is_partial: some shards did not answer. A partial funnel undercounts the later steps and
+        // would read as a trusted stall; the _search path refuses the same case (failed shards).
+        var ex = await Assert.ThrowsAsync<PanelUnavailableException>(
+            () => ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-partial.json"), Fixture("esql-polls.json"))
+                .ReadAsync(RunBoundaries, W, Range, CancellationToken.None));
+
+        Assert.Contains("partial", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task AStalledWindowIsATrustedEntryOnlyFunnel()
     {
         var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-stalled.json"), Fixture("esql-polls.json"))
@@ -411,7 +456,7 @@ public sealed class PanelTrustTests
     public async Task AFirstEntryWellAfterTheWindowStartIsNotFullyCovered()
     {
         const string lateFires =
-            """{"columns":[{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[9,"2026-10-01T19:14:00.000Z"]]}""";
+            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[4100,9,"2026-10-01T19:14:00.000Z"]]}""";
 
         var reading = await ElasticSource(lateFires, Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
@@ -422,9 +467,10 @@ public sealed class PanelTrustTests
     [Fact]
     public async Task NoFireInTheWindowReadsZeroAndIsNotFullyCovered()
     {
-        // STATS with no BY over zero rows answers one row: COUNT_DISTINCT 0, MIN null, SUM null.
+        // The workflow is logging (40 records) but no fire entered. STATS with no BY over zero rows
+        // answers one row: COUNT_DISTINCT 0, MIN null, SUM null.
         const string noFires =
-            """{"columns":[{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[0,null]]}""";
+            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[40,0,null]]}""";
         const string noFunnel =
             """{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
         const string noPolls =
@@ -436,6 +482,7 @@ public sealed class PanelTrustTests
         Assert.Equal(0, value.RootElement.GetProperty("fires").GetInt64());
         Assert.Equal(0, value.RootElement.GetProperty("drainedPolls").GetInt64());
         Assert.Equal(0, value.RootElement.GetProperty("byStep").GetArrayLength());
+        Assert.True(reading.Trust.SeriesPresent);
         Assert.False(reading.Trust.WindowFullyCovered);
     }
 
@@ -451,7 +498,9 @@ public sealed class PanelTrustTests
         Assert.All(handler.Requests, r =>
         {
             Assert.Equal(HttpMethod.Post, r.Method);
-            Assert.Equal("/_query", r.Path);
+            // allow_partial_results=false: Elasticsearch fails the request rather than answering
+            // with a partial result (the is_partial check stays as the second guard).
+            Assert.Equal("/_query?allow_partial_results=false", r.Path);
 
             // The statement carries quotes and the backticked {OriginalFormat} field: it must arrive
             // as a JSON string, not spliced raw into the body.

@@ -302,7 +302,12 @@ public sealed class PanelRegistryTests
         Assert.All(statements, s => Assert.StartsWith($"FROM {PanelRegistry.ElasticIndex}", s, StringComparison.Ordinal));
         Assert.All(statements, s => Assert.Contains("{{FROM}}", s, StringComparison.Ordinal));
         Assert.All(statements, s => Assert.Contains("{{TO}}", s, StringComparison.Ordinal));
-        Assert.Contains("STATS fires = COUNT_DISTINCT(attributes.CorrelationId), earliest = MIN(@timestamp)", statements[0], StringComparison.Ordinal);
+        Assert.Contains(
+            "STATS totalWorkflowRecords = COUNT(*), fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.StepRole == \"entry\", earliest = MIN(@timestamp) WHERE attributes.StepRole == \"entry\"",
+            statements[0], StringComparison.Ordinal);
+        // The scope count is every record of the workflow in the window: statement 1's WHERE must not
+        // narrow to entry records, or a dead-logging window could not be told from a quiet one.
+        Assert.DoesNotContain("StepRole", statements[0].Split('\n')[1], StringComparison.Ordinal);
         Assert.Contains("STATS outcomes = COUNT(*) BY attributes.StepRole, attributes.StepName", statements[1], StringComparison.Ordinal);
         Assert.Contains("STATS importerPolls = COUNT(*), drainedPolls = SUM(CASE(attributes.Consumed == 0, 1, 0))", statements[2], StringComparison.Ordinal);
     }

@@ -53,7 +53,7 @@ internal sealed class RehearsalPanels : IPanelReader
                       + "\"exception\":\"the step's input could not be read from L2\"}]}",
                 deadLetterDepth),
             ["run-boundaries"] = Clean("run-boundaries", "business",
-                """{"fires":30,"importerPolls":30,"pollsThatImported":0,"drainedPolls":30,"byStep":[{"role":"entry","step":"importer","outcomes":30}]}""", 30),
+                """{"totalWorkflowRecords":240,"fires":30,"importerPolls":30,"pollsThatImported":0,"drainedPolls":30,"byStep":[{"role":"entry","step":"importer","outcomes":30}]}""", 30),
             ["queue-wait"] = Clean("queue-wait", "ops",
                 """{"meanSeconds":0.013,"maxSeconds":0.021}""", 91),
             ["processor-liveness"] = Clean("processor-liveness", "ops",

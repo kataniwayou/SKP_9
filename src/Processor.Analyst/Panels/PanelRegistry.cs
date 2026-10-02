@@ -446,8 +446,8 @@ internal static class PanelRegistry
         // THE AGENT'S COUNTERPART TO THE OPERATOR'S FUNNEL ON THE KIBANA BOARD. Both count the same
         // thing: for the fires whose entry record falls in the range, the outcome handler's one record
         // per returned outcome (OutcomeTemplates), by the step's StepRole and name. Three ES|QL
-        // statements, split on a line holding only "---" and posted to /_query in order: fires,
-        // funnel, polls. Keep this in step with the board -- the maintenance rule above is the only
+        // statements, split on a line holding only "---" and posted to /_query in order: scope and
+        // fires (statement 1 counts every record of the workflow, the trust scope), funnel, polls. Keep this in step with the board -- the maintenance rule above is the only
         // thing that detects drift between them.
         new PanelDefinition(
             PanelId: "run-boundaries",
@@ -460,13 +460,15 @@ internal static class PanelRegistry
                 "no successors returned an outcome, not that a branch ended. fires is the number of " +
                 "fires that entered; pollsThatImported and drainedPolls split the importer's polls. " +
                 "A stall is the funnel stopping after entry. A fire still running at the window's end " +
-                "has not returned its later outcomes yet.",
+                "has not returned its later outcomes yet. totalWorkflowRecords is every record the " +
+                "workflow logged in the window; at zero nothing was reported at all, which cannot be " +
+                "told apart from logging that is not reaching the store.",
             Kind: PanelKind.Esql,
             Query: WithOutcomeTemplates(
                 """
                 FROM logs-generic.otel-default
-                | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.$ROLE$ == "$ENTRY$"
-                | STATS fires = COUNT_DISTINCT(attributes.CorrelationId), earliest = MIN(@timestamp)
+                | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}"
+                | STATS totalWorkflowRecords = COUNT(*), fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.$ROLE$ == "$ENTRY$", earliest = MIN(@timestamp) WHERE attributes.$ROLE$ == "$ENTRY$"
                 ---
                 FROM logs-generic.otel-default
                 | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.$ROLE$ IS NOT NULL

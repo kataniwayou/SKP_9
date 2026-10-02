@@ -161,7 +161,7 @@ public sealed class AnalystReplayScenarios
         .Planted("step-outcomes", """{"totalOutcomeRecords":15,"completed":15,"failed":0,"cancelled":0}""", samples: 15)
         .Planted("step-failures", """{"totalOutcomeRecords":15,"failedCount":0,"samples":[]}""", samples: 15)
         .Planted("run-boundaries",
-            """{"fires":15,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0,"byStep":[{"role":"entry","step":"split-importer_1.0.0-a090-d76e1ca64a97","outcomes":15}]}""",
+            """{"totalWorkflowRecords":1874,"fires":15,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0,"byStep":[{"role":"entry","step":"split-importer_1.0.0-a090-d76e1ca64a97","outcomes":15}]}""",
             samples: 15);
 
     [Fact]

@@ -70,7 +70,7 @@ internal static class GraphRenderer
 
         text.AppendLine()
             .AppendLine("Routing: where each result of each step goes. Computed from the entry conditions;")
-            .AppendLine("\"branch ends\" means that result is a terminal for the branch.");
+            .AppendLine("\"branch ends\" means no successor accepts that result: the branch's last step.");
 
         foreach (var (id, label) in labels.OrderBy(l => Ordinal(l.Value)))
         {

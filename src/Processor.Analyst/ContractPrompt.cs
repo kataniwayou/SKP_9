@@ -74,8 +74,8 @@ internal static class ContractPrompt
         - A successor is entered only when its entry condition accepts the predecessor's result: the
           same result, or Always. Every successor that accepts starts its own branch, so the branches
           after a fork multiply. An importer entry step turns one fire into one branch per item it read.
-        - A branch ends where no successor accepts the step's result; that step is the branch's
-          terminal for that result, and a step can be terminal for one result and not another. Every
+        - A branch ends where no successor accepts the step's result; that step is the branch's last
+          step for that result, and a step can end the branch for one result and not another. Every
           branch ends exactly once. A failure routed to a failure-handling step ends at the end of that
           handler's path, not where it failed. The running-graph block lists, for every step and
           result, where the branch goes or that it ends: use it, do not re-derive it.

@@ -111,7 +111,9 @@ internal sealed class ElasticPanelSource
             // Serialized, not spliced: the statement carries double quotes and the backticked
             // {OriginalFormat} field, and must reach Elasticsearch as one JSON string.
             var body = JsonSerializer.Serialize(new { query = Substitute(statement.Trim(), targetWorkflowId, range) });
-            var text = await PostAsync(definition, "/_query", body, ct).ConfigureAwait(false);
+            // allow_partial_results=false: a shard that cannot answer fails the request instead of
+            // silently shrinking the counts. ParseEsqlRows still refuses is_partial as a second guard.
+            var text = await PostAsync(definition, "/_query?allow_partial_results=false", body, ct).ConfigureAwait(false);
             tables.Add(ParseEsqlRows(definition.PanelId, text));
         }
 
@@ -405,8 +407,10 @@ internal sealed class ElasticPanelSource
     /// step returned, by its StepRole, plus the importer's polls. Built from the panel's three ES|QL
     /// statements in order: fires, funnel, polls.
     /// <para>
-    /// <b>Trust.</b> An answer from all three statements is a report, so <c>SeriesPresent</c> and
-    /// <c>NoDataDistinguishable</c> are true, and a funnel that stops after entry is a trusted reading
+    /// <b>Trust, as the <c>_search</c> panels draw it.</b> totalWorkflowRecords -- every record of the
+    /// workflow in the window -- is the scope count. At zero nothing was reported at all, and every
+    /// flag is false. Above zero the workflow is reporting, so <c>SeriesPresent</c> and
+    /// <c>NoDataDistinguishable</c> are true and a funnel that stops after entry is a trusted reading
     /// of a stall, not a gap. The window is fully covered only when the earliest entry record sits
     /// within <see cref="CoverageTolerance"/> of the window's start; no entry at all is not covered.
     /// </para>
@@ -427,6 +431,7 @@ internal sealed class ElasticPanelSource
         }
 
         var firesRow = SingleRow(id, tables[0]);
+        var totalWorkflowRecords = Long(id, firesRow, "totalWorkflowRecords");
         var fires = Long(id, firesRow, "fires");
         var earliest = Date(id, firesRow, "earliest");
 
@@ -443,12 +448,21 @@ internal sealed class ElasticPanelSource
 
         var valueJson = JsonSerializer.Serialize(new
         {
+            totalWorkflowRecords,
             fires,
             importerPolls,
             pollsThatImported = importerPolls - drainedPolls,
             drainedPolls,
             byStep = funnel.Select(r => new { role = r.Role, step = r.Step, outcomes = r.Outcomes }),
         });
+        if (totalWorkflowRecords == 0)
+        {
+            // Not one record of the workflow in the window: indistinguishable from a blind spot, the
+            // same as the _search panels' hits.total == 0 -- all three flags false together.
+            return new PanelReading(definition.PanelId, definition.Layer, valueJson, SampleCount: 0,
+                new PanelTrust(SeriesPresent: false, WindowFullyCovered: false, NoDataDistinguishable: false));
+        }
+
         var covered = earliest is { } e && e <= range.From + CoverageTolerance;
         return new PanelReading(definition.PanelId, definition.Layer, valueJson,
             SampleCount: checked((int)funnel.Sum(r => r.Outcomes)),
@@ -470,6 +484,14 @@ internal sealed class ElasticPanelSource
         {
             throw new PanelUnavailableException(
                 panelId, $"elasticsearch reported an error: {Truncate(errorElement.ToString())}");
+        }
+
+        if (root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("is_partial", out var partial) && partial.ValueKind == JsonValueKind.True)
+        {
+            // The ES|QL counterpart of a _search response with failed shards or timed_out: the counts
+            // cannot be told apart from an undercount, so this is a transport failure, not a reading.
+            throw new PanelUnavailableException(panelId, "elasticsearch returned a partial ES|QL response");
         }
 
         if (root.ValueKind != JsonValueKind.Object
