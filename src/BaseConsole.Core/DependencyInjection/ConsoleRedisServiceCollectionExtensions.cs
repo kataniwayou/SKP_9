@@ -142,6 +142,8 @@ public static class ConsoleRedisServiceCollectionExtensions
         // the orchestrator reads names through L2WorkflowReader, its single point of Redis access.
         services.TryAddSingleton<IEntityNameSource, RedisEntityNameSource>();
         services.TryAddSingleton<EntityNameResolver>();
+        services.TryAddSingleton<IStepRoleSource, RedisStepRoleSource>();
+        services.TryAddSingleton<StepRoleResolver>();
 
         services.TryAddSingleton<IConsumerAdmission, AlwaysOpenAdmission>();
         services.TryAddSingleton<GatedQueueConsumer>();
