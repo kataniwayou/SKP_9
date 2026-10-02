@@ -106,13 +106,4 @@ public sealed class L2KeyLayoutTests
         Assert.Equal("0 0/5 * * * ?", back.Cron);
         Assert.Equal(P, Assert.Single(back.Steps).ProcessorId);
     }
-
-    [Fact]
-    public void AStepRoleKeyNestsUnderItsWorkflow()
-    {
-        Assert.Equal(
-            "skp:wf:11111111-1111-1111-1111-111111111111:step:22222222-2222-2222-2222-222222222222",
-            L2ProjectionKeys.StepRole(W, S));
-        Assert.Equal("role", L2ProjectionKeys.RoleField);
-    }
 }

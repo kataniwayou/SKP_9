@@ -67,7 +67,7 @@ internal sealed class L2ProjectionWriter
             .ToList();
 
         var stale = await FindOwnLeftoversAsync(db, workflowId, workflowKey, caches).ConfigureAwait(false);
-        stale.AddRange(await FindRemovedStepsAsync(db, workflowId, workflowKey, steps, ct).ConfigureAwait(false));
+        stale.AddRange(await FindRemovedStepsAsync(db, workflowKey, steps, ct).ConfigureAwait(false));
 
         var store = new WorkflowStoreProjection(workflow.EntryStepIds ?? new List<Guid>(), workflow.Cron, steps);
 
@@ -87,14 +87,6 @@ internal sealed class L2ProjectionWriter
             new HashEntry(L2ProjectionKeys.RootsField,
                 JsonSerializer.Serialize(caches.Select(c => c.Root).ToList(), MessagingJson.Options)),
         ]));
-
-        // Each step's role in THIS workflow, beside the graph it was computed from, so one start
-        // writes both. See StepRoleClassifier and StepRoles.
-        foreach (var (stepId, role) in StepRoleClassifier.Classify(store.EntryStepIds, steps))
-        {
-            writes.Add(batch.HashSetAsync(
-                L2ProjectionKeys.StepRole(workflowId, stepId), L2ProjectionKeys.RoleField, role));
-        }
 
         foreach (var cache in caches)
         {
@@ -147,7 +139,7 @@ internal sealed class L2ProjectionWriter
     /// was dropped, and deleting on a guess is the one thing this must not do.
     /// </summary>
     private async Task<IEnumerable<RedisKey>> FindRemovedStepsAsync(
-        IDatabase db, Guid workflowId, string workflowKey, List<StepL1> next, CancellationToken ct)
+        IDatabase db, string workflowKey, List<StepL1> next, CancellationToken ct)
     {
         var previous = ReadStore(await db.HashGetAsync(workflowKey, L2ProjectionKeys.StoreField).ConfigureAwait(false));
         if (previous?.Steps is not { Count: > 0 } previousSteps)
@@ -162,14 +154,8 @@ internal sealed class L2ProjectionWriter
             return [];
         }
 
-        // The role key belongs to this workflow alone, so a dropped step loses it unconditionally. The
-        // shared name key keeps its own rule: deleted only when no step row remains.
-        var roleKeys = dropped.Select(id => (RedisKey)L2ProjectionKeys.StepRole(workflowId, id));
-
         var existing = await _stepRows.ExistingAsync(dropped, ct).ConfigureAwait(false);
-        return dropped.Where(id => !existing.Contains(id))
-            .Select(id => (RedisKey)L2ProjectionKeys.StepEntity(id))
-            .Concat(roleKeys);
+        return dropped.Where(id => !existing.Contains(id)).Select(id => (RedisKey)L2ProjectionKeys.StepEntity(id));
     }
 
     private static WorkflowStoreProjection? ReadStore(RedisValue json)

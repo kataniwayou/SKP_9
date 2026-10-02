@@ -22,7 +22,6 @@ namespace Messaging.Contracts.Projections;
 ///   <item><description>ProcessorSharedEntry: <c>skp:proc:{processorId}:shared:{name}</c> — one shared entry, TTL</description></item>
 ///   <item><description>Cache: <c>skp:wf:{workflowId}:cache:{root}</c> — one dictionary's key list</description></item>
 ///   <item><description>CacheEntry: <c>skp:wf:{workflowId}:cache:{root}:{key}</c> — one entry</description></item>
-///   <item><description>StepRole: <c>skp:wf:{workflowId}:step:{stepId}</c> — HASH <c>role</c>, this workflow's role for the step</description></item>
 ///   <item><description>ExecutionData: <c>skp:data:{guid}</c> — the blob for both roles</description></item>
 /// </list>
 /// </summary>
@@ -111,16 +110,6 @@ public static class L2ProjectionKeys
     /// </summary>
     public static string CacheEntry(Guid workflowId, string root, string key)
         => $"{Cache(workflowId, root)}:{key}";
-
-    /// <summary>The role field on <see cref="StepRole"/>: entry, intermediate or terminal.</summary>
-    public const string RoleField = "role";
-
-    /// <summary>
-    /// A step's role in ONE workflow. Nested under the workflow's key, not the global step key,
-    /// because a step shared by two workflows can hold a different role in each. Written with the
-    /// projection at start; a dropped step's key is deleted at the next start.
-    /// </summary>
-    public static string StepRole(Guid workflowId, Guid stepId) => $"{Workflow(workflowId)}:step:{stepId:D}";
 
     /// <summary>The per-instance processor-liveness key. <paramref name="instanceId"/> is the
     /// already-resolved pod identity — a plain string, not a Guid.</summary>

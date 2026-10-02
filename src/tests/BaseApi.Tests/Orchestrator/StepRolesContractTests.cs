@@ -10,7 +10,17 @@ public sealed class StepRolesContractTests
     public void TheKeyAndValuesAreFixed()
     {
         Assert.Equal("StepRole", StepRoles.Key);
-        Assert.Equal(["entry", "intermediate", "terminal"], new[] { StepRoles.Entry, StepRoles.Intermediate, StepRoles.Terminal });
+        Assert.Equal(["entry", "terminal"], new[] { StepRoles.Entry, StepRoles.Terminal });
+    }
+
+    [Fact]
+    public void ThereAreExactlyTwoRoles()
+    {
+        // The run's two edges. A third value would put a graph role back on every step.
+        var values = typeof(StepRoles).GetFields()
+            .Where(f => f.IsLiteral && f.Name != nameof(StepRoles.Key))
+            .Select(f => (string)f.GetRawConstantValue()!);
+        Assert.Equal(["entry", "terminal"], values.Order());
     }
 
     [Fact]
