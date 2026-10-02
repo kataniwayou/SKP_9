@@ -79,7 +79,7 @@ What the graph lets you read off the bars:
   failures, failure records are being lost. If it exceeds them, the sink itself is failing.
 - **Volume drops from one step to the next by exactly that step's Failed and Cancelled counts.** A drop
   with no matching Failed or Cancelled is lost work.
-- **The importer's Completed bar counts records, not polls.** Its Cancelled bar counts empty polls. (The funnel's importer slice in §3.3 is different: it counts the orchestrator's per-poll outcome records, 15 in the 2026-10-01 @49 window, not records imported.)
+- **The importer's Completed bar counts records, not polls.** Its Cancelled bar counts empty polls. The funnel's importer slice in §3.3 counts the same thing: one outcome record per record imported, plus one per empty poll.
 
 ### 3.2 Outcome pie
 
@@ -100,7 +100,10 @@ Each slice counts the orchestrator's one per-outcome record for that step, and o
 `entry` record falls inside the window, so a fire that began before the window never shows up as
 downstream work.
 
-- **`entry`** is the step a fire is dispatched to. Its slice is the number of fires.
+- **`entry`** is the step a fire is dispatched to. Its slice is **not** the number of fires. The split
+  importer returns one outcome per record it imported, plus one Cancelled "no successor accepts it"
+  record for each empty poll. It equals the number of fires only when every poll imports exactly one
+  record or none. The fire count is the panel's `fires` (distinct entry correlation ids), not this slice.
 - **`intermediate`** steps are everything between: read the slices left to right as a funnel.
 - **`terminal` means "a step with no successors returned an outcome".** It is a property of the graph,
   not of the result, so a terminal step that Failed still counts as terminal.
@@ -110,10 +113,15 @@ downstream work.
 - **Fan-out raises the count instead of dropping it.** After the fork every step is at 2x
   `sk-normalizer-alphabeta`, which is the §3.1 rule seen from the pie.
 
-The `busy-mixed-feed` window checked on 2026-10-01 (19:08 to 19:23 UTC) reads, in graph (chain) order,
-**15 / 125 / 107 / 89 / 53 / 106 / 106 / 106 / 54 / 54**. That is not the pie's slice order: the pie groups
-by role first (the inner ring), so its slices run entry, then the intermediates, then the terminals. The three 106s are the post-fork steps at
-2 x 53, and the two 54s are the failure sink. If a post-fork step is not 2 x alphabeta, or the sink is
+The `endless-feed-steprole` window, verified live on 2026-10-02 after the StepRole deploy
+(12:57:45 to 13:12:45 UTC; 15 fires, all of which imported, 125 records = 25 feed cycles), reads in
+graph (chain) order **125 / 125 / 100 / 75 / 25 / 50 / 50 / 50 / 75 / 75**. Those are split-importer,
+split-filefetcher, split-archiveexpander, sk-normalizer-sample, sk-normalizer-alphabeta,
+split-archivecollapser, split-filepersister, split-exporter, record-outcome and export-outcome. That is
+not the pie's slice order: the pie groups by role first (the inner ring), so its slices run entry
+(125), then the intermediates (550), then the terminal (75). The entry 125 is records imported (no
+empty polls in that window), not the 15 fires. The three 50s are the post-fork steps at 2 x 25, and
+the two 75s are the failure sink. If a post-fork step is not 2 x alphabeta, or the sink is
 not the sum of the Failed bars, branches started and did not end.
 
 The Step and Outcome dashboard controls do **not** apply to this panel. They filter out the scheduler's
@@ -152,7 +160,7 @@ three windows.
 **This table is RunPosition-era history (before 2026-10-02).** Its "entry" and "terminal" figures use
 the old meaning, where terminal counted branch ends, including empty polls. They do not describe the
 current StepRole funnel (§3.3), where terminal means a step with no successors returned an outcome.
-Only the 2026-10-01 funnel window in §3.3 is stated in current terms.
+Only the 2026-10-02 funnel window in §3.3 is stated in current terms.
 
 ES|QL over `logs-generic.otel-default`, scoped to the chain's WorkflowId. Script:
 `panel_facts.py`, kept with this session's scratch, not committed.
@@ -163,7 +171,9 @@ ES|QL over `logs-generic.otel-default`, scoped to the chain's WorkflowId. Script
 | 20:45–21:40, approved feed, 10s→60s cron | N = G = 500, E 69 | alphabeta 500; collapser/persister/exporter 1000; entry 159; terminal 1000+69 = 1069; Listed 500 | all exact |
 | 04:00–05:00, idle, 60s cron | E 60 | importer Cancelled 60; entry 60, terminal 60 | all exact |
 
-In the approved window, entry (159) equals the importer's polls (90 with records + 69 empty). Every
+RunPosition-era measurement: in the approved window, the old `entry` (159, one per fire's dispatch)
+equals the importer's polls (90 with records + 69 empty). The StepRole funnel's entry slice would
+instead read records imported + empty polls (§3.3). Every
 fire that entered also ran: the backlog seen briefly at the 10s cron had drained by the window's end.
 
 ## 6. Consequences for the Analyst

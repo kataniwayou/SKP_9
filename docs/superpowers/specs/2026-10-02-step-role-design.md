@@ -13,6 +13,13 @@ Success: on a known window the pie's per-step counts equal what the input implie
 2026-10-02 on the `busy-mixed-feed` window (19:08–19:23Z) with stand-in data: 15 / 125 / 107 / 89 /
 53 / 106 / 106 / 106 / 54 / 54, every figure matching the window's verified answer key.
 
+> **Note (2026-10-02, after deploy).** The leading 15 came from stand-in data, which counted the
+> scheduler's dispatch records (one per fire). The shipped query counts the importer's outcome
+> records. On a real window the entry slice is records imported plus one Cancelled record per empty
+> poll, and it equals fires only when each poll imports one record or none. Verified on
+> `endless-feed-steprole` (12:57:45–13:12:45Z): 15 fires, entry 125 = 125 records imported, 0 empty
+> polls; graph order 125 / 125 / 100 / 75 / 25 / 50 / 50 / 50 / 75 / 75 (Task 8 report).
+
 ## Decisions
 
 | # | Decision |
