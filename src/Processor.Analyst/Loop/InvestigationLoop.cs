@@ -29,6 +29,7 @@ internal sealed class InvestigationLoop(
         var trace = new InvestigationTrace();
         var artifacts = new StageArtifacts();
         var tools = ToolCatalog.Build([.. config.PanelSet.Select(panels.Describe)]);
+        var rejections = 0;
         var transcript = new List<ModelTurn>
         {
             new(ModelRole.User,
@@ -87,6 +88,8 @@ internal sealed class InvestigationLoop(
                     + string.Join(", ", terminalCalls.Select(c => c.ToolName)));
             }
 
+            ModelToolResult? rejected = null;
+
             if (terminalCalls.Length == 1 && Validates(terminalCalls[0], tools))
             {
                 // The only path whose payload becomes a persisted, frozen-schema document (or is
@@ -94,7 +97,33 @@ internal sealed class InvestigationLoop(
                 // other call before it is trusted. A terminal call ends the run even if it arrived
                 // alongside others: there is nothing after the end, so nothing else in this reply is
                 // executed and no non-terminal sibling leaves a trace entry behind.
-                return Terminate(terminalCalls[0], artifacts, trace, window, promptHash, config, budget);
+                var (outcome, rejection) = Terminate(terminalCalls[0], artifacts, trace, window, promptHash, config, budget);
+                if (outcome is not null)
+                {
+                    return outcome;
+                }
+
+                // The investigation's own record does not support the conclusion yet -- a planned panel
+                // left unread, a hypothesis never verified. That is a correctable omission, not a broken
+                // run: the problems go back to the model as this call's error result and it may fix
+                // them within its remaining budget. Nothing was published. After MaxRejections the
+                // run fails as it always did, so a model that cannot ground its conclusion still never
+                // publishes one.
+                rejections++;
+                if (rejections > MaxRejections)
+                {
+                    throw new AnalysisImpossibleException(rejection!);
+                }
+
+                logger.LogWarning(
+                    "the {Tool} call was rejected ({Count} of {Max}) and handed back to the model: {Why}",
+                    terminalCalls[0].ToolName, rejections, MaxRejections, rejection);
+                rejected = new ModelToolResult(
+                    terminalCalls[0].CallId,
+                    $"REJECTED, nothing was published: {rejection}. Correct the record -- read any panel "
+                    + "you planned but did not read, record the verification it changes -- then call "
+                    + $"{terminalCalls[0].ToolName} again.",
+                    IsError: true);
             }
 
             // Either there was no terminal call, or the one terminal call failed its own schema. A
@@ -111,7 +140,9 @@ internal sealed class InvestigationLoop(
             {
                 foreach (var call in reply.ToolCalls)
                 {
-                    results.Add(await ExecuteAsync(call, window, trace, artifacts, config, tools, dispatchCt).ConfigureAwait(false));
+                    results.Add(rejected is not null && call.CallId == rejected.CallId
+                        ? rejected
+                        : await ExecuteAsync(call, window, trace, artifacts, config, tools, dispatchCt).ConfigureAwait(false));
                 }
             }
             catch (EvidenceNotBelievedException ex)
@@ -235,7 +266,15 @@ internal sealed class InvestigationLoop(
         return schema.Evaluate(call.Input).IsValid;
     }
 
-    private static LoopOutcome Terminate(
+    /// <summary>
+    /// How many times a terminal call may be handed back for an ungrounded record before the run
+    /// fails. Two corrections is room to read a skipped panel and re-verify; a third miss is a model
+    /// that cannot ground its conclusion, and spending more turns on it buys nothing.
+    /// </summary>
+    internal const int MaxRejections = 2;
+
+    /// <summary>The run's end, or why the record does not yet support the terminal call.</summary>
+    private static (LoopOutcome? Outcome, string? Rejection) Terminate(
         ModelToolCall terminal,
         StageArtifacts artifacts,
         InvestigationTrace trace,
@@ -257,25 +296,26 @@ internal sealed class InvestigationLoop(
             var stageProblems = StageAssertions.CheckNoFindingIsGrounded(artifacts, trace);
             if (stageProblems.Count > 0)
             {
-                throw new AnalysisImpossibleException(
+                return (null,
                     "report_no_finding was called without completing the investigation: "
                     + string.Join("; ", stageProblems));
             }
 
             var reason = terminal.Input.GetProperty("reason").GetString()!;
-            return new LoopOutcome.NoFinding(
-                reason, NoFindingDocument("Quiet", reason, trace, window, promptHash, config, budget));
+            return (new LoopOutcome.NoFinding(
+                reason, NoFindingDocument("Quiet", reason, trace, window, promptHash, config, budget)), null);
         }
 
-        var input = terminal.Input;
+        // Each ruled-out criterion is set to the one record_plan stated before the check runs, so
+        // the published criterion is always the pre-committed one -- see PlannedCriteria.
+        var input = PlannedCriteria.Apply(artifacts, terminal.Input);
 
         // A finding that fails these is not a weaker finding, it is an investigation whose own record
         // does not support it -- so it must not be exported, and it must not be silent either.
         var problems = StageAssertions.Check(artifacts, trace, input);
         if (problems.Count > 0)
         {
-            throw new AnalysisImpossibleException(
-                "the investigation's own record does not support its finding: " + string.Join("; ", problems));
+            return (null, "the investigation's own record does not support its finding: " + string.Join("; ", problems));
         }
 
         var finding = new AnalystFinding(
@@ -304,7 +344,7 @@ internal sealed class InvestigationLoop(
             Usage: UsageOf(budget, config),
             PromptHash: promptHash);
 
-        return new LoopOutcome.Finding(finding);
+        return (new LoopOutcome.Finding(finding), null);
     }
 
     /// <summary>

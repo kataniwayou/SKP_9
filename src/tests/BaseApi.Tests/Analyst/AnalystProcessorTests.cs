@@ -276,8 +276,9 @@ public sealed class AnalystProcessorTests
         // actually reached verification and found nothing worth reporting.
         var processor = Processor(
             new ScriptedModel(FitBit(), FitBit(), FitBit()),
-            new ScriptedModel(ModelReply.Of(
-                ScriptedModel.Call("report_no_finding", new { reason = "nothing moved" }))));
+            new ScriptedModel([.. Enumerable.Repeat(ModelReply.Of(
+                ScriptedModel.Call("report_no_finding", new { reason = "nothing moved" })),
+                InvestigationLoop.MaxRejections + 1)]));
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.AnalyseAsync(Config(), CancellationToken.None));

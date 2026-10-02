@@ -86,7 +86,7 @@ public sealed class InvestigationLoopTests
         var model = new ScriptedModel(
             [
                 .. AnalystScript.StagesWithoutReadingAnyPanel(),
-                ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" })),
+                .. Persisting(ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" }))),
             ]);
 
         var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
@@ -172,7 +172,7 @@ public sealed class InvestigationLoopTests
             },
         });
 
-        var model = new ScriptedModel([.. AnalystScript.Stages(), ModelReply.Of(fabricated)]);
+        var model = new ScriptedModel([.. AnalystScript.Stages(), .. Persisting(ModelReply.Of(fabricated))]);
 
         var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
             () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
@@ -206,7 +206,7 @@ public sealed class InvestigationLoopTests
         // report_no_finding on turn one, with zero stages recorded, is exactly that shape -- and
         // must fail loudly rather than cancel silently.
         var model = new ScriptedModel(
-            ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" })));
+            [.. Persisting(ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" })))]);
 
         var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
             () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
@@ -543,12 +543,85 @@ public sealed class InvestigationLoopTests
     public async Task AFindingWhoseEvidenceWasNeverReadIsImpossible()
     {
         // The end-to-end shape of the assertions: the loop, not a unit test, refuses it.
-        var model = new ScriptedModel([.. AnalystScript.Stages(), AnalystScript.Submit("never-read")]);
+        var model = new ScriptedModel([.. AnalystScript.Stages(), .. Persisting(AnalystScript.Submit("never-read"))]);
 
         var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
             () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
 
         Assert.Contains("never-read", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A model that repeats the same ungrounded terminal call past the cap: what the old "fails at
+    /// once" tests now script, because a single rejection is handed back for correction.
+    /// </summary>
+    private static IEnumerable<ModelReply> Persisting(ModelReply terminal)
+        => Enumerable.Repeat(terminal, InvestigationLoop.MaxRejections + 1);
+
+    [Fact]
+    public async Task ARejectedConclusionIsHandedBackAndCanBeCorrected()
+    {
+        // The busy-healthy replay failure: Quiet declared with a planned panel never read. The
+        // rejection goes back as the call's error result, the model reads the panel and re-verifies,
+        // and the second report_no_finding is grounded.
+        var noFinding = ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReportNoFinding, new { reason = "nothing moved" }));
+        var model = new ScriptedModel(
+            [
+                .. AnalystScript.StagesWithoutReadingAnyPanel(),
+                noFinding,
+                ModelReply.Of(ScriptedModel.Call(ToolNamesForTest.ReadPanel, new { panelId = "queue-depth" })),
+                ModelReply.Of(ScriptedModel.Call("record_readings", new { readings = new[] { new { panelId = "queue-depth", summary = "max 4", trusted = true } } })),
+                ModelReply.Of(ScriptedModel.Call("record_verification", new { verdicts = new[] { new { hypothesis = "broker slow", survived = false, whatWasSeen = "max 4", citedPanels = new[] { "queue-depth" } } } })),
+                noFinding,
+            ]);
+
+        var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
+
+        Assert.IsType<LoopOutcome.NoFinding>(outcome);
+        var handedBack = model.Received[6].Transcript[^1].ToolResults.Single();
+        Assert.True(handedBack.IsError);
+        Assert.Contains("REJECTED, nothing was published", handedBack.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARuledOutCriterionIsTheOneThePlanStatedNotTheModelsRewording()
+    {
+        // Two stall replays failed on a reworded criterion with a sound conclusion. The planned
+        // words are published instead, which is exactly what the check exists to guarantee.
+        var reworded = ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
+        {
+            verdict = "Drifting",
+            insights = new[] { new { claim = "c", why = "w", panels = new[] { "queue-depth", "arrival-mean" } } },
+            samplesExamined = 91,
+            evidence = new[] { new { panelId = "queue-depth", layer = "ops", label = "mean", value = "180ms" } },
+            ruledOut = new[] { new { hypothesis = "broker slow", disconfirmingCriterion = "depth above a hundred", whatWasSeen = "max 4" } },
+        });
+        var model = new ScriptedModel([.. AnalystScript.Stages(), ModelReply.Of(reworded)]);
+
+        var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
+
+        var finding = Assert.IsType<LoopOutcome.Finding>(outcome).Value;
+        Assert.Equal("queue depth over 100", Assert.Single(finding.RuledOut).DisconfirmingCriterion);
+    }
+
+    [Fact]
+    public async Task ARuledOutHypothesisThePlanNeverNamedStillFails()
+    {
+        // Filling criteria from the plan must not launder an invented hypothesis.
+        var invented = ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
+        {
+            verdict = "Drifting",
+            insights = new[] { new { claim = "c", why = "w", panels = new[] { "queue-depth", "arrival-mean" } } },
+            samplesExamined = 91,
+            evidence = new[] { new { panelId = "queue-depth", layer = "ops", label = "mean", value = "180ms" } },
+            ruledOut = new[] { new { hypothesis = "made up later", disconfirmingCriterion = "x", whatWasSeen = "y" } },
+        });
+        var model = new ScriptedModel([.. AnalystScript.Stages(), .. Persisting(ModelReply.Of(invented))]);
+
+        var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
+
+        Assert.Contains("never proposed", ex.Message, StringComparison.Ordinal);
     }
 }
 

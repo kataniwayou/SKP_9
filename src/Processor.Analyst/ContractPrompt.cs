@@ -17,12 +17,12 @@ namespace Processor.Analyst;
 /// while "first query panel A, then panel B" is a script and a worse one than the model would choose.
 /// </para>
 /// <para>
-/// <b>"Verbatim" is load-bearing here, not politeness.</b> <c>StageAssertions</c> compares a
-/// <c>ruledOut</c> entry's <c>disconfirmingCriterion</c> against the one recorded in
-/// <c>record_plan</c>, and matches hypothesis names across <c>record_plan</c>,
+/// <b>"Verbatim" is load-bearing here, not politeness.</b> A <c>ruledOut</c> entry's criterion is
+/// filled from <c>record_plan</c> by <c>PlannedCriteria</c>, so the model no longer retypes it, but
+/// <c>StageAssertions</c> still matches hypothesis NAMES across <c>record_plan</c>,
 /// <c>record_verification</c> and <c>ruledOut</c> — including a re-plan, since a carried-forward
 /// hypothesis keeps its original pre-commitment mark only if <c>StageArtifacts</c> sees it restated
-/// identically. Both comparisons tolerate whitespace differences and nothing else — a paraphrase
+/// identically. The name comparisons tolerate whitespace differences and nothing else — a paraphrase
 /// fails the check with no clue in the message that the fix is "copy the words, not the meaning." So
 /// this prompt says "verbatim" outright, at the exact points a well-meaning model would otherwise
 /// reword.
@@ -144,10 +144,11 @@ internal static class ContractPrompt
         Finish in exactly one of two ways. Call {ToolNames.SubmitFinding} when you have refined at
         least one such insight — and include the hypotheses you killed, with what killed them,
         because "I suspected this and ruled it out" is often the more useful half. List in ruledOut only the hypotheses your own stage-5 verification
-        recorded as NOT surviving — not everything you merely doubted. When you list a killed
-        hypothesis, copy its disconfirming criterion into the finding VERBATIM, exactly as you wrote
-        it in stage 3 — do not summarize it or restate it in your own words, even if the restatement
-        means the same thing. Call {ToolNames.ReportNoFinding} when the analysis ran and reached no
+        recorded as NOT surviving — not everything you merely doubted. Name each killed hypothesis
+        exactly as you planned it; its disconfirming criterion is taken from your stage-3 plan, so
+        whatever you write in that field is replaced with the words you committed to there. If a
+        terminal call comes back REJECTED, nothing was published: fix what it names and call it
+        again. Call {ToolNames.ReportNoFinding} when the analysis ran and reached no
         insight — including when something survived but you cannot correlate it into one. Its reason
         is published as a Quiet verdict, under the same rule as an insight: say what killed each
         hypothesis, or why a survivor could not be correlated, and never list what was healthy.
