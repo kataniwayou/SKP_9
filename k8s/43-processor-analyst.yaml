@@ -94,6 +94,12 @@ spec:
             # setting, reasoning tokens bill as output, and the monitor workflow runs unattended.
             - name: Analyst__Model__ReasoningEffort
               value: "high"
+            # Full | StructureOnly. StructureOnly for the PoC: the preflight BIT checks the prompt's
+            # stage structure only, never calls the judge or the rehearsal, and never reads or writes
+            # the shared verdict in L2. Env-only, like the model coordinates above, so a change rolls
+            # the pod. Remove (default Full) to put the paid fitness gate back.
+            - name: Analyst__Bit__Mode
+              value: "StructureOnly"
             # appsettings.json ships dev addresses on forwarded ports (localhost:19200/19090) for
             # running outside the cluster. In-cluster these must be service DNS on the in-cluster
             # ports, which is why both are overridden here rather than left to the file.

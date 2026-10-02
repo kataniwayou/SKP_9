@@ -15,9 +15,9 @@ namespace BaseApi.Tests.Live;
 /// The proof-of-concept measuring stick: a prompt replayed against windows whose truth is known, more
 /// than once, scored against that truth.
 /// <para>
-/// <b>Every scenario starts from a REAL window.</b> <c>busy-mixed-feed</c> was captured from the live
-/// panels by <see cref="AnalystReplayCapture"/> and its answer key verified independently of them (see
-/// its <c>window.json</c>). A scenario plants at most one fault on top of it and leaves every other panel
+/// <b>Every scenario starts from a REAL window.</b> <c>endless-feed-steprole</c> was captured from the
+/// live panels by <see cref="AnalystReplayCapture"/>, after StepRole was deployed, and its answer key
+/// verified independently of them (see its <c>window.json</c>). A scenario plants at most one fault on top of it and leaves every other panel
 /// byte for byte as production returned it, so a wrong conclusion cannot be blamed on a fixture shape the
 /// real panels never produce.
 /// </para>
@@ -38,13 +38,14 @@ namespace BaseApi.Tests.Live;
 /// human to read.
 /// </para>
 /// <para>
-/// <b>Every scenario skips until the capture has a funnel.</b> <c>busy-mixed-feed</c> predates StepRole,
-/// so it has no <c>run-boundaries.json</c>; no hand-built reading stands in for a capture.
+/// <b>Every scenario skips unless the capture has a funnel.</b> <c>busy-mixed-feed</c> predates StepRole
+/// and has no <c>run-boundaries.json</c>; <c>endless-feed-steprole</c> has one. No hand-built reading
+/// stands in for a capture.
 /// </para>
 /// </summary>
 public sealed class AnalystReplayScenarios
 {
-    private const string Window = "busy-mixed-feed";
+    private const string Window = "endless-feed-steprole";
 
     private static readonly string[] AllPanels =
     [
@@ -77,7 +78,7 @@ public sealed class AnalystReplayScenarios
 
     // ── the scenarios ─────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>The captured window as it was: 54 deliberate input failures, 18 policy cancellations, no loss.</summary>
+    /// <summary>The captured window as it was: 75 deliberate input failures, 25 policy cancellations, no loss.</summary>
     private static FixturePanelReader BusyAndHealthy() => ReplayFixtures.Reader(Window);
 
     /// <summary>
@@ -91,9 +92,10 @@ public sealed class AnalystReplayScenarios
     /// insight hunting the inconsistency.
     /// </para>
     /// <para>
-    /// <b>run-boundaries is the capture's own, unplanted.</b> Its funnel would lose 17 outcomes at S9
-    /// and 17 at S10, but no hand-built funnel stands in for a capture: the capture's StepRole values
-    /// decide those step names, and until a funnel is captured every scenario skips.
+    /// <b>The funnel loses the same 34.</b> The captured run-boundaries reading keeps its step names and
+    /// roles; split-filepersister and split-exporter each return 17 fewer outcomes, and roleRecords drops
+    /// by the 34 outcome records never written. Every other number is derived from the capture, so the
+    /// plant stays consistent with whatever window <see cref="Window"/> names.
     /// </para>
     /// </summary>
     private static FixturePanelReader LosingWork()
@@ -116,16 +118,19 @@ public sealed class AnalystReplayScenarios
             }
         }
 
+        // Same scope as the captured reading: every record of the workflow in the window.
+        var workflowRecords = (int)JsonNode.Parse(reader.ValueOf("refused-messages"))!["totalWorkflowRecords"]!;
         var refusals = new JsonObject
         {
-            ["totalWorkflowRecords"] = 6215,
+            ["totalWorkflowRecords"] = workflowRecords,
             ["refusedCount"] = 17,
             ["parked"] = 17,
             ["notParked"] = 0,
             ["byQueue"] = new JsonObject { ["processor-c046fb57-6fa3-4227-8cb0-103e933652e3"] = 17 },
             ["samples"] = new JsonArray(new JsonObject
             {
-                ["@timestamp"] = "2026-10-01T19:19:42.118Z",
+                ["@timestamp"] = ReplayFixtures.Window(Window).From.AddMinutes(11).AddSeconds(57.118)
+                    .UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture),
                 ["attributes"] = new JsonObject
                 {
                     ["Queue"] = "processor-c046fb57-6fa3-4227-8cb0-103e933652e3",
@@ -137,12 +142,32 @@ public sealed class AnalystReplayScenarios
             }),
         };
 
+        const int lost = 34;
+        var outcomes = JsonNode.Parse(reader.ValueOf("step-outcomes"))!;
+        var total = (int)outcomes["totalOutcomeRecords"]! - lost;
+        outcomes["totalOutcomeRecords"] = total;
+        outcomes["completed"] = (int)outcomes["completed"]! - lost;
+
+        var funnel = JsonNode.Parse(reader.ValueOf("run-boundaries"))!;
+        foreach (var row in funnel["byStep"]!.AsArray())
+        {
+            var step = (string)row!["step"]!;
+            if (step.StartsWith("split-filepersister_", StringComparison.Ordinal)
+                || step.StartsWith("split-exporter_", StringComparison.Ordinal))
+            {
+                row["outcomes"] = (int)row["outcomes"]! - lost / 2;
+            }
+        }
+
+        funnel["roleRecords"] = (int)funnel["roleRecords"]! - lost;
+        var funnelSamples = funnel["byStep"]!.AsArray().Sum(r => (int)r!["outcomes"]!);
+
         return reader
             .Planted("dead-letter-depth", depth.ToJsonString())
-            .Planted("refused-messages", refusals.ToJsonString(), samples: 6215)
-            .Planted("step-outcomes",
-                """{"totalOutcomeRecords":891,"completed":819,"failed":54,"cancelled":18}""", samples: 891)
-            .Planted("step-failures", ReplaceTotal(reader.ValueOf("step-failures"), 891), samples: 891);
+            .Planted("refused-messages", refusals.ToJsonString(), samples: workflowRecords)
+            .Planted("step-outcomes", outcomes.ToJsonString(), samples: total)
+            .Planted("step-failures", ReplaceTotal(reader.ValueOf("step-failures"), total), samples: total)
+            .Planted("run-boundaries", funnel.ToJsonString(), samples: funnelSamples);
     }
 
     /// <summary>The captured step-failures value with its outcome total changed and its samples kept.</summary>
@@ -156,13 +181,50 @@ public sealed class AnalystReplayScenarios
     /// <summary>
     /// A stall after the first hop: fires keep entering, the importer completes each poll and imports,
     /// and nothing downstream returns an outcome. The funnel stops after entry.
+    /// <para>
+    /// <b>The entry row keeps the capture's own count.</b> The split importer returns one outcome per
+    /// record it read, not one per fire (the capture: 15 fires, 125 entry outcomes), so the stalled
+    /// funnel's entry row and step-outcomes carry the captured entry outcomes, all Completed.
+    /// roleRecords is those outcome records plus one dispatch record per fire. Fires, polls and the
+    /// entry step's name are the capture's; refused-messages carries the stall's own workflow-record
+    /// total, so the two panels sharing that scope agree.
+    /// </para>
     /// </summary>
-    private static FixturePanelReader StalledAfterTheFirstHop() => BusyAndHealthy()
-        .Planted("step-outcomes", """{"totalOutcomeRecords":15,"completed":15,"failed":0,"cancelled":0}""", samples: 15)
-        .Planted("step-failures", """{"totalOutcomeRecords":15,"failedCount":0,"samples":[]}""", samples: 15)
-        .Planted("run-boundaries",
-            """{"totalWorkflowRecords":1874,"fires":15,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0,"byStep":[{"role":"entry","step":"split-importer_1.0.0-a090-d76e1ca64a97","outcomes":15}]}""",
-            samples: 15);
+    private static FixturePanelReader StalledAfterTheFirstHop()
+    {
+        var reader = BusyAndHealthy();
+        var captured = JsonNode.Parse(reader.ValueOf("run-boundaries"))!;
+        var entry = captured["byStep"]!.AsArray().Single(r => (string)r!["role"]! == "entry")!;
+        var entered = (int)entry["outcomes"]!;
+        var fires = (int)captured["fires"]!;
+
+        var funnel = new JsonObject
+        {
+            ["totalWorkflowRecords"] = 1874,
+            ["roleRecords"] = fires + entered,
+            ["fires"] = fires,
+            ["importerPolls"] = (int)captured["importerPolls"]!,
+            ["pollsThatImported"] = (int)captured["pollsThatImported"]!,
+            ["drainedPolls"] = (int)captured["drainedPolls"]!,
+            ["byStep"] = new JsonArray(new JsonObject
+            {
+                ["role"] = "entry",
+                ["step"] = (string)entry["step"]!,
+                ["outcomes"] = entered,
+            }),
+        };
+
+        return reader
+            .Planted("step-outcomes",
+                $$"""{"totalOutcomeRecords":{{entered}},"completed":{{entered}},"failed":0,"cancelled":0}""", samples: entered)
+            .Planted("step-failures", $$"""{"totalOutcomeRecords":{{entered}},"failedCount":0,"samples":[]}""", samples: entered)
+            .Planted("run-boundaries", funnel.ToJsonString(), samples: entered)
+            // The same workflow-record scope as the funnel's totalWorkflowRecords: two panels that count
+            // one scope must not disagree in a plant.
+            .Planted("refused-messages",
+                """{"totalWorkflowRecords":1874,"refusedCount":0,"parked":0,"notParked":0,"byQueue":{},"samples":[]}""",
+                samples: 1874);
+    }
 
     [Fact]
     public Task ABusyHealthyWindowIsQuiet() => Score(
