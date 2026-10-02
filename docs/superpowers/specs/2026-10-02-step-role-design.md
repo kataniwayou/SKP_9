@@ -1,6 +1,6 @@
 # StepRole: a step's place in its workflow, replacing RunPosition
 
-Date: 2026-10-02. Status: design, awaiting review. Nothing here is implemented.
+Date: 2026-10-02. Status: implemented, then superseded the same day by `2026-10-02-step-role-edges-design.md` (StepRole on the run's edges only; no role keys, no `intermediate`). Kept as history.
 
 ## Goal
 
