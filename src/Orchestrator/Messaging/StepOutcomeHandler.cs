@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
@@ -42,13 +43,16 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     private readonly IConnectionMultiplexer _redis;
     private readonly IQueueSender _sender;
     private readonly ILogger<StepOutcomeHandler> _logger;
+    private readonly StepRoleResolver? _roles;
 
     public StepOutcomeHandler(
         WorkflowL1Store store,
         IConnectionMultiplexer redis,
         IQueueSender sender,
-        ILogger<StepOutcomeHandler> logger)
+        ILogger<StepOutcomeHandler> logger,
+        StepRoleResolver? roles = null)
     {
+        _roles  = roles;
         _store  = store ?? throw new ArgumentNullException(nameof(store));
         _redis  = redis ?? throw new ArgumentNullException(nameof(redis));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
@@ -327,16 +331,14 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             _logger.LogWarning("successor {NextStepId} is not in this workflow's step set — skipping it", id);
         }
 
+        // The one record this outcome produces carries the returning step's role in this workflow,
+        // whatever the result: a cancelled intermediate step is stamped intermediate.
+        var role = _roles is null ? null : await _roles.RoleAsync(m.WorkflowId, m.StepId).ConfigureAwait(false);
+        using var roleScope = StepRoleResolver.BeginScope(_logger, role);
+
         if (selection.Matches.Count == 0)
         {
-            // What the termination counter selects on. Worth more than the template it accompanies:
-            // a processor emits its own line beginning "the terminal step completed", so a prefix
-            // match over-counts while this attribute cannot be confused with it.
-            using var position = _logger.BeginScope(RunPositions.Scope(RunPositions.Terminal));
-
-            _logger.Log(level,
-                "the terminal step completed with {Result} — no successor accepts it, the run ends here",
-                m.Result);
+            _logger.Log(level, OutcomeTemplates.BranchEnds, m.Result);
         }
         else
         {
@@ -360,7 +362,7 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             }
 
             _logger.LogInformation(
-                "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms",
+                OutcomeTemplates.Advanced,
                 selection.Matches.Count, (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
 

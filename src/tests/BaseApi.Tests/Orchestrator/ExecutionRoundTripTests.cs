@@ -1,10 +1,12 @@
 using System.Text;
 using System.Text.Json;
 using BaseApi.Tests.Support;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Orchestrator.L1;
@@ -71,12 +73,22 @@ public sealed class ExecutionRoundTripTests
         public RecordingLogger<StepOutcomeHandler> PreLog { get; } = new();
         public RecordingLogger<NextStepHandoffHandler> PostLog { get; } = new();
 
+        private readonly StepRoleResolver _roles;
+
         public Harness(params StepL1[] steps)
+            : this(new Dictionary<(Guid, Guid), string>(), steps)
         {
-            Store.Set(W, new WorkflowL1(W, [A], "* * * * *", [.. steps], []), Guid.NewGuid());
         }
 
-        public IQueueMessageHandler Pre => new StepOutcomeHandler(Store, L2.Multiplexer, Bus, PreLog);
+        public Harness(IReadOnlyDictionary<(Guid, Guid), string> roles, params StepL1[] steps)
+        {
+            Store.Set(W, new WorkflowL1(W, [A], "* * * * *", [.. steps], []), Guid.NewGuid());
+            _roles = new StepRoleResolver(
+                new FakeStepRoleSource(roles.ToDictionary(kv => (kv.Key.Item1, kv.Key.Item2), kv => kv.Value)),
+                NullLogger<StepRoleResolver>.Instance);
+        }
+
+        public IQueueMessageHandler Pre => new StepOutcomeHandler(Store, L2.Multiplexer, Bus, PreLog, _roles);
 
         /// <summary>
         /// The flattened scope of the one record matching <paramref name="template"/>, or null if none
@@ -861,73 +873,54 @@ public sealed class ExecutionRoundTripTests
     }
 
     // ---------------------------------------------------------------------------------------
-    // RunPosition: the attribute the round-trip counters select on
+    // StepRole: stamped on the one record each returned outcome produces
     // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task ATerminalOutcomeCarriesTheTerminalRunPosition()
+    public async Task AnOutcomeWithNoAcceptingSuccessorCarriesTheStepsRole()
     {
-        // The termination counter selects on this rather than on the template, because only the
-        // orchestrator's own "the terminal step completed" line carries it. The exporter's
-        // processor-side witness -- ProcessedDataHandler's "branch completed in {ElapsedMs}ms" -- is
-        // a different record entirely and never carries this attribute, so it cannot be confused
-        // with it at all.
-        var h = new Harness(Step(A, PA, 1, "{}"));
+        var h = new Harness(new Dictionary<(Guid, Guid), string> { [(W, A)] = StepRoles.Terminal }, Step(A, PA, 1, "{}"));
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
-        var scope = h.ScopeOf(TerminalTemplate);
-        Assert.NotNull(scope);
-        Assert.Equal(RunPositions.Terminal, Assert.Contains(RunPositions.Key, scope!));
+        Assert.Equal(StepRoles.Terminal, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!));
     }
 
     [Fact]
-    public async Task AMidRunRecordCarriesNoRunPositionAtAll()
+    public async Task ACancelledIntermediateStepIsStampedIntermediate()
     {
-        // The handoff and advancement lines are neither end of the run, and they outnumber both --
-        // 118k handoffs against 19k dispatches. Tagging them would make a terms aggregation on this
-        // field unreadable, and there is no counter that wants them.
-        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
+        var h = new Harness(new Dictionary<(Guid, Guid), string> { [(W, A)] = StepRoles.Intermediate },
+            Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Cancelled, Entry));
+
+        Assert.Equal(StepRoles.Intermediate, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!));
+    }
+
+    [Fact]
+    public async Task AnAdvancingOutcomeCarriesTheStepsRoleAndTheHandoffDoesNot()
+    {
+        var h = new Harness(new Dictionary<(Guid, Guid), string> { [(W, A)] = StepRoles.Entry },
+            Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
-        var handoff = h.ScopeOf("handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}");
-        Assert.NotNull(handoff);
-        Assert.DoesNotContain(RunPositions.Key, handoff!);
-
-        var advanced = h.ScopeOf("advanced {SuccessorCount} successor(s) in {ElapsedMs}ms");
-        Assert.NotNull(advanced);
-        Assert.DoesNotContain(RunPositions.Key, advanced!);
+        Assert.Equal(StepRoles.Entry, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.Advanced)!));
+        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf("handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}")!);
+        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf("the entry step completed with {Result}")!);
     }
 
     [Fact]
-    public void TheTwoRunPositionValuesAreDistinctAndNeitherContainsTheOther()
+    public async Task AnUnresolvedRoleIsOmittedFromTheOutcomeRecord()
     {
-        // A reader matching by substring must not be able to conflate them -- the lesson the refusal
-        // templates paid for, where "NOT parked" contains "parked".
-        Assert.NotEqual(RunPositions.Entry, RunPositions.Terminal);
-        Assert.DoesNotContain(RunPositions.Entry, RunPositions.Terminal, StringComparison.Ordinal);
-        Assert.DoesNotContain(RunPositions.Terminal, RunPositions.Entry, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AnEntryStepThatIsAlsoTerminalIsTaggedOnlyOnItsTerminalRecord()
-    {
-        // A single-step workflow: A is the entry step AND has no successor. Live examples exist --
-        // analyst-monitor and sc-split-importer both emit the two completion lines for one StepId.
-        // Only the terminal record carries RunPosition: "entry" marks the DISPATCH, which the fire
-        // writes, so an outcome-side record never claims it however the step is wired.
-        var h = new Harness(Step(A, PA, 1, "{}"));
+        var h = new Harness(new Dictionary<(Guid, Guid), string>(), Step(A, PA, 1, "{}"));
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
-        Assert.Equal(RunPositions.Terminal, h.ScopeOf(TerminalTemplate)![RunPositions.Key]);
-
-        var entryCompleted = h.ScopeOf("the entry step completed with {Result}");
-        Assert.NotNull(entryCompleted);
-        Assert.DoesNotContain(RunPositions.Key, entryCompleted!);
+        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!);
     }
 }

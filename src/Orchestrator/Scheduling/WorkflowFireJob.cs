@@ -54,7 +54,8 @@ public sealed class WorkflowFireJob(
     LeaderState leaderState,
     L2Gate gate,
     ILogger<WorkflowFireJob> logger,
-    EntityNameResolver? names = null) : IJob
+    EntityNameResolver? names = null,
+    StepRoleResolver? roles = null) : IJob
 {
     /// <summary>
     /// <c>Never</c> from the API's <c>StepEntryCondition</c>, as an int — the same reach-across
@@ -307,12 +308,13 @@ public sealed class WorkflowFireJob(
                     // the orchestrator's side at all. Every id rides the open scope; the template
                     // carries none, and never the payload.
                     //
-                    // RunPosition is scoped to THIS LINE rather than added to the per-step scope above,
+                    // StepRole is scoped to THIS LINE rather than added to the per-step scope above,
                     // and the narrowness is the point: it is what the operator's start-trip counter
                     // counts, so it must mark entry steps that actually reached a queue. The frozen
                     // skip and the send failure below share that outer scope and must NOT carry it, or
                     // the counter would report dispatches that never happened.
-                    using (logger.BeginScope(RunPositions.Scope(RunPositions.Entry)))
+                    var role = roles is null ? null : await roles.RoleAsync(workflowId, step.StepId).ConfigureAwait(false);
+                    using (StepRoleResolver.BeginScope(logger, role))
                     {
                         logger.LogInformation("dispatched an entry step");
                     }

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using BaseApi.Tests.Support;
+using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -63,11 +65,12 @@ public sealed class WorkflowActivatorTests
             return this;
         }
 
-        public WorkflowActivator Build() => new(
+        public WorkflowActivator Build(StepRoleResolver? roles = null) => new(
             new L2WorkflowReader(Redis, NullLogger<L2WorkflowReader>.Instance),
             Store,
             Scheduler,
-            NullLogger<WorkflowActivator>.Instance);
+            NullLogger<WorkflowActivator>.Instance,
+            roles: roles);
     }
 
     [Fact]
@@ -137,5 +140,23 @@ public sealed class WorkflowActivatorTests
         // The replacement went out under the NEW job id, not the torn-down one. Assert.NotEqual above
         // says L1 moved on; this says the scheduler was told the same thing.
         Assert.Equal((W, e2.JobId, "0 * * * *"), h.Scheduler.Scheduled[1]);
+    }
+
+    [Fact]
+    public async Task ARestartReplacesCachedRoles()
+    {
+        // A restart after an edit can change a step's role. The activator must drop the cached role so
+        // the next record reads the new one.
+        var roles = new Dictionary<(Guid Workflow, Guid Step), string> { [(W, S)] = StepRoles.Terminal };
+        var resolver = new StepRoleResolver(new FakeStepRoleSource(roles), NullLogger<StepRoleResolver>.Instance);
+        var h = new Harness().WithWorkflow(W, cron: "0 * * * *", entry: S, processor: P);
+
+        await h.Build(resolver).ActivateAsync(W, CancellationToken.None);
+        Assert.Equal(StepRoles.Terminal, await resolver.RoleAsync(W, S));
+
+        roles[(W, S)] = StepRoles.Intermediate;   // what BaseApi writes at the restart
+        await h.Build(resolver).ActivateAsync(W, CancellationToken.None);
+
+        Assert.Equal(StepRoles.Intermediate, await resolver.RoleAsync(W, S));
     }
 }

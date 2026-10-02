@@ -39,7 +39,8 @@ public sealed class WorkflowActivator(
     WorkflowL1Store store,
     IWorkflowScheduler scheduler,
     ILogger<WorkflowActivator> logger,
-    EntityNameResolver? names = null)
+    EntityNameResolver? names = null,
+    StepRoleResolver? roles = null)
 {
     /// <summary>
     /// Spec §7.1, in order: return unless the workflow is live, read the definition, return if L2 holds
@@ -92,6 +93,10 @@ public sealed class WorkflowActivator(
         {
             await scheduler.ScheduleAsync(workflowId, jobId, cron, ct).ConfigureAwait(false);
         }
+
+        // A start can change roles (an edit took effect); drop this workflow's cached roles so the
+        // next record re-reads them. Names refresh below for the same reason.
+        roles?.Forget(workflowId);
 
         // Names for the records this workflow is about to produce, in one read. A REFRESH, not a
         // preload: the resolver lives as long as the replica, and a preload would skip every id it
