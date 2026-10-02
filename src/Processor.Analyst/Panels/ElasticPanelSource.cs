@@ -413,6 +413,9 @@ internal sealed class ElasticPanelSource
     /// <c>NoDataDistinguishable</c> are true and a funnel that stops after entry is a trusted reading
     /// of a stall, not a gap. The window is fully covered only when the earliest entry record sits
     /// within <see cref="CoverageTolerance"/> of the window's start; no entry at all is not covered.
+    /// roleRecords -- the records carrying a StepRole -- at zero with records present means the roles
+    /// were never written (the workflow has not restarted since StepRole was deployed): then
+    /// <c>NoDataDistinguishable</c> is false, since an empty funnel cannot be told from a silent workflow.
     /// </para>
     /// <para>
     /// <b>pollsThatImported is the subtraction done here rather than by the model.</b> Read the other
@@ -432,6 +435,7 @@ internal sealed class ElasticPanelSource
 
         var firesRow = SingleRow(id, tables[0]);
         var totalWorkflowRecords = Long(id, firesRow, "totalWorkflowRecords");
+        var roleRecords = Long(id, firesRow, "roleRecords");
         var fires = Long(id, firesRow, "fires");
         var earliest = Date(id, firesRow, "earliest");
 
@@ -449,6 +453,7 @@ internal sealed class ElasticPanelSource
         var valueJson = JsonSerializer.Serialize(new
         {
             totalWorkflowRecords,
+            roleRecords,
             fires,
             importerPolls,
             pollsThatImported = importerPolls - drainedPolls,
@@ -464,9 +469,14 @@ internal sealed class ElasticPanelSource
         }
 
         var covered = earliest is { } e && e <= range.From + CoverageTolerance;
+        // Records present but none carrying a StepRole: the workflow was not restarted since StepRole
+        // was deployed, so its roles were never written. fires 0 and an empty funnel then say nothing
+        // about whether it fired -- not a trusted "nothing fired". SeriesPresent stays true: it is
+        // reporting.
+        var rolesWritten = roleRecords > 0;
         return new PanelReading(definition.PanelId, definition.Layer, valueJson,
             SampleCount: checked((int)funnel.Sum(r => r.Outcomes)),
-            new PanelTrust(SeriesPresent: true, WindowFullyCovered: covered, NoDataDistinguishable: true));
+            new PanelTrust(SeriesPresent: true, WindowFullyCovered: covered, NoDataDistinguishable: rolesWritten));
     }
 
     private sealed record FunnelRow(string Role, string Step, long Outcomes);

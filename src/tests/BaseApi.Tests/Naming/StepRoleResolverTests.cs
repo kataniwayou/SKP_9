@@ -42,6 +42,35 @@ public sealed class StepRoleResolverTests
     }
 
     [Fact]
+    public async Task AMissIsNotCached()
+    {
+        var l2 = new InMemoryL2();
+        var resolver = Resolver(l2);
+        Assert.Null(await resolver.RoleAsync(W, S));
+
+        await l2.Db.HashSetAsync(L2ProjectionKeys.StepRole(W, S), L2ProjectionKeys.RoleField, "entry", When.Always, CommandFlags.None);
+        Assert.Equal("entry", await resolver.RoleAsync(W, S));
+    }
+
+    [Fact]
+    public async Task ForgetIsScopedToOneWorkflow()
+    {
+        var w2 = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var l2 = await WithRole("terminal");
+        await l2.Db.HashSetAsync(L2ProjectionKeys.StepRole(w2, S), L2ProjectionKeys.RoleField, "terminal", When.Always, CommandFlags.None);
+        var resolver = Resolver(l2);
+        await resolver.RoleAsync(W, S);
+        await resolver.RoleAsync(w2, S);
+
+        await l2.Db.HashSetAsync(L2ProjectionKeys.StepRole(W, S), L2ProjectionKeys.RoleField, "intermediate", When.Always, CommandFlags.None);
+        await l2.Db.HashSetAsync(L2ProjectionKeys.StepRole(w2, S), L2ProjectionKeys.RoleField, "intermediate", When.Always, CommandFlags.None);
+        resolver.Forget(W);
+
+        Assert.Equal("intermediate", await resolver.RoleAsync(W, S));
+        Assert.Equal("terminal", await resolver.RoleAsync(w2, S));
+    }
+
+    [Fact]
     public async Task AMissingRoleIsNullAndNotGuessed()
         => Assert.Null(await Resolver(new InMemoryL2()).RoleAsync(W, S));
 

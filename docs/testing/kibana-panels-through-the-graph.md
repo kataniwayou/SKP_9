@@ -79,7 +79,7 @@ What the graph lets you read off the bars:
   failures, failure records are being lost. If it exceeds them, the sink itself is failing.
 - **Volume drops from one step to the next by exactly that step's Failed and Cancelled counts.** A drop
   with no matching Failed or Cancelled is lost work.
-- **The importer's Completed bar counts records, not polls.** Its Cancelled bar counts empty polls.
+- **The importer's Completed bar counts records, not polls.** Its Cancelled bar counts empty polls. (The funnel's importer slice in §3.3 is different: it counts the orchestrator's per-poll outcome records, 15 in the 2026-10-01 @49 window, not records imported.)
 
 ### 3.2 Outcome pie
 
@@ -110,10 +110,14 @@ downstream work.
 - **Fan-out raises the count instead of dropping it.** After the fork every step is at 2x
   `sk-normalizer-alphabeta`, which is the §3.1 rule seen from the pie.
 
-The `busy-mixed-feed` window checked on 2026-10-02 (19:08 to 19:23 UTC) reads, in chain order:
-**15 / 125 / 107 / 89 / 53 / 106 / 106 / 106 / 54 / 54**. The three 106s are the post-fork steps at
+The `busy-mixed-feed` window checked on 2026-10-01 (19:08 to 19:23 UTC) reads, in graph (chain) order,
+**15 / 125 / 107 / 89 / 53 / 106 / 106 / 106 / 54 / 54**. That is not the pie's slice order: the pie groups
+by role first (the inner ring), so its slices run entry, then the intermediates, then the terminals. The three 106s are the post-fork steps at
 2 x 53, and the two 54s are the failure sink. If a post-fork step is not 2 x alphabeta, or the sink is
 not the sum of the Failed bars, branches started and did not end.
+
+The Step and Outcome dashboard controls do **not** apply to this panel. They filter out the scheduler's
+entry record, which carries no Result, so they empty or skew the pie. The workflow control scopes it.
 
 ### 3.4 Whitelist pies
 
@@ -144,6 +148,11 @@ three windows.
   2G.
 
 ## 5. Verification
+
+**This table is RunPosition-era history (before 2026-10-02).** Its "entry" and "terminal" figures use
+the old meaning, where terminal counted branch ends, including empty polls. They do not describe the
+current StepRole funnel (§3.3), where terminal means a step with no successors returned an outcome.
+Only the 2026-10-01 funnel window in §3.3 is stated in current terms.
 
 ES|QL over `logs-generic.otel-default`, scoped to the chain's WorkflowId. Script:
 `panel_facts.py`, kept with this session's scratch, not committed.

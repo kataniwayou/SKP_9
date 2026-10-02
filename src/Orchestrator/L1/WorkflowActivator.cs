@@ -84,6 +84,12 @@ public sealed class WorkflowActivator(
             await scheduler.UnscheduleAsync(held.JobId, ct).ConfigureAwait(false);
         }
 
+        // Before the projection is set and the job scheduled, so no fire or outcome between the two
+        // can read a cached old role.
+        // A start can change roles (an edit took effect); drop this workflow's cached roles so the
+        // next record re-reads them. Names refresh below for the same reason.
+        roles?.Forget(workflowId);
+
         var jobId = Guid.NewGuid();
         store.Set(workflowId, definition, jobId);
 
@@ -93,10 +99,6 @@ public sealed class WorkflowActivator(
         {
             await scheduler.ScheduleAsync(workflowId, jobId, cron, ct).ConfigureAwait(false);
         }
-
-        // A start can change roles (an edit took effect); drop this workflow's cached roles so the
-        // next record re-reads them. Names refresh below for the same reason.
-        roles?.Forget(workflowId);
 
         // Names for the records this workflow is about to produce, in one read. A REFRESH, not a
         // preload: the resolver lives as long as the replica, and a preload would skip every id it

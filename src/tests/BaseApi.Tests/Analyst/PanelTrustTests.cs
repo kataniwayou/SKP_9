@@ -456,7 +456,7 @@ public sealed class PanelTrustTests
     public async Task AFirstEntryWellAfterTheWindowStartIsNotFullyCovered()
     {
         const string lateFires =
-            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[4100,9,"2026-10-01T19:14:00.000Z"]]}""";
+            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"roleRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[4100,4000,9,"2026-10-01T19:14:00.000Z"]]}""";
 
         var reading = await ElasticSource(lateFires, Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
@@ -465,12 +465,32 @@ public sealed class PanelTrustTests
     }
 
     [Fact]
+    public async Task RecordsPresentButNoStepRoleIsNotATrustedNothingFired()
+    {
+        // A workflow not restarted since StepRole was deployed: 40 records, none carrying a role. fires 0
+        // and an empty funnel must not read as "did not fire".
+        const string noRoles =
+            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"roleRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[40,0,0,null]]}""";
+        const string noFunnel =
+            """{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
+        const string noPolls =
+            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"}],"values":[[0,null]]}""";
+
+        var reading = await ElasticSource(noRoles, noFunnel, noPolls).ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(0, value.RootElement.GetProperty("roleRecords").GetInt64());
+        Assert.True(reading.Trust.SeriesPresent);
+        Assert.False(reading.Trust.NoDataDistinguishable);
+    }
+
+    [Fact]
     public async Task NoFireInTheWindowReadsZeroAndIsNotFullyCovered()
     {
         // The workflow is logging (40 records) but no fire entered. STATS with no BY over zero rows
         // answers one row: COUNT_DISTINCT 0, MIN null, SUM null.
         const string noFires =
-            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[40,0,null]]}""";
+            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"roleRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[40,30,0,null]]}""";
         const string noFunnel =
             """{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
         const string noPolls =

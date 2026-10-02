@@ -303,7 +303,7 @@ public sealed class PanelRegistryTests
         Assert.All(statements, s => Assert.Contains("{{FROM}}", s, StringComparison.Ordinal));
         Assert.All(statements, s => Assert.Contains("{{TO}}", s, StringComparison.Ordinal));
         Assert.Contains(
-            "STATS totalWorkflowRecords = COUNT(*), fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.StepRole == \"entry\", earliest = MIN(@timestamp) WHERE attributes.StepRole == \"entry\"",
+            "STATS totalWorkflowRecords = COUNT(*), roleRecords = COUNT(*) WHERE attributes.StepRole IS NOT NULL, fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.StepRole == \"entry\", earliest = MIN(@timestamp) WHERE attributes.StepRole == \"entry\"",
             statements[0], StringComparison.Ordinal);
         // The scope count is every record of the workflow in the window: statement 1's WHERE must not
         // narrow to entry records, or a dead-logging window could not be told from a quiet one.
@@ -333,6 +333,7 @@ public sealed class PanelRegistryTests
         Assert.Contains("terminal means a step with no successors returned an outcome, not that a branch ended", description, StringComparison.Ordinal);
         Assert.Contains("A stall is the funnel stopping after entry", description, StringComparison.Ordinal);
         Assert.Contains("pollsThatImported", description, StringComparison.Ordinal);
+        Assert.Contains("roleRecords 0 with records present means the workflow has not been restarted since StepRole was deployed", description, StringComparison.Ordinal);
         Assert.DoesNotContain("NO FIXED RATIO", description, StringComparison.Ordinal);
     }
 }

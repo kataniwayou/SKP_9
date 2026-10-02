@@ -462,13 +462,15 @@ internal static class PanelRegistry
                 "A stall is the funnel stopping after entry. A fire still running at the window's end " +
                 "has not returned its later outcomes yet. totalWorkflowRecords is every record the " +
                 "workflow logged in the window; at zero nothing was reported at all, which cannot be " +
-                "told apart from logging that is not reaching the store.",
+                "told apart from logging that is not reaching the store. roleRecords is how many of " +
+                "those carry a StepRole; roleRecords 0 with records present means the workflow has not " +
+                "been restarted since StepRole was deployed; its funnel cannot be read.",
             Kind: PanelKind.Esql,
             Query: WithOutcomeTemplates(
                 """
                 FROM logs-generic.otel-default
                 | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}"
-                | STATS totalWorkflowRecords = COUNT(*), fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.$ROLE$ == "$ENTRY$", earliest = MIN(@timestamp) WHERE attributes.$ROLE$ == "$ENTRY$"
+                | STATS totalWorkflowRecords = COUNT(*), roleRecords = COUNT(*) WHERE attributes.$ROLE$ IS NOT NULL, fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.$ROLE$ == "$ENTRY$", earliest = MIN(@timestamp) WHERE attributes.$ROLE$ == "$ENTRY$"
                 ---
                 FROM logs-generic.otel-default
                 | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.$ROLE$ IS NOT NULL
