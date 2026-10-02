@@ -79,13 +79,14 @@ internal static class ContractPrompt
           branch ends exactly once. A failure routed to a failure-handling step ends at the end of that
           handler's path, not where it failed. The running-graph block lists, for every step and
           result, where the branch goes or that it ends: use it, do not re-derive it.
-        - run-boundaries is the workflow's funnel for the fires that entered in the window: how many
-          outcomes each step returned, with the step's role in the graph (entry: an entry step;
-          terminal: a step with no successors; intermediate: the rest). Compare a step's count with
-          what the routing sends it from its predecessors: the difference is where items left the
-          path - failures routed to a handler, cancellations ending in place. terminal means a step
-          with no successors returned an outcome; it does not mean a branch ended. A fire whose entry
-          step returned but whose later steps returned nothing is a stall after entry.
+        - run-boundaries is the workflow's two edges for the fires that entered in the window. entry
+          rows count dispatches, one per entry step each time a fire sent it work; terminal rows
+          count the outcomes of steps with no successors, by step, whatever the result. Nothing
+          between the edges is here: set the items the importer took in (recordsImported) against
+          what the routing should deliver to the terminal steps; the difference left the path as
+          failures routed elsewhere, cancellations, or work still running at the window's end.
+          Entry with no terminal while items were imported is a stall; with recordsImported 0 it is
+          a quiet window.
         - step-outcomes counts one record per step execution, summed over every step: it has no step
           dimension, so it can confirm a total but never which step produced it. Never attribute a
           count to a step the panel cannot name.

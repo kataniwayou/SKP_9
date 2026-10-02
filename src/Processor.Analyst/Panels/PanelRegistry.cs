@@ -443,47 +443,47 @@ internal static class PanelRegistry
                 }
                 """)),
 
-        // THE AGENT'S COUNTERPART TO THE OPERATOR'S FUNNEL ON THE KIBANA BOARD. Both count the same
-        // thing: for the fires whose entry record falls in the range, the outcome handler's one record
-        // per returned outcome (OutcomeTemplates), by the step's StepRole and name. Three ES|QL
+        // THE AGENT'S COUNTERPART TO THE OPERATOR'S RUN-EDGES PIE ON THE KIBANA BOARD. Both count the
+        // same thing: for the fires whose entry record falls in the range, the StepRole records of
+        // those fires -- entry dispatches and terminal outcomes -- by role and step name. Three ES|QL
         // statements, split on a line holding only "---" and posted to /_query in order: scope and
-        // fires (statement 1 counts every record of the workflow, the trust scope), funnel, polls. Keep this in step with the board -- the maintenance rule above is the only
-        // thing that detects drift between them.
+        // fires (statement 1 counts every record of the workflow, the trust scope), edges, polls.
+        // Statement 2 is the pie's query plus the time and workflow WHERE. Keep this in step with the
+        // board -- the maintenance rule above is the only thing that detects drift between them.
         new PanelDefinition(
             PanelId: "run-boundaries",
             Layer: "business",
             Description:
-                "The workflow's funnel for the fires that entered in this window: how many outcomes " +
-                "each step returned, with each step's role in the graph (entry, intermediate, " +
-                "terminal). A step's count against its predecessors' is where items dropped — " +
-                "failures routed elsewhere, cancellations ending in place. terminal means a step with " +
-                "no successors returned an outcome, not that a branch ended. fires is the number of " +
-                "fires that entered; pollsThatImported and drainedPolls split the importer's polls. " +
-                "A stall is the funnel stopping after entry. A fire still running at the window's end " +
-                "has not returned its later outcomes yet. totalWorkflowRecords is every record the " +
-                "workflow logged in the window; at zero nothing was reported at all, which cannot be " +
-                "told apart from logging that is not reaching the store. roleRecords is how many of " +
-                "those carry a StepRole; roleRecords 0 with records present means the workflow has not " +
-                "been restarted since StepRole was deployed; its funnel cannot be read.",
+                "The workflow's two edges for the fires that entered in this window. entry rows count " +
+                "dispatches: one per entry step each time a fire sent it work (with one entry step, " +
+                "entry equals fires). terminal rows count the outcomes returned by steps with no " +
+                "successors, by step, whatever their result. Nothing between the edges is on this " +
+                "panel: work that entered and did not reach a terminal step was routed elsewhere on " +
+                "failure, cancelled, or is still running -- step-outcomes and step-failures show which. " +
+                "recordsImported is how many items the importer took in; pollsThatImported and " +
+                "drainedPolls split its polls. Entry with no terminal and recordsImported 0 is a quiet " +
+                "window (every poll drained), not a stall; entry with no terminal while items were " +
+                "imported is a stall. totalWorkflowRecords is every record the workflow logged in the " +
+                "window; at zero nothing was reported at all, which cannot be told apart from logging " +
+                "that is not reaching the store.",
             Kind: PanelKind.Esql,
-            Query: WithOutcomeTemplates(
+            Query: WithStepRoles(
                 """
                 FROM logs-generic.otel-default
                 | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}"
-                | STATS totalWorkflowRecords = COUNT(*), roleRecords = COUNT(*) WHERE attributes.$ROLE$ IS NOT NULL, fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.$ROLE$ == "$ENTRY$", earliest = MIN(@timestamp) WHERE attributes.$ROLE$ == "$ENTRY$"
+                | STATS totalWorkflowRecords = COUNT(*), fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.$ROLE$ == "$ENTRY$", earliest = MIN(@timestamp) WHERE attributes.$ROLE$ == "$ENTRY$"
                 ---
                 FROM logs-generic.otel-default
                 | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.$ROLE$ IS NOT NULL
-                | EVAL entered = CASE(attributes.$ROLE$ == "$ENTRY$", 1, 0),
-                       counted = CASE(attributes.`{OriginalFormat}` IN ("$BRANCH_ENDS$", "$ADVANCED$"), 1, 0)
+                | EVAL entered = CASE(attributes.$ROLE$ == "$ENTRY$", 1, 0)
                 | INLINE STATS fire_entered = MAX(entered) BY attributes.CorrelationId
-                | WHERE fire_entered == 1 AND counted == 1
-                | STATS outcomes = COUNT(*) BY attributes.$ROLE$, attributes.StepName
-                | SORT outcomes DESC
+                | WHERE fire_entered == 1
+                | STATS records = COUNT(*) BY attributes.$ROLE$, attributes.StepName
+                | SORT records DESC
                 ---
                 FROM logs-generic.otel-default
                 | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.`{OriginalFormat}` == "consumed {Consumed}/{Requested} records; stopped because {Reason}"
-                | STATS importerPolls = COUNT(*), drainedPolls = SUM(CASE(attributes.Consumed == 0, 1, 0))
+                | STATS importerPolls = COUNT(*), drainedPolls = SUM(CASE(attributes.Consumed == 0, 1, 0)), recordsImported = SUM(attributes.Consumed)
                 """)),
     ];
 
@@ -508,15 +508,13 @@ internal static class PanelRegistry
         .Replace("$NOT_PARKED$", RefusalTemplates.NotParked, StringComparison.Ordinal);
 
     /// <summary>
-    /// Substitutes the outcome handler's two per-outcome templates, and the step-role key and its
-    /// entry value, into a panel query once, at type-initialisation time — the same compile-time
-    /// substitution, and for the same reason, as <see cref="WithRefusalTemplates"/>: the orchestrator
-    /// writes these values and a dashboard and this panel both select on them, so a literal retyped
-    /// here would be a copy no compiler holds to the emitter.
+    /// Substitutes the step-role key and its entry value into a panel query once, at
+    /// type-initialisation time — the same compile-time substitution, and for the same reason, as
+    /// <see cref="WithRefusalTemplates"/>: the orchestrator writes these values and a dashboard and
+    /// this panel both select on them, so a literal retyped here would be a copy no compiler holds
+    /// to the emitter.
     /// </summary>
-    private static string WithOutcomeTemplates(string query) => query
+    private static string WithStepRoles(string query) => query
         .Replace("$ROLE$", StepRoles.Key, StringComparison.Ordinal)
-        .Replace("$ENTRY$", StepRoles.Entry, StringComparison.Ordinal)
-        .Replace("$BRANCH_ENDS$", OutcomeTemplates.BranchEnds, StringComparison.Ordinal)
-        .Replace("$ADVANCED$", OutcomeTemplates.Advanced, StringComparison.Ordinal);
+        .Replace("$ENTRY$", StepRoles.Entry, StringComparison.Ordinal);
 }

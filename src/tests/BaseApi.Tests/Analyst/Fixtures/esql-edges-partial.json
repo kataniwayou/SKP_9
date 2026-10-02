@@ -1,0 +1,1 @@
+{"took":5012,"is_partial":true,"documents_found":412,"values_loaded":1236,"columns":[{"name":"records","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[[15,"entry","split-importer"]]}

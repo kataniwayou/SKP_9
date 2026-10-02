@@ -133,7 +133,7 @@ public sealed class AnalystGroundTruthLiveTests
         .Reading("step-failures", "ops", """{"failed":0,"samples":[]}""", samples: 0)
         .Reading("refused-messages", "ops", """{"refusals":0,"parked":0,"notParked":0,"samples":[]}""", samples: 0)
         .Reading("run-boundaries", "business",
-            """{"totalWorkflowRecords":240,"roleRecords":60,"fires":30,"importerPolls":30,"pollsThatImported":0,"drainedPolls":30,"byStep":[{"role":"entry","step":"importer","outcomes":30}]}""",
+            """{"totalWorkflowRecords":240,"fires":30,"importerPolls":30,"pollsThatImported":0,"drainedPolls":30,"recordsImported":0,"byStep":[{"role":"entry","step":"importer","records":30}]}""",
             samples: 30)
         .Reading("queue-wait", "ops", """{"meanSeconds":0.013,"max":0.021}""", samples: 91)
         .Reading("processor-liveness", "ops", """{"ready":1.0,"replicas":2}""", samples: 60)

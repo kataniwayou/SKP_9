@@ -1,1 +1,1 @@
-{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"}],"values":[[15,0]]}
+{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"},{"name":"recordsImported","type":"long"}],"values":[[15,0,125]]}

@@ -1,2 +1,0 @@
-{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],
- "values":[[15,"entry","split-importer"],[125,"intermediate","split-filefetcher"],[54,"terminal","export-outcome"]]}

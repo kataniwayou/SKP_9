@@ -15,8 +15,8 @@ namespace BaseApi.Tests.Live;
 /// The proof-of-concept measuring stick: a prompt replayed against windows whose truth is known, more
 /// than once, scored against that truth.
 /// <para>
-/// <b>Every scenario starts from a REAL window.</b> <c>endless-feed-steprole</c> was captured from the
-/// live panels by <see cref="AnalystReplayCapture"/>, after StepRole was deployed, and its answer key
+/// <b>Every scenario starts from a REAL window.</b> <c>endless-feed-edges</c> is captured from the
+/// live panels by <see cref="AnalystReplayCapture"/>, after the edges model was deployed, and its answer key
 /// verified independently of them (see its <c>window.json</c>). A scenario plants at most one fault on top of it and leaves every other panel
 /// byte for byte as production returned it, so a wrong conclusion cannot be blamed on a fixture shape the
 /// real panels never produce.
@@ -38,14 +38,15 @@ namespace BaseApi.Tests.Live;
 /// human to read.
 /// </para>
 /// <para>
-/// <b>Every scenario skips unless the capture has a funnel.</b> <c>busy-mixed-feed</c> predates StepRole
-/// and has no <c>run-boundaries.json</c>; <c>endless-feed-steprole</c> has one. No hand-built reading
-/// stands in for a capture.
+/// <b>Every scenario skips unless the capture has edges.</b> <c>busy-mixed-feed</c> predates StepRole
+/// and has no <c>run-boundaries.json</c>; <c>endless-feed-steprole</c> predates the edges model and is
+/// not read; <c>endless-feed-edges</c> has one once it is captured. No hand-built reading stands in
+/// for a capture.
 /// </para>
 /// </summary>
 public sealed class AnalystReplayScenarios
 {
-    private const string Window = "endless-feed-steprole";
+    private const string Window = "endless-feed-edges";
 
     private static readonly string[] AllPanels =
     [
@@ -53,9 +54,9 @@ public sealed class AnalystReplayScenarios
         "queue-wait", "processor-liveness", "dead-letter-depth",
     ];
 
-    private static void SkipUnlessCaptureHasAFunnel() => Assert.SkipUnless(
+    private static void SkipUnlessCaptureHasEdges() => Assert.SkipUnless(
         File.Exists(Path.Combine(AppContext.BaseDirectory, "Analyst", "Fixtures", "replay", Window, "run-boundaries.json")),
-        "the captured window predates StepRole; recapture it after deployment (plan Task 8)");
+        "the captured window predates the edges model; recapture it after deployment (plan Task 5)");
 
     private static void SkipUnlessEnabled() => Assert.SkipUnless(
         Environment.GetEnvironmentVariable("SKP_ANALYST_REPLAY") == "1",
@@ -65,10 +66,10 @@ public sealed class AnalystReplayScenarios
     private static int Runs()
         => int.TryParse(Environment.GetEnvironmentVariable("SKP_ANALYST_REPLAY_RUNS"), out var n) && n > 0 ? n : 1;
 
-    /// <summary><c>SKP_ANALYST_PROMPT</c>, absolute or repo-relative; v11, the funnel prompt, by default.</summary>
+    /// <summary><c>SKP_ANALYST_PROMPT</c>, absolute or repo-relative; v12, the edges prompt, by default.</summary>
     private static (string Path, string Text) Prompt()
     {
-        var configured = Environment.GetEnvironmentVariable("SKP_ANALYST_PROMPT") ?? "tools/analyst-prompt-v11.txt";
+        var configured = Environment.GetEnvironmentVariable("SKP_ANALYST_PROMPT") ?? "tools/analyst-prompt-v12.txt";
         var path = System.IO.Path.IsPathRooted(configured)
             ? configured
             : System.IO.Path.Combine(ReplayFixtures.RepoRoot(), configured);
@@ -92,10 +93,10 @@ public sealed class AnalystReplayScenarios
     /// insight hunting the inconsistency.
     /// </para>
     /// <para>
-    /// <b>The funnel loses the same 34.</b> The captured run-boundaries reading keeps its step names and
-    /// roles; split-filepersister and split-exporter each return 17 fewer outcomes, and roleRecords drops
-    /// by the 34 outcome records never written. Every other number is derived from the capture, so the
-    /// plant stays consistent with whatever window <see cref="Window"/> names.
+    /// <b>The edges lose the same 17 items.</b> The captured run-boundaries reading keeps its step names
+    /// and roles; the export-outcome terminal row returns 17 fewer outcomes, the 17 branches that never
+    /// reached it. Entry is untouched: the dispatches happened. Every other number is derived from the
+    /// capture, so the plant stays consistent with whatever window <see cref="Window"/> names.
     /// </para>
     /// </summary>
     private static FixturePanelReader LosingWork()
@@ -148,26 +149,27 @@ public sealed class AnalystReplayScenarios
         outcomes["totalOutcomeRecords"] = total;
         outcomes["completed"] = (int)outcomes["completed"]! - lost;
 
-        var funnel = JsonNode.Parse(reader.ValueOf("run-boundaries"))!;
-        foreach (var row in funnel["byStep"]!.AsArray())
+        var edges = JsonNode.Parse(reader.ValueOf("run-boundaries"))!;
+        var found = false;
+        foreach (var row in edges["byStep"]!.AsArray())
         {
-            var step = (string)row!["step"]!;
-            if (step.StartsWith("split-filepersister_", StringComparison.Ordinal)
-                || step.StartsWith("split-exporter_", StringComparison.Ordinal))
+            if ((string)row!["role"]! == "terminal"
+                && ((string)row["step"]!).StartsWith("export-outcome", StringComparison.Ordinal))
             {
-                row["outcomes"] = (int)row["outcomes"]! - lost / 2;
+                row["records"] = (int)row["records"]! - lost / 2;
+                found = true;
             }
         }
 
-        funnel["roleRecords"] = (int)funnel["roleRecords"]! - lost;
-        var funnelSamples = funnel["byStep"]!.AsArray().Sum(r => (int)r!["outcomes"]!);
+        Assert.True(found, "the capture has no export-outcome terminal row");
+        var funnelSamples = edges["byStep"]!.AsArray().Sum(r => (int)r!["records"]!);
 
         return reader
             .Planted("dead-letter-depth", depth.ToJsonString())
             .Planted("refused-messages", refusals.ToJsonString(), samples: workflowRecords)
             .Planted("step-outcomes", outcomes.ToJsonString(), samples: total)
             .Planted("step-failures", ReplaceTotal(reader.ValueOf("step-failures"), total), samples: total)
-            .Planted("run-boundaries", funnel.ToJsonString(), samples: funnelSamples);
+            .Planted("run-boundaries", edges.ToJsonString(), samples: funnelSamples);
     }
 
     /// <summary>The captured step-failures value with its outcome total changed and its samples kept.</summary>
@@ -180,14 +182,14 @@ public sealed class AnalystReplayScenarios
 
     /// <summary>
     /// A stall after the first hop: fires keep entering, the importer completes each poll and imports,
-    /// and nothing downstream returns an outcome. The funnel stops after entry.
+    /// and nothing reaches a terminal step. The edges show entry with no terminal while items were
+    /// imported.
     /// <para>
-    /// <b>The entry row keeps the capture's own count.</b> The split importer returns one outcome per
-    /// record it read, not one per fire (the capture: 15 fires, 125 entry outcomes), so the stalled
-    /// funnel's entry row and step-outcomes carry the captured entry outcomes, all Completed.
-    /// roleRecords is those outcome records plus one dispatch record per fire. Fires, polls and the
-    /// entry step's name are the capture's; refused-messages carries the stall's own workflow-record
-    /// total, so the two panels sharing that scope agree.
+    /// <b>Every number is the capture's own.</b> The reading is the captured entry row alone: its
+    /// dispatch count, fires, polls and recordsImported unchanged. The split importer returns one
+    /// outcome per record it read (recordsImported), not one per fire, so step-outcomes and
+    /// step-failures carry that many outcomes, all Completed. totalWorkflowRecords is the capture's,
+    /// and refused-messages carries the same total, so the two panels sharing that scope agree.
     /// </para>
     /// </summary>
     private static FixturePanelReader StalledAfterTheFirstHop()
@@ -195,22 +197,25 @@ public sealed class AnalystReplayScenarios
         var reader = BusyAndHealthy();
         var captured = JsonNode.Parse(reader.ValueOf("run-boundaries"))!;
         var entry = captured["byStep"]!.AsArray().Single(r => (string)r!["role"]! == "entry")!;
-        var entered = (int)entry["outcomes"]!;
-        var fires = (int)captured["fires"]!;
+        var dispatched = (int)entry["records"]!;
+        var total = (int)captured["totalWorkflowRecords"]!;
+        // The split importer's outcomes: one per item it took in. step-outcomes has no step dimension,
+        // so the capture's recordsImported is the entered-item count.
+        var entered = (int)captured["recordsImported"]!;
 
-        var funnel = new JsonObject
+        var edges = new JsonObject
         {
-            ["totalWorkflowRecords"] = 1874,
-            ["roleRecords"] = fires + entered,
-            ["fires"] = fires,
+            ["totalWorkflowRecords"] = total,
+            ["fires"] = (int)captured["fires"]!,
             ["importerPolls"] = (int)captured["importerPolls"]!,
             ["pollsThatImported"] = (int)captured["pollsThatImported"]!,
             ["drainedPolls"] = (int)captured["drainedPolls"]!,
+            ["recordsImported"] = (int)captured["recordsImported"]!,
             ["byStep"] = new JsonArray(new JsonObject
             {
                 ["role"] = "entry",
                 ["step"] = (string)entry["step"]!,
-                ["outcomes"] = entered,
+                ["records"] = dispatched,
             }),
         };
 
@@ -218,12 +223,12 @@ public sealed class AnalystReplayScenarios
             .Planted("step-outcomes",
                 $$"""{"totalOutcomeRecords":{{entered}},"completed":{{entered}},"failed":0,"cancelled":0}""", samples: entered)
             .Planted("step-failures", $$"""{"totalOutcomeRecords":{{entered}},"failedCount":0,"samples":[]}""", samples: entered)
-            .Planted("run-boundaries", funnel.ToJsonString(), samples: entered)
-            // The same workflow-record scope as the funnel's totalWorkflowRecords: two panels that count
+            .Planted("run-boundaries", edges.ToJsonString(), samples: dispatched)
+            // The same workflow-record scope as the edges' totalWorkflowRecords: two panels that count
             // one scope must not disagree in a plant.
             .Planted("refused-messages",
-                """{"totalWorkflowRecords":1874,"refusedCount":0,"parked":0,"notParked":0,"byQueue":{},"samples":[]}""",
-                samples: 1874);
+                $$"""{"totalWorkflowRecords":{{total}},"refusedCount":0,"parked":0,"notParked":0,"byQueue":{},"samples":[]}""",
+                samples: total);
     }
 
     [Fact]
@@ -242,7 +247,7 @@ public sealed class AnalystReplayScenarios
     [Fact]
     public Task AStallIsReported() => Score(
         "stall", StalledAfterTheFirstHop,
-        "reported, resting on run-boundaries (the funnel stops after entry); a human reads whether it says STALL",
+        "reported, resting on run-boundaries (entry with no terminal while items were imported); a human reads whether it says STALL",
         f => f.Verdict is "Drifting" or "Notable"
              && f.Insights.Any(i => i.Panels.Contains("run-boundaries")));
 
@@ -251,7 +256,7 @@ public sealed class AnalystReplayScenarios
     private static async Task Score(
         string scenario, Func<FixturePanelReader> build, string expected, Func<AnalystFinding, bool> correct)
     {
-        SkipUnlessCaptureHasAFunnel();
+        SkipUnlessCaptureHasEdges();
         SkipUnlessEnabled();
 
         var (promptPath, prompt) = Prompt();

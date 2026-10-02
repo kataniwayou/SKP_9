@@ -36,7 +36,7 @@ public sealed class PanelTrustTests
     private static string Fixture(string name)
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Analyst", "Fixtures", name));
 
-    /// <summary>The target workflow, as the funnel tests name it.</summary>
+    /// <summary>The target workflow, as the run-boundaries tests name it.</summary>
     private static readonly Guid W = TargetWorkflowId;
 
     /// <summary>The busy-mixed-feed window's fifteen minutes: the esql-* fixtures' first entry is 19:08:00.408Z.</summary>
@@ -360,27 +360,64 @@ public sealed class PanelTrustTests
     }
 
     // ---------------------------------------------------------------------------------------
-    // run-boundaries: the StepRole funnel, read over ES|QL.
+    // run-boundaries: the run's two StepRole edges, read over ES|QL.
     // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task TheFunnelCarriesEveryStepWithItsRole()
+    public async Task TheEdgesCarryEntryAndEveryTerminalStep()
     {
-        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-edges-healthy.json"), Fixture("esql-polls.json"))
+            .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        var root = value.RootElement;
+        Assert.Equal(15, root.GetProperty("fires").GetInt64());
+        Assert.Equal(125, root.GetProperty("recordsImported").GetInt64());
+        var rows = root.GetProperty("byStep").EnumerateArray().ToList();
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(15, rows.Single(r => r.GetProperty("role").GetString() == "entry").GetProperty("records").GetInt64());
+        Assert.Equal(150, rows.Where(r => r.GetProperty("role").GetString() == "terminal").Sum(r => r.GetProperty("records").GetInt64()));
+        Assert.False(root.TryGetProperty("roleRecords", out _));
+        Assert.Equal(165, reading.SampleCount);
+        Assert.True(reading.Trust.WindowFullyCovered);
+        Assert.True(reading.Trust.NoDataDistinguishable);
+    }
+
+    [Fact]
+    public async Task ADrainedWindowCarriesNothingImported()
+    {
+        // Every poll empty: entry records, no terminal, nothing imported. The panel must carry
+        // recordsImported 0 so the reading is a quiet window, not a stall.
+        const string drained =
+            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"},{"name":"recordsImported","type":"long"}],"values":[[15,15,0]]}""";
+
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-edges-stalled.json"), drained)
+            .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(0, value.RootElement.GetProperty("recordsImported").GetInt64());
+        Assert.Equal(0, value.RootElement.GetProperty("pollsThatImported").GetInt64());
+        Assert.True(reading.Trust.NoDataDistinguishable);
+    }
+
+    [Fact]
+    public async Task TwoEntryStepsAreTwoEntryRowsButOneFire()
+    {
+        const string twoEntries =
+            """{"columns":[{"name":"records","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[[15,"entry","importer-a"],[15,"entry","importer-b"]]}""";
+
+        var reading = await ElasticSource(Fixture("esql-fires.json"), twoEntries, Fixture("esql-polls.json"))
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         using var value = JsonDocument.Parse(reading.ValueJson);
         Assert.Equal(15, value.RootElement.GetProperty("fires").GetInt64());
-        Assert.Equal(3, value.RootElement.GetProperty("byStep").GetArrayLength());
-        Assert.Equal("terminal", value.RootElement.GetProperty("byStep")[2].GetProperty("role").GetString());
-        Assert.Equal(15, value.RootElement.GetProperty("pollsThatImported").GetInt64());
-        Assert.True(reading.Trust.WindowFullyCovered);
+        Assert.Equal(2, value.RootElement.GetProperty("byStep").GetArrayLength());
     }
 
     [Fact]
-    public async Task TheFunnelCarriesTheWorkflowsScopeCount()
+    public async Task TheEdgesCarryTheWorkflowsScopeCount()
     {
-        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-edges-healthy.json"), Fixture("esql-polls.json"))
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         using var value = JsonDocument.Parse(reading.ValueJson);
@@ -394,12 +431,12 @@ public sealed class PanelTrustTests
     {
         // The workflow logged nothing in the window: dead logging and an idle workflow read the same,
         // so -- as on the _search panels -- every trust flag is false, never a trusted fires:0.
-        const string noFunnel =
-            """{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
+        const string noEdges =
+            """{"columns":[{"name":"records","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
         const string noPolls =
-            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"}],"values":[[0,null]]}""";
+            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"},{"name":"recordsImported","type":"long"}],"values":[[0,null,null]]}""";
 
-        var reading = await ElasticSource(Fixture("esql-fires-no-records.json"), noFunnel, noPolls)
+        var reading = await ElasticSource(Fixture("esql-fires-no-records.json"), noEdges, noPolls)
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         using var value = JsonDocument.Parse(reading.ValueJson);
@@ -413,19 +450,19 @@ public sealed class PanelTrustTests
     [Fact]
     public async Task APartialEsqlResponseIsPanelUnavailableNotATrustedUndercount()
     {
-        // is_partial: some shards did not answer. A partial funnel undercounts the later steps and
+        // is_partial: some shards did not answer. A partial reading undercounts the terminal edge and
         // would read as a trusted stall; the _search path refuses the same case (failed shards).
         var ex = await Assert.ThrowsAsync<PanelUnavailableException>(
-            () => ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-partial.json"), Fixture("esql-polls.json"))
+            () => ElasticSource(Fixture("esql-fires.json"), Fixture("esql-edges-partial.json"), Fixture("esql-polls.json"))
                 .ReadAsync(RunBoundaries, W, Range, CancellationToken.None));
 
         Assert.Contains("partial", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task AStalledWindowIsATrustedEntryOnlyFunnel()
+    public async Task AStalledWindowIsATrustedEntryOnlyReading()
     {
-        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-stalled.json"), Fixture("esql-polls.json"))
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-edges-stalled.json"), Fixture("esql-polls.json"))
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         using var value = JsonDocument.Parse(reading.ValueJson);
@@ -435,20 +472,20 @@ public sealed class PanelTrustTests
     }
 
     [Fact]
-    public async Task TheFunnelKeepsEachStepsNameAndCountAndSumsThemAsTheSampleCount()
+    public async Task TheEdgesKeepEachStepsNameAndCountAndSumThemAsTheSampleCount()
     {
-        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-edges-healthy.json"), Fixture("esql-polls.json"))
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         using var value = JsonDocument.Parse(reading.ValueJson);
         var middle = value.RootElement.GetProperty("byStep")[1];
-        // The fixture lists outcomes FIRST: the columns are read by name, never by position.
-        Assert.Equal("intermediate", middle.GetProperty("role").GetString());
-        Assert.Equal("split-filefetcher", middle.GetProperty("step").GetString());
-        Assert.Equal(125, middle.GetProperty("outcomes").GetInt64());
+        // The fixture lists records FIRST: the columns are read by name, never by position.
+        Assert.Equal("terminal", middle.GetProperty("role").GetString());
+        Assert.Equal("record-outcome", middle.GetProperty("step").GetString());
+        Assert.Equal(75, middle.GetProperty("records").GetInt64());
         Assert.Equal(15, value.RootElement.GetProperty("importerPolls").GetInt64());
         Assert.Equal(0, value.RootElement.GetProperty("drainedPolls").GetInt64());
-        Assert.Equal(15 + 125 + 54, reading.SampleCount);
+        Assert.Equal(75 + 75 + 15, reading.SampleCount);
         Assert.True(reading.Trust.NoDataDistinguishable);
     }
 
@@ -456,32 +493,12 @@ public sealed class PanelTrustTests
     public async Task AFirstEntryWellAfterTheWindowStartIsNotFullyCovered()
     {
         const string lateFires =
-            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"roleRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[4100,4000,9,"2026-10-01T19:14:00.000Z"]]}""";
+            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[4100,9,"2026-10-01T19:14:00.000Z"]]}""";
 
-        var reading = await ElasticSource(lateFires, Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+        var reading = await ElasticSource(lateFires, Fixture("esql-edges-healthy.json"), Fixture("esql-polls.json"))
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         Assert.False(reading.Trust.WindowFullyCovered);
-    }
-
-    [Fact]
-    public async Task RecordsPresentButNoStepRoleIsNotATrustedNothingFired()
-    {
-        // A workflow not restarted since StepRole was deployed: 40 records, none carrying a role. fires 0
-        // and an empty funnel must not read as "did not fire".
-        const string noRoles =
-            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"roleRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[40,0,0,null]]}""";
-        const string noFunnel =
-            """{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
-        const string noPolls =
-            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"}],"values":[[0,null]]}""";
-
-        var reading = await ElasticSource(noRoles, noFunnel, noPolls).ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
-
-        using var value = JsonDocument.Parse(reading.ValueJson);
-        Assert.Equal(0, value.RootElement.GetProperty("roleRecords").GetInt64());
-        Assert.True(reading.Trust.SeriesPresent);
-        Assert.False(reading.Trust.NoDataDistinguishable);
     }
 
     [Fact]
@@ -490,27 +507,28 @@ public sealed class PanelTrustTests
         // The workflow is logging (40 records) but no fire entered. STATS with no BY over zero rows
         // answers one row: COUNT_DISTINCT 0, MIN null, SUM null.
         const string noFires =
-            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"roleRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[40,30,0,null]]}""";
-        const string noFunnel =
-            """{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
+            """{"columns":[{"name":"totalWorkflowRecords","type":"long"},{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[40,0,null]]}""";
+        const string noEdges =
+            """{"columns":[{"name":"records","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
         const string noPolls =
-            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"}],"values":[[0,null]]}""";
+            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"},{"name":"recordsImported","type":"long"}],"values":[[0,null,null]]}""";
 
-        var reading = await ElasticSource(noFires, noFunnel, noPolls).ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+        var reading = await ElasticSource(noFires, noEdges, noPolls).ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         using var value = JsonDocument.Parse(reading.ValueJson);
         Assert.Equal(0, value.RootElement.GetProperty("fires").GetInt64());
         Assert.Equal(0, value.RootElement.GetProperty("drainedPolls").GetInt64());
+        Assert.Equal(0, value.RootElement.GetProperty("recordsImported").GetInt64());
         Assert.Equal(0, value.RootElement.GetProperty("byStep").GetArrayLength());
         Assert.True(reading.Trust.SeriesPresent);
         Assert.False(reading.Trust.WindowFullyCovered);
     }
 
     [Fact]
-    public async Task TheFunnelPostsEachStatementToQueryAsEscapedJson()
+    public async Task TheEdgesPostEachStatementToQueryAsEscapedJson()
     {
         var handler = new SequencedHandler(
-            Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"));
+            Fixture("esql-fires.json"), Fixture("esql-edges-healthy.json"), Fixture("esql-polls.json"));
 
         await ElasticSource(handler).ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
@@ -522,8 +540,8 @@ public sealed class PanelTrustTests
             // with a partial result (the is_partial check stays as the second guard).
             Assert.Equal("/_query?allow_partial_results=false", r.Path);
 
-            // The statement carries quotes and the backticked {OriginalFormat} field: it must arrive
-            // as a JSON string, not spliced raw into the body.
+            // The statements carry quotes (the polls statement also the backticked {OriginalFormat}
+            // field): each must arrive as a JSON string, not spliced raw into the body.
             using var body = JsonDocument.Parse(r.Body);
             var statement = body.RootElement.GetProperty("query").GetString()!;
             Assert.StartsWith($"FROM {PanelRegistry.ElasticIndex}", statement, StringComparison.Ordinal);
@@ -533,12 +551,12 @@ public sealed class PanelTrustTests
             Assert.DoesNotContain("---", statement, StringComparison.Ordinal);
         });
 
-        using var funnel = JsonDocument.Parse(handler.Requests[1].Body);
-        Assert.Contains("attributes.`{OriginalFormat}`", funnel.RootElement.GetProperty("query").GetString(), StringComparison.Ordinal);
+        using var polls = JsonDocument.Parse(handler.Requests[2].Body);
+        Assert.Contains("attributes.`{OriginalFormat}`", polls.RootElement.GetProperty("query").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task AnHttpErrorOnAnyFunnelStatementIsPanelUnavailable()
+    public async Task AnHttpErrorOnAnyEdgesStatementIsPanelUnavailable()
     {
         var handler = new SequencedHandler(Fixture("esql-fires.json"), Fixture("elastic-index-not-found.json"))
         {
@@ -555,32 +573,34 @@ public sealed class PanelTrustTests
     [InlineData("not json")]
     [InlineData("""{"columns":[{"name":"something_else","type":"long"}],"values":[[1]]}""")]
     [InlineData("""{"error":{"type":"verification_exception","reason":"Unknown column"}}""")]
-    public async Task AnUnreadableFunnelResponseIsPanelUnavailable(string fires)
+    public async Task AnUnreadableEdgesResponseIsPanelUnavailable(string fires)
     {
         await Assert.ThrowsAsync<PanelUnavailableException>(
-            () => ElasticSource(fires, Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+            () => ElasticSource(fires, Fixture("esql-edges-healthy.json"), Fixture("esql-polls.json"))
                 .ReadAsync(RunBoundaries, W, Range, CancellationToken.None));
     }
 
     [Fact]
-    public void TheFunnelSelectsOnTheValuesTheOrchestratorActuallyWrites()
+    public void TheEdgesSelectOnTheValuesTheOrchestratorActuallyWrites()
     {
-        // End-to-end pin: the panel selects on the same constants the orchestrator stamps and logs,
-        // not on a literal retyped into the query.
+        // End-to-end pin: the panel selects on the same constants the orchestrator stamps, not on a
+        // literal retyped into the query. The edges are the StepRole records themselves, so no
+        // outcome template selects them.
         var query = RunBoundaries.Query;
 
         Assert.Equal(PanelKind.Esql, RunBoundaries.Kind);
         Assert.Contains($"attributes.{StepRoles.Key} == \"{StepRoles.Entry}\"", query, StringComparison.Ordinal);
-        Assert.Contains(OutcomeTemplates.BranchEnds, query, StringComparison.Ordinal);
-        Assert.Contains(OutcomeTemplates.Advanced, query, StringComparison.Ordinal);
+        Assert.Contains($"attributes.{StepRoles.Key} IS NOT NULL", query, StringComparison.Ordinal);
+        Assert.DoesNotContain(OutcomeTemplates.BranchEnds, query, StringComparison.Ordinal);
+        Assert.DoesNotContain(OutcomeTemplates.Advanced, query, StringComparison.Ordinal);
         Assert.DoesNotContain("$", query, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task LivePanelReader_RoutesTheFunnelToElasticsearchsQueryEndpoint()
+    public async Task LivePanelReader_RoutesTheEdgesToElasticsearchsQueryEndpoint()
     {
         var handler = new SequencedHandler(
-            Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"));
+            Fixture("esql-fires.json"), Fixture("esql-edges-healthy.json"), Fixture("esql-polls.json"));
         var reader = new LivePanelReader(
             ElasticSource(handler),
             new PrometheusPanelSource(

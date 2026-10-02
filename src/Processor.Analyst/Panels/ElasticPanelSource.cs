@@ -119,7 +119,7 @@ internal sealed class ElasticPanelSource
 
         return definition.PanelId switch
         {
-            "run-boundaries" => BuildFunnel(definition, range, tables),
+            "run-boundaries" => BuildEdges(definition, range, tables),
             _ => throw new PanelUnavailableException(
                 definition.PanelId, $"no ES|QL response parser registered for panel '{definition.PanelId}'"),
         };
@@ -403,19 +403,17 @@ internal sealed class ElasticPanelSource
     }
 
     /// <summary>
-    /// The run-boundaries funnel: for the fires that entered in the window, how many outcomes each
-    /// step returned, by its StepRole, plus the importer's polls. Built from the panel's three ES|QL
-    /// statements in order: fires, funnel, polls.
+    /// The run-boundaries edges: for the fires that entered in the window, the StepRole records by
+    /// role and step -- entry dispatches and terminal outcomes -- plus the importer's polls and the
+    /// items it took in. Built from the panel's three ES|QL statements in order: fires, edges, polls.
     /// <para>
     /// <b>Trust, as the <c>_search</c> panels draw it.</b> totalWorkflowRecords -- every record of the
     /// workflow in the window -- is the scope count. At zero nothing was reported at all, and every
     /// flag is false. Above zero the workflow is reporting, so <c>SeriesPresent</c> and
-    /// <c>NoDataDistinguishable</c> are true and a funnel that stops after entry is a trusted reading
-    /// of a stall, not a gap. The window is fully covered only when the earliest entry record sits
-    /// within <see cref="CoverageTolerance"/> of the window's start; no entry at all is not covered.
-    /// roleRecords -- the records carrying a StepRole -- at zero with records present means the roles
-    /// were never written (the workflow has not restarted since StepRole was deployed): then
-    /// <c>NoDataDistinguishable</c> is false, since an empty funnel cannot be told from a silent workflow.
+    /// <c>NoDataDistinguishable</c> are true and entry records with no terminal records are a trusted
+    /// reading (a stall, or a quiet window when nothing was imported), not a gap. The window is fully
+    /// covered only when the earliest entry record sits within <see cref="CoverageTolerance"/> of the
+    /// window's start; no entry at all is not covered.
     /// </para>
     /// <para>
     /// <b>pollsThatImported is the subtraction done here rather than by the model.</b> Read the other
@@ -423,42 +421,43 @@ internal sealed class ElasticPanelSource
     /// model made exactly that inversion in replay. A count stated positively cannot be inverted.
     /// </para>
     /// </summary>
-    private static PanelReading BuildFunnel(
+    private static PanelReading BuildEdges(
         PanelDefinition definition, TimeRange range,
         IReadOnlyList<IReadOnlyList<IReadOnlyDictionary<string, JsonElement>>> tables)
     {
         var id = definition.PanelId;
         if (tables.Count != 3)
         {
-            throw new PanelUnavailableException(id, $"expected 3 ES|QL statements (fires, funnel, polls), got {tables.Count}");
+            throw new PanelUnavailableException(id, $"expected 3 ES|QL statements (fires, edges, polls), got {tables.Count}");
         }
 
         var firesRow = SingleRow(id, tables[0]);
         var totalWorkflowRecords = Long(id, firesRow, "totalWorkflowRecords");
-        var roleRecords = Long(id, firesRow, "roleRecords");
         var fires = Long(id, firesRow, "fires");
         var earliest = Date(id, firesRow, "earliest");
 
-        var funnel = tables[1]
-            .Select(row => new FunnelRow(
+        var edges = tables[1]
+            .Select(row => new EdgeRow(
                 Text(id, row, $"attributes.{StepRoles.Key}"),
                 Text(id, row, "attributes.StepName"),
-                Long(id, row, "outcomes")))
+                Long(id, row, "records")))
             .ToList();
 
+        // SUM over no polls answers null; Long reads a null cell as 0, for both sums.
         var pollsRow = SingleRow(id, tables[2]);
         var importerPolls = Long(id, pollsRow, "importerPolls");
         var drainedPolls = Long(id, pollsRow, "drainedPolls");
+        var recordsImported = Long(id, pollsRow, "recordsImported");
 
         var valueJson = JsonSerializer.Serialize(new
         {
             totalWorkflowRecords,
-            roleRecords,
             fires,
             importerPolls,
             pollsThatImported = importerPolls - drainedPolls,
             drainedPolls,
-            byStep = funnel.Select(r => new { role = r.Role, step = r.Step, outcomes = r.Outcomes }),
+            recordsImported,
+            byStep = edges.Select(r => new { role = r.Role, step = r.Step, records = r.Records }),
         });
         if (totalWorkflowRecords == 0)
         {
@@ -469,17 +468,12 @@ internal sealed class ElasticPanelSource
         }
 
         var covered = earliest is { } e && e <= range.From + CoverageTolerance;
-        // Records present but none carrying a StepRole: the workflow was not restarted since StepRole
-        // was deployed, so its roles were never written. fires 0 and an empty funnel then say nothing
-        // about whether it fired -- not a trusted "nothing fired". SeriesPresent stays true: it is
-        // reporting.
-        var rolesWritten = roleRecords > 0;
         return new PanelReading(definition.PanelId, definition.Layer, valueJson,
-            SampleCount: checked((int)funnel.Sum(r => r.Outcomes)),
-            new PanelTrust(SeriesPresent: true, WindowFullyCovered: covered, NoDataDistinguishable: rolesWritten));
+            SampleCount: checked((int)edges.Sum(r => r.Records)),
+            new PanelTrust(SeriesPresent: true, WindowFullyCovered: covered, NoDataDistinguishable: true));
     }
 
-    private sealed record FunnelRow(string Role, string Step, long Outcomes);
+    private sealed record EdgeRow(string Role, string Step, long Records);
 
     /// <summary>
     /// An ES|QL <c>_query</c> response as rows keyed by column name. Column order is whatever the

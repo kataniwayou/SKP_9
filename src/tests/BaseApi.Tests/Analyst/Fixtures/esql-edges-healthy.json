@@ -1,0 +1,2 @@
+{"columns":[{"name":"records","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],
+ "values":[[75,"terminal","export-outcome"],[75,"terminal","record-outcome"],[15,"entry","split-importer"]]}

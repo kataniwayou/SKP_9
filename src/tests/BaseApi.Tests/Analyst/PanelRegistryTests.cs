@@ -275,22 +275,23 @@ public sealed class PanelRegistryTests
     }
 
     [Fact]
-    public void RunBoundariesIsTheAgentsCounterpartToTheOperatorsFunnel()
+    public void RunBoundariesIsTheAgentsCounterpartToTheOperatorsEdgesPie()
     {
         // The maintenance rule on PanelRegistry: an operator panel without a PanelDefinition is a
-        // hole in the shared language. The Kibana funnel selects on attributes.StepRole and the
-        // outcome handler's two templates; this panel selects on the same constants.
+        // hole in the shared language. The Kibana run-edges pie counts the StepRole records
+        // themselves; this panel selects on the same constants, and on no outcome template.
         var panel = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries");
 
         Assert.Equal("business", panel.Layer);
         Assert.Equal(PanelKind.Esql, panel.Kind);
         Assert.Contains($"attributes.{StepRoles.Key}", panel.Query, StringComparison.Ordinal);
         Assert.Contains($"\"{StepRoles.Entry}\"", panel.Query, StringComparison.Ordinal);
-        Assert.All(OutcomeTemplates.All, t => Assert.Contains($"\"{t}\"", panel.Query, StringComparison.Ordinal));
+        Assert.All(OutcomeTemplates.All, t => Assert.DoesNotContain(t, panel.Query, StringComparison.Ordinal));
+        Assert.DoesNotContain("$", panel.Query, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RunBoundariesIsThreeStatementsFiresFunnelPolls()
+    public void RunBoundariesIsThreeStatementsFiresEdgesPolls()
     {
         // ElasticPanelSource splits the query on a line holding only "---" and posts each statement
         // to /_query in this order.
@@ -303,37 +304,42 @@ public sealed class PanelRegistryTests
         Assert.All(statements, s => Assert.Contains("{{FROM}}", s, StringComparison.Ordinal));
         Assert.All(statements, s => Assert.Contains("{{TO}}", s, StringComparison.Ordinal));
         Assert.Contains(
-            "STATS totalWorkflowRecords = COUNT(*), roleRecords = COUNT(*) WHERE attributes.StepRole IS NOT NULL, fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.StepRole == \"entry\", earliest = MIN(@timestamp) WHERE attributes.StepRole == \"entry\"",
+            "STATS totalWorkflowRecords = COUNT(*), fires = COUNT_DISTINCT(attributes.CorrelationId) WHERE attributes.StepRole == \"entry\", earliest = MIN(@timestamp) WHERE attributes.StepRole == \"entry\"",
             statements[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("roleRecords", statements[0], StringComparison.Ordinal);
         // The scope count is every record of the workflow in the window: statement 1's WHERE must not
         // narrow to entry records, or a dead-logging window could not be told from a quiet one.
         Assert.DoesNotContain("StepRole", statements[0].Split('\n')[1], StringComparison.Ordinal);
-        Assert.Contains("STATS outcomes = COUNT(*) BY attributes.StepRole, attributes.StepName", statements[1], StringComparison.Ordinal);
-        Assert.Contains("STATS importerPolls = COUNT(*), drainedPolls = SUM(CASE(attributes.Consumed == 0, 1, 0))", statements[2], StringComparison.Ordinal);
+        // The edges are the StepRole records themselves: no message-template filter narrows them.
+        Assert.DoesNotContain("{OriginalFormat}", statements[1], StringComparison.Ordinal);
+        Assert.Contains("STATS records = COUNT(*) BY attributes.StepRole, attributes.StepName", statements[1], StringComparison.Ordinal);
+        Assert.Contains(
+            "STATS importerPolls = COUNT(*), drainedPolls = SUM(CASE(attributes.Consumed == 0, 1, 0)), recordsImported = SUM(attributes.Consumed)",
+            statements[2], StringComparison.Ordinal);
     }
 
     [Fact]
     public void RunBoundariesCountsOnlyFiresThatEnteredInTheWindow()
     {
-        // The global constraint: the Analyst counts only the outcome handler's per-outcome record,
-        // for fires whose entry record falls in the window -- the INLINE STATS join on CorrelationId.
+        // The edges are counted only for fires whose entry record falls in the window -- the
+        // INLINE STATS join on CorrelationId, the same shape as the board's pie.
         var query = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Query;
 
         Assert.Contains("INLINE STATS fire_entered = MAX(entered) BY attributes.CorrelationId", query, StringComparison.Ordinal);
-        Assert.Contains("WHERE fire_entered == 1 AND counted == 1", query, StringComparison.Ordinal);
+        Assert.Contains("| WHERE fire_entered == 1\n", query.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RunBoundariesDescribesTheFunnelNotARatio()
+    public void RunBoundariesDescribesTheTwoEdges()
     {
         var description = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Description;
 
-        Assert.Contains("funnel", description, StringComparison.Ordinal);
-        Assert.Contains("entry, intermediate, terminal", description, StringComparison.Ordinal);
-        Assert.Contains("terminal means a step with no successors returned an outcome, not that a branch ended", description, StringComparison.Ordinal);
-        Assert.Contains("A stall is the funnel stopping after entry", description, StringComparison.Ordinal);
+        Assert.Contains("two edges", description, StringComparison.Ordinal);
+        Assert.Contains("entry rows count dispatches", description, StringComparison.Ordinal);
+        Assert.Contains("terminal rows count the outcomes returned by steps with no successors", description, StringComparison.Ordinal);
+        Assert.Contains("Nothing between the edges is on this panel", description, StringComparison.Ordinal);
+        Assert.Contains("recordsImported 0 is a quiet window", description, StringComparison.Ordinal);
         Assert.Contains("pollsThatImported", description, StringComparison.Ordinal);
-        Assert.Contains("roleRecords 0 with records present means the workflow has not been restarted since StepRole was deployed", description, StringComparison.Ordinal);
         Assert.DoesNotContain("NO FIXED RATIO", description, StringComparison.Ordinal);
     }
 }
