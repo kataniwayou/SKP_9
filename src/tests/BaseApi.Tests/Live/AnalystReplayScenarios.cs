@@ -203,6 +203,14 @@ public sealed class AnalystReplayScenarios
             .AppendLine($"expected: {expected}");
         var passes = 0;
 
+        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "TestResults", $"replay-{System.IO.Path.GetFileNameWithoutExtension(promptPath)}-{(WithGraph() ? "graph" : "nograph")}-{scenario}.txt");
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file)!);
+
+        // Rewritten after every run, not once at the end: a run is minutes of real model spend, and a
+        // process stopped partway (the host reaps background jobs under memory pressure) must not
+        // take the finished runs' results with it.
+        Task Save(string tail) => File.WriteAllTextAsync(file, card + tail, TestContext.Current.CancellationToken);
+
         for (var run = 1; run <= runs; run++)
         {
             try
@@ -228,13 +236,12 @@ public sealed class AnalystReplayScenarios
             {
                 card.AppendLine($"--- run {run}: ERROR  {ex.GetType().Name}: {ex.Message}");
             }
+
+            await Save($"(in progress: {passes}/{run} so far)" + Environment.NewLine);
         }
 
         card.AppendLine($"score: {passes}/{runs}");
-
-        var file = System.IO.Path.Combine(AppContext.BaseDirectory, "TestResults", $"replay-{System.IO.Path.GetFileNameWithoutExtension(promptPath)}-{(WithGraph() ? "graph" : "nograph")}-{scenario}.txt");
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file)!);
-        await File.WriteAllTextAsync(file, card.ToString(), TestContext.Current.CancellationToken);
+        await Save("");
         TestContext.Current.TestOutputHelper?.WriteLine(card.ToString());
 
         Assert.True(passes == runs, $"{passes}/{runs} runs reached the expected conclusion; scorecard at {file}\n{card}");
