@@ -1,7 +1,8 @@
 # StepRole on the run's edges only
 
 Date: 2026-10-02. Status: approved by the user in conversation; supersedes the role model of
-`2026-10-02-step-role-design.md` (D1, D3–D6 and the role-key storage). Nothing here is implemented.
+`2026-10-02-step-role-design.md` (D1, D3–D6 and the role-key storage). Implemented
+(`c771c7a..ad5311b`) and deployed to dev on 2026-10-02.
 
 ## Goal
 
@@ -35,10 +36,11 @@ in which records silently lose the attribute. The orchestrator already holds eac
 
 - `entry` counts dispatches: per entry step, how many times a fire sent it work. With one entry
   step it equals `fires`.
-- `terminal` counts outcomes at steps with no successors, by step name. Failures and cancellations
-  that end a branch at a step with successors are not edges and are not counted here; the gap
-  between what entered and what reached the terminal steps is where they went (the `step-outcomes`
-  and `step-failures` panels hold the per-result detail).
+- `terminal` counts outcomes at steps with no successors, by step name. Failures, cancellations and
+  successes that end a branch at a step with successors are not edges and are not counted here; the
+  `step-outcomes` and `step-failures` panels hold them (amended 2026-10-02: the gap between what
+  entered and what reached the terminal steps is not a measure of where items went, because on a
+  graph like this one most items never reach a step with no successors).
 - Amended 2026-10-02: `terminal` counts only branches that end at a step with no successors. A path
   whose last step has successors that accept only other results writes no `terminal` record, so a
   healthy window can show `terminal` 0, and missing `terminal` records are **not** a stall signal by
@@ -47,12 +49,13 @@ in which records silently lose the attribute. The orchestrator already holds eac
   `recordsImported` 0 is a quiet window. A fire whose entry step never returns is visible again: it
   has its dispatch record. (Earlier text said a stall shows as `entry` with no or too few
   `terminal`; on the real graph that is false.)
-- Example (the `endless-feed-steprole` window, 15 fires, 125 items imported), amended 2026-10-02:
-  `entry` 15 (split-importer); `terminal` 75, all export-outcome -- the only step with no successors,
-  reached only by failed items that record-outcome recorded and passed on to be exported. Good items
-  end at split-exporter, which has a successor (record-outcome, Failed only), so they write no
-  `terminal`. (Earlier text also listed record-outcome as terminal; it has a successor.) Verified
-  figures come from the recapture after deployment, not from this example.
+- Verified example, 2026-10-02 (the `endless-feed-edges` capture, 17:58:45Z to 18:13:45Z, the first
+  window after the dev deploy; 15 fires, 125 items imported = 25 feed cycles): `entry` 15
+  (split-importer); `terminal` 75, all export-outcome -- the only step with no successors, reached
+  only by failed items that record-outcome recorded and passed on to be exported (3 per cycle). Good
+  items end at split-exporter, which has a successor (record-outcome, Failed only), so their 50
+  branch-ends carry no `terminal`; the 25 cancellations end at sk-normalizer-sample, also unstamped.
+  Both edge counts were predicted from the feed and the graph before the data was read.
 
 ## Analyst panel
 

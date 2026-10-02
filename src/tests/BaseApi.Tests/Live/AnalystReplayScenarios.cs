@@ -39,9 +39,8 @@ namespace BaseApi.Tests.Live;
 /// </para>
 /// <para>
 /// <b>Every scenario skips unless the capture has edges.</b> <c>busy-mixed-feed</c> predates StepRole
-/// and has no <c>run-boundaries.json</c>; <c>endless-feed-steprole</c> predates the edges model and is
-/// not read; <c>endless-feed-edges</c> has one once it is captured. No hand-built reading stands in
-/// for a capture.
+/// and has no <c>run-boundaries.json</c>; <c>endless-feed-edges</c> (captured 2026-10-02 after the edges
+/// deploy) has one. No hand-built reading stands in for a capture.
 /// </para>
 /// </summary>
 public sealed class AnalystReplayScenarios
