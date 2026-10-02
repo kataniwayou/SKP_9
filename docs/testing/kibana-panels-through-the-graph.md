@@ -92,16 +92,28 @@ What the graph lets you read off the bars:
   failure also contributes 2 Completed in the sink. So the pie's Completed share is not a success
   rate. A rising Completed share can simply mean more good records went through the long fork.
 
-### 3.3 Run boundaries pie
+### 3.3 Step funnel pie
 
-- **entry = fires = polls with records + E.**
-- **terminal = 2G + F + C + E.**
-- There is no fixed ratio. **The ratio is terminals per fire, so it moves with the records per fire
-  and their mix.** Measured: 60 : 60 idle, 40 : 225 for the mixed feed (6 terminals per cycle of five
-  roles: 2 + 1 + 1 + 1 + 1), 159 : 1069 for the approved feed (2 per good record).
-- **What the graph adds:** the expected terminal count is computable from the step bars alone (2 ×
-  alphabeta Completed + the sink's count + every Cancelled), so the pie can be cross-checked rather
-  than eyeballed. A terminal count below that expectation means branches started and did not end.
+One pie, two rings. The inner ring is the step's **role in this workflow** (`entry`, `intermediate`,
+`terminal`, stamped by the orchestrator from the workflow's own graph); the outer ring is the **step**.
+Each slice counts the orchestrator's one per-outcome record for that step, and only for fires whose
+`entry` record falls inside the window, so a fire that began before the window never shows up as
+downstream work.
+
+- **`entry`** is the step a fire is dispatched to. Its slice is the number of fires.
+- **`intermediate`** steps are everything between: read the slices left to right as a funnel.
+- **`terminal` means "a step with no successors returned an outcome".** It is a property of the graph,
+  not of the result, so a terminal step that Failed still counts as terminal.
+- **Cancellations show as the drop between a step and its successors.** A cancelled step ends its
+  branch in place and advances nothing, so the next slice is smaller by exactly the Cancelled count.
+  Failed steps drop out the same way, apart from the sink the failure is routed to.
+- **Fan-out raises the count instead of dropping it.** After the fork every step is at 2x
+  `sk-normalizer-alphabeta`, which is the §3.1 rule seen from the pie.
+
+The `busy-mixed-feed` window checked on 2026-10-02 (19:08 to 19:23 UTC) reads, in chain order:
+**15 / 125 / 107 / 89 / 53 / 106 / 106 / 106 / 54 / 54**. The three 106s are the post-fork steps at
+2 x 53, and the two 54s are the failure sink. If a post-fork step is not 2 x alphabeta, or the sink is
+not the sum of the Failed bars, branches started and did not end.
 
 ### 3.4 Whitelist pies
 
@@ -147,7 +159,7 @@ fire that entered also ran: the backlog seen briefly at the 10s cron had drained
 
 ## 6. Consequences for the Analyst
 
-The Analyst reads these panels with no knowledge of the graph. Its `run-boundaries` description
-teaches a fixed ratio that §3.3 shows does not exist. What it needs, for this workflow, is the content
+The Analyst reads these panels with no knowledge of the graph. Its run-boundaries description
+taught a fixed ratio that does not exist; §3.3 now replaces it with the step funnel. What it needs, for this workflow, is the content
 of §1 to §3: the fork, the sink, cancel-ends-in-place, and the formulas. Delivering that is the
 subject of the revised spec `docs/superpowers/specs/2026-10-01-analyst-run-boundaries-and-graph-design.md`.
