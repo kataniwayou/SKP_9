@@ -97,41 +97,36 @@ REFUSED_KQL = 'severity_text:"Error" and attributes.Queue:*'
 # until this clause existed. Widening it moves no count: checked against the live store, the
 # outcome selector under the widened filter still matches 181,732 records and zero refusals.
 #
-# The step-role selector. Exactly the records the orchestrator tags with a StepRole: the one
-# per-outcome record for each returned outcome (Completed, Failed or Cancelled), plus the
-# "advancing ... on a {Result} step" warning written under the same scope. The scheduler's
-# "dispatched an entry step" record carries none. Nothing else in the store carries the field.
+# The step-role selector. The records carrying a StepRole are exactly the scheduler's dispatch
+# records ("dispatched an entry step", role entry) and the branch-ends records of steps with no
+# successors (role terminal, any result). Nothing else in the store carries the field.
 #
-# THIS CLAUSE HAD TO GO IN THE DASHBOARD QUERY FOR A SHARPER REASON THAN THE REFUSAL ONE. Both kinds
-# of record were excluded: an outcome record carries a Result but is emitted BY the orchestrator,
-# which COUNTED_KQL excludes by name, and the "advanced" record carries no Result at all. So the
-# funnel would have rendered permanently empty on both rings -- the same failure the refusal table
-# shipped with, twice over.
+# THIS CLAUSE HAD TO GO IN THE DASHBOARD QUERY FOR A SHARPER REASON THAN THE REFUSAL ONE. The dispatch
+# record carries no Result, and the orchestrator's records are excluded from COUNTED_KQL by name, so
+# without the attributes.StepRole:* clause the pie would be empty -- the same failure the refusal
+# table shipped with. The COUNTED_KQL guards on the outcome panels (see PANEL_GUARDS) remain
+# load-bearing: an orchestrator outcome record carrying a StepRole must not slip past a guard that
+# only asks for Result and double a step.
 STEPROLE_KQL = "attributes.StepRole:*"
 
-# The funnel pie's own query, an ES|QL panel. A fire ENTERS when its entry step's outcome record is in range;
-# the pie then counts the per-outcome records (the two OutcomeTemplates) of exactly those fires,
-# split by the step's per-workflow role and its name. A fire that began before the range does not
-# appear as phantom downstream outcomes. Lens cannot express this: it needs a per-CorrelationId join
-# ("this fire has an entry"), which INLINE STATS gives. The WHERE on attributes.StepRole is what
-# keeps every other atom out. Kept byte-identical to the export so check 14 catches the panel
-# drifting from it.
-FUNNEL_ESQL = (
+# The run's two edges for the fires that entered in range: each entry-step dispatch (entry) and each
+# outcome of a step with no successors (terminal), by role and step name. Only those two kinds of
+# record carry attributes.StepRole, so the WHERE alone keeps every other atom out; INLINE STATS keeps
+# only fires with an entry record in range, so a fire that began before the range does not show as
+# phantom terminal outcomes. Kept byte-identical to the export so check 14 catches drift.
+EDGES_ESQL = (
     "FROM logs-generic.otel-default\n"
     "| WHERE attributes.StepRole IS NOT NULL\n"
-    "| EVAL entered = CASE(attributes.StepRole == \"entry\", 1, 0),\n"
-    "       counted = CASE(attributes.`{OriginalFormat}` IN (\n"
-    "         \"the terminal step completed with {Result} \u2014 no successor accepts it, the run ends here\",\n"
-    "         \"advanced {SuccessorCount} successor(s) in {ElapsedMs}ms\"), 1, 0)\n"
+    "| EVAL entered = CASE(attributes.StepRole == \"entry\", 1, 0)\n"
     "| INLINE STATS fire_entered = MAX(entered) BY attributes.CorrelationId\n"
-    "| WHERE fire_entered == 1 AND counted == 1\n"
-    "| STATS outcomes = COUNT(*) BY attributes.StepRole, attributes.StepName"
+    "| WHERE fire_entered == 1\n"
+    "| STATS records = COUNT(*) BY attributes.StepRole, attributes.StepName"
 )
 
-FUNNEL_TITLE = "Step funnel \u2014 outcomes by role and step"
+EDGES_TITLE = "Run edges \u2014 entry dispatches and terminal outcomes"
 # The id is kept from the panel this replaced, so an overwrite import replaces it in place.
-FUNNEL_ID = "skp-runposition-pie"
-FUNNEL_GROUPS = ["attributes.StepRole", "attributes.StepName"]
+EDGES_ID = "skp-runposition-pie"
+EDGES_GROUPS = ["attributes.StepRole", "attributes.StepName"]
 # The attribute the role stamp replaced. Assembled so the source never spells it: the repo-wide
 # "no trace left" grep must stay empty, and this check is what proves the export has none either.
 RETIRED_ATTRIBUTE = "Run" + "Position"
@@ -173,10 +168,10 @@ PANEL_GUARDS = {
     # union query would let step outcomes into a panel whose whole claim is "this work was thrown
     # away", and an operator would read 181,732 completed steps as lost messages.
     "skp-parked-table": REFUSED_KQL,
-    # The step funnel. An ES|QL panel, so its guard is its whole query: the WHERE on
+    # The run-edges pie. An ES|QL panel, so its guard is its whole query: the WHERE on
     # attributes.StepRole is what keeps every other atom out -- each carries a CorrelationId, and
     # without it the per-CorrelationId join would see outcomes, lookups and refusals as fires.
-    FUNNEL_ID: FUNNEL_ESQL,
+    EDGES_ID: EDGES_ESQL,
 }
 
 # The one pair-per-pie bucket. Asserted by check 11 so a later edit cannot quietly go back to
@@ -637,26 +632,26 @@ def check_11_export_states_the_rule_once(checks):
                          f"control_options_bounded={scoped}")
 
 
-def check_14_step_funnel_panel(checks):
-    """The step funnel exists under its title, runs FUNNEL_ESQL, slices by role then step, and the
+def check_14_run_edges_panel(checks):
+    """The run-edges pie exists under its title, runs EDGES_ESQL, slices by role then step, and the
     dashboard admits its records through STEPROLE_KQL and never names the retired position attribute."""
     try:
         objects = [json.loads(line) for line in open(EXPORT, encoding="utf-8") if line.strip()]
     except Exception as exc:  # noqa: BLE001
-        return checks.report(14, "Step funnel panel", False, f"{type(exc).__name__}: {exc}")
+        return checks.report(14, "Run edges panel", False, f"{type(exc).__name__}: {exc}")
 
     panel = next((o for o in objects
-                  if o.get("type") == "lens" and o["attributes"].get("title") == FUNNEL_TITLE), None)
+                  if o.get("type") == "lens" and o["attributes"].get("title") == EDGES_TITLE), None)
     if panel is None:
-        return checks.report(14, "Step funnel panel", False,
-                             f"no lens object titled {FUNNEL_TITLE!r} - the Step funnel object is missing")
+        return checks.report(14, "Run edges panel", False,
+                             f"no lens object titled {EDGES_TITLE!r} - the Run edges object is missing")
     state = panel["attributes"]["state"]
     layer = state["datasourceStates"]["textBased"]["layers"]["layer1"]
     columns = {c["columnId"]: c["fieldName"] for c in layer["columns"]}
     vis_layer = state["visualization"]["layers"][0]
     groups = [columns.get(g) for g in vis_layer["primaryGroups"]]
     metrics = [columns.get(m) for m in vis_layer["metrics"]]
-    esql_ok = state["query"].get("esql") == FUNNEL_ESQL and layer["query"].get("esql") == FUNNEL_ESQL
+    esql_ok = state["query"].get("esql") == EDGES_ESQL and layer["query"].get("esql") == EDGES_ESQL
     dash = next((o for o in objects if o.get("id") == OUTCOMES_DASHBOARD), None)
     dash_query = ""
     if dash is not None:
@@ -664,8 +659,8 @@ def check_14_step_funnel_panel(checks):
             .get("query", {}).get("query", "")
     dash_ok = STEPROLE_KQL in dash_query and RETIRED_ATTRIBUTE not in dash_query
     ok = (state["visualization"].get("shape") == "pie" and panel["attributes"]["visualizationType"] == "lnsPie"
-          and esql_ok and groups == FUNNEL_GROUPS and metrics == ["outcomes"] and dash_ok)
-    return checks.report(14, "Step funnel panel", ok,
+          and esql_ok and groups == EDGES_GROUPS and metrics == ["records"] and dash_ok)
+    return checks.report(14, "Run edges panel", ok,
                          f"esql_matches={esql_ok}, groups={groups}, metrics={metrics}, "
                          f"dashboard_has_steprole_clause={dash_ok}")
 
@@ -863,7 +858,7 @@ def main():
         global EXPORT
         EXPORT = os.path.abspath(args.export)
         check_11_export_states_the_rule_once(checks)
-        check_14_step_funnel_panel(checks)
+        check_14_run_edges_panel(checks)
         print()
         print(f"{checks.failures} check(s) failed")
         return 1 if checks.failures else 0
@@ -894,7 +889,7 @@ def main():
     check_9_generic_across_workflows(checks, args.es_url, args.kibana_url, args.window, names)
     check_10_rule_classifies_the_fixture(checks, args.es_url)
     check_11_export_states_the_rule_once(checks)
-    check_14_step_funnel_panel(checks)
+    check_14_run_edges_panel(checks)
     check_12_published_steps_are_nameable(checks, args.es_url, names)
     check_13_diagram_agrees_with_the_dashboard(checks, args.es_url, names, api_url=args.api_url)
 
