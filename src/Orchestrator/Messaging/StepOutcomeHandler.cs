@@ -329,12 +329,15 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
         if (selection.Matches.Count == 0)
         {
-            // StepRole=terminal marks the run's exit edge: a step with no successors in THIS
-            // workflow's graph, whatever its result. A step whose successors exist but all declined
-            // this result ends its branch too, but it is not an edge and carries nothing. The graph is
-            // the L1 entry this outcome was just routed from, so a step shared by two workflows is
-            // classified per workflow. See StepRoles.
-            using (completed.NextStepIds is not { Count: > 0 } ? _logger.BeginScope(StepRoles.Scope(StepRoles.Terminal)) : null)
+            // StepRole=terminal marks the run's exit edge, two ways: a Completed outcome that no
+            // successor accepts (split-exporter, whose only successor takes Failed), or any outcome of
+            // a step with no successors in THIS workflow's graph. A Failed or Cancelled outcome of a
+            // step that has successors ends its branch too, but it is not an edge and carries nothing.
+            // Inside this block no successor matched, so "Completed" alone is the first half. The
+            // graph is the L1 entry this outcome was just routed from, so a step shared by two
+            // workflows is classified per workflow. See StepRoles.
+            var terminal = m.Result == StepResult.Completed || completed.NextStepIds is not { Count: > 0 };
+            using (terminal ? _logger.BeginScope(StepRoles.Scope(StepRoles.Terminal)) : null)
             {
                 _logger.Log(level, OutcomeTemplates.BranchEnds, m.Result);
             }

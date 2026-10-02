@@ -5,13 +5,15 @@ namespace Messaging.Contracts;
 /// <para>
 /// <b>entry</b> is on the scheduler's "dispatched an entry step" record, one per entry step that
 /// reached a queue (a fire with two entry steps writes two). <b>terminal</b> is on the branch-ends
-/// record of a step with no successors in the workflow's graph, whatever its result. No other record
-/// carries the key: steps between the edges are counted by the step-outcomes panel, not here.
+/// record of a Completed outcome that no successor accepts, or of any outcome of a step with no
+/// successors in the workflow's graph. A Failed or Cancelled outcome of a step that has successors
+/// ends its branch without being terminal. No other record carries the key: steps between the edges
+/// are counted by the step-outcomes panel, not here.
 /// </para>
 /// <para>
 /// <b>Decided by the orchestrator from its own L1 graph</b>, with no lookup: entry is hardcoded on the
-/// dispatch line, terminal is <c>NextStepIds</c> empty on the step the outcome handler already holds.
-/// A step shared by two workflows is classified per workflow.
+/// dispatch line; terminal is read from the result and the routing of the step the outcome handler
+/// already holds. A step shared by two workflows is classified per workflow.
 /// </para>
 /// <para>
 /// <b>Here in the contracts assembly because the readers do not share a compiler with the emitter</b>

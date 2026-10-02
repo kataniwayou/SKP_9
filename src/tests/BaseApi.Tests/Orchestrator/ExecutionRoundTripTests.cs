@@ -863,7 +863,8 @@ public sealed class ExecutionRoundTripTests
     }
 
     // ---------------------------------------------------------------------------------------
-    // StepRole: terminal on the outcome of a step with no successors in this workflow's graph
+    // StepRole: terminal on a Completed outcome no successor accepts, or any outcome of a step with
+    // no successors, in this workflow's graph
     // ---------------------------------------------------------------------------------------
 
     [Theory]
@@ -881,10 +882,49 @@ public sealed class ExecutionRoundTripTests
     }
 
     [Fact]
+    public async Task ACompletedOutcomeNoSuccessorAcceptsIsTerminal()
+    {
+        // split-exporter's shape: A's only successor B accepts Failed (condition 2), so a Completed A
+        // advances nowhere. A has a successor, but a Completed run that ends there is an exit edge.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 2, """{"n":2}"""));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Equal(StepRoles.Terminal, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!));
+    }
+
+    [Fact]
+    public async Task AFailedOutcomeNoSuccessorAcceptsIsNotTerminal()
+    {
+        // record-outcome's shape: B accepts only Completed, so a Failed A ends its branch -- but A has
+        // a successor and the result is not Completed, so it is neither half of the definition.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
+
+        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!);
+    }
+
+    [Fact]
+    public async Task ACompletedOutcomeWhoseSuccessorsAreAllDanglingIsTerminal()
+    {
+        // A successor id that is not a step of the graph is skipped, so a Completed A advances nowhere:
+        // the first half of the definition, whatever the successor list holds.
+        var h = new Harness(Step(A, PA, 1, "{}", Guid.Parse("77777777-7777-7777-7777-777777777777")));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Equal(StepRoles.Terminal, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!));
+    }
+
+    [Fact]
     public async Task ABranchEndingAtAStepWithSuccessorsIsNotTerminal()
     {
         // B accepts only Completed (condition 1), so a Cancelled A ends its branch -- but A has a
-        // successor in the graph, so it is not an edge and carries nothing.
+        // successor and the result is not Completed, so it is not an edge and carries nothing.
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
         Seed(h, Entry, Output);
 
