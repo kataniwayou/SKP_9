@@ -106,9 +106,14 @@ count, so a fire that began before the window never shows up as phantom terminal
   the graph, not of the result, so a terminal step that Failed still counts. One record per outcome.
 - **The middle of the graph is not on this panel.** No record between the two edges carries a role, so
   the Step outcomes panels (§3.1) are where to look for where work was lost or cancelled.
-- **Entry far above terminal** is work that left the path between the edges (failures routed
-  elsewhere, cancellations) or is still running. With every poll drained, entry with no terminal is a
-  quiet window, not a stall.
+- **Terminal counts only branches that end at a step with no successors.** A path whose last step
+  has successors that accept only other results writes no terminal record. In the §1 graph the only
+  such step is export-outcome, reached only by failed items (record-outcome accepts Failed and passes
+  its Completed to export-outcome); a good item's branch ends at split-exporter, which has a successor
+  and so is not terminal. Terminal is therefore zero in a healthy window with no bad input, and its
+  absence is **not** a stall by itself: judge a stall from the Step outcomes panels (§3.1, §3.2)
+  against the records imported and the routing. With every poll drained, entry with no terminal is a
+  quiet window.
 
 The Step and Outcome dashboard controls do **not** apply to this panel. They filter out the dispatch
 record, which carries no Result and belongs to the entry step only, so they empty or skew the pie. The

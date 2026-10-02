@@ -39,11 +39,20 @@ in which records silently lose the attribute. The orchestrator already holds eac
   that end a branch at a step with successors are not edges and are not counted here; the gap
   between what entered and what reached the terminal steps is where they went (the `step-outcomes`
   and `step-failures` panels hold the per-result detail).
-- A stall shows as `entry` records with no (or too few) `terminal` records. A fire whose entry step
-  never returns is visible again: it has its dispatch record.
-- Example (the `endless-feed-steprole` window, 15 fires, 125 items imported): `entry` 15
-  (split-importer); `terminal` 75 export-outcome + 75 record-outcome. Verified figures come from the
-  recapture after deployment, not from this example.
+- Amended 2026-10-02: `terminal` counts only branches that end at a step with no successors. A path
+  whose last step has successors that accept only other results writes no `terminal` record, so a
+  healthy window can show `terminal` 0, and missing `terminal` records are **not** a stall signal by
+  themselves. A stall is judged from `step-outcomes` (completed/failed/cancelled totals) and
+  `step-failures` against `recordsImported` and the routing in the running graph. `entry` with
+  `recordsImported` 0 is a quiet window. A fire whose entry step never returns is visible again: it
+  has its dispatch record. (Earlier text said a stall shows as `entry` with no or too few
+  `terminal`; on the real graph that is false.)
+- Example (the `endless-feed-steprole` window, 15 fires, 125 items imported), amended 2026-10-02:
+  `entry` 15 (split-importer); `terminal` 75, all export-outcome -- the only step with no successors,
+  reached only by failed items that record-outcome recorded and passed on to be exported. Good items
+  end at split-exporter, which has a successor (record-outcome, Failed only), so they write no
+  `terminal`. (Earlier text also listed record-outcome as terminal; it has a successor.) Verified
+  figures come from the recapture after deployment, not from this example.
 
 ## Analyst panel
 
@@ -54,7 +63,8 @@ in which records silently lose the attribute. The orchestrator already holds eac
   (distinct correlation ids among `entry` records), `earliest` (first `entry` record, for coverage).
 - Statement 2: the edge counts, by role and step, for fires that entered in the window.
 - Statement 3: importer polls, `drainedPolls`, and `recordsImported` = sum of `attributes.Consumed`,
-  so items in can be set against terminal outcomes out.
+  so items in can be set against the `step-outcomes` totals and the routing (amended 2026-10-02:
+  not against terminal outcomes, which a healthy window may not have).
 - Trust: `totalWorkflowRecords` 0 → all flags false; otherwise `SeriesPresent` and
   `NoDataDistinguishable` true, `WindowFullyCovered` from `earliest`. A partial ES|QL response is
   unavailable (unchanged).

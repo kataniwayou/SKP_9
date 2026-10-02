@@ -81,12 +81,13 @@ internal static class ContractPrompt
           result, where the branch goes or that it ends: use it, do not re-derive it.
         - run-boundaries is the workflow's two edges for the fires that entered in the window. entry
           rows count dispatches, one per entry step each time a fire sent it work; terminal rows
-          count the outcomes of steps with no successors, by step, whatever the result. Nothing
-          between the edges is here: set the items the importer took in (recordsImported) against
-          what the routing should deliver to the terminal steps; the difference left the path as
-          failures routed elsewhere, cancellations, or work still running at the window's end.
-          Entry with no terminal while items were imported is a stall; with recordsImported 0 it is
-          a quiet window.
+          count the outcomes of steps with no successors in the graph, by step, whatever the result.
+          Only branches that end at such a step are counted: a path whose last step has successors
+          that accept only other results produces no terminal record, so terminal can be zero in a
+          healthy window and its absence is not a stall by itself. Nothing between the edges is
+          here: judge a stall from the step-outcomes totals and the step-failures samples, set
+          against the items the importer took in (recordsImported) and the routing in the running
+          graph. Entry with recordsImported 0 is a quiet window.
         - step-outcomes counts one record per step execution, summed over every step: it has no step
           dimension, so it can confirm a total but never which step produced it. Never attribute a
           count to a step the panel cannot name.

@@ -457,15 +457,17 @@ internal static class PanelRegistry
                 "The workflow's two edges for the fires that entered in this window. entry rows count " +
                 "dispatches: one per entry step each time a fire sent it work (with one entry step, " +
                 "entry equals fires). terminal rows count the outcomes returned by steps with no " +
-                "successors, by step, whatever their result. Nothing between the edges is on this " +
-                "panel: work that entered and did not reach a terminal step was routed elsewhere on " +
-                "failure, cancelled, or is still running -- step-outcomes and step-failures show which. " +
-                "recordsImported is how many items the importer took in; pollsThatImported and " +
-                "drainedPolls split its polls. Entry with no terminal and recordsImported 0 is a quiet " +
-                "window (every poll drained), not a stall; entry with no terminal while items were " +
-                "imported is a stall. totalWorkflowRecords is every record the workflow logged in the " +
-                "window; at zero nothing was reported at all, which cannot be told apart from logging " +
-                "that is not reaching the store.",
+                "successors in the graph, by step, whatever their result. Only branches that end at such " +
+                "a step are counted: a path whose last step has successors that accept only other " +
+                "results produces no terminal record, so terminal can be zero in a healthy window and " +
+                "its absence is not a stall by itself. Nothing between the edges is on this panel: judge " +
+                "a stall from step-outcomes (completed, failed and cancelled totals) and step-failures " +
+                "against recordsImported and the routing in the running graph. recordsImported is how " +
+                "many items the importer took in; pollsThatImported and drainedPolls split its polls. " +
+                "Entry with recordsImported 0 is a quiet window (every poll drained). " +
+                "totalWorkflowRecords is every record the workflow logged in the window; at zero nothing " +
+                "was reported at all, which cannot be told apart from logging that is not reaching the " +
+                "store.",
             Kind: PanelKind.Esql,
             Query: WithStepRoles(
                 """

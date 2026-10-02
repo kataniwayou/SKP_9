@@ -93,10 +93,12 @@ public sealed class AnalystReplayScenarios
     /// insight hunting the inconsistency.
     /// </para>
     /// <para>
-    /// <b>The edges lose the same 17 items.</b> The captured run-boundaries reading keeps its step names
-    /// and roles; the export-outcome terminal row returns 17 fewer outcomes, the 17 branches that never
-    /// reached it. Entry is untouched: the dispatches happened. Every other number is derived from the
-    /// capture, so the plant stays consistent with whatever window <see cref="Window"/> names.
+    /// <b>The edges are untouched.</b> The loss is refused before split-filepersister, on a good item's
+    /// path, and no good item's branch reaches a step with no successors (it ends at split-exporter,
+    /// whose only successor accepts Failed), so the planted loss cannot change any terminal row; the
+    /// dispatches behind entry happened. run-boundaries stays byte for byte as captured. Every other
+    /// number is derived from the capture, so the plant stays consistent with whatever window
+    /// <see cref="Window"/> names.
     /// </para>
     /// </summary>
     private static FixturePanelReader LosingWork()
@@ -149,27 +151,12 @@ public sealed class AnalystReplayScenarios
         outcomes["totalOutcomeRecords"] = total;
         outcomes["completed"] = (int)outcomes["completed"]! - lost;
 
-        var edges = JsonNode.Parse(reader.ValueOf("run-boundaries"))!;
-        var found = false;
-        foreach (var row in edges["byStep"]!.AsArray())
-        {
-            if ((string)row!["role"]! == "terminal"
-                && ((string)row["step"]!).StartsWith("export-outcome", StringComparison.Ordinal))
-            {
-                row["records"] = (int)row["records"]! - lost / 2;
-                found = true;
-            }
-        }
-
-        Assert.True(found, "the capture has no export-outcome terminal row");
-        var funnelSamples = edges["byStep"]!.AsArray().Sum(r => (int)r!["records"]!);
 
         return reader
             .Planted("dead-letter-depth", depth.ToJsonString())
             .Planted("refused-messages", refusals.ToJsonString(), samples: workflowRecords)
             .Planted("step-outcomes", outcomes.ToJsonString(), samples: total)
-            .Planted("step-failures", ReplaceTotal(reader.ValueOf("step-failures"), total), samples: total)
-            .Planted("run-boundaries", edges.ToJsonString(), samples: funnelSamples);
+            .Planted("step-failures", ReplaceTotal(reader.ValueOf("step-failures"), total), samples: total);
     }
 
     /// <summary>The captured step-failures value with its outcome total changed and its samples kept.</summary>
@@ -182,8 +169,9 @@ public sealed class AnalystReplayScenarios
 
     /// <summary>
     /// A stall after the first hop: fires keep entering, the importer completes each poll and imports,
-    /// and nothing reaches a terminal step. The edges show entry with no terminal while items were
-    /// imported.
+    /// and nothing after the entry step returns an outcome. step-outcomes carries only the entry step's
+    /// outcomes against the items imported; run-boundaries shows entry with recordsImported above 0. The
+    /// missing terminal row is not the evidence -- a healthy window may have none.
     /// <para>
     /// <b>Every number is the capture's own.</b> The reading is the captured entry row alone: its
     /// dispatch count, fires, polls and recordsImported unchanged. The split importer returns one
@@ -247,7 +235,7 @@ public sealed class AnalystReplayScenarios
     [Fact]
     public Task AStallIsReported() => Score(
         "stall", StalledAfterTheFirstHop,
-        "reported, resting on run-boundaries (entry with no terminal while items were imported); a human reads whether it says STALL",
+        "reported, resting on run-boundaries (items imported, recordsImported) set against step-outcomes; a human reads whether it says STALL",
         f => f.Verdict is "Drifting" or "Notable"
              && f.Insights.Any(i => i.Panels.Contains("run-boundaries")));
 

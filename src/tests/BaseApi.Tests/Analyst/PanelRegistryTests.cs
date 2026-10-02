@@ -339,6 +339,9 @@ public sealed class PanelRegistryTests
         Assert.Contains("terminal rows count the outcomes returned by steps with no successors", description, StringComparison.Ordinal);
         Assert.Contains("Nothing between the edges is on this panel", description, StringComparison.Ordinal);
         Assert.Contains("recordsImported 0 is a quiet window", description, StringComparison.Ordinal);
+        // A healthy window can have no terminal record: its absence must not be described as a stall.
+        Assert.Contains("its absence is not a stall by itself", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("while items were imported is a stall", description, StringComparison.Ordinal);
         Assert.Contains("pollsThatImported", description, StringComparison.Ordinal);
         Assert.DoesNotContain("NO FIXED RATIO", description, StringComparison.Ordinal);
     }

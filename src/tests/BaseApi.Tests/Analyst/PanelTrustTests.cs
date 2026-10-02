@@ -374,11 +374,12 @@ public sealed class PanelTrustTests
         Assert.Equal(15, root.GetProperty("fires").GetInt64());
         Assert.Equal(125, root.GetProperty("recordsImported").GetInt64());
         var rows = root.GetProperty("byStep").EnumerateArray().ToList();
-        Assert.Equal(3, rows.Count);
+        // The real graph's shape: export-outcome is the only step with no successors.
+        Assert.Equal(2, rows.Count);
         Assert.Equal(15, rows.Single(r => r.GetProperty("role").GetString() == "entry").GetProperty("records").GetInt64());
-        Assert.Equal(150, rows.Where(r => r.GetProperty("role").GetString() == "terminal").Sum(r => r.GetProperty("records").GetInt64()));
+        Assert.Equal(75, rows.Where(r => r.GetProperty("role").GetString() == "terminal").Sum(r => r.GetProperty("records").GetInt64()));
         Assert.False(root.TryGetProperty("roleRecords", out _));
-        Assert.Equal(165, reading.SampleCount);
+        Assert.Equal(90, reading.SampleCount);
         Assert.True(reading.Trust.WindowFullyCovered);
         Assert.True(reading.Trust.NoDataDistinguishable);
     }
@@ -478,14 +479,14 @@ public sealed class PanelTrustTests
             .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         using var value = JsonDocument.Parse(reading.ValueJson);
-        var middle = value.RootElement.GetProperty("byStep")[1];
+        var first = value.RootElement.GetProperty("byStep")[0];
         // The fixture lists records FIRST: the columns are read by name, never by position.
-        Assert.Equal("terminal", middle.GetProperty("role").GetString());
-        Assert.Equal("record-outcome", middle.GetProperty("step").GetString());
-        Assert.Equal(75, middle.GetProperty("records").GetInt64());
+        Assert.Equal("terminal", first.GetProperty("role").GetString());
+        Assert.Equal("export-outcome", first.GetProperty("step").GetString());
+        Assert.Equal(75, first.GetProperty("records").GetInt64());
         Assert.Equal(15, value.RootElement.GetProperty("importerPolls").GetInt64());
         Assert.Equal(0, value.RootElement.GetProperty("drainedPolls").GetInt64());
-        Assert.Equal(75 + 75 + 15, reading.SampleCount);
+        Assert.Equal(75 + 15, reading.SampleCount);
         Assert.True(reading.Trust.NoDataDistinguishable);
     }
 
