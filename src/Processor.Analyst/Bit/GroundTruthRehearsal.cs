@@ -16,6 +16,11 @@ namespace Processor.Analyst.Bit;
 /// <c>read_panel</c> to a closed enum — and still conclude wrongly. Only ground truth catches that.
 /// </para>
 /// <para>
+/// <b>The graph rides along, as it does on a live dispatch.</b> A v12 prompt derives what every panel
+/// should show from the running graph before reading any of them, so each rehearsal briefs the loop
+/// with <see cref="RehearsalGraph"/> exactly as <c>AnalystProcessor</c> briefs it with the target's.
+/// </para>
+/// <para>
 /// <b>Two scenarios, and the quiet one matters more.</b> A monitor that fires twice an hour and
 /// cries wolf trains its operator to ignore it, so a false alarm costs more than a missed finding.
 /// The quiet window runs first for that reason, and a prompt that invents a finding there fails
@@ -38,16 +43,18 @@ internal sealed class GroundTruthRehearsal(
     ILogger<GroundTruthRehearsal> logger)
 {
     /// <summary>
-    /// Budgets for a rehearsal, deliberately its own constants rather than the payload's. The
-    /// evidence is seven small readings, so an investigation that cannot conclude inside this is
-    /// telling us something about the prompt.
+    /// Budgets for a rehearsal: its own constants, compiled like the rest of the gate, set equal to
+    /// what the analyst-monitor step payload grants a live dispatch. A rehearsal stricter than
+    /// production fails prompts that work in production: at 240 seconds a v12 quiet rehearsal was
+    /// cancelled mid-call, while live v12 investigations took 125 and 206 seconds of a 600-second
+    /// budget, and the deadline cancels the model call in flight rather than ending between turns.
     /// </summary>
     private const int MaxIterations = 12;
 
     private const int MaxTokens = 1_500_000;
-    private const int WallClockSeconds = 240;
+    private const int WallClockSeconds = 600;
 
-    /// <summary>The window is arbitrary — the panels ignore it — but it must be well formed.</summary>
+    /// <summary>15 minutes, so the fixture graph's once-a-minute cron schedules the 15 fires the panels show.</summary>
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
 
     internal async Task<IReadOnlyList<StageProblem>> RunAsync(string prompt, CancellationToken ct)
@@ -57,8 +64,10 @@ internal sealed class GroundTruthRehearsal(
         if (quiet is LoopOutcome.Finding invented)
         {
             return [new StageProblem("verify", "contradicting",
-                "against a rehearsal window with every panel clean and every dead-letter queue at "
-                + "zero, the prompt still produced a finding: "
+                "against a quiet rehearsal window -- every count one the running graph's routing "
+                + "explains (6 items rejected for their own extension, 5 empty polls cancelled, the 34 "
+                + "good items ending with no terminal record), every dead-letter queue at zero, no "
+                + "refusal -- the prompt still produced a finding: "
                 + Summarise(invented.Value)
                 + " -- an operator who is woken by a quiet window learns to ignore the next alert")];
         }
@@ -70,9 +79,9 @@ internal sealed class GroundTruthRehearsal(
         {
             return [new StageProblem("verify", "contradicting",
                 "against a rehearsal window in which a dead-letter queue grew from 0 to 17 while 17 "
-                + "parked refusals landed, the prompt "
-                + $"reported nothing: \"{missed.Reason}\" -- work this deployment threw away during "
-                + "the window went unreported, though two panels agree on the loss")];
+                + "parked refusals landed and the step-outcomes totals fell 17 short of the routing's "
+                + $"prediction, the prompt reported nothing: \"{missed.Reason}\" -- work this deployment "
+                + "threw away during the window went unreported, though three panels agree on the loss")];
         }
 
         logger.LogInformation(
@@ -94,7 +103,7 @@ internal sealed class GroundTruthRehearsal(
             model, panels, clock, loggerFactory.CreateLogger<InvestigationLoop>());
 
         var config = new AnalystConfig(
-            TargetWorkflowId: Guid.Empty,
+            TargetWorkflowId: RehearsalGraph.WorkflowId,
             WindowMinutes: (int)Window.TotalMinutes,
             Prompt: prompt,
             PanelSet: panels.PanelIds,
@@ -106,7 +115,7 @@ internal sealed class GroundTruthRehearsal(
 
         return await loop
             .RunAsync(ContractPrompt.Compose(prompt), config, new TimeRange(to - Window, to),
-                PromptHash.Of(prompt), ct)
+                PromptHash.Of(prompt), ct, RehearsalGraph.Briefing)
             .ConfigureAwait(false);
     }
 

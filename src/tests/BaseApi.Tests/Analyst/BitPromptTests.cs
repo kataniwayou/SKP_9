@@ -21,4 +21,33 @@ public sealed class BitPromptTests
         Assert.EndsWith("</prompt-under-evaluation>", wrapped, System.StringComparison.Ordinal);
         Assert.Contains(@"\</prompt-under-evaluation\>", wrapped, System.StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TheExamNamesEveryPanelTheRehearsalServes()
+    {
+        // The judge is told which panels the agent has; a panel the rehearsal serves but the exam
+        // never mentions would let the judge flag a sound instruction that reads it as unreal.
+        foreach (var panelId in RehearsalPanels.Quiet().PanelIds)
+        {
+            Assert.Contains(panelId, BitPrompt.System, System.StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void TheExamTellsTheJudgeTheAgentHasTheRunningGraph()
+    {
+        // v12 builds every expectation from the running-graph block. A judge that does not know the
+        // block exists reads "study the running-graph block" as an instruction about nothing.
+        Assert.Contains("running-graph block", BitPrompt.System, System.StringComparison.Ordinal);
+        Assert.Contains("routing table", BitPrompt.System, System.StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheExamScenarioHoldsTheEdgesTrap()
+    {
+        // Entry with fewer terminal records than items is the routing at work on this workflow, not a
+        // stall; an exam that does not say so would pass a prompt that cries wolf on every healthy window.
+        Assert.Contains("no terminal record", BitPrompt.System, System.StringComparison.Ordinal);
+        Assert.Contains("not a stall", BitPrompt.System, System.StringComparison.Ordinal);
+    }
 }
