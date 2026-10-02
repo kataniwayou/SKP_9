@@ -38,7 +38,7 @@ root files `Directory.Build.props`, `Directory.Packages.props`, `NuGet.config`, 
   `Analyst__Bit__Mode`).
 - **Deleted** (the delta reports them as `D`; removals are never applied without `-PruneRemoved`, so
   delete them on the offline tree or the old types linger): `src/Messaging.Contracts/RunPositions.cs`,
-  `src/BaseApi.Service/Orchestration/Projection/StepRoleClassifier.cs`,
+  `src/BaseApi.Service/Features/Orchestration/Projection/StepRoleClassifier.cs`,
   `src/BaseConsole.Core/Naming/IStepRoleSource.cs`, `RedisStepRoleSource.cs`, `StepRoleResolver.cs`.
 
 Changed **outside** the scope (the delta will not list them):
@@ -192,6 +192,12 @@ matched. Without StepRole the same window shows 25 Cancelled branch-ends at sk-n
   records or traffic on the `simple-step*` steps.
 - A fresh baseapi pod has no queue-wait points yet, so a capture or panel read right after the
   rollout can report queue-wait as not fully covered.
-- Records written before the edges rollout still carry the old values (`intermediate`, `terminal` on
-  record-outcome, roles on "advancing ..." lines). A range that spans the rollout mixes the two
+- Records written before the edges rollout (on dev, the older model ran until the 2026-10-02 17:52Z
+  rollout) carry the old values: `entry` sat on the importer's OUTCOME records (one per record
+  imported plus one per empty poll), not on dispatches; `intermediate` sat on every other step's
+  outcome records, record-outcome included; `terminal` sat on export-outcome's outcomes; and roles
+  also appeared on "advanced ..." lines. So `entry` changes meaning across the rollout (125 vs 15 in
+  comparable windows: records imported vs dispatches). A range that spans the rollout mixes the two
   models; read the pie and the panel only for windows after it.
+- One fire may be skipped while the orchestrator StatefulSet rolls ("the projection store is
+  unusable; this fire dispatches nothing"). That is a rollout artifact, not a fault.

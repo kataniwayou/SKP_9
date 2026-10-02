@@ -2,7 +2,7 @@
 
 Date: 2026-10-02. Status: approved by the user in conversation; supersedes the role model of
 `2026-10-02-step-role-design.md` (D1, D3–D6 and the role-key storage). Implemented
-(`c771c7a..ad5311b`) and deployed to dev on 2026-10-02.
+(`c105f8a..ad5311b`) and deployed to dev on 2026-10-02 (replay capture and deploy note: `7f9c54e`).
 
 ## Goal
 

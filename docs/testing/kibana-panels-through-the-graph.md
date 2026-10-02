@@ -119,8 +119,9 @@ The Step and Outcome dashboard controls do **not** apply to this panel. They fil
 record, which carries no Result and belongs to the entry step only, so they empty or skew the pie. The
 workflow control scopes it.
 
-Verified numbers for this panel come from the `endless-feed-edges` capture (plan Task 5); none are
-stated here until that capture is made.
+Verified numbers come from the `endless-feed-edges` capture (window 2026-10-02 17:58:45-18:13:45Z, after
+the edges rollout): entry 15 at split-importer, terminal 75 at export-outcome (the failed items), 15
+fires, 125 items imported. A missing terminal is not a stall: a healthy window may have none.
 
 ### 3.4 Whitelist pies
 

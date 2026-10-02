@@ -175,8 +175,12 @@ public sealed class AnalystReplayScenarios
     /// <b>Every number is the capture's own.</b> The reading is the captured entry row alone: its
     /// dispatch count, fires, polls and recordsImported unchanged. The split importer returns one
     /// outcome per record it read (recordsImported), not one per fire, so step-outcomes and
-    /// step-failures carry that many outcomes, all Completed. totalWorkflowRecords is the capture's,
-    /// and refused-messages carries the same total, so the two panels sharing that scope agree.
+    /// step-failures carry that many outcomes, all Completed. totalWorkflowRecords is derived from the
+    /// capture, not copied: a stall logs only the entry side, so it is the entry dispatch records
+    /// (the entry row's records) + the importer's outcome records (recordsImported, one per item) +
+    /// the importer's poll records (importerPolls). The captured 4960 covers the whole run and would
+    /// overstate a stall. refused-messages carries the same total, so the two panels sharing that
+    /// scope agree.
     /// </para>
     /// </summary>
     private static FixturePanelReader StalledAfterTheFirstHop()
@@ -185,10 +189,10 @@ public sealed class AnalystReplayScenarios
         var captured = JsonNode.Parse(reader.ValueOf("run-boundaries"))!;
         var entry = captured["byStep"]!.AsArray().Single(r => (string)r!["role"]! == "entry")!;
         var dispatched = (int)entry["records"]!;
-        var total = (int)captured["totalWorkflowRecords"]!;
         // The split importer's outcomes: one per item it took in. step-outcomes has no step dimension,
         // so the capture's recordsImported is the entered-item count.
         var entered = (int)captured["recordsImported"]!;
+        var total = dispatched + entered + (int)captured["importerPolls"]!;
 
         var edges = new JsonObject
         {
