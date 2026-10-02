@@ -164,4 +164,18 @@ public sealed class PreflightBitQuorumTests
         Assert.Contains("ballot 1 of 5", spoiled.Message, StringComparison.Ordinal);
         Assert.IsType<AnalysisImpossibleException>(spoiled.Exception);
     }
+
+    [Fact]
+    public async Task AProseBallotSaysWhatTheJudgeWroteAndWhyItStopped()
+    {
+        var logger = new BaseApi.Tests.Support.RecordingLogger<PreflightBit>();
+        var prose = new ModelReply([], Text: "Every stage looks fine to me.", 0, 0) { FinishReason = "stop" };
+        var bit = new PreflightBit(new ScriptedModel(prose, Fit(), Fit(), Fit()), new BitCache(new BaseApi.Tests.Support.InMemorySharedState(), "test-model/high"), logger: logger);
+
+        await bit.CheckAsync(Structured, CancellationToken.None);
+
+        var spoiled = Assert.Single(logger.Records, r => r.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.Contains("finish_reason 'stop'", spoiled.Exception!.Message, StringComparison.Ordinal);
+        Assert.Contains("\"Every stage looks fine to me.\"", spoiled.Exception.Message, StringComparison.Ordinal);
+    }
 }

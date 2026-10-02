@@ -68,4 +68,35 @@ internal sealed record ModelReply(
 {
     /// <summary>A reply that is nothing but the given calls. Test convenience, and the common shape.</summary>
     internal static ModelReply Of(params ModelToolCall[] calls) => new(calls, null, 0, 0);
+
+    /// <summary>
+    /// Why the backend stopped generating (<c>finish_reason</c>), or null when it did not say.
+    /// Diagnostic only: nothing decides on it.
+    /// </summary>
+    internal string? FinishReason { get; init; }
+
+    private const int MaxDescribedChars = 500;
+
+    /// <summary>
+    /// What a reply that could not be used actually said, for the error that discards it: the finish
+    /// reason and the text, flattened to one line and capped. Without it a reply with no tool call
+    /// is undiagnosable -- a conclusion written as prose and a reply cut off at a length limit read
+    /// the same.
+    /// </summary>
+    internal string Describe()
+    {
+        var reason = FinishReason is { Length: > 0 } r ? $"finish_reason '{r}'" : "finish_reason (none)";
+
+        if (string.IsNullOrWhiteSpace(Text))
+        {
+            return $"{reason}; the reply carried no text";
+        }
+
+        var flat = string.Join(" ", Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        var quoted = flat.Length <= MaxDescribedChars
+            ? $"\"{flat}\""
+            : $"\"{flat[..MaxDescribedChars]}…\" (truncated from {flat.Length})";
+
+        return $"{reason}; the reply said {quoted}";
+    }
 }

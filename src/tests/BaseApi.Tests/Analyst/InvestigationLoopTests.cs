@@ -371,6 +371,36 @@ public sealed class InvestigationLoopTests
     }
 
     [Fact]
+    public async Task AReplyWithNoToolCallsSaysWhatTheModelWroteAndWhyItStopped()
+    {
+        // Without this the failure is undiagnosable: the reply is discarded, and "no tool calls"
+        // cannot tell a conclusion written as prose from a reply cut off at a length limit.
+        var model = new ScriptedModel(new ModelReply([], Text: "The window is quiet.\nNothing to report.", 0, 0)
+        {
+            FinishReason = "stop",
+        });
+
+        var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
+
+        Assert.Contains("finish_reason 'stop'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("\"The window is quiet. Nothing to report.\"", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ALongNoToolReplyIsTruncatedInTheMessage()
+    {
+        var model = new ScriptedModel(new ModelReply([], Text: new string('x', 2000), 0, 0));
+
+        var ex = await Assert.ThrowsAsync<AnalysisImpossibleException>(
+            () => Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None));
+
+        Assert.Contains("(truncated from 2000)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("finish_reason (none)", ex.Message, StringComparison.Ordinal);
+        Assert.True(ex.Message.Length < 800);
+    }
+
+    [Fact]
     public async Task ACallToAToolThatDoesNotExistIsReturnedAsAToolErrorNotAnException()
     {
         // ToolCatalog.SchemaFor has no case for a name the model invented; resolving the schema from

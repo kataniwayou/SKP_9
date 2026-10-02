@@ -245,7 +245,7 @@ internal sealed class PreflightBit(
         var call = reply.ToolCalls.FirstOrDefault(c => c.ToolName == BitPrompt.ToolName)
             ?? throw new AnalysisImpossibleException(
                 "the fitness judge answered without calling report_fitness; a verdict it can phrase "
-                + "freely is a gate that can talk itself into passing");
+                + "freely is a gate that can talk itself into passing: " + reply.Describe());
 
         // Client-side validation, same as every tool call InvestigationLoop trusts: no server-side
         // schema enforcement may ever be load-bearing above the seam, regardless of what the backend

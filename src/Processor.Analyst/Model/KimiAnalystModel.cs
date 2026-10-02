@@ -334,7 +334,15 @@ internal sealed class KimiAnalystModel : IAnalystModel
             calls,
             text,
             TokenCount(usage, "prompt_tokens"),
-            TokenCount(usage, "completion_tokens"));
+            TokenCount(usage, "completion_tokens"))
+        {
+            // Read leniently: it only explains a reply the loop could not use, so a missing or
+            // non-string value is null rather than an unreadable response.
+            FinishReason = choices[0].TryGetProperty("finish_reason", out var finish)
+                && finish.ValueKind == JsonValueKind.String
+                    ? finish.GetString()
+                    : null,
+        };
     }
 
     /// <summary>

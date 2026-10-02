@@ -71,7 +71,7 @@ internal sealed class InvestigationLoop(
                 // The model talked instead of acting. Nothing was executed, so there is nothing to
                 // report and no way to continue honestly.
                 throw new AnalysisImpossibleException(
-                    "the model returned no tool calls; the investigation cannot proceed");
+                    "the model returned no tool calls; the investigation cannot proceed: " + reply.Describe());
             }
 
             transcript.Add(new ModelTurn(ModelRole.Assistant, reply.Text, reply.ToolCalls, []));

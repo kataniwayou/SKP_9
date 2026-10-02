@@ -197,6 +197,34 @@ public sealed class KimiAnalystModelTests
     }
 
     [Fact]
+    public void TheFinishReasonIsRead()
+    {
+        var body = JsonDocument.Parse("""
+        {
+          "choices": [ { "finish_reason": "stop",
+            "message": { "role": "assistant", "content": "The window is quiet." } } ],
+          "usage": { "prompt_tokens": 5, "completion_tokens": 6 }
+        }
+        """).RootElement.Clone();
+
+        Assert.Equal("stop", KimiAnalystModel.ToReply(body).FinishReason);
+    }
+
+    [Fact]
+    public void AnAbsentFinishReasonIsNullNotAnError()
+    {
+        // Diagnostic only: nothing decides on it, so a backend that omits it must not fail the reply.
+        var body = JsonDocument.Parse("""
+        {
+          "choices": [ { "message": { "role": "assistant", "content": "x" } } ],
+          "usage": { "prompt_tokens": 5, "completion_tokens": 6 }
+        }
+        """).RootElement.Clone();
+
+        Assert.Null(KimiAnalystModel.ToReply(body).FinishReason);
+    }
+
+    [Fact]
     public void AnAssistantTurnReplaysItsProviderEchoVerbatimRatherThanRebuildingIt()
     {
         // The whole point. reasoning_content cannot be reconstructed from content + tool_calls, and the
