@@ -90,11 +90,15 @@ public sealed class RehearsalFixtureTests
                 Records: r.GetProperty("records").GetInt32()))
             .ToList();
 
-        var expected = graph.EntryStepIds
-            .Select(id => (Role: (string?)StepRoles.Entry, Step: (string?)graph.Names[id], Records: RehearsalPanels.Fires))
-            .Concat(graph.Steps.Where(s => s.NextStepIds.Count == 0)
-                .Select(s => (Role: (string?)StepRoles.Terminal, Step: (string?)graph.Names[s.StepId],
-                    Records: panels.Ledger.Single(l => l.StepId == s.StepId).Outcomes)))
+        // The orchestrator's rule, spelled out per step: persist-file's Completed outcomes advance
+        // nowhere (its only successor takes Failed), and record-outcome has no successors at all.
+        var good = scenario == "quiet" ? 34 : 17;
+        var expected = new List<(string? Role, string? Step, int Records)>
+            {
+                (StepRoles.Entry, graph.Names[RehearsalGraph.ImportStep], RehearsalPanels.Fires),
+                (StepRoles.Terminal, graph.Names[RehearsalGraph.PersistStep], good),
+                (StepRoles.Terminal, graph.Names[RehearsalGraph.RecordStep], 6),
+            }
             .OrderBy(r => r.Role).ThenBy(r => r.Step)
             .ToList();
 
@@ -154,17 +158,19 @@ public sealed class RehearsalFixtureTests
     }
 
     [Fact]
-    public void TheQuietWindowHoldsTheTrapsAV12PromptMustNotMistakeForFaults()
+    public void TheQuietWindowHoldsTheTrapsAPromptMustNotMistakeForFaults()
     {
         var panels = RehearsalPanels.Quiet();
-        var terminal = Read(panels, "run-boundaries").GetProperty("byStep").EnumerateArray()
+        var terminalSteps = Read(panels, "run-boundaries").GetProperty("byStep").EnumerateArray()
             .Where(r => r.GetProperty("role").GetString() == StepRoles.Terminal)
-            .Sum(r => r.GetProperty("records").GetInt32());
+            .Select(r => r.GetProperty("step").GetString())
+            .ToList();
 
-        // Item-caused failures, empty-poll cancellations, and completed items with no terminal record.
+        // Item-caused failures, and empty-poll cancellations that end their branch with no terminal
+        // record: the importer has successors, so a Cancelled outcome there is not an exit edge.
         Assert.True(panels.Ledger.Sum(s => s.Failed) > 0);
         Assert.True(RehearsalPanels.DrainedPolls > 0);
-        Assert.True(terminal < RehearsalPanels.RecordsImported);
+        Assert.DoesNotContain(RehearsalGraph.Graph.Names[RehearsalGraph.ImportStep], terminalSteps);
     }
 
     /// <summary>

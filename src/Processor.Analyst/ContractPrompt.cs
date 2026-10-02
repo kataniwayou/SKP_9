@@ -81,13 +81,16 @@ internal static class ContractPrompt
           result, where the branch goes or that it ends: use it, do not re-derive it.
         - run-boundaries is the workflow's two edges for the fires that entered in the window. entry
           rows count dispatches, one per entry step each time a fire sent it work; terminal rows
-          count the outcomes of steps with no successors in the graph, by step, whatever the result.
-          Only branches that end at such a step are counted: a path whose last step has successors
-          that accept only other results produces no terminal record, so terminal can be zero in a
-          healthy window and its absence is not a stall by itself. Nothing between the edges is
-          here: judge a stall from the step-outcomes totals and the step-failures samples, set
-          against the items the importer took in (recordsImported) and the routing in the running
-          graph. Entry with recordsImported 0 is a quiet window.
+          count, by step, the outcomes at the run's exit edges: a Completed outcome that no
+          successor accepts, and any outcome of a step with no successors in the graph. A Failed or
+          Cancelled outcome that ends its branch at a step with successors is not terminal, so
+          terminal does not count every branch ending: an item that is cancelled, or fails where no
+          failure path takes it, writes no terminal record. The routing in the running graph says
+          which steps are exit edges and how many terminal records each path writes there. Nothing
+          between the edges is here: judge a stall from the step-outcomes totals and the
+          step-failures samples, set against the items the importer took in (recordsImported) and
+          the routing in the running graph, with terminal as one more count the routing must
+          explain. Entry with recordsImported 0 is a quiet window.
         - step-outcomes counts one record per step execution, summed over every step: it has no step
           dimension, so it can confirm a total but never which step produced it. Never attribute a
           count to a step the panel cannot name.

@@ -98,8 +98,9 @@ REFUSED_KQL = 'severity_text:"Error" and attributes.Queue:*'
 # outcome selector under the widened filter still matches 181,732 records and zero refusals.
 #
 # The step-role selector. The records carrying a StepRole are exactly the scheduler's dispatch
-# records ("dispatched an entry step", role entry) and the branch-ends records of steps with no
-# successors (role terminal, any result). Nothing else in the store carries the field.
+# records ("dispatched an entry step", role entry) and the branch-ends records at the run's exit edge
+# (role terminal: a Completed outcome no successor accepts, or any outcome of a step with no
+# successors). Nothing else in the store carries the field.
 #
 # THIS CLAUSE HAD TO GO IN THE DASHBOARD QUERY FOR A SHARPER REASON THAN THE REFUSAL ONE. The dispatch
 # record carries no Result, and the orchestrator's records are excluded from COUNTED_KQL by name, so
@@ -110,7 +111,8 @@ REFUSED_KQL = 'severity_text:"Error" and attributes.Queue:*'
 STEPROLE_KQL = "attributes.StepRole:*"
 
 # The run's two edges for the fires that entered in range: each entry-step dispatch (entry) and each
-# outcome of a step with no successors (terminal), by role and step name. Only those two kinds of
+# exit-edge outcome (terminal: Completed with no successor accepting it, or any outcome of a step with
+# no successors), by role and step name. Only those two kinds of
 # record carry attributes.StepRole, so the WHERE alone keeps every other atom out; INLINE STATS keeps
 # only fires with an entry record in range, so a fire that began before the range does not show as
 # phantom terminal outcomes. Kept byte-identical to the export so check 14 catches drift.

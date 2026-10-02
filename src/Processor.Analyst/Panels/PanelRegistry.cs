@@ -456,11 +456,11 @@ internal static class PanelRegistry
             Description:
                 "The workflow's two edges for the fires that entered in this window. entry rows count " +
                 "dispatches: one per entry step each time a fire sent it work (with one entry step, " +
-                "entry equals fires). terminal rows count the outcomes returned by steps with no " +
-                "successors in the graph, by step, whatever their result. Only branches that end at such " +
-                "a step are counted: a path whose last step has successors that accept only other " +
-                "results produces no terminal record, so terminal can be zero in a healthy window and " +
-                "its absence is not a stall by itself. Nothing between the edges is on this panel: judge " +
+                "entry equals fires). terminal rows count, by step, the outcomes at the run's exit edges: " +
+                "a Completed outcome that no successor accepts, and any outcome of a step with no " +
+                "successors in the graph. A Failed or Cancelled outcome that ends its branch at a step " +
+                "with successors is not terminal, so terminal does not count every branch ending and " +
+                "its absence alone is not a stall. Nothing between the edges is on this panel: judge " +
                 "a stall from step-outcomes (completed, failed and cancelled totals) and step-failures " +
                 "against recordsImported and the routing in the running graph. recordsImported is how " +
                 "many items the importer took in; pollsThatImported and drainedPolls split its polls. " +

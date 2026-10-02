@@ -1,8 +1,10 @@
 # Offline drop: the StepRole change set (run edges)
 
 `RunPosition` is gone; `StepRole` marks only the two **edges** of a workflow run: `entry` on each
-"dispatched an entry step" record, and `terminal` on the branch-ends outcome record of a step with
-**no successors** in the workflow's graph. There is no `intermediate` and there are no role keys.
+"dispatched an entry step" record, and `terminal` on the branch-ends outcome record at the run's
+**exit edge**: a Completed outcome no successor accepts, or any outcome of a step with **no
+successors** in the workflow's graph (the second half alone until `6a492b5`, 2026-10-02). There is
+no `intermediate` and there are no role keys.
 Spec: `docs/superpowers/specs/2026-10-02-step-role-edges-design.md` (it supersedes the role model of
 `2026-10-02-step-role-design.md`). Commits `0688b06..dc4fa54` (the first StepRole model) and
 `c105f8a..ad5311b` (the edges model) on `feature/path-importer`; an offline tree that never received
@@ -32,7 +34,7 @@ root files `Directory.Build.props`, `Directory.Packages.props`, `NuGet.config`, 
   `Messaging.Transport`. Every project's `packages.lock.json` moved with them.
 - `src/BaseApi.Service` (`L2ProjectionWriter`: writes no role keys).
 - `src/Orchestrator` (`WorkflowActivator`, `WorkflowFireJob` -- stamps `entry` after a successful
-  send; `StepOutcomeHandler` -- stamps `terminal` from the L1 graph it already holds).
+  send; `StepOutcomeHandler` -- stamps `terminal` from the result and the L1 graph it already holds).
 - `src/Processor.Analyst` (`PanelRegistry`, `ContractPrompt`, `ElasticPanelSource`, `RehearsalPanels`).
 - `kibana/kibana-export.ndjson` (the run-edges pie), `k8s/43-processor-analyst.yaml` (adds
   `Analyst__Bit__Mode`).
@@ -43,7 +45,7 @@ root files `Directory.Build.props`, `Directory.Packages.props`, `NuGet.config`, 
 
 Changed **outside** the scope (the delta will not list them):
 
-- `tools/analyst-prompt-v12.txt`. It is not a file the offline side needs to run: the prompt
+- `tools/analyst-prompt-v13.txt` (v12 until the exit-edge rule). It is not a file the offline side needs to run: the prompt
   travels inside the `analyst-monitor-cfg` assignment payload (section 4;
   `docs/rebuild-analyst-monitor-workflow.md` §6.1 names the file and carries the payload). Carry the
   file by hand if you want to generate the payload rather than trust the escaping.
@@ -71,7 +73,7 @@ L1 graph, which it loads at start like every other step fact. Rebuild, load and 
    dotnet build src/Processor.Analyst/Processor.Analyst.csproj
    $asm  = [Reflection.Assembly]::LoadFrom((Resolve-Path "src/Processor.Analyst/bin/Debug/net8.0/Processor.Analyst.dll"))
    $hash = ($asm.GetCustomAttributes([Reflection.AssemblyMetadataAttribute], $false) | Where-Object { $_.Key -eq 'SourceHash' }).Value
-   $hash   # dev 2026-10-02: 5b49f3022de3aa666c9a0e74ad74ad45404dcda7b67303ac4e88d155beee9a1f (only if the source is identical)
+   $hash   # dev 2026-10-02 (exit-edge rule, v13): 45f49c4ede1ec334aee3bbe87276b372c0eedfd419725a910ecc8d3d80067e82 (only if the source is identical)
    ```
 
    Repoint the existing row (expect `UPDATE 1`):
@@ -146,7 +148,8 @@ never ran the first model has no such keys and skips this.
   (Without the manifest: `kubectl -n skp set env deploy/processor-analyst Analyst__Bit__Mode=StructureOnly`.)
   The BIT then checks the prompt's structure only; nothing is spent on the fitness gate. Apply
   before the rollout in section 2 step 3, or roll once more after it.
-- Prompt v12 goes into `analyst-monitor-cfg`: `GET /api/v1/assignments/<id>`, then `PUT` it back
+- Prompt v13 goes into `analyst-monitor-cfg` (v12 before the exit-edge rule; a v12 Analyst reads the
+  new `terminal` rows under the old meaning, so ship v13 with the orchestrator): `GET /api/v1/assignments/<id>`, then `PUT` it back
   with **every field resent** (`name`, `version`, `description`, `stepId`, `payload`), changing only
   the `prompt` inside `payload`. The `targetWorkflowId` and the other payload fields stay as they
   were. Dev: GET showed v11, PUT returned 200, read-back matched v12 with every other field equal.
@@ -160,17 +163,20 @@ never ran the first model has no such keys and skips this.
 - **`entry`** counts dispatches: one record per entry step a fire sent work to, written only after a
   successful send. With one entry step it equals fires. A drained (empty) poll is still a fire and
   still has its `entry` record.
-- **`terminal`** counts outcome records of steps that have **no successors** in the workflow's
-  graph, whatever the result. It counts only branches that end at such a step. Failures,
-  cancellations and successes that end a branch at a step *with* successors (successors that accept
-  only other results) write no `terminal` record. **On the filefetcher-archiveexpander chain the only
-  step with no successors is export-outcome, reached only by failed items** (via record-outcome), so
-  `terminal` counts recorded-and-exported failures. Good items end at split-exporter, whose only
-  successor accepts Failed; cancellations end at sk-normalizer-sample; empty polls end at
-  split-importer. None of them is a terminal.
-- **A missing `terminal` is not a stall.** A healthy window with no failures has `terminal` 0. A stall
-  is judged from `step-outcomes` (completed/failed/cancelled totals) and `step-failures` against
-  `recordsImported` and the routing in the running graph.
+- **`terminal`** counts outcome records at the run's **exit edge**, by its position in the graph: a
+  **Completed** outcome that no successor accepts, or **any** outcome of a step with **no
+  successors**. A Failed or Cancelled outcome that ends its branch at a step *with* successors writes
+  no `terminal` record. **On the filefetcher-archiveexpander chain the exit edges are split-exporter
+  and export-outcome**: good items end at split-exporter with Completed (its only successor accepts
+  Failed) -- two terminal records per good item, because the sample normalizer forks -- and failed
+  items end at export-outcome via record-outcome. Cancellations at sk-normalizer-sample and empty
+  polls at split-importer are not terminal.
+- **A missing `terminal` alone is not a stall.** A window whose items are all cancelled has no
+  `terminal`. A stall is judged from `step-outcomes` (completed/failed/cancelled totals) and
+  `step-failures` against `recordsImported` and the routing in the running graph, with `terminal` as
+  one more count the routing must explain.
+- Until `6a492b5` (deployed 2026-10-02 evening) `terminal` was stamped only on steps with no
+  successors, so older records show failures only on this chain.
 - The pie (inner ring by StepRole, outer ring by step, metric `records`) counts every StepRole record
   of the fires that entered in the selected range. The Analyst's `run-boundaries` value is
   `{totalWorkflowRecords, fires, importerPolls, pollsThatImported, drainedPolls, recordsImported,

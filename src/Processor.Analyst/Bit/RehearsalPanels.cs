@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Messaging.Contracts;
+using Processor.Analyst.Graph;
 using Processor.Analyst.Panels;
 
 namespace Processor.Analyst.Bit;
@@ -49,18 +50,19 @@ internal sealed class RehearsalPanels : IPanelReader
     private static readonly TimeSpan Step = TimeSpan.FromSeconds(15);
 
     /// <summary>
-    /// A busy window with nothing to report, and the traps a v12 prompt must not mistake for faults:
-    /// 6 items failed validation for a cause in the item itself, 5 polls found nothing and cancelled,
-    /// and the 34 good items ended at persist-file with no terminal record, so terminal reads 6 against 40
-    /// imported. Every count is the routing doing its job.
+    /// A busy window with nothing to report, and the traps a prompt must not mistake for faults:
+    /// 6 items failed validation for a cause in the item itself, and 5 polls found nothing and
+    /// cancelled with no terminal record. terminal reads 34 at persist-file (the good items' Completed
+    /// exit) and 6 at record-outcome (the rejected items' exit). Every count is the routing doing its job.
     /// </summary>
     internal static RehearsalPanels Quiet() => new(lost: 0);
 
     /// <summary>
     /// The same window with one unambiguous fault: work thrown away DURING the window. 17 of the 34
     /// deliveries to persist-file were parked because their input could not be read, so its dead-letter queue
-    /// grows from 0 to 17, 17 parked refusals land, and the step-outcomes totals fall 17 short of what
-    /// the routing predicts for 40 imported items. Three panels agree on the same loss.
+    /// grows from 0 to 17, 17 parked refusals land, the step-outcomes totals fall 17 short of what
+    /// the routing predicts for 40 imported items, and terminal at persist-file reads 17 against 34
+    /// good items. Four readings agree on the same loss.
     /// <para>
     /// <b>Not a standing depth.</b> A depth that sits flat across the window with no refusals is an
     /// old backlog, which the prompt is allowed to rule out from other panels; planting one here
@@ -197,12 +199,10 @@ internal sealed class RehearsalPanels : IPanelReader
         var graph = RehearsalGraph.Graph;
         var rows = graph.EntryStepIds
             .Select(id => new { role = StepRoles.Entry, step = graph.Names[id], records = Fires })
-            .Concat(graph.Steps.Where(s => s.NextStepIds.Count == 0).Select(s => new
-            {
-                role = StepRoles.Terminal,
-                step = graph.Names[s.StepId],
-                records = Ledger.Single(l => l.StepId == s.StepId).Outcomes,
-            }))
+            .Concat(graph.Steps
+                .Select(s => new { s.StepId, records = TerminalRecords(s, graph.Steps) })
+                .Where(t => t.records > 0)
+                .Select(t => new { role = StepRoles.Terminal, step = graph.Names[t.StepId], t.records }))
             .ToList();
 
         return (Serialize(new
@@ -215,6 +215,25 @@ internal sealed class RehearsalPanels : IPanelReader
             recordsImported = RecordsImported,
             byStep = rows,
         }), rows.Sum(r => r.records));
+    }
+
+    /// <summary>
+    /// The orchestrator's terminal rule applied to the ledger: every outcome of a step with no
+    /// successors, or the Completed outcomes of a step whose successors all decline Completed.
+    /// </summary>
+    private int TerminalRecords(StepL1 step, IReadOnlyList<StepL1> steps)
+    {
+        var ledger = Ledger.Single(l => l.StepId == step.StepId);
+        if (step.NextStepIds.Count == 0)
+        {
+            return ledger.Outcomes;
+        }
+
+        var completedAdvances = step.NextStepIds
+            .Select(id => steps.Single(s => s.StepId == id))
+            .Any(next => GraphRenderer.Accepts(next.EntryCondition, StepResult.Completed));
+
+        return completedAdvances ? 0 : ledger.Completed;
     }
 
     private static string ValidatorQueue => $"processor-{RehearsalGraph.ValidatorProcessor:D}";

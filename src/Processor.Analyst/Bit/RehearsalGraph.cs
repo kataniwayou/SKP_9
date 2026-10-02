@@ -10,11 +10,12 @@ namespace Processor.Analyst.Bit;
 /// <para>
 /// <b>Four steps carrying the edges model's traps, in miniature.</b> import-paths takes items in and
 /// cancels on an empty poll. validate-file fails the items whose extension it refuses. persist-file
-/// stores the good items; its only successor accepts Failed, so a completed item's branch ends there
-/// with <i>no</i> terminal record. record-outcome records failures and is the only step with no
-/// successors, so every terminal record in a healthy window is a failed item. (The briefing labels
-/// breadth-first, so record-outcome renders as S3 and persist-file as S4.) That is the shape of
-/// filefetcher-archiveexpander-chain, where a healthy window shows entry and terminal = failures only.
+/// stores the good items; its only successor accepts Failed, so a Completed item ends its run there
+/// and that outcome is terminal although the step has a successor. record-outcome records failures
+/// and is the only step with no successors, so every outcome of it is terminal. An empty poll
+/// cancels at import-paths, which has successors, so it writes no terminal record. (The briefing
+/// labels breadth-first, so record-outcome renders as S3 and persist-file as S4.) That is the shape
+/// of filefetcher-archiveexpander-chain: split-exporter and export-outcome are its exit edges.
 /// </para>
 /// <para>
 /// <b>Compiled in, like <see cref="BitPrompt"/> and <see cref="RehearsalPanels"/>:</b> the standard a

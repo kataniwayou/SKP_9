@@ -65,9 +65,9 @@ internal sealed class GroundTruthRehearsal(
         {
             return [new StageProblem("verify", "contradicting",
                 "against a quiet rehearsal window -- every count one the running graph's routing "
-                + "explains (6 items rejected for their own extension, 5 empty polls cancelled, the 34 "
-                + "good items ending with no terminal record), every dead-letter queue at zero, no "
-                + "refusal -- the prompt still produced a finding: "
+                + "explains (6 items rejected for their own extension, 5 empty polls cancelled with no "
+                + "terminal record, terminal 34 at persist-file and 6 at record-outcome), every "
+                + "dead-letter queue at zero, no refusal -- the prompt still produced a finding: "
                 + Summarise(invented.Value)
                 + " -- an operator who is woken by a quiet window learns to ignore the next alert")];
         }
@@ -79,9 +79,10 @@ internal sealed class GroundTruthRehearsal(
         {
             return [new StageProblem("verify", "contradicting",
                 "against a rehearsal window in which a dead-letter queue grew from 0 to 17 while 17 "
-                + "parked refusals landed and the step-outcomes totals fell 17 short of the routing's "
-                + $"prediction, the prompt reported nothing: \"{missed.Reason}\" -- work this deployment "
-                + "threw away during the window went unreported, though three panels agree on the loss")];
+                + "parked refusals landed, the step-outcomes totals fell 17 short of the routing's "
+                + "prediction and terminal at persist-file read 17 against 34 good items, the prompt "
+                + $"reported nothing: \"{missed.Reason}\" -- work this deployment threw away during the "
+                + "window went unreported, though four readings agree on the loss")];
         }
 
         logger.LogInformation(

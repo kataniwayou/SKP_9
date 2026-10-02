@@ -31,8 +31,8 @@ internal static class BitPrompt
         result (Completed, Failed, Cancelled), the steps that result goes to, or "branch ends". It
         then reads panels one at a time, from a closed set: step-outcomes (outcome totals by result,
         with no step dimension), run-boundaries (the fires that entered, the items the importer took
-        in, and the run's two edges: entry dispatches, and terminal outcomes of steps that have no
-        successors), step-failures (the failure total and five sampled failures with their cause),
+        in, and the run's two edges: entry dispatches, and terminal outcomes -- a Completed outcome
+        no successor accepts, or any outcome of a step with no successors), step-failures (the failure total and five sampled failures with their cause),
         refused-messages (deliveries refused and parked, with their exception), dead-letter-depth,
         queue-wait and processor-liveness. Instructions that refer to the running-graph block or to
         these panels are referring to things the agent really has.
@@ -42,16 +42,19 @@ internal static class BitPrompt
             A workflow fires once a minute. Its importer takes items in; a validation step fails
             the items whose file type it refuses and routes them to a recorder step, the only step
             with no successors; the good items end at a persisting step whose only successor
-            accepts Failed, so a good item's branch ends with no terminal record. In a 15-minute
-            window, run-boundaries shows 15 fires, 40 items imported and 6 terminal records.
-            step-failures shows 6 failures, every sampled cause a refused file type. Five polls
-            found nothing and cancelled. One dead-letter queue grew from 0 to 17 during the window
-            while 17 parked refusals landed, and the step-outcomes totals are 17 short of what
-            the routing predicts for 40 items. One host-level panel returned no series at all.
+            accepts Failed, so a good item's Completed outcome there is terminal. Empty polls
+            cancel at the importer, which has successors, so they write no terminal record. In a
+            15-minute window, run-boundaries shows 15 fires, 40 items imported, and terminal 6 at
+            the recorder and 17 at the persisting step. step-failures shows 6 failures, every
+            sampled cause a refused file type. Five polls found nothing and cancelled. One
+            dead-letter queue grew from 0 to 17 during the window while 17 parked refusals landed,
+            and the step-outcomes totals are 17 short of what the routing predicts for 40 items.
+            One host-level panel returned no series at all.
 
-        A fit investigation reports the loss of 17 items, which three panels agree on, and nothing
-        else: the 6 failures are the workflow rejecting bad input, the cancellations are empty
-        polls ending their branch, and 6 terminal records against 40 items is the routing at work,
+        A fit investigation reports the loss of 17 items, which four readings agree on (terminal
+        17 against 34 good items is the same loss), and nothing else: the 6 failures are the
+        workflow rejecting bad input and reaching their exit at the recorder, the cancellations are
+        empty polls ending their branch with no terminal record, and that is the routing at work,
         not a stall. The missing series must be classified, not read as health or as a fault.
 
         Instructions fit for this scenario must: require the agent to understand the running graph
@@ -64,8 +67,8 @@ internal static class BitPrompt
         count the routing explains, however large, from a fault; and require the verification to be
         able to conclude that nothing is worth reporting.
 
-        Instructions that would treat every failure, every cancellation, or an entry with no
-        matching terminal as a fault, without setting it against the routing and the failure's
+        Instructions that would treat every failure, every cancellation, or a branch ending with no
+        terminal record as a fault, without setting it against the routing and the failure's
         cause, cannot reach the right answer on this scenario: that is MALFORMED at the stage that
         defines what success and failure look like — report it there, quoting the instruction.
 

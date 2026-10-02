@@ -1,5 +1,12 @@
 # StepRole on the run's edges only
 
+> **Amended 2026-10-02 (evening), `6a492b5`: `terminal` is the run's exit edge by position in the
+> graph -- a Completed outcome that no successor accepts, OR any outcome of a step with no
+> successors.** E3 below describes only the second half. On filefetcher-archiveexpander-chain the
+> exit edges are split-exporter (good items) and export-outcome (failed items). Analyst prompt v13,
+> the primer, the panel description, the BIT exam and rehearsal, and the Kibana description follow.
+
+
 Date: 2026-10-02. Status: approved by the user in conversation; supersedes the role model of
 `2026-10-02-step-role-design.md` (D1, D3–D6 and the role-key storage). Implemented
 (`c105f8a..ad5311b`) and deployed to dev on 2026-10-02 (replay capture and deploy note: `7f9c54e`).

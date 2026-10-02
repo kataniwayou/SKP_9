@@ -411,7 +411,9 @@ internal sealed class ElasticPanelSource
     /// workflow in the window -- is the scope count. At zero nothing was reported at all, and every
     /// flag is false. Above zero the workflow is reporting, so <c>SeriesPresent</c> and
     /// <c>NoDataDistinguishable</c> are true and entry records with no terminal records are a trusted
-    /// reading (a stall, or a quiet window when nothing was imported), not a gap. The window is fully
+    /// reading (a quiet window when nothing was imported, or work that never reached an exit edge),
+    /// not a gap. terminal is a Completed outcome no successor accepts, or any outcome of a step with
+    /// no successors (see StepRoles). The window is fully
     /// covered only when the earliest entry record sits within <see cref="CoverageTolerance"/> of the
     /// window's start; no entry at all is not covered.
     /// </para>

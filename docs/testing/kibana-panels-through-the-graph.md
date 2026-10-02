@@ -102,26 +102,27 @@ count, so a fire that began before the window never shows up as phantom terminal
   dispatches the entry step. It is not the step's outcomes. The split importer returns one outcome per
   record it imported, but it is dispatched once per poll, so this slice counts polls (one per fire), not
   records imported.
-- **`terminal`** counts outcomes of steps with no successors, whatever the result. It is a property of
-  the graph, not of the result, so a terminal step that Failed still counts. One record per outcome.
+- **`terminal`** counts outcomes at the run's exit edge: a **Completed** outcome that no successor
+  accepts, or **any** outcome of a step with no successors (so a step with no successors that Failed
+  still counts). One record per outcome.
 - **The middle of the graph is not on this panel.** No record between the two edges carries a role, so
   the Step outcomes panels (§3.1) are where to look for where work was lost or cancelled.
-- **Terminal counts only branches that end at a step with no successors.** A path whose last step
-  has successors that accept only other results writes no terminal record. In the §1 graph the only
-  such step is export-outcome, reached only by failed items (record-outcome accepts Failed and passes
-  its Completed to export-outcome); a good item's branch ends at split-exporter, which has a successor
-  and so is not terminal. Terminal is therefore zero in a healthy window with no bad input, and its
-  absence is **not** a stall by itself: judge a stall from the Step outcomes panels (§3.1, §3.2)
-  against the records imported and the routing. With every poll drained, entry with no terminal is a
-  quiet window.
+- **A Failed or Cancelled outcome at a step with successors is not terminal.** In the §1 graph the exit
+  edges are split-exporter (a good item's Completed outcome: its only successor, record-outcome,
+  accepts Failed) and export-outcome (no successors, reached by failed items through record-outcome).
+  A good item writes two terminal records at split-exporter, because the sample normalizer forks.
+  Cancellations at sk-normalizer-sample and empty polls at split-importer write none, so terminal's
+  absence alone is **not** a stall: judge a stall from the Step outcomes panels (§3.1, §3.2) against
+  the records imported and the routing. With every poll drained, entry with no terminal is a quiet
+  window.
 
 The Step and Outcome dashboard controls do **not** apply to this panel. They filter out the dispatch
 record, which carries no Result and belongs to the entry step only, so they empty or skew the pie. The
 workflow control scopes it.
 
-Verified numbers come from the `endless-feed-edges` capture (window 2026-10-02 17:58:45-18:13:45Z, after
-the edges rollout): entry 15 at split-importer, terminal 75 at export-outcome (the failed items), 15
-fires, 125 items imported. A missing terminal is not a stall: a healthy window may have none.
+The `endless-feed-edges` capture (window 2026-10-02 17:58:45-18:13:45Z) predates the exit-edge rule
+(`6a492b5`): it shows entry 15 at split-importer and terminal 75 at export-outcome only. Under the
+current rule the same window would also carry terminal 50 at split-exporter (25 good items, two each).
 
 ### 3.4 Whitelist pies
 
