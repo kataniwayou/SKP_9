@@ -7,6 +7,9 @@ internal enum PanelKind
 {
     Elastic,
     Prometheus,
+
+    /// <summary>One or more ES|QL statements posted to <c>/_query</c>; see <see cref="PanelDefinition.Query"/>.</summary>
+    Esql,
 }
 
 /// <summary>
@@ -30,6 +33,8 @@ internal enum PanelKind
 /// <c>{{WORKFLOW}}</c> substituted at read time — the window's bounds (<c>o</c>-formatted, UTC) and
 /// the target workflow id (<c>"D"</c>-formatted, matching
 /// <c>BaseApi.Tests.Live.Resilience.ElasticLogReader</c>'s own use of the same field).
+/// For <see cref="PanelKind.Esql"/>, one or more ES|QL statements separated by a line holding only
+/// <c>---</c>, each posted to <c>/_query</c> in order, with the same three placeholders.
 /// </param>
 internal sealed record PanelDefinition(
     string PanelId, string Layer, string Description, PanelKind Kind, string Query);
@@ -438,96 +443,45 @@ internal static class PanelRegistry
                 }
                 """)),
 
-        // THE AGENT'S COUNTERPART TO THE OPERATOR'S RUN-BOUNDARY PIE (skp-runposition-pie). Since
-        // 2026-10-01 both count the same thing: fires that entered in the range, and every terminal
-        // record of those fires. The pie does it in ES|QL; this panel does it with a terms join on
-        // CorrelationId, because ElasticPanelSource reads _search. Keep the two in step -- the
-        // maintenance rule above is the only thing that detects drift between them.
+        // THE AGENT'S COUNTERPART TO THE OPERATOR'S FUNNEL ON THE KIBANA BOARD. Both count the same
+        // thing: for the fires whose entry record falls in the range, the outcome handler's one record
+        // per returned outcome (OutcomeTemplates), by the step's StepRole and name. Three ES|QL
+        // statements, split on a line holding only "---" and posted to /_query in order: fires,
+        // funnel, polls. Keep this in step with the board -- the maintenance rule above is the only
+        // thing that detects drift between them.
         new PanelDefinition(
             PanelId: "run-boundaries",
             Layer: "business",
             Description:
-                "Where this workflow's runs began and ended in the window. entry is the number of " +
-                "fires that ENTERED in the window (distinct CorrelationIds with an entry record); " +
-                "terminal is the number of branch ends belonging to those fires (terminal records " +
-                "whose CorrelationId is one of them), however far each fire fanned out. A terminal " +
-                "of a fire that entered before the window is not counted. The operator reads the " +
-                "same two numbers as the run-boundaries pie on the Kibana board. " +
-                "THERE IS NO FIXED RATIO between the two. A branch ends where no next step accepts " +
-                "its outcome, and a fork multiplies the branches after it, so terminals per fire " +
-                "follow from the workflow's graph AND from how many records each fire imported: the " +
-                "same healthy workflow reads about 1:1 idle and many terminals per fire when busy. " +
-                "Do NOT report a shortfall against an assumed ratio; the prompt describes the " +
-                "target workflow's graph. " +
-                "entry ABOVE ZERO WITH TERMINAL AT ZERO is the one unambiguous finding: the " +
-                "workflow is alive -- the schedule fired, the leader held the lease, the gate was " +
-                "open, the dispatch reached a queue -- and nothing completed. " +
-                "pollsThatImported is how many fires' importer polls read at least one item and sent it " +
-                "downstream; drainedPolls is how many read nothing (the two sum to importerPolls). Only " +
-                "a drained poll ends Cancelled at the importer; a poll that imported ends wherever its " +
-                "items' paths end. " +
-                "drainedPolls out of importerPolls is how many fires sent nothing downstream. Such " +
-                "a fire is NOT missing a terminal: the importer reports Cancelled, which the " +
-                "orchestrator records as that fire's terminal, so an idle workflow sits near 1:1 " +
-                "rather than at terminal zero. Never explain missing terminals with drainedPolls; " +
-                "a fire with no terminal is work that started and did not finish. " +
-                "entry AT ZERO means the workflow did not fire at all: stopped, no leader " +
-                "dispatching, or the projection store gate shut. " +
-                "A reading NOT fully covering the window here can also mean more runs touched the " +
-                "window than the reading could hold; entry and terminal are then lower bounds. " +
-                "Scoped to the target workflow by attributes.WorkflowId.",
-            Kind: PanelKind.Elastic,
-            Query: WithRunPositions(
+                "The workflow's funnel for the fires that entered in this window: how many outcomes " +
+                "each step returned, with each step's role in the graph (entry, intermediate, " +
+                "terminal). A step's count against its predecessors' is where items dropped — " +
+                "failures routed elsewhere, cancellations ending in place. terminal means a step with " +
+                "no successors returned an outcome, not that a branch ended. fires is the number of " +
+                "fires that entered; pollsThatImported and drainedPolls split the importer's polls. " +
+                "A stall is the funnel stopping after entry. A fire still running at the window's end " +
+                "has not returned its later outcomes yet.",
+            Kind: PanelKind.Esql,
+            Query: WithOutcomeTemplates(
                 """
-                {
-                  "size": 0,
-                  "track_total_hits": true,
-                  "query": {
-                    "bool": {
-                      "filter": [
-                        { "range": { "@timestamp": { "gte": "{{FROM}}", "lte": "{{TO}}" } } },
-                        { "term": { "attributes.WorkflowId": "{{WORKFLOW}}" } }
-                      ]
-                    }
-                  },
-                  "aggs": {
-                    "boundaries": {
-                      "filter": {
-                        "terms": { "attributes.$KEY$": [ "$ENTRY$", "$TERMINAL$" ] }
-                      },
-                      "aggs": {
-                        "by_run": {
-                          "terms": { "field": "attributes.CorrelationId", "size": {{RUNS}} },
-                          "aggs": {
-                            "entry": { "filter": { "term": { "attributes.$KEY$": "$ENTRY$" } } },
-                            "terminal": { "filter": { "term": { "attributes.$KEY$": "$TERMINAL$" } } },
-                            "entered": {
-                              "bucket_selector": {
-                                "buckets_path": { "e": "entry._count" },
-                                "script": "params.e > 0"
-                              }
-                            }
-                          }
-                        },
-                        "entered_runs": { "stats_bucket": { "buckets_path": "by_run>entry._count" } },
-                        "entered_terminals": { "sum_bucket": { "buckets_path": "by_run>terminal._count" } }
-                      }
-                    },
-                    "polls": {
-                      "filter": {
-                        "term": {
-                          "attributes.{OriginalFormat}":
-                            "consumed {Consumed}/{Requested} records; stopped because {Reason}"
-                        }
-                      },
-                      "aggs": {
-                        "drained": { "filter": { "term": { "attributes.Consumed": 0 } } }
-                      }
-                    },
-                    "earliest": { "min": { "field": "@timestamp" } }
-                  }
-                }
-                """)),    ];
+                FROM logs-generic.otel-default
+                | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.$ROLE$ == "$ENTRY$"
+                | STATS fires = COUNT_DISTINCT(attributes.CorrelationId), earliest = MIN(@timestamp)
+                ---
+                FROM logs-generic.otel-default
+                | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.$ROLE$ IS NOT NULL
+                | EVAL entered = CASE(attributes.$ROLE$ == "$ENTRY$", 1, 0),
+                       counted = CASE(attributes.`{OriginalFormat}` IN ("$BRANCH_ENDS$", "$ADVANCED$"), 1, 0)
+                | INLINE STATS fire_entered = MAX(entered) BY attributes.CorrelationId
+                | WHERE fire_entered == 1 AND counted == 1
+                | STATS outcomes = COUNT(*) BY attributes.$ROLE$, attributes.StepName
+                | SORT outcomes DESC
+                ---
+                FROM logs-generic.otel-default
+                | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.`{OriginalFormat}` == "consumed {Consumed}/{Requested} records; stopped because {Reason}"
+                | STATS importerPolls = COUNT(*), drainedPolls = SUM(CASE(attributes.Consumed == 0, 1, 0))
+                """)),
+    ];
 
     /// <summary>
     /// Substitutes the refusal templates into a panel query once, at type-initialisation time.
@@ -550,14 +504,15 @@ internal static class PanelRegistry
         .Replace("$NOT_PARKED$", RefusalTemplates.NotParked, StringComparison.Ordinal);
 
     /// <summary>
-    /// Substitutes the run-position key and its two values into a panel query once, at
-    /// type-initialisation time — the same compile-time substitution, and for the same reason, as
-    /// <see cref="WithRefusalTemplates"/>: the orchestrator writes these values and a dashboard and
-    /// this panel both select on them, so a literal retyped here would be a copy no compiler holds
-    /// to the emitter.
+    /// Substitutes the outcome handler's two per-outcome templates, and the step-role key and its
+    /// entry value, into a panel query once, at type-initialisation time — the same compile-time
+    /// substitution, and for the same reason, as <see cref="WithRefusalTemplates"/>: the orchestrator
+    /// writes these values and a dashboard and this panel both select on them, so a literal retyped
+    /// here would be a copy no compiler holds to the emitter.
     /// </summary>
-    private static string WithRunPositions(string query) => query
-        .Replace("$KEY$", RunPositions.Key, StringComparison.Ordinal)
-        .Replace("$ENTRY$", RunPositions.Entry, StringComparison.Ordinal)
-        .Replace("$TERMINAL$", RunPositions.Terminal, StringComparison.Ordinal);
+    private static string WithOutcomeTemplates(string query) => query
+        .Replace("$ROLE$", StepRoles.Key, StringComparison.Ordinal)
+        .Replace("$ENTRY$", StepRoles.Entry, StringComparison.Ordinal)
+        .Replace("$BRANCH_ENDS$", OutcomeTemplates.BranchEnds, StringComparison.Ordinal)
+        .Replace("$ADVANCED$", OutcomeTemplates.Advanced, StringComparison.Ordinal);
 }

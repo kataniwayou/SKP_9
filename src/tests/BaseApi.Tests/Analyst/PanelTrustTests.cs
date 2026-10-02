@@ -36,6 +36,23 @@ public sealed class PanelTrustTests
     private static string Fixture(string name)
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Analyst", "Fixtures", name));
 
+    /// <summary>The target workflow, as the funnel tests name it.</summary>
+    private static readonly Guid W = TargetWorkflowId;
+
+    /// <summary>The busy-mixed-feed window's fifteen minutes: the esql-* fixtures' first entry is 19:08:00.408Z.</summary>
+    private static readonly TimeRange Range = new(
+        new DateTimeOffset(2026, 10, 1, 19, 8, 0, TimeSpan.Zero),
+        new DateTimeOffset(2026, 10, 1, 19, 23, 0, TimeSpan.Zero));
+
+    private static PanelDefinition RunBoundaries => Def("run-boundaries");
+
+    /// <summary>An Elastic source answering successive requests with <paramref name="responses"/>, in order.</summary>
+    private static ElasticPanelSource ElasticSource(params string[] responses) => ElasticSource(new SequencedHandler(responses));
+
+    private static ElasticPanelSource ElasticSource(SequencedHandler handler) => new(
+        new HttpClient(handler, disposeHandler: false),
+        Options.Create(new PanelSourceOptions { ElasticBaseUrl = "http://elasticsearch:9200" }));
+
     // ---------------------------------------------------------------------------------------
     // Prometheus
     // ---------------------------------------------------------------------------------------
@@ -342,111 +359,169 @@ public sealed class PanelTrustTests
         Assert.Contains(RefusalTemplates.NotParked, query, StringComparison.Ordinal);
     }
 
+    // ---------------------------------------------------------------------------------------
+    // run-boundaries: the StepRole funnel, read over ES|QL.
+    // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public void Elastic_RunBoundaries_ReportsBothEndsAndTheDrainedPollsThatExplainAGap()
+    public async Task TheFunnelCarriesEveryStepWithItsRole()
     {
-        var reading = ElasticPanelSource.Parse(
-            Def("run-boundaries"), Window, Fixture("elastic-run-boundaries-present.json"));
-
-        Assert.True(reading.Trust.SeriesPresent);
-        Assert.True(reading.Trust.NoDataDistinguishable);
-        Assert.Equal(940, reading.SampleCount);
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+            .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
         using var value = JsonDocument.Parse(reading.ValueJson);
-        var root = value.RootElement;
-
-        // 20 fires, 40 branch ends: the 1:2 of a workflow whose entry step opens two lineages.
-        Assert.Equal(20, root.GetProperty("entry").GetInt64());
-        Assert.Equal(40, root.GetProperty("terminal").GetInt64());
-
-        // 8 of the 20 polls read nothing; the other 12 imported, stated positively so it cannot be
-        // read the wrong way round.
-        Assert.Equal(20, root.GetProperty("importerPolls").GetInt64());
-        Assert.Equal(8, root.GetProperty("drainedPolls").GetInt64());
-        Assert.Equal(12, root.GetProperty("pollsThatImported").GetInt64());
-    }
-
-    [Fact]
-    public void Elastic_RunBoundaries_NoBoundariesWhileTheWorkflowIsReportingIsATrustedZero()
-    {
-        // The workflow is logging 940 records and not one is a run boundary. That is a real zero --
-        // the workflow is not firing at all -- rather than a gap, and it is drawable only because the
-        // query's scope is every record for the workflow rather than the boundaries themselves.
-        var reading = ElasticPanelSource.Parse(
-            Def("run-boundaries"), Window, Fixture("elastic-run-boundaries-zero.json"));
-
-        Assert.True(reading.Trust.SeriesPresent);
-        Assert.True(reading.Trust.NoDataDistinguishable);
-
-        using var value = JsonDocument.Parse(reading.ValueJson);
-        Assert.Equal(0, value.RootElement.GetProperty("entry").GetInt64());
-        Assert.Equal(0, value.RootElement.GetProperty("terminal").GetInt64());
-    }
-
-    [Fact]
-    public void Elastic_RunBoundaries_ReadsTheSiblingTotalsNotTheReturnedBuckets()
-    {
-        // The present fixture returns ONE bucket, yet 20 fires and 40 terminals. A parser that summed
-        // the buckets itself would report 1 and 2 -- and, worse, would count a fire bucket_selector
-        // kept by mistake. The totals are computed by Elasticsearch after the selector ran.
-        var reading = ElasticPanelSource.Parse(
-            Def("run-boundaries"), Window, Fixture("elastic-run-boundaries-present.json"));
-
-        using var value = JsonDocument.Parse(reading.ValueJson);
-        Assert.Equal(20, value.RootElement.GetProperty("entry").GetInt64());
-        Assert.Equal(40, value.RootElement.GetProperty("terminal").GetInt64());
+        Assert.Equal(15, value.RootElement.GetProperty("fires").GetInt64());
+        Assert.Equal(3, value.RootElement.GetProperty("byStep").GetArrayLength());
+        Assert.Equal("terminal", value.RootElement.GetProperty("byStep")[2].GetProperty("role").GetString());
+        Assert.Equal(15, value.RootElement.GetProperty("pollsThatImported").GetInt64());
         Assert.True(reading.Trust.WindowFullyCovered);
     }
 
     [Fact]
-    public void Elastic_RunBoundaries_MoreRunsThanBucketsIsNotFullyCovered()
+    public async Task AStalledWindowIsATrustedEntryOnlyFunnel()
     {
-        // sum_other_doc_count > 0: some runs never got a bucket, so entry and terminal are lower
-        // bounds. The reading is still returned -- a lower bound is evidence -- but it must not be
-        // trusted as covering the window.
-        var reading = ElasticPanelSource.Parse(
-            Def("run-boundaries"), Window, Fixture("elastic-run-boundaries-capped.json"));
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-stalled.json"), Fixture("esql-polls.json"))
+            .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
 
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal("entry", Assert.Single(value.RootElement.GetProperty("byStep").EnumerateArray()).GetProperty("role").GetString());
         Assert.True(reading.Trust.SeriesPresent);
+        Assert.True(reading.Trust.WindowFullyCovered);
+    }
+
+    [Fact]
+    public async Task TheFunnelKeepsEachStepsNameAndCountAndSumsThemAsTheSampleCount()
+    {
+        var reading = await ElasticSource(Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+            .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        var middle = value.RootElement.GetProperty("byStep")[1];
+        // The fixture lists outcomes FIRST: the columns are read by name, never by position.
+        Assert.Equal("intermediate", middle.GetProperty("role").GetString());
+        Assert.Equal("split-filefetcher", middle.GetProperty("step").GetString());
+        Assert.Equal(125, middle.GetProperty("outcomes").GetInt64());
+        Assert.Equal(15, value.RootElement.GetProperty("importerPolls").GetInt64());
+        Assert.Equal(0, value.RootElement.GetProperty("drainedPolls").GetInt64());
+        Assert.Equal(15 + 125 + 54, reading.SampleCount);
+        Assert.True(reading.Trust.NoDataDistinguishable);
+    }
+
+    [Fact]
+    public async Task AFirstEntryWellAfterTheWindowStartIsNotFullyCovered()
+    {
+        const string lateFires =
+            """{"columns":[{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[9,"2026-10-01T19:14:00.000Z"]]}""";
+
+        var reading = await ElasticSource(lateFires, Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+            .ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
         Assert.False(reading.Trust.WindowFullyCovered);
     }
 
+    [Fact]
+    public async Task NoFireInTheWindowReadsZeroAndIsNotFullyCovered()
+    {
+        // STATS with no BY over zero rows answers one row: COUNT_DISTINCT 0, MIN null, SUM null.
+        const string noFires =
+            """{"columns":[{"name":"fires","type":"long"},{"name":"earliest","type":"date"}],"values":[[0,null]]}""";
+        const string noFunnel =
+            """{"columns":[{"name":"outcomes","type":"long"},{"name":"attributes.StepRole","type":"keyword"},{"name":"attributes.StepName","type":"keyword"}],"values":[]}""";
+        const string noPolls =
+            """{"columns":[{"name":"importerPolls","type":"long"},{"name":"drainedPolls","type":"long"}],"values":[[0,null]]}""";
+
+        var reading = await ElasticSource(noFires, noFunnel, noPolls).ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(0, value.RootElement.GetProperty("fires").GetInt64());
+        Assert.Equal(0, value.RootElement.GetProperty("drainedPolls").GetInt64());
+        Assert.Equal(0, value.RootElement.GetProperty("byStep").GetArrayLength());
+        Assert.False(reading.Trust.WindowFullyCovered);
+    }
+
+    [Fact]
+    public async Task TheFunnelPostsEachStatementToQueryAsEscapedJson()
+    {
+        var handler = new SequencedHandler(
+            Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"));
+
+        await ElasticSource(handler).ReadAsync(RunBoundaries, W, Range, CancellationToken.None);
+
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.All(handler.Requests, r =>
+        {
+            Assert.Equal(HttpMethod.Post, r.Method);
+            Assert.Equal("/_query", r.Path);
+
+            // The statement carries quotes and the backticked {OriginalFormat} field: it must arrive
+            // as a JSON string, not spliced raw into the body.
+            using var body = JsonDocument.Parse(r.Body);
+            var statement = body.RootElement.GetProperty("query").GetString()!;
+            Assert.StartsWith($"FROM {PanelRegistry.ElasticIndex}", statement, StringComparison.Ordinal);
+            Assert.Contains($"attributes.WorkflowId == \"{W:D}\"", statement, StringComparison.Ordinal);
+            Assert.Contains("\"2026-10-01T19:08:00", statement, StringComparison.Ordinal);
+            Assert.DoesNotContain("{{", statement, StringComparison.Ordinal);
+            Assert.DoesNotContain("---", statement, StringComparison.Ordinal);
+        });
+
+        using var funnel = JsonDocument.Parse(handler.Requests[1].Body);
+        Assert.Contains("attributes.`{OriginalFormat}`", funnel.RootElement.GetProperty("query").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnHttpErrorOnAnyFunnelStatementIsPanelUnavailable()
+    {
+        var handler = new SequencedHandler(Fixture("esql-fires.json"), Fixture("elastic-index-not-found.json"))
+        {
+            StatusFor = i => i == 1 ? HttpStatusCode.BadRequest : HttpStatusCode.OK,
+        };
+
+        var ex = await Assert.ThrowsAsync<PanelUnavailableException>(
+            () => ElasticSource(handler).ReadAsync(RunBoundaries, W, Range, CancellationToken.None));
+
+        Assert.Contains("elasticsearch", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
-    [InlineData(0, 1)]
-    [InlineData(900, 900)]
-    [InlineData(21600, 21600)]
-    [InlineData(86400, 60000)]
-    public void RunsPlaceholderIsClampedToTheBucketLimit(int seconds, int expected)
+    [InlineData("not json")]
+    [InlineData("""{"columns":[{"name":"something_else","type":"long"}],"values":[[1]]}""")]
+    [InlineData("""{"error":{"type":"verification_exception","reason":"Unknown column"}}""")]
+    public async Task AnUnreadableFunnelResponseIsPanelUnavailable(string fires)
     {
-        var from = DateTimeOffset.FromUnixTimeSeconds(1790208000);
-        Assert.Equal(expected, ElasticPanelSource.RunsFor(new TimeRange(from, from.AddSeconds(seconds))));
+        await Assert.ThrowsAsync<PanelUnavailableException>(
+            () => ElasticSource(fires, Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"))
+                .ReadAsync(RunBoundaries, W, Range, CancellationToken.None));
     }
 
     [Fact]
-    public async Task ElasticPanelSource_RunBoundariesSubstitutesTheRunsBucketSize()
+    public void TheFunnelSelectsOnTheValuesTheOrchestratorActuallyWrites()
     {
-        var handler = new RecordingHandler(HttpStatusCode.OK, Fixture("elastic-run-boundaries-present.json"));
-        var source = new ElasticPanelSource(
-            new HttpClient(handler, disposeHandler: false),
-            Options.Create(new PanelSourceOptions { ElasticBaseUrl = "http://elasticsearch:9200" }));
+        // End-to-end pin: the panel selects on the same constants the orchestrator stamps and logs,
+        // not on a literal retyped into the query.
+        var query = RunBoundaries.Query;
 
-        await source.ReadAsync(Def("run-boundaries"), TargetWorkflowId, Window, CancellationToken.None);
-
-        // Window is six hours: 21,600 seconds, one bucket per possible one-second fire.
-        Assert.Contains("\"size\": 21600", handler.LastBody, StringComparison.Ordinal);
-        Assert.DoesNotContain("{{RUNS}}", handler.LastBody, StringComparison.Ordinal);
+        Assert.Equal(PanelKind.Esql, RunBoundaries.Kind);
+        Assert.Contains($"attributes.{StepRoles.Key} == \"{StepRoles.Entry}\"", query, StringComparison.Ordinal);
+        Assert.Contains(OutcomeTemplates.BranchEnds, query, StringComparison.Ordinal);
+        Assert.Contains(OutcomeTemplates.Advanced, query, StringComparison.Ordinal);
+        Assert.DoesNotContain("$", query, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Elastic_RunBoundaries_QueryCarriesTheValuesTheOrchestratorActuallyWrites()
+    public async Task LivePanelReader_RoutesTheFunnelToElasticsearchsQueryEndpoint()
     {
-        // End-to-end pin: the panel selects on the same constants WorkflowFireJob and
-        // StepOutcomeHandler tag their records with, not on a literal retyped into the query.
-        var query = Def("run-boundaries").Query;
+        var handler = new SequencedHandler(
+            Fixture("esql-fires.json"), Fixture("esql-funnel-healthy.json"), Fixture("esql-polls.json"));
+        var reader = new LivePanelReader(
+            ElasticSource(handler),
+            new PrometheusPanelSource(
+                new HttpClient(new RecordingHandler(HttpStatusCode.OK, "{}"), disposeHandler: false),
+                Options.Create(new PanelSourceOptions { PrometheusBaseUrl = "http://prometheus:9090" })));
 
-        Assert.Contains(RunPositions.Entry, query, StringComparison.Ordinal);
-        Assert.Contains(RunPositions.Terminal, query, StringComparison.Ordinal);
+        var reading = await reader.ReadAsync("run-boundaries", W, Range, CancellationToken.None);
+
+        Assert.Equal("business", reading.Layer);
+        Assert.Equal(3, handler.Requests.Count);
     }
 
     [Fact]
@@ -677,6 +752,33 @@ public sealed class PanelTrustTests
             return new HttpResponseMessage(status)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    /// <summary>
+    /// Answers the i-th request with the i-th body (and <see cref="StatusFor"/>'s status, 200 by
+    /// default), recording every request. A request past the last body fails the test outright.
+    /// </summary>
+    private sealed class SequencedHandler(params string[] bodies) : HttpMessageHandler
+    {
+        internal List<(HttpMethod Method, string Path, string Body)> Requests { get; } = [];
+
+        internal Func<int, HttpStatusCode> StatusFor { get; init; } = _ => HttpStatusCode.OK;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var index = Requests.Count;
+            Requests.Add((
+                request.Method,
+                request.RequestUri?.PathAndQuery ?? string.Empty,
+                request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct)));
+
+            Assert.True(index < bodies.Length, $"unexpected request #{index + 1}: only {bodies.Length} responses were scripted");
+
+            return new HttpResponseMessage(StatusFor(index))
+            {
+                Content = new StringContent(bodies[index], Encoding.UTF8, "application/json"),
             };
         }
     }

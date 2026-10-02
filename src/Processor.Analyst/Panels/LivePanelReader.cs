@@ -24,6 +24,7 @@ internal sealed class LivePanelReader(ElasticPanelSource elastic, PrometheusPane
         {
             PanelKind.Elastic => elastic.ReadAsync(definition, targetWorkflowId, range, ct),
             PanelKind.Prometheus => prometheus.ReadAsync(definition, targetWorkflowId, range, ct),
+            PanelKind.Esql => elastic.ReadEsqlAsync(definition, targetWorkflowId, range, ct),
             _ => throw new PanelUnavailableException(panelId, $"panel kind {definition.Kind} has no source"),
         };
     }

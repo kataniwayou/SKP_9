@@ -32,10 +32,14 @@ namespace BaseApi.Tests.Live;
 /// rehearsals to every run.
 /// </para>
 /// <para>
-/// <b>Where the assertion stops, the scorecard takes over.</b> Telling a stall from a reporting fault is
-/// a judgement about what a claim says, which no assertion here can make reliably. Both are asserted only
-/// as "reported, and resting on run-boundaries"; every claim and reason is written to the scorecard for a
+/// <b>Where the assertion stops, the scorecard takes over.</b> Whether a claim names a stall is a
+/// judgement about what it says, which no assertion here can make reliably. A stall is asserted only as
+/// "reported, and resting on run-boundaries"; every claim and reason is written to the scorecard for a
 /// human to read.
+/// </para>
+/// <para>
+/// <b>Every scenario skips until the capture has a funnel.</b> <c>busy-mixed-feed</c> predates StepRole,
+/// so it has no <c>run-boundaries.json</c>; no hand-built reading stands in for a capture.
 /// </para>
 /// </summary>
 public sealed class AnalystReplayScenarios
@@ -48,6 +52,10 @@ public sealed class AnalystReplayScenarios
         "queue-wait", "processor-liveness", "dead-letter-depth",
     ];
 
+    private static void SkipUnlessCaptureHasAFunnel() => Assert.SkipUnless(
+        File.Exists(Path.Combine(AppContext.BaseDirectory, "Analyst", "Fixtures", "replay", Window, "run-boundaries.json")),
+        "the captured window predates StepRole; recapture it after deployment (plan Task 8)");
+
     private static void SkipUnlessEnabled() => Assert.SkipUnless(
         Environment.GetEnvironmentVariable("SKP_ANALYST_REPLAY") == "1",
         "set SKP_ANALYST_REPLAY=1 to replay a prompt against the captured scenarios; every run is a full "
@@ -56,10 +64,10 @@ public sealed class AnalystReplayScenarios
     private static int Runs()
         => int.TryParse(Environment.GetEnvironmentVariable("SKP_ANALYST_REPLAY_RUNS"), out var n) && n > 0 ? n : 1;
 
-    /// <summary><c>SKP_ANALYST_PROMPT</c>, absolute or repo-relative; the deployed v9 by default.</summary>
+    /// <summary><c>SKP_ANALYST_PROMPT</c>, absolute or repo-relative; v11, the funnel prompt, by default.</summary>
     private static (string Path, string Text) Prompt()
     {
-        var configured = Environment.GetEnvironmentVariable("SKP_ANALYST_PROMPT") ?? "tools/analyst-prompt-v9.txt";
+        var configured = Environment.GetEnvironmentVariable("SKP_ANALYST_PROMPT") ?? "tools/analyst-prompt-v11.txt";
         var path = System.IO.Path.IsPathRooted(configured)
             ? configured
             : System.IO.Path.Combine(ReplayFixtures.RepoRoot(), configured);
@@ -78,9 +86,14 @@ public sealed class AnalystReplayScenarios
     /// <para>
     /// <b>Consistent with the loss, not just decorated with it.</b> Each of the 17 is a good item's
     /// branch whose dispatch to S9 (split-filepersister) was refused: it never produced its S9 or S10
-    /// Completed record and never ended. So the outcome totals lose 34 Completed and run-boundaries loses
-    /// 17 terminals. Leaving the captured totals untouched planted a loss that left no trace in the
-    /// counts -- which cannot happen -- and the model spent an insight hunting the inconsistency.
+    /// Completed record. So the outcome totals lose 34 Completed. Leaving the captured totals untouched
+    /// planted a loss that left no trace in the counts -- which cannot happen -- and the model spent an
+    /// insight hunting the inconsistency.
+    /// </para>
+    /// <para>
+    /// <b>run-boundaries is the capture's own, unplanted.</b> Its funnel would lose 17 outcomes at S9
+    /// and 17 at S10, but no hand-built funnel stands in for a capture: the capture's StepRole values
+    /// decide those step names, and until a funnel is captured every scenario skips.
     /// </para>
     /// </summary>
     private static FixturePanelReader LosingWork()
@@ -129,9 +142,7 @@ public sealed class AnalystReplayScenarios
             .Planted("refused-messages", refusals.ToJsonString(), samples: 6215)
             .Planted("step-outcomes",
                 """{"totalOutcomeRecords":891,"completed":819,"failed":54,"cancelled":18}""", samples: 891)
-            .Planted("step-failures", ReplaceTotal(reader.ValueOf("step-failures"), 891), samples: 891)
-            .Planted("run-boundaries",
-                """{"totalWorkflowRecords":6215,"entry":16,"terminal":161,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0}""");
+            .Planted("step-failures", ReplaceTotal(reader.ValueOf("step-failures"), 891), samples: 891);
     }
 
     /// <summary>The captured step-failures value with its outcome total changed and its samples kept.</summary>
@@ -143,23 +154,15 @@ public sealed class AnalystReplayScenarios
     }
 
     /// <summary>
-    /// A stall after the first hop: fires keep entering, the importer completes each poll, and nothing
-    /// downstream produces an outcome or ends a branch — not even an empty poll's Cancelled.
+    /// A stall after the first hop: fires keep entering, the importer completes each poll and imports,
+    /// and nothing downstream returns an outcome. The funnel stops after entry.
     /// </summary>
     private static FixturePanelReader StalledAfterTheFirstHop() => BusyAndHealthy()
         .Planted("step-outcomes", """{"totalOutcomeRecords":15,"completed":15,"failed":0,"cancelled":0}""", samples: 15)
         .Planted("step-failures", """{"totalOutcomeRecords":15,"failedCount":0,"samples":[]}""", samples: 15)
         .Planted("run-boundaries",
-            """{"totalWorkflowRecords":1874,"entry":16,"terminal":0,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0}""",
-            samples: 1874);
-
-    /// <summary>
-    /// The work finishes and its end is not recorded: every outcome panel is the healthy capture, but
-    /// run-boundaries counts no terminal at all. The system is fine; the evidence about it is not.
-    /// </summary>
-    private static FixturePanelReader EndsNotRecorded() => BusyAndHealthy()
-        .Planted("run-boundaries",
-            """{"totalWorkflowRecords":6215,"entry":16,"terminal":0,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0}""");
+            """{"fires":15,"importerPolls":15,"pollsThatImported":15,"drainedPolls":0,"byStep":[{"role":"entry","step":"split-importer_1.0.0-a090-d76e1ca64a97","outcomes":15}]}""",
+            samples: 15);
 
     [Fact]
     public Task ABusyHealthyWindowIsQuiet() => Score(
@@ -177,22 +180,16 @@ public sealed class AnalystReplayScenarios
     [Fact]
     public Task AStallIsReported() => Score(
         "stall", StalledAfterTheFirstHop,
-        "reported, resting on run-boundaries (fires enter, nothing ends); a human reads whether it says STALL",
+        "reported, resting on run-boundaries (the funnel stops after entry); a human reads whether it says STALL",
         f => f.Verdict is "Drifting" or "Notable"
              && f.Insights.Any(i => i.Panels.Contains("run-boundaries")));
-
-    [Fact]
-    public Task UnrecordedEndsAreReported() => Score(
-        "ends-not-recorded", EndsNotRecorded,
-        "reported, correlating run-boundaries with step-outcomes; a human reads whether it says the RECORDING is at fault",
-        f => f.Verdict is "Drifting" or "Notable"
-             && f.Insights.Any(i => i.Panels.Contains("run-boundaries") && i.Panels.Contains("step-outcomes")));
 
     // ── the runner ────────────────────────────────────────────────────────────────────────────────
 
     private static async Task Score(
         string scenario, Func<FixturePanelReader> build, string expected, Func<AnalystFinding, bool> correct)
     {
+        SkipUnlessCaptureHasAFunnel();
         SkipUnlessEnabled();
 
         var (promptPath, prompt) = Prompt();

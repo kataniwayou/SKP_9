@@ -26,6 +26,7 @@ public sealed class PromptStructureTests
     [Theory]
     [InlineData("analyst-prompt-v9.txt")]
     [InlineData("analyst-prompt-v10.txt")]
+    [InlineData("analyst-prompt-v11.txt")]
     public void EachPublishedPromptHasAllFiveStages(string file)
     {
         // tools/analyst-prompt-v9.txt is what the dev rollout PUTs into the analyst-monitor payload.

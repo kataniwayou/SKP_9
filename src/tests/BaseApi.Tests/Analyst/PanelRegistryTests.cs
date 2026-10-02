@@ -275,67 +275,59 @@ public sealed class PanelRegistryTests
     }
 
     [Fact]
-    public void RunBoundariesIsTheAgentsCounterpartToTheOperatorsRunBoundaryPie()
+    public void RunBoundariesIsTheAgentsCounterpartToTheOperatorsFunnel()
     {
         // The maintenance rule on PanelRegistry: an operator panel without a PanelDefinition is a
-        // hole in the shared language. skp-runposition-pie shipped on the Kibana board this session;
-        // this is its counterpart, and it selects on the SAME attribute the board selects on.
+        // hole in the shared language. The Kibana funnel selects on attributes.StepRole and the
+        // outcome handler's two templates; this panel selects on the same constants.
         var panel = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries");
 
         Assert.Equal("business", panel.Layer);
-        Assert.Equal(PanelKind.Elastic, panel.Kind);
-        Assert.Contains(RunPositions.Key, panel.Query, StringComparison.Ordinal);
-        Assert.Contains(RunPositions.Entry, panel.Query, StringComparison.Ordinal);
-        Assert.Contains(RunPositions.Terminal, panel.Query, StringComparison.Ordinal);
+        Assert.Equal(PanelKind.Esql, panel.Kind);
+        Assert.Contains($"attributes.{StepRoles.Key}", panel.Query, StringComparison.Ordinal);
+        Assert.Contains($"\"{StepRoles.Entry}\"", panel.Query, StringComparison.Ordinal);
+        Assert.All(OutcomeTemplates.All, t => Assert.Contains($"\"{t}\"", panel.Query, StringComparison.Ordinal));
     }
 
     [Fact]
-    public void RunBoundariesCountsEnteredFiresAndEveryTerminalOfThem()
+    public void RunBoundariesIsThreeStatementsFiresFunnelPolls()
     {
-        // The operator pie's rule since 2026-10-01: fires are distinct CorrelationIds with an entry
-        // in the window, and terminals are RECORDS (not deduplicated) whose CorrelationId is one of
-        // those fires. Counting terminal records keeps partial loss visible -- a fire that lost one
-        // of its two branches shows one terminal fewer -- which was the reason the old panel refused
-        // to deduplicate at all.
+        // ElasticPanelSource splits the query on a line holding only "---" and posts each statement
+        // to /_query in this order.
+        var statements = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Query
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split("\n---\n");
+
+        Assert.Equal(3, statements.Length);
+        Assert.All(statements, s => Assert.StartsWith($"FROM {PanelRegistry.ElasticIndex}", s, StringComparison.Ordinal));
+        Assert.All(statements, s => Assert.Contains("{{FROM}}", s, StringComparison.Ordinal));
+        Assert.All(statements, s => Assert.Contains("{{TO}}", s, StringComparison.Ordinal));
+        Assert.Contains("STATS fires = COUNT_DISTINCT(attributes.CorrelationId), earliest = MIN(@timestamp)", statements[0], StringComparison.Ordinal);
+        Assert.Contains("STATS outcomes = COUNT(*) BY attributes.StepRole, attributes.StepName", statements[1], StringComparison.Ordinal);
+        Assert.Contains("STATS importerPolls = COUNT(*), drainedPolls = SUM(CASE(attributes.Consumed == 0, 1, 0))", statements[2], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RunBoundariesCountsOnlyFiresThatEnteredInTheWindow()
+    {
+        // The global constraint: the Analyst counts only the outcome handler's per-outcome record,
+        // for fires whose entry record falls in the window -- the INLINE STATS join on CorrelationId.
         var query = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Query;
 
-        Assert.Contains("\"field\": \"attributes.CorrelationId\"", query, StringComparison.Ordinal);
-        Assert.Contains("\"size\": {{RUNS}}", query, StringComparison.Ordinal);
-        Assert.Contains("bucket_selector", query, StringComparison.Ordinal);
-        Assert.Contains("\"entered_runs\": { \"stats_bucket\": { \"buckets_path\": \"by_run>entry._count\" } }",
-            query, StringComparison.Ordinal);
-        Assert.Contains("\"entered_terminals\": { \"sum_bucket\": { \"buckets_path\": \"by_run>terminal._count\" } }",
-            query, StringComparison.Ordinal);
-        Assert.DoesNotContain("cardinality", query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("INLINE STATS fire_entered = MAX(entered) BY attributes.CorrelationId", query, StringComparison.Ordinal);
+        Assert.Contains("WHERE fire_entered == 1 AND counted == 1", query, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RunBoundariesCarriesTheDrainedPollCountThatExplainsAMissingTerminal()
+    public void RunBoundariesDescribesTheFunnelNotARatio()
     {
-        // The agent cannot go and look at a log the way an operator can, and "entry records with no
-        // terminal" has two completely different causes: an importer that found nothing to read
-        // (correct, a no-op) and work that is being lost (a finding). Without the drained count in
-        // the same reading the agent must report inconclusive every time the source is idle, which
-        // on this deployment is about half of all polls.
-        var query = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Query;
-
-        Assert.Contains("attributes.Consumed", query, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void RunBoundariesTellsTheModelThereIsNoFixedRatio()
-    {
-        // Measured 2026-10-01 on filefetcher-archiveexpander-chain: 60:60 idle, 40:225 with the mixed
-        // feed, 159:1069 with the approved feed. The ratio is terminals per fire, so it moves with the
-        // records each fire imported. The old description called it "a constant OF THIS WORKFLOW";
-        // a model taught that reports a load change as a fault.
         var description = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Description;
 
-        Assert.Contains("NO FIXED RATIO", description, StringComparison.Ordinal);
-        Assert.Contains("graph", description, StringComparison.Ordinal);
-        Assert.Contains("drained", description, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("entered", description, StringComparison.Ordinal);
-        Assert.DoesNotContain("constant OF THIS WORKFLOW", description, StringComparison.Ordinal);
-        Assert.DoesNotContain("1:6", description, StringComparison.Ordinal);
+        Assert.Contains("funnel", description, StringComparison.Ordinal);
+        Assert.Contains("entry, intermediate, terminal", description, StringComparison.Ordinal);
+        Assert.Contains("terminal means a step with no successors returned an outcome, not that a branch ended", description, StringComparison.Ordinal);
+        Assert.Contains("A stall is the funnel stopping after entry", description, StringComparison.Ordinal);
+        Assert.Contains("pollsThatImported", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("NO FIXED RATIO", description, StringComparison.Ordinal);
     }
 }

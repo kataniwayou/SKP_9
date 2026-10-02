@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Messaging.Contracts;
 
 namespace Processor.Analyst.Panels;
 
@@ -78,13 +79,62 @@ internal sealed class ElasticPanelSource
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        var body = definition.Query
-            .Replace("{{FROM}}", range.From.UtcDateTime.ToString("o"), StringComparison.Ordinal)
-            .Replace("{{TO}}", range.To.UtcDateTime.ToString("o"), StringComparison.Ordinal)
-            .Replace("{{WORKFLOW}}", targetWorkflowId.ToString("D"), StringComparison.Ordinal)
-            .Replace("{{RUNS}}", RunsFor(range).ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        if (definition.Kind == PanelKind.Esql)
+        {
+            return await ReadEsqlAsync(definition, targetWorkflowId, range, ct).ConfigureAwait(false);
+        }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"/{PanelRegistry.ElasticIndex}/_search")
+        var body = Substitute(definition.Query, targetWorkflowId, range);
+        var text = await PostAsync(definition, $"/{PanelRegistry.ElasticIndex}/_search", body, ct).ConfigureAwait(false);
+
+        return Parse(definition, range, text);
+    }
+
+    /// <summary>
+    /// Reads a <see cref="PanelKind.Esql"/> panel: each statement in <see cref="PanelDefinition.Query"/>
+    /// (separated by a line holding only <c>---</c>) is posted to <c>/_query</c> in order, through the
+    /// same transport and failure mapping as the <c>_search</c> path, and its
+    /// <c>{"columns":[...],"values":[[...]]}</c> response is read by COLUMN NAME, never by position.
+    /// </summary>
+    internal async Task<PanelReading> ReadEsqlAsync(
+        PanelDefinition definition, Guid targetWorkflowId, TimeRange range, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        var statements = definition.Query
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split("\n---\n");
+
+        var tables = new List<IReadOnlyList<IReadOnlyDictionary<string, JsonElement>>>(statements.Length);
+        foreach (var statement in statements)
+        {
+            // Serialized, not spliced: the statement carries double quotes and the backticked
+            // {OriginalFormat} field, and must reach Elasticsearch as one JSON string.
+            var body = JsonSerializer.Serialize(new { query = Substitute(statement.Trim(), targetWorkflowId, range) });
+            var text = await PostAsync(definition, "/_query", body, ct).ConfigureAwait(false);
+            tables.Add(ParseEsqlRows(definition.PanelId, text));
+        }
+
+        return definition.PanelId switch
+        {
+            "run-boundaries" => BuildFunnel(definition, range, tables),
+            _ => throw new PanelUnavailableException(
+                definition.PanelId, $"no ES|QL response parser registered for panel '{definition.PanelId}'"),
+        };
+    }
+
+    private static string Substitute(string query, Guid targetWorkflowId, TimeRange range) => query
+        .Replace("{{FROM}}", range.From.UtcDateTime.ToString("o"), StringComparison.Ordinal)
+        .Replace("{{TO}}", range.To.UtcDateTime.ToString("o"), StringComparison.Ordinal)
+        .Replace("{{WORKFLOW}}", targetWorkflowId.ToString("D"), StringComparison.Ordinal);
+
+    /// <summary>
+    /// One POST to Elasticsearch, with every transport failure and every non-success status turned
+    /// into <see cref="PanelUnavailableException"/>. Shared by the <c>_search</c> and ES|QL paths.
+    /// </summary>
+    private async Task<string> PostAsync(PanelDefinition definition, string path, string body, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json"),
         };
@@ -125,7 +175,7 @@ internal sealed class ElasticPanelSource
                     definition.PanelId, $"elasticsearch returned {(int)response.StatusCode}: {Truncate(text)}");
             }
 
-            return Parse(definition, range, text);
+            return text;
         }
     }
 
@@ -196,22 +246,9 @@ internal sealed class ElasticPanelSource
             "step-outcomes" => BuildStepOutcomes(definition, total, aggregations, windowFullyCovered),
             "step-failures" => BuildStepFailures(definition, total, aggregations, windowFullyCovered),
             "refused-messages" => BuildRefusedMessages(definition, total, aggregations, windowFullyCovered),
-            "run-boundaries" => BuildRunBoundaries(definition, total, aggregations, windowFullyCovered),
             _ => throw new PanelUnavailableException(
                 definition.PanelId, $"no elasticsearch response parser registered for panel '{definition.PanelId}'"),
         };
-    }
-
-    /// <summary>
-    /// The terms size for a per-run aggregation: one bucket per second of the range, because the cron
-    /// floor is one fire per second. Clamped to [1, 60000] -- below Elasticsearch's 65,536
-    /// search.max_buckets, so a long range still reads (as a lower bound, flagged by
-    /// sum_other_doc_count) rather than failing the request.
-    /// </summary>
-    internal static int RunsFor(TimeRange range)
-    {
-        var seconds = Math.Ceiling((range.To - range.From).TotalSeconds);
-        return (int)Math.Clamp(seconds, 1, 60000);
     }
 
     private static bool IsWindowFullyCovered(JsonElement aggregations, TimeRange range)
@@ -298,7 +335,6 @@ internal sealed class ElasticPanelSource
     private static string ScopeCountName(string panelId) => panelId switch
     {
         "refused-messages" => "totalWorkflowRecords",
-        "run-boundaries" => "totalWorkflowRecords",
         _ => "totalOutcomeRecords",
     };
 
@@ -365,53 +401,152 @@ internal sealed class ElasticPanelSource
     }
 
     /// <summary>
-    /// The run-boundary reading: how many fires entered in the window, how many branch ends belong to
-    /// those fires, and how many importer polls found nothing to read.
+    /// The run-boundaries funnel: for the fires that entered in the window, how many outcomes each
+    /// step returned, by its StepRole, plus the importer's polls. Built from the panel's three ES|QL
+    /// statements in order: fires, funnel, polls.
     /// <para>
-    /// <b>Elasticsearch's sibling totals, never a sum over the returned buckets.</b> entered_runs and
-    /// entered_terminals are computed after bucket_selector dropped the fires that entered before the
-    /// window, which is the whole join. If the terms size could not hold every run that touched the
-    /// window (sum_other_doc_count above zero), both counts are lower bounds and the reading is not
-    /// trusted as covering the window.
+    /// <b>Trust.</b> An answer from all three statements is a report, so <c>SeriesPresent</c> and
+    /// <c>NoDataDistinguishable</c> are true, and a funnel that stops after entry is a trusted reading
+    /// of a stall, not a gap. The window is fully covered only when the earliest entry record sits
+    /// within <see cref="CoverageTolerance"/> of the window's start; no entry at all is not covered.
     /// </para>
     /// <para>
-    /// <b>drainedPolls no longer explains a gap between entry and terminal.</b> An importer poll that
-    /// finds nothing reports Cancelled, which the orchestrator records as that fire's terminal, so a
-    /// drained poll still produces a terminal and an idle workflow sits near 1:1 rather than at
-    /// terminal zero. A fire with no terminal is work that started and did not finish; drainedPolls
-    /// is carried for context, not as an excuse for that shape.
+    /// <b>pollsThatImported is the subtraction done here rather than by the model.</b> Read the other
+    /// way round, drainedPolls=0 sounds like "every poll was empty" -- it means the opposite -- and the
+    /// model made exactly that inversion in replay. A count stated positively cannot be inverted.
     /// </para>
     /// </summary>
-    private static PanelReading BuildRunBoundaries(
-        PanelDefinition definition, long total, JsonElement aggregations, bool windowFullyCovered)
+    private static PanelReading BuildFunnel(
+        PanelDefinition definition, TimeRange range,
+        IReadOnlyList<IReadOnlyList<IReadOnlyDictionary<string, JsonElement>>> tables)
     {
-        var boundaries = aggregations.GetProperty("boundaries");
-        var polls = aggregations.GetProperty("polls");
+        var id = definition.PanelId;
+        if (tables.Count != 3)
+        {
+            throw new PanelUnavailableException(id, $"expected 3 ES|QL statements (fires, funnel, polls), got {tables.Count}");
+        }
 
-        var entry = boundaries.GetProperty("entered_runs").GetProperty("count").GetInt64();
-        var terminal = (long)boundaries.GetProperty("entered_terminals").GetProperty("value").GetDouble();
-        var capped = boundaries.GetProperty("by_run").GetProperty("sum_other_doc_count").GetInt64() > 0;
+        var firesRow = SingleRow(id, tables[0]);
+        var fires = Long(id, firesRow, "fires");
+        var earliest = Date(id, firesRow, "earliest");
 
-        var importerPolls = polls.GetProperty("doc_count").GetInt64();
-        var drainedPolls = polls.GetProperty("drained").GetProperty("doc_count").GetInt64();
+        var funnel = tables[1]
+            .Select(row => new FunnelRow(
+                Text(id, row, $"attributes.{StepRoles.Key}"),
+                Text(id, row, "attributes.StepName"),
+                Long(id, row, "outcomes")))
+            .ToList();
 
-        // pollsThatImported is the subtraction done here rather than by the model. Read the other way
-        // round, drainedPolls=0 sounds like "every poll was empty" -- it means the opposite -- and the
-        // model made exactly that inversion in replay, prompt rule against it notwithstanding. A count
-        // stated positively cannot be inverted.
+        var pollsRow = SingleRow(id, tables[2]);
+        var importerPolls = Long(id, pollsRow, "importerPolls");
+        var drainedPolls = Long(id, pollsRow, "drainedPolls");
+
         var valueJson = JsonSerializer.Serialize(new
         {
-            totalWorkflowRecords = total,
-            entry,
-            terminal,
+            fires,
             importerPolls,
             pollsThatImported = importerPolls - drainedPolls,
             drainedPolls,
+            byStep = funnel.Select(r => new { role = r.Role, step = r.Step, outcomes = r.Outcomes }),
         });
+        var covered = earliest is { } e && e <= range.From + CoverageTolerance;
+        return new PanelReading(definition.PanelId, definition.Layer, valueJson,
+            SampleCount: checked((int)funnel.Sum(r => r.Outcomes)),
+            new PanelTrust(SeriesPresent: true, WindowFullyCovered: covered, NoDataDistinguishable: true));
+    }
 
-        return new PanelReading(
-            definition.PanelId, definition.Layer, valueJson, SampleCount: checked((int)total),
-            new PanelTrust(SeriesPresent: true, windowFullyCovered && !capped, NoDataDistinguishable: true));
+    private sealed record FunnelRow(string Role, string Step, long Outcomes);
+
+    /// <summary>
+    /// An ES|QL <c>_query</c> response as rows keyed by column name. Column order is whatever the
+    /// statement's STATS produced, so nothing downstream may read by position.
+    /// </summary>
+    private static IReadOnlyList<IReadOnlyDictionary<string, JsonElement>> ParseEsqlRows(string panelId, string responseJson)
+    {
+        using var doc = ParseJson(panelId, responseJson);
+        var root = doc.RootElement;
+
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var errorElement))
+        {
+            throw new PanelUnavailableException(
+                panelId, $"elasticsearch reported an error: {Truncate(errorElement.ToString())}");
+        }
+
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("columns", out var columns) || columns.ValueKind != JsonValueKind.Array
+            || !root.TryGetProperty("values", out var values) || values.ValueKind != JsonValueKind.Array)
+        {
+            throw new PanelUnavailableException(panelId, "unexpected elasticsearch response shape: no ES|QL columns/values");
+        }
+
+        var names = columns.EnumerateArray()
+            .Select(c => c.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty)
+            .ToArray();
+        var rows = new List<IReadOnlyDictionary<string, JsonElement>>();
+        foreach (var value in values.EnumerateArray())
+        {
+            var cells = value.ValueKind == JsonValueKind.Array ? value.EnumerateArray().ToArray() : [];
+            if (cells.Length != names.Length)
+            {
+                throw new PanelUnavailableException(panelId, "unexpected elasticsearch response shape: a row does not match its columns");
+            }
+
+            var row = new Dictionary<string, JsonElement>(names.Length, StringComparer.Ordinal);
+            for (var i = 0; i < names.Length; i++)
+            {
+                row[names[i]] = cells[i].Clone();
+            }
+
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+
+    private static IReadOnlyDictionary<string, JsonElement> SingleRow(
+        string panelId, IReadOnlyList<IReadOnlyDictionary<string, JsonElement>> table)
+        => table.Count == 1
+            ? table[0]
+            : throw new PanelUnavailableException(panelId, $"unexpected elasticsearch response shape: expected one row, got {table.Count}");
+
+    private static JsonElement Cell(string panelId, IReadOnlyDictionary<string, JsonElement> row, string column)
+        => row.TryGetValue(column, out var cell)
+            ? cell
+            : throw new PanelUnavailableException(panelId, $"unexpected elasticsearch response shape: no column '{column}'");
+
+    /// <summary>A count column; null (an aggregate such as SUM over no rows) reads as zero.</summary>
+    private static long Long(string panelId, IReadOnlyDictionary<string, JsonElement> row, string column)
+    {
+        var cell = Cell(panelId, row, column);
+        return cell.ValueKind switch
+        {
+            JsonValueKind.Null => 0,
+            JsonValueKind.Number => cell.GetInt64(),
+            _ => throw new PanelUnavailableException(panelId, $"unexpected elasticsearch response shape: '{column}' is not a number"),
+        };
+    }
+
+    private static string Text(string panelId, IReadOnlyDictionary<string, JsonElement> row, string column)
+    {
+        var cell = Cell(panelId, row, column);
+        return cell.ValueKind == JsonValueKind.String
+            ? cell.GetString()!
+            : throw new PanelUnavailableException(panelId, $"unexpected elasticsearch response shape: '{column}' is not a string");
+    }
+
+    /// <summary>A date column; null (MIN over no rows) is no date at all.</summary>
+    private static DateTimeOffset? Date(string panelId, IReadOnlyDictionary<string, JsonElement> row, string column)
+    {
+        var cell = Cell(panelId, row, column);
+        if (cell.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return cell.ValueKind == JsonValueKind.String
+               && DateTimeOffset.TryParse(cell.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+            ? parsed
+            : throw new PanelUnavailableException(panelId, $"unexpected elasticsearch response shape: '{column}' is not a date");
     }
 
     private static long BucketCount(JsonElement buckets, string name)

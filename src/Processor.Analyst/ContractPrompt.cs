@@ -55,8 +55,8 @@ internal static class ContractPrompt
     /// <c>running-graph</c> block, and these rules are what make that block readable.
     /// <para>
     /// <b>Compiled because it only changes when the framework does.</b> Every statement here is a rule
-    /// some framework code enforces (advancement in <c>StepResult</c>'s wire values, terminals and
-    /// entries in <c>RunPositions</c>, refusals in <c>RefusalTemplates</c>), so it moves with the image
+    /// some framework code enforces (advancement in <c>StepResult</c>'s wire values, step roles in
+    /// <c>StepRoles</c>, refusals in <c>RefusalTemplates</c>), so it moves with the image
     /// and the SourceHash, and a stored BIT verdict is re-judged when it does. Nothing here is specific
     /// to one workflow; that belongs to the graph or the payload.
     /// </para>
@@ -79,11 +79,13 @@ internal static class ContractPrompt
           branch ends exactly once. A failure routed to a failure-handling step ends at the end of that
           handler's path, not where it failed. The running-graph block lists, for every step and
           result, where the branch goes or that it ends: use it, do not re-derive it.
-        - run-boundaries: an entry record is written once per entry step per fire, after the dispatch
-          reached its queue; a terminal record once per branch end. An importer poll that reads nothing
-          ends Cancelled, and that is its fire's terminal, so a fire always produces at least one
-          terminal. Entry above zero with terminal at zero therefore means not even the shortest path
-          ended: something every branch shares is not working, or ends are not being recorded.
+        - run-boundaries is the workflow's funnel for the fires that entered in the window: how many
+          outcomes each step returned, with the step's role in the graph (entry: an entry step;
+          terminal: a step with no successors; intermediate: the rest). Compare a step's count with
+          what the routing sends it from its predecessors: the difference is where items left the
+          path - failures routed to a handler, cancellations ending in place. terminal means a step
+          with no successors returned an outcome; it does not mean a branch ended. A fire whose entry
+          step returned but whose later steps returned nothing is a stall after entry.
         - step-outcomes counts one record per step execution, summed over every step: it has no step
           dimension, so it can confirm a total but never which step produced it. Never attribute a
           count to a step the panel cannot name.
@@ -92,8 +94,8 @@ internal static class ContractPrompt
         - The pods run the graph projected at the workflow's last start; an edit since then is not in
           effect until it is restarted. The running-graph block is that projection.
         - Expectations come from the routing: an item that takes a path produces one outcome record per
-          step on it and one terminal per branch it ends in. A count that the routing explains is
-          expected, however large; a fault is a count the routing does not explain.
+          step on it. A count that the routing explains is expected, however large; a fault is a count
+          the routing does not explain.
         """;
 
     internal static string Compose(string payloadPrompt) => $"""

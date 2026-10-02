@@ -2,7 +2,7 @@ namespace Messaging.Contracts;
 
 /// <summary>
 /// A step's place in its workflow's graph, as stamped on orchestrator records: the log-scope key and
-/// its three values. Replaces RunPositions.
+/// its three values.
 /// <para>
 /// <b>A property of the graph, per workflow.</b> entry: the step is in the workflow's entryStepIds.
 /// terminal: it has no successors. intermediate: every other step. A step shared by two workflows
