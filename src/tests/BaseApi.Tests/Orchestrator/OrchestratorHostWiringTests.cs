@@ -125,25 +125,6 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
     }
 
     [Fact]
-    public void TheStepRoleResolverReachesEveryOrchestratorConsumerOfIt()
-    {
-        // The roles parameters are optional, so a missing registration would not fail the graph
-        // validation above: the container would pass null and no record would ever carry StepRole.
-        // Read the field each production object was actually built with.
-        static object? Held(object o) => o.GetType()
-            .GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
-            .Where(f => f.FieldType == typeof(StepRoleResolver))
-            .Select(f => f.GetValue(o))
-            .FirstOrDefault();
-
-        using var scope = _host.Services.CreateScope();
-        var handler = scope.ServiceProvider.GetServices<IQueueMessageHandler>().OfType<StepOutcomeHandler>().Single();
-        Assert.NotNull(Held(handler));
-        Assert.NotNull(Held(_host.Services.GetRequiredService<WorkflowActivator>()));
-        Assert.Same(_host.Services.GetRequiredService<StepRoleResolver>(), Held(handler));
-    }
-
-    [Fact]
     public void TheReplicaIdentityResolves()
     {
         Assert.NotNull(_host.Services.GetRequiredService<InstanceId>());

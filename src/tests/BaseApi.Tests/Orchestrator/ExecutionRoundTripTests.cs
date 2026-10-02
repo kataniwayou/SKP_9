@@ -73,22 +73,12 @@ public sealed class ExecutionRoundTripTests
         public RecordingLogger<StepOutcomeHandler> PreLog { get; } = new();
         public RecordingLogger<NextStepHandoffHandler> PostLog { get; } = new();
 
-        private readonly StepRoleResolver _roles;
-
         public Harness(params StepL1[] steps)
-            : this(new Dictionary<(Guid, Guid), string>(), steps)
-        {
-        }
-
-        public Harness(IReadOnlyDictionary<(Guid, Guid), string> roles, params StepL1[] steps)
         {
             Store.Set(W, new WorkflowL1(W, [A], "* * * * *", [.. steps], []), Guid.NewGuid());
-            _roles = new StepRoleResolver(
-                new FakeStepRoleSource(roles.ToDictionary(kv => (kv.Key.Item1, kv.Key.Item2), kv => kv.Value)),
-                NullLogger<StepRoleResolver>.Instance);
         }
 
-        public IQueueMessageHandler Pre => new StepOutcomeHandler(Store, L2.Multiplexer, Bus, PreLog, _roles);
+        public IQueueMessageHandler Pre => new StepOutcomeHandler(Store, L2.Multiplexer, Bus, PreLog);
 
         /// <summary>
         /// The flattened scope of the one record matching <paramref name="template"/>, or null if none
@@ -873,54 +863,74 @@ public sealed class ExecutionRoundTripTests
     }
 
     // ---------------------------------------------------------------------------------------
-    // StepRole: stamped on the one record each returned outcome produces
+    // StepRole: terminal on the outcome of a step with no successors in this workflow's graph
     // ---------------------------------------------------------------------------------------
 
-    [Fact]
-    public async Task AnOutcomeWithNoAcceptingSuccessorCarriesTheStepsRole()
+    [Theory]
+    [InlineData(StepResult.Completed)]
+    [InlineData(StepResult.Failed)]
+    [InlineData(StepResult.Cancelled)]
+    public async Task ATerminalStepsOutcomeCarriesTerminalWhateverItsResult(StepResult result)
     {
-        var h = new Harness(new Dictionary<(Guid, Guid), string> { [(W, A)] = StepRoles.Terminal }, Step(A, PA, 1, "{}"));
+        var h = new Harness(Step(A, PA, 1, "{}"));
         Seed(h, Entry, Output);
 
-        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(result, Entry));
 
         Assert.Equal(StepRoles.Terminal, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!));
     }
 
     [Fact]
-    public async Task ACancelledIntermediateStepIsStampedIntermediate()
+    public async Task ABranchEndingAtAStepWithSuccessorsIsNotTerminal()
     {
-        var h = new Harness(new Dictionary<(Guid, Guid), string> { [(W, A)] = StepRoles.Intermediate },
-            Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
+        // B accepts only Completed (condition 1), so a Cancelled A ends its branch -- but A has a
+        // successor in the graph, so it is not an edge and carries nothing.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Cancelled, Entry));
 
-        Assert.Equal(StepRoles.Intermediate, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!));
+        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!);
     }
 
     [Fact]
-    public async Task AnAdvancingOutcomeCarriesTheStepsRoleAndTheHandoffDoesNot()
+    public async Task AnAdvancingOutcomeAndItsHandoffCarryNoRole()
     {
-        var h = new Harness(new Dictionary<(Guid, Guid), string> { [(W, A)] = StepRoles.Entry },
-            Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}"""));
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
-        Assert.Equal(StepRoles.Entry, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.Advanced)!));
+        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf(OutcomeTemplates.Advanced)!);
         Assert.DoesNotContain(StepRoles.Key, h.ScopeOf("handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}")!);
         Assert.DoesNotContain(StepRoles.Key, h.ScopeOf("the entry step completed with {Result}")!);
     }
 
     [Fact]
-    public async Task AnUnresolvedRoleIsOmittedFromTheOutcomeRecord()
+    public async Task ASharedStepIsTerminalOnlyInTheWorkflowWhereItHasNoSuccessors()
     {
-        var h = new Harness(new Dictionary<(Guid, Guid), string>(), Step(A, PA, 1, "{}"));
+        // A has no successors in W (the harness) and one successor in W2.
+        var w2 = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var h = new Harness(Step(A, PA, 1, "{}"));
+        h.Store.Set(w2, new WorkflowL1(w2, [A], "* * * * *", [Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}""")], []), Guid.NewGuid());
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry) with { WorkflowId = w2 });
+
+        Assert.Null(h.ScopeOf(OutcomeTemplates.BranchEnds));
+        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf(OutcomeTemplates.Advanced)!);
+    }
+
+    [Fact]
+    public async Task ATerminalOutcomeAfterAStopIsStillStamped()
+    {
+        // A stop marks the L1 entry rather than removing it, so outcomes in flight still resolve.
+        var h = new Harness(Step(A, PA, 1, "{}"));
+        h.Store.MarkDeleted(W, DateTimeOffset.UtcNow);
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
-        Assert.DoesNotContain(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!);
+        Assert.Equal(StepRoles.Terminal, Assert.Contains(StepRoles.Key, h.ScopeOf(OutcomeTemplates.BranchEnds)!));
     }
 }

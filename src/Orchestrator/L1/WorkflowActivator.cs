@@ -39,8 +39,7 @@ public sealed class WorkflowActivator(
     WorkflowL1Store store,
     IWorkflowScheduler scheduler,
     ILogger<WorkflowActivator> logger,
-    EntityNameResolver? names = null,
-    StepRoleResolver? roles = null)
+    EntityNameResolver? names = null)
 {
     /// <summary>
     /// Spec §7.1, in order: return unless the workflow is live, read the definition, return if L2 holds
@@ -83,12 +82,6 @@ public sealed class WorkflowActivator(
         {
             await scheduler.UnscheduleAsync(held.JobId, ct).ConfigureAwait(false);
         }
-
-        // Before the projection is set and the job scheduled, so no fire or outcome between the two
-        // can read a cached old role.
-        // A start can change roles (an edit took effect); drop this workflow's cached roles so the
-        // next record re-reads them. Names refresh below for the same reason.
-        roles?.Forget(workflowId);
 
         var jobId = Guid.NewGuid();
         store.Set(workflowId, definition, jobId);

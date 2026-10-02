@@ -543,26 +543,24 @@ public sealed class WorkflowFireJobTests
     }
 
     // ---------------------------------------------------------------------------------------
-    // The dispatch record: one per entry step that reached a queue, and never a StepRole
+    // The dispatch record: one per entry step that reached a queue, carrying StepRole=entry
     // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task NoRecordAFireWritesCarriesAStepRole()
+    public async Task ADispatchedEntryStepCarriesEntry()
     {
-        // StepRole is a graph role stamped only where a step returns an outcome, so every record
-        // carrying it is the same kind of event. A fire dispatches; it returns nothing. If the
-        // dispatch carried "entry" too, the role would mark two different events and every reader
-        // would have to tell them apart by template.
+        // The run's entry edge: hardcoded, no lookup. One record per entry step that reached a queue.
         var h = new Harness().AsLeader().WithWorkflow(W, [(S1, P1)]);
 
         await h.Build().Execute(h.Context(W, h.JobId));
 
-        Assert.NotNull(h.ScopeOf("dispatched an entry step"));
-        Assert.All(h.Log.RecordScopes, scope => Assert.DoesNotContain(StepRoles.Key, scope));
+        var scope = h.ScopeOf("dispatched an entry step");
+        Assert.NotNull(scope);
+        Assert.Equal(StepRoles.Entry, Assert.Contains(StepRoles.Key, scope!));
     }
 
     [Fact]
-    public async Task EveryEntryStepOfOneFireCarriesItSeparatelyUnderOneCorrelationId()
+    public async Task EveryEntryStepOfOneFireCarriesEntryUnderOneCorrelationId()
     {
         // Three entry steps, three records, one correlation id -- so the counter's unit is the
         // DISPATCH and distinct-CorrelationId is the unit of the FIRE. Both are load-bearing on the
@@ -582,6 +580,7 @@ public sealed class WorkflowFireJobTests
             }
 
             dispatches++;
+            Assert.Equal(StepRoles.Entry, h.Log.RecordScopes[i][StepRoles.Key]);
             correlations.Add(h.Log.RecordScopes[i][CorrelationKeys.LogScope].ToString()!);
         }
 
@@ -617,6 +616,7 @@ public sealed class WorkflowFireJobTests
 
         Assert.Null(h.ScopeOf("dispatched an entry step"));
         Assert.NotNull(h.ScopeOf("the entry-step dispatch failed to send; continuing"));
+        Assert.All(h.Log.RecordScopes, scope => Assert.DoesNotContain(StepRoles.Key, scope));
     }
 
     [Fact]

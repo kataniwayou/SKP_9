@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text.Json;
-using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
@@ -43,16 +42,13 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     private readonly IConnectionMultiplexer _redis;
     private readonly IQueueSender _sender;
     private readonly ILogger<StepOutcomeHandler> _logger;
-    private readonly StepRoleResolver? _roles;
 
     public StepOutcomeHandler(
         WorkflowL1Store store,
         IConnectionMultiplexer redis,
         IQueueSender sender,
-        ILogger<StepOutcomeHandler> logger,
-        StepRoleResolver? roles = null)
+        ILogger<StepOutcomeHandler> logger)
     {
-        _roles  = roles;
         _store  = store ?? throw new ArgumentNullException(nameof(store));
         _redis  = redis ?? throw new ArgumentNullException(nameof(redis));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
@@ -331,14 +327,17 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             _logger.LogWarning("successor {NextStepId} is not in this workflow's step set — skipping it", id);
         }
 
-        // The one record this outcome produces carries the returning step's role in this workflow,
-        // whatever the result: a cancelled intermediate step is stamped intermediate.
-        var role = _roles is null ? null : await _roles.RoleAsync(m.WorkflowId, m.StepId).ConfigureAwait(false);
-        using var roleScope = StepRoleResolver.BeginScope(_logger, role);
-
         if (selection.Matches.Count == 0)
         {
-            _logger.Log(level, OutcomeTemplates.BranchEnds, m.Result);
+            // StepRole=terminal marks the run's exit edge: a step with no successors in THIS
+            // workflow's graph, whatever its result. A step whose successors exist but all declined
+            // this result ends its branch too, but it is not an edge and carries nothing. The graph is
+            // the L1 entry this outcome was just routed from, so a step shared by two workflows is
+            // classified per workflow. See StepRoles.
+            using (completed.NextStepIds.Count == 0 ? _logger.BeginScope(StepRoles.Scope(StepRoles.Terminal)) : null)
+            {
+                _logger.Log(level, OutcomeTemplates.BranchEnds, m.Result);
+            }
         }
         else
         {

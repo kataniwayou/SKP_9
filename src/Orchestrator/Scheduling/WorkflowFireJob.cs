@@ -307,10 +307,13 @@ public sealed class WorkflowFireJob(
                     // the orchestrator's side at all. Every id rides the open scope; the template
                     // carries none, and never the payload.
                     //
-                    // No StepRole here. It is a graph role, stamped only where a step returns an
-                    // outcome (StepOutcomeHandler), so every record carrying it is the same kind of
-                    // event; the entry step's own outcome is what marks a fire as entered.
-                    logger.LogInformation("dispatched an entry step");
+                    // StepRole=entry, hardcoded: this line IS the run's entry edge, one per entry step
+                    // that reached a queue. Scoped to this line only, so the frozen skip and the send
+                    // failure below, which share the outer scope, never carry it. See StepRoles.
+                    using (logger.BeginScope(StepRoles.Scope(StepRoles.Entry)))
+                    {
+                        logger.LogInformation("dispatched an entry step");
+                    }
                 }
                 catch (Exception ex) when (!context.CancellationToken.IsCancellationRequested)
                 {
