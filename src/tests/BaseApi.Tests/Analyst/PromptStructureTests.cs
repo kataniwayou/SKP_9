@@ -146,5 +146,7 @@ public sealed class PromptStructureTests
         Assert.DoesNotContain("expected, however large", prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("doing its job on bad input", prompt, StringComparison.Ordinal);
         Assert.Contains("a new cause is reported even inside the share", prompt, StringComparison.Ordinal);
+        Assert.Contains("A survivor is never reported as no finding", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("the survivors cannot be correlated", prompt, StringComparison.Ordinal);
     }
 }

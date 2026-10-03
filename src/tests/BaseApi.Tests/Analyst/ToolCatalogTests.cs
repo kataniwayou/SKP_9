@@ -80,6 +80,18 @@ public sealed class ToolCatalogTests
     }
 
     [Fact]
+    public void ReportNoFindingNeverAbsorbsAClassifiableSurvivor()
+    {
+        // U5: a survivor is never folded into Quiet. The Quiet reason names the expectation that
+        // covered any data-domain failures, and a survivor that can be classified is a finding.
+        var spec = ToolCatalog.Build(Panels()).Single(t => t.Name == ToolNames.ReportNoFinding);
+
+        Assert.Contains("name the declared expectation that covered them", spec.Description, StringComparison.Ordinal);
+        Assert.Contains("must be submitted with submit_finding, never reported here", spec.Description, StringComparison.Ordinal);
+        Assert.DoesNotContain("cannot be correlated", spec.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SubmitFindingRequiresRuledOutAndEvidenceButNotTrace()
     {
         // The two fields an agent optimizing for looking decisive would quietly drop. Requiring them

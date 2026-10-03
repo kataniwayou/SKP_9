@@ -68,10 +68,11 @@ internal static class ToolCatalog
                 SchemaFor(ToolNames.SubmitFinding)),
 
             new ToolSpec(ToolNames.ReportNoFinding,
-                "End the investigation with no insight. The analysis ran and reached none: no "
-                + "hypothesis survived, or what survived cannot be correlated into an insight. The "
-                + "reason is published as a Quiet verdict: state what killed each hypothesis, or why "
-                + "a survivor could not be correlated. Do not list what was healthy.",
+                "End the investigation with no insight. The analysis ran and no hypothesis survived. "
+                + "The reason is published as a Quiet verdict: state what killed each hypothesis, and "
+                + "when data-domain failures were seen, name the declared expectation that covered "
+                + "them. A survivor that can be classified deterministic or transient must be "
+                + "submitted with submit_finding, never reported here. Do not list what was healthy.",
                 SchemaFor(ToolNames.ReportNoFinding)),
         ];
     }
