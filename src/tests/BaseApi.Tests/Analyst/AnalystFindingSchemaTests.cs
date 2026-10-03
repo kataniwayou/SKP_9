@@ -9,8 +9,9 @@ public sealed class AnalystFindingSchemaTests
     private static string Definition()
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "analyst-finding.json"));
 
+    // Product-valid: a deterministic insight is high severity and makes the verdict Notable.
     private static AnalystFinding Sample() => new(
-        Verdict: "Drifting",
+        Verdict: "Notable",
         Target: new FindingTarget(Guid.Parse("1a56b3ca-e276-4815-87fa-5c2f48ab6dad"), "filefetcher-archiveexpander-chain"),
         Window: new RealizedWindow(
             From: new DateTimeOffset(2026, 9, 24, 0, 0, 0, TimeSpan.Zero),
@@ -160,10 +161,27 @@ public sealed class AnalystFindingSchemaTests
         // Four verdicts and no more. "Indeterminate" is not one: a run that could not see because a
         // facility failed is a Failed step with no document, not a verdict.
         var json = System.Text.Encoding.UTF8.GetString(AnalystFinding.Serialize(Sample()))
-            .Replace("\"Drifting\"", "\"Indeterminate\"", StringComparison.Ordinal);
+            .Replace("\"Notable\"", "\"Indeterminate\"", StringComparison.Ordinal);
 
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(), System.Text.Encoding.UTF8.GetBytes(json), out _);
+
+        Assert.False(ok);
+    }
+
+    [Theory]
+    [InlineData("deterministic", "low")]
+    [InlineData("transient", "high")]
+    public void SeverityThatDisagreesWithClassificationIsRejected(string classification, string severity)
+    {
+        // Severity is derived, not chosen: high iff deterministic. A deterministic/low insight would
+        // let an operator-intervention problem be filtered out as noise.
+        var json = System.Text.Json.Nodes.JsonNode.Parse(AnalystFinding.Serialize(Sample()))!.AsObject();
+        json["insights"]![0]!["classification"] = classification;
+        json["insights"]![0]!["severity"] = severity;
+
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), System.Text.Encoding.UTF8.GetBytes(json.ToJsonString()), out _);
 
         Assert.False(ok);
     }

@@ -142,7 +142,10 @@
           "onset",
           "evidenceKinds"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "if": { "properties": { "classification": { "const": "deterministic" } } },
+        "then": { "properties": { "severity": { "const": "high" } } },
+        "else": { "properties": { "severity": { "const": "low" } } }
       },
       "description": "What the analyst inferred, never what a panel showed. Each insight correlates at least two panels into a cause, a consequence or a contradiction no single panel shows; the readings themselves live in evidence. Non-empty exactly on Drifting and Notable."
     },
