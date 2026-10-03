@@ -35,7 +35,7 @@ root files `Directory.Build.props`, `Directory.Packages.props`, `NuGet.config`, 
 - `src/BaseApi.Service` (`L2ProjectionWriter`: writes no role keys).
 - `src/Orchestrator` (`WorkflowActivator`, `WorkflowFireJob` -- stamps `entry` after a successful
   send; `StepOutcomeHandler` -- stamps `terminal` from the result and the L1 graph it already holds).
-- `src/Processor.Analyst` (`PanelRegistry`, `ContractPrompt`, `ElasticPanelSource`, `RehearsalPanels`).
+- `src/Processor.Analyst` (`PanelRegistry`, `ContractPrompt`, `ElasticPanelSource`, `RehearsalPanels`; for the operator role also the config and finding contracts, the run context and the `failure-causes` panel).
 - `kibana/kibana-export.ndjson` (the run-edges pie), `k8s/43-processor-analyst.yaml` (adds
   `Analyst__Bit__Mode`).
 - **Deleted** (the delta reports them as `D`; removals are never applied without `-PruneRemoved`, so
@@ -45,7 +45,7 @@ root files `Directory.Build.props`, `Directory.Packages.props`, `NuGet.config`, 
 
 Changed **outside** the scope (the delta will not list them):
 
-- `tools/analyst-prompt-v13.txt` (v12 until the exit-edge rule). It is not a file the offline side needs to run: the prompt
+- `tools/analyst-prompt-v14.txt` (v13 until the operator role; v12 before the exit-edge rule). It is not a file the offline side needs to run: the prompt
   travels inside the `analyst-monitor-cfg` assignment payload (section 4;
   `docs/rebuild-analyst-monitor-workflow.md` §6.1 names the file and carries the payload). Carry the
   file by hand if you want to generate the payload rather than trust the escaping.
@@ -57,6 +57,32 @@ edges) and the Analyst (its SourceHash moves). The other processors' lock files 
 packages were repacked; their code did not.
 
 ## 2. Deploy order
+
+**Analyst operator role (2026-10-03) adds two schema rows and changes the Analyst's order.** A schema
+definition is frozen once a processor references it, so the new contract is two NEW rows and a
+repoint, never an edit. On a stack that has `analyst-config` 1.0.0 and `analyst-finding` 3.0.0, do
+this in order (the analyst steps below come after BaseApi and the orchestrator):
+
+1. **Schema rows** -- `POST /api/v1/schemas` for `analyst-config` **2.0.0** (adds the optional
+   `expectations` object) and `analyst-finding` **4.0.0** (per-insight `classification`, `domain`,
+   `severity`, `onset`, `evidenceKinds`; severity tied to classification). Send the `definition`
+   from `src/tests/BaseApi.Tests/Schemas/analyst-config.json` / `analyst-finding.json`
+   (runbook §2.1/§2.2). Dev ids: config `4a203429-8379-42fb-a674-c4242bb37619`, finding
+   `ebc7e9d3-b02c-4e62-bb02-fb86464793d9` -- yours will differ. Record both.
+2. **Processor PUT** -- `PUT /api/v1/processors/<analyst id>` with every field resent, changing only
+   `sourceHash` (the new hash below), `outputSchemaId` (the 4.0.0 id) and `configSchemaId` (the
+   2.0.0 id). This replaces the psql repoint in step 3 below for this release, because the schema
+   ids change too.
+3. **Image** -- `docker build`, load it into the cluster.
+4. **Rollout** -- `rollout restart` and `rollout status`; both pods log
+   `resolving identity for source hash <hash>` and `all schema definitions resolved; ... output=<4.0.0 id> config=<2.0.0 id>`.
+5. **Assignment** -- only now `PUT` `analyst-monitor-cfg` (§4): prompt v14, `failure-causes`
+   appended to `panelSet`, and the `expectations` object. Do it last: a v14 payload against the
+   old config schema is refused (`additionalProperties: false`, unknown panel), and the old payload
+   is accepted by the new one. Leave `analyst-monitor` stopped.
+
+Dev 2026-10-03: SourceHash `87e91aad8f7d2a4d6983ac73d4cc100518104487bdabf12c24bbbd254c490f9f`
+(operator role, prompt v14; was `45f49c4e...`), valid only if the Analyst source is identical.
 
 **Order no longer matters for roles.** BaseApi writes no role keys and nothing reads them: the
 orchestrator decides both edges itself, `entry` when it dispatches and `terminal` from the workflow's
@@ -148,11 +174,12 @@ never ran the first model has no such keys and skips this.
   (Without the manifest: `kubectl -n skp set env deploy/processor-analyst Analyst__Bit__Mode=StructureOnly`.)
   The BIT then checks the prompt's structure only; nothing is spent on the fitness gate. Apply
   before the rollout in section 2 step 3, or roll once more after it.
-- Prompt v13 goes into `analyst-monitor-cfg` (v12 before the exit-edge rule; a v12 Analyst reads the
+- Prompt v14 goes into `analyst-monitor-cfg` (v13 before the operator role, v12 before the exit-edge rule; a v12 Analyst reads the
   new `terminal` rows under the old meaning, so ship v13 with the orchestrator): `GET /api/v1/assignments/<id>`, then `PUT` it back
-  with **every field resent** (`name`, `version`, `description`, `stepId`, `payload`), changing only
-  the `prompt` inside `payload`. The `targetWorkflowId` and the other payload fields stay as they
-  were. Dev: GET showed v11, PUT returned 200, read-back matched v12 with every other field equal.
+  with **every field resent** (`name`, `version`, `description`, `stepId`, `payload`), changing the
+  `prompt` inside `payload`, appending `failure-causes` to `panelSet` and adding `expectations`
+  (`{"maxFailedShare": 0.65, "maxCancelledShare": 0.25, "reason": "dev endless feed: 3 of every 5 files are built to fail, 1 to be cancelled"}` on dev -- size it to your own feed or omit it). The `targetWorkflowId` and the other payload fields stay as they
+  were. Dev: GET showed v11, PUT returned 200, read-back matched v12 with every other field equal; 2026-10-03 the same procedure took v13 to v14, read-back equal in every other field.
   Payload and escaping: `docs/rebuild-analyst-monitor-workflow.md` §6.1.
 - Leave `analyst-monitor` **stopped** (it spends money on every fire) until the BIT is deliberately
   re-enabled (`Analyst__Bit__Mode=Full`; read Appendix D of that runbook first). If it is running when
