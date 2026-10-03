@@ -38,11 +38,11 @@ public sealed class GroundTruthRehearsalTests
         ModelReply.Of(ScriptedModel.Call("report_no_finding", new { reason = "every panel clean" })),
     ];
 
-    /// <summary>An investigation that reports a finding.</summary>
-    private static ModelReply[] ConcludesFinding() =>
+    /// <summary>An investigation that reports a finding, classified deterministic in the given domain.</summary>
+    private static ModelReply[] ConcludesFinding(string domain = "data") =>
     [
         .. AnalystScript.Stages(DeadLetterPanel),
-        AnalystScript.Submit(DeadLetterPanel),
+        AnalystScript.Submit(DeadLetterPanel, domain),
     ];
 
     private static (PreflightBit Bit, ScriptedModel Model) Build(params ModelReply[] script)
@@ -56,17 +56,51 @@ public sealed class GroundTruthRehearsalTests
     }
 
     [Fact]
-    public async Task APromptThatStaysQuietAndThenReportsTheFaultPasses()
+    public async Task APromptThatStaysQuietAndThenReportsBothFaultsPasses()
     {
         var (bit, _) = Build([
             Fit(), Fit(), Fit(),                 // the judge
             .. ConcludesNothing(),               // quiet window: correctly silent
-            .. ConcludesFinding(),               // planted fault: correctly reported
+            .. ConcludesFinding("system"),       // planted loss: correctly reported
+            .. ConcludesFinding("data"),         // undeclared bad input: correctly reported
         ]);
 
         var verdict = await bit.CheckAsync(Structured, CancellationToken.None);
 
         Assert.True(verdict.Fit);
+    }
+
+    [Fact]
+    public async Task APromptThatStaysQuietOnUndeclaredBadInputFails()
+    {
+        var (bit, _) = Build([
+            Fit(), Fit(), Fit(),
+            .. ConcludesNothing(),
+            .. ConcludesFinding("system"),
+            .. ConcludesNothing(),               // undeclared bad input: missed
+        ]);
+
+        var verdict = await bit.CheckAsync(Structured, CancellationToken.None);
+
+        Assert.False(verdict.Fit);
+        var problem = Assert.Single(verdict.Problems);
+        Assert.Equal("verify", problem.Stage);
+        Assert.Contains("bad input", problem.Offending, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ALossReportedAsADataProblemFails()
+    {
+        var (bit, _) = Build([
+            Fit(), Fit(), Fit(),
+            .. ConcludesNothing(),
+            .. ConcludesFinding("data"),         // the loss is a system problem
+        ]);
+
+        var verdict = await bit.CheckAsync(Structured, CancellationToken.None);
+
+        Assert.False(verdict.Fit);
+        Assert.Contains("system", Assert.Single(verdict.Problems).Offending, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,7 +176,7 @@ public sealed class GroundTruthRehearsalTests
     public async Task TheRehearsalIsPaidOncePerPromptPerProcess()
     {
         var (bit, model) = Build([
-            Fit(), Fit(), Fit(), .. ConcludesNothing(), .. ConcludesFinding(),
+            Fit(), Fit(), Fit(), .. ConcludesNothing(), .. ConcludesFinding("system"), .. ConcludesFinding("data"),
         ]);
 
         await bit.CheckAsync(Structured, CancellationToken.None);

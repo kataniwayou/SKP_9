@@ -33,7 +33,9 @@ internal static class BitPrompt
         with no step dimension), run-boundaries (the fires that entered, the items the importer took
         in, and the run's two edges: entry dispatches, and terminal outcomes -- a Completed outcome
         no successor accepts, or any outcome of a step with no successors), step-failures (the failure total and five sampled failures with their cause),
-        refused-messages (deliveries refused and parked, with their exception), dead-letter-depth,
+        refused-messages (deliveries refused and parked, with their exception), failure-causes
+        (each failure cause with its count and first and last sighting, and the failed share per
+        time bucket), dead-letter-depth,
         queue-wait and processor-liveness. Instructions that refer to the running-graph block or to
         these panels are referring to things the agent really has.
 
@@ -49,13 +51,15 @@ internal static class BitPrompt
             sampled cause a refused file type. Five polls found nothing and cancelled. One
             dead-letter queue grew from 0 to 17 during the window while 17 parked refusals landed,
             and the step-outcomes totals are 17 short of what the routing predicts for 40 items.
-            One host-level panel returned no series at all.
+            One host-level panel returned no series at all. The run-context block states the
+            workflow started six hours ago with no declared expectation for this source, and
+            failure-causes shows the refused file type in every bucket since the start.
 
-        A fit investigation reports the loss of 17 items, which four readings agree on (terminal
-        17 against 34 good items is the same loss), and nothing else: the 6 failures are the
-        workflow rejecting bad input and reaching their exit at the recorder, the cancellations are
-        empty polls ending their branch with no terminal record, and that is the routing at work,
-        not a stall. The missing series must be classified, not read as health or as a fault.
+        A fit investigation reports two deterministic problems -- the loss of 17 items (system) and
+        a provider sending a refused file type since the start (data, because no declared
+        expectation covers it) -- classifies each with at least two kinds of evidence, and treats
+        the cancellations and the terminal shape as the routing at work, not a stall. The missing series must be
+        classified, not read as health or as a fault.
 
         Instructions fit for this scenario must: require the agent to understand the running graph
         and to write down, before reading any panel, what each panel should show for that graph —
@@ -65,7 +69,10 @@ internal static class BitPrompt
         to stop rather than guess when it cannot tell; require a disconfirming criterion per
         hypothesis, stated before the evidence that criterion names has been read; distinguish a
         count the routing explains, however large, from a fault; and require the verification to be
-        able to conclude that nothing is worth reporting.
+        able to conclude that nothing is worth reporting; require every problem found to be
+        classified deterministic or transient by its nature and supported by at least two kinds of
+        evidence; require undeclared bad input to be reported; require history reads to stay within
+        the history limit of the run-context block.
 
         Instructions that would treat every failure, every cancellation, or a branch ending with no
         terminal record as a fault, without setting it against the routing and the failure's

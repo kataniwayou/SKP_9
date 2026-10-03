@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Processor.Analyst.Graph;
 using Processor.Analyst.Loop;
 using Processor.Analyst.Model;
 using Processor.Analyst.Panels;
@@ -21,7 +22,7 @@ namespace Processor.Analyst.Bit;
 /// with <see cref="RehearsalGraph"/> exactly as <c>AnalystProcessor</c> briefs it with the target's.
 /// </para>
 /// <para>
-/// <b>Two scenarios, and the quiet one matters more.</b> A monitor that fires twice an hour and
+/// <b>Three scenarios, and the quiet one matters more.</b> A monitor that fires twice an hour and
 /// cries wolf trains its operator to ignore it, so a false alarm costs more than a missed finding.
 /// The quiet window runs first for that reason, and a prompt that invents a finding there fails
 /// without the second scenario being paid for.
@@ -66,7 +67,8 @@ internal sealed class GroundTruthRehearsal(
             return [new StageProblem("verify", "contradicting",
                 "against a quiet rehearsal window -- every count one the running graph's routing "
                 + "explains (6 items rejected for their own extension, 5 empty polls cancelled with no "
-                + "terminal record, terminal 34 at persist-file and 6 at record-outcome), every "
+                + "terminal record, terminal 34 at persist-file and 6 at record-outcome, and the 15% "
+                + "rejection rate within the declared expectation), every "
                 + "dead-letter queue at zero, no refusal -- the prompt still produced a finding: "
                 + Summarise(invented.Value)
                 + " -- an operator who is woken by a quiet window learns to ignore the next alert")];
@@ -85,12 +87,48 @@ internal sealed class GroundTruthRehearsal(
                 + "window went unreported, though four readings agree on the loss")];
         }
 
+        if (Unclassified(fault, "system") is { } lossProblem)
+        {
+            return [lossProblem];
+        }
+
+        var badInput = await ConcludesAsync(
+            prompt, RehearsalPanels.RejectingBadInput(), ct).ConfigureAwait(false);
+
+        if (badInput is LoopOutcome.NoFinding ignored)
+        {
+            return [new StageProblem("verify", "contradicting",
+                "against a rehearsal window in which 15% of items failed validation for a cause in the item "
+                + "itself, steadily since the workflow's start, with no declared expectation, the prompt "
+                + $"reported nothing: \"{ignored.Reason}\" -- undeclared bad input is a deterministic data "
+                + "problem the operator must hear about")];
+        }
+
+        if (Unclassified(badInput, "data") is { } dataProblem)
+        {
+            return [dataProblem];
+        }
+
         logger.LogInformation(
             "the payload prompt passed its ground-truth rehearsal: quiet window silent, planted "
-            + "loss reported");
+            + "loss and undeclared bad input reported and classified");
 
         return [];
     }
+
+    /// <summary>
+    /// A finding in a scenario with a known cause must say what the operator needs to hear: a
+    /// deterministic problem in the right domain. Anything else is a report that names the wrong
+    /// kind of thing, however alarming it sounds.
+    /// </summary>
+    private static StageProblem? Unclassified(LoopOutcome outcome, string domain)
+        => outcome is LoopOutcome.Finding f
+           && f.Value.Insights.Any(i => i.Classification == "deterministic" && i.Domain == domain)
+            ? null
+            : new StageProblem("verify", "contradicting",
+                $"the rehearsal window holds a deterministic {domain} problem, and the prompt's finding "
+                + $"carries no insight classified deterministic in the {domain} domain -- the operator "
+                + "would be told the wrong kind of thing");
 
     /// <summary>
     /// One rehearsal. <see cref="AnalysisImpossibleException"/> is deliberately not caught: a
@@ -116,7 +154,10 @@ internal sealed class GroundTruthRehearsal(
 
         return await loop
             .RunAsync(ContractPrompt.Compose(prompt), config, new TimeRange(to - Window, to),
-                PromptHash.Of(prompt), ct, RehearsalGraph.Briefing)
+                PromptHash.Of(prompt), ct,
+                RehearsalGraph.Briefing + "\n\n"
+                    + RunContextRenderer.Render(RehearsalGraph.RunFor(to), new TimeRange(to - Window, to), panels.Expectations),
+                RehearsalGraph.RunFor(to).HistoryLimit)
             .ConfigureAwait(false);
     }
 

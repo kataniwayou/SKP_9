@@ -50,4 +50,12 @@ public sealed class BitPromptTests
         Assert.Contains("no terminal record", BitPrompt.System, System.StringComparison.Ordinal);
         Assert.Contains("not a stall", BitPrompt.System, System.StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TheExamRequiresClassificationAndReportingBadInput()
+    {
+        Assert.Contains("deterministic or transient", BitPrompt.System, StringComparison.Ordinal);
+        Assert.Contains("no declared expectation", BitPrompt.System, StringComparison.Ordinal);
+        Assert.Contains("run-context block", BitPrompt.System, StringComparison.Ordinal);
+    }
 }

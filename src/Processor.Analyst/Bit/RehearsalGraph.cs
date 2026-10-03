@@ -74,6 +74,13 @@ internal static class RehearsalGraph
             [RecorderProcessor] = "outcomerecorder_1.0.0",
         });
 
+    /// <summary>The fixture run began six hours before any rehearsal window; no deploys since.</summary>
+    internal static RunContext RunFor(DateTimeOffset windowEnd)
+        => new(windowEnd.AddHours(-6), windowEnd.AddHours(-6), [], null);
+
+    internal static readonly AnalystExpectations TestFeed =
+        new(0.2, 0.0, "rehearsal feed: 6 of every 40 items are built to fail validation");
+
     /// <summary>The briefing exactly as a live dispatch renders it.</summary>
     internal static string Briefing => GraphRenderer.Render(GraphBriefing.Of(Graph));
 }

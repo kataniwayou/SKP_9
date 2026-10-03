@@ -56,7 +56,7 @@ internal static class AnalystScript
     ];
 
     /// <summary>A valid submit_finding call, citing the given panel as its evidence, as a raw tool call.</summary>
-    internal static ModelToolCall SubmitFinding(string panelId = "queue-depth") => ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
+    internal static ModelToolCall SubmitFinding(string panelId = "queue-depth", string domain = "data") => ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
     {
         verdict = "Notable",
         insights = new[]
@@ -67,7 +67,7 @@ internal static class AnalystScript
                 why = "arrival rose while the corroborating panel stayed flat",
                 panels = new[] { panelId, CorroboratingPanel(panelId) },
                 classification = "deterministic",
-                domain = "data",
+                domain,
                 severity = "high",
                 onset = "since start",
                 evidenceKinds = new[] { "nature", "persistence" },
@@ -82,7 +82,7 @@ internal static class AnalystScript
     });
 
     /// <summary>The same call, wrapped as the reply that carries it.</summary>
-    internal static ModelReply Submit(string panelId = "queue-depth") => ModelReply.Of(SubmitFinding(panelId));
+    internal static ModelReply Submit(string panelId = "queue-depth", string domain = "data") => ModelReply.Of(SubmitFinding(panelId, domain));
 }
 
 /// <summary>Mirrors ToolNames, which is internal to the processor and reached through InternalsVisibleTo.</summary>

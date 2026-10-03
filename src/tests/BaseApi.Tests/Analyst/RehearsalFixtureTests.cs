@@ -3,6 +3,7 @@ using Messaging.Contracts;
 using Processor.Analyst.Bit;
 using Processor.Analyst.Graph;
 using Processor.Analyst.Panels;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace BaseApi.Tests.Analyst;
@@ -186,14 +187,23 @@ public sealed class RehearsalFixtureTests
         var captured = ReplayFixtures.Reader("endless-feed-edges");
 
         Assert.Equal(
-            new[] { "dead-letter-depth", "processor-liveness", "queue-wait", "refused-messages",
+            new[] { "dead-letter-depth", "failure-causes", "processor-liveness", "queue-wait", "refused-messages",
                     "run-boundaries", "step-failures", "step-outcomes" },
             panels.PanelIds.Order().ToArray());
 
         foreach (var panelId in panels.PanelIds)
         {
-            var live = Value(captured, panelId);
             var ours = Read(panels, panelId);
+
+            if (panelId == "failure-causes")
+            {
+                // The captured window predates the panel, so the reference is the reading the live
+                // source builds from the captured ES|QL tables.
+                AssertFailureCausesShape(ours);
+                continue;
+            }
+
+            var live = Value(captured, panelId);
 
             Assert.True(Keys(live).SetEquals(Keys(ours)), $"{panelId}: top-level keys differ");
 
@@ -214,6 +224,40 @@ public sealed class RehearsalFixtureTests
                     "step-failures: sample attribute keys differ");
             }
         }
+    }
+
+    private static void AssertFailureCausesShape(JsonElement ours)
+    {
+        var live = LiveFailureCauses();
+        Assert.True(Keys(live).SetEquals(Keys(ours)), "failure-causes: top-level keys differ");
+        Assert.True(Keys(live.GetProperty("causes")[0]).SetEquals(Keys(ours.GetProperty("causes")[0])), "failure-causes: cause keys differ");
+        Assert.True(Keys(live.GetProperty("buckets")[0]).SetEquals(Keys(ours.GetProperty("buckets")[0])), "failure-causes: bucket keys differ");
+    }
+
+    private static JsonElement LiveFailureCauses()
+    {
+        string Fixture(string name) => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Analyst", "Fixtures", name));
+
+        var source = new ElasticPanelSource(
+            new HttpClient(new CannedHandler(Fixture("esql-causes.json"), Fixture("esql-cause-buckets.json"))),
+            Options.Create(new PanelSourceOptions { ElasticBaseUrl = "http://elasticsearch:9200" }));
+        var definition = PanelRegistry.All.Single(p => p.PanelId == "failure-causes");
+        var range = new TimeRange(new DateTimeOffset(2026, 10, 3, 7, 10, 0, TimeSpan.Zero), new DateTimeOffset(2026, 10, 3, 7, 25, 0, TimeSpan.Zero));
+
+        var reading = source.ReadEsqlAsync(definition, RehearsalGraph.WorkflowId, range, CancellationToken.None).GetAwaiter().GetResult();
+        return JsonDocument.Parse(reading.ValueJson).RootElement;
+    }
+
+    /// <summary>Answers successive requests with the given bodies.</summary>
+    private sealed class CannedHandler(params string[] bodies) : HttpMessageHandler
+    {
+        private int _next;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(bodies[_next++], System.Text.Encoding.UTF8, "application/json"),
+            });
     }
 
     private static HashSet<string> Keys(JsonElement e) => e.EnumerateObject().Select(p => p.Name).ToHashSet();
@@ -248,5 +292,38 @@ public sealed class RehearsalFixtureTests
         Assert.Contains("S4: Completed -> branch ends | Failed -> S3 | Cancelled -> branch ends", briefing, StringComparison.Ordinal);
         Assert.Contains("S3: Completed -> branch ends | Failed -> branch ends | Cancelled -> branch ends", briefing, StringComparison.Ordinal);
         Assert.DoesNotContain("can never run", briefing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FailureCausesNamesTheItemAndPersistsSinceTheStart()
+    {
+        var panels = RehearsalPanels.RejectingBadInput();
+        var value = Read(panels, "failure-causes");
+
+        var cause = Assert.Single(value.GetProperty("causes").EnumerateArray());
+        Assert.Equal("author-reported", cause.GetProperty("logged").GetString());
+        Assert.Contains("extension", cause.GetProperty("cause").GetString(), StringComparison.Ordinal);
+        Assert.Equal(6, cause.GetProperty("count").GetInt64());
+    }
+
+    [Fact]
+    public async Task AHistoryReadShowsTheSameShareInEveryBucket()
+    {
+        var panels = RehearsalPanels.RejectingBadInput();
+        var history = new TimeRange(RehearsalGraph.RunFor(To).HistoryLimit!.Value, To);
+        var reading = await panels.ReadAsync("failure-causes", RehearsalGraph.WorkflowId, history, true, CancellationToken.None);
+
+        var shares = JsonDocument.Parse(reading.ValueJson).RootElement.GetProperty("buckets").EnumerateArray()
+            .Where(b => b.GetProperty("imported").GetInt64() > 0)
+            .Select(b => b.GetProperty("failedShare").GetDouble()).Distinct().ToList();
+        Assert.Equal([0.15], shares);
+    }
+
+    [Fact]
+    public void OnlyTheQuietScenarioCarriesExpectations()
+    {
+        Assert.NotNull(RehearsalPanels.Quiet().Expectations);
+        Assert.Null(RehearsalPanels.RejectingBadInput().Expectations);
+        Assert.Null(RehearsalPanels.HoldingDiscardedWork().Expectations);
     }
 }

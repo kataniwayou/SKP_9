@@ -55,7 +55,15 @@ internal sealed class RehearsalPanels : IPanelReader
     /// cancelled with no terminal record. terminal reads 34 at persist-file (the good items' Completed
     /// exit) and 6 at record-outcome (the rejected items' exit). Every count is the routing doing its job.
     /// </summary>
-    internal static RehearsalPanels Quiet() => new(lost: 0);
+    internal static RehearsalPanels Quiet() => new(lost: 0, RehearsalGraph.TestFeed);
+
+    /// <summary>
+    /// The quiet window's mix with no declared expectation: 15% of items fail validation for a
+    /// cause in the item itself, in every bucket since the workflow's start, and nobody said that is
+    /// expected. The failures are the same ones <see cref="Quiet"/> treats as the routing at work;
+    /// only the missing declaration makes them a deterministic data problem the operator must hear of.
+    /// </summary>
+    internal static RehearsalPanels RejectingBadInput() => new(lost: 0, expectations: null);
 
     /// <summary>
     /// The same window with one unambiguous fault: work thrown away DURING the window. 17 of the 34
@@ -70,13 +78,14 @@ internal sealed class RehearsalPanels : IPanelReader
     /// explained away, so a prompt that stays silent here has missed real loss.
     /// </para>
     /// </summary>
-    internal static RehearsalPanels HoldingDiscardedWork() => new(lost: LostItems);
+    internal static RehearsalPanels HoldingDiscardedWork() => new(lost: LostItems, expectations: null);
 
     private readonly int _lost;
 
-    private RehearsalPanels(int lost)
+    private RehearsalPanels(int lost, AnalystExpectations? expectations)
     {
         _lost = lost;
+        Expectations = expectations;
         var good = RecordsImported - RejectedItems;
 
         Ledger =
@@ -88,13 +97,16 @@ internal sealed class RehearsalPanels : IPanelReader
         ];
     }
 
+    /// <summary>What the step payload declares as expected for this scenario's source; only the quiet window declares any.</summary>
+    internal AnalystExpectations? Expectations { get; }
+
     /// <summary>What every step did in the window; every reading below is derived from it.</summary>
     internal IReadOnlyList<RehearsalStep> Ledger { get; }
 
     /// <summary>A string[] because <c>AnalystConfig.PanelSet</c> takes one.</summary>
     internal string[] PanelIds =>
         ["step-outcomes", "run-boundaries", "step-failures", "refused-messages",
-         "dead-letter-depth", "queue-wait", "processor-liveness"];
+         "dead-letter-depth", "queue-wait", "processor-liveness", "failure-causes"];
 
     private static string Layer(string panelId) => panelId switch
     {
@@ -110,7 +122,7 @@ internal sealed class RehearsalPanels : IPanelReader
     public Task<PanelReading> ReadAsync(
         string panelId, Guid targetWorkflowId, TimeRange range, bool history, CancellationToken ct) =>
         PanelIds.Contains(panelId)
-            ? Task.FromResult(Build(panelId, range))
+            ? Task.FromResult(Build(panelId, range, history))
             : throw new PanelUnavailableException(panelId, "not part of the rehearsal");
 
     private int Outcomes => Ledger.Sum(s => s.Outcomes);
@@ -118,7 +130,7 @@ internal sealed class RehearsalPanels : IPanelReader
     /// <summary>Every log record of the workflow in the window, the scope count the Elastic panels report.</summary>
     private int WorkflowRecords => Outcomes * 6 + Fires * 3 + _lost;
 
-    private PanelReading Build(string panelId, TimeRange range)
+    private PanelReading Build(string panelId, TimeRange range, bool history)
     {
         var (value, samples) = panelId switch
         {
@@ -151,6 +163,7 @@ internal sealed class RehearsalPanels : IPanelReader
                     },
                 }),
             }), Outcomes),
+            "failure-causes" => FailureCauses(range, history),
             "refused-messages" => (Serialize(new
             {
                 totalWorkflowRecords = WorkflowRecords,
@@ -192,6 +205,49 @@ internal sealed class RehearsalPanels : IPanelReader
 
         return new PanelReading(panelId, Layer(panelId), value, samples,
             new PanelTrust(SeriesPresent: true, WindowFullyCovered: true, NoDataDistinguishable: true));
+    }
+
+    /// <summary>
+    /// The one cause, and the failed share per bucket. The share is the ledger's ratio (6 of 40),
+    /// not recomputed from the rounded per-bucket counts, so it reads 0.15 at every bucket width.
+    /// A history range shows the cause since the range's start with its count scaled to the range:
+    /// the failure is persistent, not a recent change.
+    /// </summary>
+    private (string Value, int Samples) FailureCauses(TimeRange range, bool history)
+    {
+        const double windowMinutes = 15;
+        var share = (double)RejectedItems / RecordsImported;
+        var bucket = ElasticPanelSource.BucketFor(range);
+        var width = TimeSpan.FromMinutes(int.Parse(bucket.Split(' ')[0], CultureInfo.InvariantCulture));
+        var scale = (range.To - range.From).TotalMinutes / windowMinutes;
+        var count = history ? (long)Math.Round(RejectedItems * scale) : RejectedItems;
+
+        var buckets = new List<object>();
+        for (var start = range.From; start < range.To; start += width)
+        {
+            var f = width.TotalMinutes / windowMinutes;
+            buckets.Add(new
+            {
+                start,
+                imported = (long)Math.Round(RecordsImported * f),
+                failed = (long)Math.Round(RejectedItems * f),
+                cancelled = (long)Math.Round(DrainedPolls * f),
+                failedShare = share,
+            });
+        }
+
+        var cause = new
+        {
+            step = RehearsalGraph.Graph.Names[RehearsalGraph.ValidateStep],
+            logged = "author-reported",
+            cause = "the author reported the step failed: fetching item-<n>.dat failed: "
+                  + "the extension '.dat' is not one of the allowed extensions [.zip]",
+            count,
+            firstSeen = history ? range.From : range.To.AddMinutes(-14),
+            lastSeen = range.To.AddSeconds(-40),
+        };
+
+        return (Serialize(new { bucket, causes = new[] { cause }, buckets }), (int)count);
     }
 
     private (string Value, int Samples) RunBoundaries()
