@@ -118,7 +118,11 @@ internal static class GraphRenderer
 
         foreach (var group in layers.Unhandled.GroupBy(u => u.Result))
         {
-            text.AppendLine($"  {group.Key} is handled by nothing at: " + string.Join(", ", group.Select(u => Ref(u.StepId))) + ".");
+            var at = string.Join(", ", group.Select(u => Ref(u.StepId)));
+            // A Completed no successor accepts is the normal end of the run (an exit edge), not a gap.
+            text.AppendLine(group.Key == StepResult.Completed
+                ? $"  Completed ends the run at: {at}."
+                : $"  {group.Key} is handled by nothing at: {at}.");
         }
 
         foreach (var eq in layers.Conservation)

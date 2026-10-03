@@ -81,5 +81,7 @@ public sealed class GraphLayersTests
         Assert.Contains("Layers (computed from the entry conditions):", text, StringComparison.Ordinal);
         Assert.Contains("Failure handler:", text, StringComparison.Ordinal);
         Assert.Contains("Check: Failed outcomes of the 8 steps", text, StringComparison.Ordinal);
+        Assert.Contains("Completed ends the run at:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Completed is handled by nothing", text, StringComparison.Ordinal);
     }
 }
