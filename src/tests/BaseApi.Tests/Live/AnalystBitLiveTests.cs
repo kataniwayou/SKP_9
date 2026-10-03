@@ -21,10 +21,10 @@ public sealed class AnalystBitLiveTests
         Environment.GetEnvironmentVariable("SKP_ANALYST_REPLAY") == "1",
         "set SKP_ANALYST_REPLAY=1 to run the full BIT against the real model; it costs real credit");
 
-    /// <summary><c>SKP_ANALYST_PROMPT</c>, absolute or repo-relative; v13, the deployed prompt, by default.</summary>
+    /// <summary><c>SKP_ANALYST_PROMPT</c>, absolute or repo-relative; v14 by default.</summary>
     private static string Prompt()
     {
-        var configured = Environment.GetEnvironmentVariable("SKP_ANALYST_PROMPT") ?? "tools/analyst-prompt-v13.txt";
+        var configured = Environment.GetEnvironmentVariable("SKP_ANALYST_PROMPT") ?? "tools/analyst-prompt-v14.txt";
         var path = Path.IsPathRooted(configured) ? configured : Path.Combine(ReplayFixtures.RepoRoot(), configured);
         Assert.True(File.Exists(path), $"prompt not found at {path}");
         return File.ReadAllText(path).Trim();

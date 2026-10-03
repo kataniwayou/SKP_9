@@ -212,4 +212,15 @@ public sealed class RunningGraphTests
         "STAGE 3 - PLAN. " + new string('x', 100),
         "STAGE 4 - EXECUTE. " + new string('x', 100),
         "STAGE 5 - VERIFY. " + new string('x', 100));
+
+    [Fact]
+    public void ThePrimerTeachesClassification()
+    {
+        var system = ContractPrompt.Compose("p");
+
+        Assert.Contains("Every anomaly is classified deterministic or transient", system, StringComparison.Ordinal);
+        Assert.Contains("author-reported", system, StringComparison.Ordinal);
+        Assert.Contains("Notable when any insight is deterministic", system, StringComparison.Ordinal);
+        Assert.DoesNotContain("expected, however large", system, StringComparison.Ordinal);
+    }
 }

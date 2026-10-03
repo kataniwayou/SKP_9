@@ -131,4 +131,18 @@ public sealed class PromptStructureTests
         Assert.Single(runs);
         Assert.Equal("validate:missing", runs[0]);
     }
+
+    [Fact]
+    public void PromptV14IsWellFormedAndTeachesTheOperatorRole()
+    {
+        var path = Path.Combine(ReplayFixtures.RepoRoot(), "tools", "analyst-prompt-v14.txt");
+        var prompt = File.ReadAllText(path);
+
+        Assert.Empty(PromptStructure.Check(prompt));
+        Assert.Contains("DETERMINISTIC DATA PROBLEM", prompt, StringComparison.Ordinal);
+        Assert.Contains("THE FAILURE HANDLING IS LOSING FAILURES", prompt, StringComparison.Ordinal);
+        Assert.Contains("run-context", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("expected however large it is", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("expected, however large", prompt, StringComparison.Ordinal);
+    }
 }

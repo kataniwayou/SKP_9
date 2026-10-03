@@ -99,8 +99,20 @@ internal static class ContractPrompt
         - The pods run the graph projected at the workflow's last start; an edit since then is not in
           effect until it is restarted. The running-graph block is that projection.
         - Expectations come from the routing: an item that takes a path produces one outcome record per
-          step on it. A count that the routing explains is expected, however large; a fault is a count
-          the routing does not explain.
+          step on it. A count the routing explains is not a routing fault; an item-caused rate is judged
+          against the declared expectations, and without them it is reported.
+        - Every anomaly is classified deterministic or transient. Deterministic: the cause names the item
+          or its configuration (an extension, bytes, a schema, a rule that rejects it) or a code defect,
+          and retrying gives the same result. Transient: the cause names infrastructure (timeout,
+          connection refused or reset, store or broker unavailable, a dropped response). A failure logged
+          "the author reported the step failed" (author-reported) is the step's own code rejecting the
+          item; "the transform faulted" is an unexpected exception, judged by what it names.
+        - Both are reported: Notable when any insight is deterministic (an operator must intervene),
+          Drifting when every insight is transient (lower severity). Quiet only when nothing is wrong or
+          only what the declared expectations allow. A system problem is never covered by an expectation.
+        - History is optional and on demand: read back with from only to test a suspicion, never past the
+          history limit in the run-context block. A cause present since the start, or since a deploy
+          marker, is strong evidence it is deterministic.
         """;
 
     internal static string Compose(string payloadPrompt) => $"""
