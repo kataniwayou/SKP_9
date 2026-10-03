@@ -19,10 +19,14 @@ public sealed class RehearsalFixtureTests
     private static readonly DateTimeOffset To = new(2026, 10, 2, 18, 15, 0, TimeSpan.Zero);
     private static readonly TimeRange Window = new(To.AddMinutes(-15), To);
 
-    public static TheoryData<string> Scenarios => new() { "quiet", "fault" };
+    public static TheoryData<string> Scenarios => new() { "quiet", "fault", "edge" };
 
-    private static RehearsalPanels Scenario(string name)
-        => name == "quiet" ? RehearsalPanels.Quiet() : RehearsalPanels.HoldingDiscardedWork();
+    private static RehearsalPanels Scenario(string name) => name switch
+    {
+        "quiet" => RehearsalPanels.Quiet(),
+        "edge" => RehearsalPanels.EdgeSkewed(),
+        _ => RehearsalPanels.HoldingDiscardedWork(),
+    };
 
     private static JsonElement Read(RehearsalPanels panels, string panelId) => Value(panels, panelId);
 
@@ -39,7 +43,7 @@ public sealed class RehearsalFixtureTests
     {
         var panels = Scenario(scenario);
         var graph = RehearsalGraph.Graph;
-        var ledger = panels.Ledger.ToDictionary(s => s.StepId);
+        var ledger = panels.ClosedLedger.ToDictionary(s => s.StepId);
 
         foreach (var step in graph.Steps)
         {
@@ -93,7 +97,9 @@ public sealed class RehearsalFixtureTests
 
         // The orchestrator's rule, spelled out per step: persist-file's Completed outcomes advance
         // nowhere (its only successor takes Failed), and record-outcome has no successors at all.
-        var good = scenario == "quiet" ? 34 : 17;
+        // persist-file's terminal: the good items, less any lost, less the last fire's items still being
+        // persisted when the window closed (their terminal records land after it).
+        var good = scenario switch { "quiet" => 34, "edge" => 34 - RehearsalPanels.InFlightAtEnd, _ => 17 };
         var expected = new List<(string? Role, string? Step, int Records)>
             {
                 (StepRoles.Entry, graph.Names[RehearsalGraph.ImportStep], RehearsalPanels.Fires),
@@ -370,7 +376,7 @@ public sealed class RehearsalFixtureTests
 
     public static TheoryData<string> WindowOnlyPanels => new()
     {
-        "step-outcomes", "run-boundaries", "step-failures", "refused-messages",
+        "refused-messages",
         "dead-letter-depth", "queue-wait", "processor-liveness",
     };
 
@@ -389,10 +395,108 @@ public sealed class RehearsalFixtureTests
         Assert.Equal(window, read);
     }
 
+    private static async Task<JsonElement> ValueAsync(IPanelReader reader, string panelId, TimeRange range, bool history)
+    {
+        var reading = await reader.ReadAsync(panelId, RehearsalGraph.WorkflowId, range, history, CancellationToken.None);
+        return JsonDocument.Parse(reading.ValueJson).RootElement;
+    }
+
+    private static int Terminal(JsonElement edges, Guid stepId)
+        => edges.GetProperty("byStep").EnumerateArray()
+            .Where(r => r.GetProperty("role").GetString() == StepRoles.Terminal
+                        && r.GetProperty("step").GetString() == RehearsalGraph.Graph.Names[stepId])
+            .Sum(r => r.GetProperty("records").GetInt32());
+
     [Fact]
-    public void OnlyTheQuietScenarioCarriesExpectations()
+    public async Task TheEdgeWindowIsShortAtBothExitsWithNothingLost()
+    {
+        var panels = RehearsalPanels.EdgeSkewed();
+        var edges = await ValueAsync(panels, "run-boundaries", Window, history: false);
+        var outcomes = await ValueAsync(panels, "step-outcomes", Window, history: false);
+        var refused = await ValueAsync(panels, "refused-messages", Window, history: false);
+
+        Assert.Equal(7, outcomes.GetProperty("failed").GetInt32());           // 6 + 1 from a pre-window fire
+        Assert.Equal(6, Terminal(edges, RehearsalGraph.RecordStep));          // that fire never entered here
+        Assert.Equal(32, Terminal(edges, RehearsalGraph.PersistStep));        // 34 validated, 2 still persisting
+        Assert.Equal(40, edges.GetProperty("recordsImported").GetInt32());
+        Assert.Equal(0, refused.GetProperty("refusedCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task AHistoryReadFromTheStartLosesTheStartResidueAndKeepsTheEndOne()
+    {
+        // The test D3 asks for: an edge residue stays about one fire per edge however long the range.
+        var panels = RehearsalPanels.EdgeSkewed();
+        var history = new TimeRange(RehearsalGraph.RunFor(To).Start!.Value, To);
+        var edges = await ValueAsync(panels, "run-boundaries", history, history: true);
+        var outcomes = await ValueAsync(panels, "step-outcomes", history, history: true);
+
+        Assert.Equal(960, edges.GetProperty("recordsImported").GetInt32());
+        Assert.Equal(144, outcomes.GetProperty("failed").GetInt32());
+        Assert.Equal(144, Terminal(edges, RehearsalGraph.RecordStep));
+        Assert.Equal(814, Terminal(edges, RehearsalGraph.PersistStep));
+    }
+
+    [Fact]
+    public async Task AHistoryReadAnHourBackKeepsTheRoutingAndTheStartResidue()
+    {
+        var panels = RehearsalPanels.EdgeSkewed();
+        var hour = new TimeRange(To.AddHours(-1), To);
+        var edges = await ValueAsync(panels, "run-boundaries", hour, history: true);
+        var outcomes = await ValueAsync(panels, "step-outcomes", hour, history: true);
+
+        Assert.Equal(160, edges.GetProperty("recordsImported").GetInt32());
+        Assert.Equal(24 + RehearsalPanels.PreWindowFailures, outcomes.GetProperty("failed").GetInt32());
+        Assert.Equal(24, Terminal(edges, RehearsalGraph.RecordStep));
+        Assert.Equal(136 - RehearsalPanels.InFlightAtEnd, Terminal(edges, RehearsalGraph.PersistStep));
+    }
+
+    [Fact]
+    public async Task AHistoryReadKeepsThePlantedLossConstant()
+    {
+        // The loss happened in the window. Scaling it would invent a recurring loss.
+        var panels = RehearsalPanels.HoldingDiscardedWork();
+        var history = new TimeRange(RehearsalGraph.RunFor(To).Start!.Value, To);
+        var edges = await ValueAsync(panels, "run-boundaries", history, history: true);
+
+        Assert.Equal(816 - 17, Terminal(edges, RehearsalGraph.PersistStep));
+        Assert.Equal(144, Terminal(edges, RehearsalGraph.RecordStep));
+    }
+
+    public static TheoryData<string, bool> FailureScopes => new()
+    {
+        { "quiet", false }, { "fault", false }, { "edge", false },
+        { "quiet", true }, { "fault", true }, { "edge", true },
+    };
+
+    [Theory]
+    [MemberData(nameof(FailureScopes))]
+    public async Task StepFailuresAndFailureCausesAgreeOnFailures(string scenario, bool history)
+    {
+        // Two panels counting one scope must not disagree in a fixture.
+        var panels = Scenario(scenario);
+        var range = history ? new TimeRange(RehearsalGraph.RunFor(To).Start!.Value, To) : Window;
+        var failures = await ValueAsync(panels, "step-failures", range, history);
+        var causes = await ValueAsync(panels, "failure-causes", range, history);
+
+        var bucketed = causes.GetProperty("buckets").EnumerateArray().Sum(b => b.GetProperty("failed").GetInt64());
+        Assert.Equal(failures.GetProperty("failedCount").GetInt32(), (int)bucketed);
+    }
+
+    [Fact]
+    public async Task TheEdgeWindowServesASharesItsDeclaredExpectationAllows()
+    {
+        var panels = RehearsalPanels.EdgeSkewed();
+        var causes = await ValueAsync(panels, "failure-causes", Window, history: false);
+
+        Assert.True(causes.GetProperty("failedShare").GetDouble() <= panels.Expectations!.MaxFailedShare!.Value);
+    }
+
+    [Fact]
+    public void OnlyTheQuietScenariosCarryExpectations()
     {
         Assert.NotNull(RehearsalPanels.Quiet().Expectations);
+        Assert.NotNull(RehearsalPanels.EdgeSkewed().Expectations);
         Assert.Null(RehearsalPanels.RejectingBadInput().Expectations);
         Assert.Null(RehearsalPanels.HoldingDiscardedWork().Expectations);
     }

@@ -83,28 +83,93 @@ internal sealed class RehearsalPanels : IPanelReader
     /// </summary>
     internal static RehearsalPanels HoldingDiscardedWork() => new(lost: LostItems, expectations: null);
 
-    private readonly int _lost;
+    /// <summary>Failures of one fire that entered before the window, recorded inside it (edge-skew only).</summary>
+    internal const int PreWindowFailures = 1;
 
-    private RehearsalPanels(int lost, AnalystExpectations? expectations)
+    /// <summary>The last fire's good items still being persisted when the window closed (edge-skew only).</summary>
+    internal const int InFlightAtEnd = 2;
+
+    /// <summary>
+    /// A healthy window whose edges do not cancel. A fire that entered before the window had 1 item
+    /// fail and be recorded inside it, so the stamped panels count 7 failures while run-boundaries,
+    /// which never sees that fire, has 6 terminal at record-outcome. The last fire's 2 good items were
+    /// validated but still being persisted at the end, so persist-file reads 32 terminal against 34
+    /// validated. Nothing was lost: no dead-letter growth, no refusal, and the failed share 7/40 is inside
+    /// the declared 0.2. A history read from the start loses the start residue and keeps the end one.
+    /// </summary>
+    internal static RehearsalPanels EdgeSkewed()
+        => new(lost: 0, RehearsalGraph.TestFeed, preWindowFailures: PreWindowFailures, inFlight: InFlightAtEnd);
+
+    private readonly int _lost;
+    private readonly int _preWindowFailures;
+    private readonly int _inFlight;
+
+    private RehearsalPanels(int lost, AnalystExpectations? expectations, int preWindowFailures = 0, int inFlight = 0)
     {
         _lost = lost;
+        _preWindowFailures = preWindowFailures;
+        _inFlight = inFlight;
         Expectations = expectations;
-        var good = RecordsImported - RejectedItems;
 
-        Ledger =
-        [
-            new(RehearsalGraph.ImportStep, Completed: RecordsImported, Failed: 0, Cancelled: DrainedPolls, Parked: 0),
-            new(RehearsalGraph.ValidateStep, Completed: good, Failed: RejectedItems, Cancelled: 0, Parked: 0),
-            new(RehearsalGraph.PersistStep, Completed: good - lost, Failed: 0, Cancelled: 0, Parked: lost),
-            new(RehearsalGraph.RecordStep, Completed: RejectedItems, Failed: 0, Cancelled: 0, Parked: 0),
-        ];
+        var window = SliceOf(WindowLength, startsAfterTheRunBegan: true);
+        ClosedLedger = window.Closed;
+        Ledger = window.Stamped;
     }
 
-    /// <summary>What the step payload declares as expected for this scenario's source; only the quiet window declares any.</summary>
+    /// <summary>What the step payload declares as expected for this scenario's source; only the quiet windows declare any.</summary>
     internal AnalystExpectations? Expectations { get; }
 
-    /// <summary>What every step did in the window; every reading below is derived from it.</summary>
+    /// <summary>The fires that entered in the window, followed to their end: what the routing explains.</summary>
+    internal IReadOnlyList<RehearsalStep> ClosedLedger { get; }
+
+    /// <summary>What every step logged inside the window, whatever fire it belonged to: what the stamped panels count.</summary>
     internal IReadOnlyList<RehearsalStep> Ledger { get; }
+
+    /// <summary>One range's worth of fixture: its fires, polls and imports, the closed fires and the stamped records.</summary>
+    private sealed record Slice(
+        int Fires, int DrainedPolls, int Imported,
+        IReadOnlyList<RehearsalStep> Closed, IReadOnlyList<RehearsalStep> Stamped);
+
+    /// <summary>
+    /// The slice for a range. It starts after the run began unless it is a history read from the start,
+    /// so only then does a fire from before the range exist to leave a start residue.
+    /// </summary>
+    private Slice SliceOf(TimeRange range)
+        => SliceOf(range.To - range.From, range.From > RehearsalGraph.RunFor(range.To).Start!.Value);
+
+    /// <summary>
+    /// The per-window rates scaled to the range. A planted loss stays constant: it happened in the window.
+    /// Stamped = closed, plus a pre-range fire's failures (validated and recorded inside), less the last
+    /// fire's items still being persisted at the end.
+    /// </summary>
+    private Slice SliceOf(TimeSpan length, bool startsAfterTheRunBegan)
+    {
+        var scale = length.TotalMinutes / WindowLength.TotalMinutes;
+        int Scaled(int n) => (int)Math.Round(n * scale);
+
+        var imported = Scaled(RecordsImported);
+        var rejected = Scaled(RejectedItems);
+        var drained = Scaled(DrainedPolls);
+        var good = imported - rejected;
+
+        IReadOnlyList<RehearsalStep> closed =
+        [
+            new(RehearsalGraph.ImportStep, Completed: imported, Failed: 0, Cancelled: drained, Parked: 0),
+            new(RehearsalGraph.ValidateStep, Completed: good, Failed: rejected, Cancelled: 0, Parked: 0),
+            new(RehearsalGraph.PersistStep, Completed: good - _lost, Failed: 0, Cancelled: 0, Parked: _lost),
+            new(RehearsalGraph.RecordStep, Completed: rejected, Failed: 0, Cancelled: 0, Parked: 0),
+        ];
+
+        var pre = startsAfterTheRunBegan ? _preWindowFailures : 0;
+        IReadOnlyList<RehearsalStep> stamped = closed
+            .Select(s => s.StepId == RehearsalGraph.ValidateStep ? s with { Failed = s.Failed + pre }
+                : s.StepId == RehearsalGraph.RecordStep ? s with { Completed = s.Completed + pre }
+                : s.StepId == RehearsalGraph.PersistStep ? s with { Completed = s.Completed - _inFlight }
+                : s)
+            .ToList();
+
+        return new Slice(Scaled(Fires), drained, imported, closed, stamped);
+    }
 
     /// <summary>A string[] because <c>AnalystConfig.PanelSet</c> takes one.</summary>
     internal string[] PanelIds =>
@@ -130,8 +195,8 @@ internal sealed class RehearsalPanels : IPanelReader
     }
 
     /// <summary>
-    /// Only failure-causes has invented history. Every other panel answers a history read with the
-    /// window reading: the history range ends where the window does, so the window is its last
+    /// failure-causes, step-outcomes, run-boundaries and step-failures are served from the range; every
+    /// other panel answers a history read with the window reading: the history range ends where the window does, so the window is its last
     /// <see cref="WindowLength"/>. <b>Limitation:</b> the loop builds the <c>served</c> envelope from
     /// the range it asked for, not from the reader, so the model is still told the history range was
     /// served; only the reading itself (series timestamps included) is the window's. The live loop is
@@ -145,32 +210,33 @@ internal sealed class RehearsalPanels : IPanelReader
             throw new PanelUnavailableException(panelId, "not part of the rehearsal");
         }
 
-        return history && panelId != "failure-causes"
+        var servedFromTheRange = panelId is "failure-causes" or "step-outcomes" or "run-boundaries" or "step-failures";
+        return history && !servedFromTheRange
             ? Task.FromResult(Build(panelId, new TimeRange(range.To - WindowLength, range.To), history: false))
             : Task.FromResult(Build(panelId, range, history));
     }
 
-    private int Outcomes => Ledger.Sum(s => s.Outcomes);
-
-    /// <summary>Every log record of the workflow in the window, the scope count the Elastic panels report.</summary>
-    private int WorkflowRecords => Outcomes * 6 + Fires * 3 + _lost;
+    /// <summary>Every log record of the workflow in the slice, the scope count the Elastic panels report.</summary>
+    private int WorkflowRecords(Slice slice) => slice.Stamped.Sum(s => s.Outcomes) * 6 + slice.Fires * 3 + _lost;
 
     private PanelReading Build(string panelId, TimeRange range, bool history)
     {
+        var slice = SliceOf(range);
+
         var (value, samples) = panelId switch
         {
             "step-outcomes" => (Serialize(new
             {
-                totalOutcomeRecords = Outcomes,
-                completed = Ledger.Sum(s => s.Completed),
-                failed = Ledger.Sum(s => s.Failed),
-                cancelled = Ledger.Sum(s => s.Cancelled),
-            }), Outcomes),
-            "run-boundaries" => RunBoundaries(),
+                totalOutcomeRecords = slice.Stamped.Sum(s => s.Outcomes),
+                completed = slice.Stamped.Sum(s => s.Completed),
+                failed = slice.Stamped.Sum(s => s.Failed),
+                cancelled = slice.Stamped.Sum(s => s.Cancelled),
+            }), slice.Stamped.Sum(s => s.Outcomes)),
+            "run-boundaries" => RunBoundaries(slice),
             "step-failures" => (Serialize(new
             {
-                totalOutcomeRecords = Outcomes,
-                failedCount = Ledger.Sum(s => s.Failed),
+                totalOutcomeRecords = slice.Stamped.Sum(s => s.Outcomes),
+                failedCount = slice.Stamped.Sum(s => s.Failed),
                 samples = Enumerable.Range(0, Math.Min(5, RejectedItems)).Select(i => new Dictionary<string, object>
                 {
                     ["@timestamp"] = EpochMillis(range.To - TimeSpan.FromSeconds(40 + 150 * i)),
@@ -187,11 +253,11 @@ internal sealed class RehearsalPanels : IPanelReader
                              + "the extension '.dat' is not one of the allowed extensions [.zip]",
                     },
                 }),
-            }), Outcomes),
-            "failure-causes" => FailureCauses(range, history),
+            }), slice.Stamped.Sum(s => s.Outcomes)),
+            "failure-causes" => FailureCauses(range, history, slice),
             "refused-messages" => (Serialize(new
             {
-                totalWorkflowRecords = WorkflowRecords,
+                totalWorkflowRecords = WorkflowRecords(slice),
                 refusedCount = _lost,
                 parked = _lost,
                 notParked = 0,
@@ -215,7 +281,7 @@ internal sealed class RehearsalPanels : IPanelReader
                         ["{OriginalFormat}"] = RefusalTemplates.Parked,
                     },
                 }),
-            }), WorkflowRecords),
+            }), WorkflowRecords(slice)),
             "dead-letter-depth" => Series(range, "queue",
                 new[] { "orchestrator-control.dead", ValidatorQueue + ".dead", PersisterQueue + ".dead", RecorderQueue + ".dead" },
                 (queue, i, n) => queue == PersisterQueue + ".dead" ? (double)(_lost * i / (n - 1)) : 0),
@@ -234,18 +300,17 @@ internal sealed class RehearsalPanels : IPanelReader
 
     /// <summary>
     /// The one cause, and the failed share per bucket. The range's totals are the ledger's per-15-minute
-    /// rates scaled to the range (40 imported, 6 failed, 5 cancelled for the window itself), spread over
+    /// rates scaled to the range (the slice's stamped totals), spread over
     /// the buckets by largest remainder weighted by each bucket's overlap with the range, so the buckets
     /// sum exactly to the totals. Each share is that bucket's own failed over imported (null when it
     /// imported nothing), and the top-level share is the range's, both as the live panel computes them;
     /// the cause's count is the failed the buckets add up to.
     /// </summary>
-    private (string Value, int Samples) FailureCauses(TimeRange range, bool history)
+    private (string Value, int Samples) FailureCauses(TimeRange range, bool history, Slice slice)
     {
         var windowMinutes = WindowLength.TotalMinutes;
         var bucket = ElasticPanelSource.BucketFor(range);
         var width = TimeSpan.FromMinutes(int.Parse(bucket.Split(' ')[0], CultureInfo.InvariantCulture));
-        var scale = (range.To - range.From).TotalMinutes / windowMinutes;
 
         var starts = new List<DateTimeOffset>();
         for (var start = range.From; start < range.To; start += width)
@@ -256,9 +321,9 @@ internal sealed class RehearsalPanels : IPanelReader
         var weights = starts
             .Select(t => (Math.Min((t + width).Ticks, range.To.Ticks) - t.Ticks) / (double)TimeSpan.TicksPerMinute)
             .ToList();
-        var imported = Allocate((int)Math.Round(RecordsImported * scale), weights);
-        var failed = Allocate((int)Math.Round(RejectedItems * scale), weights);
-        var cancelled = Allocate((int)Math.Round(DrainedPolls * scale), weights);
+        var imported = Allocate(slice.Imported, weights);
+        var failed = Allocate(slice.Stamped.Sum(s => s.Failed), weights);
+        var cancelled = Allocate(slice.Stamped.Sum(s => s.Cancelled), weights);
 
         var buckets = starts.Select((start, i) => new
         {
@@ -302,46 +367,45 @@ internal sealed class RehearsalPanels : IPanelReader
         return parts;
     }
 
-    private (string Value, int Samples) RunBoundaries()
+    private (string Value, int Samples) RunBoundaries(Slice slice)
     {
         var graph = RehearsalGraph.Graph;
         var rows = graph.EntryStepIds
-            .Select(id => new { role = StepRoles.Entry, step = graph.Names[id], records = Fires })
+            .Select(id => new { role = StepRoles.Entry, step = graph.Names[id], records = slice.Fires })
             .Concat(graph.Steps
-                .Select(s => new { s.StepId, records = TerminalRecords(s, graph.Steps) })
+                .Select(s => new { s.StepId, records = TerminalRecords(s, graph.Steps, slice) })
                 .Where(t => t.records > 0)
                 .Select(t => new { role = StepRoles.Terminal, step = graph.Names[t.StepId], t.records }))
             .ToList();
 
         return (Serialize(new
         {
-            totalWorkflowRecords = WorkflowRecords,
-            fires = Fires,
-            importerPolls = Fires,
-            pollsThatImported = Fires - DrainedPolls,
-            drainedPolls = DrainedPolls,
-            recordsImported = RecordsImported,
+            totalWorkflowRecords = WorkflowRecords(slice),
+            fires = slice.Fires,
+            importerPolls = slice.Fires,
+            pollsThatImported = slice.Fires - slice.DrainedPolls,
+            drainedPolls = slice.DrainedPolls,
+            recordsImported = slice.Imported,
             byStep = rows,
         }), rows.Sum(r => r.records));
     }
 
     /// <summary>
-    /// The orchestrator's terminal rule applied to the ledger: every outcome of a step with no
-    /// successors, or the Completed outcomes of a step whose successors all decline Completed.
+    /// The orchestrator's terminal rule applied to the CLOSED fires -- run-boundaries never sees a fire
+    /// that entered before the range -- less the last fire's terminal records that land after it.
     /// </summary>
-    private int TerminalRecords(StepL1 step, IReadOnlyList<StepL1> steps)
+    private int TerminalRecords(StepL1 step, IReadOnlyList<StepL1> steps, Slice slice)
     {
-        var ledger = Ledger.Single(l => l.StepId == step.StepId);
-        if (step.NextStepIds.Count == 0)
-        {
-            return ledger.Outcomes;
-        }
+        var closed = slice.Closed.Single(l => l.StepId == step.StepId);
+        var count = step.NextStepIds.Count == 0
+            ? closed.Outcomes
+            : step.NextStepIds
+                .Select(id => steps.Single(s => s.StepId == id))
+                .Any(next => GraphRenderer.Accepts(next.EntryCondition, StepResult.Completed))
+                ? 0
+                : closed.Completed;
 
-        var completedAdvances = step.NextStepIds
-            .Select(id => steps.Single(s => s.StepId == id))
-            .Any(next => GraphRenderer.Accepts(next.EntryCondition, StepResult.Completed));
-
-        return completedAdvances ? 0 : ledger.Completed;
+        return step.StepId == RehearsalGraph.PersistStep ? count - _inFlight : count;
     }
 
     private static string ValidatorQueue => $"processor-{RehearsalGraph.ValidatorProcessor:D}";
