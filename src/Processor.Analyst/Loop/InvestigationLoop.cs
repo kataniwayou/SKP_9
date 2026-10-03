@@ -341,16 +341,20 @@ internal sealed class InvestigationLoop(
             return (null, "the investigation's own record does not support its finding: " + string.Join("; ", problems));
         }
 
+        var insights = FindingInsights(input);
+        var verdictProblem = VerdictProblem(input.GetProperty("verdict").GetString()!, insights);
+        if (verdictProblem is not null)
+        {
+            return (null, verdictProblem);
+        }
+
         var finding = new AnalystFinding(
             Verdict: input.GetProperty("verdict").GetString()!,
             // The name is filled by AnalystProcessor, which can read L2; the loop knows only the id.
             Target: new FindingTarget(config.TargetWorkflowId, Name: null),
             Window: new RealizedWindow(window.From, window.To, input.GetProperty("samplesExamined").GetInt32()),
             Reason: null,
-            Insights: [.. input.GetProperty("insights").EnumerateArray().Select(i => new FindingInsight(
-                i.GetProperty("claim").GetString()!,
-                i.GetProperty("why").GetString()!,
-                [.. i.GetProperty("panels").EnumerateArray().Select(p => p.GetString()!)]))],
+            Insights: insights,
             Evidence: [.. input.GetProperty("evidence").EnumerateArray().Select(e => new FindingEvidence(
                 e.GetProperty("panelId").GetString()!,
                 e.GetProperty("layer").GetString()!,
@@ -369,6 +373,36 @@ internal sealed class InvestigationLoop(
 
         return (new LoopOutcome.Finding(finding), null);
     }
+
+    /// <summary>The verdict rule (spec D2): Notable iff any insight is deterministic; severity follows.</summary>
+    internal static string? VerdictProblem(string verdict, IReadOnlyList<FindingInsight> insights)
+    {
+        var mismatched = insights.FirstOrDefault(i => (i.Classification == "deterministic") != (i.Severity == "high"));
+        if (mismatched is not null)
+        {
+            return $"insight '{mismatched.Claim}' is {mismatched.Classification} but has severity {mismatched.Severity}; "
+                 + "severity is high exactly when the insight is deterministic";
+        }
+
+        var deterministic = insights.Any(i => i.Classification == "deterministic");
+        return (verdict, deterministic) switch
+        {
+            ("Notable", false) => "Notable needs at least one deterministic insight; with only transient insights the verdict is Drifting",
+            ("Drifting", true) => "Drifting carries only transient insights; a deterministic insight makes the verdict Notable",
+            _ => null,
+        };
+    }
+
+    private static IReadOnlyList<FindingInsight> FindingInsights(JsonElement input)
+        => [.. input.GetProperty("insights").EnumerateArray().Select(i => new FindingInsight(
+            i.GetProperty("claim").GetString()!,
+            i.GetProperty("why").GetString()!,
+            [.. i.GetProperty("panels").EnumerateArray().Select(p => p.GetString()!)],
+            i.GetProperty("classification").GetString()!,
+            i.GetProperty("domain").GetString()!,
+            i.GetProperty("severity").GetString()!,
+            i.GetProperty("onset").GetString()!,
+            [.. i.GetProperty("evidenceKinds").EnumerateArray().Select(k => k.GetString()!)]))];
 
     /// <summary>
     /// The document for a run that reached no insight. Same target, window, trace, usage and prompt

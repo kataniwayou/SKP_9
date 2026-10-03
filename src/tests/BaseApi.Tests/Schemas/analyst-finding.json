@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Analyst finding v3",
+  "title": "Analyst finding v4",
   "type": "object",
   "properties": {
     "verdict": {
@@ -11,7 +11,7 @@
         "Quiet",
         "Inconclusive"
       ],
-      "description": "Drifting and Notable carry at least one insight. Quiet means the analysis ran and nothing correlated into anything wrong; Inconclusive means the model judged the evidence it got back unbelievable. All four are published: every run whose facilities worked completes and exports a document, and only a facility failure fails the step and publishes nothing."
+      "description": "Notable carries at least one deterministic insight (operator intervention); Drifting carries only transient insights (lower severity); Quiet means no problem, or only what the declared expectations allow; Inconclusive means the evidence could not decide."
     },
     "target": {
       "type": "object",
@@ -87,12 +87,60 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "deterministic",
+              "transient"
+            ]
+          },
+          "domain": {
+            "type": "string",
+            "enum": [
+              "system",
+              "data"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "high",
+              "low"
+            ]
+          },
+          "onset": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidenceKinds": {
+            "type": "array",
+            "minItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "nature",
+                "logged-as",
+                "persistence",
+                "mix",
+                "retry",
+                "scope",
+                "coincidence",
+                "conservation"
+              ]
+            }
           }
         },
         "required": [
           "claim",
           "why",
-          "panels"
+          "panels",
+          "classification",
+          "domain",
+          "severity",
+          "onset",
+          "evidenceKinds"
         ],
         "additionalProperties": false
       },
@@ -171,6 +219,20 @@
           },
           "dataReturned": {
             "type": "boolean"
+          },
+          "historyFrom": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "historyTo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         },
         "required": [

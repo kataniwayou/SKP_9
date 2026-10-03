@@ -22,7 +22,12 @@ public sealed class AnalystFindingSchemaTests
             new FindingInsight(
                 Claim: "The broker is not the bottleneck; consumers are falling behind.",
                 Why: "Arrival mean rose fourfold while produce duration stayed flat at 12ms.",
-                Panels: ["arrival-mean", "produce-duration"]),
+                Panels: ["arrival-mean", "produce-duration"],
+                Classification: "deterministic",
+                Domain: "data",
+                Severity: "high",
+                Onset: "since 2026-10-02T12:51:47Z",
+                EvidenceKinds: ["nature", "persistence"]),
         ],
         Evidence:
         [
@@ -40,7 +45,10 @@ public sealed class AnalystFindingSchemaTests
         [
             new TraceEntry(1, "arrival-mean", true),
             new TraceEntry(2, "queue-depth", true),
-            new TraceEntry(3, "produce-duration", true),
+            new TraceEntry(
+                3, "produce-duration", true,
+                HistoryFrom: new DateTimeOffset(2026, 9, 23, 0, 0, 0, TimeSpan.Zero),
+                HistoryTo: new DateTimeOffset(2026, 9, 23, 6, 0, 0, TimeSpan.Zero)),
         ],
         Usage: new FindingUsage(
             Calls: 9,

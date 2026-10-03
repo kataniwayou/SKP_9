@@ -44,7 +44,7 @@ public sealed class InvestigationLoopTests
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
 
         var finding = Assert.IsType<LoopOutcome.Finding>(outcome);
-        Assert.Equal("Drifting", finding.Value.Verdict);
+        Assert.Equal("Notable", finding.Value.Verdict);
         Assert.Equal(Hash, finding.Value.PromptHash);
     }
 
@@ -162,7 +162,7 @@ public sealed class InvestigationLoopTests
             verdict = "Notable",
             insights = new[]
             {
-                new { claim = "c", why = "w", panels = new[] { "queue-depth", "never-read" } },
+                new { claim = "c", why = "w", panels = new[] { "queue-depth", "never-read" }, classification = "deterministic", domain = "data", severity = "high", onset = "since start", evidenceKinds = new[] { "nature", "persistence" } },
             },
             samplesExamined = 91,
             evidence = new[] { new { panelId = "queue-depth", layer = "ops", label = "max", value = "4" } },
@@ -459,7 +459,7 @@ public sealed class InvestigationLoopTests
         var invalidFinding = ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
         {
             verdict = "Quiet",
-            insights = new[] { new { claim = "c", why = "w", panels = new[] { "arrival-mean", "queue-depth" } } },
+            insights = new[] { new { claim = "c", why = "w", panels = new[] { "arrival-mean", "queue-depth" }, classification = "transient", domain = "system", severity = "low", onset = "since start", evidenceKinds = new[] { "nature", "persistence" } } },
             samplesExamined = 10,
             evidence = new[] { new { panelId = "arrival-mean", layer = "ops", label = "mean", value = "1ms" } },
             ruledOut = Array.Empty<object>(),
@@ -475,7 +475,7 @@ public sealed class InvestigationLoopTests
         var outcome = await Loop(model).RunAsync("sys", Config(), Window, Hash, CancellationToken.None);
 
         var finding = Assert.IsType<LoopOutcome.Finding>(outcome);
-        Assert.Equal("Drifting", finding.Value.Verdict);
+        Assert.Equal("Notable", finding.Value.Verdict);
         var errors = model.Received[^1].Transcript.SelectMany(t => t.ToolResults).Where(r => r.IsError).ToArray();
         Assert.True(Assert.Single(errors).IsError);
     }
@@ -621,7 +621,7 @@ public sealed class InvestigationLoopTests
         var reworded = ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
         {
             verdict = "Drifting",
-            insights = new[] { new { claim = "c", why = "w", panels = new[] { "queue-depth", "arrival-mean" } } },
+            insights = new[] { new { claim = "c", why = "w", panels = new[] { "queue-depth", "arrival-mean" }, classification = "transient", domain = "system", severity = "low", onset = "since start", evidenceKinds = new[] { "nature", "persistence" } } },
             samplesExamined = 91,
             evidence = new[] { new { panelId = "queue-depth", layer = "ops", label = "mean", value = "180ms" } },
             ruledOut = new[] { new { hypothesis = "broker slow", disconfirmingCriterion = "depth above a hundred", whatWasSeen = "max 4" } },
@@ -641,7 +641,7 @@ public sealed class InvestigationLoopTests
         var invented = ScriptedModel.Call(ToolNamesForTest.SubmitFinding, new
         {
             verdict = "Drifting",
-            insights = new[] { new { claim = "c", why = "w", panels = new[] { "queue-depth", "arrival-mean" } } },
+            insights = new[] { new { claim = "c", why = "w", panels = new[] { "queue-depth", "arrival-mean" }, classification = "transient", domain = "system", severity = "low", onset = "since start", evidenceKinds = new[] { "nature", "persistence" } } },
             samplesExamined = 91,
             evidence = new[] { new { panelId = "queue-depth", layer = "ops", label = "mean", value = "180ms" } },
             ruledOut = new[] { new { hypothesis = "made up later", disconfirmingCriterion = "x", whatWasSeen = "y" } },
@@ -653,6 +653,36 @@ public sealed class InvestigationLoopTests
 
         Assert.Contains("never proposed", ex.Message, StringComparison.Ordinal);
     }
+
+    private static FindingInsight Insight(string classification) => new(
+        "c", "w", ["failure-causes", "step-outcomes"], classification,
+        classification == "deterministic" ? "data" : "system",
+        classification == "deterministic" ? "high" : "low", "since start", ["nature", "persistence"]);
+
+    [Theory]
+    [InlineData("Notable", "deterministic", null)]
+    [InlineData("Drifting", "transient", null)]
+    [InlineData("Notable", "transient", "Notable needs at least one deterministic insight")]
+    [InlineData("Drifting", "deterministic", "Drifting carries only transient insights")]
+    public void TheVerdictFollowsTheClassifications(string verdict, string classification, string? problem)
+    {
+        var found = InvestigationLoop.VerdictProblem(verdict, [Insight(classification)]);
+
+        if (problem is null)
+        {
+            Assert.Null(found);
+        }
+        else
+        {
+            Assert.Contains(problem, found, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void SeverityMustMatchTheClassification()
+        => Assert.Contains("severity",
+            InvestigationLoop.VerdictProblem("Notable", [Insight("deterministic") with { Severity = "low" }]),
+            StringComparison.Ordinal);
 }
 
 // ToolNamesForTest now lives on AnalystScript.cs, shared with AnalystProcessorTests.

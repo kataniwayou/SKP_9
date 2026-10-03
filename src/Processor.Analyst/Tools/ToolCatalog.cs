@@ -150,8 +150,13 @@ internal static class ToolCatalog
                  "properties":{
                    "claim":{"type":"string","minLength":1},
                    "why":{"type":"string","minLength":1},
-                   "panels":{"type":"array","minItems":2,"uniqueItems":true,"items":{"type":"string","minLength":1}}},
-                 "required":["claim","why","panels"],
+                   "panels":{"type":"array","minItems":2,"uniqueItems":true,"items":{"type":"string","minLength":1}},
+                   "classification":{"type":"string","enum":["deterministic","transient"]},
+                   "domain":{"type":"string","enum":["system","data"]},
+                   "severity":{"type":"string","enum":["high","low"]},
+                   "onset":{"type":"string","minLength":1},
+                   "evidenceKinds":{"type":"array","minItems":2,"uniqueItems":true,"items":{"type":"string","enum":["nature","logged-as","persistence","mix","retry","scope","coincidence","conservation"]}}},
+                 "required":["claim","why","panels","classification","domain","severity","onset","evidenceKinds"],
                  "additionalProperties":false}},
                "samplesExamined":{"type":"integer","minimum":0},
                "evidence":{"type":"array","minItems":1,"items":{

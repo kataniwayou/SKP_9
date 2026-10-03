@@ -33,7 +33,7 @@ internal sealed class InvestigationTrace
 
     internal void Record(string panelId, bool dataReturned, int samples = 0, TimeRange? history = null)
     {
-        _entries.Add(new TraceEntry(_entries.Count + 1, panelId, dataReturned));
+        _entries.Add(new TraceEntry(_entries.Count + 1, panelId, dataReturned, history?.From, history?.To));
         _ranges.Add(history);
         SamplesRead += samples;
     }

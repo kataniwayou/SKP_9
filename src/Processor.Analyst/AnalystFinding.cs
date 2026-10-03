@@ -70,8 +70,13 @@ internal sealed record AnalystFinding(
 /// </summary>
 internal sealed record FindingTarget(Guid WorkflowId, string? Name);
 
-/// <summary>One inference, the panels it correlates, and the reasoning that connects them.</summary>
-internal sealed record FindingInsight(string Claim, string Why, IReadOnlyList<string> Panels);
+/// <summary>
+/// One inference, classified (spec D3). Severity is derived, high exactly when deterministic, and is
+/// carried so a reader of the topic need not know the rule.
+/// </summary>
+internal sealed record FindingInsight(
+    string Claim, string Why, IReadOnlyList<string> Panels,
+    string Classification, string Domain, string Severity, string Onset, IReadOnlyList<string> EvidenceKinds);
 
 /// <summary>
 /// The investigation's own spend -- what <see cref="Budget"/> limits -- and, separately, the whole
@@ -96,5 +101,6 @@ internal sealed record FindingEvidence(string PanelId, string Layer, string Labe
 /// <summary>A hypothesis that was killed, and what killed it.</summary>
 internal sealed record RuledOutHypothesis(string Hypothesis, string DisconfirmingCriterion, string WhatWasSeen);
 
-/// <summary>One panel consultation, in order.</summary>
-internal sealed record TraceEntry(int Ordinal, string PanelId, bool DataReturned);
+/// <summary>One panel consultation, in order. The history range is set when the read asked for one.</summary>
+internal sealed record TraceEntry(
+    int Ordinal, string PanelId, bool DataReturned, DateTimeOffset? HistoryFrom = null, DateTimeOffset? HistoryTo = null);
