@@ -344,6 +344,23 @@ public sealed class RehearsalFixtureTests
     }
 
     [Fact]
+    public void TheQuietScenarioServesSharesItsDeclaredExpectationsAllow()
+    {
+        // A Quiet scenario whose expectations do not cover what it serves is not quiet: a correct
+        // investigation would have to report the excess share.
+        var panels = RehearsalPanels.Quiet();
+        var buckets = Read(panels, "failure-causes").GetProperty("buckets").EnumerateArray().ToList();
+        var imported = (double)buckets.Sum(b => b.GetProperty("imported").GetInt64());
+
+        var expectations = panels.Expectations!;
+
+        Assert.InRange(buckets.Sum(b => b.GetProperty("failed").GetInt64()) / imported, 0.0, expectations.MaxFailedShare!.Value);
+        // An undeclared cancelled share is not an expectation of zero: the drained polls are routine.
+        if (expectations.MaxCancelledShare is { } maxCancelled)
+            Assert.InRange(buckets.Sum(b => b.GetProperty("cancelled").GetInt64()) / imported, 0.0, maxCancelled);
+    }
+
+    [Fact]
     public void OnlyTheQuietScenarioCarriesExpectations()
     {
         Assert.NotNull(RehearsalPanels.Quiet().Expectations);

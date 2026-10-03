@@ -79,7 +79,7 @@ internal static class RehearsalGraph
         => new(windowEnd.AddHours(-6), windowEnd.AddHours(-6), [], null);
 
     internal static readonly AnalystExpectations TestFeed =
-        new(0.2, 0.0, "rehearsal feed: 6 of every 40 items are built to fail validation");
+        new(0.2, null, "rehearsal feed: 6 of every 40 items are built to fail validation");
 
     /// <summary>The briefing exactly as a live dispatch renders it.</summary>
     internal static string Briefing => GraphRenderer.Render(GraphBriefing.Of(Graph));
