@@ -19,8 +19,9 @@ namespace Processor.Analyst.Bit;
 /// <para>
 /// <b>Three parts, cheapest first, each able to reject on its own.</b>
 /// <see cref="PromptStructure"/> is mechanical and free; the judge costs a few calls and grades
-/// method against a hypothetical; <see cref="GroundTruthRehearsal"/> costs two full
-/// investigations and is the only part that checks the prompt reaches the right CONCLUSION. The
+/// method against a hypothetical; <see cref="GroundTruthRehearsal"/> costs up to four full
+/// investigations (quiet, edge-skew, loss, bad input; fail-fast) and is the only part that
+/// checks the prompt reaches the right CONCLUSION. The
 /// ordering is not tidiness: a structureless prompt must never cost a model call, and an unfit one
 /// must never cost a rehearsal.
 /// </para>

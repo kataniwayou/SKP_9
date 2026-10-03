@@ -215,6 +215,8 @@ public sealed class GroundTruthRehearsalTests
         var problem = Assert.Single(verdict.Problems);
         Assert.Equal("verify", problem.Stage);
         Assert.Contains("edges", problem.Offending, StringComparison.Ordinal);
+        Assert.Contains("6 against 7", problem.Offending, StringComparison.Ordinal);
+        Assert.Contains("32 against 34", problem.Offending, StringComparison.Ordinal);
     }
 
     [Fact]

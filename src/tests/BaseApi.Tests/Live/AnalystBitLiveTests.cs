@@ -7,11 +7,11 @@ namespace BaseApi.Tests.Live;
 
 /// <summary>
 /// The whole preflight BIT, in Full mode, against the real model: the structure check, the judge's
-/// quorum and both ground-truth rehearsals. This is what a dispatch pays the first time it sees a
+/// quorum and all four ground-truth rehearsals. This is what a dispatch pays the first time it sees a
 /// prompt, run deliberately before <c>Analyst__Bit__Mode</c> goes back to Full, so a prompt the exam
 /// would refuse is found here rather than as a fire that fails.
 /// <para>
-/// <b>Costs real credit:</b> up to five judge calls and two full investigations, roughly an
+/// <b>Costs real credit:</b> up to five judge calls and four full investigations, roughly an
 /// investigation and a half. The verdict goes to a private in-memory store, never the deployment's.
 /// </para>
 /// </summary>

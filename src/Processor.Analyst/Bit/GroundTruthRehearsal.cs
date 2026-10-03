@@ -22,10 +22,10 @@ namespace Processor.Analyst.Bit;
 /// with <see cref="RehearsalGraph"/> exactly as <c>AnalystProcessor</c> briefs it with the target's.
 /// </para>
 /// <para>
-/// <b>Three scenarios, and the quiet one matters more.</b> A monitor that fires twice an hour and
+/// <b>Four scenarios, and the quiet one matters more.</b> A monitor that fires twice an hour and
 /// cries wolf trains its operator to ignore it, so a false alarm costs more than a missed finding.
-/// The quiet window runs first for that reason, and a prompt that invents a finding there fails
-/// without the second scenario being paid for.
+/// They run in order -- quiet, edge-skew, loss, bad input -- and fail fast: a prompt that invents a
+/// finding on the quiet window fails without any later scenario being paid for.
 /// </para>
 /// <para>
 /// <b>Cost, stated plainly.</b> Each scenario is a full investigation against the real model: minutes
@@ -80,11 +80,19 @@ internal sealed class GroundTruthRehearsal(
 
         if (edges is LoopOutcome.Finding paged)
         {
+            var skew = RehearsalPanels.EdgeSkewed();
+            var recordTerminal = skew.ClosedLedger.Single(s => s.StepId == RehearsalGraph.RecordStep).Completed;
+            var failures = skew.Ledger.Single(s => s.StepId == RehearsalGraph.ValidateStep).Failed;
+            var persistTerminal = skew.ClosedLedger.Single(s => s.StepId == RehearsalGraph.PersistStep).Completed
+                - RehearsalPanels.InFlightAtEnd;
+            var validated = skew.Ledger.Single(s => s.StepId == RehearsalGraph.ValidateStep).Completed;
+
             return [new StageProblem("verify", "contradicting",
                 "against a healthy rehearsal window whose edges do not cancel -- a fire that entered before "
                 + $"the window had {RehearsalPanels.PreWindowFailures} failure recorded inside it, and the last "
                 + $"fire's {RehearsalPanels.InFlightAtEnd} good items were still being persisted when it closed, "
-                + "so record-outcome's terminal reads 6 against 7 failures and persist-file's 32 against 34 "
+                + $"so record-outcome's terminal reads {recordTerminal} against {failures} failures and persist-file's "
+                + $"{persistTerminal} against {validated} "
                 + "validated, with no dead-letter growth, no refusal and the failed share inside the declared "
                 + "expectation -- the prompt still produced a finding: " + Summarise(paged.Value)
                 + " -- a gap the window's edges explain is not lost work, and paging it teaches the operator "

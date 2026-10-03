@@ -71,7 +71,8 @@ internal sealed class RehearsalPanels : IPanelReader
 
     /// <summary>
     /// The same window with one unambiguous fault: work thrown away DURING the window. 17 of the 34
-    /// deliveries to persist-file were parked because their input could not be read, so its dead-letter queue
+    /// deliveries to persist-file were parked because the key the step reads was never written by its
+    /// predecessor, a code defect that repeats on every item routed there, so its dead-letter queue
     /// grows from 0 to 17, 17 parked refusals land, the step-outcomes totals fall 17 short of what
     /// the routing predicts for 40 imported items, and terminal at persist-file reads 17 against 34
     /// good items. Four readings agree on the same loss.
@@ -177,11 +178,8 @@ internal sealed class RehearsalPanels : IPanelReader
         ["step-outcomes", "run-boundaries", "step-failures", "refused-messages",
          "dead-letter-depth", "queue-wait", "processor-liveness", "failure-causes"];
 
-    private static string Layer(string panelId) => panelId switch
-    {
-        "dead-letter-depth" or "queue-wait" or "processor-liveness" => "ops",
-        _ => "business",
-    };
+    private static string Layer(string panelId)
+        => PanelRegistry.All.Single(p => p.PanelId == panelId).Layer;
 
     public PanelDescriptor Describe(string panelId)
     {
@@ -200,10 +198,11 @@ internal sealed class RehearsalPanels : IPanelReader
     /// is at least <see cref="WindowLength"/> long. Every other panel, and any history read shorter than
     /// the window, answers with the window reading: the history range ends where the window does, so
     /// the window is its last <see cref="WindowLength"/>. A shorter range would scale the rates down but
-    /// still carry a whole edge residue, breaching the declared expectation the window meets. <b>Limitation:</b> the loop builds the <c>served</c> envelope from
-    /// the range it asked for, not from the reader, so the model is still told the history range was
-    /// served; only the reading itself (series timestamps included) is the window's. The live loop is
-    /// not changed to accommodate the rehearsal.
+    /// still carry a whole edge residue, breaching the declared expectation the window meets.
+    /// <b>Limitation:</b> the loop builds the <c>served</c> envelope from the range it asked for, not
+    /// from the reader, so the model is still told the history range was served; only the reading
+    /// itself (series timestamps included) is the window's. The live loop is not changed to
+    /// accommodate the rehearsal.
     /// </summary>
     public Task<PanelReading> ReadAsync(
         string panelId, Guid targetWorkflowId, TimeRange range, bool history, CancellationToken ct)
@@ -280,7 +279,7 @@ internal sealed class RehearsalPanels : IPanelReader
                         ["exception"] = new
                         {
                             type = "System.InvalidOperationException",
-                            message = "the step's input could not be read from L2",
+                            message = "the step's input key was never written: the predecessor's output key does not match the one this step reads",
                         },
                         ["{OriginalFormat}"] = RefusalTemplates.Parked,
                     },

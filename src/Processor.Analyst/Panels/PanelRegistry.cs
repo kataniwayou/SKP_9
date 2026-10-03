@@ -482,7 +482,7 @@ internal static class PanelRegistry
                 "its absence alone is not a stall. Nothing between the edges is on this panel: judge " +
                 "a stall from step-outcomes (completed, failed and cancelled totals) and step-failures " +
                 "against recordsImported and the routing in the running graph. recordsImported is how " +
-                "many items the importer took in; pollsThatImported and drainedPolls split its polls. " +
+                "many items the importer took in; pollsThatImported and drainedPolls split its polls; recordsImported and its polls count importer poll records stamped in the window. " +
                 "Entry with recordsImported 0 is a quiet window (every poll drained). " +
                 "totalWorkflowRecords is every record the workflow logged in the window; at zero nothing " +
                 "was reported at all, which cannot be told apart from logging that is not reaching the " +
