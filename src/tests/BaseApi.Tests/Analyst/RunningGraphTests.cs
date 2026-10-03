@@ -205,7 +205,7 @@ public sealed class RunningGraphTests
         Assert.Contains("has no step", system, StringComparison.Ordinal);
     }
 
-    private static readonly string StagedPrompt = string.Join("\n\n",
+    internal static readonly string StagedPrompt = string.Join("\n\n",
         "Preamble.",
         "STAGE 1 - RESEARCH. " + new string('x', 100),
         "STAGE 2 - VALIDATE. " + new string('x', 100),

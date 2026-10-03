@@ -149,6 +149,20 @@ public static class ProcessorHost
         // The target's running graph, from the projection its last start wrote to L2.
         builder.Services.AddSingleton<Graph.IWorkflowGraphSource, Graph.L2WorkflowGraphSource>();
 
+        // Same base address and timeout as the Elastic panel source; one more ES|QL reader. The
+        // address is set here because the source takes a bare HttpClient; a blank or malformed
+        // value leaves it unset and the source reports the run context as unavailable.
+        builder.Services.AddHttpClient<Graph.ElasticRunContextSource>((sp, client) =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            var baseUrl = sp.GetRequiredService<IOptions<Panels.PanelSourceOptions>>().Value.ElasticBaseUrl;
+            if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri))
+            {
+                client.BaseAddress = uri;
+            }
+        });
+        builder.Services.AddSingleton<Graph.IRunContextSource>(sp => sp.GetRequiredService<Graph.ElasticRunContextSource>());
+
         builder.Services.Configure<Model.AnalystModelOptions>(builder.Configuration.GetSection("Analyst:Model"));
         // Env-only, like the model options: Analyst__Bit__Mode=StructureOnly skips the judge and the
         // rehearsal for a proof of concept. Unset means Full.

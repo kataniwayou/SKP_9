@@ -23,7 +23,8 @@ internal sealed class AnalystProcessor(
     TokenMeter? meter = null,
     IEntityNameSource? names = null,
     Graph.IWorkflowGraphSource? graphs = null,
-    TimeProvider? clock = null)
+    TimeProvider? clock = null,
+    Graph.IRunContextSource? runs = null)
     : BaseProcessor<AnalystConfig>
 {
     /// <summary>The longest window any panel source here can honestly answer.</summary>
@@ -254,10 +255,18 @@ internal sealed class AnalystProcessor(
 
             // Read by the processor, never by the model: the model gets the whole running graph every
             // dispatch, with no turn spent fetching it and no way to reach anything else.
-            var briefing = graphs is null
+            var graphText = graphs is null
                 ? null
                 : Graph.GraphRenderer.Render(
                     await graphs.ReadAsync(config.TargetWorkflowId, ct).ConfigureAwait(false));
+
+            // Resolved here, never by the model: the limit must be known before the first turn.
+            var runContext = runs is null
+                ? Graph.RunContext.Missing("no run-context source is configured")
+                : await runs.ReadAsync(config.TargetWorkflowId, to, ct).ConfigureAwait(false);
+
+            var briefing = string.Join("\n\n",
+                new[] { graphText, Graph.RunContextRenderer.Render(runContext, range) }.Where(t => t is not null));
 
             outcome = await loop
                 .RunAsync(ContractPrompt.Compose(config.Prompt), config, range, PromptHash.Of(config.Prompt), ct,
