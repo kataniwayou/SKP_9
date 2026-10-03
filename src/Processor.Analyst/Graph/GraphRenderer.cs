@@ -100,6 +100,32 @@ internal static class GraphRenderer
                 + string.Join(", ", unreachable.Select(s => $"{Name(s.StepId)} (step {s.StepId:D})")));
         }
 
+        var layers = GraphLayers.Of(graph, id => labels.TryGetValue(id, out var l) ? $"{l} {Name(id)}" : Name(id));
+        text.AppendLine()
+            .AppendLine("Layers (computed from the entry conditions):");
+
+        if (layers.Handlers.Count == 0)
+        {
+            text.AppendLine("  No step is entered on Failed or Cancelled: failures are recorded only in logs, "
+                + "and each one ends at the step that failed.");
+        }
+
+        foreach (var h in layers.Handlers)
+        {
+            text.AppendLine($"  Failure handler: {Ref(h.StepId)} {Name(h.StepId)} takes {h.Takes} from {h.FanIn.Count} step(s): "
+                + string.Join(", ", h.FanIn.Select(Ref)) + ".");
+        }
+
+        foreach (var group in layers.Unhandled.GroupBy(u => u.Result))
+        {
+            text.AppendLine($"  {group.Key} is handled by nothing at: " + string.Join(", ", group.Select(u => Ref(u.StepId))) + ".");
+        }
+
+        foreach (var eq in layers.Conservation)
+        {
+            text.AppendLine($"  Check: {eq}");
+        }
+
         return text.Append("</running-graph>").ToString();
     }
 
