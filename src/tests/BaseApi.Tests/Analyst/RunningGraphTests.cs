@@ -205,6 +205,20 @@ public sealed class RunningGraphTests
         Assert.Contains("has no step", system, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ThePrimerTeachesTheEdgeResidueAndPersistenceForAnUncorroboratedGap()
+    {
+        var primer = ContractPrompt.FrameworkPrimer;
+
+        Assert.Contains("read each one's Scope", primer, StringComparison.Ordinal);
+        Assert.Contains("edge residue", primer, StringComparison.Ordinal);
+        Assert.Contains("recordsImported over fires", primer, StringComparison.Ordinal);
+        Assert.Contains("is the window's edges, not a finding", primer, StringComparison.Ordinal);
+        Assert.Contains("An uncorroborated conservation gap is deterministic only if it recurs", primer, StringComparison.Ordinal);
+        // Corroborated loss keeps the existing rule: the loss rehearsal grades it deterministic / system.
+        Assert.Contains("dead-letter growth, parked refusals or a failure cause naming infrastructure", primer, StringComparison.Ordinal);
+    }
+
     internal static readonly string StagedPrompt = string.Join("\n\n",
         "Preamble.",
         "STAGE 1 - RESEARCH. " + new string('x', 100),

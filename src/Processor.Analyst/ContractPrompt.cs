@@ -94,6 +94,16 @@ internal static class ContractPrompt
         - step-outcomes counts one record per step execution, summed over every step: it has no step
           dimension, so it can confirm a total but never which step produced it. Never attribute a
           count to a step the panel cannot name.
+        - Panels count different populations: read each one's Scope. step-outcomes, step-failures and
+          failure-causes count records stamped in the window, whatever fire they belong to;
+          run-boundaries counts the fires that entered in the window, and only their records stamped in
+          it. Setting one against the other leaves an edge residue: the work of fires that entered before
+          the window, and the terminal records of fires still running when it ended. The residue is about
+          one fire's work at each edge -- estimate it from recordsImported over fires and the routing (an
+          item whose path writes two terminal records counts twice). A conservation gap within that
+          residue, with nothing corroborating it, is the window's edges, not a finding. A gap beyond it,
+          or one corroborated by dead-letter growth, parked refusals or a failure cause naming infrastructure,
+          is evidence of loss and is reported.
         - A refused message produced no result at all and is invisible to step-outcomes. Parked means
           it sits in a dead-letter queue; not parked means it was redelivered and nothing was lost.
         - The pods run the graph projected at the workflow's last start; an edit since then is not in
@@ -116,6 +126,10 @@ internal static class ContractPrompt
           history limit in the run-context block. A cause present since the start, or since a deploy
           marker, is strong evidence it is deterministic. With no workflow start in the run-context block
           there is no history: the investigation is window-only.
+        - An uncorroborated conservation gap is deterministic only if it recurs: read run-boundaries and
+          step-outcomes again with from. An edge residue stays about one fire per edge however long the
+          range; a defect in the accounting grows with it. With no history available, such a gap is never
+          deterministic.
         """;
 
     internal static string Compose(string payloadPrompt) => $"""
