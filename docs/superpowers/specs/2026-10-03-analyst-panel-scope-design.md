@@ -101,10 +101,13 @@ rules:
 The Layers `Check:` lines from `GraphRenderer` stay as they are. They state what must balance for
 whole fires. The new rule says which panels can be set against them, and with what allowance.
 
-### D3. A gap is deterministic only with persistence
+### D3. An uncorroborated gap is deterministic only with persistence
 
-Extend the classification rule. A conservation gap may be classified deterministic only when a
-history read shows it recurs. The test: read `run-boundaries` and `step-outcomes` again with
+Extend the classification rule. An **uncorroborated** conservation gap may be classified
+deterministic only when a history read shows it recurs. Uncorroborated means no dead-letter growth,
+no parked refusals and no failure cause naming infrastructure. A corroborated loss keeps the
+existing rules: the loss rehearsal's 17 parked items happen inside the window only, and must still
+be reported as deterministic / system. The test: read `run-boundaries` and `step-outcomes` again with
 `from`. The edge residue stays about one fire per edge however long the range, while a real
 accounting loss grows with the range. With no history available (no workflow start in the run
 context), an uncorroborated gap within the bound cannot be deterministic.
@@ -125,8 +128,23 @@ Add `RehearsalPanels.EdgeSkewed()`, a healthy window whose edges do not cancel. 
 - There is no loss: no dead-letter growth and no refusals. Declared expectations cover the
   item-caused failures.
 
-Expected conclusion: **no finding** (Quiet). A finding with any deterministic insight fails the BIT,
-with a message saying the gap was the window edge.
+Expected conclusion: **no finding** (Quiet). **Any finding fails the BIT**, as in the quiet
+rehearsal. A Drifting note about work in flight is a report about something healthy, which the
+contract already forbids. The failure message says the gap was the window edge.
+
+The numbers, on the rehearsal graph (import -> validate -> persist; validate Failed -> record):
+
+| | fires that entered in the window, followed to the end | stamped in the window (what `step-outcomes` shows) | `run-boundaries` terminal |
+|---|---|---|---|
+| import-paths | 40 Completed, 5 Cancelled | 40 Completed, 5 Cancelled | -- |
+| validate-file | 34 Completed, 6 Failed | 34 Completed, **7** Failed (+1 from a pre-window fire) | -- |
+| persist-file | 34 Completed | **32** Completed (2 still running at the end) | **32** |
+| record-outcome | 6 Completed | **7** Completed (+1 pre-window) | **6** |
+
+The failed share is 7/40 = 0.175, within the declared 0.2. The residues are 1 and 2, inside the
+average 40/15 = 2.7 items per fire. A history read from the workflow start (6 h, 24 windows)
+shows 960 imported, 144 failed, 144 terminal at record-outcome (no start residue at the start), and
+814 at persist-file against 816 validated: the end residue stays 2.
 
 Constraints:
 
@@ -142,6 +160,16 @@ Constraints:
    the two scenarios fence the rule from both sides.
 3. `RehearsalFixtureTests` walks the new ledger against the graph. Every residue must be one the
    stated edges produce.
+4. **The rehearsal must show the model the real panel descriptions.** Today
+   `RehearsalPanels.Describe` returns `"rehearsal panel {id}"`, and `InvestigationLoop` builds the
+   tool catalog from `Describe`. So the BIT has never shown the model the descriptions production
+   shows, and D1's scope sentences would be invisible to it. `Describe` returns the
+   `PanelRegistry` description for each id. This makes every rehearsal more faithful, so all four
+   scenarios are judged on what production reads.
+5. History reads of `step-outcomes`, `run-boundaries` and `step-failures` are served from the
+   ledger scaled to the range, in every scenario. A loss planted in the window stays constant, and
+   the start residue applies only when the range begins after the workflow start. The ops panels
+   and `refused-messages` keep answering history reads with the window.
 
 Order and cost: quiet, then edge-skew, then loss, then bad input. Edge-skew goes second because it
 is a cheap rejection of the most expensive real failure mode, a false page. This adds one
@@ -172,7 +200,8 @@ rehearsal's 1200 s cap per scenario.
 ## 6. Acceptance
 
 - Unit tests: every panel description carries a `Scope:` sentence; the `EdgeSkewed` ledger walks
-  against the graph; grading fails a deterministic finding on edge-skew and passes no finding.
+  against the graph; grading fails any finding on edge-skew and passes no finding; the rehearsal
+  describes every panel with its registry description.
 - **Replay of the offset-58 window** (14:58-15:13Z), captured with `AnalystReplayCapture`, concludes
   Quiet. Capture it before implementation starts, so it is a regression case and not a
   reconstruction. Replays of the offset-56 (Quiet) and offset-57 (Notable, data) windows keep their
@@ -181,8 +210,11 @@ rehearsal's 1200 s cap per scenario.
 
 ## 7. Open questions for review
 
-1. Should the Kibana panels carry the same scope sentence in their descriptions, so the operator and
-   the Analyst read the same caveat? This changes no query. Recommended: yes.
+1. **Decided 2026-10-03: yes, text only, three panels.** The Kibana descriptions of *Run edges —
+   entry dispatches and terminal outcomes*, *Step outcomes over time* and *Outcome distribution*
+   gain the same edge facts. No query, visualization or data-view change. The ndjson is edited by
+   hand and re-imported by API (`overwrite=true`). This is a separate commit; the Analyst fix does
+   not depend on it. *Refused messages* and *Whitelist verdicts by value* are unchanged.
 2. Edge-skew's expected verdict is Quiet with declared expectations. Should a second variant without
    expectations (expected: Notable, *data* only, never *system*) be added, or is that already covered
    by the bad-input scenario? Recommended: covered; do not add.
