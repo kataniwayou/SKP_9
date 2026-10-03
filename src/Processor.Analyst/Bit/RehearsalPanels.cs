@@ -279,7 +279,7 @@ internal sealed class RehearsalPanels : IPanelReader
                         ["exception"] = new
                         {
                             type = "System.InvalidOperationException",
-                            message = "the step's input key was never written: the predecessor's output key does not match the one this step reads",
+                            message = "the step's input key was never written: a code defect, the predecessor's output key does not match the one this step reads",
                         },
                         ["{OriginalFormat}"] = RefusalTemplates.Parked,
                     },
