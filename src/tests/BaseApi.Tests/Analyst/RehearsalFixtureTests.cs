@@ -307,16 +307,40 @@ public sealed class RehearsalFixtureTests
     }
 
     [Fact]
-    public async Task AHistoryReadShowsTheSameShareInEveryBucket()
+    public async Task AHistoryReadShowsTheFailuresInEveryBucketAtTheFeedsShare()
     {
         var panels = RehearsalPanels.RejectingBadInput();
         var history = new TimeRange(RehearsalGraph.RunFor(To).HistoryLimit!.Value, To);
         var reading = await panels.ReadAsync("failure-causes", RehearsalGraph.WorkflowId, history, true, CancellationToken.None);
 
-        var shares = JsonDocument.Parse(reading.ValueJson).RootElement.GetProperty("buckets").EnumerateArray()
-            .Where(b => b.GetProperty("imported").GetInt64() > 0)
-            .Select(b => b.GetProperty("failedShare").GetDouble()).Distinct().ToList();
-        Assert.Equal([0.15], shares);
+        var root = JsonDocument.Parse(reading.ValueJson).RootElement;
+        var buckets = root.GetProperty("buckets").EnumerateArray().ToList();
+
+        Assert.All(buckets, b => Assert.True(b.GetProperty("failed").GetInt64() > 0));
+        Assert.Equal(960, buckets.Sum(b => b.GetProperty("imported").GetInt64()));
+        Assert.Equal(144, buckets.Sum(b => b.GetProperty("failed").GetInt64()));
+        Assert.Equal(0.15,
+            (double)buckets.Sum(b => b.GetProperty("failed").GetInt64()) / buckets.Sum(b => b.GetProperty("imported").GetInt64()));
+        Assert.Equal(144, Assert.Single(root.GetProperty("causes").EnumerateArray()).GetProperty("count").GetInt64());
+    }
+
+    [Fact]
+    public void TheWindowReadingAddsUpToTheLedger()
+    {
+        var root = Read(RehearsalPanels.RejectingBadInput(), "failure-causes");
+        var buckets = root.GetProperty("buckets").EnumerateArray().ToList();
+
+        Assert.InRange(buckets.Count, 1, 48);
+        Assert.Equal(40, buckets.Sum(b => b.GetProperty("imported").GetInt64()));
+        Assert.Equal(6, buckets.Sum(b => b.GetProperty("failed").GetInt64()));
+        Assert.Equal(5, buckets.Sum(b => b.GetProperty("cancelled").GetInt64()));
+        Assert.Equal(6, Assert.Single(root.GetProperty("causes").EnumerateArray()).GetProperty("count").GetInt64());
+        Assert.All(buckets, b =>
+        {
+            var imported = b.GetProperty("imported").GetInt64();
+            var expected = imported == 0 ? 0.0 : Math.Round((double)b.GetProperty("failed").GetInt64() / imported, 3);
+            Assert.Equal(expected, b.GetProperty("failedShare").GetDouble());
+        });
     }
 
     [Fact]

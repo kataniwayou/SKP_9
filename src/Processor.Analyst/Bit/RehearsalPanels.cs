@@ -208,46 +208,71 @@ internal sealed class RehearsalPanels : IPanelReader
     }
 
     /// <summary>
-    /// The one cause, and the failed share per bucket. The share is the ledger's ratio (6 of 40),
-    /// not recomputed from the rounded per-bucket counts, so it reads 0.15 at every bucket width.
-    /// A history range shows the cause since the range's start with its count scaled to the range:
-    /// the failure is persistent, not a recent change.
+    /// The one cause, and the failed share per bucket. The range's totals are the ledger's per-15-minute
+    /// rates scaled to the range (40 imported, 6 failed, 5 cancelled for the window itself), spread over
+    /// the buckets by largest remainder weighted by each bucket's overlap with the range, so the buckets
+    /// sum exactly to the totals. Each share is that bucket's own failed over imported, as the live
+    /// panel computes it, and the cause's count is the failed the buckets add up to.
     /// </summary>
     private (string Value, int Samples) FailureCauses(TimeRange range, bool history)
     {
         const double windowMinutes = 15;
-        var share = (double)RejectedItems / RecordsImported;
         var bucket = ElasticPanelSource.BucketFor(range);
         var width = TimeSpan.FromMinutes(int.Parse(bucket.Split(' ')[0], CultureInfo.InvariantCulture));
         var scale = (range.To - range.From).TotalMinutes / windowMinutes;
-        var count = history ? (long)Math.Round(RejectedItems * scale) : RejectedItems;
 
-        var buckets = new List<object>();
+        var starts = new List<DateTimeOffset>();
         for (var start = range.From; start < range.To; start += width)
         {
-            var f = width.TotalMinutes / windowMinutes;
-            buckets.Add(new
-            {
-                start,
-                imported = (long)Math.Round(RecordsImported * f),
-                failed = (long)Math.Round(RejectedItems * f),
-                cancelled = (long)Math.Round(DrainedPolls * f),
-                failedShare = share,
-            });
+            starts.Add(start);
         }
 
+        var weights = starts
+            .Select(t => (Math.Min((t + width).Ticks, range.To.Ticks) - t.Ticks) / (double)TimeSpan.TicksPerMinute)
+            .ToList();
+        var imported = Allocate((int)Math.Round(RecordsImported * scale), weights);
+        var failed = Allocate((int)Math.Round(RejectedItems * scale), weights);
+        var cancelled = Allocate((int)Math.Round(DrainedPolls * scale), weights);
+
+        var buckets = starts.Select((start, i) => new
+        {
+            start,
+            imported = (long)imported[i],
+            failed = (long)failed[i],
+            cancelled = (long)cancelled[i],
+            failedShare = imported[i] == 0 ? 0.0 : Math.Round((double)failed[i] / imported[i], 3),
+        }).ToList();
+
+        var count = failed.Sum();
         var cause = new
         {
             step = RehearsalGraph.Graph.Names[RehearsalGraph.ValidateStep],
             logged = "author-reported",
             cause = "the author reported the step failed: fetching item-<n>.dat failed: "
                   + "the extension '.dat' is not one of the allowed extensions [.zip]",
-            count,
+            count = (long)count,
             firstSeen = history ? range.From : range.To.AddMinutes(-14),
             lastSeen = range.To.AddSeconds(-40),
         };
 
-        return (Serialize(new { bucket, causes = new[] { cause }, buckets }), (int)count);
+        return (Serialize(new { bucket, causes = new[] { cause }, buckets }), count);
+    }
+
+    /// <summary>Splits <paramref name="total"/> across the weights by largest remainder, so the parts sum to it exactly.</summary>
+    private static int[] Allocate(int total, IReadOnlyList<double> weights)
+    {
+        var sum = weights.Sum();
+        var exact = weights.Select(w => total * w / sum).ToArray();
+        var parts = exact.Select(e => (int)Math.Floor(e)).ToArray();
+        var order = Enumerable.Range(0, parts.Length)
+            .OrderByDescending(i => exact[i] - parts[i]).ThenBy(i => i).ToList();
+
+        for (int k = 0, missing = total - parts.Sum(); k < missing; k++)
+        {
+            parts[order[k]]++;
+        }
+
+        return parts;
     }
 
     private (string Value, int Samples) RunBoundaries()
