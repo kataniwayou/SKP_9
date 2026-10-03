@@ -27,7 +27,7 @@ public sealed class RehearsalFixtureTests
 
     private static JsonElement Value(IPanelReader reader, string panelId)
     {
-        var reading = reader.ReadAsync(panelId, RehearsalGraph.Graph.WorkflowId, Window, CancellationToken.None)
+        var reading = reader.ReadAsync(panelId, RehearsalGraph.Graph.WorkflowId, Window, history: false, CancellationToken.None)
             .GetAwaiter().GetResult();
         return JsonDocument.Parse(reading.ValueJson).RootElement;
     }

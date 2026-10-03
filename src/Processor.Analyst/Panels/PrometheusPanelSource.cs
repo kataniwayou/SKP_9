@@ -52,6 +52,9 @@ internal sealed class PrometheusPanelSource
     /// <summary>Caps the number of points a wide window returns; see <see cref="ComputeStep"/>.</summary>
     private const int MaxPointsPerSeries = 300;
 
+    /// <summary>Points per series on a history read (spec 4.3).</summary>
+    internal const int HistoryPoints = 48;
+
     private readonly HttpClient _http;
 
     public PrometheusPanelSource(HttpClient httpClient, IOptions<PanelSourceOptions> options)
@@ -88,14 +91,15 @@ internal sealed class PrometheusPanelSource
     /// <see cref="LivePanelReader"/> dispatches to uniformly.
     /// </param>
     /// <param name="range">The window to read.</param>
+    /// <param name="history">A since-start read: the step is widened to fit <see cref="HistoryPoints"/>.</param>
     /// <param name="ct">Cancellation.</param>
     internal async Task<PanelReading> ReadAsync(
-        PanelDefinition definition, Guid targetWorkflowId, TimeRange range, CancellationToken ct)
+        PanelDefinition definition, Guid targetWorkflowId, TimeRange range, bool history, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
         _ = targetWorkflowId;
 
-        var step = ComputeStep(range);
+        var step = ComputeStep(range, history);
         var url =
             "/api/v1/query_range" +
             $"?query={Uri.EscapeDataString(definition.Query)}" +
@@ -262,7 +266,7 @@ internal sealed class PrometheusPanelSource
     /// under <see cref="MaxPointsPerSeries"/> points -- wide enough to see a six-hour drift, without
     /// asking Prometheus for tens of thousands of points a monitoring window has no use for.
     /// </summary>
-    internal static TimeSpan ComputeStep(TimeRange range)
+    internal static TimeSpan ComputeStep(TimeRange range, bool history = false)
     {
         var duration = range.To - range.From;
         if (duration <= TimeSpan.Zero)
@@ -270,7 +274,8 @@ internal sealed class PrometheusPanelSource
             return MinStep;
         }
 
-        var evenStep = TimeSpan.FromSeconds(Math.Ceiling(duration.TotalSeconds / MaxPointsPerSeries));
+        var points = history ? HistoryPoints : MaxPointsPerSeries;
+        var evenStep = TimeSpan.FromSeconds(Math.Ceiling(duration.TotalSeconds / points));
         return evenStep > MinStep ? evenStep : MinStep;
     }
 

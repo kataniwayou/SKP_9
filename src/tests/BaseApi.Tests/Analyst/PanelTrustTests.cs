@@ -608,7 +608,7 @@ public sealed class PanelTrustTests
                 new HttpClient(new RecordingHandler(HttpStatusCode.OK, "{}"), disposeHandler: false),
                 Options.Create(new PanelSourceOptions { PrometheusBaseUrl = "http://prometheus:9090" })));
 
-        var reading = await reader.ReadAsync("run-boundaries", W, Range, CancellationToken.None);
+        var reading = await reader.ReadAsync("run-boundaries", W, Range, history: false, CancellationToken.None);
 
         Assert.Equal("business", reading.Layer);
         Assert.Equal(3, handler.Requests.Count);
@@ -703,7 +703,7 @@ public sealed class PanelTrustTests
             new HttpClient(handler, disposeHandler: false),
             Options.Create(new PanelSourceOptions { PrometheusBaseUrl = "http://prometheus:9090" }));
 
-        await source.ReadAsync(Def("queue-wait"), TargetWorkflowId, Window, CancellationToken.None);
+        await source.ReadAsync(Def("queue-wait"), TargetWorkflowId, Window, history: false, CancellationToken.None);
 
         Assert.Equal(HttpMethod.Get, handler.LastMethod);
         Assert.Contains("/api/v1/query_range?", handler.LastPath, StringComparison.Ordinal);
@@ -729,7 +729,7 @@ public sealed class PanelTrustTests
             new HttpClient(handler, disposeHandler: false),
             Options.Create(new PanelSourceOptions { PrometheusBaseUrl = "http://prometheus:9090" }));
 
-        await source.ReadAsync(Def("consumer-duration-mean"), TargetWorkflowId, Window, CancellationToken.None);
+        await source.ReadAsync(Def("consumer-duration-mean"), TargetWorkflowId, Window, history: false, CancellationToken.None);
 
         var decodedQuery = Uri.UnescapeDataString(handler.LastPath);
         Assert.Contains("disposition", decodedQuery, StringComparison.Ordinal);
@@ -747,7 +747,7 @@ public sealed class PanelTrustTests
             Options.Create(new PanelSourceOptions { PrometheusBaseUrl = "http://prometheus:9090" }));
 
         var ex = await Assert.ThrowsAsync<PanelUnavailableException>(
-            () => source.ReadAsync(Def("queue-wait"), TargetWorkflowId, Window, CancellationToken.None));
+            () => source.ReadAsync(Def("queue-wait"), TargetWorkflowId, Window, history: false, CancellationToken.None));
 
         Assert.Contains("prometheus", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -761,7 +761,7 @@ public sealed class PanelTrustTests
             Options.Create(new PanelSourceOptions { PrometheusBaseUrl = null }));
 
         var ex = await Assert.ThrowsAsync<PanelUnavailableException>(
-            () => source.ReadAsync(Def("queue-wait"), TargetWorkflowId, Window, CancellationToken.None));
+            () => source.ReadAsync(Def("queue-wait"), TargetWorkflowId, Window, history: false, CancellationToken.None));
 
         Assert.Contains("prometheus", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -777,8 +777,8 @@ public sealed class PanelTrustTests
         var prometheusHandler = new RecordingHandler(HttpStatusCode.OK, Fixture("prometheus-present-covering.json"));
         var reader = BuildReader(elasticHandler, prometheusHandler);
 
-        var businessReading = await reader.ReadAsync("step-outcomes", TargetWorkflowId, Window, CancellationToken.None);
-        var opsReading = await reader.ReadAsync("queue-wait", TargetWorkflowId, Window, CancellationToken.None);
+        var businessReading = await reader.ReadAsync("step-outcomes", TargetWorkflowId, Window, history: false, CancellationToken.None);
+        var opsReading = await reader.ReadAsync("queue-wait", TargetWorkflowId, Window, history: false, CancellationToken.None);
 
         Assert.Equal("business", businessReading.Layer);
         Assert.Equal("ops", opsReading.Layer);

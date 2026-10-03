@@ -27,5 +27,7 @@ internal interface IPanelReader
     /// and reads host-level telemetry for the whole replica.
     /// </para>
     /// </summary>
-    Task<PanelReading> ReadAsync(string panelId, Guid targetWorkflowId, TimeRange range, CancellationToken ct);
+    /// <param name="history">A since-start read rather than the window: sources shape the result to
+    /// fit the token budget (spec 4.3).</param>
+    Task<PanelReading> ReadAsync(string panelId, Guid targetWorkflowId, TimeRange range, bool history, CancellationToken ct);
 }

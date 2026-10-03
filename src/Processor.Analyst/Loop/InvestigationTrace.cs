@@ -1,3 +1,5 @@
+using Processor.Analyst.Panels;
+
 namespace Processor.Analyst.Loop;
 
 /// <summary>
@@ -24,9 +26,15 @@ internal sealed class InvestigationTrace
     /// </summary>
     internal int SamplesRead { get; private set; }
 
-    internal void Record(string panelId, bool dataReturned, int samples = 0)
+    private readonly List<TimeRange?> _ranges = [];
+
+    /// <summary>Parallel to <see cref="Entries"/>: the history range served, or null for a window read.</summary>
+    internal IReadOnlyList<TimeRange?> Ranges => _ranges;
+
+    internal void Record(string panelId, bool dataReturned, int samples = 0, TimeRange? history = null)
     {
         _entries.Add(new TraceEntry(_entries.Count + 1, panelId, dataReturned));
+        _ranges.Add(history);
         SamplesRead += samples;
     }
 }

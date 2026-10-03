@@ -15,7 +15,7 @@ public sealed class FixturePanelReaderTests
         var reader = new FixturePanelReader()
             .Reading("arrival-mean", "ops", """{"mean":180}""", samples: 91);
 
-        var reading = await reader.ReadAsync("arrival-mean", Guid.Empty, Window, CancellationToken.None);
+        var reading = await reader.ReadAsync("arrival-mean", Guid.Empty, Window, history: false, CancellationToken.None);
 
         Assert.Equal("ops", reading.Layer);
         Assert.Equal(91, reading.SampleCount);
@@ -30,7 +30,7 @@ public sealed class FixturePanelReaderTests
         // as a clean zero.
         var reader = new FixturePanelReader().MissingSeries("liveness");
 
-        var reading = await reader.ReadAsync("liveness", Guid.Empty, Window, CancellationToken.None);
+        var reading = await reader.ReadAsync("liveness", Guid.Empty, Window, history: false, CancellationToken.None);
 
         Assert.False(reading.Trust.SeriesPresent);
         Assert.False(reading.Trust.NoDataDistinguishable);
@@ -44,7 +44,7 @@ public sealed class FixturePanelReaderTests
         var reader = new FixturePanelReader().Failing("queue-wait", "elasticsearch timed out");
 
         var ex = await Assert.ThrowsAsync<PanelUnavailableException>(
-            () => reader.ReadAsync("queue-wait", Guid.Empty, Window, CancellationToken.None));
+            () => reader.ReadAsync("queue-wait", Guid.Empty, Window, history: false, CancellationToken.None));
 
         Assert.Contains("elasticsearch", ex.Message, StringComparison.Ordinal);
     }
@@ -55,6 +55,6 @@ public sealed class FixturePanelReaderTests
         var reader = new FixturePanelReader();
 
         await Assert.ThrowsAsync<PanelUnavailableException>(
-            () => reader.ReadAsync("nope", Guid.Empty, Window, CancellationToken.None));
+            () => reader.ReadAsync("nope", Guid.Empty, Window, history: false, CancellationToken.None));
     }
 }

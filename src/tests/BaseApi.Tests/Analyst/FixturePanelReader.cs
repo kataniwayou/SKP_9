@@ -13,6 +13,9 @@ internal sealed class FixturePanelReader : IPanelReader
     private readonly Dictionary<string, string> _failures = [];
     private readonly Dictionary<string, PanelDescriptor> _descriptors = [];
 
+    /// <summary>Every read served, in order, so a test can see what range the loop asked for.</summary>
+    internal List<(TimeRange Range, bool History)> Requests { get; } = [];
+
     internal FixturePanelReader Reading(string panelId, string layer, string valueJson, int samples)
     {
         _readings[panelId] = new PanelReading(
@@ -78,8 +81,9 @@ internal sealed class FixturePanelReader : IPanelReader
             ? d
             : new PanelDescriptor(panelId, "unknown", "not configured in this fixture");
 
-    public Task<PanelReading> ReadAsync(string panelId, Guid targetWorkflowId, TimeRange range, CancellationToken ct)
+    public Task<PanelReading> ReadAsync(string panelId, Guid targetWorkflowId, TimeRange range, bool history, CancellationToken ct)
     {
+        Requests.Add((range, history));
         // Fixture readings are keyed on panelId alone -- a fixture-driven test has no live workflow
         // to scope against, so the id is accepted (matching the real IPanelReader signature) and
         // ignored, same as PrometheusPanelSource ignores it for its own, real reason.

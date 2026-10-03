@@ -24,15 +24,17 @@ internal static class ToolCatalog
                 Closed("{}", required: "[]")),
 
             new ToolSpec(ToolNames.ReadPanel,
-                "Read one panel over the analysis window. The result carries trust flags: a series "
-                + "that was absent, a window only partly covered, or a 'no data' that could not be "
-                + "told apart from 'no problem'. Treat those as facts about the evidence, not about "
-                + "the system.",
+                "Read one panel over the analysis window, or -- with 'from' -- from that instant to the window's end. "
+                + "Use 'from' only for a hypothesis a window reading made suspicious; it is clamped to the history "
+                + "limit stated in the run context. The result carries trust flags: a series that was absent, a "
+                + "window only partly covered, or a 'no data' that could not be told apart from 'no problem'. Treat "
+                + "those as facts about the evidence, not about the system.",
                 $$"""
                 {"type":"object",
                  "properties":{"panelId":{"type":"string","enum":
                    {{ids}}
-                 } },
+                 },
+                 "from":{"type":"string","format":"date-time"} },
                  "required":["panelId"],
                  "additionalProperties":false}
                 """),

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Processor.Analyst.Loop;
+using Processor.Analyst.Panels;
 using Xunit;
 
 namespace BaseApi.Tests.Analyst;
@@ -526,5 +527,14 @@ public sealed class StageAssertionsTests
         var problems = StageAssertions.Check(artifacts, TraceOver("queue-depth"), finding);
 
         Assert.Empty(problems);
+    }
+
+    [Fact]
+    public void AHistoryReadCountsAsReadingThePanel()
+    {
+        var trace = new InvestigationTrace();
+        trace.Record("step-failures", true, 5, new TimeRange(DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddHours(1)));
+
+        Assert.Contains("step-failures", trace.PanelsRead);
     }
 }

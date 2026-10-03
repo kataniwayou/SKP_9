@@ -108,7 +108,7 @@ internal sealed class RehearsalPanels : IPanelReader
             : throw new ArgumentException($"no rehearsal panel '{panelId}'", nameof(panelId));
 
     public Task<PanelReading> ReadAsync(
-        string panelId, Guid targetWorkflowId, TimeRange range, CancellationToken ct) =>
+        string panelId, Guid targetWorkflowId, TimeRange range, bool history, CancellationToken ct) =>
         PanelIds.Contains(panelId)
             ? Task.FromResult(Build(panelId, range))
             : throw new PanelUnavailableException(panelId, "not part of the rehearsal");

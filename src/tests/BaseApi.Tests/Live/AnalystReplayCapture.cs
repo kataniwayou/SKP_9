@@ -58,7 +58,7 @@ public sealed class AnalystReplayCapture
 
         foreach (var panel in PanelRegistry.All)
         {
-            var reading = await reader.ReadAsync(panel.PanelId, workflow, range, TestContext.Current.CancellationToken);
+            var reading = await reader.ReadAsync(panel.PanelId, workflow, range, history: false, TestContext.Current.CancellationToken);
             await File.WriteAllTextAsync(
                 Path.Combine(dir, panel.PanelId + ".json"),
                 JsonSerializer.Serialize(reading, ReplayFixtures.Json), TestContext.Current.CancellationToken);

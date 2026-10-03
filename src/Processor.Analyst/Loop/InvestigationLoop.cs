@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Json.Schema;
 using Microsoft.Extensions.Logging;
@@ -20,7 +21,7 @@ internal sealed class InvestigationLoop(
 {
     internal async Task<LoopOutcome> RunAsync(
         string system, AnalystConfig config, TimeRange window, string promptHash, CancellationToken ct,
-        string? briefing = null)
+        string? briefing = null, DateTimeOffset? historyLimit = null)
     {
         ArgumentNullException.ThrowIfNull(config);
 
@@ -142,7 +143,7 @@ internal sealed class InvestigationLoop(
                 {
                     results.Add(rejected is not null && call.CallId == rejected.CallId
                         ? rejected
-                        : await ExecuteAsync(call, window, trace, artifacts, config, tools, dispatchCt).ConfigureAwait(false));
+                        : await ExecuteAsync(call, window, historyLimit, trace, artifacts, config, tools, dispatchCt).ConfigureAwait(false));
                 }
             }
             catch (EvidenceNotBelievedException ex)
@@ -169,9 +170,24 @@ internal sealed class InvestigationLoop(
         throw new AnalysisImpossibleException(budget.Why!);
     }
 
+    /// <summary>
+    /// The range a read is served: the window, unless a 'from' inside the run asks for more. Clamped in
+    /// code so no read can reach past the workflow's start, whatever the model asks for (spec U8).
+    /// </summary>
+    internal static TimeRange ClampHistory(TimeRange window, DateTimeOffset? limit, DateTimeOffset? from)
+    {
+        if (from is not { } f || limit is not { } l || f >= window.To)
+        {
+            return window;
+        }
+
+        return new TimeRange(f > l ? f : l, window.To);
+    }
+
     private async Task<ModelToolResult> ExecuteAsync(
         ModelToolCall call,
         TimeRange window,
+        DateTimeOffset? historyLimit,
         InvestigationTrace trace,
         StageArtifacts artifacts,
         AnalystConfig config,
@@ -200,10 +216,15 @@ internal sealed class InvestigationLoop(
 
             case ToolNames.ReadPanel:
                 var panelId = call.Input.GetProperty("panelId").GetString()!;
+                DateTimeOffset? from = call.Input.TryGetProperty("from", out var f)
+                    && DateTimeOffset.TryParse(f.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+                    ? parsed : null;
+                var range = ClampHistory(window, historyLimit, from);
+                var history = range != window;
                 PanelReading reading;
                 try
                 {
-                    reading = await panels.ReadAsync(panelId, config.TargetWorkflowId, window, ct).ConfigureAwait(false);
+                    reading = await panels.ReadAsync(panelId, config.TargetWorkflowId, range, history, ct).ConfigureAwait(false);
                 }
                 catch (PanelUnavailableException ex)
                 {
@@ -212,8 +233,10 @@ internal sealed class InvestigationLoop(
                     throw new AnalysisImpossibleException(ex.Message, ex);
                 }
 
-                trace.Record(panelId, reading.SampleCount > 0, reading.SampleCount);
-                return new ModelToolResult(call.CallId, JsonSerializer.Serialize(reading), IsError: false);
+                trace.Record(panelId, reading.SampleCount > 0, reading.SampleCount, history ? range : null);
+                return new ModelToolResult(call.CallId,
+                    JsonSerializer.Serialize(new { served = new { from = range.From, to = range.To, history }, reading }),
+                    IsError: false);
 
             case ToolNames.RecordValidation:
                 artifacts.Record(call.ToolName, call.Input, trace.Entries.Count);

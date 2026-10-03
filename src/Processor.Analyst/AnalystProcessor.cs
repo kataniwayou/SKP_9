@@ -270,7 +270,7 @@ internal sealed class AnalystProcessor(
 
             outcome = await loop
                 .RunAsync(ContractPrompt.Compose(config.Prompt), config, range, PromptHash.Of(config.Prompt), ct,
-                    briefing)
+                    briefing, runContext.HistoryLimit)
                 .ConfigureAwait(false);
         }
         catch (AnalysisImpossibleException ex)
