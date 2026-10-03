@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using BaseApi.Tests.Analyst;
+using Processor.Analyst.Graph;
 using Processor.Analyst.Panels;
 using Xunit;
 
@@ -63,6 +64,24 @@ public sealed class AnalystReplayCapture
                 Path.Combine(dir, panel.PanelId + ".json"),
                 JsonSerializer.Serialize(reading, ReplayFixtures.Json), TestContext.Current.CancellationToken);
         }
+
+        // failure-causes is in PanelRegistry.All, so the loop above has already saved it as
+        // failure-causes.json beside the other panels; a replay of the operator role needs it, so fail
+        // loudly rather than commit a capture without it.
+        Assert.True(File.Exists(Path.Combine(dir, "failure-causes.json")), "the capture must include failure-causes.json");
+
+        // The run context the model is handed in its first message, read as of the window's end -- the
+        // start/stop records and deploy markers decide how far back history may be read, so a replay
+        // without it answers a different question than production asked.
+        using var runHttp = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+            BaseAddress = new Uri(options.Value.ElasticBaseUrl!),
+        };
+        var runContext = await new ElasticRunContextSource(runHttp).ReadAsync(workflow, range.To, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(dir, "run-context.json"),
+            JsonSerializer.Serialize(runContext, ReplayFixtures.Json), TestContext.Current.CancellationToken);
 
         var window = Path.Combine(dir, "window.json");
 
