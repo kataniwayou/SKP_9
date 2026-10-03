@@ -109,7 +109,9 @@ internal static class ContractPrompt
           item; "the transform faulted" is an unexpected exception, judged by what it names.
         - Both are reported: Notable when any insight is deterministic (an operator must intervene),
           Drifting when every insight is transient (lower severity). Quiet only when nothing is wrong or
-          only what the declared expectations allow. A system problem is never covered by an expectation.
+          only what the declared expectations allow. A new item-naming cause -- first seen after the start
+          or a deploy marker -- is reported even when the share stays within the expectation. A system
+          problem is never covered by an expectation.
         - History is optional and on demand: read back with from only to test a suspicion, never past the
           history limit in the run-context block. A cause present since the start, or since a deploy
           marker, is strong evidence it is deterministic. With no workflow start in the run-context block

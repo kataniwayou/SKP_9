@@ -145,5 +145,6 @@ public sealed class PromptStructureTests
         Assert.DoesNotContain("expected however large it is", prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("expected, however large", prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("doing its job on bad input", prompt, StringComparison.Ordinal);
+        Assert.Contains("a new cause is reported even inside the share", prompt, StringComparison.Ordinal);
     }
 }

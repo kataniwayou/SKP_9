@@ -223,5 +223,6 @@ public sealed class RunningGraphTests
         Assert.Contains("Notable when any insight is deterministic", system, StringComparison.Ordinal);
         Assert.DoesNotContain("expected, however large", system, StringComparison.Ordinal);
         Assert.Contains("the investigation is window-only", system, StringComparison.Ordinal);
+        Assert.Contains("is reported even when the share stays within the expectation", system, StringComparison.Ordinal);
     }
 }
