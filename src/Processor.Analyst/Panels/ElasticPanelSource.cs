@@ -120,15 +120,66 @@ internal sealed class ElasticPanelSource
         return definition.PanelId switch
         {
             "run-boundaries" => BuildEdges(definition, range, tables),
+            "failure-causes" => BuildFailureCauses(definition, range, tables),
             _ => throw new PanelUnavailableException(
                 definition.PanelId, $"no ES|QL response parser registered for panel '{definition.PanelId}'"),
         };
     }
 
+    /// <summary>The bucket width that keeps a range under 48 buckets, never below a minute (spec 4.3).</summary>
+    internal static string BucketFor(TimeRange range)
+    {
+        var minutes = (int)Math.Max(1, Math.Ceiling((range.To - range.From).TotalMinutes / 48));
+        return minutes == 1 ? "1 minute" : $"{minutes} minutes";
+    }
+
     private static string Substitute(string query, Guid targetWorkflowId, TimeRange range) => query
         .Replace("{{FROM}}", range.From.UtcDateTime.ToString("o"), StringComparison.Ordinal)
         .Replace("{{TO}}", range.To.UtcDateTime.ToString("o"), StringComparison.Ordinal)
-        .Replace("{{WORKFLOW}}", targetWorkflowId.ToString("D"), StringComparison.Ordinal);
+        .Replace("{{WORKFLOW}}", targetWorkflowId.ToString("D"), StringComparison.Ordinal)
+        .Replace("{{BUCKET}}", BucketFor(range), StringComparison.Ordinal);
+
+    private static PanelReading BuildFailureCauses(
+        PanelDefinition definition, TimeRange range,
+        IReadOnlyList<IReadOnlyList<IReadOnlyDictionary<string, JsonElement>>> tables)
+    {
+        var id = definition.PanelId;
+        if (tables.Count != 2)
+        {
+            throw new PanelUnavailableException(id, $"expected 2 ES|QL statements (causes, buckets), got {tables.Count}");
+        }
+
+        var causes = tables[0].Select(r => new
+        {
+            step = Text(id, r, "attributes.StepName"),
+            logged = Text(id, r, "logged"),
+            cause = Text(id, r, "cause"),
+            count = Long(id, r, "count"),
+            firstSeen = Date(id, r, "first_seen"),
+            lastSeen = Date(id, r, "last_seen"),
+        }).ToList();
+
+        var buckets = tables[1].Select(r =>
+        {
+            var imported = Long(id, r, "imported");
+            var failed = Long(id, r, "failed");
+            return new
+            {
+                start = Date(id, r, "bucket"),
+                imported,
+                failed,
+                cancelled = Long(id, r, "cancelled"),
+                failedShare = imported == 0 ? 0.0 : Math.Round((double)failed / imported, 3),
+            };
+        }).ToList();
+
+        var valueJson = JsonSerializer.Serialize(new { bucket = BucketFor(range), causes, buckets });
+        var failures = (int)causes.Sum(c => c.count);
+        var reporting = buckets.Count > 0;
+
+        return new PanelReading(id, definition.Layer, valueJson, SampleCount: failures,
+            new PanelTrust(SeriesPresent: reporting, WindowFullyCovered: reporting, NoDataDistinguishable: reporting));
+    }
 
     /// <summary>
     /// One POST to Elasticsearch, with every transport failure and every non-success status turned

@@ -889,4 +889,41 @@ public sealed class PanelTrustTests
             };
         }
     }
+
+    [Fact]
+    public async Task FailureCausesCarryEachCauseAndTheSharePerBucket()
+    {
+        var reading = await ElasticSource(Fixture("esql-causes.json"), Fixture("esql-cause-buckets.json"))
+            .ReadEsqlAsync(Def("failure-causes"), W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        var causes = value.RootElement.GetProperty("causes").EnumerateArray().ToList();
+        Assert.Equal(3, causes.Count);
+        Assert.All(causes, c => Assert.Equal("author-reported", c.GetProperty("logged").GetString()));
+        Assert.Equal(24, causes.Sum(c => c.GetProperty("count").GetInt64()));
+
+        var last = value.RootElement.GetProperty("buckets").EnumerateArray().Last();
+        Assert.Equal(0.6, last.GetProperty("failedShare").GetDouble(), 3);
+        Assert.Equal(24, reading.SampleCount);
+        Assert.True(reading.Trust.SeriesPresent);
+    }
+
+    [Fact]
+    public async Task NoFailuresIsATrustedZeroWhenTheWorkflowLoggedOutcomes()
+    {
+        var reading = await ElasticSource(
+                """{"columns":[{"name":"count","type":"long"}],"values":[]}""",
+                Fixture("esql-cause-buckets.json"))
+            .ReadEsqlAsync(Def("failure-causes"), W, Range, CancellationToken.None);
+
+        Assert.Equal(0, reading.SampleCount);
+        Assert.True(reading.Trust.NoDataDistinguishable);
+    }
+
+    [Theory]
+    [InlineData(15, "1 minute")]
+    [InlineData(48 * 60, "60 minutes")]
+    [InlineData(1100, "23 minutes")]
+    public void TheBucketKeepsAHistoryReadUnderFortyEightBuckets(int minutes, string expected)
+        => Assert.Equal(expected, ElasticPanelSource.BucketFor(new TimeRange(Range.From, Range.From.AddMinutes(minutes))));
 }

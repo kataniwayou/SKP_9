@@ -1,0 +1,5 @@
+{"columns":[{"name":"count","type":"long"},{"name":"first_seen","type":"date"},{"name":"last_seen","type":"date"},{"name":"attributes.StepName","type":"keyword"},{"name":"logged","type":"keyword"},{"name":"cause","type":"keyword"}],
+ "values":[
+  [8,"2026-10-03T07:20:00.494Z","2026-10-03T07:24:00.480Z","split-archiveexpander_1.0.0-b5a8-f6b2ce5722b1","author-reported","the author reported the step failed: extracting sim-<n>-corrupt.zip failed: the file is named '.zip' and its leading bytes are no archive this processor knows"],
+  [8,"2026-10-03T07:20:00.318Z","2026-10-03T07:24:00.416Z","split-filefetcher_1.0.0-9d20-ab0a6d3fd48f","author-reported","the author reported the step failed: file <path> rejected: extension '.dat' is not in the allowed list (.zip)"],
+  [8,"2026-10-03T07:20:00.695Z","2026-10-03T07:24:00.544Z","sk-normalizer-sample_1.0.0-b790-2eeb754ed4fd","author-reported","the author reported the step failed: normalizing sim-<n>-triple.zip failed: item 'track<n>': an Acme item is exactly the .wav and the .json, and this one also holds track<n>.txt"]]}

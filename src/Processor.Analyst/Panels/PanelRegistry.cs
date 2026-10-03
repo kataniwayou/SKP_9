@@ -487,6 +487,37 @@ internal static class PanelRegistry
                 | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.`{OriginalFormat}` == "consumed {Consumed}/{Requested} records; stopped because {Reason}"
                 | STATS importerPolls = COUNT(*), drainedPolls = SUM(CASE(attributes.Consumed == 0, 1, 0)), recordsImported = SUM(attributes.Consumed)
                 """)),
+
+        // No operator board counterpart yet: the Kibana board shows step outcomes, not causes over time.
+        // When one is added, keep it in step with this query (the maintenance rule above).
+        new PanelDefinition(
+            PanelId: "failure-causes",
+            Layer: "business",
+            Description:
+                "Every distinct failure cause for the target workflow over the range: the step, how it was " +
+                "logged (author-reported = the step's own code rejected the item; faulted = an unexpected " +
+                "exception; other), the cause text with paths, names, ids and numbers replaced by " +
+                "placeholders, its count, and when it was first and last seen. Plus, per time bucket, the " +
+                "items imported, failed and cancelled and the failed share. This is the panel for telling a " +
+                "deterministic problem from a transient one: persistence, onset, mix and nature. bucket " +
+                "names the bucket width; a history read uses wider buckets so the range fits.",
+            Kind: PanelKind.Esql,
+            Query:
+                """
+                FROM logs-generic.otel-default
+                | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.Result == "Failed" AND NOT resource.attributes.service.name == "orchestrator"
+                | EVAL logged = CASE(`attributes.{OriginalFormat}` LIKE "the author reported the step failed*", "author-reported", `attributes.{OriginalFormat}` LIKE "the transform faulted*", "faulted", "other")
+                | EVAL cause = REPLACE(REPLACE(REPLACE(TO_STRING(body.text), "[0-9a-fA-F]{8}-[0-9a-fA-F-]{27}", "<id>"), "/[^ ]+", "<path>"), "[0-9]+", "<n>")
+                | STATS count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY attributes.StepName, logged, cause
+                | SORT count DESC
+                | LIMIT 50
+                ---
+                FROM logs-generic.otel-default
+                | WHERE @timestamp >= "{{FROM}}" AND @timestamp <= "{{TO}}" AND attributes.WorkflowId == "{{WORKFLOW}}" AND attributes.Result IS NOT NULL AND NOT resource.attributes.service.name == "orchestrator"
+                | EVAL imported = CASE(attributes.StepName LIKE "*importer*" AND attributes.Result == "Completed", 1, 0), failed = CASE(attributes.Result == "Failed", 1, 0), cancelled = CASE(attributes.Result == "Cancelled", 1, 0)
+                | STATS imported = SUM(imported), failed = SUM(failed), cancelled = SUM(cancelled) BY bucket = DATE_TRUNC({{BUCKET}}, @timestamp)
+                | SORT bucket
+                """),
     ];
 
     /// <summary>

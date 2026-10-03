@@ -346,4 +346,15 @@ public sealed class PanelRegistryTests
         Assert.Contains("pollsThatImported", description, StringComparison.Ordinal);
         Assert.DoesNotContain("NO FIXED RATIO", description, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void FailureCausesClassifiesHowEachFailureWasLogged()
+    {
+        var q = PanelRegistry.All.Single(p => p.PanelId == "failure-causes").Query;
+
+        Assert.Contains("\"the author reported the step failed*\", \"author-reported\"", q, StringComparison.Ordinal);
+        Assert.Contains("\"the transform faulted*\", \"faulted\"", q, StringComparison.Ordinal);
+        Assert.Contains("DATE_TRUNC({{BUCKET}}, @timestamp)", q, StringComparison.Ordinal);
+        Assert.DoesNotContain(" last ", q, StringComparison.Ordinal);
+    }
 }

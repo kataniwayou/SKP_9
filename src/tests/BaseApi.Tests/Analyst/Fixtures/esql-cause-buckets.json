@@ -1,0 +1,2 @@
+{"columns":[{"name":"imported","type":"long"},{"name":"failed","type":"long"},{"name":"cancelled","type":"long"},{"name":"bucket","type":"date"}],
+ "values":[[0,0,5,"2026-10-03T07:10:00.000Z"],[0,0,5,"2026-10-03T07:15:00.000Z"],[40,24,8,"2026-10-03T07:20:00.000Z"]]}
