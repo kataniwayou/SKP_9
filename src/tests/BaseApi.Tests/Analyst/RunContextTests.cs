@@ -14,6 +14,11 @@ internal sealed class FixedRunContextSource(RunContext ctx) : IRunContextSource
     public Task<RunContext> ReadAsync(Guid workflowId, DateTimeOffset now, CancellationToken ct) => Task.FromResult(ctx);
 }
 
+internal sealed class ThrowingRunContextSource(Func<Exception> fault) : IRunContextSource
+{
+    public Task<RunContext> ReadAsync(Guid workflowId, DateTimeOffset now, CancellationToken ct) => Task.FromException<RunContext>(fault());
+}
+
 public sealed class RunContextTests
 {
     private static readonly TimeRange Window = new(
@@ -59,6 +64,54 @@ public sealed class RunContextTests
             Guid.NewGuid(), 15, RunningGraphTests.StagedPrompt, ["step-outcomes"], 12, 100_000, 300), CancellationToken.None));
 
         Assert.Contains("<run-context>", Assert.Single(model.Received).Transcript[0].Text!, StringComparison.Ordinal);
+    }
+
+    private static (AnalystProcessor Processor, ScriptedModel Model, RecordingLogger<AnalystProcessor> Log) WithRuns(IRunContextSource runs)
+    {
+        var model = new ScriptedModel();
+        var log = new RecordingLogger<AnalystProcessor>();
+        var processor = new AnalystProcessor(
+            new PreflightBit(model, new BitCache(new InMemorySharedState(), "m"),
+                options: Microsoft.Extensions.Options.Options.Create(new AnalystBitOptions { Mode = BitMode.StructureOnly })),
+            new InvestigationLoop(model, new FixturePanelReader(), TimeProvider.System, NullLogger<InvestigationLoop>.Instance),
+            log,
+            runs: runs);
+        return (processor, model, log);
+    }
+
+    [Fact]
+    public async Task AThrowingRunContextSourceDegradesToHistoryUnavailable()
+    {
+        // Spec 4.1: history is optional. A run-context source that throws (here a malformed date)
+        // must cost the dispatch its history, not the dispatch itself.
+        var (processor, model, log) = WithRuns(new ThrowingRunContextSource(() => new FormatException("bad date")));
+
+        // The scripted model has no replies, so the loop fails after its first turn -- which is
+        // proof the dispatch got past the run context to the model.
+        await Assert.ThrowsAnyAsync<Exception>(() => processor.AnalyseAsync(new AnalystConfig(
+            Guid.NewGuid(), 15, RunningGraphTests.StagedPrompt, ["step-outcomes"], 12, 100_000, 300), CancellationToken.None));
+
+        var first = Assert.Single(model.Received).Transcript[0].Text!;
+        Assert.Contains("History is NOT available: the run context could not be read: bad date.", first, StringComparison.Ordinal);
+        Assert.Single(log.Records, r => r.Level == Microsoft.Extensions.Logging.LogLevel.Warning && r.Exception is FormatException);
+    }
+
+    [Fact]
+    public async Task ACancelledDispatchIsNotDegraded()
+    {
+        // Cancelled while the run context is being read: the dispatch stops, it does not carry on
+        // without history.
+        using var cts = new CancellationTokenSource();
+        var (processor, model, _) = WithRuns(new ThrowingRunContextSource(() =>
+        {
+            cts.Cancel();
+            return new OperationCanceledException(cts.Token);
+        }));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processor.AnalyseAsync(new AnalystConfig(
+            Guid.NewGuid(), 15, RunningGraphTests.StagedPrompt, ["step-outcomes"], 12, 100_000, 300), cts.Token));
+
+        Assert.Empty(model.Received);
     }
 
     [Fact]

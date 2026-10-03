@@ -179,6 +179,25 @@ internal sealed class AnalystProcessor(
         }
     }
 
+    /// <summary>
+    /// The run context, or history unavailable. History is optional (spec 4.1): a source that throws
+    /// -- a malformed record, an unexpected shape -- costs the dispatch its history, never the
+    /// dispatch. Only a cancellation of this dispatch propagates.
+    /// </summary>
+    private async Task<Graph.RunContext> ReadRunContextAsync(
+        Graph.IRunContextSource source, Guid workflowId, DateTimeOffset now, CancellationToken ct)
+    {
+        try
+        {
+            return await source.ReadAsync(workflowId, now, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            logger.LogWarning(ex, "the run context could not be read; the investigation is window-only");
+            return Graph.RunContext.Missing($"the run context could not be read: {ex.Message}");
+        }
+    }
+
     private async Task<AnalystFinding> RunAsync(AnalystConfig config, CancellationToken ct)
     {
 
@@ -263,7 +282,7 @@ internal sealed class AnalystProcessor(
             // Resolved here, never by the model: the limit must be known before the first turn.
             var runContext = runs is null
                 ? Graph.RunContext.Missing("no run-context source is configured")
-                : await runs.ReadAsync(config.TargetWorkflowId, to, ct).ConfigureAwait(false);
+                : await ReadRunContextAsync(runs, config.TargetWorkflowId, to, ct).ConfigureAwait(false);
 
             var briefing = string.Join("\n\n",
                 new[] { graphText, Graph.RunContextRenderer.Render(runContext, range, config.Expectations) }.Where(t => t is not null));
