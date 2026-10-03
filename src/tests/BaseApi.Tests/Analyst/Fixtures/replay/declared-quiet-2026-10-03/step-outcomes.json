@@ -1,0 +1,11 @@
+{
+  "PanelId": "step-outcomes",
+  "Layer": "business",
+  "ValueJson": "{\u0022totalOutcomeRecords\u0022:720,\u0022completed\u0022:624,\u0022failed\u0022:72,\u0022cancelled\u0022:24}",
+  "SampleCount": 720,
+  "Trust": {
+    "SeriesPresent": true,
+    "WindowFullyCovered": true,
+    "NoDataDistinguishable": true
+  }
+}
