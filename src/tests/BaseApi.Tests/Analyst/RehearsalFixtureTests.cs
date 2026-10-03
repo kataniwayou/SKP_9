@@ -396,4 +396,23 @@ public sealed class RehearsalFixtureTests
         Assert.Null(RehearsalPanels.RejectingBadInput().Expectations);
         Assert.Null(RehearsalPanels.HoldingDiscardedWork().Expectations);
     }
+
+    public static TheoryData<string> RehearsalPanelIds => new(RehearsalPanels.Quiet().PanelIds);
+
+    [Theory]
+    [MemberData(nameof(RehearsalPanelIds))]
+    public void EveryRehearsalPanelIsDescribedAsProductionDescribesIt(string panelId)
+    {
+        // InvestigationLoop builds the tool catalog from Describe. A placeholder here means the BIT
+        // never showed the model what a live dispatch reads -- including every panel's Scope.
+        var expected = PanelRegistry.All.Single(p => p.PanelId == panelId);
+        var described = RehearsalPanels.Quiet().Describe(panelId);
+
+        Assert.Equal(expected.Description, described.Description);
+        Assert.Equal(expected.Layer, described.Layer);
+    }
+
+    [Fact]
+    public void AnUnknownPanelIsStillRefused()
+        => Assert.Throws<ArgumentException>(() => RehearsalPanels.Quiet().Describe("gate-open"));
 }

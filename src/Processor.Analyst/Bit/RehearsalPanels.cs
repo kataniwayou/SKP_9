@@ -117,10 +117,17 @@ internal sealed class RehearsalPanels : IPanelReader
         _ => "business",
     };
 
-    public PanelDescriptor Describe(string panelId) =>
-        PanelIds.Contains(panelId)
-            ? new PanelDescriptor(panelId, Layer(panelId), $"rehearsal panel {panelId}")
-            : throw new ArgumentException($"no rehearsal panel '{panelId}'", nameof(panelId));
+    public PanelDescriptor Describe(string panelId)
+    {
+        if (!PanelIds.Contains(panelId))
+        {
+            throw new ArgumentException($"no rehearsal panel '{panelId}'", nameof(panelId));
+        }
+
+        // The description production shows: the BIT judges a prompt on what a live dispatch reads.
+        var definition = PanelRegistry.All.Single(p => p.PanelId == panelId);
+        return new PanelDescriptor(definition.PanelId, definition.Layer, definition.Description);
+    }
 
     /// <summary>
     /// Only failure-causes has invented history. Every other panel answers a history read with the
