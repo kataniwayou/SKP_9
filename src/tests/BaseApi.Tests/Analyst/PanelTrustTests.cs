@@ -910,6 +910,26 @@ public sealed class PanelTrustTests
     }
 
     [Fact]
+    public async Task ANullStepOrCauseIsReadAsNone()
+    {
+        // A failure record with no StepName, or a body ES|QL cannot render, groups under a null key.
+        // One such row must not make the whole panel unavailable to every dispatch that reads it.
+        var reading = await ElasticSource(
+                """
+                {"columns":[{"name":"count","type":"long"},{"name":"first_seen","type":"date"},{"name":"last_seen","type":"date"},{"name":"attributes.StepName","type":"keyword"},{"name":"logged","type":"keyword"},{"name":"cause","type":"keyword"}],
+                 "values":[[2,"2026-10-03T07:20:00.000Z","2026-10-03T07:24:00.000Z",null,"other",null]]}
+                """,
+                Fixture("esql-cause-buckets.json"))
+            .ReadEsqlAsync(Def("failure-causes"), W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        var cause = Assert.Single(value.RootElement.GetProperty("causes").EnumerateArray());
+        Assert.Equal("<none>", cause.GetProperty("step").GetString());
+        Assert.Equal("<none>", cause.GetProperty("cause").GetString());
+        Assert.Equal(2, reading.SampleCount);
+    }
+
+    [Fact]
     public async Task ABucketThatImportedNothingHasNoShare()
     {
         // Failures land after their import, so a bucket can fail items it never imported. 0.0 there

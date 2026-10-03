@@ -158,9 +158,9 @@ internal sealed class ElasticPanelSource
 
         var causes = tables[0].Select(r => new
         {
-            step = Text(id, r, "attributes.StepName"),
+            step = TextOrNone(id, r, "attributes.StepName"),
             logged = Text(id, r, "logged"),
-            cause = Text(id, r, "cause"),
+            cause = TextOrNone(id, r, "cause"),
             count = Long(id, r, "count"),
             firstSeen = Date(id, r, "first_seen"),
             lastSeen = Date(id, r, "last_seen"),
@@ -633,6 +633,14 @@ internal sealed class ElasticPanelSource
             ? cell.GetString()!
             : throw new PanelUnavailableException(panelId, $"unexpected elasticsearch response shape: '{column}' is not a string");
     }
+
+    /// <summary>
+    /// A grouping key that may be null: a failure record with no StepName, or a body ES|QL cannot
+    /// render, groups under null. Read as "&lt;none&gt;" so one such row cannot make the whole panel
+    /// unavailable; every other column keeps <see cref="Text"/>'s strictness.
+    /// </summary>
+    private static string TextOrNone(string panelId, IReadOnlyDictionary<string, JsonElement> row, string column)
+        => Cell(panelId, row, column).ValueKind == JsonValueKind.Null ? "<none>" : Text(panelId, row, column);
 
     /// <summary>A date column; null (MIN over no rows) is no date at all.</summary>
     private static DateTimeOffset? Date(string panelId, IReadOnlyDictionary<string, JsonElement> row, string column)
