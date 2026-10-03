@@ -77,6 +77,19 @@ public sealed class RunContextSourceTests
         Assert.Contains("could not be read", ctx.Unavailable, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ADeployRowWithoutAMinuteIsSkipped()
+    {
+        var ctx = await Source(
+            Esql(StartCols, """[["2026-10-02T12:51:47Z",null]]"""),
+            Esql(DeployCols, """[[1,null],[2,"2026-10-02T14:14:00.000Z"]]"""))
+            .ReadAsync(W, Now, CancellationToken.None);
+
+        Assert.Null(ctx.Unavailable);
+        Assert.Equal(DateTimeOffset.Parse("2026-10-02T12:51:47Z"), ctx.Start);
+        Assert.Equal([DateTimeOffset.Parse("2026-10-02T14:14:00Z")], ctx.Deploys.Select(d => d.Minute));
+    }
+
     private sealed class Sequenced(params string[] bodies) : HttpMessageHandler
     {
         private int _next;
