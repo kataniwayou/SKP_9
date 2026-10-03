@@ -49,11 +49,13 @@ internal sealed class GroundTruthRehearsal(
     /// production fails prompts that work in production: at 240 seconds a v12 quiet rehearsal was
     /// cancelled mid-call, while live v12 investigations took 125 and 206 seconds of a 600-second
     /// budget, and the deadline cancels the model call in flight rather than ending between turns.
+    /// At 600 seconds the v14 loss rehearsal was cancelled the same way on two dev fires in a row,
+    /// with single Kimi replies of 142 to 263 seconds, so both this and the payload are 1200.
     /// </summary>
     private const int MaxIterations = 12;
 
     private const int MaxTokens = 1_500_000;
-    private const int WallClockSeconds = 600;
+    private const int WallClockSeconds = 1200;
 
     /// <summary>15 minutes, so the fixture graph's once-a-minute cron schedules the 15 fires the panels show.</summary>
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
