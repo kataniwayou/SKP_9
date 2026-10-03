@@ -144,5 +144,6 @@ public sealed class PromptStructureTests
         Assert.Contains("run-context", prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("expected however large it is", prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("expected, however large", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("doing its job on bad input", prompt, StringComparison.Ordinal);
     }
 }

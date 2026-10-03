@@ -112,7 +112,8 @@ internal static class ContractPrompt
           only what the declared expectations allow. A system problem is never covered by an expectation.
         - History is optional and on demand: read back with from only to test a suspicion, never past the
           history limit in the run-context block. A cause present since the start, or since a deploy
-          marker, is strong evidence it is deterministic.
+          marker, is strong evidence it is deterministic. With no workflow start in the run-context block
+          there is no history: the investigation is window-only.
         """;
 
     internal static string Compose(string payloadPrompt) => $"""
