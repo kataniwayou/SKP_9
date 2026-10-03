@@ -54,6 +54,10 @@ namespace Processor.Analyst;
 /// <param name="MaxIterations">Hard ceiling on model turns. Exhaustion with no terminal tool call is a failed step.</param>
 /// <param name="MaxTokens">Hard ceiling on accumulated tokens across the dispatch.</param>
 /// <param name="WallClockSeconds">Hard ceiling on elapsed time for the investigation.</param>
+/// <param name="Expectations">
+/// What this workflow is allowed to do (shares of failed or cancelled data outcomes). Optional: absent,
+/// every deterministic problem is reported.
+/// </param>
 public sealed record AnalystConfig(
     Guid TargetWorkflowId,
     int WindowMinutes,
@@ -61,4 +65,11 @@ public sealed record AnalystConfig(
     string[] PanelSet,
     int MaxIterations,
     int MaxTokens,
-    int WallClockSeconds) : ProcessorConfig;
+    int WallClockSeconds,
+    AnalystExpectations? Expectations = null) : ProcessorConfig;
+
+/// <summary>
+/// What a workflow is allowed to do, declared per workflow (spec D1). Shares count data-domain outcomes
+/// only; a system problem is never covered.
+/// </summary>
+public sealed record AnalystExpectations(double? MaxFailedShare, double? MaxCancelledShare, string Reason);

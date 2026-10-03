@@ -266,7 +266,7 @@ internal sealed class AnalystProcessor(
                 : await runs.ReadAsync(config.TargetWorkflowId, to, ct).ConfigureAwait(false);
 
             var briefing = string.Join("\n\n",
-                new[] { graphText, Graph.RunContextRenderer.Render(runContext, range) }.Where(t => t is not null));
+                new[] { graphText, Graph.RunContextRenderer.Render(runContext, range, config.Expectations) }.Where(t => t is not null));
 
             outcome = await loop
                 .RunAsync(ContractPrompt.Compose(config.Prompt), config, range, PromptHash.Of(config.Prompt), ct,

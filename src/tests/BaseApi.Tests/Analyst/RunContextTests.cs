@@ -60,4 +60,20 @@ public sealed class RunContextTests
 
         Assert.Contains("<run-context>", Assert.Single(model.Received).Transcript[0].Text!, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void DeclaredExpectationsAreStatedForDataOutcomesOnly()
+    {
+        var text = RunContextRenderer.Render(Chain, Window,
+            new AnalystExpectations(0.65, 0.25, "dev endless feed: 3 of every 5 files are built to fail"));
+
+        Assert.Contains("Declared expectations (data-domain outcomes only; system problems are never covered): "
+            + "failed share up to 0.65, cancelled share up to 0.25 -- dev endless feed: 3 of every 5 files are built to fail.",
+            text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutExpectationsEveryDeterministicProblemIsReported()
+        => Assert.Contains("No declared expectations: report every deterministic problem.",
+            RunContextRenderer.Render(Chain, Window), StringComparison.Ordinal);
 }

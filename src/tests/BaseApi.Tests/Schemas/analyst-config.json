@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Analyst step payload",
+  "title": "Analyst step payload v2",
   "type": "object",
   "properties": {
     "targetWorkflowId": {
@@ -39,6 +39,17 @@
       "type": "integer",
       "minimum": 1,
       "description": "Hard ceiling on elapsed investigation time."
+    },
+    "expectations": {
+      "type": "object",
+      "properties": {
+        "maxFailedShare": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxCancelledShare": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "required": ["reason"],
+      "additionalProperties": false,
+      "description": "What this workflow is allowed to do. Shares count data-domain outcomes only (the cause names the item); system problems are never covered. Absent: every deterministic problem is reported."
     }
   },
   "required": [
