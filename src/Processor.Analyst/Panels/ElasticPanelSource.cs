@@ -126,10 +126,17 @@ internal sealed class ElasticPanelSource
         };
     }
 
-    /// <summary>The bucket width that keeps a range under 48 buckets, never below a minute (spec 4.3).</summary>
+    /// <summary>
+    /// The bucket width that keeps a range within 48 buckets, never below a minute (spec 4.3).
+    /// <para>
+    /// Divides by 47, not 48: DATE_TRUNC aligns buckets to the clock, not to the range start, so a range
+    /// that does not begin on a bucket boundary spans one bucket more than range/width. 47 intervals keep
+    /// any alignment within 48. The same rule as the Prometheus history step.
+    /// </para>
+    /// </summary>
     internal static string BucketFor(TimeRange range)
     {
-        var minutes = (int)Math.Max(1, Math.Ceiling((range.To - range.From).TotalMinutes / 48));
+        var minutes = (int)Math.Max(1, Math.Ceiling((range.To - range.From).TotalMinutes / 47));
         return minutes == 1 ? "1 minute" : $"{minutes} minutes";
     }
 

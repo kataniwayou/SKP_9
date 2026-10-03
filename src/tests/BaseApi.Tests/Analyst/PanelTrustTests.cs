@@ -922,8 +922,31 @@ public sealed class PanelTrustTests
 
     [Theory]
     [InlineData(15, "1 minute")]
-    [InlineData(48 * 60, "60 minutes")]
-    [InlineData(1100, "23 minutes")]
+    [InlineData(48 * 60, "62 minutes")]
+    [InlineData(1100, "24 minutes")]
     public void TheBucketKeepsAHistoryReadUnderFortyEightBuckets(int minutes, string expected)
         => Assert.Equal(expected, ElasticPanelSource.BucketFor(new TimeRange(Range.From, Range.From.AddMinutes(minutes))));
+
+    [Theory]
+    [InlineData("2026-10-03T10:30:00Z", 48 * 60)]
+    [InlineData("2026-10-03T07:07:00Z", 1100)]
+    [InlineData("2026-10-03T00:13:00Z", 30 * 24 * 60)]
+    [InlineData("2026-10-03T07:11:00Z", 15)]
+    [InlineData("2026-10-03T07:01:00Z", 47)]
+    [InlineData("2026-10-03T07:59:00Z", 48)]
+    public void AnUnalignedRangeStillSpansAtMostFortyEightClockAlignedBuckets(string from, int minutes)
+    {
+        var start = DateTimeOffset.Parse(from, System.Globalization.CultureInfo.InvariantCulture);
+        var range = new TimeRange(start, start.AddMinutes(minutes));
+        var width = int.Parse(ElasticPanelSource.BucketFor(range).Split(' ')[0], System.Globalization.CultureInfo.InvariantCulture);
+
+        // DATE_TRUNC(N minutes, ts) floors to a multiple of N from the epoch: count the distinct
+        // floors over every minute of the range, edges included.
+        var starts = Enumerable.Range(0, minutes + 1)
+            .Select(m => start.AddMinutes(m).ToUnixTimeSeconds() / 60 / width)
+            .Distinct()
+            .Count();
+
+        Assert.True(starts <= 48, $"{minutes} minutes from {from} spans {starts} buckets of {width} minutes");
+    }
 }
