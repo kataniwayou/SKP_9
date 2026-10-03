@@ -120,7 +120,10 @@ internal static class PanelRegistry
                 "duplicate records, read from Elasticsearch's attributes.Result field. This is the " +
                 "business-layer summary of whether the monitored workflow is succeeding, failing, " +
                 "or being cancelled by policy. The Analyst's own step records never appear here: " +
-                "they carry the monitor workflow's id, not the target workflow's.",
+                "they carry the monitor workflow's id, not the target workflow's." +
+                " Scope: outcome records of any fire / stamped in the window, whatever fire they belong to / " +
+                "so it includes records of fires that entered before the window began, and misses records " +
+                "stamped after the window end, even of fires that entered inside it.",
             Kind: PanelKind.Elastic,
             Query:
                 """
@@ -162,7 +165,10 @@ internal static class PanelRegistry
                 "scope, step id) for the target workflow specifically, scoped by " +
                 "attributes.WorkflowId, alongside the total outcome-record count for the window, " +
                 "from Elasticsearch. A cancelled branch is logged at Information and is never a " +
-                "failure here -- only attributes.Result: \"Failed\" records for this workflow appear.",
+                "failure here -- only attributes.Result: \"Failed\" records for this workflow appear." +
+                " Scope: Failed outcome records of any fire, and the window's outcome total / stamped in the " +
+                "window, whatever fire they belong to / so a failure of a fire that entered before the window " +
+                "is counted here, and one stamped after the window end is not.",
             Kind: PanelKind.Elastic,
             Query:
                 """
@@ -227,7 +233,9 @@ internal static class PanelRegistry
                 "seriesCount: how many replicas reported at all in this window. A replica missing " +
                 "from the response entirely cannot be counted, so seriesCount is a floor, not a " +
                 "census -- a drop in it is meaningful, but a steady value is not proof every " +
-                "expected replica is present.",
+                "expected replica is present." +
+                " Scope: messages of every workflow on each replica / a rate over the trailing 60 seconds, " +
+                "evaluated every 15 seconds / so the first minute of the window includes traffic from before it.",
             Kind: PanelKind.Prometheus,
             Query:
                 $"sum by (service_instance_id) " +
@@ -252,7 +260,9 @@ internal static class PanelRegistry
                 "for why. The reading also carries seriesCount: how many replicas reported at all in " +
                 "this window. A replica missing from the response entirely cannot be counted, so " +
                 "seriesCount is a floor, not a census -- a drop in it is meaningful, but a steady " +
-                "value is not proof every expected replica is present.",
+                "value is not proof every expected replica is present." +
+                " Scope: messages of every workflow on each replica / a rate over the trailing 60 seconds, " +
+                "evaluated every 15 seconds / so the first minute of the window includes traffic from before it.",
             Kind: PanelKind.Prometheus,
             Query:
                 $"sum by (service_instance_id) " +
@@ -277,7 +287,9 @@ internal static class PanelRegistry
                 "The reading also carries seriesCount: how many replicas reported at all in this " +
                 "window. A replica missing from the response entirely cannot be counted, so " +
                 "seriesCount is a floor, not a census -- a drop in it is meaningful, but a steady " +
-                "value is not proof every expected replica is present.",
+                "value is not proof every expected replica is present." +
+                " Scope: messages of every workflow on each replica / a rate over the trailing 60 seconds, " +
+                "evaluated every 15 seconds / so the first minute of the window includes traffic from before it.",
             Kind: PanelKind.Prometheus,
             Query:
                 $"sum by (queue, disposition, service_instance_id) " +
@@ -299,7 +311,9 @@ internal static class PanelRegistry
                 "The reading also carries seriesCount: how many replicas reported at all in this " +
                 "window. A replica missing from the response entirely cannot be counted, so " +
                 "seriesCount is a floor, not a census -- a drop in it is meaningful, but a steady " +
-                "value is not proof every expected replica is present.",
+                "value is not proof every expected replica is present." +
+                " Scope: each replica's identity / the worst value over the trailing 40 seconds, evaluated " +
+                "every 15 seconds / so the first 40 seconds of the window include state from before it.",
             Kind: PanelKind.Prometheus,
             Query: "min by (service_instance_id) (last_over_time(pipeline_identity_ready_ratio[40s]))"),
 
@@ -338,7 +352,9 @@ internal static class PanelRegistry
                 "proof every expected queue is present. " +
                 "The probe behind it runs on a five-minute backstop and is also read immediately " +
                 "whenever something is parked, so a new park shows up promptly while a manual drain " +
-                "can take up to five minutes to appear.",
+                "can take up to five minutes to appear." +
+                " Scope: queue depth across every workflow / a level sampled every 15 seconds across the " +
+                "window / so its first sample already includes anything parked before the window.",
             Kind: PanelKind.Prometheus,
             Query: "max by (queue) (pipeline_deadletter_depth)"),
 
@@ -382,7 +398,10 @@ internal static class PanelRegistry
                 "byQueue keeps only the ten busiest queues, so a wide spread of single refusals " +
                 "can be undercounted there while refusedCount still totals them all. " +
                 "Samples carry the exception type and message -- which is WHY the message was " +
-                "refused, and the most useful field on the record -- but never the stack trace.",
+                "refused, and the most useful field on the record -- but never the stack trace." +
+                " Scope: refusal events for this workflow, of any fire / stamped in the window / an event, so " +
+                "a refusal before the window is never here even if its message still sits in a dead-letter " +
+                "queue.",
             Kind: PanelKind.Elastic,
             Query: WithRefusalTemplates(
                 """
@@ -467,7 +486,13 @@ internal static class PanelRegistry
                 "Entry with recordsImported 0 is a quiet window (every poll drained). " +
                 "totalWorkflowRecords is every record the workflow logged in the window; at zero nothing " +
                 "was reported at all, which cannot be told apart from logging that is not reaching the " +
-                "store.",
+                "store." +
+                " Scope: fires that ENTERED in the window, and their entry and terminal records / a fire is in " +
+                "when its entry record is in the window, and each of its records counts only if it too is " +
+                "stamped in the window / so a fire that entered before the window is never counted, even " +
+                "where its records land inside, and a fire still running at the window end has its later " +
+                "terminal records dropped. Its counts are not the same population as step-outcomes, " +
+                "step-failures or failure-causes.",
             Kind: PanelKind.Esql,
             Query: WithStepRoles(
                 """
@@ -504,7 +529,11 @@ internal static class PanelRegistry
                 "The top-level failedShare is the whole range's failed over imported: the share to compare " +
                 "with a declared expectation. This is the panel for telling a " +
                 "deterministic problem from a transient one: persistence, onset, mix and nature. bucket " +
-                "names the bucket width; a history read uses wider buckets so the range fits.",
+                "names the bucket width; a history read uses wider buckets so the range fits." +
+                " Scope: Failed records by cause, and per bucket the items imported, failed and cancelled, " +
+                "stamped in the range, whatever fire they belong to / so a bucket's failures can belong to " +
+                "items imported in an earlier bucket or before the range began, and the range's last items " +
+                "may not have completed or failed yet when it ends.",
             Kind: PanelKind.Esql,
             Query:
                 """

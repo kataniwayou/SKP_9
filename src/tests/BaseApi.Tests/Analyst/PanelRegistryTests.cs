@@ -357,4 +357,32 @@ public sealed class PanelRegistryTests
         Assert.Contains("DATE_TRUNC({{BUCKET}}, @timestamp)", q, StringComparison.Ordinal);
         Assert.DoesNotContain(" last ", q, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void EveryPanelStatesItsScope()
+    {
+        // A panel's description goes into the prompt verbatim. Without its scope, the model sets one
+        // panel against another as if they counted the same records (offset 58, 2026-10-03).
+        Assert.All(PanelRegistry.All, p => Assert.Contains("Scope: ", p.Description, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheStampedPanelsSayTheyIncludeFiresFromBeforeTheWindow()
+    {
+        foreach (var id in new[] { "step-outcomes", "step-failures", "failure-causes" })
+        {
+            var description = PanelRegistry.All.Single(p => p.PanelId == id).Description;
+            Assert.Contains("whatever fire they belong to", description, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void RunBoundariesSaysItDropsTheLastFiresLateTerminalRecords()
+    {
+        var description = PanelRegistry.All.Single(p => p.PanelId == "run-boundaries").Description;
+
+        Assert.Contains("entered before the window is never counted", description, StringComparison.Ordinal);
+        Assert.Contains("later terminal records dropped", description, StringComparison.Ordinal);
+        Assert.Contains("not the same population as step-outcomes", description, StringComparison.Ordinal);
+    }
 }
