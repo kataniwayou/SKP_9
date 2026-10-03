@@ -49,6 +49,9 @@ internal sealed class RehearsalPanels : IPanelReader
     private const int LostItems = 17;
     private static readonly TimeSpan Step = TimeSpan.FromSeconds(15);
 
+    /// <summary>The rehearsal window's length; a history range always ends where the window does.</summary>
+    private static readonly TimeSpan WindowLength = TimeSpan.FromMinutes(15);
+
     /// <summary>
     /// A busy window with nothing to report, and the traps a prompt must not mistake for faults:
     /// 6 items failed validation for a cause in the item itself, and 5 polls found nothing and
@@ -119,11 +122,26 @@ internal sealed class RehearsalPanels : IPanelReader
             ? new PanelDescriptor(panelId, Layer(panelId), $"rehearsal panel {panelId}")
             : throw new ArgumentException($"no rehearsal panel '{panelId}'", nameof(panelId));
 
+    /// <summary>
+    /// Only failure-causes has invented history. Every other panel answers a history read with the
+    /// window reading: the history range ends where the window does, so the window is its last
+    /// <see cref="WindowLength"/>. <b>Limitation:</b> the loop builds the <c>served</c> envelope from
+    /// the range it asked for, not from the reader, so the model is still told the history range was
+    /// served; only the reading itself (series timestamps included) is the window's. The live loop is
+    /// not changed to accommodate the rehearsal.
+    /// </summary>
     public Task<PanelReading> ReadAsync(
-        string panelId, Guid targetWorkflowId, TimeRange range, bool history, CancellationToken ct) =>
-        PanelIds.Contains(panelId)
-            ? Task.FromResult(Build(panelId, range, history))
-            : throw new PanelUnavailableException(panelId, "not part of the rehearsal");
+        string panelId, Guid targetWorkflowId, TimeRange range, bool history, CancellationToken ct)
+    {
+        if (!PanelIds.Contains(panelId))
+        {
+            throw new PanelUnavailableException(panelId, "not part of the rehearsal");
+        }
+
+        return history && panelId != "failure-causes"
+            ? Task.FromResult(Build(panelId, new TimeRange(range.To - WindowLength, range.To), history: false))
+            : Task.FromResult(Build(panelId, range, history));
+    }
 
     private int Outcomes => Ledger.Sum(s => s.Outcomes);
 
@@ -217,7 +235,7 @@ internal sealed class RehearsalPanels : IPanelReader
     /// </summary>
     private (string Value, int Samples) FailureCauses(TimeRange range, bool history)
     {
-        const double windowMinutes = 15;
+        var windowMinutes = WindowLength.TotalMinutes;
         var bucket = ElasticPanelSource.BucketFor(range);
         var width = TimeSpan.FromMinutes(int.Parse(bucket.Split(' ')[0], CultureInfo.InvariantCulture));
         var scale = (range.To - range.From).TotalMinutes / windowMinutes;

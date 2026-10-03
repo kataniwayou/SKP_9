@@ -368,6 +368,27 @@ public sealed class RehearsalFixtureTests
             Assert.InRange(buckets.Sum(b => b.GetProperty("cancelled").GetInt64()) / imported, 0.0, maxCancelled);
     }
 
+    public static TheoryData<string> WindowOnlyPanels => new()
+    {
+        "step-outcomes", "run-boundaries", "step-failures", "refused-messages",
+        "dead-letter-depth", "queue-wait", "processor-liveness",
+    };
+
+    [Theory]
+    [MemberData(nameof(WindowOnlyPanels))]
+    public async Task AHistoryReadOfAWindowOnlyPanelIsTheWindowReading(string panelId)
+    {
+        // Only failure-causes has invented history. Every other panel answers a history read with the
+        // window it knows, so a series never spans six hours of fabricated flat lines.
+        var panels = RehearsalPanels.RejectingBadInput();
+        var history = new TimeRange(RehearsalGraph.RunFor(To).HistoryLimit!.Value, To);
+
+        var window = await panels.ReadAsync(panelId, RehearsalGraph.WorkflowId, Window, false, CancellationToken.None);
+        var read = await panels.ReadAsync(panelId, RehearsalGraph.WorkflowId, history, true, CancellationToken.None);
+
+        Assert.Equal(window, read);
+    }
+
     [Fact]
     public void OnlyTheQuietScenarioCarriesExpectations()
     {
