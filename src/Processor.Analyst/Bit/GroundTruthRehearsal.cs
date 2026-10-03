@@ -76,6 +76,21 @@ internal sealed class GroundTruthRehearsal(
                 + " -- an operator who is woken by a quiet window learns to ignore the next alert")];
         }
 
+        var edges = await ConcludesAsync(prompt, RehearsalPanels.EdgeSkewed(), ct).ConfigureAwait(false);
+
+        if (edges is LoopOutcome.Finding paged)
+        {
+            return [new StageProblem("verify", "contradicting",
+                "against a healthy rehearsal window whose edges do not cancel -- a fire that entered before "
+                + $"the window had {RehearsalPanels.PreWindowFailures} failure recorded inside it, and the last "
+                + $"fire's {RehearsalPanels.InFlightAtEnd} good items were still being persisted when it closed, "
+                + "so record-outcome's terminal reads 6 against 7 failures and persist-file's 32 against 34 "
+                + "validated, with no dead-letter growth, no refusal and the failed share inside the declared "
+                + "expectation -- the prompt still produced a finding: " + Summarise(paged.Value)
+                + " -- a gap the window's edges explain is not lost work, and paging it teaches the operator "
+                + "to ignore the next one")];
+        }
+
         var fault = await ConcludesAsync(
             prompt, RehearsalPanels.HoldingDiscardedWork(), ct).ConfigureAwait(false);
 
@@ -112,8 +127,8 @@ internal sealed class GroundTruthRehearsal(
         }
 
         logger.LogInformation(
-            "the payload prompt passed its ground-truth rehearsal: quiet window silent, planted "
-            + "loss and undeclared bad input reported and classified");
+            "the payload prompt passed its ground-truth rehearsal: quiet and edge-skewed windows silent, "
+            + "planted loss and undeclared bad input reported and classified");
 
         return [];
     }

@@ -61,6 +61,7 @@ public sealed class GroundTruthRehearsalTests
         var (bit, _) = Build([
             Fit(), Fit(), Fit(),                 // the judge
             .. ConcludesNothing(),               // quiet window: correctly silent
+            .. ConcludesNothing(),               // edge-skewed window: correctly silent
             .. ConcludesFinding("system"),       // planted loss: correctly reported
             .. ConcludesFinding("data"),         // undeclared bad input: correctly reported
         ]);
@@ -76,6 +77,7 @@ public sealed class GroundTruthRehearsalTests
         var (bit, _) = Build([
             Fit(), Fit(), Fit(),
             .. ConcludesNothing(),
+            .. ConcludesNothing(),               // edge-skewed window: correctly silent
             .. ConcludesFinding("system"),
             .. ConcludesNothing(),               // undeclared bad input: missed
         ]);
@@ -94,6 +96,7 @@ public sealed class GroundTruthRehearsalTests
         var (bit, _) = Build([
             Fit(), Fit(), Fit(),
             .. ConcludesNothing(),
+            .. ConcludesNothing(),               // edge-skewed window: correctly silent
             .. ConcludesFinding("data"),         // the loss is a system problem
         ]);
 
@@ -129,6 +132,7 @@ public sealed class GroundTruthRehearsalTests
         var (bit, _) = Build([
             Fit(), Fit(), Fit(),
             .. ConcludesNothing(),               // quiet window: correct
+            .. ConcludesNothing(),               // edge-skewed window: correctly silent
             .. ConcludesNothing(),               // planted fault: missed
         ]);
 
@@ -181,7 +185,7 @@ public sealed class GroundTruthRehearsalTests
     public async Task TheRehearsalIsPaidOncePerPromptPerProcess()
     {
         var (bit, model) = Build([
-            Fit(), Fit(), Fit(), .. ConcludesNothing(), .. ConcludesFinding("system"), .. ConcludesFinding("data"),
+            Fit(), Fit(), Fit(), .. ConcludesNothing(), .. ConcludesNothing(), .. ConcludesFinding("system"), .. ConcludesFinding("data"),
         ]);
 
         await bit.CheckAsync(Structured, CancellationToken.None);
@@ -193,5 +197,35 @@ public sealed class GroundTruthRehearsalTests
 
         Assert.True(second.Fit);
         Assert.Equal(spent, model.Received.Count);
+    }
+
+    [Fact]
+    public async Task AWindowEdgeReportedAsLostWorkFails()
+    {
+        // offset 58, 2026-10-03: a residue the window's edges explain, paged as a system defect.
+        var (bit, _) = Build([
+            Fit(), Fit(), Fit(),
+            .. ConcludesNothing(),               // quiet window: correct
+            .. ConcludesFinding("system"),       // edge-skewed window: a false page
+        ]);
+
+        var verdict = await bit.CheckAsync(Structured, CancellationToken.None);
+
+        Assert.False(verdict.Fit);
+        var problem = Assert.Single(verdict.Problems);
+        Assert.Equal("verify", problem.Stage);
+        Assert.Contains("edges", problem.Offending, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AFalsePageOnTheEdgeWindowCostsNoLossRehearsal()
+    {
+        // Edge-skew runs second: the cheap rejection of the costliest real mistake. Nothing is scripted
+        // after it, so a third investigation would exhaust the script and throw.
+        var (bit, model) = Build([Fit(), Fit(), Fit(), .. ConcludesNothing(), .. ConcludesFinding("system")]);
+
+        await bit.CheckAsync(Structured, CancellationToken.None);
+
+        Assert.Equal(3 + ConcludesNothing().Length + ConcludesFinding("system").Length, model.Received.Count);
     }
 }
