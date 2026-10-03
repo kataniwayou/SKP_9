@@ -25,8 +25,9 @@ internal sealed record RehearsalStep(Guid StepId, int Completed, int Failed, int
 /// <b>Every count is one the <see cref="RehearsalGraph"/> routing explains.</b> A v12 prompt sets the
 /// step-outcomes totals against the items the importer took in and the routing; a fixture whose
 /// numbers do not add up plants a fault nobody intended, and fails every prompt that does the
-/// arithmetic. The readings are therefore built from one per-step <see cref="Ledger"/>, and
-/// <c>RehearsalFixtureTests</c> walks it against the graph.
+/// arithmetic. <c>RehearsalFixtureTests</c> therefore walks the <see cref="ClosedLedger"/> -- the fires
+/// that entered in the window, followed to their end -- against the graph, and the readings are built
+/// from the range's slice: those closed fires plus the edge residues the stamped panels also count.
 /// </para>
 /// <para>
 /// <b>In the live sources' shapes.</b> Each reading has the keys the deployed Elastic and Prometheus
@@ -195,9 +196,11 @@ internal sealed class RehearsalPanels : IPanelReader
     }
 
     /// <summary>
-    /// failure-causes, step-outcomes, run-boundaries and step-failures are served from the range; every
-    /// other panel answers a history read with the window reading: the history range ends where the window does, so the window is its last
-    /// <see cref="WindowLength"/>. <b>Limitation:</b> the loop builds the <c>served</c> envelope from
+    /// failure-causes, step-outcomes, run-boundaries and step-failures are served from the range when it
+    /// is at least <see cref="WindowLength"/> long. Every other panel, and any history read shorter than
+    /// the window, answers with the window reading: the history range ends where the window does, so
+    /// the window is its last <see cref="WindowLength"/>. A shorter range would scale the rates down but
+    /// still carry a whole edge residue, breaching the declared expectation the window meets. <b>Limitation:</b> the loop builds the <c>served</c> envelope from
     /// the range it asked for, not from the reader, so the model is still told the history range was
     /// served; only the reading itself (series timestamps included) is the window's. The live loop is
     /// not changed to accommodate the rehearsal.
@@ -211,7 +214,8 @@ internal sealed class RehearsalPanels : IPanelReader
         }
 
         var servedFromTheRange = panelId is "failure-causes" or "step-outcomes" or "run-boundaries" or "step-failures";
-        return history && !servedFromTheRange
+        var shorterThanTheWindow = history && range.To - range.From < WindowLength;
+        return history && (!servedFromTheRange || shorterThanTheWindow)
             ? Task.FromResult(Build(panelId, new TimeRange(range.To - WindowLength, range.To), history: false))
             : Task.FromResult(Build(panelId, range, history));
     }

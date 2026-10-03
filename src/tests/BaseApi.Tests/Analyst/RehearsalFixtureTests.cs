@@ -384,8 +384,9 @@ public sealed class RehearsalFixtureTests
     [MemberData(nameof(WindowOnlyPanels))]
     public async Task AHistoryReadOfAWindowOnlyPanelIsTheWindowReading(string panelId)
     {
-        // Only failure-causes has invented history. Every other panel answers a history read with the
-        // window it knows, so a series never spans six hours of fabricated flat lines.
+        // step-outcomes, run-boundaries, step-failures and failure-causes are served from the range, so
+        // they are not in this list. Every panel here answers a history read with the window it knows,
+        // so a series never spans six hours of fabricated flat lines.
         var panels = RehearsalPanels.RejectingBadInput();
         var history = new TimeRange(RehearsalGraph.RunFor(To).HistoryLimit!.Value, To);
 
@@ -490,6 +491,24 @@ public sealed class RehearsalFixtureTests
         var causes = await ValueAsync(panels, "failure-causes", Window, history: false);
 
         Assert.True(causes.GetProperty("failedShare").GetDouble() <= panels.Expectations!.MaxFailedShare!.Value);
+    }
+
+    [Theory]
+    [InlineData("step-outcomes")]
+    [InlineData("run-boundaries")]
+    [InlineData("step-failures")]
+    [InlineData("failure-causes")]
+    public async Task AHistoryReadShorterThanTheWindowIsTheWindowReading(string panelId)
+    {
+        // A range inside the window would scale the rates but keep a whole edge residue, breaching
+        // the expectation the window meets.
+        var panels = RehearsalPanels.EdgeSkewed();
+        var short7 = new TimeRange(To.AddMinutes(-7), To);
+
+        var window = await panels.ReadAsync(panelId, RehearsalGraph.WorkflowId, Window, false, CancellationToken.None);
+        var read = await panels.ReadAsync(panelId, RehearsalGraph.WorkflowId, short7, true, CancellationToken.None);
+
+        Assert.Equal(window, read);
     }
 
     [Fact]
