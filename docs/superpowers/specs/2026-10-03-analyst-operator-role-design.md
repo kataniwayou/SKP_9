@@ -106,7 +106,7 @@ Range-dependent shape, so a since-start read fits the token budget:
 | Range | Elasticsearch panels | Prometheus panels |
 |---|---|---|
 | window | as today | as today |
-| history | totals plus a **bucketed series** with at most 48 buckets (bucket = range / 48, rounded up to a whole minute) | `step` chosen so each series has at most 48 points (`PrometheusPanelSource` already caps points) |
+| history | totals over the range; the time shape of failures comes from `failure-causes`, whose buckets are range / 48 rounded up to a whole minute (amended in planning: no histogram on the other Elastic panels) | `step` chosen so each series has at most 48 points (`PrometheusPanelSource` already caps points) |
 
 ### 4.4 New panel: `failure-causes`
 
@@ -182,9 +182,8 @@ anomaly to classify by the same table, never a verdict on its own.
 
 Each insight gains `classification`, `domain`, `severity`, `onset` (required) and `evidenceKinds`
 (at least two). A new schema row, with both sides of the Analyst -> KafkaExporter edge repointed as
-the frozen-schema rule requires. **Risk to check in planning:** edges match by schema row id, and
-three schema rows serve five processors -- confirm that repointing the Analyst's output cannot break
-another published workflow.
+the frozen-schema rule requires. Checked in planning: `kafka-exporter` has no input schema, so only
+the `analyst` processor row is repointed (its output and config schema ids).
 
 ### 4.9 The BIT
 
