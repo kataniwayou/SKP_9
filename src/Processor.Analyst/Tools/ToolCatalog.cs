@@ -20,7 +20,7 @@ internal static class ToolCatalog
         return
         [
             new ToolSpec(ToolNames.ListPanels,
-                "List the panels available for this investigation, with the layer each belongs to.",
+                "List the panels available for this investigation, with the layer each belongs to and its Scope (what it counts, how the window selects it, what happens at the edges).",
                 Closed("{}", required: "[]")),
 
             new ToolSpec(ToolNames.ReadPanel,

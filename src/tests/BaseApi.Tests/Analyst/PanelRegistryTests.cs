@@ -361,7 +361,7 @@ public sealed class PanelRegistryTests
     [Fact]
     public void EveryPanelStatesItsScope()
     {
-        // A panel's description goes into the prompt verbatim. Without its scope, the model sets one
+        // A panel's description reaches the model through the list_panels result. Without its scope, the model sets one
         // panel against another as if they counted the same records (offset 58, 2026-10-03).
         Assert.All(PanelRegistry.All, p => Assert.Contains("Scope: ", p.Description, StringComparison.Ordinal));
     }

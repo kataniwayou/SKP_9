@@ -94,7 +94,7 @@ internal static class ContractPrompt
         - step-outcomes counts one record per step execution, summed over every step: it has no step
           dimension, so it can confirm a total but never which step produced it. Never attribute a
           count to a step the panel cannot name.
-        - Panels count different populations: read each one's Scope. step-outcomes, step-failures and
+        - Panels count different populations: read each one's Scope (list_panels). step-outcomes, step-failures and
           failure-causes count records stamped in the window, whatever fire they belong to;
           run-boundaries counts the fires that entered in the window, and only their records stamped in
           it. Setting one against the other leaves an edge residue: the work of fires that entered before
