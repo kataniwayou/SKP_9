@@ -226,7 +226,7 @@ Content-Type: application/json
   "name": "analyst",
   "version": "1.0.0",
   "description": "Reads the same Kibana and Grafana panels an operator reads, drives kimi-k3 through a five-stage investigation, and either writes a finding or says nothing. Read-only.",
-  "sourceHash": "5bc08070360770437ab1850df75d6759a5944253ef7c1ae5cfa5c6959f3d3f5b",
+  "sourceHash": "bbfa4aecf8451fb739984f1d62d9a559eac1d60e0bd0884367323b90050a7bfc",
   "instanceId": null,
   "inputSchemaId": null,
   "outputSchemaId": "<analyst-finding>",
@@ -529,8 +529,9 @@ It has moved twelve times in a week -- `29ea6590...` (2026-09-26, in `docs/task-
 `3d5d5b59...` (StepRole funnel, StructureOnly BIT mode, prompt v11) `5b49f302...` (run edges,
 prompt v12), `8300d649...` (v12 BIT exam and rehearsal, BIT Full) `45f49c4e...` (exit-edge
 terminal rule, prompt v13) `87e91aad...` (operator role, 2026-10-03: expectations,
-failure-causes, classification; prompt v14, schema rows 2.0.0/4.0.0) and now `5bc08070...` (BIT
-rehearsal wall clock 600 -> 1200, same day) -- and nothing announced any of it.
+failure-causes, classification; prompt v14, schema rows 2.0.0/4.0.0) `5bc08070...` (BIT
+rehearsal wall clock 600 -> 1200, same day) and now `bbfa4aec...` (an unclassified rehearsal
+finding names what it classified, same day) -- and nothing announced any of it.
 Every request in this file still returns `201` with a stale value, its counts still match, and the
 graph still starts, because **no gate reads a `sourceHash`** -- only a processor does, by waiting. If
 you are rebuilding from an older copy of this file or from that `.http` file, re-derive the hash

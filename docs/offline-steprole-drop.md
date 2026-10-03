@@ -81,9 +81,9 @@ this in order (the analyst steps below come after BaseApi and the orchestrator):
    old config schema is refused (`additionalProperties: false`, unknown panel), and the old payload
    is accepted by the new one. Leave `analyst-monitor` stopped.
 
-Dev 2026-10-03: SourceHash `5bc08070360770437ab1850df75d6759a5944253ef7c1ae5cfa5c6959f3d3f5b`
-(operator role, prompt v14, BIT rehearsal wall clock 1200; was `87e91aad...`, before that
-`45f49c4e...`), valid only if the Analyst source is identical. The v14 payload carries
+Dev 2026-10-03: SourceHash `bbfa4aecf8451fb739984f1d62d9a559eac1d60e0bd0884367323b90050a7bfc`
+(operator role, prompt v14, BIT rehearsal wall clock 1200, unclassified findings named in the verdict; was
+`5bc08070...`, `87e91aad...`, before that `45f49c4e...`), valid only if the Analyst source is identical. The v14 payload carries
 `wallClockSeconds: 1200`.
 
 **Order no longer matters for roles.** BaseApi writes no role keys and nothing reads them: the
