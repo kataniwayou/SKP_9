@@ -121,7 +121,8 @@ internal sealed class GroundTruthRehearsal(
     /// <summary>
     /// A finding in a scenario with a known cause must say what the operator needs to hear: a
     /// deterministic problem in the right domain. Anything else is a report that names the wrong
-    /// kind of thing, however alarming it sounds.
+    /// kind of thing, however alarming it sounds. The problem names what the finding did classify,
+    /// because a failed dispatch publishes nothing and this verdict is the only record of it.
     /// </summary>
     private static StageProblem? Unclassified(LoopOutcome outcome, string domain)
         => outcome is LoopOutcome.Finding f
@@ -130,7 +131,13 @@ internal sealed class GroundTruthRehearsal(
             : new StageProblem("verify", "contradicting",
                 $"the rehearsal window holds a deterministic {domain} problem, and the prompt's finding "
                 + $"carries no insight classified deterministic in the {domain} domain -- the operator "
-                + "would be told the wrong kind of thing");
+                + "would be told the wrong kind of thing; it classified "
+                + (outcome is LoopOutcome.Finding found ? Classified(found.Value) : "no finding"));
+
+    private static string Classified(AnalystFinding finding)
+        => finding.Insights.Count == 0
+            ? "no insights"
+            : string.Join("; ", finding.Insights.Select(i => $"{i.Classification}/{i.Domain}: {i.Claim}"));
 
     /// <summary>
     /// One rehearsal. <see cref="AnalysisImpossibleException"/> is deliberately not caught: a

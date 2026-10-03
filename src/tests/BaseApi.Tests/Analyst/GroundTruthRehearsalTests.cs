@@ -100,7 +100,12 @@ public sealed class GroundTruthRehearsalTests
         var verdict = await bit.CheckAsync(Structured, CancellationToken.None);
 
         Assert.False(verdict.Fit);
-        Assert.Contains("system", Assert.Single(verdict.Problems).Offending, StringComparison.Ordinal);
+        var offending = Assert.Single(verdict.Problems).Offending;
+        Assert.Contains("system", offending, StringComparison.Ordinal);
+
+        // A failed dispatch publishes nothing, so the verdict is the only record of what the model
+        // classified instead.
+        Assert.Contains("deterministic/data", offending, StringComparison.Ordinal);
     }
 
     [Fact]
