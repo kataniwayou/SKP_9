@@ -498,7 +498,11 @@ internal static class PanelRegistry
                 "logged (author-reported = the step's own code rejected the item; faulted = an unexpected " +
                 "exception; other), the cause text with paths, names, ids and numbers replaced by " +
                 "placeholders, its count, and when it was first and last seen. Plus, per time bucket, the " +
-                "items imported, failed and cancelled and the failed share. This is the panel for telling a " +
+                "items imported, failed and cancelled and the failed share. imported counts the Completed " +
+                "outcomes of steps whose name contains \"importer\". A bucket's failedShare is null when it " +
+                "imported nothing (failures land after their import, so such a bucket can still fail items). " +
+                "The top-level failedShare is the whole range's failed over imported: the share to compare " +
+                "with a declared expectation. This is the panel for telling a " +
                 "deterministic problem from a transient one: persistence, onset, mix and nature. bucket " +
                 "names the bucket width; a history read uses wider buckets so the range fits.",
             Kind: PanelKind.Esql,

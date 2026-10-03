@@ -904,8 +904,44 @@ public sealed class PanelTrustTests
 
         var last = value.RootElement.GetProperty("buckets").EnumerateArray().Last();
         Assert.Equal(0.6, last.GetProperty("failedShare").GetDouble(), 3);
+        Assert.Equal(0.6, value.RootElement.GetProperty("failedShare").GetDouble(), 3);
         Assert.Equal(24, reading.SampleCount);
         Assert.True(reading.Trust.SeriesPresent);
+    }
+
+    [Fact]
+    public async Task ABucketThatImportedNothingHasNoShare()
+    {
+        // Failures land after their import, so a bucket can fail items it never imported. 0.0 there
+        // would read as healthy; the share is null, and the range's own share is the one to judge.
+        var reading = await ElasticSource(
+                Fixture("esql-causes.json"),
+                """
+                {"columns":[{"name":"imported","type":"long"},{"name":"failed","type":"long"},{"name":"cancelled","type":"long"},{"name":"bucket","type":"date"}],
+                 "values":[[10,2,0,"2026-10-03T07:10:00.000Z"],[0,3,0,"2026-10-03T07:15:00.000Z"]]}
+                """)
+            .ReadEsqlAsync(Def("failure-causes"), W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        var buckets = value.RootElement.GetProperty("buckets").EnumerateArray().ToList();
+        Assert.Equal(0.2, buckets[0].GetProperty("failedShare").GetDouble(), 3);
+        Assert.Equal(JsonValueKind.Null, buckets[1].GetProperty("failedShare").ValueKind);
+        Assert.Equal(0.5, value.RootElement.GetProperty("failedShare").GetDouble(), 3);
+    }
+
+    [Fact]
+    public async Task NoImportsInTheRangeHasNoShare()
+    {
+        var reading = await ElasticSource(
+                Fixture("esql-causes.json"),
+                """
+                {"columns":[{"name":"imported","type":"long"},{"name":"failed","type":"long"},{"name":"cancelled","type":"long"},{"name":"bucket","type":"date"}],
+                 "values":[[0,3,0,"2026-10-03T07:15:00.000Z"]]}
+                """)
+            .ReadEsqlAsync(Def("failure-causes"), W, Range, CancellationToken.None);
+
+        using var value = JsonDocument.Parse(reading.ValueJson);
+        Assert.Equal(JsonValueKind.Null, value.RootElement.GetProperty("failedShare").ValueKind);
     }
 
     [Fact]

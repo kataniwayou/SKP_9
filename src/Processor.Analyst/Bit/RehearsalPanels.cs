@@ -211,8 +211,9 @@ internal sealed class RehearsalPanels : IPanelReader
     /// The one cause, and the failed share per bucket. The range's totals are the ledger's per-15-minute
     /// rates scaled to the range (40 imported, 6 failed, 5 cancelled for the window itself), spread over
     /// the buckets by largest remainder weighted by each bucket's overlap with the range, so the buckets
-    /// sum exactly to the totals. Each share is that bucket's own failed over imported, as the live
-    /// panel computes it, and the cause's count is the failed the buckets add up to.
+    /// sum exactly to the totals. Each share is that bucket's own failed over imported (null when it
+    /// imported nothing), and the top-level share is the range's, both as the live panel computes them;
+    /// the cause's count is the failed the buckets add up to.
     /// </summary>
     private (string Value, int Samples) FailureCauses(TimeRange range, bool history)
     {
@@ -240,7 +241,7 @@ internal sealed class RehearsalPanels : IPanelReader
             imported = (long)imported[i],
             failed = (long)failed[i],
             cancelled = (long)cancelled[i],
-            failedShare = imported[i] == 0 ? 0.0 : Math.Round((double)failed[i] / imported[i], 3),
+            failedShare = ElasticPanelSource.FailedShare(failed[i], imported[i]),
         }).ToList();
 
         var count = failed.Sum();
@@ -255,7 +256,8 @@ internal sealed class RehearsalPanels : IPanelReader
             lastSeen = range.To.AddSeconds(-40),
         };
 
-        return (Serialize(new { bucket, causes = new[] { cause }, buckets }), count);
+        var failedShare = ElasticPanelSource.FailedShare(failed.Sum(), imported.Sum());
+        return (Serialize(new { bucket, failedShare, causes = new[] { cause }, buckets }), count);
     }
 
     /// <summary>Splits <paramref name="total"/> across the weights by largest remainder, so the parts sum to it exactly.</summary>

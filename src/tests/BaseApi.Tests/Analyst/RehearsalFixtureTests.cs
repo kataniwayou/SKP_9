@@ -322,6 +322,7 @@ public sealed class RehearsalFixtureTests
         Assert.Equal(0.15,
             (double)buckets.Sum(b => b.GetProperty("failed").GetInt64()) / buckets.Sum(b => b.GetProperty("imported").GetInt64()));
         Assert.Equal(144, Assert.Single(root.GetProperty("causes").EnumerateArray()).GetProperty("count").GetInt64());
+        Assert.Equal(0.15, root.GetProperty("failedShare").GetDouble());
     }
 
     [Fact]
@@ -335,11 +336,18 @@ public sealed class RehearsalFixtureTests
         Assert.Equal(6, buckets.Sum(b => b.GetProperty("failed").GetInt64()));
         Assert.Equal(5, buckets.Sum(b => b.GetProperty("cancelled").GetInt64()));
         Assert.Equal(6, Assert.Single(root.GetProperty("causes").EnumerateArray()).GetProperty("count").GetInt64());
+        Assert.Equal(0.15, root.GetProperty("failedShare").GetDouble());
         Assert.All(buckets, b =>
         {
             var imported = b.GetProperty("imported").GetInt64();
-            var expected = imported == 0 ? 0.0 : Math.Round((double)b.GetProperty("failed").GetInt64() / imported, 3);
-            Assert.Equal(expected, b.GetProperty("failedShare").GetDouble());
+            if (imported == 0)
+            {
+                // A bucket that imported nothing has no share: failures land after their import.
+                Assert.Equal(JsonValueKind.Null, b.GetProperty("failedShare").ValueKind);
+                return;
+            }
+
+            Assert.Equal(Math.Round((double)b.GetProperty("failed").GetInt64() / imported, 3), b.GetProperty("failedShare").GetDouble());
         });
     }
 

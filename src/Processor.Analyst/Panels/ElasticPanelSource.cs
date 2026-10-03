@@ -176,17 +176,31 @@ internal sealed class ElasticPanelSource
                 imported,
                 failed,
                 cancelled = Long(id, r, "cancelled"),
-                failedShare = imported == 0 ? 0.0 : Math.Round((double)failed / imported, 3),
+                failedShare = FailedShare(failed, imported),
             };
         }).ToList();
 
-        var valueJson = JsonSerializer.Serialize(new { bucket = BucketFor(range), causes, buckets });
+        var valueJson = JsonSerializer.Serialize(new
+        {
+            bucket = BucketFor(range),
+            failedShare = FailedShare(buckets.Sum(b => b.failed), buckets.Sum(b => b.imported)),
+            causes,
+            buckets,
+        });
         var failures = (int)causes.Sum(c => c.count);
         var reporting = buckets.Count > 0;
 
         return new PanelReading(id, definition.Layer, valueJson, SampleCount: failures,
             new PanelTrust(SeriesPresent: reporting, WindowFullyCovered: reporting, NoDataDistinguishable: reporting));
     }
+
+    /// <summary>
+    /// Failed over imported, or null when nothing was imported. Failures land after their import, so a
+    /// bucket can fail items it never imported: 0.0 there would read as healthy, and any number would
+    /// be meaningless. Shared with the rehearsal so both sources serve one reading shape.
+    /// </summary>
+    internal static double? FailedShare(long failed, long imported)
+        => imported == 0 ? null : Math.Round((double)failed / imported, 3);
 
     /// <summary>
     /// One POST to Elasticsearch, with every transport failure and every non-success status turned
