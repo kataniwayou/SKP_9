@@ -787,6 +787,23 @@ public sealed class PanelTrustTests
     }
 
     [Fact]
+    public async Task LivePanelReader_PassesHistoryThroughToThePrometheusStep()
+    {
+        var handler = new RecordingHandler(HttpStatusCode.OK, Fixture("prometheus-present-covering.json"));
+        var reader = BuildReader(new RecordingHandler(HttpStatusCode.OK, "{}"), handler);
+        var thirtyDays = new TimeRange(Window.To.AddDays(-30), Window.To);
+
+        await reader.ReadAsync("queue-wait", TargetWorkflowId, thirtyDays, history: true, CancellationToken.None);
+        var historyStep = handler.LastPath;
+        await reader.ReadAsync("queue-wait", TargetWorkflowId, thirtyDays, history: false, CancellationToken.None);
+        var windowStep = handler.LastPath;
+
+        // ceil(30d / 47 / 1min) = 920 minutes; the window read keeps the 300-point step (8640s).
+        Assert.Contains("&step=55200s", historyStep, StringComparison.Ordinal);
+        Assert.Contains("&step=8640s", windowStep, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LivePanelReader_DescribeReturnsTheRegistrysDescription()
     {
         var reader = BuildReader(

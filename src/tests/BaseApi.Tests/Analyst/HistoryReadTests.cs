@@ -38,6 +38,33 @@ public sealed class HistoryReadTests
         => Assert.Equal(Window, InvestigationLoop.ClampHistory(Window, null, Limit));
 
     [Fact]
+    public void ALimitAtOrAfterTheWindowEndReadsTheWindow()
+        => Assert.Equal(Window, InvestigationLoop.ClampHistory(Window, Window.To.AddHours(1), Window.From.AddHours(-1)));
+
+    [Fact]
+    public void AShortHistoryRangeGetsTheOneMinuteFloor()
+        => Assert.Equal(TimeSpan.FromSeconds(60),
+            PrometheusPanelSource.ComputeStep(new TimeRange(Window.To.AddMinutes(-10), Window.To), history: true));
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(47)]
+    [InlineData(48)]
+    [InlineData(49)]
+    [InlineData(420)]
+    [InlineData(43_200)]
+    [InlineData(1_000)]
+    public void EveryHistoryStepIsWholeMinutesAndReturnsAtMostFortyEightPoints(int minutes)
+    {
+        var range = new TimeRange(Window.To.AddMinutes(-minutes), Window.To);
+        var step = PrometheusPanelSource.ComputeStep(range, history: true);
+
+        Assert.Equal(0, step.Ticks % TimeSpan.FromMinutes(1).Ticks);
+        Assert.True(step >= TimeSpan.FromMinutes(1));
+        Assert.True(Math.Floor((range.To - range.From) / step) + 1 <= PrometheusPanelSource.HistoryPoints);
+    }
+
+    [Fact]
     public void AHistoryRangeUsesAtMostFortyEightPrometheusPoints()
     {
         var range = new TimeRange(Limit, Window.To);

@@ -176,7 +176,7 @@ internal sealed class InvestigationLoop(
     /// </summary>
     internal static TimeRange ClampHistory(TimeRange window, DateTimeOffset? limit, DateTimeOffset? from)
     {
-        if (from is not { } f || limit is not { } l || f >= window.To)
+        if (from is not { } f || limit is not { } l || f >= window.To || l >= window.To)
         {
             return window;
         }

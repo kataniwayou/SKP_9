@@ -274,7 +274,16 @@ internal sealed class PrometheusPanelSource
             return MinStep;
         }
 
-        var points = history ? HistoryPoints : MaxPointsPerSeries;
+        if (history)
+        {
+            // query_range returns floor(range/step)+1 points, so dividing by HistoryPoints exactly would
+            // return one too many. Dividing by one fewer and rounding up to whole minutes keeps the
+            // read at or under HistoryPoints, on a step an operator would recognise.
+            var minutes = Math.Ceiling(duration.TotalSeconds / (HistoryPoints - 1) / 60);
+            return TimeSpan.FromMinutes(Math.Max(1, minutes));
+        }
+
+        var points = MaxPointsPerSeries;
         var evenStep = TimeSpan.FromSeconds(Math.Ceiling(duration.TotalSeconds / points));
         return evenStep > MinStep ? evenStep : MinStep;
     }
