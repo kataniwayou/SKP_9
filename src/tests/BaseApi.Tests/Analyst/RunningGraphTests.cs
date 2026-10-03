@@ -224,5 +224,7 @@ public sealed class RunningGraphTests
         Assert.DoesNotContain("expected, however large", system, StringComparison.Ordinal);
         Assert.Contains("the investigation is window-only", system, StringComparison.Ordinal);
         Assert.Contains("is reported even when the share stays within the expectation", system, StringComparison.Ordinal);
+        Assert.DoesNotContain("cannot correlate", system, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be correlated", system, StringComparison.Ordinal);
     }
 }

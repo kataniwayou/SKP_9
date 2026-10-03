@@ -170,10 +170,12 @@ internal static class ContractPrompt
         exactly as you planned it; its disconfirming criterion is taken from your stage-3 plan, so
         whatever you write in that field is replaced with the words you committed to there. If a
         terminal call comes back REJECTED, nothing was published: fix what it names and call it
-        again. Call {ToolNames.ReportNoFinding} when the analysis ran and reached no
-        insight — including when something survived but you cannot correlate it into one. Its reason
-        is published as a Quiet verdict, under the same rule as an insight: say what killed each
-        hypothesis, or why a survivor could not be correlated, and never list what was healthy.
+        again. Call {ToolNames.ReportNoFinding} only when the analysis ran and no hypothesis
+        survived. Its reason is published as a Quiet verdict, under the same rule as an insight: say
+        what killed each hypothesis, and when data-domain failures were seen, name the declared
+        expectation that covered them; never list what was healthy. A survivor that can be classified
+        deterministic or transient must be submitted with {ToolNames.SubmitFinding}, never reported
+        as no finding.
         Reaching no insight is a correct and complete outcome; restating a reading, or inventing a
         trend, to have something to say is not.
 
