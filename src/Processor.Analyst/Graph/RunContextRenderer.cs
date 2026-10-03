@@ -36,10 +36,10 @@ internal static class RunContextRenderer
             : "Declared expectations (data-domain outcomes only; system problems are never covered): "
               + string.Join(", ", new[]
                 {
-                    expectations.MaxFailedShare is { } f ? $"failed share up to {f.ToString("0.##", CultureInfo.InvariantCulture)}" : null,
-                    expectations.MaxCancelledShare is { } c ? $"cancelled share up to {c.ToString("0.##", CultureInfo.InvariantCulture)}" : null,
+                    expectations.MaxFailedShare is { } f ? $"failed share up to {f.ToString("0.###", CultureInfo.InvariantCulture)}" : null,
+                    expectations.MaxCancelledShare is { } c ? $"cancelled share up to {c.ToString("0.###", CultureInfo.InvariantCulture)}" : null,
                 }.Where(s => s is not null))
-              + $" -- {expectations.Reason}.");
+              + $" -- {expectations.Reason.TrimEnd('.')}.");
 
         lines.Add("</run-context>");
         return string.Join("\n", lines);

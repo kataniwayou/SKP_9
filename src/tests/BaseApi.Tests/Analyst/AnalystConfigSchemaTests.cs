@@ -111,6 +111,32 @@ public sealed class AnalystConfigSchemaTests
     }
 
     [Fact]
+    public void ExpectationsWithAShareValidate()
+    {
+        var withShare = Valid.Replace("\"wallClockSeconds\":300",
+            "\"wallClockSeconds\":300,\"expectations\":{\"maxFailedShare\":0.65,\"reason\":\"x\"}");
+
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), Encoding.UTF8.GetBytes(withShare), out var errors);
+
+        Assert.True(ok, string.Join("; ", errors));
+    }
+
+    [Fact]
+    public void ExpectationsWithNoShareAreRejected()
+    {
+        // A reason with no share allows nothing, yet would render as "Declared expectations" -- an
+        // operator would read it as cover. Refuse it at publish: the row freezes once it is referenced.
+        var noShare = Valid.Replace("\"wallClockSeconds\":300",
+            "\"wallClockSeconds\":300,\"expectations\":{\"reason\":\"x\"}");
+
+        var ok = ProcessorJsonSchemaValidator.TryValidate(
+            Definition(), Encoding.UTF8.GetBytes(noShare), out _);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
     public void AMalformedTargetWorkflowIdIsRejected()
     {
         // format:uuid is documentation only - ProcessorJsonSchemaValidator's EvaluationOptions do

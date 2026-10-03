@@ -48,6 +48,7 @@
         "reason": { "type": "string", "minLength": 1 }
       },
       "required": ["reason"],
+      "anyOf": [{ "required": ["maxFailedShare"] }, { "required": ["maxCancelledShare"] }],
       "additionalProperties": false,
       "description": "What this workflow is allowed to do. Shares count data-domain outcomes only (the cause names the item); system problems are never covered. Absent: every deterministic problem is reported."
     }

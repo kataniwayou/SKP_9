@@ -73,6 +73,15 @@ public sealed class RunContextTests
     }
 
     [Fact]
+    public void ADeclaredShareRendersWithoutLosingItsThirdDecimal()
+    {
+        var text = RunContextRenderer.Render(Chain, Window, new AnalystExpectations(0.655, null, "feed."));
+
+        Assert.Contains("failed share up to 0.655 -- feed.", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("feed..", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WithoutExpectationsEveryDeterministicProblemIsReported()
         => Assert.Contains("No declared expectations: report every deterministic problem.",
             RunContextRenderer.Render(Chain, Window), StringComparison.Ordinal);
