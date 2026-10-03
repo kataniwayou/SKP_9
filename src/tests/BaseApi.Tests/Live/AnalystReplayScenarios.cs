@@ -305,7 +305,7 @@ public sealed class AnalystReplayScenarios
     /// <summary>The deployed payload's own budgets, so a replay gets the room a live dispatch gets.</summary>
     private static AnalystConfig Config(string prompt) => AnalystGroundTruthLiveTests.Config(prompt, AllPanels) with
     {
-        WallClockSeconds = 600,
+        WallClockSeconds = 1200,
     };
 
     private static AnalystProcessor Processor(FixturePanelReader panels)
