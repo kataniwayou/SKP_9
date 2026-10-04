@@ -38,8 +38,9 @@ That is the price of the drawing being current, and it is not recoverable by try
 information is not in the rows this reads.
 
 THE GATE REFUSES TO PUBLISH A BROKEN DRAWING. It is structural and runs on coordinates: every
-failure edge reaches the sink, nothing leaves the viewBox, no attribute is declared twice, and the
-SVG parses. Text metrics need a real renderer and belong to step 3 - a duplicated `xmlns` once
+failure edge reaches the sink, every wire leaves its box on the right and enters on the left at
+right angles, no wire runs through a box or along another, ports on one side stand PORT_GAP apart,
+nothing leaves the viewBox, no attribute is declared twice, and the SVG parses. Text metrics need a real renderer and belong to step 3 - a duplicated `xmlns` once
 served as 200 image/svg+xml with correct bytes and rendered as nothing at all, which only a browser
 noticed.
 """
@@ -184,6 +185,18 @@ BYPASS_Y = 18 + HEAD_H
 # running along the row; a bypass runs up here, so its label follows it rather than staying behind
 # with edges it is not.
 BYPASS_LABEL_Y = BYPASS_Y - 6
+
+# ONE SIDE PER DIRECTION. Every wire leaves a box on its right side and enters one on its left,
+# however many there are. Wires sharing a side stand PORT_GAP apart: the straight row edge on the
+# side's centre, lane edges stacked above it (below, on a row whose lanes run below), failures
+# under those. Every bend stands in the middle of the gap between two boxes; wires sharing a gap
+# that would overlap spread PORT_GAP apart around that middle. Lanes that share a gap stack
+# LANE_GAP apart - wide enough for a lane's schema label to sit between it and the next one up.
+PORT_GAP = 12
+LANE_GAP = 16
+# A row whose lanes cannot run above it - the failure row, which has the bus there - runs them
+# this far below its boxes instead.
+BELOW_LANE = 14
 
 # The gap between the lowest row of boxes and the first legend line, and the strip under the
 # caption. Both are margins now rather than terms in a fixed total - see render().
@@ -398,9 +411,39 @@ def render(g):
     steps, procs, schemas, by_step = g["steps"], g["procs"], g["schemas"], g["by_step"]
     spine, fail_chain = g["spine"], g["fail_chain"]
 
-    pos = {sid: (X0 + PITCH * i, YT) for i, sid in enumerate(spine)}
+    rows = (spine, fail_chain)
+    col = {sid: k for row in rows for k, sid in enumerate(row)}
+    row_of = {sid: r for r, row in enumerate(rows) for sid in row}
+    row_x0 = (X0, 520)
+    has_fail = bool(fail_chain and spine)
+
+    # LANES ARE LAID OUT BEFORE THE BOXES, because how many stack above the spine decides how far
+    # down the boxes sit. An edge to the next column runs straight along its row; any other edge -
+    # a bypass, or one that runs backwards - goes out into a lane. Its two verticals stand in the
+    # gap right of its source and the gap left of its target, and two lanes whose gap ranges meet
+    # cannot share a level. Shorter spans take the lower levels, so a long bypass passes over a
+    # short one rather than through it.
+    row_edges = [(a, b) for a, b in g["edges"] if col[b] == col[a] + 1]
+    lane_edges = [(a, b) for a, b in g["edges"] if col[b] != col[a] + 1]
+
+    def gaps(e):
+        return sorted((col[e[0]], col[e[1]] - 1))
+
+    level = {}
+    for e in sorted(lane_edges, key=lambda e: (abs(col[e[1]] - col[e[0]]), col[e[0]])):
+        lo, hi = gaps(e)
+        taken = {level[o] for o in level if row_of[o[0]] == row_of[e[0]]
+                 and gaps(o)[0] <= hi and lo <= gaps(o)[1]}
+        level[e] = next(k for k in range(len(lane_edges) + 1) if k not in taken)
+    # The failure row has the bus above it, so its lanes run below.
+    above = {e: not (has_fail and row_of[e[0]] == 1) for e in lane_edges}
+    levels_above = max([level[e] + 1 for e in lane_edges if above[e]] or [0])
+    top = max(0, levels_above - 1) * LANE_GAP
+    yt, yf, bus_y = YT + top, YF + top, BUS_Y + top
+
+    pos = {sid: (row_x0[0] + PITCH * i, yt) for i, sid in enumerate(spine)}
     for i, sid in enumerate(fail_chain):
-        pos[sid] = (520 + PITCH * i, YF)
+        pos[sid] = (row_x0[1] + PITCH * i, yf)
     # Every drawn step, in reading order: the boxes, the legend and the width all walk this.
     drawn_steps = spine + fail_chain
 
@@ -468,77 +511,176 @@ def render(g):
     # sk-normalizer-sample -> split-archivecollapser vanished from a drawing that was otherwise
     # correct and passed its own gate. Positions still come from the spine; what is DRAWN comes
     # from the edge list.
-    def arrow(x, y, facing, cls="arrow"):
-        """A filled head whose TIP touches the rectangle, so the edge visibly terminates on it."""
-        if facing == "right":
-            pts = f"{x},{y} {x-9},{y-4.5} {x-9},{y+4.5}"
-        else:   # down
-            pts = f"{x},{y} {x-4.5},{y-9} {x+4.5},{y-9}"
+    def arrow(x, y, cls="arrow"):
+        """A filled head whose TIP touches the rectangle's left side, where every wire enters."""
+        pts = f"{x:g},{y:g} {x-9:g},{y-4.5:g} {x-9:g},{y+4.5:g}"
         emit(f'    <polygon class="{cls}" points="{pts}"/>\n', cls)
 
     # WHICH EDGES GOT A LABEL, so the gate can check that every edge carrying a schema says so.
     # The fanout's bypass went unlabelled for exactly as long as nothing compared the two: the
     # label was emitted in the adjacent-edge branch only, so the one edge on the drawing that a
     # reader cannot follow by eye was also the one with no schema on it.
-    col = {sid: k for row in (spine, fail_chain) for k, sid in enumerate(row)}
     drawn, labelled = set(), set()
 
+    # LABELS ARE DRAWN LAST AND EVERY WIRE HAS A GAP CUT UNDER THEM. A bend stands mid-gap, which
+    # is exactly where a row label is centred, so a lane's vertical runs through the label of the
+    # gap it climbs out of. A gap in the wire reads on any panel background; a filled box behind
+    # the text would show as a patch, and the drawing has no background of its own.
+    labels, holes = [], []
+
     def schema_label(cx, ly, sc):
-        emit(f'    <text class="lbl-schema" x="{cx}" y="{ly}" text-anchor="middle">{esc(sc)}</text>\n',
-             "lbl-schema")
+        w = text_w(sc, 10) + 6
+        holes.append(f'<rect x="{cx - w / 2:g}" y="{ly - 10:g}" width="{w:g}" height="13" '
+                     f'fill="black"/>')
+        labels.append(f'    <text class="lbl-schema" x="{cx:g}" y="{ly:g}" '
+                      f'text-anchor="middle">{esc(sc)}</text>\n')
+        used.add("lbl-schema")
 
-    # Every y below is relative to the edge's own row, so both rows draw the same way.
-    for a, b in g["edges"]:
-        ca, cb = col[a], col[b]
-        ry = pos[a][1]
-        y = ry + H // 2
-        if cb == ca + 1:
-            x1, x2 = pos[a][0] + W, pos[b][0]
-            emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
-            sc = out_schema(a)
-            if sc:
-                schema_label((x1 + x2) // 2, ry - (YT - LABEL_Y), sc)
-                labelled.add((a, b))
-            arrow(x2, y, "right")
+    # THE PORTS. Each side of a box holds its wires in fixed slots: the row edge on the centre
+    # (whether or not this box has one, so every row edge is one straight line), lanes running above
+    # stacked upward by level, lanes running below and then failures stacked downward. Slots close
+    # up: a box with only a level-2 lane still puts it one PORT_GAP from the centre.
+    outs = {sid: [] for sid in drawn_steps}
+    ins = {sid: [] for sid in drawn_steps}
+    for e in row_edges:
+        outs[e[0]].append(((0, 0), e))
+        ins[e[1]].append(((0, 0), e))
+    for e in lane_edges:
+        key = (-1, level[e]) if above[e] else (1, level[e])
+        outs[e[0]].append((key, e))
+        ins[e[1]].append((key, e))
+    if has_fail:
+        for sid in spine:
+            outs[sid].append(((1, len(lane_edges) + 1), "fail"))
+        # The bus takes the sink's centre: the sink is column 0, so no row edge can, and the bus
+        # arrives from above - any lower slot would cross a lane arriving from below.
+        ins[fail_chain[0]].append(((0, 0), "bus"))
+
+    def slots(side):
+        dy = {}
+        for sign in (-1, 1):
+            ranked = sorted(k for k, _ in side if k[0] == sign)
+            for (k, item) in side:
+                if k[0] == sign:
+                    dy[item] = sign * (ranked.index(k) + 1) * PORT_GAP
+        for (k, item) in side:
+            if k[0] == 0:
+                dy[item] = 0
+        return dy
+
+    out_dy = {sid: slots(outs[sid]) for sid in drawn_steps}
+    in_dy = {sid: slots(ins[sid]) for sid in drawn_steps}
+
+    def port_out(sid, item):
+        x, y = pos[sid]
+        return x + W, y + H / 2 + out_dy[sid][item]
+
+    def port_in(sid, item):
+        x, y = pos[sid]
+        return x, y + H / 2 + in_dy[sid][item]
+
+    def lane_y(e):
+        ry = pos[e[0]][1]
+        if above[e]:
+            return ry - (YT - BYPASS_Y) - level[e] * LANE_GAP
+        return ry + H + BELOW_LANE + level[e] * LANE_GAP
+
+    # THE TRACKS. Every vertical stands in a gap - gap k is the one right of column k on its row,
+    # gap -1 the one left of column 0 - and its x is decided only once every vertical in that gap
+    # is known. Verticals whose spans do not overlap share the middle; ones that do spread
+    # PORT_GAP apart around it. They are placed left to right in an order that cannot cross: a
+    # wire climbing out of the gap's left box takes a track nearer that box the higher its lane,
+    # one descending into the right box takes a track nearer that box the higher its lane.
+    verts = []
+
+    def vertical(row, gap, y0, y1, order):
+        v = dict(row=row, gap=gap, lo=min(y0, y1), hi=max(y0, y1), order=order, x=None)
+        verts.append(v)
+        return v
+
+    wires = []      # (kind, points-with-verticals, source, target) - resolved after the tracks
+    for e in row_edges:
+        wires.append(("row", [port_out(e[0], e), port_in(e[1], e)], e[0], e[1]))
+    for e in lane_edges:
+        a, b = e
+        (xa, ya), (xb, yb), ly = port_out(a, e), port_in(b, e), lane_y(e)
+        rank = level[e]
+        up = vertical(row_of[a], col[a], ya, ly, (0, -rank))
+        down = vertical(row_of[b], col[b] - 1, ly, yb, (2, rank))
+        wires.append(("lane", [(xa, ya), (up, ya), (up, ly), (down, ly), (down, yb), (xb, yb)],
+                      a, b))
+    if has_fail:
+        for sid in spine:
+            xa, ya = port_out(sid, "fail")
+            drop = vertical(0, col[sid], ya, bus_y, (1, 0))
+            wires.append(("fail", [(xa, ya), (drop, ya), (drop, bus_y)], sid, None))
+        xs, ys = port_in(fail_chain[0], "bus")
+        entry = vertical(1, -1, bus_y, ys, (1, 0))
+        wires.append(("sink", [(entry, bus_y), (entry, ys), (xs, ys)], None, fail_chain[0]))
+
+    for key in {(v["row"], v["gap"]) for v in verts}:
+        here = sorted((v for v in verts if (v["row"], v["gap"]) == key), key=lambda v: v["order"])
+        tracks = []
+        for v in here:
+            for t in tracks:
+                if all(v["hi"] + 2 < o["lo"] or o["hi"] + 2 < v["lo"] for o in t):
+                    t.append(v)
+                    break
+            else:
+                tracks.append([v])
+        mid = row_x0[key[0]] + PITCH * key[1] + W + (PITCH - W) / 2
+        step = min(PORT_GAP, (PITCH - W) / (len(tracks) + 1))
+        for i, t in enumerate(tracks):
+            for v in t:
+                v["x"] = mid + (i - (len(tracks) - 1) / 2) * step
+
+    def resolve(pts):
+        return [(p[0]["x"] if isinstance(p[0], dict) else p[0], p[1]) for p in pts]
+
+    wires = [(kind, resolve(pts), a, b) for kind, pts, a, b in wires]
+
+    def path(cls, pts):
+        d = "M " + " L ".join(f"{x:g} {y:g}" for x, y in pts)
+        emit(f'    <path class="{" ".join(cls)}" mask="url(#lbl-holes)" d="{d}"/>\n', *cls)
+
+    for kind, pts, a, b in wires:
+        if kind == "row":
+            path(["edge-ok"], pts)
+            arrow(*pts[-1])
+        elif kind == "lane":
+            path(["edge-ok", "edge-bypass"], pts)
+            arrow(*pts[-1])
         else:
-            # A BYPASS: the source reaches a step further along without passing through the boxes
-            # between, so it cannot run on the row. STRAIGHT SEGMENTS ONLY - up into the lane,
-            # across, and back down - matching every other wire on the drawing. A curve here was
-            # the only non-straight line in the diagram and read as a different KIND of edge.
-            xa, xb = pos[a][0] + W // 2, pos[b][0] + W // 2
-            lane = ry - (YT - BYPASS_Y)
-            emit(f'    <path class="edge-ok edge-bypass" d="M {xa} {ry} L {xa} {lane} '
-                 f'L {xb} {lane} L {xb} {ry}"/>\n', "edge-ok", "edge-bypass")
-            # THE BYPASS CARRIES A SCHEMA LIKE ANY OTHER EDGE. It was drawn without one - the label
-            # lived in the branch above - so on the chain's fanout the only edge whose route is not
-            # obvious was also the only one that did not say what it carries.
+            path(["edge-fail"], pts)
+            if kind == "sink":
+                arrow(*pts[-1], cls="arrow-fail")
+        if a is not None and b is not None:
+            drawn.add((a, b))
             sc = out_schema(a)
             if sc:
-                schema_label((xa + xb) // 2, lane - (BYPASS_Y - BYPASS_LABEL_Y), sc)
+                if kind == "row":
+                    schema_label((pts[0][0] + pts[-1][0]) / 2, pos[a][1] - (YT - LABEL_Y), sc)
+                else:
+                    e = (a, b)
+                    cx, ly = (pts[2][0] + pts[3][0]) / 2, lane_y(e)
+                    schema_label(cx, ly - (BYPASS_Y - BYPASS_LABEL_Y) if above[e] else ly + 12, sc)
                 labelled.add((a, b))
-            arrow(xb, ry, "down")
-        drawn.add((a, b))
 
-    # THE FAILURE EDGES RUN ONTO A BUS AND THEN INTO THE SINK. A stub that stops in white space
-    # draws something that LOOKS like an edge and connects nothing, leaving the reader to infer the
-    # destination - the one thing a wiring diagram exists to remove. No prose annotation either: the
-    # drawing already says "any step that fails" by where the edges go.
-    if fail_chain and spine:
-        xs = [pos[sid][0] + W // 2 for sid in spine]
-        for cx in xs:
-            emit(f'    <line class="edge-fail" x1="{cx}" y1="{YT+H}" x2="{cx}" y2="{BUS_Y}"/>\n',
-                 "edge-fail")
-        sink_cx = pos[fail_chain[0]][0] + W // 2
-        emit(f'    <line class="edge-fail" x1="{min(xs)}" y1="{BUS_Y}" x2="{max(xs)}" y2="{BUS_Y}"/>\n',
-             "edge-fail")
-        emit(f'    <line class="edge-fail" x1="{sink_cx}" y1="{BUS_Y}" x2="{sink_cx}" y2="{YF}"/>\n',
-             "edge-fail")
-        arrow(sink_cx, YF, "down", "arrow-fail")
+    # THE BUS: one wire under the spine that every failure drops onto and the sink is fed from.
+    if has_fail:
+        bus_xs = [pts[-1][0] for kind, pts, _a, _b in wires if kind == "fail"]
+        bus_xs += [pts[0][0] for kind, pts, _a, _b in wires if kind == "sink"]
+        bus = [(min(bus_xs), bus_y), (max(bus_xs), bus_y)]
+        path(["edge-fail"], bus)
+        wires.append(("bus", bus, None, None))
+    body.extend(labels)
 
     # THE BAND STARTS UNDER THE LOWEST ROW THAT EXISTS. `pos` holds only the steps that were
     # drawn, so a graph with no failure sink has no failure row and the legend rises to meet the
     # boxes instead of clearing a lane that nothing is in.
-    legend_y0 = max(y for _x, y in pos.values()) + H + LEGEND_GAP
+    # A lane running below the failure row sits between it and the band, so the band clears it.
+    below = [lane_y(e) + 12 for e in lane_edges if not above[e]]
+    legend_y0 = max([y + H for _x, y in pos.values()] + below) + LEGEND_GAP
 
     # ONE ROW PER WRAPPED LINE, NOT ONE PER STEP. Packed once here and reused by both the emitter
     # below and the vb_w computation further down, for the reason fmt_value already gives: the
@@ -605,10 +747,15 @@ def render(g):
         label += f', failures drop to {steps[fail_chain[0]]["name"]}'
     head = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" '
             f'width="{vb_w}" height="{vb_h}" role="img" aria-label="{esc(label)}">\n')
+    # The mask every wire carries, cutting it where a schema label sits. Emitted even with no
+    # labels: a wire referencing a mask that does not exist is not drawn at all.
+    body.append(f'  <mask id="lbl-holes" maskUnits="userSpaceOnUse" x="0" y="0" width="{vb_w}" '
+                f'height="{vb_h}"><rect x="0" y="0" width="{vb_w}" height="{vb_h}" fill="white"/>'
+                + "".join(holes) + '</mask>\n')
     svg = ('<?xml version="1.0" encoding="UTF-8"?>\n' + head + style_block(used)
            + "".join(body) + "</svg>\n")
     return svg, dict(pos=pos, drawn=drawn, labelled=labelled, vb_w=vb_w, vb_h=vb_h,
-                     cron=cron_txt)
+                     cron=cron_txt, wires=wires, bus_y=bus_y)
 
 
 # THE BROWSER CHECK, RUN ON THE CANDIDATE BEFORE IT IS PUBLISHED. It used to be
@@ -814,19 +961,91 @@ def gate(svg, g, art):
         if x < 0 or y < 0 or x + W > vb_w or y + H > vb_h:
             problems.append(f'{g["steps"][sid]["name"]} at ({x},{y}) leaves the viewBox')
 
+    problems += wiring_problems(g, art)
+    return problems
+
+
+def wiring_problems(g, art):
+    """The routing rules, checked on the wires render() returned rather than on the SVG text: a
+    regex over <line> elements is what the old bus check was, and it broke the moment the failure
+    edges became paths."""
+    problems, pos, wires = [], art["pos"], art["wires"]
+    name = lambda sid: g["steps"][sid]["name"]                 # noqa: E731
+    eps = 0.01
+
+    def segments(pts):
+        return list(zip(pts, pts[1:]))
+
+    for kind, pts, a, b in wires:
+        what = f'{kind} wire {name(a) if a else "bus"} -> {name(b) if b else "bus"}'
+        # STRAIGHT SEGMENTS AT RIGHT ANGLES, nothing diagonal.
+        for (x1, y1), (x2, y2) in segments(pts):
+            if abs(x1 - x2) > eps and abs(y1 - y2) > eps:
+                problems.append(f"{what} has a diagonal segment ({x1},{y1})-({x2},{y2})")
+        # OUT ON THE RIGHT, IN ON THE LEFT.
+        if a is not None:
+            x, y = pos[a]
+            if abs(pts[0][0] - (x + W)) > eps or not y < pts[0][1] < y + H:
+                problems.append(f"{what} does not leave {name(a)} from its right side")
+        if b is not None:
+            x, y = pos[b]
+            if abs(pts[-1][0] - x) > eps or not y < pts[-1][1] < y + H:
+                problems.append(f"{what} does not enter {name(b)} on its left side")
+        # THROUGH NO BOX. A bend inside a box, or a lane run along a row, would hide the wire
+        # behind the step it passes.
+        for (x1, y1), (x2, y2) in segments(pts):
+            for sid, (bx, by) in pos.items():
+                if (min(x1, x2) < bx + W - eps and max(x1, x2) > bx + eps
+                        and min(y1, y2) < by + H - eps and max(y1, y2) > by + eps):
+                    problems.append(f"{what} runs through {name(sid)}")
+
+    # NO TWO WIRES ON ONE LINE. Collinear wires that overlap read as one, and the reader can no
+    # longer say which arrowhead a wire leads to. Touching end to end - a drop meeting the bus - is
+    # how the failure wires join, and is allowed.
+    segs = [(i, s) for i, (_k, pts, _a, _b) in enumerate(wires) for s in segments(pts)]
+    for n, (i, ((ax1, ay1), (ax2, ay2))) in enumerate(segs):
+        for j, ((bx1, by1), (bx2, by2)) in segs[n + 1:]:
+            if i == j:
+                continue
+            if abs(ax1 - ax2) < eps and abs(bx1 - bx2) < eps and abs(ax1 - bx1) < eps:
+                lo, hi = max(min(ay1, ay2), min(by1, by2)), min(max(ay1, ay2), max(by1, by2))
+            elif abs(ay1 - ay2) < eps and abs(by1 - by2) < eps and abs(ay1 - by1) < eps:
+                lo, hi = max(min(ax1, ax2), min(bx1, bx2)), min(max(ax1, ax2), max(bx1, bx2))
+            else:
+                continue
+            if hi - lo > eps:
+                problems.append(f"wires {wires[i][0]} and {wires[j][0]} overlap at "
+                                f"({ax1:g},{ay1:g})-({ax2:g},{ay2:g})")
+
+    # PORTS ON ONE SIDE STAND APART.
+    for end, sel in (("leaving", lambda w: (w[2], w[1][0])), ("entering", lambda w: (w[3], w[1][-1]))):
+        by_box = {}
+        for w in wires:
+            sid, (_x, y) = sel(w)
+            if sid is not None:
+                by_box.setdefault(sid, []).append(y)
+        for sid, ys in by_box.items():
+            ys = sorted(ys)
+            if any(b - a < PORT_GAP - eps for a, b in zip(ys, ys[1:])):
+                problems.append(f"wires {end} {name(sid)} are closer than {PORT_GAP}px")
+
+    # EVERY STEP THAT CAN FAIL REACHES THE SINK: one drop per spine step, each ending on the one bus,
+    # and the bus feeding the sink.
     if g["fail_chain"] and g["spine"]:
-        fails = re.findall(
-            r'<line class="edge-fail" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"', svg)
-        verticals = [f for f in fails if f[0] == f[2]]
-        horizontals = [f for f in fails if f[1] == f[3]]
-        if len(horizontals) != 1:
-            problems.append(f"expected exactly one bus, found {len(horizontals)}")
-        if len(verticals) != len(g["spine"]) + 1:
-            problems.append(
-                f'expected {len(g["spine"])+1} vertical failure edges, found {len(verticals)}')
-        for x1, _y1, _x2, y2 in verticals:
-            if float(y2) not in (float(BUS_Y), float(YF)):
-                problems.append(f"failure edge at x={x1} ends at y={y2} - it dangles")
+        drops = [w for w in wires if w[0] == "fail"]
+        buses = [w for w in wires if w[0] == "bus"]
+        sinks = [w for w in wires if w[0] == "sink"]
+        if sorted(w[2] for w in drops) != sorted(g["spine"]):
+            problems.append(f'expected a failure wire from each of {len(g["spine"])} steps, '
+                            f'found {len(drops)}')
+        if len(buses) != 1 or len(sinks) != 1:
+            problems.append(f"expected one bus and one sink entry, found {len(buses)} and {len(sinks)}")
+        else:
+            (bx1, by), (bx2, _) = buses[0][1]
+            for w in drops + sinks:
+                x, y = w[1][-1] if w[0] == "fail" else w[1][0]
+                if abs(y - by) > eps or not bx1 - eps <= x <= bx2 + eps:
+                    problems.append(f"{w[0]} wire at x={x:g} does not meet the bus - it dangles")
     return problems
 
 
