@@ -257,16 +257,21 @@ def read_graph(base, workflow_name):
                if n in steps and n not in fail_chain]
         cur = nxt[-1] if nxt else None      # a fork's later branch continues the line
 
-    # EVERY SUCCESS EDGE, not only the ones the spine happens to walk. The spine is a LINE and a
-    # graph is not: at a fork it keeps one successor and drops the rest, which is how
+    # EVERY EDGE WITHIN A ROW, not only the ones the spine happens to walk. The spine is a LINE and
+    # a graph is not: at a fork it keeps one successor and drops the rest, which is how
     # sk-normalizer-sample -> split-archivecollapser disappeared from a drawing that was otherwise
-    # correct. Positions still come from the spine; what is drawn comes from here.
-    on_spine = set(spine)
+    # correct. Positions still come from the rows; what is drawn comes from here.
+    # THE FAILURE ROW IS A ROW LIKE THE SPINE. Its steps are ordinary steps - a processor, an output
+    # schema, a payload - and were drawn as a special case that skipped all three:
+    # record-outcome -> export-outcome had no schema label and neither step had a legend line.
+    # Edges BETWEEN the rows are the failure bus, drawn separately.
     edges = []
-    for sid in spine:
-        for n in (steps[sid].get("nextStepIds") or []):
-            if n in on_spine and n != sid:
-                edges.append((sid, n))
+    for row in (spine, fail_chain):
+        in_row = set(row)
+        for sid in row:
+            for n in (steps[sid].get("nextStepIds") or []):
+                if n in in_row and n != sid:
+                    edges.append((sid, n))
 
     return dict(wf=wf, steps=steps, procs=procs, schemas=schemas, by_step=by_step,
                 spine=spine, fail_chain=fail_chain, edges=edges)
@@ -395,7 +400,9 @@ def render(g):
 
     pos = {sid: (X0 + PITCH * i, YT) for i, sid in enumerate(spine)}
     for i, sid in enumerate(fail_chain):
-        pos[sid] = (520 + 240 * i, YF)
+        pos[sid] = (520 + PITCH * i, YF)
+    # Every drawn step, in reading order: the boxes, the legend and the width all walk this.
+    drawn_steps = spine + fail_chain
 
     def out_schema(sid):
         p = procs[steps[sid]["processorId"]]
@@ -431,11 +438,11 @@ def render(g):
     # `sk-normalizer-sample`, and the numeral said `4`, which is a fact about the layout rather
     # than about the graph. It also went stale the moment the spine changed: insert a step and
     # every numeral after it means a different box than it did in the last drawing anyone saw.
-    for sid in spine + fail_chain:
+    for sid in drawn_steps:
         s = steps[sid]
         p = procs[s["processorId"]]
         x, y = pos[sid]
-        cls = ("node-box-fail" if s["entryCondition"] == 2 else "node-box") if sid in fail_chain \
+        cls = "node-box-fail" if s["entryCondition"] == 2 \
             else ("node-box-fork" if p["name"] == "sk-normalizer" else "node-box")
         # ENTRY CONDITION ON EVERY BOX, not only the failure sink. It is the one property that
         # decides whether a step runs when its predecessor failed, and showing it on some boxes
@@ -473,22 +480,24 @@ def render(g):
     # The fanout's bypass went unlabelled for exactly as long as nothing compared the two: the
     # label was emitted in the adjacent-edge branch only, so the one edge on the drawing that a
     # reader cannot follow by eye was also the one with no schema on it.
-    col = {sid: k for k, sid in enumerate(spine)}
+    col = {sid: k for row in (spine, fail_chain) for k, sid in enumerate(row)}
     drawn, labelled = set(), set()
 
     def schema_label(cx, ly, sc):
         emit(f'    <text class="lbl-schema" x="{cx}" y="{ly}" text-anchor="middle">{esc(sc)}</text>\n',
              "lbl-schema")
 
+    # Every y below is relative to the edge's own row, so both rows draw the same way.
     for a, b in g["edges"]:
         ca, cb = col[a], col[b]
-        y = YT + H // 2
+        ry = pos[a][1]
+        y = ry + H // 2
         if cb == ca + 1:
             x1, x2 = pos[a][0] + W, pos[b][0]
             emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
             sc = out_schema(a)
             if sc:
-                schema_label((x1 + x2) // 2, LABEL_Y, sc)
+                schema_label((x1 + x2) // 2, ry - (YT - LABEL_Y), sc)
                 labelled.add((a, b))
             arrow(x2, y, "right")
         else:
@@ -497,16 +506,17 @@ def render(g):
             # across, and back down - matching every other wire on the drawing. A curve here was
             # the only non-straight line in the diagram and read as a different KIND of edge.
             xa, xb = pos[a][0] + W // 2, pos[b][0] + W // 2
-            emit(f'    <path class="edge-ok edge-bypass" d="M {xa} {YT} L {xa} {BYPASS_Y} '
-                 f'L {xb} {BYPASS_Y} L {xb} {YT}"/>\n', "edge-ok", "edge-bypass")
+            lane = ry - (YT - BYPASS_Y)
+            emit(f'    <path class="edge-ok edge-bypass" d="M {xa} {ry} L {xa} {lane} '
+                 f'L {xb} {lane} L {xb} {ry}"/>\n', "edge-ok", "edge-bypass")
             # THE BYPASS CARRIES A SCHEMA LIKE ANY OTHER EDGE. It was drawn without one - the label
             # lived in the branch above - so on the chain's fanout the only edge whose route is not
             # obvious was also the only one that did not say what it carries.
             sc = out_schema(a)
             if sc:
-                schema_label((xa + xb) // 2, BYPASS_LABEL_Y, sc)
+                schema_label((xa + xb) // 2, lane - (BYPASS_Y - BYPASS_LABEL_Y), sc)
                 labelled.add((a, b))
-            arrow(xb, YT, "down")
+            arrow(xb, ry, "down")
         drawn.add((a, b))
 
     # THE FAILURE EDGES RUN ONTO A BUS AND THEN INTO THE SINK. A stub that stops in white space
@@ -524,11 +534,6 @@ def render(g):
         emit(f'    <line class="edge-fail" x1="{sink_cx}" y1="{BUS_Y}" x2="{sink_cx}" y2="{YF}"/>\n',
              "edge-fail")
         arrow(sink_cx, YF, "down", "arrow-fail")
-    for i in range(len(fail_chain) - 1):
-        a, b = fail_chain[i], fail_chain[i + 1]
-        x1, x2, y = pos[a][0] + W, pos[b][0], YF + H // 2
-        emit(f'    <line class="edge-ok" x1="{x1}" y1="{y}" x2="{x2}" y2="{y}"/>\n', "edge-ok")
-        arrow(x2, y, "right")
 
     # THE BAND STARTS UNDER THE LOWEST ROW THAT EXISTS. `pos` holds only the steps that were
     # drawn, so a graph with no failure sink has no failure row and the legend rises to meet the
@@ -538,7 +543,7 @@ def render(g):
     # ONE ROW PER WRAPPED LINE, NOT ONE PER STEP. Packed once here and reused by both the emitter
     # below and the vb_w computation further down, for the reason fmt_value already gives: the
     # drawing and the width estimate must never disagree about how wide a line is.
-    step_rows = [cfg_rows(config(sid)) for sid in spine]
+    step_rows = [cfg_rows(config(sid)) for sid in drawn_steps]
     vb_h = legend_y0 + LEGEND_DY * sum(len(r) for r in step_rows) + CAPTION_BAND
 
     # THE LEGEND BAND. The config keys used to sit inside the 150px rectangle, truncated to two
@@ -549,7 +554,7 @@ def render(g):
     # several steps sharing a name; continuation rows start at the same X0+260 column as the first,
     # so the config reads as one left-aligned paragraph under the name that ties it to its box.
     row_i = 0
-    for sid, rows in zip(spine, step_rows):
+    for sid, rows in zip(drawn_steps, step_rows):
         for j, row in enumerate(rows):
             ly = legend_y0 + LEGEND_DY * row_i
             row_i += 1
@@ -587,7 +592,7 @@ def render(g):
     right = [max(x for x, _y in pos.values()) + W,
              X0 + text_w(caption, 12, mono=False),
              X0 + text_w("cron " + cron_txt, 11)]
-    for sid, rows in zip(spine, step_rows):
+    for sid, rows in zip(drawn_steps, step_rows):
         right.append(X0 + text_w(steps[sid]["name"], 11))
         # Each WRAPPED row, not the joined line: the same rows the emitter drew, so the canvas is
         # sized to the widest line that actually renders.
@@ -769,7 +774,7 @@ def gate(svg, g, art):
     # absent for as long again, and a rule that checks only keys cannot tell `topic: skp-paths`
     # from `topic: skp-documents` - the difference between the step that reads and the one that
     # writes. An escaped value is compared escaped, since that is what the drawing contains.
-    for sid in g["spine"]:
+    for sid in g["spine"] + g["fail_chain"]:
         raw = (g["by_step"].get(sid) or [{}])[0].get("payload")
         try:
             cfg = json.loads(raw) if isinstance(raw, str) else (raw or {})
