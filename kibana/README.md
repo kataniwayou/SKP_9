@@ -360,5 +360,18 @@ so rebuilding the graph elsewhere needs no regeneration. The retired design rend
 PNG, base64'd them into a ConfigMap keyed by workflow id and stood an nginx in front of it; those
 ids were fixed at build time, so every rebuild orphaned the images.
 
-**With no workflow selected and several in range the diagrams stack**, and the panel scrolls rather
-than hiding the ones after the first. Selecting a workflow collapses it to one.
+**The drawing is scaled to the panel, never scrolled.** The panel's custom CSS (`markdown_css`)
+pins the markdown body to the panel's content box and fits each image with `object-fit: contain`,
+so a drawing of any shape shows whole at whatever size the panel is. Kibana 9 nests that CSS
+inside `.kbnMarkdown__body { … }`, so the rules are written as declarations plus `&` selectors;
+the body is `position: absolute; inset: 0` because the wrapper between it and the content box has
+no height for `100%` to resolve against.
+
+**The panel is 28 rows tall so the drawing fills its width.** Fitting without scrolling means the
+tighter of width and height wins; at 14 rows the panel was ~4.8:1 and the chain's drawing ~2.6:1,
+so height won and the drawing used half the width. 28 rows gives a 716px content box, which fills
+the width up to a ~1850px-wide panel (a 1920px screen); a flatter drawing, or a wider screen, leaves
+white below rather than at the sides.
+
+**With no workflow selected and several in range the diagrams stack**, sharing the panel's height
+equally rather than hiding the ones after the first. Selecting a workflow collapses it to one.
