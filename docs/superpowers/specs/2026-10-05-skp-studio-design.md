@@ -1,6 +1,6 @@
 # SKP Studio -- design
 
-Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Branch: `feature/path-importer`.
+Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Branch: `feature/path-importer`.
 
 ## 1. Purpose
 
@@ -13,7 +13,7 @@ last saved, change it, and save it in one atomic request -- without the editor e
 design, and with every rule the orchestrator enforces at start shown as a warning beforehand.
 
 The reference implementation of the visual system and the dock is the brainstorm mockup
-(`.superpowers/brainstorm/385-1791189446/content/skp-studio-dock-v46.html`, gitignored; source and
+(`.superpowers/brainstorm/385-1791189446/content/skp-studio-dock-v49.html`, gitignored; source and
 `build.py` in `../source/`). Where this spec and the mockup disagree, this spec wins.
 
 ## 2. Data model facts the design rests on
@@ -109,16 +109,25 @@ The response is the graph re-read through `WorkflowGraphLoader`.
 - **Two levels of delete.**
   - *From the graph:* unlink only. Removing a mid-chain step offers "Reconnect A→C?".
   - *From the toolbox:* a plain `DELETE`, decided by the Postgres restrict FKs. A 422 is shown together
-    with who still references the entity.
+    with who still references the entity. Each toolbox item has a ✕ for this.
+- **Creating from the toolbox.** The Steps, Processors and Caches tabs each have **+ New**, which opens a
+  small form:
+  - *Step:* name, version, and its processor, picked from a dropdown that names every processor with
+    BaseApi's entity-name convention (`Messaging.Contracts.EntityNames.Format`):
+    `{name}_{version}-{last two groups of the id}`, e.g. `kafka-importer_2.2.0-ad95-fca1af2631b2`. Name
+    and version alone are not unique (no constraint); the suffix is. The new step lands **parked**.
+  - *Processor:* name, version, source hash. Its schemas are set afterwards in the Processor inspector.
+  - *Cache:* name, version, root. It is created **unlinked**; dragging it onto the workflow links it.
 
 ## 5. Visual system
 
 ### 5.1 Theme and blocks
 
 - **Theme:** dark blueprint, IBM Plex Sans / Mono.
-- **Grid (the lit mesh):** two tiers of fine dashed **neutral grey** lines, every **8 px** (one snap step)
-  and every **32 px** (a cell), with a small lit dot where 32 px lines cross. Thin, so it stays behind the
-  wires. Below 60 % zoom the 8 px tier drops out (Visio's variable grid). The canvas origin is a whole
+- **Grid (the lit mesh):** soft, fine dashed **neutral grey** lines every **8 px** (one snap step), a
+  barely visible solid line every **32 px** (a cell), and a small lit dot where 32 px lines cross. There is
+  no bright dashed 32 px line (removed in the v49 review). Thin, so it stays behind the wires. Below 60 %
+  zoom the 8 px tier drops out (Visio's variable grid), leaving the dots. The canvas origin is a whole
   cell, so block coordinates and drawn lines coincide.
 - **Everything sits on the grid.** Blocks snap to 8 px. A step is **224 × 160 = 7 × 5 cells**; its
   processor middle is **96** (3 cells down), so ports and arrows run along a 32 px line. Ports are
@@ -245,6 +254,17 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
 
 ## 7. Inspector editors
 
+Two rules hold for every view:
+
+- **Read-only text is shortened, never wrapped.** A read-only label or value that does not fit is cut
+  with an ellipsis, and its full text is a tooltip, shown only when something was cut. This covers every
+  read-only value: the source hash (its full 64 characters, cut on screen), schema slots, ids, dates and
+  name tags.
+- **Entity details.** Every entity (step, parked step, processor, workflow, cache) always shows its name
+  and version. Under them, **▸ show all** reveals the base-entity fields, read-only: **Id, Created at,
+  Created by, Updated at, Updated by**; **▾ hide details** folds them away. It is one switch for all
+  entities, so it stays as the operator left it while they click around.
+
 - **Step:** semver version; an entry-condition dropdown (never 0; `Never` noted for entry steps); a
   processor swap that previews which wires would break; wired from/to lists; "also reached by"
   (shared).
@@ -315,7 +335,8 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
 4. **Inspectors:** Step, Assignment, Processor, Workflow, Cache, then the Problems pane.
 5. **Dock chrome** on dockview-core 8.4: `renderer: 'always'` for documents, `ownerDocument` in
    pop-outs, overlay layer tokens, window menus, in-house auto-hide, layout in `localStorage`.
-6. **Toolbox:** drag-and-drop onto the canvas, delete from the toolbox.
+6. **Toolbox:** drag-and-drop onto the canvas, **+ New** step / processor / cache, delete (✕) from the
+   toolbox (§4.3).
 7. **Junctions and polish:** positioned junctions (bus, trunk, node, contact points) and their drags.
 
 ## 11. Deferred and rejected

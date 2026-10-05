@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node ≥ 22.12, Vite 8.3.2, React 19.3.0, TypeScript 5.9.3, @xyflow/react 12.12.0, elkjs 0.12.0, Vitest 5.0.3 + jsdom 30.1.2 + Testing Library, openapi-typescript 7.13.0, Swashbuckle.AspNetCore.Cli 6.9.0 (a local dotnet tool), nginx 1.29-alpine.
 
-**Spec:** `docs/superpowers/specs/2026-10-05-skp-studio-design.md` (sections 1, 2, 3.1, 4.3, 5.1–5.3, 5.4 pan/zoom and label shortening, 8 "stale ids", 9 `model/` and `layout/`, 10 slice 2). The visual reference is the mockup `.superpowers/brainstorm/385-1791189446/content/skp-studio-dock-v46.html` (gitignored); every visual value below was copied from it.
+**Spec:** `docs/superpowers/specs/2026-10-05-skp-studio-design.md` (sections 1, 2, 3.1, 4.3, 5.1–5.3, 5.4 pan/zoom and label shortening, 8 "stale ids", 9 `model/` and `layout/`, 10 slice 2). The visual reference is the mockup `.superpowers/brainstorm/385-1791189446/content/skp-studio-dock-v49.html` (gitignored); every visual value below was copied from it.
 
 ## Global Constraints
 
@@ -1666,7 +1666,7 @@ git commit -m "feat(studio): layout document, grid geometry and elkjs placement 
   - `router.ts`: `type Pt = readonly [number, number]`, `interface Box { id: string; x: number; y: number; w: number; h: number }`, `route(sx, sy, tx, ty, srcId, tgtId, nudge, boxes): Pt[]`, `simplify(pts: Pt[]): Pt[]`.
   - `wires.ts`: `interface WireRoute { id: string; source: SourceId; target: Id; points: Pt[]; condition: number; broken: boolean }`, `interface WiringInput { entryStepIds: Id[]; steps: ReadonlyMap<Id, Step>; processors: ReadonlyMap<Id, Processor> }`, `collectWires(input, placement): WireEnd[]`, `routeWires(input, placement): WireRoute[]`, `blockBoxes(placement): Box[]`, `tetherPoints(sphere, cache: Point): Pt[]`, `stepBoxId(id)`, `cacheBoxId(id)`, `SPHERE_BOX_ID`.
 
-Ported from the mockup's `computePorts`, `computeLand` and `route` (lines 553–623), with two fixes: the straight-landing search can no longer oscillate when the band is full (it searches outward and gives up to the bent rule), and collinear points are removed so a straight run is never counted as a bend.
+Ported from the mockup's `computePorts`, `computeLand` and `route`, with two fixes: the straight-landing search can no longer oscillate when the band is full (it searches outward and gives up to the bent rule), and collinear points are removed so a straight run is never counted as a bend.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2422,7 +2422,7 @@ export function TetherEdge({ data }: EdgeProps<TetherEdgeType>) {
 `src/canvas/tokens.css`:
 
 ```css
-/* Colour tokens of the blueprint theme (mockup v46, lines 12-21). */
+/* Colour tokens of the blueprint theme (mockup v49, the :root tokens). */
 :root {
   --z-fly: 1000; --z-menu: 1010; --z-toast: 1020; --z-modal: 1030; --z-switcher: 1040; --z-tip: 1050;
   --ground: #0A1220; --ground-2: #0C1628;
@@ -2439,7 +2439,7 @@ export function TetherEdge({ data }: EdgeProps<TetherEdgeType>) {
 `src/canvas/canvas.css`:
 
 ```css
-/* Block and wire styles (mockup v46, the effective rules of lines 334-422). */
+/* Block and wire styles (mockup v49, the effective block, chip and wire rules). */
 .studio-canvas { background: var(--ground); font-family: var(--sans); }
 .studio-canvas .react-flow__node { cursor: default; }
 .studio-canvas svg text { font-family: var(--sans); }
@@ -2507,8 +2507,8 @@ export function TetherEdge({ data }: EdgeProps<TetherEdgeType>) {
 
 ```tsx
 /**
- * Every gradient and filter the blocks and wires reference, defined once per page (mockup v46,
- * lines 651-674). The ids are document-global, so nothing else may define them.
+ * Every gradient and filter the blocks and wires reference, defined once per page (mockup v49,
+ * the defsInto block). The ids are document-global, so nothing else may define them.
  */
 export function SvgDefs() {
   return (
@@ -2549,8 +2549,9 @@ import { useId } from 'react';
 import { useStore } from '@xyflow/react';
 
 /**
- * The lit mesh (spec §5.1): fine dashed neutral grey lines every 8 px and every 32 px, a lit dot
- * where 32 px lines cross, over a soft vignette. The patterns are in world units and follow the
+ * The lit mesh (spec §5.1): soft fine dashed neutral grey lines every 8 px, a barely visible solid
+ * line every 32 px and a lit dot where 32 px lines cross, over a soft vignette. No bright dashed
+ * 32 px line (removed in the mockup v49 review). The patterns are in world units and follow the
  * viewport, so world (0, 0) is a whole cell and block coordinates coincide with drawn lines. Below
  * 60 % zoom the 8 px tier drops out. Pattern ids come from useId, so two canvases never collide.
  */
@@ -2567,8 +2568,8 @@ export function GridBackground() {
           <path d="M0 0H8 M0 8H8 M0 0V8 M8 0V8" fill="none" stroke="rgba(200,208,218,.20)" strokeWidth=".6" strokeDasharray="2 2" />
         </pattern>
         <g id={ids.tile}>
+          {/* the barely visible 32 px line; the bright dashed 32 px line was removed in the v49 review */}
           <path d="M0 0H32 M0 32H32 M0 0V32 M32 0V32" fill="none" stroke="rgba(214,220,230,.07)" strokeWidth="2.2" />
-          <path d="M0 0H32 M0 32H32 M0 0V32 M32 0V32" fill="none" stroke="rgba(222,228,236,.46)" strokeWidth=".8" strokeDasharray="4 4" />
           {[[0, 0], [0, 32], [32, 0], [32, 32]].map(([cx, cy]) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.3" fill="rgba(236,240,246,.55)" />)}
         </g>
         <pattern id={ids.major} width="32" height="32" patternUnits="userSpaceOnUse" patternTransform={transform}>
@@ -2621,7 +2622,7 @@ git commit -m "feat(studio): blueprint tokens, shared SVG definitions, the lit g
   - `nodes/*`: `WorkflowNodeData`, `StepNodeData`, `ProcessorView`, `CacheNodeData`; components `WorkflowNode`, `StepNode`, `CacheNode`, and the plain views `StepView`, `ChipView` used by tests.
   - `toFlow.ts`: `type StudioNode`, `type StudioEdge`, `toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: StudioNode[]; edges: StudioEdge[] }`, node id helpers `SPHERE_NODE_ID = 'wf'`, `cacheNodeId(id)`; step node ids are the step ids.
 
-Text limits (mockup v46 lines 725–751): step name `600 14.5px` SANS, max 178; version `10.5px` MONO, max 106 (90 when parked); die title `11px` MONO, room 136, version dropped first; die rows `10px` MONO, room 136 minus the label; cache name `600 13px` SANS, max 128; cache second line `10px` MONO, max 128; sphere name `600 14px` SANS split after `-`, `_`, `.` into at most 3 lines, each fitted to the sphere chord `2·√((r−16)² − dy²)`.
+Text limits (mockup v49, drawStep, drawChip and drawCacheTag): step name `600 14.5px` SANS, max 178; version `10.5px` MONO, max 106 (90 when parked); die title `11px` MONO, room 136, version dropped first; die rows `10px` MONO, room 136 minus the label; cache name `600 13px` SANS, max 128; cache second line `10px` MONO, max 128; sphere name `600 14px` SANS split after `-`, `_`, `.` into at most 3 lines, each fitted to the sphere chord `2·√((r−16)² − dy²)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2874,7 +2875,7 @@ export interface ProcessorView {
 const W = 176, H = 80, DX = 12, DY = 6, DW = W - 24, DH = H - 14;
 
 /**
- * The processor drawn as a glossy die on a substrate (spec §5.1, mockup lines 681-710): SMD parts on
+ * The processor drawn as a glossy die on a substrate (spec §5.1, mockup drawChip): SMD parts on
  * the border and an edge contact with a bond trace at every height a wire lands or leaves. A contact
  * is lit when the processor declares that side's schema. `ins` and `outs` are chip-local heights.
  */
@@ -2951,7 +2952,7 @@ export type StepNodeType = Node<StepNodeData, 'step'>;
 
 const W = STEP_W, H = STEP_H;
 
-/** A step: a dark body under a glossy title cap, with its processor drawn inside (mockup 716-736). */
+/** A step: a dark body under a glossy title cap, with its processor drawn inside (mockup drawStep). */
 export function StepView(d: StepNodeData) {
   const ins = d.ins.length > 0 ? d.ins : [PMID];
   const outs = d.outs.length > 0 ? d.outs : [PMID];
@@ -3007,7 +3008,7 @@ export type WorkflowNodeType = Node<WorkflowNodeData, 'workflow'>;
 
 const R = SPHERE_R, C = SPHERE_R; // the node box is 2r × 2r, so the centre is (r, r)
 
-/** The workflow as a lit sphere showing only "WORKFLOW" and its name (spec §5.1, mockup 758-783). */
+/** The workflow as a lit sphere showing only "WORKFLOW" and its name (spec §5.1, mockup drawWorkflow). */
 export function WorkflowView({ lines, full, cut }: WorkflowNodeData) {
   const top = C - 6 - (lines.length - 1) * 8;
   return (
@@ -3056,7 +3057,7 @@ export type CacheNodeType = Node<CacheNodeData, 'cache'>;
 
 const W = CACHE_W, H = CACHE_H;
 
-/** A cache: the glass cap over a dark body, with a stack of lit discs (mockup 739-753). */
+/** A cache: the glass cap over a dark body, with a stack of lit discs (mockup drawCacheTag). */
 export function CacheView({ name, sub }: CacheNodeData) {
   return (
     <g className="cachetag">
@@ -3518,7 +3519,7 @@ export async function loadDocument(api: StudioApi, workflowId: Id): Promise<ApiR
 ```tsx
 import { CONDITIONS } from '../model/entryConditions';
 
-/** The colour key (mockup v46, lines 1381-1386): each entry condition, broken and parked. */
+/** The colour key (mockup v49, the legend builder): each entry condition, broken and parked. */
 export function Legend() {
   return (
     <div className="legend">
