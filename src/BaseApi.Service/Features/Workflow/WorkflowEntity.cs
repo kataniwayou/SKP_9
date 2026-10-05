@@ -48,4 +48,19 @@ public sealed class WorkflowEntity : BaseEntity
     /// </para>
     /// </summary>
     public string? Diagram { get; set; }
+
+    /// <summary>
+    /// The SKP Studio canvas layout as JSON, or null when the workflow has never been laid out.
+    /// <para>
+    /// <b>Positions only, never graph facts.</b> It holds where the sphere, steps, caches, parked blocks
+    /// and junctions are drawn. What exists is decided by the tables on every load; an id in here that
+    /// no longer exists is ignored by the editor. The server treats it as opaque and checks only that
+    /// it is a JSON object within the size cap (<c>WorkflowLayout</c>).
+    /// </para>
+    /// <para>
+    /// Like <see cref="Diagram"/>, it is absent from every DTO and travels only through the dedicated
+    /// layout and graph actions on <c>WorkflowsController</c>.
+    /// </para>
+    /// </summary>
+    public string? Layout { get; set; }
 }

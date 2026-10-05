@@ -34,6 +34,7 @@ public sealed partial class WorkflowEntityMapper :
     [MapperIgnoreSource(nameof(WorkflowCreateDto.AssignmentIds))]
     [MapperIgnoreSource(nameof(WorkflowCreateDto.CacheIds))]
     [MapperIgnoreTarget(nameof(WorkflowEntity.Diagram))]
+    [MapperIgnoreTarget(nameof(WorkflowEntity.Layout))]
     public partial WorkflowEntity ToEntity(WorkflowCreateDto dto);
 
     [MapperIgnoreTarget(nameof(WorkflowEntity.Id))]
@@ -45,6 +46,7 @@ public sealed partial class WorkflowEntityMapper :
     [MapperIgnoreSource(nameof(WorkflowUpdateDto.AssignmentIds))]
     [MapperIgnoreSource(nameof(WorkflowUpdateDto.CacheIds))]
     [MapperIgnoreTarget(nameof(WorkflowEntity.Diagram))]
+    [MapperIgnoreTarget(nameof(WorkflowEntity.Layout))]
     public partial void Update(WorkflowUpdateDto dto, WorkflowEntity target);
 
     // All three collections are required constructor parameters on the positional read record, so
@@ -53,5 +55,6 @@ public sealed partial class WorkflowEntityMapper :
     [MapValue(nameof(WorkflowReadDto.AssignmentIds), null)]
     [MapValue(nameof(WorkflowReadDto.CacheIds), null)]
     [MapperIgnoreSource(nameof(WorkflowEntity.Diagram))]
+    [MapperIgnoreSource(nameof(WorkflowEntity.Layout))]
     public partial WorkflowReadDto ToRead(WorkflowEntity entity);
 }

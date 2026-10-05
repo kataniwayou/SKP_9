@@ -26,5 +26,10 @@ internal sealed class WorkflowEntityConfiguration : IEntityTypeConfiguration<Wor
         // that leave it null, which is every workflow until an operator publishes one.
         entity.Property(e => e.Diagram)
             .HasColumnType("text");
+
+        // jsonb like Assignment.Payload: the layout is a JSON object, and storing it as jsonb makes
+        // Postgres reject anything that is not JSON even if a caller bypasses the action's check.
+        entity.Property(e => e.Layout)
+            .HasColumnType("jsonb");
     }
 }
