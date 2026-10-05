@@ -26,7 +26,8 @@ internal sealed class CycleDetector
 {
     /// <summary>
     /// Runs the two-set depth-first search over the snapshot's step graph, seeded from every
-    /// workflow's entry steps. Throws on the first cycle or missing step encountered.
+    /// workflow's entry steps. Throws on the first cycle or missing step encountered, which is the first
+    /// entry in <see cref="Collect"/>'s list.
     /// <para>
     /// <b>Scope:</b> the search is seeded only from entry steps, so an orphan subgraph unreachable
     /// from any entry is intentionally not visited — an unreachable step can never execute and so
@@ -38,6 +39,22 @@ internal sealed class CycleDetector
     /// </summary>
     public void Validate(WorkflowGraphSnapshot snapshot)
     {
+        var problems = Collect(snapshot);
+        if (problems.Count > 0)
+        {
+            throw problems[0];
+        }
+    }
+
+    /// <summary>
+    /// Every cycle and missing step the search meets, in the order <see cref="Validate"/> would meet
+    /// them, so the first entry is the one it throws. A back-edge is recorded and not followed, and a
+    /// dangling wire is recorded and not descended, so the search still terminates.
+    /// </summary>
+    public IReadOnlyList<OrchestrationValidationException> Collect(WorkflowGraphSnapshot snapshot)
+    {
+        var problems = new List<OrchestrationValidationException>();
+
         // Completed subtrees, shared across all entry seeds so a cleared subtree is never re-walked.
         var fullyVisited = new HashSet<Guid>();
 
@@ -54,12 +71,15 @@ internal sealed class CycleDetector
                 // here, so an empty GUID stands in as the parent for an entry-seed miss.
                 if (!snapshot.Steps.ContainsKey(entryId))
                 {
-                    throw OrchestrationValidationException.MissingStep(Guid.Empty, entryId);
+                    problems.Add(OrchestrationValidationException.MissingStep(Guid.Empty, entryId));
+                    continue;
                 }
 
-                RunDfs(snapshot, entryId, fullyVisited);
+                RunDfs(snapshot, entryId, fullyVisited, problems);
             }
         }
+
+        return problems;
     }
 
     /// <summary>
@@ -67,7 +87,8 @@ internal sealed class CycleDetector
     /// for cycle detection, the path list tracks the same nodes in order so the offending chain can be
     /// reconstructed, and <paramref name="fullyVisited"/> records completed subtrees across seeds.
     /// </summary>
-    private static void RunDfs(WorkflowGraphSnapshot snapshot, Guid entryId, HashSet<Guid> fullyVisited)
+    private static void RunDfs(
+        WorkflowGraphSnapshot snapshot, Guid entryId, HashSet<Guid> fullyVisited, List<OrchestrationValidationException> problems)
     {
         var stack = new Stack<(Guid Step, IEnumerator<Guid> Children)>();
         var onStack = new HashSet<Guid>();
@@ -86,16 +107,19 @@ internal sealed class CycleDetector
                 if (!snapshot.Steps.ContainsKey(child))
                 {
                     // Referenced as a next step but absent from the graph.
-                    throw OrchestrationValidationException.MissingStep(currentStep, child);
+                    problems.Add(OrchestrationValidationException.MissingStep(currentStep, child));
+                    continue;
                 }
 
                 if (onStack.Contains(child))
                 {
                     // Back-edge, so a cycle. Reconstruct it as the path slice from the first
                     // occurrence of the child to the end, then close the loop by appending it again.
+                    // The child is already on the stack, so not following the edge keeps the search finite.
                     var startIndex = path.IndexOf(child);
                     var cycleChain = new List<Guid>(path.GetRange(startIndex, path.Count - startIndex)) { child };
-                    throw OrchestrationValidationException.Cycle(cycleChain);
+                    problems.Add(OrchestrationValidationException.Cycle(cycleChain));
+                    continue;
                 }
 
                 if (!fullyVisited.Contains(child))

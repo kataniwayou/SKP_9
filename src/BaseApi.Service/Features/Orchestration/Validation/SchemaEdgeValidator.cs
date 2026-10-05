@@ -20,11 +20,21 @@ namespace BaseApi.Service.Features.Orchestration.Validation;
 /// </summary>
 internal sealed class SchemaEdgeValidator
 {
-    /// <summary>
-    /// Walks every parent-to-child edge in the snapshot, throwing on the first mismatched edge.
-    /// </summary>
+    /// <summary>Walks every parent-to-child edge in the snapshot, throwing on the first mismatched edge.</summary>
     public void Validate(WorkflowGraphSnapshot snapshot)
     {
+        var problems = Collect(snapshot);
+        if (problems.Count > 0)
+        {
+            throw problems[0];
+        }
+    }
+
+    /// <summary>Every mismatched edge, in walk order; the first is the one <see cref="Validate"/> throws.</summary>
+    public IReadOnlyList<OrchestrationValidationException> Collect(WorkflowGraphSnapshot snapshot)
+    {
+        var problems = new List<OrchestrationValidationException>();
+
         foreach (var parent in snapshot.Steps.Values)
         {
             foreach (var childId in parent.NextStepIds ?? Enumerable.Empty<Guid>())
@@ -50,9 +60,11 @@ internal sealed class SchemaEdgeValidator
 
                 if (parentOut.Value != childIn.Value)
                 {
-                    throw OrchestrationValidationException.SchemaEdge(parent.Id, child.Id);
+                    problems.Add(OrchestrationValidationException.SchemaEdge(parent.Id, child.Id));
                 }
             }
         }
+
+        return problems;
     }
 }

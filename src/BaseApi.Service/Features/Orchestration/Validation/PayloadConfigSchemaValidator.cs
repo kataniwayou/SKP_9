@@ -17,7 +17,7 @@ namespace BaseApi.Service.Features.Orchestration.Validation;
 /// <b>Two things here are security-relevant.</b> Evaluation uses
 /// <see cref="JsonSchemaConfig.DefaultOptions"/>, which is what fires the static constructor that
 /// pins the dialect and installs the no-op fetcher, so an external <c>$ref</c> cannot trigger an
-/// outbound request. And the parse cache is a local inside <see cref="Validate"/>, never an instance
+/// outbound request. And the parse cache is a local inside <see cref="Collect"/>, never an instance
 /// field: this seam is registered scoped, so an instance field would leak parsed schemas across
 /// requests.
 /// </para>
@@ -26,8 +26,21 @@ internal sealed class PayloadConfigSchemaValidator
 {
     public void Validate(WorkflowGraphSnapshot snapshot)
     {
-        // Local cache, so each schema is parsed at most once per call and nothing outlives it.
-        var schemaCache = new Dictionary<Guid, JsonSchema>();
+        var problems = Collect(snapshot);
+        if (problems.Count > 0)
+        {
+            throw problems[0];
+        }
+    }
+
+    /// <summary>Every non-conforming assignment, in snapshot order; the first is the one <see cref="Validate"/> throws.</summary>
+    public IReadOnlyList<OrchestrationValidationException> Collect(WorkflowGraphSnapshot snapshot)
+    {
+        var problems = new List<OrchestrationValidationException>();
+
+        // Local cache, so each schema is parsed at most once per call and nothing outlives it. A
+        // definition that is not a valid JSON Schema is cached as null.
+        var schemaCache = new Dictionary<Guid, JsonSchema?>();
 
         foreach (var assignment in snapshot.Assignments.Values)
         {
@@ -46,25 +59,33 @@ internal sealed class PayloadConfigSchemaValidator
                 }
                 catch (Exception ex) when (ex is JsonException or JsonSchemaException)
                 {
-                    throw OrchestrationValidationException.PayloadConfigSchema(
-                        assignment.Id,
-                        new[] { $"Config schema '{cfgId.Value}' is not a valid JSON Schema." });
+                    schema = null;
                 }
                 schemaCache[cfgId.Value] = schema;
             }
 
-            JsonDocument? payloadDoc = null;
+            if (schema is null)
+            {
+                problems.Add(OrchestrationValidationException.PayloadConfigSchema(
+                    assignment.Id,
+                    new[] { $"Config schema '{cfgId.Value}' is not a valid JSON Schema." }));
+                continue;
+            }
+
+            JsonDocument payloadDoc;
             try
             {
-                try
-                {
-                    payloadDoc = JsonDocument.Parse(assignment.Payload);
-                }
-                catch (JsonException)
-                {
-                    throw OrchestrationValidationException.PayloadConfigSchema(
-                        assignment.Id, new[] { "Payload is not valid JSON." });
-                }
+                payloadDoc = JsonDocument.Parse(assignment.Payload);
+            }
+            catch (JsonException)
+            {
+                problems.Add(OrchestrationValidationException.PayloadConfigSchema(
+                    assignment.Id, new[] { "Payload is not valid JSON." }));
+                continue;
+            }
+
+            using (payloadDoc)
+            {
                 var results = schema.Evaluate(payloadDoc.RootElement, JsonSchemaConfig.DefaultOptions);
                 if (!results.IsValid)
                 {
@@ -74,13 +95,11 @@ internal sealed class PayloadConfigSchemaValidator
                         .ToList();
                     if (errorStrings.Count == 0 && results.Errors is { Count: > 0 })
                         errorStrings = results.Errors.Select(kv => $"{results.InstanceLocation}: {kv.Value}").ToList();
-                    throw OrchestrationValidationException.PayloadConfigSchema(assignment.Id, errorStrings);
+                    problems.Add(OrchestrationValidationException.PayloadConfigSchema(assignment.Id, errorStrings));
                 }
             }
-            finally
-            {
-                payloadDoc?.Dispose();
-            }
         }
+
+        return problems;
     }
 }
