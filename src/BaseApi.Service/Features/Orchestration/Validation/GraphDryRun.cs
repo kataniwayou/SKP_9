@@ -1,4 +1,5 @@
 using BaseApi.Core.Persistence;
+using Microsoft.Extensions.Logging;
 
 namespace BaseApi.Service.Features.Orchestration.Validation;
 
@@ -18,8 +19,13 @@ internal interface IGraphDryRun
 internal sealed class RelationalGraphDryRun : IGraphDryRun
 {
     private readonly BaseDbContext _db;
+    private readonly ILogger<RelationalGraphDryRun> _logger;
 
-    public RelationalGraphDryRun(BaseDbContext db) => _db = db ?? throw new ArgumentNullException(nameof(db));
+    public RelationalGraphDryRun(BaseDbContext db, ILogger<RelationalGraphDryRun> logger)
+    {
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
     public async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct)
     {
@@ -30,9 +36,21 @@ internal sealed class RelationalGraphDryRun : IGraphDryRun
         }
         finally
         {
-            // Not the request's token: a cancelled request must still roll back.
-            await transaction.RollbackAsync(CancellationToken.None);
-            _db.ChangeTracker.Clear();
+            try
+            {
+                // Not the request's token: a cancelled request must still roll back.
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // Any rollback failure (e.g. a broken connection) must not mask the work's own result or error;
+                // the server discards an uncommitted transaction when the connection goes away anyway.
+                _logger.LogWarning(ex, "Rolling back the validate dry run failed; the original outcome is kept.");
+            }
+            finally
+            {
+                _db.ChangeTracker.Clear();
+            }
         }
     }
 }
