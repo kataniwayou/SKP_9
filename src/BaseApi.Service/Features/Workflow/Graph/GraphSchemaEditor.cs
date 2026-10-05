@@ -32,8 +32,15 @@ internal sealed class GraphSchemaEditor
     public async Task ApplyAsync(IReadOnlyList<GraphSchemaEdit> edits, CancellationToken ct)
     {
         var failures = new List<ValidationFailure>();
+        var seen = new HashSet<(Guid, string)>();
         foreach (var edit in edits)
         {
+            if (!seen.Add((edit.ProcessorId, edit.Slot)))
+            {
+                failures.Add(new ValidationFailure($"SchemaEdits[{edit.ProcessorId}].Slot",
+                    "Each processor slot may be edited once per save."));
+                continue;
+            }
             if (!Slots.Contains(edit.Slot))
             {
                 failures.Add(new ValidationFailure($"SchemaEdits[{edit.ProcessorId}].Slot",

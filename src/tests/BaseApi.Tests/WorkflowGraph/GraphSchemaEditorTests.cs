@@ -90,4 +90,20 @@ public sealed class GraphSchemaEditorTests
         await Assert.ThrowsAsync<NotFoundException>(() =>
             SaveAsync(h, wf, step, new GraphSchemaEdit(Guid.NewGuid(), "output", NewDefinition)));
     }
+
+    [Fact]
+    public async Task TheSameSlotEditedTwiceIsAValidationFailureAndWritesNothing()
+    {
+        var (h, wf, proc, step, _) = await SetupAsync();
+        await using var _h = h;
+        var before = await h.Db.Schemas.CountAsync(h.Ct);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            SaveAsync(h, wf, step,
+                new GraphSchemaEdit(proc, "output", NewDefinition),
+                new GraphSchemaEdit(proc, "output", """{"type":"object"}""")));
+
+        h.Forget();
+        Assert.Equal(before, await h.Db.Schemas.CountAsync(h.Ct));
+    }
 }
