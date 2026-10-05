@@ -1,9 +1,11 @@
 using System.Text.Json;
 using BaseApi.Core.Controllers;
 using BaseApi.Core.Services;
+using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 
 namespace BaseApi.Service.Features.Workflow;
@@ -30,6 +32,7 @@ namespace BaseApi.Service.Features.Workflow;
 /// service. A diagram touches exactly one column on one row, and the service layer exists to keep
 /// the three junction tables in step with the DTO collections — none of which applies here.
 /// The graph actions instead delegate to <see cref="IWorkflowGraphReader"/> and <see cref="IWorkflowGraphSaver"/>.
+/// The validate action delegates to <see cref="IWorkflowValidator"/>.
 /// </para>
 /// </summary>
 public sealed class WorkflowsController :
@@ -38,14 +41,17 @@ public sealed class WorkflowsController :
     private readonly AppDbContext _db;
     private readonly IWorkflowGraphReader _graphReader;
     private readonly IWorkflowGraphSaver _graphSaver;
+    private readonly IWorkflowValidator _validator;
 
     public WorkflowsController(
         BaseService<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto> service,
         AppDbContext db,
         IWorkflowGraphReader graphReader,
-        IWorkflowGraphSaver graphSaver)
+        IWorkflowGraphSaver graphSaver,
+        IWorkflowValidator validator)
         : base(service)
     {
+        _validator = validator;
         _db = db;
         _graphReader = graphReader;
         _graphSaver = graphSaver;
@@ -214,4 +220,23 @@ public sealed class WorkflowsController :
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> PutGraph(Guid id, [FromBody] GraphSaveRequest request, CancellationToken ct)
         => Ok(await _graphSaver.SaveAsync(id, request, ct));
+
+    /// <summary>
+    /// Every problem a start of this workflow would refuse, from every gate -- cycles, missing steps,
+    /// schema edges, payloads against config schemas, processor liveness -- without saving and without
+    /// starting. The body is an optional draft in the shape of <c>PUT /graph</c>; without one, the stored
+    /// workflow is checked. Gate problems are a 200 with <c>valid: false</c>; a draft the graph save would
+    /// reject keeps that save's status.
+    /// </summary>
+    [HttpPost("{id:guid}/validate")]
+    [ProducesResponseType(typeof(WorkflowValidationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Validate(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] GraphSaveRequest? request,
+        CancellationToken ct)
+        => Ok(await _validator.ValidateAsync(id, request, ct));
 }

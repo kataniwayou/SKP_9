@@ -57,6 +57,10 @@ internal static class OrchestrationServiceCollectionExtensions
         // Shared by the liveness endpoint; the gate builds its own from the same two dependencies.
         services.AddScoped<ProcessorLivenessProbe>();
 
+        // The dry run behind POST /workflows/{id}/validate. Scoped, like the context it rolls back.
+        services.AddScoped<IGraphDryRun, RelationalGraphDryRun>();
+        services.AddScoped<IWorkflowValidator, WorkflowValidator>();
+
         // The projection read/write pair, used only by the queue handlers. Scoped so a handler
         // resolved per delivery gets its own, matching every other dependency in this folder; both
         // are stateless over an injected multiplexer, so the lifetime costs nothing.

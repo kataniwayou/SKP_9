@@ -13,6 +13,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using BaseApi.Service.Features.Orchestration.Validation;
+using StackExchange.Redis;
 
 namespace BaseApi.Tests.WorkflowGraph;
 
@@ -28,6 +30,7 @@ internal sealed class GraphHarness : IAsyncDisposable
     public AppDbContext Db { get; }
     public IWorkflowGraphReader Reader { get; }
     public IWorkflowGraphSaver Saver { get; }
+    public IWorkflowGraphLoader Loader { get; }
 
     public GraphHarness()
     {
@@ -36,11 +39,11 @@ internal sealed class GraphHarness : IAsyncDisposable
             .AddInterceptors(new AuditInterceptor(new HttpContextAccessor(), Clock))
             .Options);
 
-        var loader = new WorkflowGraphLoader(
+        Loader = new WorkflowGraphLoader(
             Db, NullLogger<WorkflowGraphSnapshot>.Instance,
             new SchemaEntityMapper(), new ProcessorEntityMapper(), new StepEntityMapper(),
             new AssignmentEntityMapper(), new WorkflowEntityMapper(), new CacheEntityMapper());
-        Reader = new WorkflowGraphReader(Db, loader);
+        Reader = new WorkflowGraphReader(Db, Loader);
         Saver = new WorkflowGraphSaver(
             Db, Reader,
             new WorkflowUpdateDtoValidator(),
@@ -124,6 +127,27 @@ internal sealed class GraphHarness : IAsyncDisposable
 
     /// <summary>Forgets every tracked entity, so the next read sees the store rather than the tracker.</summary>
     public void Forget() => Db.ChangeTracker.Clear();
+
+    /// <summary>
+    /// The dry-run validator over this harness. InMemory has no transactions, so the dry run is a pass
+    /// through here: what the draft writes stays written, and these tests assert problems only.
+    /// WorkflowValidationLiveTests proves on Postgres that nothing persists.
+    /// </summary>
+    public IWorkflowValidator Validator(IConnectionMultiplexer redis) =>
+        new WorkflowValidator(
+            Db, Saver, Loader,
+            new CycleDetector(), new SchemaEdgeValidator(), new PayloadConfigSchemaValidator(),
+            new ProcessorLivenessValidator(redis, Clock),
+            new PassThroughDryRun(Db));
+
+    private sealed class PassThroughDryRun(AppDbContext db) : IGraphDryRun
+    {
+        public async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct)
+        {
+            try { return await work(ct); }
+            finally { db.ChangeTracker.Clear(); }
+        }
+    }
 
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

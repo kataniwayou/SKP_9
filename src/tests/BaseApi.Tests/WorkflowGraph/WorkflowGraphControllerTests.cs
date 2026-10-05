@@ -1,5 +1,6 @@
 using System.Text.Json;
 using BaseApi.Core.Persistence.Repositories;
+using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Workflow;
 using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
@@ -15,7 +16,7 @@ public sealed class WorkflowGraphControllerTests
         new(new WorkflowService(
                 new WorkflowCreateDtoValidator(), new WorkflowUpdateDtoValidator(),
                 new WorkflowEntityMapper(), new Repository<WorkflowEntity>(h.Db), h.Db),
-            h.Db, h.Reader, h.Saver);
+            h.Db, h.Reader, h.Saver, h.Validator(RedisStub.AllLive(h.Clock)));
 
     [Fact]
     public async Task GetGraphReturnsTheGraph()
@@ -57,6 +58,17 @@ public sealed class WorkflowGraphControllerTests
         Assert.True(saved.UpdatedAt > first.Workflow.UpdatedAt);
         var next = await controller.PutGraph(wf, GraphHarness.Request([a], workflowUpdatedAt: saved.UpdatedAt), h.Ct);
         Assert.IsType<OkObjectResult>(next);
+    }
+
+    [Fact]
+    public async Task ValidateReturnsTheProblems()
+    {
+        await using var h = new GraphHarness();
+        var a = await h.StepAsync(await h.ProcessorAsync());
+        var wf = await h.WorkflowAsync("wf", [a]);
+
+        var ok = Assert.IsType<OkObjectResult>(await Controller(h).Validate(wf, null, h.Ct));
+        Assert.True(Assert.IsType<WorkflowValidationDto>(ok.Value).Valid);
     }
 
     [Fact]
