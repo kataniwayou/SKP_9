@@ -27,6 +27,7 @@ internal sealed class GraphHarness : IAsyncDisposable
     public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero));
     public AppDbContext Db { get; }
     public IWorkflowGraphReader Reader { get; }
+    public IWorkflowGraphSaver Saver { get; }
 
     public GraphHarness()
     {
@@ -40,7 +41,30 @@ internal sealed class GraphHarness : IAsyncDisposable
             new SchemaEntityMapper(), new ProcessorEntityMapper(), new StepEntityMapper(),
             new AssignmentEntityMapper(), new WorkflowEntityMapper(), new CacheEntityMapper());
         Reader = new WorkflowGraphReader(Db, loader);
+        Saver = new WorkflowGraphSaver(
+            Db, Reader,
+            new WorkflowUpdateDtoValidator(),
+            new StepCreateDtoValidator(), new StepUpdateDtoValidator(),
+            new WorkflowEntityMapper(), new StepEntityMapper(),
+            new GraphAssignmentResolver(Db, new AssignmentCreateDtoValidator()),
+            new GraphSchemaEditor(Db, new SchemaCreateDtoValidator()));
     }
+
+
+    public static GraphSaveRequest Request(
+        Guid[] entry,
+        DateTime? workflowUpdatedAt = null,
+        GraphStepDto[]? steps = null,
+        GraphAssignmentIntent[]? assignments = null,
+        GraphSchemaEdit[]? schemaEdits = null,
+        string? layout = null,
+        string name = "wf") =>
+        new(new GraphWorkflowDto(name, "1.0.0", null, null, workflowUpdatedAt, entry.ToList(), null),
+            steps?.ToList(), assignments?.ToList(), schemaEdits?.ToList(),
+            layout is null ? null : System.Text.Json.JsonDocument.Parse(layout).RootElement.Clone());
+
+    public static GraphStepDto NewStep(Guid id, Guid processorId, string name = "step", params Guid[] next) =>
+        new(id, null, name, "1.0.0", null, processorId, next.ToList(), StepEntryCondition.PreviousCompleted);
 
     public CancellationToken Ct => Xunit.TestContext.Current.CancellationToken;
 
