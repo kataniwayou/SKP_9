@@ -19,30 +19,31 @@ namespace BaseApi.Service.Features.Workflow;
 /// cannot resolve this controller's dependency.
 /// </para>
 /// <para>
-/// <b>The body is no longer empty.</b> The two diagram actions below sit outside CRUD deliberately.
+/// <b>The body is no longer empty.</b> The diagram and layout actions below sit outside CRUD deliberately.
 /// The diagram is not on any DTO — see <see cref="WorkflowEntity.Diagram"/> — so it has nowhere to
 /// travel through the inherited verbs, and it should not: a read DTO is JSON returned to a client
 /// that wants a workflow, while a diagram is image bytes fetched by a browser that wants a picture.
 /// They differ in content type, in size and in who asks for them.
 /// </para>
 /// <para>
-/// These two actions take the <see cref="AppDbContext"/> directly rather than going through the
+/// The diagram and layout actions take the <see cref="AppDbContext"/> directly rather than going through the
 /// service. A diagram touches exactly one column on one row, and the service layer exists to keep
 /// the three junction tables in step with the DTO collections — none of which applies here.
+/// The graph actions instead delegate to <see cref="IWorkflowGraphReader"/> and <see cref="IWorkflowGraphSaver"/>.
 /// </para>
 /// </summary>
 public sealed class WorkflowsController :
     BaseController<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto>
 {
     private readonly AppDbContext _db;
-    private readonly IWorkflowGraphReader? _graphReader;
-    private readonly IWorkflowGraphSaver? _graphSaver;
+    private readonly IWorkflowGraphReader _graphReader;
+    private readonly IWorkflowGraphSaver _graphSaver;
 
     public WorkflowsController(
         BaseService<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto> service,
         AppDbContext db,
-        IWorkflowGraphReader? graphReader = null,
-        IWorkflowGraphSaver? graphSaver = null)
+        IWorkflowGraphReader graphReader,
+        IWorkflowGraphSaver graphSaver)
         : base(service)
     {
         _db = db;
@@ -182,4 +183,28 @@ public sealed class WorkflowsController :
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    /// <summary>
+    /// The workflow's graph for the editor: the steps reachable from its entry steps, their
+    /// processors and schemas, its assignments and caches, and its layout.
+    /// </summary>
+    [HttpGet("{id:guid}/graph")]
+    [ProducesResponseType(typeof(WorkflowGraphDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetGraph(Guid id, CancellationToken ct)
+        => Ok(await _graphReader.ReadAsync(id, ct));
+
+    /// <summary>
+    /// Creates or replaces the workflow's whole graph in one commit and returns it re-read. The
+    /// editor never blocks a design, so this checks field rules and staleness only; cycles, broken
+    /// wires and payload-vs-schema are start checks.
+    /// </summary>
+    [HttpPut("{id:guid}/graph")]
+    [ProducesResponseType(typeof(WorkflowGraphDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> PutGraph(Guid id, [FromBody] GraphSaveRequest request, CancellationToken ct)
+        => Ok(await _graphSaver.SaveAsync(id, request, ct));
 }

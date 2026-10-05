@@ -1,4 +1,5 @@
 using BaseApi.Core.Services;
+using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BaseApi.Service.Features.Workflow;
@@ -18,6 +19,15 @@ internal static class WorkflowServiceCollectionExtensions
         services.AddScoped<WorkflowService>();
         services.AddScoped<BaseService<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto>>(
             sp => sp.GetRequiredService<WorkflowService>());
+
+        // The SKP Studio graph endpoints. IWorkflowGraphLoader comes from AddOrchestrationFeature.
+        services.AddScoped<IWorkflowGraphReader, WorkflowGraphReader>();
+        services.AddScoped<GraphAssignmentResolver>();
+        services.AddScoped<GraphSchemaEditor>();
+        services.AddScoped<IWorkflowGraphSaver, WorkflowGraphSaver>();
+
+        // Runs via AddAppFeatures, so it lands after the core handlers and before the catch-all.
+        services.AddExceptionHandler<GraphConflictExceptionHandler>();
         return services;
     }
 }
