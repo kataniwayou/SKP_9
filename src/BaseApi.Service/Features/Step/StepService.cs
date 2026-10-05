@@ -32,37 +32,17 @@ public sealed class StepService :
     /// Synchronizes the junction rows with the next-step collection on whichever DTO was supplied.
     /// Called between the add or update and the save, inside the locked verb order.
     /// </summary>
-    protected override async Task SyncJunctionsAsync(
+    protected override Task SyncJunctionsAsync(
         StepEntity entity,
         StepCreateDto? createDto,
         StepUpdateDto? updateDto,
         CancellationToken ct)
-    {
-        var junctionSet = DbContext.Set<StepNextSteps>();
-
-        // On update, clear the existing rows before adding the new ones.
-        if (updateDto is not null)
-        {
-            var existing = await junctionSet
-                .Where(j => j.StepId == entity.Id)
-                .ToListAsync(ct);
-            if (existing.Count > 0)
-            {
-                junctionSet.RemoveRange(existing);
-            }
-        }
-
-        var newIds = createDto?.NextStepIds ?? updateDto?.NextStepIds;
-        if (newIds is { Count: > 0 })
-        {
-            var rows = newIds.Select(nextId => new StepNextSteps
-            {
-                StepId = entity.Id,
-                NextStepId = nextId,
-            });
-            await junctionSet.AddRangeAsync(rows, ct);
-        }
-    }
+        => StepJunctions.SyncNextStepsAsync(
+            DbContext,
+            entity.Id,
+            createDto?.NextStepIds ?? updateDto?.NextStepIds,
+            replaceExisting: updateDto is not null,
+            ct);
 
     /// <summary>
     /// Populates <see cref="StepReadDto.NextStepIds"/> from the junction table — the same enrichment

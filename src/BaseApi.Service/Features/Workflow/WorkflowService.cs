@@ -38,83 +38,19 @@ public sealed class WorkflowService :
     /// whichever DTO was supplied. Called between the add or update and the save, inside the locked
     /// verb order.
     /// </summary>
-    protected override async Task SyncJunctionsAsync(
+    protected override Task SyncJunctionsAsync(
         WorkflowEntity entity,
         WorkflowCreateDto? createDto,
         WorkflowUpdateDto? updateDto,
         CancellationToken ct)
-    {
-        var entryStepsSet = DbContext.Set<WorkflowEntrySteps>();
-        var assignmentsSet = DbContext.Set<WorkflowAssignments>();
-        var cachesSet = DbContext.Set<WorkflowCaches>();
-
-        // On update, clear the existing rows on all three junctions before adding the new ones.
-        if (updateDto is not null)
-        {
-            var existingEntrySteps = await entryStepsSet
-                .Where(j => j.WorkflowId == entity.Id)
-                .ToListAsync(ct);
-            if (existingEntrySteps.Count > 0)
-            {
-                entryStepsSet.RemoveRange(existingEntrySteps);
-            }
-
-            var existingAssignments = await assignmentsSet
-                .Where(j => j.WorkflowId == entity.Id)
-                .ToListAsync(ct);
-            if (existingAssignments.Count > 0)
-            {
-                assignmentsSet.RemoveRange(existingAssignments);
-            }
-
-            var existingCaches = await cachesSet
-                .Where(j => j.WorkflowId == entity.Id)
-                .ToListAsync(ct);
-
-            if (existingCaches.Count > 0)
-            {
-                cachesSet.RemoveRange(existingCaches);
-            }
-        }
-
-        // The entry-step collection is required and non-empty by the DTO and validator contract.
-        var entryStepIds = createDto?.EntryStepIds ?? updateDto?.EntryStepIds ?? new List<Guid>();
-        if (entryStepIds.Count > 0)
-        {
-            var rows = entryStepIds.Select(stepId => new WorkflowEntrySteps
-            {
-                WorkflowId = entity.Id,
-                StepId = stepId,
-            });
-            await entryStepsSet.AddRangeAsync(rows, ct);
-        }
-
-        // The assignment collection is optional, so insert only when it is present and non-empty.
-        var assignmentIds = createDto?.AssignmentIds ?? updateDto?.AssignmentIds;
-        if (assignmentIds is { Count: > 0 })
-        {
-            var rows = assignmentIds.Select(assignmentId => new WorkflowAssignments
-            {
-                WorkflowId = entity.Id,
-                AssignmentId = assignmentId,
-            });
-            await assignmentsSet.AddRangeAsync(rows, ct);
-        }
-
-        // The cache collection is optional, so insert only when it is present and non-empty.
-        var cacheIds = createDto?.CacheIds ?? updateDto?.CacheIds;
-
-        if (cacheIds is { Count: > 0 })
-        {
-            var rows = cacheIds.Select(cacheId => new WorkflowCaches
-            {
-                WorkflowId = entity.Id,
-                CacheId = cacheId,
-            });
-
-            await cachesSet.AddRangeAsync(rows, ct);
-        }
-    }
+        => WorkflowJunctions.SyncAsync(
+            DbContext,
+            entity.Id,
+            createDto?.EntryStepIds ?? updateDto?.EntryStepIds ?? new List<Guid>(),
+            createDto?.AssignmentIds ?? updateDto?.AssignmentIds,
+            createDto?.CacheIds ?? updateDto?.CacheIds,
+            replaceExisting: updateDto is not null,
+            ct);
 
     /// <summary>
     /// Populates <see cref="WorkflowReadDto.EntryStepIds"/>, <see cref="WorkflowReadDto.AssignmentIds"/>
