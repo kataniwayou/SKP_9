@@ -1,6 +1,6 @@
 # SKP Studio -- design
 
-Date: 2026-10-05. Status: draft for review. Branch: `feature/path-importer`.
+Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Branch: `feature/path-importer`.
 
 ## 1. Purpose
 
@@ -13,7 +13,7 @@ last saved, change it, and save it in one atomic request -- without the editor e
 design, and with every rule the orchestrator enforces at start shown as a warning beforehand.
 
 The reference implementation of the visual system and the dock is the brainstorm mockup
-(`.superpowers/brainstorm/385-1791189446/content/skp-studio-dock-v41.html`, gitignored; source and
+(`.superpowers/brainstorm/385-1791189446/content/skp-studio-dock-v46.html`, gitignored; source and
 `build.py` in `../source/`). Where this spec and the mockup disagree, this spec wins.
 
 ## 2. Data model facts the design rests on
@@ -115,7 +115,16 @@ The response is the graph re-read through `WorkflowGraphLoader`.
 
 ### 5.1 Theme and blocks
 
-- **Theme:** dark blueprint, an 8 px mesh grid with snapping, IBM Plex Sans / Mono.
+- **Theme:** dark blueprint, IBM Plex Sans / Mono.
+- **Grid (the lit mesh):** two tiers of fine dashed **neutral grey** lines, every **8 px** (one snap step)
+  and every **32 px** (a cell), with a small lit dot where 32 px lines cross. Thin, so it stays behind the
+  wires. Below 60 % zoom the 8 px tier drops out (Visio's variable grid). The canvas origin is a whole
+  cell, so block coordinates and drawn lines coincide.
+- **Everything sits on the grid.** Blocks snap to 8 px. A step is **224 × 160 = 7 × 5 cells**; its
+  processor middle is **96** (3 cells down), so ports and arrows run along a 32 px line. Ports are
+  **16 px** apart, so even fan-outs (±8, ±24 …) land on 8 px lines. The sphere's radius is 96, a cache tag
+  is 192 × 64, columns are 288 apart. Wire bends, landings, the junction bus and contact points snap to
+  8 px.
 - **Workflow:** a **lit sphere** (gradient depth, specular highlight, rim light, contact shadow) showing
   only "WORKFLOW" and its name. No orbit ring, version or cron. It starts centred and can be moved.
 - **Step:** a **sphere-glass cap** block. A glossy blue title cap holds the name, `STEP vX`, the
@@ -129,11 +138,16 @@ The response is the graph re-read through `WorkflowGraphLoader`.
 - **Lit cables** (shadow, halo, line, specular core), straight or right-angled only.
 - **Straight wherever possible:** a wire may land anywhere within the target processor's band. **A wire
   that must bend lands at the processor's middle.** Every port is anchored on the **processor middle**
-  (`PMID = 86`), not the step's middle.
+  (`PMID = 96`), not the step's middle. Arrows into one step keep 16 px apart.
 - **Fan-out** leaves as an evenly spaced group centred on the source processor's middle.
 - **Junctions** (drawing only, stored in `Layout`): **only an arrow touches a processor; only a contact
-  point touches a line.** A step with ≥ 4 incoming wires gets one arrow plus lines on contact points.
-  A junction merges only wires into the same step, so they share its colour.
+  point touches a line.** A step with ≥ 4 incoming wires gets a junction: each wire is a **line** ending
+  on a horizontal **bus** at its own contact point, and one **trunk** leaves the bus at the **junction node**
+  (⊕) and lands on the step as the single arrow. A junction merges only wires into the same step, so they
+  share its colour.
+- **A junction is positioned state, like a block.** Its node position (the bus height and the trunk's
+  lane) is seeded once and stored in `Layout`; it never follows blocks. Moving a source step stretches
+  **only that step's own line, up to its contact point**; the bus, the trunk and the other lines stay.
 
 ### 5.3 Colours
 
@@ -146,12 +160,51 @@ The response is the graph re-read through `WorkflowGraphLoader`.
 
 ### 5.4 Interaction (Visio-like)
 
-- Connectors stay glued and reroute live as blocks move; the router picks the cheapest of straight,
-  Z and U shapes.
+- **Automatic routes** stay glued and reroute live as blocks move; the router picks the cheapest of
+  straight, Z and U shapes. **Manual routes** (shaped by hand) keep their shape; only their end segments
+  follow their ends (Visio's "reroute as needed").
+- **Alignment guides** (Visio's dynamic grid): while a block is dragged, a solid white line with a halo
+  appears when its edge, centre or processor middle lines up with another block's, and the block snaps
+  onto it from up to one grid step away. Guides never pull a block off the grid.
 - Multi-select by Shift/Ctrl+click or rubber band. Snap to 8 px. Arrow keys nudge.
 - Space+drag or the middle button pans. Ctrl+wheel zooms at the pointer. Scrollbars appear only when
   needed.
 - **Long labels are shortened with a tooltip**, measured with the real fonts.
+
+### 5.5 Connector editing (Visio-like)
+
+Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a deliberate adaptation).
+
+- **Parts.** A plain wire runs from its source to its arrow head. With a junction there are three kinds of
+  part: each **line** (source → its contact point), the **trunk** (the bus plus the arrow into the step),
+  and the **junction node**. *Ours*: Visio has no built-in merge; its users drop a junction shape.
+- **One click selects one whole part** (*Visio*). Shift/Ctrl+click adds; a rubber band selects a wire only
+  when it lies wholly inside (*Visio*). The selected part is drawn on top, so where wires cross its handles
+  win the pointer (*ours*).
+- **Handles** (*Visio*): a green dot on each glued end, a square handle at the middle of each segment, a
+  small diamond on each bend.
+- **Segment drag** (*Visio*): a segment moves square to itself and its neighbours stretch; lining it up
+  with a parallel segment removes the bend between them. The first segment leaves a fixed port, so
+  dragging it inserts a jog first. The **last** segment of an arrow slides the landing within the
+  processor band; of a line, slides its contact point along the bus (*ours*). Dragging the **bus** moves
+  the junction up or down; dragging the trunk's first leg moves it sideways (*ours*).
+- **Dragging the line body** behaves as a segment drag and **never detaches** the wire (*ours*: Visio
+  detaches, which here would silently rewire the workflow).
+- **End drag** (*Visio*): drop the arrow head (or a line's contact point) on another step to rewire the
+  wire to it; drop the start dot on another step or the sphere to re-source it. The target outlines green
+  when allowed, red when not (self-loop, duplicate). Dropped anywhere else it **snaps back** (*ours*: the
+  data cannot hold a loose end). Dragging the trunk's arrow head moves every merged wire. Rewiring changes
+  the graph, so the wire takes the new target's colour.
+- **Junction node drag** moves the bus and the trunk together.
+- **Right-click → Reset route** makes a manual route automatic again (*Visio's* Reset Connector).
+- **Delete** removes the selected wire (unlink, §4.3). On a junction, Delete or "remove junction" draws
+  its wires as separate arrows.
+- **Double-click does nothing on a wire**: our wires carry no text, so Visio's connector label is not
+  adopted.
+- **What `Layout` stores for a wire** (positions only): its interior bend points when manual, a landing
+  offset (relative to the target step) when dragged, a contact x on the bus; per junction its node
+  position; and the set of targets whose junction the operator removed. The server treats all of it as
+  opaque, so plan 1 needs no change.
 
 ## 6. Chrome and dock
 
@@ -231,7 +284,9 @@ The response is the graph re-read through `WorkflowGraphLoader`.
 - **`model/` and `layout/` with Vitest.** These tests mirror the backend validator tests case for
   case: cycle detection, the schema-edge rule (by id; null passes), entry conditions (never 0), at most
   one assignment per (workflow, step), reachability and parked blocks, and wire routing (straight in
-  the band, bent → processor middle, fan-out spacing).
+  the band, bent → processor middle, fan-out spacing). `layout/` also covers manual routes: keeping
+  them orthogonal as their ends move, removing a bend when segments line up, the jog on a first-segment
+  drag, and grid alignment of every computed point.
 - **Backend, hermetic (EF InMemory, `BaseApi.Tests`).** Request building, the order of the concurrency
   checks, and choosing the assignment rule (update, copy, create, orphan).
 - **Backend, RealStack (real Postgres, gated by `SKP_REALSTACK=1`).** InMemory has no transactions or
@@ -245,18 +300,23 @@ The response is the graph re-read through `WorkflowGraphLoader`.
   - documents drop only into or beside the document area, with a real mouse drag;
   - pop out a document, then drag a block and zoom in the new window;
   - switch document tabs and come back: the viewport and selection are kept;
-  - menus, pickers and the tooltip open above a floating group.
+  - menus, pickers and the tooltip open above a floating group;
+  - moving a junction's source step stretches only its own line (the bus, trunk and other lines stay);
+  - a segment drag makes a route manual, it survives a block move, and Reset route restores it;
+  - dragging an arrow head onto a step rewires it; dropped on empty canvas it snaps back;
+  - after layout, every step border lies on a 32 px line and every wire point on an 8 px line.
 
 ## 10. Build order (vertical slices)
 
 1. **Backend:** `Layout` column and migration, `GET` / `PUT /layout`, then `PUT /graph` with its tests.
 2. **Read-only canvas:** load, render and route with the section 5 visuals.
-3. **Editing:** wiring, moving, undo/redo, parked blocks, draft save through `/graph`.
+3. **Editing:** wiring, moving, connector editing (§5.5) and alignment guides, undo/redo, parked
+   blocks, draft save through `/graph`.
 4. **Inspectors:** Step, Assignment, Processor, Workflow, Cache, then the Problems pane.
 5. **Dock chrome** on dockview-core 8.4: `renderer: 'always'` for documents, `ownerDocument` in
    pop-outs, overlay layer tokens, window menus, in-house auto-hide, layout in `localStorage`.
 6. **Toolbox:** drag-and-drop onto the canvas, delete from the toolbox.
-7. **Junctions and polish.**
+7. **Junctions and polish:** positioned junctions (bus, trunk, node, contact points) and their drags.
 
 ## 11. Deferred and rejected
 
