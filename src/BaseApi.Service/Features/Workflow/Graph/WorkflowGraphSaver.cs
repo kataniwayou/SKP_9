@@ -68,6 +68,9 @@ internal sealed class WorkflowGraphSaver : IWorkflowGraphSaver
         // ---- 1. Validate: the request's own shape, then the existing validators. -----------------
         var failures = new List<ValidationFailure>();
 
+        if (workflowId == Guid.Empty)
+            failures.Add(new ValidationFailure("WorkflowId", "The workflow id must not be Guid.Empty."));
+
         if (request.Layout is { } layout && WorkflowLayout.Validate(layout) is { } layoutError)
             failures.Add(new ValidationFailure(nameof(GraphSaveRequest.Layout), layoutError));
 
@@ -125,6 +128,9 @@ internal sealed class WorkflowGraphSaver : IWorkflowGraphSaver
             if (storedSteps.TryGetValue(s.Id, out var stored))
             {
                 _stepMapper.Update(ToUpdate(s), stored);
+                // Wires live only in StepNextSteps, so a wiring-only edit leaves the row Unchanged and
+                // UpdatedAt/xmin would not move. Force the stamp so the next stale save gets a 409.
+                _db.Entry(stored).State = EntityState.Modified;
                 await StepJunctions.SyncNextStepsAsync(_db, s.Id, s.NextStepIds, replaceExisting: true, ct);
             }
             else
@@ -155,6 +161,8 @@ internal sealed class WorkflowGraphSaver : IWorkflowGraphSaver
         else
         {
             _workflowMapper.Update(workflowDto with { AssignmentIds = assignmentIds }, storedWorkflow);
+            // Same reason as steps: entry/cache/assignment changes are junction-only, so force the stamp.
+            _db.Entry(storedWorkflow).State = EntityState.Modified;
         }
 
         if (request.Layout is { } newLayout)

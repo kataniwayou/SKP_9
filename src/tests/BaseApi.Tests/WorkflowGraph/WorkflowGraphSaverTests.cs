@@ -191,4 +191,71 @@ public sealed class WorkflowGraphSaverTests
 
         Assert.False(await h.Db.Steps.AnyAsync(s => s.Id == fresh, h.Ct));
     }
+
+    [Fact]
+    public async Task AWiringOnlyStepSaveMovesItsStampAndAReplayOfTheOldStampConflicts()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var c = await h.StepAsync(proc, "c");
+        var d = await h.StepAsync(proc, "d");
+        var b = await h.StepAsync(proc, "b");
+        var a = await h.StepAsync(proc, "a", b);
+        var wf = await h.WorkflowAsync("wf", [a]);
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        var aLoaded = loaded.Steps.Single(s => s.Id == a);
+        h.Forget();
+
+        GraphSaveRequest Rewire(Guid to) => GraphHarness.Request(
+            entry: [a],
+            workflowUpdatedAt: null,
+            steps: [new GraphStepDto(a, aLoaded.UpdatedAt, "a", "1.0.0", null, proc, [to], StepEntryCondition.PreviousCompleted)]);
+
+        h.Tick();
+        var first = await h.Saver.SaveAsync(wf, Rewire(c) with
+        {
+            Workflow = Rewire(c).Workflow with { UpdatedAt = loaded.Workflow.UpdatedAt },
+        }, h.Ct);
+        Assert.True(first.Steps.Single(s => s.Id == a).UpdatedAt > aLoaded.UpdatedAt);
+        h.Forget();
+
+        h.Tick();
+        var ex = await Assert.ThrowsAsync<GraphConflictException>(() =>
+            h.Saver.SaveAsync(wf, Rewire(d) with
+            {
+                Workflow = Rewire(d).Workflow with { UpdatedAt = first.Workflow.UpdatedAt },
+            }, h.Ct));
+        Assert.Equal(("step", a), (ex.Kind, ex.Id));
+    }
+
+    [Fact]
+    public async Task AnEntryOnlyWorkflowSaveMovesItsStampAndAReplayOfTheOldStampConflicts()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var s1 = await h.StepAsync(proc, "s1");
+        var s2 = await h.StepAsync(proc, "s2");
+        var wf = await h.WorkflowAsync("wf", [s1]);
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        h.Forget();
+
+        h.Tick();
+        var saved = await h.Saver.SaveAsync(wf, GraphHarness.Request([s1, s2], loaded.Workflow.UpdatedAt), h.Ct);
+        Assert.True(saved.Workflow.UpdatedAt > loaded.Workflow.UpdatedAt);
+        h.Forget();
+
+        h.Tick();
+        var ex = await Assert.ThrowsAsync<GraphConflictException>(() =>
+            h.Saver.SaveAsync(wf, GraphHarness.Request([s2], loaded.Workflow.UpdatedAt), h.Ct));
+        Assert.Equal(("workflow", wf), (ex.Kind, ex.Id));
+    }
+
+    [Fact]
+    public async Task AnEmptyWorkflowIdIsAValidationFailure()
+    {
+        await using var h = new GraphHarness();
+        var step = await h.StepAsync(await h.ProcessorAsync());
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            h.Saver.SaveAsync(Guid.Empty, GraphHarness.Request([step]), h.Ct));
+    }
 }
