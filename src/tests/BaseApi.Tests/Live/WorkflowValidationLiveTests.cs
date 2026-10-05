@@ -145,6 +145,7 @@ public sealed class WorkflowValidationLiveTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
         Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/steps/{a}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/workflows/{wf}", Ct)).StatusCode);
     }
 
     [Fact]

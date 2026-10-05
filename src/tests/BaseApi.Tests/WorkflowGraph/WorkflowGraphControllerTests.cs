@@ -61,7 +61,7 @@ public sealed class WorkflowGraphControllerTests
     }
 
     [Fact]
-    public async Task ValidateReturnsTheProblems()
+    public async Task ValidateReturnsValidForACleanWorkflow()
     {
         await using var h = new GraphHarness();
         var a = await h.StepAsync(await h.ProcessorAsync());
