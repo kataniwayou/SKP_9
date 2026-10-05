@@ -16,6 +16,12 @@ namespace BaseApi.Service.Features.Orchestration;
 /// load the result with the loader the start path uses, collect every gate's problems in the start's
 /// locked order, and roll everything back.
 /// <para>
+/// <b>Liveness runs after the rollback.</b> Inside the dry run only the save (or existence check), the
+/// snapshot load and the three snapshot gates run. The liveness gate probes Redis once the transaction
+/// is rolled back, so no row locks or pooled connection are held across Redis round trips. The snapshot
+/// is in memory, so it outlives the transaction.
+/// </para>
+/// <para>
 /// <b>Nothing escapes.</b> This never builds a start definition, never sends to the broker and never
 /// writes Redis; its only Redis access is the read-only liveness probe. The draft's database writes live
 /// inside <see cref="IGraphDryRun"/>, which always rolls back.
@@ -64,7 +70,14 @@ internal sealed class WorkflowValidator : IWorkflowValidator
             throw new ValidationException(new[] { new ValidationFailure(nameof(workflowId), "WorkflowId must not be Guid.Empty.") });
         }
 
-        return _dryRun.RunAsync(async c =>
+        return ValidateCoreAsync(workflowId, draft, ct);
+    }
+
+    private async Task<WorkflowValidationDto> ValidateCoreAsync(Guid workflowId, GraphSaveRequest? draft, CancellationToken ct)
+    {
+        // Only the database work runs inside the dry-run transaction; it hands the in-memory snapshot
+        // and the snapshot gates' problems out, and the liveness probe runs after the rollback.
+        var (snapshot, problems) = await _dryRun.RunAsync(async c =>
         {
             if (draft is not null)
             {
@@ -75,16 +88,28 @@ internal sealed class WorkflowValidator : IWorkflowValidator
                 throw new NotFoundException(nameof(WorkflowEntity), workflowId);
             }
 
-            using var snapshot = await _loader.LoadL1Async(new[] { workflowId }, c);
-
-            // The start's locked order: cycle and missing step, schema edge, payload, liveness.
-            var problems = new List<OrchestrationValidationException>();
-            problems.AddRange(_cycles.Collect(snapshot));
-            problems.AddRange(_schemaEdges.Collect(snapshot));
-            problems.AddRange(_payloads.Collect(snapshot));
+            var loaded = await _loader.LoadL1Async(new[] { workflowId }, c);
             try
             {
-                problems.AddRange(await _liveness.CollectAsync(snapshot, c));
+                // The start's locked order: cycle and missing step, schema edge, payload, then liveness.
+                var found = new List<OrchestrationValidationException>();
+                found.AddRange(_cycles.Collect(loaded));
+                found.AddRange(_schemaEdges.Collect(loaded));
+                found.AddRange(_payloads.Collect(loaded));
+                return (loaded, found);
+            }
+            catch
+            {
+                loaded.Dispose();
+                throw;
+            }
+        }, ct);
+
+        using (snapshot)
+        {
+            try
+            {
+                problems.AddRange(await _liveness.CollectAsync(snapshot, ct));
             }
             catch (RedisException ex)
             {
@@ -92,10 +117,10 @@ internal sealed class WorkflowValidator : IWorkflowValidator
                 ex.Data["redisOp"] = "ValidateLiveness";
                 throw;
             }
+        }
 
-            return new WorkflowValidationDto(
-                problems.Count == 0,
-                problems.Select(p => new WorkflowProblemDto(p.Gate, p.Title, p.Message, p.Offending)).ToList());
-        }, ct);
+        return new WorkflowValidationDto(
+            problems.Count == 0,
+            problems.Select(p => new WorkflowProblemDto(p.Gate, p.Title, p.Message, p.Offending)).ToList());
     }
 }
