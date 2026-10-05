@@ -4,7 +4,7 @@
 
 **Goal:** A new `src/WorkflowStudio` web app, served by nginx in the kind cluster, opens any workflow from a picker and draws it read-only on the blueprint canvas: the lit sphere, glass-cap steps with their processor dies, caches, and lit cables routed straight / Z / U, laid out from the stored `Layout` or by elkjs when a block has no position.
 
-**Architecture:** Vite + React + TypeScript. Four units with hard boundaries: `api/` (typed fetch client over types generated from BaseApi's OpenAPI document, plus DTO → model conversion), `model/` (pure graph rules mirroring the backend: reachability, start checks, schema edges, assignment choice, entry conditions), `layout/` (pure geometry: the `Layout` document, elkjs placement, ports, landings, the router), and `canvas/` (React Flow nodes and edges that only *draw* what `layout/` computed). `model/` and `layout/` import no React and do no I/O. Routing is global (it needs every block's box), so wires are computed once in `layout/` and handed to a custom edge as points; React Flow's own handle geometry is not used for drawing.
+**Architecture:** Vite + React + TypeScript. Four units with hard boundaries: `api/` (typed fetch client over types generated from BaseApi's OpenAPI document, plus DTO → model conversion), `model/` (pure graph rules the drawing needs and BaseApi does not own: reachability, entry conditions, assignment choice; no start rule lives here), `layout/` (pure geometry: the `Layout` document, elkjs placement, ports, landings, the router), and `canvas/` (React Flow nodes and edges that only *draw* what `layout/` computed). `model/` and `layout/` import no React and do no I/O. Routing is global (it needs every block's box), so wires are computed once in `layout/` and handed to a custom edge as points; React Flow's own handle geometry is not used for drawing.
 
 **Tech Stack:** Node ≥ 22.12, Vite 8.3.2, React 19.3.0, TypeScript 5.9.3, @xyflow/react 12.12.0, elkjs 0.12.0, Vitest 5.0.3 + jsdom 30.1.2 + Testing Library, openapi-typescript 7.13.0, Swashbuckle.AspNetCore.Cli 6.9.0 (a local dotnet tool), nginx 1.29-alpine.
 
@@ -23,6 +23,7 @@
 - **Fonts:** IBM Plex Sans **Condensed** (400/500/600) and IBM Plex Mono (400/500), self-hosted through `@fontsource` (no Google CDN: the cluster may be offline). Label widths are measured with these fonts after `document.fonts.ready`.
 - **Stale `Layout` ids are ignored silently** (spec §8). Any malformed part of a layout is ignored, never an error.
 - **Test commands.** Unit tests: `npm test` (runs `vitest run`). Types: `npm run typecheck`. Production build: `npm run build`. A focused run: `npx vitest run src/layout/router.test.ts`. Vitest prints each failing test's name; a run that collects 0 tests is a failure, not a pass.
+- **No start rule is re-implemented.** Cycles, missing steps, schema edges, payloads and liveness are BaseApi's (plan 1b's `POST /workflows/{id}/validate`); the studio draws what it returns. Plan 1b must be deployed first.
 - **No backend code changes.** The only file outside `src/WorkflowStudio` and `k8s/` this plan adds is the dotnet tool manifest `.config/dotnet-tools.json`, plus one-line additions to `.gitignore`, `.dockerignore`, `k8s/kustomization.yaml`, `k8s/port-forward-realstack.ps1` and `k8s/README.md`.
 - **Machine notes.** Windows; the Bash tool is Git Bash. Bash heredocs that contain apostrophes or backticks fail on this machine: write files with the Write tool. Stage only the files a task names (never `git add -A`). Untracked files that must not be touched: `.wf-restore.json`, `tools/simulate-approved-feed.py`, `tools/simulate-unapproved-feed.py`, `.playwright-mcp/`, `docs/HANDOVER-*.md`.
 
@@ -31,6 +32,7 @@
 - **Font cut.** The spec says "IBM Plex Sans"; the approved mockup uses IBM Plex Sans **Condensed**, and every text width in it is tuned to the condensed cut. This plan uses Condensed.
 - **Assignment badge.** The spec says the cap holds "the assignment keys"; the mockup shows a count, `◆ 3 keys` (or `◇ {}` for an empty object), because 224 px cannot hold key names. This plan follows the mockup. Key names are the Inspector's job (plan 4).
 - **Junctions are plan 7.** Until then a step with ≥ 4 incoming wires draws them as separate arrows, still 16 px apart.
+- **Broken wires come from validate.** The studio calls `POST /workflows/{id}/validate` once per load and marks a wire broken only when a `schemaEdge` problem names it. Nothing in `model/` or `layout/` compares schemas, walks for cycles or checks that steps exist. If validate cannot be reached, the graph still draws, with no broken wires and "Problems unavailable." in the status line.
 - **OpenAPI document.** BaseApi serves Swagger only in Development, and the cluster runs Production. The document is therefore produced offline from the built DLL with the Swashbuckle CLI and committed with the generated types.
 
 ## Review Focus
@@ -61,8 +63,6 @@
 | `src/model/graph.ts` | The domain types |
 | `src/model/entryConditions.ts` | Names, letters, colours |
 | `src/model/reachability.ts` | Steps reachable from the entry steps |
-| `src/model/startChecks.ts` | First cycle / missing step, as the start gate finds it |
-| `src/model/schemaEdges.ts` | The broken-wire rule |
 | `src/model/assignments.ts` | One assignment per step, key count |
 | `src/layout/geometry.ts` | Constants and snapping |
 | `src/layout/layoutDoc.ts` | The `Layout` JSON document: parse leniently |
@@ -319,9 +319,9 @@ git commit -m "feat(studio): scaffold the WorkflowStudio app (Vite, React, TypeS
 **Interfaces:**
 - Consumes: Task 1's scaffold.
 - Produces:
-  - `model/graph.ts`: `type Id = string`; interfaces `Workflow`, `Step`, `Processor`, `Schema`, `Assignment`, `Cache`, `Graph` (exact fields below).
-  - `api/types.ts`: `WorkflowGraphDto`, `WorkflowReadDto`, `StepReadDto`, `ProcessorReadDto`.
-  - `api/client.ts`: `type ApiError`, `type ApiResult<T>`, `interface StudioApi { listWorkflows(); getGraph(id); getStep(id); getProcessor(id) }`, `createApi(base?: string, fetchImpl?: typeof fetch): StudioApi`.
+  - `model/graph.ts`: `type Id = string`; interfaces `Workflow`, `Step`, `Processor`, `Schema`, `Assignment`, `Cache`, `Graph`, `WorkflowProblem` (exact fields below).
+  - `api/types.ts`: `WorkflowGraphDto`, `WorkflowReadDto`, `StepReadDto`, `ProcessorReadDto`, `WorkflowValidationDto`, `WorkflowProblemDto`.
+  - `api/client.ts`: `type ApiError`, `type ApiResult<T>`, `interface StudioApi { listWorkflows(); getGraph(id); getStep(id); getProcessor(id); validate(workflowId) }` (`validate` is a `POST` with no body: plan 1b's dry run of the stored workflow), `createApi(base?: string, fetchImpl?: typeof fetch): StudioApi`.
   - `api/toModel.ts`: `graphFromDto(dto): Graph`, `stepFromDto(dto): Step`, `processorFromDto(dto): Processor`.
   - `api/fixtures.ts` (tests only): `graphDto(...)`, `stepDto(...)`, `processorDto(...)` builders, reused by later tasks' tests.
 
@@ -403,6 +403,8 @@ export type WorkflowGraphDto = Schemas['WorkflowGraphDto'];
 export type WorkflowReadDto = Schemas['WorkflowReadDto'];
 export type StepReadDto = Schemas['StepReadDto'];
 export type ProcessorReadDto = Schemas['ProcessorReadDto'];
+export type WorkflowValidationDto = Schemas['WorkflowValidationDto'];
+export type WorkflowProblemDto = Schemas['WorkflowProblemDto'];
 ```
 
 `src/model/graph.ts`:
@@ -466,6 +468,17 @@ export interface Cache {
   root: string;
   /** JSON text of an object of string items. */
   items: string;
+}
+
+/**
+ * One problem BaseApi's validate reported (plan 1b). The studio never derives these: it only draws
+ * them. `offending` is the gate's own object (for gate "schemaEdge": `{ parentStepId, childStepId }`).
+ */
+export interface WorkflowProblem {
+  gate: string;
+  title: string;
+  detail: string;
+  offending: unknown;
 }
 
 export interface Graph {
@@ -639,6 +652,19 @@ describe('createApi', () => {
     await createApi('/api/v1', fetchImpl).getProcessor('a/b');
     expect(fetchImpl).toHaveBeenCalledWith('/api/v1/processors/a%2Fb', expect.anything());
   });
+
+  it('POSTs validate with no body and returns the verdict', async () => {
+    const verdict = { valid: false, problems: [{ gate: 'schemaEdge', title: 't', detail: 'd', offending: { parentStepId: 'a', childStepId: 'b' } }] };
+    const fetchImpl = vi.fn().mockResolvedValue(respond(200, verdict));
+
+    const result = await createApi('/api/v1', fetchImpl).validate('wf1');
+
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/workflows/wf1/validate', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    });
+    expect(result).toEqual({ ok: true, value: verdict });
+  });
 });
 ```
 
@@ -652,7 +678,7 @@ Expected: FAIL, `Failed to resolve import "./toModel"` and `"./client"`.
 `src/api/client.ts`:
 
 ```ts
-import type { ProcessorReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { ProcessorReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto, WorkflowValidationDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -673,6 +699,8 @@ export interface StudioApi {
   getGraph(workflowId: string): Promise<ApiResult<WorkflowGraphDto>>;
   getStep(stepId: string): Promise<ApiResult<StepReadDto>>;
   getProcessor(processorId: string): Promise<ApiResult<ProcessorReadDto>>;
+  /** Plan 1b's dry run of the stored workflow: POST, no body. Saves and starts nothing. */
+  validate(workflowId: string): Promise<ApiResult<WorkflowValidationDto>>;
 }
 
 interface Problem {
@@ -711,10 +739,10 @@ async function toError(response: Response): Promise<ApiError> {
 
 /** Relative URLs only: the studio is served from the same origin as BaseApi. */
 export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)): StudioApi {
-  async function get<T>(path: string): Promise<ApiResult<T>> {
+  async function request<T>(method: 'GET' | 'POST', path: string): Promise<ApiResult<T>> {
     let response: Response;
     try {
-      response = await fetchImpl(`${base}${path}`, { method: 'GET', headers: { Accept: 'application/json' } });
+      response = await fetchImpl(`${base}${path}`, { method, headers: { Accept: 'application/json' } });
     } catch (e) {
       return { ok: false, error: { kind: 'network', message: e instanceof Error ? e.message : String(e) } };
     }
@@ -722,6 +750,7 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     return { ok: true, value: (await response.json()) as T };
   }
 
+  const get = <T>(path: string) => request<T>('GET', path);
   const id = (value: string) => encodeURIComponent(value);
 
   return {
@@ -729,6 +758,7 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     getGraph: (workflowId) => get<WorkflowGraphDto>(`/workflows/${id(workflowId)}/graph`),
     getStep: (stepId) => get<StepReadDto>(`/steps/${id(stepId)}`),
     getProcessor: (processorId) => get<ProcessorReadDto>(`/processors/${id(processorId)}`),
+    validate: (workflowId) => request<WorkflowValidationDto>('POST', `/workflows/${id(workflowId)}/validate`),
   };
 }
 ```
@@ -823,33 +853,31 @@ npx vitest run src/api
 npm run typecheck
 ```
 
-Expected: 11 passed (4 conversion + 7 client); typecheck clean.
+Expected: 12 passed (4 conversion + 8 client); typecheck clean.
 
 - [ ] **Step 9: Commit**
 
 ```bash
 git add .config/dotnet-tools.json src/WorkflowStudio/scripts src/WorkflowStudio/openapi src/WorkflowStudio/src/api src/WorkflowStudio/src/model/graph.ts
-git commit -m "feat(studio): generated BaseApi types, typed GET client and the graph model"
+git commit -m "feat(studio): generated BaseApi types, typed client (GET and validate) and the graph model"
 ```
 
 ---
 
-### Task 3: `model/` rules mirroring the backend
+### Task 3: `model/`: reachability, entry conditions, assignment choice
 
 **Files:**
-- Create: `src/model/entryConditions.ts`, `src/model/reachability.ts`, `src/model/startChecks.ts`, `src/model/schemaEdges.ts`, `src/model/assignments.ts`
+- Create: `src/model/entryConditions.ts`, `src/model/reachability.ts`, `src/model/assignments.ts`
 - Test: one `*.test.ts` beside each
 
 **Interfaces:**
-- Consumes: `Id`, `Step`, `Processor`, `Assignment` (Task 2).
+- Consumes: `Id`, `Step`, `Assignment` (Task 2).
 - Produces:
   - `entryConditions.ts`: `interface ConditionInfo { name: string; letter: string; colour: string }`, `conditionInfo(condition: number): ConditionInfo`, `CONDITIONS: ReadonlyArray<{ value: number } & ConditionInfo>` (1..5 in order).
   - `reachability.ts`: `reachableStepIds(entryStepIds: Id[], steps: ReadonlyMap<Id, Pick<Step, 'nextStepIds'>>): Id[]`.
-  - `startChecks.ts`: `type StartProblem`, `findStartProblem(entryStepIds, steps): StartProblem | null`.
-  - `schemaEdges.ts`: `isBrokenEdge(parent: Processor | undefined, child: Processor | undefined): boolean`.
   - `assignments.ts`: `assignmentByStep(assignments: Assignment[]): Map<Id, Assignment>`, `payloadKeyCount(payload: string): number | null`.
 
-The backend has no unit tests for `CycleDetector` or `SchemaEdgeValidator`; the cases below are derived from their code (`src/BaseApi.Service/Features/Orchestration/Validation/CycleDetector.cs`, `SchemaEdgeValidator.cs`) and from `WorkflowGraphLoader`'s BFS.
+These are the only graph rules the studio keeps: what to draw (reachability, as `WorkflowGraphLoader`'s BFS finds it), how to colour it, and which assignment to show. Whether a workflow may start is BaseApi's call (plan 1b's validate), not repeated here.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -913,80 +941,6 @@ describe('reachableStepIds (WorkflowGraphLoader BFS)', () => {
 });
 ```
 
-`src/model/startChecks.test.ts`:
-
-```ts
-import { describe, expect, it } from 'vitest';
-import { findStartProblem } from './startChecks';
-
-const steps = (edges: Record<string, string[]>) =>
-  new Map(Object.entries(edges).map(([id, next]) => [id, { nextStepIds: next }]));
-
-describe('findStartProblem (CycleDetector)', () => {
-  it('passes a chain, a diamond and a fan-in', () => {
-    expect(findStartProblem(['a'], steps({ a: ['b'], b: ['c'], c: [] }))).toBeNull();
-    expect(findStartProblem(['a'], steps({ a: ['b', 'c'], b: ['d'], c: ['d'], d: [] }))).toBeNull();
-    expect(findStartProblem(['a', 'b'], steps({ a: ['c'], b: ['c'], c: [] }))).toBeNull();
-  });
-
-  it('reports a self-loop as the chain [A, A]', () => {
-    expect(findStartProblem(['a'], steps({ a: ['a'] }))).toEqual({ gate: 'cycle', stepChain: ['a', 'a'] });
-  });
-
-  it('reports a cycle as the path from the repeated step back to itself', () => {
-    expect(findStartProblem(['a'], steps({ a: ['b'], b: ['c'], c: ['b'] }))).toEqual({ gate: 'cycle', stepChain: ['b', 'c', 'b'] });
-  });
-
-  it('reports a missing child with its parent', () => {
-    expect(findStartProblem(['a'], steps({ a: ['ghost'] }))).toEqual({ gate: 'missingStep', parentStepId: 'a', missingChildId: 'ghost' });
-  });
-
-  it('reports a missing entry step with no parent', () => {
-    expect(findStartProblem(['ghost'], steps({}))).toEqual({ gate: 'missingStep', parentStepId: null, missingChildId: 'ghost' });
-  });
-
-  it('finds problems in DFS order: children in nextStepIds order, first found wins', () => {
-    const graph = steps({ a: ['b', 'c'], b: ['ghost'], c: ['c'] });
-    expect(findStartProblem(['a'], graph)).toEqual({ gate: 'missingStep', parentStepId: 'b', missingChildId: 'ghost' });
-  });
-
-  it('does not visit steps nothing reaches from an entry', () => {
-    expect(findStartProblem(['a'], steps({ a: [], orphan: ['orphan'] }))).toBeNull();
-  });
-});
-```
-
-`src/model/schemaEdges.test.ts`:
-
-```ts
-import { describe, expect, it } from 'vitest';
-import type { Processor } from './graph';
-import { isBrokenEdge } from './schemaEdges';
-
-const proc = (inputSchemaId: string | null, outputSchemaId: string | null): Processor => ({
-  id: 'p', name: 'p', version: '1.0.0', inputSchemaId, outputSchemaId, configSchemaId: null,
-});
-
-describe('isBrokenEdge (SchemaEdgeValidator)', () => {
-  it('passes when the parent Out schema id equals the child In schema id', () => {
-    expect(isBrokenEdge(proc(null, 's1'), proc('s1', null))).toBe(false);
-  });
-
-  it('breaks when both are set and differ, compared by id', () => {
-    expect(isBrokenEdge(proc(null, 's1'), proc('s2', null))).toBe(true);
-  });
-
-  it('passes when either side is null', () => {
-    expect(isBrokenEdge(proc(null, null), proc('s2', null))).toBe(false);
-    expect(isBrokenEdge(proc(null, 's1'), proc(null, null))).toBe(false);
-  });
-
-  it('passes when a processor is unknown (the validator reads its schema as null)', () => {
-    expect(isBrokenEdge(undefined, proc('s2', null))).toBe(false);
-  });
-});
-```
-
 `src/model/assignments.test.ts`:
 
 ```ts
@@ -1030,9 +984,9 @@ describe('payloadKeyCount', () => {
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `npx vitest run src/model`
-Expected: FAIL, the five modules cannot be resolved.
+Expected: FAIL, the three modules cannot be resolved.
 
-- [ ] **Step 3: Implement the five modules**
+- [ ] **Step 3: Implement the three modules**
 
 `src/model/entryConditions.ts`:
 
@@ -1097,71 +1051,6 @@ export function reachableStepIds(entryStepIds: Id[], steps: ReadonlyMap<Id, Pick
 }
 ```
 
-`src/model/startChecks.ts`:
-
-```ts
-import type { Id, Step } from './graph';
-
-/**
- * The first structural problem the start gate would refuse, found in the gate's own order
- * (CycleDetector.cs): depth first from each entry step, children in nextStepIds order. The backend
- * uses Guid.Empty for "no parent" on a missing entry step; here it is null.
- */
-export type StartProblem =
-  | { gate: 'cycle'; stepChain: Id[] }
-  | { gate: 'missingStep'; parentStepId: Id | null; missingChildId: Id };
-
-export function findStartProblem(
-  entryStepIds: Id[],
-  steps: ReadonlyMap<Id, Pick<Step, 'nextStepIds'>>,
-): StartProblem | null {
-  const done = new Set<Id>();
-  const onPath = new Set<Id>();
-  const path: Id[] = [];
-
-  const visit = (id: Id): StartProblem | null => {
-    onPath.add(id);
-    path.push(id);
-    for (const child of steps.get(id)!.nextStepIds) {
-      if (!steps.has(child)) return { gate: 'missingStep', parentStepId: id, missingChildId: child };
-      if (onPath.has(child)) return { gate: 'cycle', stepChain: [...path.slice(path.indexOf(child)), child] };
-      if (done.has(child)) continue; // a diamond or a fan-in is legal
-      const problem = visit(child);
-      if (problem) return problem;
-    }
-    onPath.delete(id);
-    path.pop();
-    done.add(id);
-    return null;
-  };
-
-  for (const entry of entryStepIds) {
-    if (!steps.has(entry)) return { gate: 'missingStep', parentStepId: null, missingChildId: entry };
-    if (done.has(entry)) continue;
-    const problem = visit(entry);
-    if (problem) return problem;
-  }
-  return null;
-}
-```
-
-`src/model/schemaEdges.ts`:
-
-```ts
-import type { Processor } from './graph';
-
-/**
- * The start gate's SchemaEdgeValidator rule: the parent processor's Out schema must be the child
- * processor's In schema, compared by id. A null on either side passes, and so does an unknown
- * processor (the validator reads its schema as null). A broken wire is drawn dashed with a "!".
- */
-export function isBrokenEdge(parent: Processor | undefined, child: Processor | undefined): boolean {
-  const out = parent?.outputSchemaId ?? null;
-  const input = child?.inputSchemaId ?? null;
-  return out !== null && input !== null && out !== input;
-}
-```
-
 `src/model/assignments.ts`:
 
 ```ts
@@ -1199,13 +1088,13 @@ npx vitest run src/model
 npm run typecheck
 ```
 
-Expected: 27 passed (entryConditions 7, the `it.each` counting 5; reachability 5; startChecks 7; schemaEdges 4; assignments 4); typecheck clean.
+Expected: 16 passed (entryConditions 7, the `it.each` counting 5; reachability 5; assignments 4); typecheck clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/WorkflowStudio/src/model
-git commit -m "feat(studio): model rules mirroring reachability, start checks, schema edges and assignment choice"
+git commit -m "feat(studio): model rules for reachability, entry conditions and assignment choice"
 ```
 
 ---
@@ -1660,11 +1549,11 @@ git commit -m "feat(studio): layout document, grid geometry and elkjs placement 
 - Test: `src/layout/ports.test.ts`, `src/layout/router.test.ts`, `src/layout/wires.test.ts`
 
 **Interfaces:**
-- Consumes: `geometry.ts`, `Placement`, `Sphere` (Task 4); `isBrokenEdge` (Task 3); `Step`, `Processor`, `Id` (Task 2).
+- Consumes: `geometry.ts`, `Placement`, `Sphere` (Task 4); `Step`, `Id` (Task 2).
 - Produces:
   - `ports.ts`: `WORKFLOW_SOURCE = 'wf'`, `type SourceId = string`, `interface WireEnd { source: SourceId; target: Id }`, `departureX(source, placement): number`, `computeDepartures(wires, placement): Map<SourceId, Map<Id, number>>`, `computeLandings(wires, placement, departures): Map<Id, Map<SourceId, number>>`.
   - `router.ts`: `type Pt = readonly [number, number]`, `interface Box { id: string; x: number; y: number; w: number; h: number }`, `route(sx, sy, tx, ty, srcId, tgtId, nudge, boxes): Pt[]`, `simplify(pts: Pt[]): Pt[]`.
-  - `wires.ts`: `interface WireRoute { id: string; source: SourceId; target: Id; points: Pt[]; condition: number; broken: boolean }`, `interface WiringInput { entryStepIds: Id[]; steps: ReadonlyMap<Id, Step>; processors: ReadonlyMap<Id, Processor> }`, `collectWires(input, placement): WireEnd[]`, `routeWires(input, placement): WireRoute[]`, `blockBoxes(placement): Box[]`, `tetherPoints(sphere, cache: Point): Pt[]`, `stepBoxId(id)`, `cacheBoxId(id)`, `SPHERE_BOX_ID`.
+  - `wires.ts`: `interface WireRoute { id: string; source: SourceId; target: Id; points: Pt[]; condition: number; broken: boolean }`, `interface WiringInput { entryStepIds: Id[]; steps: ReadonlyMap<Id, Step>; brokenEdges: ReadonlySet<string> }`, `collectWires(input, placement): WireEnd[]`, `routeWires(input, placement): WireRoute[]`, `blockBoxes(placement): Box[]`, `tetherPoints(sphere, cache: Point): Pt[]`, `stepBoxId(id)`, `cacheBoxId(id)`, `SPHERE_BOX_ID`.
 
 Ported from the mockup's `computePorts`, `computeLand` and `route`, with two fixes: the straight-landing search can no longer oscillate when the band is full (it searches outward and gives up to the bent rule), and collinear points are removed so a straight run is never counted as a bend.
 
@@ -1801,22 +1690,18 @@ describe('computeLandings', () => {
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import type { Processor, Step } from '../model/graph';
+import type { Step } from '../model/graph';
 import type { Placement } from './placement';
 import { routeWires, tetherPoints, type WiringInput } from './wires';
 
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
   id, name: id, version: '1.0.0', processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', ...over,
 });
-const proc = (id: string, inputSchemaId: string | null, outputSchemaId: string | null): Processor => ({
-  id, name: id, version: '1.0.0', inputSchemaId, outputSchemaId, configSchemaId: null,
-});
-
-function setup(steps: Step[], positions: Record<string, [number, number]>, processors: Processor[] = [proc('p', null, null)]) {
+function setup(steps: Step[], positions: Record<string, [number, number]>, brokenEdges: ReadonlySet<string>) {
   const input: WiringInput = {
     entryStepIds: ['a'],
     steps: new Map(steps.map((s) => [s.id, s])),
-    processors: new Map(processors.map((p) => [p.id, p])),
+    brokenEdges,
   };
   const placement: Placement = {
     sphere: { cx: 128, cy: 128 },
@@ -1828,34 +1713,34 @@ function setup(steps: Step[], positions: Record<string, [number, number]>, proce
 
 describe('routeWires', () => {
   it('draws the entry wire and a step wire straight when they line up', () => {
-    const wires = setup([step('a', ['b']), step('b', [])], { a: [288, 32], b: [576, 32] });
+    const wires = setup([step('a', ['b']), step('b', [])], { a: [288, 32], b: [576, 32] }, new Set<string>());
 
     expect(wires.find((w) => w.id === 'wf->a')!.points).toEqual([[224, 128], [288, 128]]);
     expect(wires.find((w) => w.id === 'a->b')!.points).toEqual([[512, 128], [576, 128]]);
   });
 
   it('colours a wire by its target step entry condition', () => {
-    const wires = setup([step('a', ['b']), step('b', [], { entryCondition: 2 })], { a: [288, 32], b: [576, 32] });
+    const wires = setup([step('a', ['b']), step('b', [], { entryCondition: 2 })], { a: [288, 32], b: [576, 32] }, new Set<string>());
     expect(wires.find((w) => w.id === 'a->b')!.condition).toBe(2);
   });
 
-  it('marks a wire broken when the parent Out schema differs from the child In schema', () => {
+  it('marks a wire broken only when validate named it (the studio never compares schemas itself)', () => {
     const wires = setup(
-      [step('a', ['b'], { processorId: 'pa' }), step('b', [], { processorId: 'pb' })],
+      [step('a', ['b']), step('b', [])],
       { a: [288, 32], b: [576, 32] },
-      [proc('pa', null, 's1'), proc('pb', 's2', null)],
+      new Set(['a->b']),
     );
     expect(wires.find((w) => w.id === 'a->b')!.broken).toBe(true);
     expect(wires.find((w) => w.id === 'wf->a')!.broken).toBe(false);
   });
 
   it('does not draw a wire to a step that is not on the canvas (a dangling next-step id)', () => {
-    const wires = setup([step('a', ['ghost'])], { a: [288, 32] });
+    const wires = setup([step('a', ['ghost'])], { a: [288, 32] }, new Set<string>());
     expect(wires.map((w) => w.id)).toEqual(['wf->a']);
   });
 
   it('routes a back edge and a self-loop orthogonally, every point on the 8 px grid', () => {
-    const wires = setup([step('a', ['b', 'a']), step('b', ['a'])], { a: [288, 32], b: [576, 32] });
+    const wires = setup([step('a', ['b', 'a']), step('b', ['a'])], { a: [288, 32], b: [576, 32] }, new Set<string>());
 
     for (const w of wires) {
       for (let i = 1; i < w.points.length; i++) {
@@ -1868,7 +1753,7 @@ describe('routeWires', () => {
   });
 
   it('ends every wire on the target step left edge at its landing height', () => {
-    const wires = setup([step('a', ['b']), step('b', [])], { a: [288, 32], b: [576, 320] });
+    const wires = setup([step('a', ['b']), step('b', [])], { a: [288, 32], b: [576, 320] }, new Set<string>());
     expect(wires.find((w) => w.id === 'a->b')!.points.at(-1)).toEqual([576, 416]);
   });
 });
@@ -2092,8 +1977,7 @@ function nearestFreeInBand(d: number, top: number, bottom: number, free: (y: num
 `src/layout/wires.ts`:
 
 ```ts
-import { isBrokenEdge } from '../model/schemaEdges';
-import type { Id, Processor, Step } from '../model/graph';
+import type { Id, Step } from '../model/graph';
 import { CACHE_H, CACHE_W, PORT_GAP, SPHERE_R, STEP_H, STEP_W, offset, type Point } from './geometry';
 import type { Placement, Sphere } from './placement';
 import { computeDepartures, computeLandings, departureX, WORKFLOW_SOURCE, type SourceId, type WireEnd } from './ports';
@@ -2114,7 +1998,8 @@ export interface WiringInput {
   entryStepIds: Id[];
   /** Every step on the canvas, parked ones included. */
   steps: ReadonlyMap<Id, Step>;
-  processors: ReadonlyMap<Id, Processor>;
+  /** `${parentStepId}->${childStepId}` for every wire BaseApi's validate reported as a schemaEdge problem. */
+  brokenEdges: ReadonlySet<string>;
 }
 
 export const SPHERE_BOX_ID = 'wf';
@@ -2155,14 +2040,13 @@ export function routeWires(input: WiringInput, placement: Placement): WireRoute[
     const sx = departureX(w.source, placement), sy = departures.get(w.source)!.get(w.target)!;
     const tx = placement.steps.get(w.target)!.x, ty = landings.get(w.target)!.get(w.source)!;
     const target = input.steps.get(w.target)!;
-    const parent = w.source === WORKFLOW_SOURCE ? undefined : input.processors.get(input.steps.get(w.source)!.processorId);
     return {
       id: `${w.source}->${w.target}`,
       source: w.source,
       target: w.target,
       points: route(sx, sy, tx, ty, boxIdOf(w.source), stepBoxId(w.target), nudge, boxes),
       condition: target.entryCondition,
-      broken: w.source !== WORKFLOW_SOURCE && isBrokenEdge(parent, input.processors.get(target.processorId)),
+      broken: w.source !== WORKFLOW_SOURCE && input.brokenEdges.has(`${w.source}->${w.target}`),
     };
   });
 }
@@ -2618,7 +2502,7 @@ git commit -m "feat(studio): blueprint tokens, shared SVG definitions, the lit g
 **Interfaces:**
 - Consumes: everything in Tasks 2–6.
 - Produces:
-  - `app/document.ts`: `interface StudioDocument { graph: Graph; parkedIds: Id[]; placement: Placement; wires: WireRoute[] }` (Task 8's loader fills it).
+  - `app/document.ts`: `interface StudioDocument { graph: Graph; parkedIds: Id[]; placement: Placement; wires: WireRoute[]; problems: WorkflowProblem[] | null }` (`problems` is null when validate could not be reached) (Task 8's loader fills it).
   - `nodes/*`: `WorkflowNodeData`, `StepNodeData`, `ProcessorView`, `CacheNodeData`; components `WorkflowNode`, `StepNode`, `CacheNode`, and the plain views `StepView`, `ChipView` used by tests.
   - `toFlow.ts`: `type StudioNode`, `type StudioEdge`, `toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: StudioNode[]; edges: StudioEdge[] }`, node id helpers `SPHERE_NODE_ID = 'wf'`, `cacheNodeId(id)`; step node ids are the step ids.
 
@@ -2664,6 +2548,7 @@ function doc(over: Partial<Graph> = {}, parkedIds: string[] = []): StudioDocumen
       { id: 'wf->a', source: 'wf', target: 'a', points: [[224, 128], [288, 128]], condition: 1, broken: false },
       { id: 'a->b', source: 'a', target: 'b', points: [[512, 128], [576, 128]], condition: 2, broken: true },
     ],
+    problems: [],
   };
 }
 
@@ -2822,17 +2707,19 @@ Expected: FAIL, `./toFlow` and `./StepNode` cannot be resolved.
 `src/app/document.ts`:
 
 ```ts
-import type { Id, Graph } from '../model/graph';
+import type { Id, Graph, WorkflowProblem } from '../model/graph';
 import type { Placement } from '../layout/placement';
 import type { WireRoute } from '../layout/wires';
 
 /** One opened workflow, ready to draw: the graph (parked steps included), where every block sits,
- *  and every wire's route. */
+ *  every wire's route, and the problems BaseApi's validate reported (null when it could not be reached). */
 export interface StudioDocument {
   graph: Graph;
   parkedIds: Id[];
   placement: Placement;
   wires: WireRoute[];
+  /** What `POST /workflows/{id}/validate` returned; null when that call failed. Advisory: the graph draws either way. */
+  problems: WorkflowProblem[] | null;
 }
 ```
 
@@ -3319,6 +3206,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     getGraph: vi.fn().mockResolvedValue(ok(graphDto())),
     getStep: vi.fn().mockResolvedValue(notFound),
     getProcessor: vi.fn().mockResolvedValue(notFound),
+    validate: vi.fn().mockResolvedValue(ok({ valid: true, problems: [] })),
     ...over,
   };
 }
@@ -3331,6 +3219,34 @@ describe('loadDocument', () => {
     if (!result.ok) return;
     expect([...result.value.placement.steps.keys()]).toEqual(['s1']);
     expect(result.value.wires.map((w) => w.id)).toEqual(['wf->s1']);
+    expect(result.value.problems).toEqual([]);
+  });
+
+  it('marks the wire a schemaEdge problem names as broken, and keeps the problem', async () => {
+    const problem = { gate: 'schemaEdge', title: 'Schema mismatch', detail: 'a to b', offending: { parentStepId: 's1', childStepId: 's2' } };
+    const api = fakeApi({
+      getGraph: vi.fn().mockResolvedValue(ok(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }))),
+      validate: vi.fn().mockResolvedValue(ok({ valid: false, problems: [problem] })),
+    });
+
+    const result = await loadDocument(api, 'wf1');
+
+    expect(api.validate).toHaveBeenCalledWith('wf1');
+    expect(result.ok && result.value.problems).toEqual([problem]);
+    expect(result.ok && result.value.wires.map((w) => [w.id, w.broken])).toEqual([['wf->s1', false], ['s1->s2', true]]);
+  });
+
+  it('still loads when validate cannot be reached, with problems null and no broken wire', async () => {
+    const api = fakeApi({
+      getGraph: vi.fn().mockResolvedValue(ok(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }))),
+      validate: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } }),
+    });
+
+    const result = await loadDocument(api, 'wf1');
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value.problems).toBeNull();
+    expect(result.ok && result.value.wires.some((w) => w.broken)).toBe(false);
   });
 
   it('fetches parked steps the layout lists, and the processors they need', async () => {
@@ -3404,6 +3320,7 @@ describe('WorkflowCanvas', () => {
       getStep: async () => ({ ok: false, error: { kind: 'notFound', status: 404 } }),
       getProcessor: async () => ({ ok: false, error: { kind: 'notFound', status: 404 } }),
       listWorkflows: async () => ({ ok: true, value: [] }),
+      validate: async () => ({ ok: true, value: { valid: true, problems: [] } }),
     } as unknown as StudioApi;
     const loaded = await loadDocument(api, 'wf1');
     if (!loaded.ok) throw new Error('load failed');
@@ -3428,7 +3345,8 @@ import { workflowDto } from './api/fixtures';
 import { App } from './App';
 
 const api = (over: Partial<StudioApi>): StudioApi => ({
-  listWorkflows: vi.fn(), getGraph: vi.fn(), getStep: vi.fn(), getProcessor: vi.fn(), ...over,
+  listWorkflows: vi.fn(), getGraph: vi.fn(), getStep: vi.fn(), getProcessor: vi.fn(),
+  validate: vi.fn().mockResolvedValue({ ok: true, value: { valid: true, problems: [] } }), ...over,
 } as StudioApi);
 
 describe('App', () => {
@@ -3463,7 +3381,7 @@ import { graphFromDto, processorFromDto, stepFromDto } from '../api/toModel';
 import { parseLayout } from '../layout/layoutDoc';
 import { place } from '../layout/placement';
 import { routeWires } from '../layout/wires';
-import type { Graph, Id } from '../model/graph';
+import type { Graph, Id, WorkflowProblem } from '../model/graph';
 import { reachableStepIds } from '../model/reachability';
 import type { StudioDocument } from './document';
 
@@ -3471,12 +3389,23 @@ import type { StudioDocument } from './document';
  * Opens one workflow: the graph, then the parked steps its layout lists (they are not reachable, so
  * GET /graph does not return them; spec §4.3) and any processor they need, then placement and wires.
  * A parked id the server no longer has is dropped silently (spec §8); any other failure is returned.
+ *
+ * Whether the workflow may start is BaseApi's answer, not ours: one `validate` call supplies the
+ * problems, and the wires a `schemaEdge` problem names are drawn broken. Validate is advisory, so a
+ * failure of that call leaves `problems` null and the graph still loads.
  */
 export async function loadDocument(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDocument>> {
   const loaded = await api.getGraph(workflowId);
   if (!loaded.ok) return loaded;
 
   const graph: Graph = graphFromDto(loaded.value);
+  const verdict = await api.validate(workflowId);
+  const problems: WorkflowProblem[] | null = verdict.ok
+    ? (verdict.value.problems ?? []).map((p) => ({
+        gate: p.gate ?? '', title: p.title ?? '', detail: p.detail ?? '', offending: p.offending,
+      }))
+    : null;
+  const brokenEdges = brokenEdgeKeys(problems ?? []);
   const layout = parseLayout(graph.layout);
   const reachable = reachableStepIds(graph.workflow.entryStepIds, graph.steps);
   const reachableSet = new Set(reachable);
@@ -3506,9 +3435,20 @@ export async function loadDocument(api: StudioApi, workflowId: Id): Promise<ApiR
     cacheIds: [...graph.caches.keys()],
     layout,
   });
-  const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps, processors: graph.processors }, placement);
+  const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps, brokenEdges }, placement);
 
-  return { ok: true, value: { graph, parkedIds, placement, wires } };
+  return { ok: true, value: { graph, parkedIds, placement, wires, problems } };
+}
+
+/** `${parentStepId}->${childStepId}` for each schemaEdge problem; offending is read defensively. */
+function brokenEdgeKeys(problems: WorkflowProblem[]): Set<string> {
+  const keys = new Set<string>();
+  for (const problem of problems) {
+    if (problem.gate !== 'schemaEdge' || typeof problem.offending !== 'object' || problem.offending === null) continue;
+    const { parentStepId, childStepId } = problem.offending as { parentStepId?: unknown; childStepId?: unknown };
+    if (typeof parentStepId === 'string' && typeof childStepId === 'string') keys.add(`${parentStepId}->${childStepId}`);
+  }
+  return keys;
 }
 ```
 
@@ -3692,7 +3632,7 @@ export function App({ api: injected }: { api?: StudioApi }) {
     setStatus({ text: 'Loading…', error: false });
     void loadDocument(api, selected).then((r) => {
       if (!live) return;
-      if (r.ok) { setDoc(r.value); setStatus({ text: '', error: false }); }
+      if (r.ok) { setDoc(r.value); setStatus({ text: r.value.problems === null ? 'Problems unavailable.' : '', error: false }); }
       else { setDoc(null); setStatus({ text: describe(r.error), error: true }); }
     });
     return () => { live = false; };
@@ -3969,6 +3909,6 @@ Expected: `200` and `200` (the second proves the same-origin proxy reaches BaseA
 
 ## Self-review notes
 
-- **Spec coverage (slice 2, "load, render and route with the section 5 visuals"):** `api/` typed client and error mapping (§3.1) — Task 2; `model/` rules (§3.1, §9) — Task 3; `layout/` placement with elkjs for blocks without positions, stale ids ignored (§4.3, §8) — Task 4; routing straight / Z / U, landing band, bent → processor middle, fan-out spacing, arrows 16 apart, grid alignment (§5.2, §9) — Task 5; the lit grid with the 60 % rule, theme, fonts (§5.1) — Task 6; sphere, glass-cap step with processor die, cache, broken and parked styles, colours and pills (§5.1, §5.3) — Tasks 6–7; pan and zoom bindings and label shortening with tooltips (§5.4) — Tasks 7–8; nginx same-origin serving (§2, §3.1) — Task 9.
+- **Spec coverage (slice 2, "load, render and route with the section 5 visuals"):** `api/` typed client (GET and the `validate` POST) and error mapping (§3.1) — Task 2; `model/` holds only reachability, entry conditions and assignment choice, and does not mirror the start gates (§3.1, §9) — Task 3; broken wires and the problem list come from plan 1b's validate, loaded in Task 8 (§3.2, §4.4); `layout/` placement with elkjs for blocks without positions, stale ids ignored (§4.3, §8) — Task 4; routing straight / Z / U, landing band, bent → processor middle, fan-out spacing, arrows 16 apart, grid alignment (§5.2, §9) — Task 5; the lit grid with the 60 % rule, theme, fonts (§5.1) — Task 6; sphere, glass-cap step with processor die, cache, broken and parked styles, colours and pills (§5.1, §5.3) — Tasks 6–7; pan and zoom bindings and label shortening with tooltips (§5.4) — Tasks 7–8; nginx same-origin serving (§2, §3.1) — Task 9.
 - **Deliberately not here:** editing, manual routes, alignment guides, undo, save (plan 3); Inspector, Problems (plan 4); dock (plan 5); toolbox (plan 6); junctions (plan 7); Playwright (plan 5 sets it up).
-- **Type consistency checked:** `Placement`, `Sphere`, `Point`, `Pt`, `Box`, `WireRoute`, `WireEnd`, `SourceId`, `WORKFLOW_SOURCE`, `StudioDocument`, `TextFitter`, `FittedText`, `StepNodeData`, `ProcessorView`, `WorkflowNodeData`, `CacheNodeData`, `CableEdgeData`, `TetherEdgeData`, `SPHERE_NODE_ID`, `cacheNodeId` are each defined once and used with the same names and fields everywhere.
+- **Type consistency checked:** `Placement`, `Sphere`, `Point`, `Pt`, `Box`, `WireRoute`, `WireEnd`, `SourceId`, `WORKFLOW_SOURCE`, `StudioDocument`, `WorkflowProblem`, `WorkflowValidationDto`, `WorkflowProblemDto`, `brokenEdges` (the `WiringInput` key set, `${parentStepId}->${childStepId}`), `TextFitter`, `FittedText`, `StepNodeData`, `ProcessorView`, `WorkflowNodeData`, `CacheNodeData`, `CableEdgeData`, `TetherEdgeData`, `SPHERE_NODE_ID`, `cacheNodeId` are each defined once and used with the same names and fields everywhere.

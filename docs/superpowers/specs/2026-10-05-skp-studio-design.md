@@ -1,6 +1,6 @@
 # SKP Studio -- design
 
-Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Branch: `feature/path-importer`.
+Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Branch: `feature/path-importer`.
 
 ## 1. Purpose
 
@@ -51,7 +51,7 @@ generated from BaseApi's Swagger with `openapi-typescript`.
 | Unit | Does | Depends on |
 |---|---|---|
 | `api/` | Typed REST client; maps HTTP errors (409, 422) to typed results | generated types |
-| `model/` | Pure graph logic mirroring the backend validators: reachability, cycles, schema edges, entry conditions, assignment uniqueness, parked blocks, problems list | nothing (no React) |
+| `model/` | Pure graph logic for drawing: reachability, parked blocks, entry-condition presentation, choosing the one assignment per step. **No start rule is re-implemented:** problems come from BaseApi's dry-run validate (§4.4) | nothing (no React) |
 | `layout/` | elkjs placement for blocks with no stored position; wire routing (straight / Z / U), landing bands, fan-out spacing, junctions | `model/` |
 | `canvas/` | React Flow nodes and edges drawn in the section 5 visual system; selection, drag, snap, pan, zoom | `model/`, `layout/`, `store/` |
 | `panels/` | Inspector editors, Toolbox, Problems, Output | `model/`, `store/`, `api/` |
@@ -66,6 +66,8 @@ generated from BaseApi's Swagger with `openapi-typescript`.
 - **A nullable jsonb `Layout` column** on `WorkflowEntity`, with **`GET` / `PUT /workflows/{id}/layout`**,
   and one EF migration.
 - **No validator changes.** The graph save reuses the existing validators and junction sync.
+- **`POST /workflows/{id}/validate`, `GET /orchestration/live`, `GET /processors/liveness`** (§4.4). The
+  browser never reaches Redis or Postgres: BaseApi is its only coupling, and nginx only passes `/api/` through.
 
 ## 4. Graph-save contract
 
@@ -118,6 +120,22 @@ The response is the graph re-read through `WorkflowGraphLoader`.
     and version alone are not unique (no constraint); the suffix is. The new step lands **parked**.
   - *Processor:* name, version, source hash. Its schemas are set afterwards in the Processor inspector.
   - *Cache:* name, version, root. It is created **unlinked**; dragging it onto the workflow links it.
+
+### 4.4 Validation and status reads
+
+- **`POST /workflows/{id}/validate`** runs **every** workflow-start gate (cycle and missing step, schema
+  edge, payload against config schema, processor liveness) and returns **all** problems, each as
+  `{ gate, title, detail, offending }`, the same description a start's 422 gives. The body is an optional
+  draft in the shape of `PUT /graph`; without one the stored workflow is checked. It never saves and never
+  starts: the draft is applied by the real graph saver inside a transaction that is always rolled back.
+  Gate problems are a 200 with `valid: false`; a draft the save would reject keeps the save's status.
+- The gates gain a collect mode beside their throw-first mode, so there is **one implementation of each
+  rule** and the start path is unchanged.
+- **`GET /orchestration/live`** lists the running workflow ids (the `skp:live` set). Start and stop are
+  queued (202), so the studio polls it and shows "starting…" / "stopping…" until the set catches up.
+- **`GET /processors/liveness`** reports each processor: live, and its replicas classified (healthy,
+  absent, unhealthy, stale, malformed), judged exactly as the start gate judges.
+- A Redis fault on any of them is a 500, never a "not live" answer.
 
 ## 5. Visual system
 
@@ -225,6 +243,7 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
   from a searchable dropdown. Closing an unsaved one asks **Save / Discard / Cancel**.
 - **Shared tool panes:** Inspector, Toolbox, Problems, Output.
 - Each document has a capsule toolbar: name, cron, status, Save / Start / Stop, its own zoom and Fit.
+  The status comes from `GET /orchestration/live` (§4.4).
 - Clicking anything fills the Inspector, whether it is shown or hidden.
 
 ### 6.2 Docking behaviour (all built on the free core)
@@ -284,8 +303,9 @@ Two rules hold for every view:
 - **Problems** has two severities:
   - **start blockers:** cycle, broken wire, invalid payload, dangling step;
   - **notes:** fan-in, shared, parked, frozen.
-  Processor liveness reads Redis, so the editor cannot check it; it surfaces as the start's 422 in
-  Output.
+  Start blockers come from `POST /workflows/{id}/validate` (§4.4), called shortly after each edit pause
+  and on demand, and include **processor liveness**, so a dead processor shows before Start. Notes are
+  drawing facts the studio computes itself.
 
 ## 8. Error handling
 
@@ -301,9 +321,9 @@ Two rules hold for every view:
 
 ## 9. Testing
 
-- **`model/` and `layout/` with Vitest.** These tests mirror the backend validator tests case for
-  case: cycle detection, the schema-edge rule (by id; null passes), entry conditions (never 0), at most
-  one assignment per (workflow, step), reachability and parked blocks, and wire routing (straight in
+- **`model/` and `layout/` with Vitest.** No start rule is tested here, because none is re-implemented
+  (the backend's gate tests own them). They cover entry conditions (never 0), at most one assignment per
+  (workflow, step), reachability and parked blocks, and wire routing (straight in
   the band, bent → processor middle, fan-out spacing). `layout/` also covers manual routes: keeping
   them orthogonal as their ends move, removing a bend when segments line up, the jog on a first-segment
   drag, and grid alignment of every computed point.
@@ -329,6 +349,8 @@ Two rules hold for every view:
 ## 10. Build order (vertical slices)
 
 1. **Backend:** `Layout` column and migration, `GET` / `PUT /layout`, then `PUT /graph` with its tests.
+1b. **Backend reads:** the gates' collect mode, `POST /workflows/{id}/validate`, `GET /orchestration/live`,
+   `GET /processors/liveness` (§4.4).
 2. **Read-only canvas:** load, render and route with the section 5 visuals.
 3. **Editing:** wiring, moving, connector editing (§5.5) and alignment guides, undo/redo, parked
    blocks, draft save through `/graph`.
@@ -343,7 +365,6 @@ Two rules hold for every view:
 
 **Deferred:**
 - The VS drag **compass** (`dndCompass`) -- dockview-enterprise only.
-- Processor **liveness** in the editor -- would need a new read endpoint over Redis.
 
 **Rejected dock libraries** (web research, 2026-10-05):
 
