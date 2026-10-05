@@ -179,4 +179,38 @@ public sealed class GateCollectionTests
         Assert.Equal(2, problems.Count);
         Assert.All(problems, x => Assert.Contains("is not a valid JSON Schema", ((PayloadConfigSchemaOffending)x.Offending).errors[0]));
     }
+
+    [Fact]
+    public void AConfigSchemaWithAnExternalRefIsReportedAndDoesNotThrow()
+    {
+        var g = new Graph();
+        var cfg = g.Schema("""{"$ref":"https://example.invalid/x.json"}""");
+        var step = g.Step(g.Processor(config: cfg));
+        g.Workflow(step);
+        var asg = g.Assignment(step, "{}");
+
+        var problems = new PayloadConfigSchemaValidator().Collect(g.Snapshot);
+
+        var problem = Assert.Single(problems);
+        var offending = (PayloadConfigSchemaOffending)problem.Offending;
+        Assert.Equal(asg, offending.assignmentId);
+        Assert.Contains($"Config schema '{cfg}' could not be evaluated", offending.errors[0]);
+    }
+
+    [Fact]
+    public void ValidateThrowsTheFirstCollectedProblemWhenALaterAssignmentHasAnUnresolvableRef()
+    {
+        var g = new Graph();
+        var strict = g.Schema("""{"type":"object","required":["url"]}""");
+        var external = g.Schema("""{"$ref":"https://example.invalid/x.json"}""");
+        var stepA = g.Step(g.Processor(config: strict));
+        var stepB = g.Step(g.Processor(config: external));
+        g.Workflow(stepA, stepB);
+        var first = g.Assignment(stepA, "{}");
+        g.Assignment(stepB, "{}");
+
+        var ex = Assert.Throws<OrchestrationValidationException>(() => new PayloadConfigSchemaValidator().Validate(g.Snapshot));
+
+        Assert.Equal(first, ((PayloadConfigSchemaOffending)ex.Offending).assignmentId);
+    }
 }

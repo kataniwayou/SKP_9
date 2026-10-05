@@ -86,7 +86,20 @@ internal sealed class PayloadConfigSchemaValidator
 
             using (payloadDoc)
             {
-                var results = schema.Evaluate(payloadDoc.RootElement, JsonSchemaConfig.DefaultOptions);
+                EvaluationResults results;
+                try
+                {
+                    results = schema.Evaluate(payloadDoc.RootElement, JsonSchemaConfig.DefaultOptions);
+                }
+                catch (JsonSchemaException ex)
+                {
+                    // An unresolvable $ref (the no-op fetcher holding) is a problem to report, not a 500.
+                    problems.Add(OrchestrationValidationException.PayloadConfigSchema(
+                        assignment.Id,
+                        new[] { $"Config schema '{cfgId.Value}' could not be evaluated: {ex.Message}" }));
+                    continue;
+                }
+
                 if (!results.IsValid)
                 {
                     var errorStrings = (results.Details ?? Enumerable.Empty<EvaluationResults>())
