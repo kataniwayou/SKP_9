@@ -54,6 +54,8 @@ internal static class OrchestrationServiceCollectionExtensions
         // The liveness gate's multiplexer and time-provider dependencies are already in the
         // container, registered by the base API wiring.
         services.AddScoped<ProcessorLivenessValidator>();
+        // Shared by the liveness endpoint; the gate builds its own from the same two dependencies.
+        services.AddScoped<ProcessorLivenessProbe>();
 
         // The projection read/write pair, used only by the queue handlers. Scoped so a handler
         // resolved per delivery gets its own, matching every other dependency in this folder; both

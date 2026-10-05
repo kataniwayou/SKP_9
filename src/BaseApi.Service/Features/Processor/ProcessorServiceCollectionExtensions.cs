@@ -18,6 +18,7 @@ internal static class ProcessorServiceCollectionExtensions
         services.AddScoped<ProcessorService>();
         services.AddScoped<BaseService<ProcessorEntity, ProcessorCreateDto, ProcessorUpdateDto, ProcessorReadDto>>(
             sp => sp.GetRequiredService<ProcessorService>());
+        services.AddScoped<IProcessorLivenessReader, ProcessorLivenessReader>();
         return services;
     }
 }

@@ -19,13 +19,16 @@ public sealed class ProcessorsController :
     BaseController<ProcessorEntity, ProcessorCreateDto, ProcessorUpdateDto, ProcessorReadDto>
 {
     private readonly ProcessorService _processorService;
+    private readonly IProcessorLivenessReader _liveness;
 
     public ProcessorsController(
         BaseService<ProcessorEntity, ProcessorCreateDto, ProcessorUpdateDto, ProcessorReadDto> service,
-        ProcessorService processorService)
+        ProcessorService processorService,
+        IProcessorLivenessReader liveness)
         : base(service)
     {
         _processorService = processorService ?? throw new ArgumentNullException(nameof(processorService));
+        _liveness = liveness ?? throw new ArgumentNullException(nameof(liveness));
     }
 
     /// <summary>
@@ -52,4 +55,14 @@ public sealed class ProcessorsController :
     public async Task<ActionResult<ProcessorReadDto>> GetBySourceHash(
         string sourceHash, [FromQuery] string? instanceId, CancellationToken ct)
         => Ok(await _processorService.GetBySourceHashAsync(sourceHash, instanceId, ct));
+
+    /// <summary>
+    /// Every processor's liveness, as the start gate judges it. A Redis fault is a 500, never a
+    /// "not live" answer.
+    /// </summary>
+    [HttpGet("liveness")]
+    [ProducesResponseType(typeof(IReadOnlyList<ProcessorLivenessDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<IReadOnlyList<ProcessorLivenessDto>>> Liveness(CancellationToken ct)
+        => Ok(await _liveness.ReadAllAsync(ct));
 }
