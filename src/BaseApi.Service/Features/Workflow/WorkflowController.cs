@@ -164,10 +164,15 @@ public sealed class WorkflowsController :
     /// <summary>
     /// Stores the workflow's canvas layout. It moves blocks without touching the graph, so the editor
     /// can keep positions when nothing else changed. The graph save writes the layout too.
+    /// The save moves the workflow's <c>UpdatedAt</c>, which the next graph save is checked against,
+    /// so the response carries the new stamp: without it the editor's next save would send the old
+    /// stamp and get a spurious 409. The stamp is truncated to microseconds, because the tracked
+    /// entity holds 100 ns ticks after the save while Postgres stores microseconds, and a graph save
+    /// echoing the unrounded value would compare newer than the stored one.
     /// </summary>
     [HttpPut("{id:guid}/layout")]
     [Consumes("application/json")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(LayoutSavedDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> PutLayout(Guid id, [FromBody] JsonElement layout, CancellationToken ct)
@@ -181,7 +186,9 @@ public sealed class WorkflowsController :
 
         workflow.Layout = layout.GetRawText();
         await _db.SaveChangesAsync(ct);
-        return NoContent();
+
+        var stamp = workflow.UpdatedAt;
+        return Ok(new LayoutSavedDto(new DateTime(stamp.Ticks - stamp.Ticks % 10, stamp.Kind)));
     }
 
     /// <summary>

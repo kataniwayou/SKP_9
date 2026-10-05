@@ -85,7 +85,9 @@ public sealed class WorkflowLayoutTests
         var put = await controller.PutLayout(id, Json("""{"nodes":{"s1":{"x":8,"y":16}}}"""), TestContext.Current.CancellationToken);
         var get = await controller.GetLayout(id, TestContext.Current.CancellationToken);
 
-        Assert.IsType<NoContentResult>(put);
+        var saved = Assert.IsType<LayoutSavedDto>(Assert.IsType<OkObjectResult>(put).Value);
+        var row = await db.Set<WorkflowEntity>().AsNoTracking().SingleAsync(w => w.Id == id, TestContext.Current.CancellationToken);
+        Assert.Equal(row.UpdatedAt, saved.UpdatedAt);
         var content = Assert.IsType<ContentResult>(get);
         Assert.Equal("application/json", content.ContentType);
         Assert.Equal(16, JsonDocument.Parse(content.Content!).RootElement.GetProperty("nodes").GetProperty("s1").GetProperty("y").GetInt32());

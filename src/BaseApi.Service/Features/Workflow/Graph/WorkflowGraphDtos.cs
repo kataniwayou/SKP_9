@@ -68,3 +68,6 @@ public sealed record WorkflowGraphDto(
     List<AssignmentReadDto> Assignments,
     List<CacheReadDto> Caches,
     JsonElement? Layout);
+
+/// <summary>The workflow's new <c>UpdatedAt</c> after a layout save, for the editor's next graph save.</summary>
+public sealed record LayoutSavedDto(DateTime UpdatedAt);

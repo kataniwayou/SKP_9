@@ -36,7 +36,7 @@ public sealed class WorkflowGraphLiveTests : IAsyncLifetime
 
         foreach (var path in ordered.Where(p => Rank(p) < 2))
         {
-            try { await _http.DeleteAsync($"/api/v1/{path}"); } catch (HttpRequestException) { }
+            try { await _http.DeleteAsync($"/api/v1/{path}"); } catch (Exception) { }
         }
         foreach (var path in ordered.Where(p => Rank(p) == 2))
         {
@@ -52,15 +52,15 @@ public sealed class WorkflowGraphLiveTests : IAsyncLifetime
                     nextStepIds = Array.Empty<Guid>(), entryCondition = s.GetProperty("entryCondition").GetInt32(),
                 });
             }
-            catch (HttpRequestException) { }
+            catch (Exception) { }
         }
         foreach (var path in ordered.Where(p => Rank(p) >= 2))
         {
-            try { await _http.DeleteAsync($"/api/v1/{path}"); } catch (HttpRequestException) { }
+            try { await _http.DeleteAsync($"/api/v1/{path}"); } catch (Exception) { }
         }
         if (_processor != Guid.Empty)
         {
-            try { await _http.DeleteAsync($"/api/v1/processors/{_processor}"); } catch (HttpRequestException) { }
+            try { await _http.DeleteAsync($"/api/v1/processors/{_processor}"); } catch (Exception) { }
         }
         _http.Dispose();
     }
@@ -112,10 +112,11 @@ public sealed class WorkflowGraphLiveTests : IAsyncLifetime
             assignments: [new { stepId = b, payload = """{"v":1}""" }],
             layout: new { nodes = new { } }));
 
+        if (status == HttpStatusCode.OK && graph.GetProperty("assignments").GetArrayLength() > 0)
+            _cleanup.Add($"assignments/{graph.GetProperty("assignments")[0].GetProperty("id").GetGuid()}");
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(2, graph.GetProperty("steps").GetArrayLength());
         var asg = graph.GetProperty("assignments")[0];
-        _cleanup.Add($"assignments/{asg.GetProperty("id").GetGuid()}");
         Assert.Equal(b, asg.GetProperty("stepId").GetGuid());
     }
 
@@ -188,7 +189,43 @@ public sealed class WorkflowGraphLiveTests : IAsyncLifetime
         using var put = await _http.PutAsJsonAsync($"/api/v1/workflows/{wf}/layout", new { nodes = new { s = new { x = 24, y = 16 } } }, Ct);
         var layout = JsonDocument.Parse(await _http.GetStringAsync($"/api/v1/workflows/{wf}/layout", Ct)).RootElement;
 
-        Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        Assert.True(JsonDocument.Parse(await put.Content.ReadAsStringAsync(Ct)).RootElement.TryGetProperty("updatedAt", out _));
         Assert.Equal(24, layout.GetProperty("nodes").GetProperty("s").GetProperty("x").GetInt32());
+    }
+
+    [Fact]
+    public async Task ASharedAssignmentIsCopiedForOneWorkflowAndDeletedWhenTheLastLetsGo()
+    {
+        RealStack.SkipUnlessEnabled();
+        var (wfA, s1) = (Guid.NewGuid(), Guid.NewGuid());
+        Track(wfA, s1);
+        var (_, first) = await PutGraphAsync(wfA, Body(null, [s1], steps: [Step(s1, _processor)],
+            assignments: [new { stepId = s1, payload = """{"v":1}""" }]));
+        var r = first.GetProperty("assignments")[0].GetProperty("id").GetGuid();
+        _cleanup.Add($"assignments/{r}");
+
+        // B shares R on the same step through the plain workflow endpoint.
+        var wfB = await PostAsync("workflows", new
+        {
+            name = $"graph-live-{Guid.NewGuid():N}"[..24], version = "1.0.0",
+            entryStepIds = new[] { s1 }, assignmentIds = new[] { r }, cacheIds = Array.Empty<Guid>(),
+        });
+        _cleanup.Add($"workflows/{wfB}");
+
+        // A drops its assignment: R is shared, so it must stay.
+        var (statusA, afterA) = await PutGraphAsync(wfA, Body(first.GetProperty("workflow").GetProperty("updatedAt").GetString(), [s1],
+            assignments: [new { stepId = s1, payload = (string?)null }]));
+        Assert.Equal(HttpStatusCode.OK, statusA);
+        Assert.Equal(0, afterA.GetProperty("assignments").GetArrayLength());
+        Assert.Equal(HttpStatusCode.OK, (await _http.GetAsync($"/api/v1/assignments/{r}", Ct)).StatusCode);
+
+        // B drops it too: R is now an orphan and goes with the save, not a 422.
+        var bStamp = JsonDocument.Parse(await _http.GetStringAsync($"/api/v1/workflows/{wfB}", Ct)).RootElement
+            .GetProperty("updatedAt").GetString();
+        var (statusB, _) = await PutGraphAsync(wfB, Body(bStamp, [s1],
+            assignments: [new { stepId = s1, payload = (string?)null }]));
+        Assert.Equal(HttpStatusCode.OK, statusB);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/assignments/{r}", Ct)).StatusCode);
     }
 }

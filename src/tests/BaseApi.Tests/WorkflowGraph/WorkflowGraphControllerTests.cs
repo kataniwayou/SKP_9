@@ -41,6 +41,25 @@ public sealed class WorkflowGraphControllerTests
     }
 
     [Fact]
+    public async Task ALayoutSaveThenAGraphSaveWithTheReturnedStampSucceeds()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var (wf, a) = (Guid.NewGuid(), Guid.NewGuid());
+        var controller = Controller(h);
+        var first = Assert.IsType<WorkflowGraphDto>(Assert.IsType<OkObjectResult>(await controller.PutGraph(wf,
+            GraphHarness.Request([a], steps: [GraphHarness.NewStep(a, proc)]), h.Ct)).Value);
+
+        h.Tick();
+        var layout = JsonDocument.Parse("""{"nodes":{"s":{"x":8,"y":16}}}""").RootElement.Clone();
+        var saved = Assert.IsType<LayoutSavedDto>(Assert.IsType<OkObjectResult>(await controller.PutLayout(wf, layout, h.Ct)).Value);
+
+        Assert.True(saved.UpdatedAt > first.Workflow.UpdatedAt);
+        var next = await controller.PutGraph(wf, GraphHarness.Request([a], workflowUpdatedAt: saved.UpdatedAt), h.Ct);
+        Assert.IsType<OkObjectResult>(next);
+    }
+
+    [Fact]
     public async Task TheConflictHandlerWritesA409NamingTheEntity()
     {
         var services = new ServiceCollection().AddOptions().AddProblemDetails().BuildServiceProvider();

@@ -130,7 +130,7 @@ internal sealed class WorkflowGraphSaver : IWorkflowGraphSaver
                 _stepMapper.Update(ToUpdate(s), stored);
                 // Wires live only in StepNextSteps, so a wiring-only edit leaves the row Unchanged and
                 // UpdatedAt/xmin would not move. Force the stamp so the next stale save gets a 409.
-                _db.Entry(stored).State = EntityState.Modified;
+                _db.Entry(stored).Property(e => e.UpdatedAt).IsModified = true;
                 await StepJunctions.SyncNextStepsAsync(_db, s.Id, s.NextStepIds, replaceExisting: true, ct);
             }
             else
@@ -162,7 +162,7 @@ internal sealed class WorkflowGraphSaver : IWorkflowGraphSaver
         {
             _workflowMapper.Update(workflowDto with { AssignmentIds = assignmentIds }, storedWorkflow);
             // Same reason as steps: entry/cache/assignment changes are junction-only, so force the stamp.
-            _db.Entry(storedWorkflow).State = EntityState.Modified;
+            _db.Entry(storedWorkflow).Property(e => e.UpdatedAt).IsModified = true;
         }
 
         if (request.Layout is { } newLayout)

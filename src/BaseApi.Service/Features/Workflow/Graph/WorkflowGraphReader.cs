@@ -40,8 +40,12 @@ internal sealed class WorkflowGraphReader : IWorkflowGraphReader
         // The snapshot clears itself on dispose, so everything is copied out before it goes.
         using var snapshot = await _loader.LoadL1Async([workflowId], ct);
 
+        // The workflow can be deleted between the two reads.
+        if (!snapshot.Workflows.TryGetValue(workflowId, out var workflow))
+            throw new NotFoundException(nameof(WorkflowEntity), workflowId);
+
         return new WorkflowGraphDto(
-            snapshot.Workflows[workflowId],
+            workflow,
             snapshot.Steps.Values.OrderBy(s => s.Name, StringComparer.Ordinal).ThenBy(s => s.Id).ToList(),
             snapshot.Processors.Values.OrderBy(p => p.Name, StringComparer.Ordinal).ThenBy(p => p.Id).ToList(),
             snapshot.Schemas.Values.OrderBy(s => s.Name, StringComparer.Ordinal).ThenBy(s => s.Id).ToList(),
