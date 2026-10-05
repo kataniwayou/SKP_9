@@ -55,7 +55,7 @@ public sealed class WorkflowEntity : BaseEntity
     /// <b>Positions only, never graph facts.</b> It holds where the sphere, steps, caches, parked blocks
     /// and junctions are drawn. What exists is decided by the tables on every load; an id in here that
     /// no longer exists is ignored by the editor. The server treats it as opaque and checks only that
-    /// it is a JSON object within the size cap (<c>WorkflowLayout</c>).
+    /// it is a JSON object within the size cap (<see cref="Graph.WorkflowLayout"/>).
     /// </para>
     /// <para>
     /// Like <see cref="Diagram"/>, it is absent from every DTO and travels only through the dedicated

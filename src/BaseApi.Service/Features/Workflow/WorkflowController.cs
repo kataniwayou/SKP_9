@@ -1,5 +1,7 @@
+using System.Text.Json;
 using BaseApi.Core.Controllers;
 using BaseApi.Core.Services;
+using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -33,11 +35,20 @@ public sealed class WorkflowsController :
     BaseController<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto>
 {
     private readonly AppDbContext _db;
+    private readonly IWorkflowGraphReader? _graphReader;
+    private readonly IWorkflowGraphSaver? _graphSaver;
 
     public WorkflowsController(
         BaseService<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto> service,
-        AppDbContext db)
-        : base(service) => _db = db;
+        AppDbContext db,
+        IWorkflowGraphReader? graphReader = null,
+        IWorkflowGraphSaver? graphSaver = null)
+        : base(service)
+    {
+        _db = db;
+        _graphReader = graphReader;
+        _graphSaver = graphSaver;
+    }
 
     /// <summary>
     /// Returns the workflow's diagram as SVG, or the placeholder when none has been published.
@@ -124,6 +135,50 @@ public sealed class WorkflowsController :
             return NotFound();
 
         workflow.Diagram = svg;
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Returns the workflow's canvas layout as JSON, or the JSON literal <c>null</c> when it has never
+    /// been laid out. A missing workflow is 404, so "never laid out" stays distinguishable from a wrong id.
+    /// </summary>
+    [HttpGet("{id:guid}/layout")]
+    [Produces("application/json")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetLayout(Guid id, CancellationToken ct)
+    {
+        var row = await _db.Set<WorkflowEntity>()
+            .Where(w => w.Id == id)
+            .Select(w => new { w.Layout })
+            .FirstOrDefaultAsync(ct);
+
+        if (row is null)
+            return NotFound();
+
+        return Content(row.Layout ?? "null", "application/json");
+    }
+
+    /// <summary>
+    /// Stores the workflow's canvas layout. It moves blocks without touching the graph, so the editor
+    /// can keep positions when nothing else changed. The graph save writes the layout too.
+    /// </summary>
+    [HttpPut("{id:guid}/layout")]
+    [Consumes("application/json")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> PutLayout(Guid id, [FromBody] JsonElement layout, CancellationToken ct)
+    {
+        if (WorkflowLayout.Validate(layout) is { } error)
+            return BadRequest(error);
+
+        var workflow = await _db.Set<WorkflowEntity>().FirstOrDefaultAsync(w => w.Id == id, ct);
+        if (workflow is null)
+            return NotFound();
+
+        workflow.Layout = layout.GetRawText();
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
