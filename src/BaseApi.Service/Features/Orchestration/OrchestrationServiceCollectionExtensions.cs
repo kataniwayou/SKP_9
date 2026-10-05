@@ -59,6 +59,8 @@ internal static class OrchestrationServiceCollectionExtensions
         // resolved per delivery gets its own, matching every other dependency in this folder; both
         // are stateless over an injected multiplexer, so the lifetime costs nothing.
         services.AddScoped<L2LiveSet>();
+        // The studio's status read: the same live set, through a public interface the controller can take.
+        services.AddScoped<ILiveWorkflowReader>(sp => sp.GetRequiredService<L2LiveSet>());
         services.AddScoped<IStepRowLookup, DbStepRowLookup>();
         services.AddScoped<L2ProjectionWriter>();
 

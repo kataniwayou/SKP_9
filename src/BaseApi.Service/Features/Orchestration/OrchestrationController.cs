@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace BaseApi.Service.Features.Orchestration;
 
 /// <summary>
-/// Cross-entity orchestration controller. Two endpoints, start and stop, each acting on a single
-/// workflow id supplied as the request body, and returning <c>202 Accepted</c> with no response body.
+/// Cross-entity orchestration controller. Start and stop, each acting on a single workflow id supplied
+/// as the request body and returning 202 Accepted, plus a read of the running workflows.
 /// <para>
 /// <b>Accepted rather than No Content, because the work is not finished when the response is
 /// written.</b> Both verbs validate the request completely and then hand the projection write to a
@@ -29,9 +29,13 @@ namespace BaseApi.Service.Features.Orchestration;
 public sealed class OrchestrationController : ControllerBase
 {
     private readonly OrchestrationService _service;
+    private readonly ILiveWorkflowReader _live;
 
-    public OrchestrationController(OrchestrationService service)
-        => _service = service ?? throw new ArgumentNullException(nameof(service));
+    public OrchestrationController(OrchestrationService service, ILiveWorkflowReader live)
+    {
+        _service = service;
+        _live = live ?? throw new ArgumentNullException(nameof(live));
+    }
 
     /// <summary>
     /// Validates the requested workflow and its graph and queues the projection write, returning
@@ -62,4 +66,14 @@ public sealed class OrchestrationController : ControllerBase
         await _service.StopAsync(workflowId, ct);
         return Accepted();
     }
+
+    /// <summary>
+    /// The running workflows. Start and stop are queued (both answer 202), so a workflow appears here
+    /// a moment after its start was accepted and leaves a moment after its stop.
+    /// </summary>
+    [HttpGet("live")]
+    [ProducesResponseType(typeof(IReadOnlyList<Guid>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<IReadOnlyList<Guid>>> Live(CancellationToken ct)
+        => Ok(await _live.ListAsync(ct));
 }
