@@ -1,10 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { describe, expect, it } from 'vitest';
-import { graphDto, processorDto, stepDto } from '../api/fixtures';
+import { describe, expect, it, vi } from 'vitest';
+import { cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { createStudioStore, StudioStoreProvider, type StudioStore } from '../store/studioStore';
-import { Inspector } from './Inspector';
+import { renderInspector } from '../test/inspector';
 import { Output, Toolbox } from './PaneNote';
 import { Problems } from './Problems';
 
@@ -21,23 +21,23 @@ async function storeWith(problems: Parameters<typeof loadedDocument>[1] = []): P
 }
 const wrap = (store: StudioStore, ui: ReactNode) => render(<StudioStoreProvider value={store}>{ui}</StudioStoreProvider>);
 
+const ok = <T,>(value: T) => ({ ok: true, value }) as const;
+
 describe('Inspector', () => {
   it('asks for a workflow, then for a selection', async () => {
-    const empty = createStudioStore();
-    const { unmount } = wrap(empty, <Inspector />);
-    expect(screen.getByText('Open a workflow to inspect it.')).toBeInTheDocument();
-    unmount();
-
-    wrap(await storeWith(), <Inspector />);
+    const { store } = await renderInspector({}, { selection: { kind: 'step', stepId: 's1' } });
+    act(() => store.dispatch({ type: 'select', workflowId: 'wf1', selection: null }));
     expect(screen.getByText(/Nothing selected/)).toBeInTheDocument();
+
+    act(() => store.dispatch({ type: 'close', workflowId: 'wf1' }));
+    expect(screen.getByText('Open a workflow to inspect it.')).toBeInTheDocument();
   });
 
   it('fills when something is selected, and keeps one show-all switch across entities', async () => {
-    const store = await storeWith();
-    wrap(store, <Inspector />);
-    act(() => store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } }));
+    const getEntity = vi.fn(async (kind: string) => ok(kind === 'step' ? stepDto('s1', { name: 'fetch' }) : workflowDto()));
+    const { store } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' } });
     expect(screen.getByText('STEP')).toBeInTheDocument();
-    expect(screen.getByLabelText('Unique name')).toHaveTextContent('fetch_1.0.0-s1');
+    expect(await screen.findByLabelText('Unique name')).toHaveTextContent('fetch_1.0.0-s1');
     expect(screen.queryByText('Created at')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '▸ show all' }));
@@ -45,17 +45,111 @@ describe('Inspector', () => {
 
     act(() => store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'workflow' } }));
     expect(screen.getByText('WORKFLOW')).toBeInTheDocument();
-    expect(screen.getByText('Created at')).toBeInTheDocument();
+    expect(await screen.findByText('Created at')).toBeInTheDocument();
+    expect(screen.getByLabelText('Unique name')).toHaveTextContent('orders_1.0.0-wf1');
     expect(screen.getByRole('button', { name: '▾ hide details' })).toBeInTheDocument();
   });
 
   it('marks every read-only value so its full text shows when it is cut', async () => {
-    const store = await storeWith();
-    store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'processor', processorId: 'p1', stepId: 's1' } });
-    const { container } = wrap(store, <Inspector />);
+    const { container } = await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(processorDto('p1', { name: 'fetcher', configSchemaId: 'sc1' }))) },
+      { selection: { kind: 'processor', processorId: 'p1', stepId: 's1' } });
+    fireEvent.click(await screen.findByRole('button', { name: '▸ show all' }));
     const values = [...container.querySelectorAll('.ro, .slot .v')];
     expect(values.length).toBeGreaterThan(5);
     for (const v of values) expect(v.getAttribute('data-tipcut')).toBe(v.textContent);
+  });
+});
+
+describe('Inspector editing (slice 3b)', () => {
+  const step = stepDto('s1', { name: 'fetch', nextStepIds: ['s2'], processorId: 'p1', description: null });
+
+  it('reads the selected step and shows its writable fields filled in', async () => {
+    const { api } = await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
+    expect(await screen.findByLabelText('Name')).toHaveValue('fetch');
+    expect(screen.getByLabelText('Version')).toHaveValue('1.0.0');
+    expect(screen.getByLabelText('Entry condition')).toHaveValue('1');
+    expect(api.getEntity).toHaveBeenCalledWith('step', 's1');
+  });
+
+  it('marks an edit unsaved, saves it, and takes what the server read back', async () => {
+    const putEntity = vi.fn().mockResolvedValue(ok({ ...step, description: 'now' }));
+    const { afterWrite } = await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)), putEntity }, { selection: { kind: 'step', stepId: 's1' } });
+    fireEvent.change(await screen.findByLabelText('Description'), { target: { value: 'now' } });
+    expect(screen.getByText('● unsaved changes')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(putEntity).toHaveBeenCalledWith('step', 's1', expect.objectContaining({ description: 'now', nextStepIds: ['s2'] })));
+    await waitFor(() => expect(screen.queryByText('● unsaved changes')).toBeNull());
+    expect(screen.getByLabelText('Description')).toHaveValue('now');
+    expect(afterWrite).toHaveBeenCalled();
+  });
+
+  it('Revert drops the edits; Save and Revert are disabled with nothing to save', async () => {
+    await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
+    const save = await screen.findByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Entry condition'), { target: { value: '4' } });
+    expect(save).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+    expect(screen.getByLabelText('Entry condition')).toHaveValue('1');
+    expect(save).toBeDisabled();
+  });
+
+  it('disables Save while Name is empty, showing the saved name as the placeholder', async () => {
+    await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
+    const name = await screen.findByLabelText('Name');
+    fireEvent.change(name, { target: { value: '' } });
+    expect(name).toHaveAttribute('placeholder', 'fetch');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('marks invalid JSON while typing and still lets the server judge it', async () => {
+    await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(cacheDto('c1'))) }, { selection: { kind: 'cache', cacheId: 'c1' } });
+    fireEvent.change(await screen.findByLabelText('Items'), { target: { value: '{"a":' } });
+    expect(screen.getByText('Not valid JSON')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  it('shows a 400 under its field and a 409 in a banner, keeping what was typed', async () => {
+    const putEntity = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: { kind: 'badRequest', status: 400, detail: 'Validation failed', errors: { Version: ['Version must be x.y.z.'] } } })
+      .mockResolvedValueOnce({ ok: false, error: { kind: 'conflict', status: 409, detail: 'Unique constraint violation: root already exists.', entity: null } });
+    await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(cacheDto('c1'))), putEntity }, { selection: { kind: 'cache', cacheId: 'c1' } });
+    fireEvent.change(await screen.findByLabelText('Version'), { target: { value: 'abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Version must be x.y.z.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Version')).toHaveValue('abc');
+    expect(screen.getByLabelText('Version')).toHaveAttribute('aria-invalid', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Not saved: Unique constraint violation: root already exists.');
+    expect(screen.getByLabelText('Version')).toHaveValue('abc');
+  });
+
+  it('drills from a step to its processor and on to a schema slot, with a breadcrumb back', async () => {
+    const getEntity = vi.fn(async (kind: string, id: string) =>
+      ok(kind === 'step' ? step : kind === 'processor' ? processorDto('p1', { name: 'fetcher', configSchemaId: 'sc1' }) : schemaDto(id, { name: 'cfg' })));
+    const { guard } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' } });
+    fireEvent.click(await screen.findByRole('button', { name: /fetcher_1\.0\.0-p1/ }));
+    expect(await screen.findByText('PROCESSOR')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'sc1' }));                   // the Config slot; the graph does not carry sc1
+    expect(await screen.findByLabelText('Definition')).toHaveValue('{}');
+    expect(screen.getByRole('navigation', { name: 'Drill-down' })).toHaveTextContent('Step›Processor›Config schema');
+    expect(guard).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByText('PROCESSOR')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Step' }));
+    expect(await screen.findByLabelText('Name')).toHaveValue('fetch');
+  });
+
+  it('shows why a restored draft cannot be read, and lets it be discarded (review focus 4)', async () => {
+    const { store } = await renderInspector({ getEntity: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'notFound', status: 404 } }) },
+      { selection: { kind: 'step', stepId: 's1' } });
+    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'restored', saved: '' }));
+    expect(await screen.findByText('This step no longer exists.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard unsaved changes' }));
+    expect(store.getState().docs[0]!.inspector.edits).toEqual({});
   });
 });
 

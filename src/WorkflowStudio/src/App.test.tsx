@@ -58,7 +58,7 @@ describe('App', () => {
   });
 
   it('opens a workflow as a tab, fills the Inspector on a click, and clears it on Esc', async () => {
-    render(<App api={fakeApi()} storage={memoryStorage()} />);
+    render(<App api={fakeApi({ getEntity: vi.fn().mockResolvedValue({ ok: true, value: stepDto('s1', { name: 'fetch' }) }) })} storage={memoryStorage()} />);
     await pickWorkflow('alpha');
 
     const step = await screen.findByText('fetch');
@@ -66,8 +66,8 @@ describe('App', () => {
     expect(screen.getByText('No problems')).toBeInTheDocument();
 
     fireEvent.click(step.closest('.react-flow__node')!);
+    expect(await screen.findByLabelText('Unique name')).toHaveTextContent('fetch_1.0.0-s1');
     expect(within(inspector()).getByText('STEP')).toBeInTheDocument();
-    expect(within(inspector()).getByLabelText('Unique name')).toHaveTextContent('fetch_1.0.0-s1');
 
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(within(inspector()).getByText(/Nothing selected/)).toBeInTheDocument();

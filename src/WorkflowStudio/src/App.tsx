@@ -3,8 +3,10 @@ import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
 import type { WorkflowReadDto } from './api/types';
 import { DocumentPanel } from './app/DocumentPanel';
+import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
 import { browserTabStorage, createSaver, readTabSession, restoredState, sessionOf, writeTabSession, type Session } from './app/session';
+import { StudioActionsProvider, type StudioActions } from './app/studioActions';
 import { SvgDefs } from './canvas/SvgDefs';
 import type { SavedView } from './canvas/savedView';
 import { fitterFor } from './canvas/useFitter';
@@ -134,34 +136,43 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     [workflows, documents],
   );
 
+  // interim: Task 7 (the page's guard and refresh) replaces these actions
+  const actions: StudioActions = useMemo(() => ({
+    service: createInspectorService(api, store, () => {}),
+    guard: (_workflowId, proceed) => proceed(),
+    confirmUnlink: () => {},
+  }), [api, store]);
+
   return (
-    <DockShell
-      documents={documents}
-      activeDocumentId={activeId}
-      onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
-      onCloseDocument={(id) => {
-        views.current.delete(id); // reopened later, it fits afresh
-        store.dispatch({ type: 'close', workflowId: id });
-      }}
-      workflows={items}
-      pickerNote={listError}
-      onPickerOpen={readList}
-      onOpenWorkflow={openWorkflow}
-      renderDocument={(id, panel) => (
-        <DocumentPanel api={api} workflowId={id} panel={panel}
-          initialView={views.current.get(id) ?? null}
-          onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }} />
-      )}
-      renderTool={renderTool}
-      inspectorKey={inspector}
-      onEscape={() => {
-        const id = store.getState().activeId;
-        if (id !== null) store.dispatch({ type: 'select', workflowId: id, selection: null });
-      }}
-      popoutContent={<SvgDefs />}
-      storage={storage}
-      restore={session?.dock ?? null}
-      onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
-    />
+    <StudioActionsProvider value={actions}>
+      <DockShell
+        documents={documents}
+        activeDocumentId={activeId}
+        onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
+        onCloseDocument={(id) => {
+          views.current.delete(id); // reopened later, it fits afresh
+          store.dispatch({ type: 'close', workflowId: id });
+        }}
+        workflows={items}
+        pickerNote={listError}
+        onPickerOpen={readList}
+        onOpenWorkflow={openWorkflow}
+        renderDocument={(id, panel) => (
+          <DocumentPanel api={api} workflowId={id} panel={panel}
+            initialView={views.current.get(id) ?? null}
+            onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }} />
+        )}
+        renderTool={renderTool}
+        inspectorKey={inspector}
+        onEscape={() => {
+          const id = store.getState().activeId;
+          if (id !== null) store.dispatch({ type: 'select', workflowId: id, selection: null });
+        }}
+        popoutContent={<SvgDefs />}
+        storage={storage}
+        restore={session?.dock ?? null}
+        onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
+      />
+    </StudioActionsProvider>
   );
 }

@@ -35,3 +35,27 @@
 .prob b { color: var(--ink); font-weight: 500; }
 .prob .gate { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; margin-right: 8px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--muted); background: var(--panel-2); }
 .prob .pd { margin-top: 3px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+
+/* inspector editing (slice 3b; mockup v49 .input, .btn) */
+.input { font-family: var(--mono); font-size: 12px; background: var(--ground-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 6px 8px; color: var(--ink); width: 100%; min-width: 0; box-sizing: border-box; }
+.input::placeholder { color: var(--faint); }
+.input[aria-invalid="true"] { border-color: var(--f); }
+textarea.input { resize: vertical; line-height: 1.45; font-family: var(--mono); }
+textarea.input.json { white-space: pre; overflow: auto; }
+select.input { appearance: auto; }
+.field.tall { align-items: start; }
+.field.tall > label { padding-top: 7px; }
+.fval { min-width: 0; }
+.ferr { margin-top: 3px; font-size: 11.5px; color: var(--f); }
+.fnote { margin-top: 3px; font-size: 11.5px; color: var(--x); }
+.drill { font-family: var(--mono); font-size: 12px; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drill::after { content: " ›"; color: var(--faint); }
+.slot .v.drill { color: var(--accent); }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 16px 0; font-size: 12px; color: var(--muted); }
+.crumbs .sep { color: var(--faint); }
+.crumbs [aria-current] { color: var(--ink); }
+.unsaved { margin-left: 8px; font-size: 11.5px; color: var(--x); }
+.savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--panel); }
+.banner { flex: 1 0 100%; padding: 6px 8px; font-size: 12px; color: var(--f); background: rgba(255, 122, 102, .08); border: 1px solid rgba(255, 122, 102, .35); border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
+.btn:disabled { opacity: .45; cursor: default; }
+.link.danger { color: var(--f); }
