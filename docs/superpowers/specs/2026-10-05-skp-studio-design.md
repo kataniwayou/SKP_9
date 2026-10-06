@@ -332,7 +332,8 @@ which assignments and caches a workflow holds, a step's processor, a processor's
 assignment's step) comes from the designer graph. Every save is `PUT /{entity}/{id}` with the entity's
 update DTO built from its last `GET`, only the writable fields changed and **every structural field
 sent back exactly as read** (a step `PUT` replaces `NextStepIds`; a workflow `PUT` replaces its three
-lists; `null` clears them).
+lists; `null` clears them). Save re-reads the entity (`GET`) immediately before the `PUT`, so structural fields go back exactly
+as the server holds them at that moment (decided 2026-10-06, plan 3b).
 
 | Entity | Writable (free text unless noted) | Not editable here |
 |---|---|---|
@@ -361,6 +362,10 @@ lists; `null` clears them).
 - **Save and Revert**, never autosave. Selecting another entity, drilling down, going back or closing
   the document with unsaved changes asks **Save / Discard / Cancel**. Drill-downs keep a breadcrumb
   (e.g. **Step › Processor › Config schema**) with a back button.
+- A document holds at most one Inspector draft: the drill-down trail and the typed fields (§6.1). It is
+  marked by "● unsaved changes", the tab's amber dot and an enabled capsule Save, which saves it. After
+  any write every open document re-reads its graph and validate, and every Inspector re-reads its
+  entity; a document that fails to re-read keeps its drawing and a toast says so.
 - **After a save** the form takes the returned DTO as its baseline, and every open document re-reads
   its graph and re-runs validate (a shared entity may sit in several), so the canvas and Problems
   update.

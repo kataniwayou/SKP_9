@@ -32,14 +32,17 @@ const label = (name: string, version: string, id: string) => `${name}_${version}
 
 const TOOL_NAMES = new Set(['Toolbox', 'Inspector', 'Problems', 'Output']);
 
-/** Every workflow with a step, each with a distinct name that is not a tool window's. Read-only. */
+/**
+ * Every workflow with a step, each with a distinct name that is not a tool window's. Read-only. Skips
+ * workflows named `e2e-…`: those are another spec's throwaway entities (e2e/throwaway.ts), which it edits.
+ */
 export async function workflowsWithSteps(request: APIRequestContext): Promise<LiveWorkflow[]> {
   const list = await request.get('/api/v1/workflows');
   expect(list.ok()).toBe(true);
   const found: LiveWorkflow[] = [];
   const names = new Set<string>(TOOL_NAMES);
   for (const w of (await list.json()) as { id: string; name: string; version: string }[]) {
-    if (names.has(w.name)) continue;
+    if (names.has(w.name) || w.name.startsWith('e2e-')) continue;
     const graph = await request.get(`/api/v1/workflows/${w.id}/graph`);
     if (graph.ok() && ((await graph.json()) as { steps?: unknown[] }).steps?.length) {
       names.add(w.name);
