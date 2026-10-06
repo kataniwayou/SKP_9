@@ -1,6 +1,6 @@
 # SKP Studio -- design
 
-Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Branch: `feature/path-importer`.
+Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Amended 2026-10-06: the Inspector shows the unique entity name; the workflow picker uses it (§7). Branch: `feature/path-importer`.
 
 ## 1. Purpose
 
@@ -279,6 +279,12 @@ Two rules hold for every view:
   with an ellipsis, and its full text is a tooltip, shown only when something was cut. This covers every
   read-only value: the source hash (its full 64 characters, cut on screen), schema slots, ids, dates and
   name tags.
+- **Unique entity name.** Selecting an entity shows, at the top of the Inspector, its unique name by
+  the rule in `Messaging.Contracts.EntityNames.Format`: `{name}_{version}-{last two id groups}` (the
+  studio's `model/entityNames.ts` mirrors it; the workflow picker uses the same name). It is the name
+  the logs and processors use, so an operator can match what they selected to what they read in Output
+  and the logs. The canvas does not show it: step caps keep the bare name and version (user decision,
+  2026-10-06).
 - **Entity details.** Every entity (step, parked step, processor, workflow, cache) always shows its name
   and version. Under them, **▸ show all** reveals the base-entity fields, read-only: **Id, Created at,
   Created by, Updated at, Updated by**; **▾ hide details** folds them away. It is one switch for all
