@@ -468,3 +468,7 @@ analyzer-reports/phase-88-screenshots/
 
 # SKP Studio build output
 src/WorkflowStudio/dist/
+
+# SKP Studio end-to-end output
+src/WorkflowStudio/test-results/
+src/WorkflowStudio/playwright-report/
