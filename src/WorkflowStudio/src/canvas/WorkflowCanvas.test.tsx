@@ -64,6 +64,15 @@ describe('WorkflowCanvas', () => {
     }
     const node = (container: HTMLElement, id: string) => container.querySelector(`.react-flow__node[data-id="${id}"]`) as HTMLElement;
 
+    it('shows the hub started only when the live state says so (review focus 3)', async () => {
+      const doc = await twoSteps();
+      const { container, rerender } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} />);
+      expect(container.querySelector('.wf')!.getAttribute('data-started')).toBe('false');
+
+      rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} live={{ started: true, health: () => 'healthy' }} />);
+      expect(container.querySelector('.wf')!.getAttribute('data-started')).toBe('true');
+    });
+
     it('shows no React Flow attribution badge (it would sit on the horizontal scroll bar)', async () => {
       const { container } = render(<WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} />);
       expect(container.querySelector('.react-flow__node')).not.toBeNull();

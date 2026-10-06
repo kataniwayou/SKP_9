@@ -241,7 +241,8 @@ describe('DocumentPanel', () => {
     act(() => store.dispatch({ type: 'loaded', workflowId: 'wf1', doc }));
 
     expect(await screen.findByText('fetch')).toBeInTheDocument();
-    expect(screen.getByText('⏱ 0 * * * * *')).toBeInTheDocument();
+    // the toolbar and the hub's pill both show the cron
+    expect(screen.getAllByText('⏱ 0 * * * * *')).toHaveLength(2);
     expect(await screen.findByText('▶ running')).toBeInTheDocument();
     for (const name of ['⤓ Save', '▶ Start', '■ Stop']) expect(screen.getByRole('button', { name })).toBeDisabled();
     expect(screen.getByRole('button', { name: '▶ Start' }).parentElement).toHaveAttribute('data-tip', 'Not available yet');

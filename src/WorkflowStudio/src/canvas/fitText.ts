@@ -17,7 +17,7 @@ export const FONT = {
   stepVersion: `9.5px ${MONO}`,
   processorTitle: `11px ${SANS}`,
   processorRow: `9px ${MONO}`,
-  sphere: `600 14px ${SANS}`,
+  hubPill: `10px ${MONO}`,
 } as const;
 
 export const MEASURED_FONTS: readonly string[] = [...new Set(Object.values(FONT))];

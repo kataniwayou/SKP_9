@@ -52,6 +52,23 @@
 .chipg .nx-chipbody { stroke-width: 1.1; }
 .chipg .nx-core { stroke-width: .85; }
 
+/* workflow hub: the outer rings are structure white; the inside carries the run state */
+.wf.nx { --nc: var(--undetermined); }
+.wf.nx.started { --nc: var(--healthy); }
+.wf .hub-outer { --nc: var(--structure); }
+.wf .nx-glow { opacity: .05; pointer-events: none; }
+.wf .nx-ticks { stroke-width: 7; }
+.wf .nx-rim { stroke-width: 1.2; }
+.wf .nx-hub-spinner { stroke-width: 2; }
+.wf .nx-core-dots { stroke-dasharray: 1 3; stroke-width: 4; opacity: .55; }
+.wf .nx-wl { font: 400 11px var(--sans); fill: var(--nh); letter-spacing: 3px; }
+.wf .nx-pill .nx-ln { stroke-width: 1; opacity: .7; }
+.wf .nx-state { font: 400 10px var(--mono); fill: var(--nh); }
+.wf.nx-idlewf .hub-inner { animation: nxwait 2.6s ease-in-out infinite; }
+.wf.nx-idlewf .nx-spin { animation: none; }
+.wf.nx:hover .sphere { filter: brightness(1.08); }
+.studio-sel .wf .sphere { filter: url(#glow); }
+
 @media (prefers-reduced-motion: reduce) {
-  .nx-spin, .nx-wait { animation: none; }
+  .nx-spin, .nx-wait, .wf.nx-idlewf .hub-inner { animation: none; }
 }

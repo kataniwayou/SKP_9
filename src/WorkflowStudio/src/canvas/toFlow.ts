@@ -5,13 +5,14 @@ import { tetherPoints } from '../layout/wires';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { conditionInfo } from '../model/entryConditions';
+import { entityName } from '../model/entityNames';
 import type { Graph, Id, Processor, Step } from '../model/graph';
 import type { CableEdgeType } from './edges/CableEdge';
 import type { TetherEdgeType } from './edges/TetherEdge';
 import { FONT, type FittedText, type TextFitter } from './fitText';
 import type { CacheNodeType } from './nodes/CacheNode';
 import type { ProcessorView, StepNodeType } from './nodes/StepNode';
-import type { WorkflowNodeType } from './nodes/WorkflowNode';
+import { PILL_STATE, PILL_W, type WorkflowNodeType } from './nodes/WorkflowNode';
 
 export type StudioNode = WorkflowNodeType | StepNodeType | CacheNodeType;
 export type StudioEdge = CableEdgeType | TetherEdgeType;
@@ -50,7 +51,7 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
     id: SPHERE_NODE_ID, type: 'workflow', position: { x: cx - SPHERE_R, y: cy - SPHERE_R },
     width: 2 * SPHERE_R, height: 2 * SPHERE_R, draggable: false, selectable: false,
     handles: [handle('out', 'source', Position.Right, 2 * SPHERE_R, SPHERE_R), handle('down', 'source', Position.Bottom, SPHERE_R, 2 * SPHERE_R)],
-    data: sphereLabel(graph.workflow.name, fitter),
+    data: hubData(graph.workflow, fitter),
   });
 
   for (const [id, position] of placement.steps) {
@@ -152,25 +153,11 @@ function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitte
   };
 }
 
-/** Splits after `-`, `_` and `.` into at most three lines, each fitted to the sphere's chord. */
-function sphereLabel(name: string, fitter: TextFitter): { lines: string[]; full: string; cut: boolean } {
-  const font = FONT.sphere;
-  const chord = (dy: number) => 2 * Math.sqrt(Math.max(0, (SPHERE_R - 16) ** 2 - dy * dy));
-  const parts: string[] = [];
-  let current = '';
-  for (const segment of name.split(/(?<=[-_.])/)) {
-    if (current && fitter.width(current + segment, font) > chord(16)) { parts.push(current); current = segment; }
-    else current += segment;
-  }
-  parts.push(current);
-  if (parts.length > 3) parts.splice(2, parts.length - 2, parts.slice(2).join(''));
-
-  let cut = false;
-  const lines = parts.map((line, k) => {
-    const dy = (k - (parts.length - 1) / 2) * 16;
-    const fitted = fitter.fit(line, chord(Math.abs(dy) + 8), font);
-    cut = cut || fitted.cut;
-    return fitted.text;
-  });
-  return { lines, full: name, cut };
+/** The hub's tooltip and its pill's cron, cut to the room the state text leaves (gallery wfPill). */
+function hubData(workflow: Graph['workflow'], fitter: TextFitter): { tip: string; cron: FittedText } {
+  const room = PILL_W - 24 - fitter.width(PILL_STATE, FONT.hubPill);
+  return {
+    tip: entityName(workflow.name, workflow.version, workflow.id),
+    cron: fitter.fit(`⏱ ${workflow.cronExpression || 'not scheduled'}`, room, FONT.hubPill),
+  };
 }

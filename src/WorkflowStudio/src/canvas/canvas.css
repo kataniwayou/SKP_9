@@ -15,9 +15,6 @@
 .wire .brk + text { font-family: var(--sans); }
 .tether { fill: none; stroke: var(--line-2); stroke-width: 1.2; stroke-dasharray: 3 4; }
 
-/* sphere */
-.wf .wft { paint-order: stroke; stroke: rgba(3, 12, 28, .55); stroke-width: 3px; stroke-linejoin: round; }
-
 /* cache shell (plan 2; the locked cache replaces it in plan 3c Task 5) */
 .cachetag .contact { fill: #000; opacity: .5; filter: url(#soft); }
 .cachetag .shell { fill: url(#darkbody); }
@@ -47,10 +44,8 @@
 
 /* hover and selection (mockup v49, the .sel rules); the selection class sits on React Flow's node wrapper */
 .cachetag:hover .cap { filter: brightness(1.1); }
-.wf:hover .sphere { filter: brightness(1.08); }
 .studio-sel .cachetag .rimr { stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: none; }
 .studio-sel .cachetag .shell { filter: url(#glow); }
-.studio-sel .wf .sphere { filter: url(#glow); }
 
 /* a document's zoom (mockup v49 .zoom, .docbar .zoom) */
 .zoom { display: flex; align-items: center; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); }
