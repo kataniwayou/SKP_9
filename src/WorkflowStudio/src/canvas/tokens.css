@@ -1,0 +1,12 @@
+/* Colour tokens of the blueprint theme (mockup v49, the :root tokens). */
+:root {
+  --z-fly: 1000; --z-menu: 1010; --z-toast: 1020; --z-modal: 1030; --z-switcher: 1040; --z-tip: 1050;
+  --ground: #0A1220; --ground-2: #0C1628;
+  --panel: #0E1828; --panel-2: #122036; --line: #1E3050; --line-2: #2A4166;
+  --ink: #E6EEF8; --muted: #8193AE; --faint: #5A6B86;
+  --accent: #7DD3FC;
+  --c: #2DD4BF; --f: #FF7A66; --x: #F5B841; --a: #B392F0; --n: #F472B6;
+  --block: #0F1C31;
+  --sans: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
