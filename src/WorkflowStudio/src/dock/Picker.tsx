@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Anchor } from './Menu';
 import { asNode } from './nodes';
@@ -28,6 +28,10 @@ export function Picker({ items, anchor, onPick, onClose, note }: {
 }) {
   const [query, setQuery] = useState('');
   const shown = useMemo(() => filterItems(items, query), [items, query]);
+  const [chosen, setChosen] = useState(0);
+  const at = Math.min(chosen, Math.max(0, shown.length - 1));
+  const baseId = useId().replace(/[^\w-]/g, '');
+  const optionId = (i: number) => `${baseId}-o${i}`;
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,10 +45,11 @@ export function Picker({ items, anchor, onPick, onClose, note }: {
 
   const pick = (id: string) => { onClose(); onPick(id); };
   const view = anchor.doc.defaultView;
+  const top = Math.max(8, Math.min(anchor.y, (view?.innerHeight ?? 800) - 360));
   const left = Math.max(8, Math.min(anchor.x, (view?.innerWidth ?? 1280) - 452));
 
   return createPortal(
-    <div ref={ref} className="picker" role="dialog" aria-label="Open workflow" style={{ left, top: anchor.y }}>
+    <div ref={ref} className="picker" role="dialog" aria-label="Open workflow" style={{ left, top }}>
       <div className="pk-h">Open workflow</div>
       <input
         className="input"
@@ -52,15 +57,19 @@ export function Picker({ items, anchor, onPick, onClose, note }: {
         placeholder="Search workflows…"
         autoFocus
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => { setQuery(e.target.value); setChosen(0); }}
+        aria-activedescendant={shown.length > 0 ? optionId(at) : undefined}
+        aria-controls={`${baseId}-list`}
         onKeyDown={(e) => {
           if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
-          if (e.key === 'Enter' && shown[0]) { e.preventDefault(); pick(shown[0].id); }
+          if (e.key === 'ArrowDown') { e.preventDefault(); setChosen(Math.min(at + 1, shown.length - 1)); }
+          if (e.key === 'ArrowUp') { e.preventDefault(); setChosen(Math.max(at - 1, 0)); }
+          if (e.key === 'Enter' && shown[at]) { e.preventDefault(); pick(shown[at].id); }
         }}
       />
-      <div role="listbox" aria-label="Workflows">
+      <div role="listbox" aria-label="Workflows" id={`${baseId}-list`}>
         {shown.map((item, i) => (
-          <div key={item.id} role="option" aria-selected={i === 0} className={i === 0 ? 'pk hi' : 'pk'} onClick={() => pick(item.id)}>
+          <div key={item.id} id={optionId(i)} role="option" aria-selected={i === at} className={i === at ? 'pk hi' : 'pk'} onClick={() => pick(item.id)}>
             <b data-tipcut={item.label}>{item.label}</b>
             <span className="o">{item.open ? 'open — switch' : ''}</span>
           </div>

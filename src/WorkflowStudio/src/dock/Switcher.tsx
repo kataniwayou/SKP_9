@@ -26,8 +26,14 @@ export function Switcher({ entries, selected, onPick }: { entries: readonly Swit
     <div className="switcher" role="dialog" aria-label="Switch window">
       <div className="sw-t">Switch window <span className="m">hold Ctrl · tap E · release</span></div>
       <div className="sw-b">
-        <div role="listbox" aria-label="Active tool windows"><div className="sw-h">Active tool windows</div>{entries.filter((e) => !e.document).map(row)}</div>
-        <div role="listbox" aria-label="Active documents"><div className="sw-h">Active documents</div>{entries.filter((e) => e.document).map(row)}</div>
+        <div>
+          <div className="sw-h" aria-hidden="true">Active tool windows</div>
+          <div role="listbox" aria-label="Active tool windows">{entries.filter((e) => !e.document).map(row)}</div>
+        </div>
+        <div>
+          <div className="sw-h" aria-hidden="true">Active documents</div>
+          <div role="listbox" aria-label="Active documents">{entries.filter((e) => e.document).map(row)}</div>
+        </div>
       </div>
     </div>
   );

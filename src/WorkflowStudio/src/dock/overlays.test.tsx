@@ -2,8 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { railOf } from './AutoHide';
 import { Menu } from './Menu';
-import { filterItems } from './Picker';
-import { switcherOrder, touch } from './Switcher';
+import { Picker, filterItems } from './Picker';
+import { Switcher, switcherOrder, touch } from './Switcher';
 import { tipFor } from './Tooltip';
 
 describe('Menu', () => {
@@ -73,5 +73,66 @@ describe('switcher order and rails', () => {
 
   it('sends a top pane to the bottom rail', () => {
     expect([railOf('left'), railOf('right'), railOf('top'), railOf('bottom')]).toEqual(['l', 'r', 'b', 'b']);
+  });
+});
+
+describe('keyboard and screen readers (plan 3d)', () => {
+  it('a menu gives focus back to where it was when it closes, and Tab closes it', () => {
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const onClose = vi.fn();
+    const anchor = { x: 10, y: 10, doc: document };
+    const { unmount } = render(<Menu label="File" anchor={anchor} onClose={onClose} entries={[{ id: 'a', label: 'Open', onSelect: vi.fn() }]} />);
+    const item = screen.getByRole('menuitem', { name: /Open/ });
+    expect(document.activeElement).toBe(item);
+
+    fireEvent.keyDown(item, { key: 'Tab' });
+    expect(onClose).toHaveBeenCalled();
+    unmount();
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
+
+  it('the picker moves its choice with the arrow keys, and Enter opens the chosen one', () => {
+    const onPick = vi.fn();
+    const items = [{ id: 'a', label: 'alpha', open: false }, { id: 'b', label: 'beta', open: false }, { id: 'c', label: 'gamma', open: false }];
+    render(<Picker items={items} anchor={{ x: 10, y: 10, doc: document }} onPick={onPick} onClose={vi.fn()} />);
+    const input = screen.getByRole('textbox', { name: 'Search workflows' });
+    const selected = () => screen.getAllByRole('option').filter((o) => o.getAttribute('aria-selected') === 'true').map((o) => o.textContent);
+
+    expect(selected()).toEqual(['alpha']);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(selected()).toEqual(['gamma']);
+    expect(input).toHaveAttribute('aria-activedescendant', screen.getAllByRole('option')[2]!.id);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });              // stops at the last
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(selected()).toEqual(['beta']);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onPick).toHaveBeenCalledWith('b');
+  });
+
+  it('the picker goes back to the first match when the search changes', () => {
+    const items = [{ id: 'a', label: 'alpha', open: false }, { id: 'b', label: 'beta', open: false }];
+    render(<Picker items={items} anchor={{ x: 10, y: 10, doc: document }} onPick={vi.fn()} onClose={vi.fn()} />);
+    const input = screen.getByRole('textbox', { name: 'Search workflows' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.change(input, { target: { value: 'a' } });
+    expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('the picker opens on screen near the bottom edge', () => {
+    render(<Picker items={[]} anchor={{ x: 10, y: window.innerHeight - 5, doc: document }} onPick={vi.fn()} onClose={vi.fn()} />);
+    const top = parseFloat((screen.getByRole('dialog', { name: 'Open workflow' }) as HTMLElement).style.top);
+    expect(top).toBeLessThanOrEqual(window.innerHeight - 360);
+  });
+
+  it('the switcher keeps its headings outside its listboxes', () => {
+    render(<Switcher entries={[{ id: 'inspector', label: 'Inspector', document: false }, { id: 'doc:a', label: 'a', document: true }]} selected="doc:a" onPick={vi.fn()} />);
+    for (const box of screen.getAllByRole('listbox')) {
+      expect([...box.children].every((c) => c.getAttribute('role') === 'option')).toBe(true);
+    }
+    expect(screen.getByRole('listbox', { name: 'Active documents' })).toBeInTheDocument();
   });
 });

@@ -50,9 +50,15 @@ export function Menu({ entries, anchor, onClose, label }: { entries: readonly Me
 
   // keyboard: focus the first enabled item on open, then arrows / Home / End / Enter / Space
   const items = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []);
-  useEffect(() => { items()[0]?.focus(); }, []);
+  // focus the first item on open; on close, give focus back to whatever had it (the trigger)
+  useEffect(() => {
+    const before = anchor.doc.activeElement as HTMLElement | null;
+    items()[0]?.focus();
+    return () => { if (before && before.isConnected && typeof before.focus === 'function') before.focus(); };
+  }, []);
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Tab') { onClose(); return; }
     const list = items();
     if (list.length === 0) return;
     const at = list.indexOf(anchor.doc.activeElement as HTMLElement);
