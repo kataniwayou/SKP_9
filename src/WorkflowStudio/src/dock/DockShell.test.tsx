@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DockShell, type DockDocument, type DockShellProps } from './DockShell';
-import { LAYOUT_KEY } from './layoutPersistence';
+import { LAYOUT_KEY, type SavedLayout } from './layoutPersistence';
 import { memoryStorage } from '../test/memoryStorage';
 import { DockviewWillShowOverlayLocationEvent, type DockviewApi, type DockviewGroupPanel } from 'dockview-react';
 
@@ -645,5 +645,64 @@ describe('DockShell, the drop rules on a drag overlay (spec 6.2.4)', () => {
     expect(overlay({ panelId: 'toolbox' }, 'tab', 'problems')).toBe(true);
     expect(overlay({ panelId: 'toolbox' }, 'edge', null)).toBe(true);
     expect(overlay({ groupOf: 'problems' }, 'content', 'inspector')).toBe(true);
+  });
+});
+
+describe('session (plan 3d)', () => {
+  it('reports its layout, documents included, when it changes, and restores it at startup in place of the saved layout', () => {
+    const onLayoutChange = vi.fn();
+    setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'b', onLayoutChange });
+    // change the layout: auto-hide Problems from its tab menu
+    fireEvent.contextMenu(tab('Problems'));
+    choose(/Auto hide/);
+    const last = onLayoutChange.mock.calls.at(-1)![0] as SavedLayout;
+    expect(Object.keys(last.dock.panels)).toEqual(expect.arrayContaining(['doc:a', 'doc:b']));
+    expect(last.hidden).toContain('problems');
+
+    cleanup();
+    // a saved window layout that differs: the session must win at startup
+    setup({
+      documents: [doc('a'), doc('b')], activeDocumentId: 'b', restore: last,
+      storage: memoryStorage({ [LAYOUT_KEY]: JSON.stringify({ ...last, hidden: [] }) }),
+    });
+    expect(railTab('problems')).not.toBeNull();
+    expect(screen.getAllByText('wf-a', { selector: '.doctab .nm' })).toHaveLength(1);
+    expect(screen.getAllByText('wf-b', { selector: '.doctab .nm' })).toHaveLength(1);
+  });
+
+  it('does not report a document-less layout while it restores one', () => {
+    const first = vi.fn();
+    setup({ documents: [doc('a')], activeDocumentId: 'a', onLayoutChange: first });
+    const last = first.mock.calls.at(-1)![0] as SavedLayout;
+    cleanup();
+    const onLayoutChange = vi.fn();
+    setup({ documents: [doc('a')], activeDocumentId: 'a', restore: last, onLayoutChange });
+    expect(onLayoutChange).toHaveBeenCalled();
+    for (const [dock] of onLayoutChange.mock.calls as [SavedLayout][]) expect(Object.keys(dock.dock.panels)).toContain('doc:a');
+  });
+
+  it('falls back to the default layout when dockview rejects the restored layout, keeping the documents (review focus 2)', () => {
+    expectingDockviewRejection(() => {
+      setup({ documents: [doc('a')], activeDocumentId: 'a', restore: { ...JSON.parse(REJECTED_BY_DOCKVIEW), popped: [] } });
+    });
+    expect(toast()).toHaveTextContent(/default layout/);
+    expect(docTabs('wf-a')).toHaveLength(1);
+    for (const name of ['Inspector', 'Toolbox', 'Problems', 'Output']) expect(docTabs(name)).toHaveLength(1);
+  });
+
+  it('falls back to the default layout when the restored layout names a tool pane the dock does not know, keeping the documents', () => {
+    const unknown = JSON.parse(REJECTED_BY_DOCKVIEW) as SavedLayout;
+    unknown.dock.panels['tool:mystery'] = { id: 'tool:mystery', contentComponent: 'tool', title: 'Mystery' };
+    expectingDockviewRejection(() => {
+      setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'a', restore: { ...unknown, popped: [] } });
+    });
+    expect(toast()).toHaveTextContent(/default layout/);
+    for (const id of ['a', 'b']) expect(docTabs(`wf-${id}`)).toHaveLength(1);
+  });
+
+  it('without a session, still applies the saved window layout at startup', () => {
+    const storage = memoryStorage();
+    setup({ storage, restore: null });
+    expect(tab('Inspector')).toBeInTheDocument();
   });
 });

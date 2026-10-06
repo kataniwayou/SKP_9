@@ -6,7 +6,7 @@ import { canDrop } from './dropRules';
 import type { Rect } from './home';
 import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type ToolId } from './ids';
 import { keyCommand } from './keys';
-import { browserStorage, readLayout, writeLayout } from './layoutPersistence';
+import { browserStorage, readLayout, writeLayout, type SavedLayout } from './layoutPersistence';
 import { anchorBelow, Menu, type Anchor, type MenuEntry } from './Menu';
 import { DocumentHost, GroupActions, ShellProvider, StudioTab, ToolHost, Watermark, type DockDocument, type GroupAction, type ShellApi } from './parts';
 import { Picker, type PickerItem } from './Picker';
@@ -45,6 +45,10 @@ export interface DockShellProps {
   popoutContent?: ReactNode;
   /** Where the window layout is kept; tests pass their own. Default: this browser's localStorage. */
   storage?: Storage | null;
+  /** The dock as the page left it (the session, spec §6.1): restored at startup in place of the saved window layout. */
+  restore?: SavedLayout | null;
+  /** Called with the dock's state, documents included, whenever it changes: the page keeps it in its session. */
+  onLayoutChange?: (dock: SavedLayout) => void;
 }
 
 const COMPONENTS = { document: DocumentHost, tool: ToolHost };
@@ -154,7 +158,8 @@ export function DockShell(props: DockShellProps) {
 
   /** Applies the saved layout; at startup, silently, and the default layout when there is none. */
   const apply = useCallback((dv: DockviewApi, atStartup: boolean): void => {
-    const saved = readLayout(storage);
+    const restore = atStartup ? latest.current.props.restore ?? null : null;
+    const saved = restore ?? readLayout(storage);
     if (!saved) {
       if (atStartup) reset(dv); else showToast('No saved layout yet — Window › Save window layout first');
       return;
@@ -172,6 +177,13 @@ export function DockShell(props: DockShellProps) {
       syncDocuments(dv);
     }
   }, [storage, memory, reset, showToast, syncDocuments]);
+
+  /** Hands the page the dock's current state for its session; never while a layout is being applied. */
+  const report = useCallback((dv: DockviewApi) => {
+    const onLayoutChange = latest.current.props.onLayoutChange;
+    if (!onLayoutChange || applying.current) return;
+    onLayoutChange(captureLayout(dv, memory, latest.current.hidden, { keepDocuments: true }));
+  }, [memory]);
 
   // the dock lives as long as the page, so these subscriptions are never disposed
   const onReady = useCallback((event: DockviewReadyEvent) => {
@@ -197,13 +209,16 @@ export function DockShell(props: DockShellProps) {
       if (!canDrop(dragged, e.kind, target, emptyArea)) e.preventDefault();
     });
     // the document area takes the resize slack: keep its groups marked through drags, splits and moves
-    dv.onDidLayoutChange(() => markDocumentArea(dv, memory));
+    dv.onDidLayoutChange(() => { markDocumentArea(dv, memory); report(dv); });
     dv.onDidAddPopoutGroup((p) => setPopouts((ws) => (ws.includes(p.window) ? ws : [...ws, p.window])));
     dv.onDidRemovePopoutGroup((p) => setPopouts((ws) => ws.filter((w) => w !== p.window)));
     apply(dv, true);
     syncDocuments(dv);
     setApi(dv);
-  }, [apply, memory, syncDocuments]);
+  }, [apply, memory, syncDocuments, report]);
+
+  // the rails live in React state, not in dockview's layout: report when they change
+  useEffect(() => { if (api) report(api); }, [api, hidden, report]);
 
   // the open documents decide which document panels exist
   useEffect(() => { if (api) syncDocuments(api); }, [api, documents, syncDocuments]);
