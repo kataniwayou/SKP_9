@@ -1,8 +1,14 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from './api/client';
 import { workflowDto } from './api/fixtures';
 import { App } from './App';
+import * as fitText from './canvas/fitText';
+
+vi.mock('./canvas/fitText', async (original) => {
+  const actual = await original<typeof import('./canvas/fitText')>();
+  return { ...actual, createTextFitter: vi.fn(actual.createTextFitter) };
+});
 
 const api = (over: Partial<StudioApi>): StudioApi => ({
   listWorkflows: vi.fn(), getGraph: vi.fn(), getStep: vi.fn(), getProcessor: vi.fn(),
@@ -25,5 +31,28 @@ describe('App', () => {
   it('shows a network failure in the status line', async () => {
     render(<App api={api({ listWorkflows: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'network', message: 'Failed to fetch' } }) })} />);
     expect(await screen.findByRole('status')).toHaveTextContent('Network error: Failed to fetch');
+  });
+
+  describe('fonts', () => {
+    afterEach(() => { delete (document as { fonts?: unknown }).fonts; });
+
+    it('requests every face the fitter measures with before it makes the fitter', async () => {
+      const load = vi.fn().mockResolvedValue([]);
+      Object.defineProperty(document, 'fonts', { configurable: true, value: { load, ready: Promise.resolve() } });
+      vi.mocked(fitText.createTextFitter).mockClear();
+
+      render(<App api={api({ listWorkflows: vi.fn().mockResolvedValue({ ok: true, value: [] }) })} />);
+
+      await waitFor(() => expect(fitText.createTextFitter).toHaveBeenCalled());
+      expect(load.mock.calls.map((c) => c[0]).sort()).toEqual([...fitText.MEASURED_FONTS].sort());
+      const lastLoad = Math.max(...load.mock.invocationCallOrder);
+      expect(lastLoad).toBeLessThan(vi.mocked(fitText.createTextFitter).mock.invocationCallOrder[0]!);
+    });
+
+    it('does not wait for a document that has no fonts API', async () => {
+      vi.mocked(fitText.createTextFitter).mockClear();
+      render(<App api={api({ listWorkflows: vi.fn().mockResolvedValue({ ok: true, value: [] }) })} />);
+      await waitFor(() => expect(fitText.createTextFitter).toHaveBeenCalled());
+    });
   });
 });

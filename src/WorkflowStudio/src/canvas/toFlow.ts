@@ -8,7 +8,7 @@ import { conditionInfo } from '../model/entryConditions';
 import type { Graph, Id, Processor, Step } from '../model/graph';
 import type { CableEdgeType } from './edges/CableEdge';
 import type { TetherEdgeType } from './edges/TetherEdge';
-import { MONO, SANS, type FittedText, type TextFitter } from './fitText';
+import { FONT, type FittedText, type TextFitter } from './fitText';
 import type { CacheNodeType } from './nodes/CacheNode';
 import type { ProcessorView, StepNodeType } from './nodes/StepNode';
 import type { WorkflowNodeType } from './nodes/WorkflowNode';
@@ -80,8 +80,8 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
       id: cacheNodeId(id), type: 'cache', position, width: CACHE_W, height: CACHE_H, draggable: false, selectable: false,
       handles: [handle('in', 'target', Position.Top, CACHE_W / 2, 0)],
       data: {
-        name: fitter.fit(cache.name, CACHE_W - 12 - 52, `600 13px ${SANS}`),
-        sub: fitter.fit(`root ${cache.root} · ${count ?? '?'} items`, CACHE_W - 12 - 52, `10px ${MONO}`),
+        name: fitter.fit(cache.name, CACHE_W - 12 - 52, FONT.cacheName),
+        sub: fitter.fit(`root ${cache.root} · ${count ?? '?'} items`, CACHE_W - 12 - 52, FONT.cacheSub),
       },
     });
   }
@@ -113,8 +113,8 @@ function badge(payload: string | undefined): string | null {
 function stepLabels(step: Step, parked: boolean, fitter: TextFitter): { name: FittedText; version: FittedText; parked: boolean } {
   const versionX = parked ? 60 : 44;
   return {
-    name: fitter.fit(step.name, STEP_W - 12 - 34, `600 14.5px ${SANS}`),
-    version: fitter.fit(`v${step.version}`, STEP_W - versionX - 74, `10.5px ${MONO}`),
+    name: fitter.fit(step.name, STEP_W - 12 - 34, FONT.stepName),
+    version: fitter.fit(`v${step.version}`, STEP_W - versionX - 74, FONT.stepVersion),
     parked,
   };
 }
@@ -124,7 +124,7 @@ const ROOM = 152 - 16; // the die's inner width
 function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitter): ProcessorView {
   const name = p?.name ?? '(missing processor)';
   const version = p?.version ?? '';
-  const titleFont = `11px ${MONO}`, rowFont = `10px ${MONO}`;
+  const titleFont = FONT.processorTitle, rowFont = FONT.processorRow;
   const fitsWithVersion = version !== '' && fitter.width(`${name} ${version}`, titleFont) <= ROOM;
   const schemaLabel = (id: Id | null | undefined) => {
     if (!id) return null;
@@ -152,7 +152,7 @@ function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitte
 
 /** Splits after `-`, `_` and `.` into at most three lines, each fitted to the sphere's chord. */
 function sphereLabel(name: string, fitter: TextFitter): { lines: string[]; full: string; cut: boolean } {
-  const font = `600 14px ${SANS}`;
+  const font = FONT.sphere;
   const chord = (dy: number) => 2 * Math.sqrt(Math.max(0, (SPHERE_R - 16) ** 2 - dy * dy));
   const parts: string[] = [];
   let current = '';

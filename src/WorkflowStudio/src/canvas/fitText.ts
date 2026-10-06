@@ -5,6 +5,35 @@
 export const SANS = '"IBM Plex Sans Condensed","Helvetica Neue",Arial,sans-serif';
 export const MONO = '"IBM Plex Mono",ui-monospace,Consolas,monospace';
 
+/**
+ * Every font string the studio measures labels with (toFlow and the nodes use only these). The page
+ * loads each one before it makes the fitter: `document.fonts.ready` alone does not wait for faces
+ * nothing has asked for yet, and @fontsource faces load lazily.
+ */
+export const FONT = {
+  cacheName: `600 13px ${SANS}`,
+  cacheSub: `10px ${MONO}`,
+  stepName: `600 14.5px ${SANS}`,
+  stepVersion: `10.5px ${MONO}`,
+  processorTitle: `11px ${MONO}`,
+  processorRow: `10px ${MONO}`,
+  sphere: `600 14px ${SANS}`,
+} as const;
+
+export const MEASURED_FONTS: readonly string[] = [...new Set(Object.values(FONT))];
+
+/** Requests every measured face, then waits for fonts to settle. Safe where `document.fonts` is missing (jsdom). */
+export async function loadMeasuredFonts(): Promise<void> {
+  const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+  if (!fonts) return;
+  try {
+    await Promise.all(MEASURED_FONTS.map((f) => fonts.load(f)));
+    await fonts.ready;
+  } catch {
+    // a face that fails to load just means the fallback font is measured; never block the page
+  }
+}
+
 export interface FittedText {
   text: string;
   full: string;

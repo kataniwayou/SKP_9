@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StudioDocument } from '../app/document';
 import type { Graph, Step } from '../model/graph';
-import { createTextFitter } from './fitText';
+import { createTextFitter, MEASURED_FONTS } from './fitText';
 import { cacheNodeId, SPHERE_NODE_ID, toFlow } from './toFlow';
 
 const fitter = createTextFitter((text) => text.length * 7);
@@ -114,5 +114,14 @@ describe('toFlow', () => {
     expect(sphere.lines.length).toBeGreaterThan(1);
     expect(sphere.lines.length).toBeLessThanOrEqual(3);
     expect(sphere.full).toBe('orders-intake_eu-west.nightly-backfill-and-reconcile');
+  });
+
+  it('measures only with the fonts the page loads before it makes the fitter, and with all of them', () => {
+    const used = new Set<string>();
+    const recording = createTextFitter((text, font) => { used.add(font); return text.length * 7; });
+
+    toFlow(doc({}, ['p']), recording);
+
+    expect([...used].sort()).toEqual([...MEASURED_FONTS].sort());
   });
 });

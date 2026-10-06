@@ -3,7 +3,7 @@ import { createApi, type ApiError, type StudioApi } from './api/client';
 import type { WorkflowReadDto } from './api/types';
 import type { StudioDocument } from './app/document';
 import { loadDocument } from './app/loadDocument';
-import { canvasMeasure, createTextFitter, type TextFitter } from './canvas/fitText';
+import { canvasMeasure, createTextFitter, loadMeasuredFonts, type TextFitter } from './canvas/fitText';
 import { SvgDefs } from './canvas/SvgDefs';
 import { WorkflowCanvas } from './canvas/WorkflowCanvas';
 
@@ -32,8 +32,7 @@ export function App({ api: injected }: { api?: StudioApi }) {
   // Labels are measured with the real fonts, so the fitter is made once the fonts have loaded.
   useEffect(() => {
     let live = true;
-    const ready = document.fonts?.ready ?? Promise.resolve();
-    void ready.then(() => { if (live) setFitter(createTextFitter(canvasMeasure())); });
+    void loadMeasuredFonts().then(() => { if (live) setFitter(createTextFitter(canvasMeasure())); });
     return () => { live = false; };
   }, []);
 
