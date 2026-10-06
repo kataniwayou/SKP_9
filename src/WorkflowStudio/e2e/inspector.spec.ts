@@ -1,15 +1,14 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { documentPanel, inspector, openWorkflow, tab } from './studio';
-import { allowed, createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
+import { allow, createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
 // Spec §7.1: the Inspector edits each entity's metadata. Every write goes to this run's own
 // throwaway entities (e2e/throwaway.ts, named `e2e-3b-…`), created here and deleted afterwards.
+// The tests share that one set and build on each other's state, so they run in order, never retried.
+test.describe.configure({ mode: 'serial', retries: 0 });
 let t: Throwaway;
-test.beforeAll(async ({ request }) => {
-  t = await createThrowaway(request);
-  for (const id of [t.workflow.id, t.stepId, t.processorId, t.schemaId, t.cacheId]) allowed.add(id);
-});
-test.afterAll(async ({ request }) => { if (t) await removeThrowaway(request, t); });
+test.beforeAll(async ({ request }) => { t = await createThrowaway(request); });
+test.afterAll(async ({ request }) => { await removeThrowaway(request); });
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
@@ -141,7 +140,7 @@ test('an assignment is added, edited and unlinked from the step', async ({ page,
   await inspector(page).getByRole('button', { name: '▸ show all' }).click();
   const id = (await fieldRow(page, 'Id').locator('.ro').textContent())!.trim();
   expect((await assignmentIds())[0]).toBe(id);
-  allowed.add(id);
+  allow('assignments', id);
   await field(page, 'Payload').fill('{"k":1}');
   await save(page);
   expect(JSON.parse((await get<{ payload: string }>(request, `assignments/${id}`)).payload)).toEqual({ k: 1 });
