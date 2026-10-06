@@ -118,7 +118,7 @@ export function stripDocuments(layout: SerializedDockview): { dock: SerializedDo
     }
   };
   forEachGroup(dock.grid.root, clean);
-  pruneGrid(dock, (g) => g.id !== documentGroupId && heldDocuments.has(g.id) && g.views.length === 0);
+  pruneGrid(dock, (g, leaf) => (g.id !== documentGroupId && heldDocuments.has(g.id) && g.views.length === 0) || isHiddenEmpty(g, leaf));
   for (const id of Object.keys(dock.panels)) if (isDocPanelId(id)) delete dock.panels[id];
 
   dock.floatingGroups = (dock.floatingGroups ?? []).filter((f) => {
@@ -162,7 +162,7 @@ export function sessionDock(layout: SerializedDockview): { dock: SerializedDockv
   const popped = takePopouts(dock);
   // A pop-out leaves its group's place in the grid hidden and empty. It would come back hidden, and
   // pile up refresh after refresh; its documents come back in the document area, its panes docked.
-  pruneGrid(dock, (g, leaf) => leaf.visible === false && g.views.length === 0);
+  pruneGrid(dock, isHiddenEmpty);
   fixRootSize(dock);
   return { dock, documentGroupId, popped };
 }
@@ -179,9 +179,14 @@ export function withDocuments(
   const dock = JSON.parse(JSON.stringify(stripped)) as SerializedDockview;
   fixRootSize(dock);
   if (documents.length === 0) return dock;
+  // never a hidden group: dockview does not show a group a panel is added to
   let target: GroupState | null = null;
-  forEachGroup(dock.grid.root, (g) => { if (g.id === documentGroupId) target = g; });
-  if (target === null) forEachGroup(dock.grid.root, (g) => { target ??= g; });
+  const shown = (node: GridNode, visit: (g: GroupState) => void): void => {
+    if (node.type === 'leaf') { if (node.visible !== false) visit(node.data as GroupState); }
+    else for (const child of node.data as GridNode[]) shown(child, visit);
+  };
+  shown(dock.grid.root, (g) => { if (g.id === documentGroupId) target = g; });
+  if (target === null) shown(dock.grid.root, (g) => { target ??= g; });
   const area = target as GroupState | null;
   if (area === null) return dock;
   for (const panel of documents) {
@@ -203,6 +208,9 @@ type GridNode = SerializedGridObject<GroupState>;
 function fixRootSize(dock: SerializedDockview): void {
   dock.grid.root = { ...dock.grid.root, size: dock.grid.orientation === Orientation.HORIZONTAL ? dock.grid.height : dock.grid.width };
 }
+
+/** The place a pop-out left in the grid: hidden and empty. A hidden group that holds panes is a rail and stays. */
+const isHiddenEmpty = (group: GroupState, leaf: GridNode): boolean => leaf.visible === false && group.views.length === 0;
 
 /**
  * Removes the leaves `drop` picks from the main grid. A branch left with no child goes, one left

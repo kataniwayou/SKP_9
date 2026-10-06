@@ -258,3 +258,37 @@ describe('readLayout and writeLayout (review focus 1: old, corrupt or unreadable
     expect(writeLayout(null, saved())).toBe(false);
   });
 });
+
+describe('Window > Save after a pop-out left a hidden empty group', () => {
+  const popped = (): SerializedDockview => {
+    const l = layout();
+    l.grid.root = {
+      type: 'branch', size: 600,
+      data: [
+        { type: 'leaf', data: { id: 'g0', views: [] }, size: 300, visible: false },
+        { type: 'leaf', data: { id: 'g1', views: ['inspector'], activeView: 'inspector' }, size: 300 },
+        { type: 'leaf', data: { id: 'g2', views: ['toolbox'], activeView: 'toolbox' }, size: 300, visible: false },
+      ],
+    };
+    return l;
+  };
+
+  it('stripDocuments drops the hidden empty placeholder and keeps a hidden rail', () => {
+    const root = JSON.stringify(stripDocuments(popped()).dock.grid.root);
+    expect(root).not.toContain('"g0"');
+    expect(root).toContain('"g1"');
+    expect(root).toContain('"g2"');
+  });
+
+  it('withDocuments never puts documents into a hidden target', () => {
+    const out = withDocuments(popped(), 'g0', [panel('doc:a', 'document')], 'doc:a');
+    const held: string[] = [];
+    const walk = (n: { type: string; data: unknown; visible?: boolean }): void => {
+      if (n.type === 'leaf') {
+        if ((n.data as { views: string[] }).views.includes('doc:a')) held.push(n.visible === false ? 'hidden' : 'shown');
+      } else (n.data as typeof n[]).forEach(walk);
+    };
+    walk(out.grid.root);
+    expect(held).toEqual(['shown']);
+  });
+});

@@ -472,3 +472,23 @@ test('after layout every step border lies on a 32 px line and every wire point o
     for (const n of numbers) expect(n % 8, `wire point ${n} in ${d}`).toBe(0);
   }
 });
+
+test('Window › Apply after a Save made while the document group was popped out shows the document', async ({ page }) => {
+  const wf = workflows[0]!;
+  await openWorkflow(page, wf);
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup'),
+    groupOf(page, wf.name).getByRole('button', { name: 'Pop out to its own window' }).click(),
+  ]);
+  await popup.waitForLoadState();
+  await expect(popup.locator('.docpanel .react-flow__node').first()).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Window' }).click();
+  await page.getByRole('menuitem', { name: /Save window layout/ }).click();
+  await expect(page.locator('.toast')).toHaveText('Window layout saved in this browser');
+  await popup.getByRole('button', { name: 'Dock back into the main layout' }).click();
+  await expect(tab(page, wf.name)).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Window' }).click();
+  await page.getByRole('menuitem', { name: /Apply saved layout/ }).click();
+  await expect(tab(page, wf.name)).toBeVisible();
+  await expect(documentPanel(page, wf).locator('.react-flow__node').first()).toBeVisible();
+});
