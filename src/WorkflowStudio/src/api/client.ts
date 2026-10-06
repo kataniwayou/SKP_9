@@ -1,4 +1,5 @@
-import type { ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto, WorkflowValidationDto } from './types';
+import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
+import type { AssignmentCreateDto, AssignmentReadDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto, WorkflowValidationDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -6,7 +7,7 @@ import type { ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, Wo
  */
 export type ApiError =
   | { kind: 'notFound'; status: 404 }
-  | { kind: 'badRequest'; status: 400; detail: string }
+  | { kind: 'badRequest'; status: 400; detail: string; errors: Record<string, string[]> }
   | { kind: 'conflict'; status: 409; detail: string; entity: { kind: string; id: string } | null }
   | { kind: 'unprocessable'; status: 422; detail: string }
   | { kind: 'http'; status: number; detail: string }
@@ -20,6 +21,12 @@ export interface StudioApi {
   getStep(stepId: string): Promise<ApiResult<StepReadDto>>;
   getProcessor(processorId: string): Promise<ApiResult<ProcessorReadDto>>;
   getSchema(schemaId: string): Promise<ApiResult<SchemaReadDto>>;
+  /** `GET /{entity}/{id}`: the entity's read DTO, the Inspector's baseline (spec §7.1). */
+  getEntity<K extends EntityKind>(kind: K, id: string): Promise<ApiResult<ReadDtoOf[K]>>;
+  /** `PUT /{entity}/{id}` with the full update DTO; BaseApi answers 200 with the entity read back. */
+  putEntity<K extends EntityKind>(kind: K, id: string, dto: UpdateDtoOf[K]): Promise<ApiResult<ReadDtoOf[K]>>;
+  /** `POST /assignments`: the only create in slice 3b; BaseApi answers 201 with the new assignment. */
+  createAssignment(dto: AssignmentCreateDto): Promise<ApiResult<AssignmentReadDto>>;
   /**
    * The running workflow ids (`GET /orchestration/live`, the `skp:live` set). Typed `unknown`
    * on purpose: callers read it defensively (api/liveStatus.ts), never trusting its shape.
@@ -39,6 +46,7 @@ interface Problem {
   detail?: string;
   kind?: string;
   id?: string;
+  errors?: unknown;
 }
 
 async function readProblem(response: Response): Promise<Problem> {
@@ -49,13 +57,24 @@ async function readProblem(response: Response): Promise<Problem> {
   }
 }
 
+/** ValidationProblemDetails' `errors` (C# property name → messages), read defensively. */
+function fieldErrorsOf(value: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return out;
+  for (const [key, messages] of Object.entries(value)) {
+    const list = Array.isArray(messages) ? messages.filter((m): m is string => typeof m === 'string') : [];
+    if (list.length > 0) out[key] = list;
+  }
+  return out;
+}
+
 async function toError(response: Response): Promise<ApiError> {
   if (response.status === 404) return { kind: 'notFound', status: 404 };
   const problem = await readProblem(response);
   const detail = problem.detail ?? problem.title ?? response.statusText;
   switch (response.status) {
     case 400:
-      return { kind: 'badRequest', status: 400, detail };
+      return { kind: 'badRequest', status: 400, detail, errors: fieldErrorsOf(problem.errors) };
     case 409:
       return {
         kind: 'conflict', status: 409, detail,
@@ -70,10 +89,13 @@ async function toError(response: Response): Promise<ApiError> {
 
 /** Relative URLs only: the studio is served from the same origin as BaseApi. */
 export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)): StudioApi {
-  async function request<T>(method: 'GET' | 'POST', path: string): Promise<ApiResult<T>> {
+  async function request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<ApiResult<T>> {
+    const init: RequestInit = body === undefined
+      ? { method, headers: { Accept: 'application/json' } }
+      : { method, headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
     let response: Response;
     try {
-      response = await fetchImpl(`${base}${path}`, { method, headers: { Accept: 'application/json' } });
+      response = await fetchImpl(`${base}${path}`, init);
     } catch (e) {
       return { ok: false, error: { kind: 'network', message: e instanceof Error ? e.message : String(e) } };
     }
@@ -94,6 +116,13 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     getStep: (stepId) => get<StepReadDto>(`/steps/${id(stepId)}`),
     getProcessor: (processorId) => get<ProcessorReadDto>(`/processors/${id(processorId)}`),
     getSchema: (schemaId) => get<SchemaReadDto>(`/schemas/${id(schemaId)}`),
+    getEntity<K extends EntityKind>(kind: K, entityId: string) {
+      return get<ReadDtoOf[K]>(`/${ENTITY_PATH[kind]}/${id(entityId)}`);
+    },
+    putEntity<K extends EntityKind>(kind: K, entityId: string, dto: UpdateDtoOf[K]) {
+      return request<ReadDtoOf[K]>('PUT', `/${ENTITY_PATH[kind]}/${id(entityId)}`, dto);
+    },
+    createAssignment: (dto) => request<AssignmentReadDto>('POST', '/assignments', dto),
     listLive: () => get<unknown>('/orchestration/live'),
     listLiveness: () => get<unknown>('/processors/liveness'),
     validate: (workflowId) => request<WorkflowValidationDto>('POST', `/workflows/${id(workflowId)}/validate`),

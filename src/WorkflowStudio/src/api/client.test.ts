@@ -83,6 +83,55 @@ describe('createApi', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/v1/orchestration/live', expect.objectContaining({ method: 'GET' }));
   });
 
+  it.each([
+    ['workflow', '/api/v1/workflows/x'],
+    ['step', '/api/v1/steps/x'],
+    ['processor', '/api/v1/processors/x'],
+    ['schema', '/api/v1/schemas/x'],
+    ['assignment', '/api/v1/assignments/x'],
+    ['cache', '/api/v1/caches/x'],
+  ] as const)('GETs a %s from %s', async (kind, url) => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond(200, { id: 'x' }));
+    expect(await createApi('/api/v1', fetchImpl).getEntity(kind, 'x')).toEqual({ ok: true, value: { id: 'x' } });
+    expect(fetchImpl).toHaveBeenCalledWith(url, expect.objectContaining({ method: 'GET' }));
+  });
+
+  it('PUTs an entity with its update DTO as JSON and returns what the server read back', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond(200, { id: 's1', name: 'renamed' }));
+    const dto = { name: 'renamed', version: '1.0.0', description: null, processorId: 'p1', nextStepIds: ['s2'], entryCondition: 1 as const };
+
+    const result = await createApi('/api/v1', fetchImpl).putEntity('step', 's1', dto);
+
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/steps/s1', expect.objectContaining({ method: 'PUT', body: JSON.stringify(dto) }));
+    expect(fetchImpl.mock.calls[0]![1].headers).toMatchObject({ 'Content-Type': 'application/json' });
+    expect(result).toEqual({ ok: true, value: { id: 's1', name: 'renamed' } });
+  });
+
+  it('POSTs a new assignment and returns the 201 body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond(201, { id: 'a9', stepId: 's1' }));
+    const dto = { name: 'fetch-assignment', version: '1.0.0', description: null, stepId: 's1', payload: '{}' };
+
+    expect(await createApi('/api/v1', fetchImpl).createAssignment(dto)).toEqual({ ok: true, value: { id: 'a9', stepId: 's1' } });
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/assignments', expect.objectContaining({ method: 'POST', body: JSON.stringify(dto) }));
+  });
+
+  it("keeps a 400's field messages by property name, and only the strings", async () => {
+    const api = createApi('/api/v1', vi.fn().mockResolvedValue(respond(400, {
+      title: 'Validation failed',
+      errors: { Version: ['Version must be x.y.z.'], CronExpression: ['Bad cron.', 7], Junk: 'not a list' },
+    })));
+
+    expect(await api.putEntity('workflow', 'wf1', {})).toEqual({
+      ok: false,
+      error: { kind: 'badRequest', status: 400, detail: 'Validation failed', errors: { Version: ['Version must be x.y.z.'], CronExpression: ['Bad cron.'] } },
+    });
+  });
+
+  it('keeps an empty field map for a 400 without errors', async () => {
+    const api = createApi('/api/v1', vi.fn().mockResolvedValue(respond(400, { title: 'Bad' })));
+    expect(await api.getGraph('wf1')).toEqual({ ok: false, error: { kind: 'badRequest', status: 400, detail: 'Bad', errors: {} } });
+  });
+
   it('maps a 200 whose body is not JSON to an error result instead of rejecting', async () => {
     const api = createApi('/api/v1', vi.fn().mockResolvedValue(new Response('<html>', { status: 200 })));
     const result = await api.getGraph('wf1');

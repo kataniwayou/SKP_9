@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createApi, type ApiError, type StudioApi } from './api/client';
+import { createApi, type StudioApi } from './api/client';
+import { describeError } from './api/describeError';
 import type { WorkflowReadDto } from './api/types';
 import { DocumentPanel } from './app/DocumentPanel';
 import { loadDocument } from './app/loadDocument';
@@ -17,13 +18,7 @@ import { Problems } from './panels/Problems';
 import { inspectorKey } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
 
-export function describeError(error: ApiError): string {
-  switch (error.kind) {
-    case 'notFound': return 'This workflow no longer exists.';
-    case 'network': return `Network error: ${error.message}`;
-    default: return error.status === 0 ? error.detail : `${error.status}: ${error.detail}`;
-  }
-}
+export { describeError } from './api/describeError';
 
 const uniqueName = (w: WorkflowReadDto) => entityName(w.name ?? '', w.version ?? '', w.id ?? '');
 

@@ -13,6 +13,9 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     getStep: vi.fn().mockResolvedValue(notFound),
     getProcessor: vi.fn().mockResolvedValue(notFound),
     getSchema: vi.fn().mockResolvedValue(notFound),
+    getEntity: vi.fn().mockResolvedValue(notFound),
+    putEntity: vi.fn().mockResolvedValue(notFound),
+    createAssignment: vi.fn().mockResolvedValue(notFound),
     listLive: vi.fn(),
     listLiveness: vi.fn(),
     validate: vi.fn().mockResolvedValue(ok({ valid: true, problems: [] })),
@@ -59,7 +62,7 @@ describe('loadDocument', () => {
   });
 
   it.each([
-    ['400', { kind: 'badRequest', status: 400, detail: 'x' }],
+    ['400', { kind: 'badRequest', status: 400, detail: 'x', errors: {} }],
     ['409', { kind: 'conflict', status: 409, detail: 'x', entity: null }],
     ['422', { kind: 'unprocessable', status: 422, detail: 'x' }],
     ['500', { kind: 'http', status: 500, detail: 'x' }],

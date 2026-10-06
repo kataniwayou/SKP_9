@@ -1,4 +1,4 @@
-import type { CacheReadDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { AssignmentReadDto, CacheReadDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
 
 // Builders for complete DTOs, so tests state only what they care about. Every field the server
 // sends is present, which satisfies the generated types whether they mark fields optional or not.
@@ -44,4 +44,8 @@ export function graphDto(over: Partial<WorkflowGraphDto> = {}): WorkflowGraphDto
     layout: null,
     ...over,
   } as WorkflowGraphDto;
+}
+
+export function assignmentDto(id: string, over: Partial<AssignmentReadDto> = {}): AssignmentReadDto {
+  return { id, name: `assignment-${id}`, version: '1.0.0', description: null, stepId: 's1', payload: '{}', ...audit, ...over } as AssignmentReadDto;
 }
