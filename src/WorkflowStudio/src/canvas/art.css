@@ -67,7 +67,8 @@
 .wf.nx-idlewf .hub-inner { animation: nxwait 2.6s ease-in-out infinite; }
 .wf.nx-idlewf .nx-spin { animation: none; }
 .wf.nx:hover .sphere { filter: brightness(1.08); }
-.studio-sel .wf .sphere { filter: url(#glow); }
+/* (0,4,0) like the hover rule above and later, so a selected hub keeps its glow while hovered */
+.studio-sel .wf.nx .sphere { filter: url(#glow); }
 
 /* cache: static, structure white */
 .cachetag .nx-brk { stroke-width: 1.1; }

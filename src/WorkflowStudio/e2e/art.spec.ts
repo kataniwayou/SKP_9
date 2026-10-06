@@ -141,3 +141,18 @@ test('a selected cache draws the cyan selection stroke', async ({ page, request 
   await panel.locator('.react-flow__node-cache').first().click();
   await expect.poll(() => stroke('.studio-sel .nx-brk')).toBe(cyan);
 });
+
+test('a selected hub keeps its selection glow while hovered', async ({ page, request }) => {
+  const [wf] = await workflowsWithSteps(request);
+  test.skip(!wf, 'BaseApi has no workflow with steps');
+  const panel = await open(page, wf!);
+  const hub = panel.locator('.react-flow__node-workflow');
+  const filter = () => panel.locator('.react-flow__node-workflow .wf .sphere').evaluate((e) => getComputedStyle(e).filter);
+
+  await hub.hover();
+  await expect.poll(filter).toContain('brightness'); // the hover baseline: an unselected hub only brightens
+  await hub.click();
+  await expect(panel.locator('.react-flow__node-workflow.studio-sel')).toHaveCount(1);
+  await hub.hover();
+  await expect.poll(filter).toMatch(/url\(.*#glow/);
+});
