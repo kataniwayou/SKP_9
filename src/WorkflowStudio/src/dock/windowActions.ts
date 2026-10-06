@@ -400,7 +400,7 @@ export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLa
     api.fromJSON(withDocuments(saved.dock, saved.documentGroupId, documents, active), { reuseExistingPanels: true });
   } catch (error) {
     // dockview clears the whole dock when a layout fails halfway, the re-attached documents
-    // included. Open them again (new panels: their canvases start from the default view) so no
+    // included. Open them again (new panels: their canvases open at their last saved view) so no
     // document is lost, then report the failure; the caller resets to the default layout.
     memory.sides = {};
     memory.homes = {};

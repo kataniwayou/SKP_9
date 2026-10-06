@@ -171,7 +171,9 @@ export function DockShell(props: DockShellProps) {
       if (!atStartup) showToast('Saved window layout applied');
     } catch {
       reset(dv);
-      showToast('The saved window layout could not be applied; the default layout is shown.');
+      showToast(restore
+        ? "The last session's layout could not be restored; the default layout is shown."
+        : 'The saved window layout could not be applied; the default layout is shown.');
     } finally {
       applying.current = false;
       // at startup onReady puts the documents in itself, keeping the page's active one
@@ -525,7 +527,8 @@ export function DockShell(props: DockShellProps) {
           />
         </div>
       </div>
-      {menu && <Menu label={menu.label} entries={menu.entries} anchor={menu.anchor} onClose={closeMenu} />}
+      {/* keyed: switching menus opens a new one, which focuses its first item and gives focus back to its own trigger */}
+      {menu && <Menu key={menu.label} label={menu.label} entries={menu.entries} anchor={menu.anchor} onClose={closeMenu} />}
       {picker && (
         <Picker
           anchor={picker}

@@ -206,6 +206,22 @@ describe('DockShell', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
+  it('focuses the first item of the menu switched to, and gives focus back to its own button (review Minor)', () => {
+    setup();
+    const file = screen.getByRole('menuitem', { name: 'File' });
+    const view = screen.getByRole('menuitem', { name: 'View' });
+    file.focus();
+    fireEvent.click(file);
+    expect(document.activeElement).toHaveTextContent('Open workflow');
+    view.focus();
+    fireEvent.click(view);
+    const menu = screen.getByRole('menu', { name: 'View' });
+    expect(document.activeElement).toBe(within(menu).getAllByRole('menuitem')[0]);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(view);
+  });
+
   it('closes an open menu on Esc before it clears the selection', () => {
     const { props } = setup();
     openMenu('View');
@@ -706,7 +722,7 @@ describe('session (plan 3d)', () => {
     expectingDockviewRejection(() => {
       setup({ documents: [doc('a')], activeDocumentId: 'a', restore: { ...JSON.parse(REJECTED_BY_DOCKVIEW), popped: [] } });
     });
-    expect(toast()).toHaveTextContent(/default layout/);
+    expect(toast()).toHaveTextContent("The last session's layout could not be restored; the default layout is shown.");
     expect(docTabs('wf-a')).toHaveLength(1);
     for (const name of ['Inspector', 'Toolbox', 'Problems', 'Output']) expect(docTabs(name)).toHaveLength(1);
   });
@@ -726,7 +742,7 @@ describe('session (plan 3d)', () => {
     addView(unknown.dock.grid.root as { type: string; data: unknown });
     unknown.dock.panels['mystery'] = { id: 'mystery', contentComponent: 'tool', title: 'Mystery' };
     setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'a', restore: unknown });
-    expect(toast()).toHaveTextContent(/default layout/);
+    expect(toast()).toHaveTextContent("The last session's layout could not be restored; the default layout is shown.");
     for (const id of ['a', 'b']) expect(docTabs(`wf-${id}`)).toHaveLength(1);
     expect(docTabs('Mystery')).toHaveLength(0);
   });
