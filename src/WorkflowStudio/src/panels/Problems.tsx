@@ -30,7 +30,9 @@ export function Problems() {
               key={i}
               role="listitem"
               className={target === null ? 'prob static' : 'prob'}
+              tabIndex={select ? 0 : undefined}
               onClick={select}
+              onKeyDown={select ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); } } : undefined}
               data-tip={target === null ? undefined : 'Select it'}
             >
               <span className="gate">{problem.gate}</span>

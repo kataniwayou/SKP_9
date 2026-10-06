@@ -82,6 +82,20 @@ describe('Problems', () => {
     fireEvent.click(named!);
     expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's2' });
   });
+
+  it('selects a problem from the keyboard: it is focusable and Enter selects its target', async () => {
+    const store = await storeWith([
+      { gate: 'schemaEdge', title: 'Schema-edge mismatch between steps', detail: "on edge 's1' -> 's2'", offending: { parentStepId: 's1', childStepId: 's2' } },
+      { gate: 'somethingNew', title: 'A gate this studio does not know', detail: 'd', offending: 42 },
+    ]);
+    wrap(store, <Problems />);
+    const [named, unnamed] = screen.getAllByRole('listitem');
+    expect(named).toHaveAttribute('tabindex', '0');
+    expect(unnamed).not.toHaveAttribute('tabindex');
+
+    fireEvent.keyDown(named!, { key: 'Enter' });
+    expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's2' });
+  });
 });
 
 describe('Output and Toolbox', () => {

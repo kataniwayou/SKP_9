@@ -114,6 +114,7 @@ describe('WorkflowCanvas', () => {
           <ZoomControls />
         </WorkflowCanvas>,
       );
+      expect(screen.getByLabelText('Zoom level').tagName).toBe('OUTPUT');
       const level = () => Number(screen.getByLabelText('Zoom level').textContent!.replace('%', ''));
       await waitFor(() => expect(level()).toBeGreaterThan(0));
       const before = level();

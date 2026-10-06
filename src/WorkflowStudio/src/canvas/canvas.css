@@ -30,4 +30,4 @@
 .zoom button { background: var(--panel-2); border: 0; color: var(--ink); width: 30px; height: 28px; cursor: pointer; font-size: 15px; }
 .zoom button:hover { background: var(--line); }
 .zoom button.fit { width: 38px; font-size: 11px; font-family: var(--sans); }
-.zoom span { font-family: var(--mono); font-size: 12px; width: 52px; text-align: center; color: var(--muted); }
+.zoom output { font-family: var(--mono); font-size: 12px; width: 52px; text-align: center; color: var(--muted); }

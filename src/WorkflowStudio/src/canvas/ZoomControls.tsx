@@ -13,7 +13,7 @@ export function ZoomControls() {
   return (
     <div className="zoom">
       <button type="button" aria-label="Zoom out" data-tip="Zoom out" onClick={() => { follow(false); void zoomOut(); }}>−</button>
-      <span aria-label="Zoom level">{`${Math.round(zoom * 100)}%`}</span>
+      <output aria-label="Zoom level">{`${Math.round(zoom * 100)}%`}</output>
       <button type="button" aria-label="Zoom in" data-tip="Zoom in" onClick={() => { follow(false); void zoomIn(); }}>+</button>
       <button type="button" className="fit" aria-label="Fit" data-tip="Fit this workflow" onClick={() => { follow(true); void fitView(FIT_VIEW_OPTIONS); }}>Fit</button>
     </div>

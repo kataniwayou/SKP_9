@@ -79,11 +79,18 @@ export function StudioTab({ api }: IDockviewPanelHeaderProps) {
       <span
         className="x"
         role="button"
+        tabIndex={0}
         aria-label={`Close ${name}`}
         data-tip="Close"
         onPointerDown={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); shell.closePanel(id); }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          e.stopPropagation();
+          shell.closePanel(id);
+        }}
       >
         ×
       </span>

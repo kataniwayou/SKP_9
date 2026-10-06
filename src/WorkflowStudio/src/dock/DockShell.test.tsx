@@ -85,6 +85,17 @@ describe('DockShell', () => {
     expect(vi.mocked(props.onCloseDocument).mock.calls).toEqual([['a'], ['b'], ['b']]);
   });
 
+  it('closes a pane or a document from the keyboard on its tab ×', () => {
+    const { props } = setup({ documents: [doc('a')] });
+    const close = screen.getByRole('button', { name: 'Close Inspector' });
+    expect(close).toHaveAttribute('tabindex', '0');
+    fireEvent.keyDown(close, { key: 'Enter' });
+    expect(screen.queryAllByText('Inspector', { selector: '.doctab .nm' })).toHaveLength(0);
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Close wf-a' }), { key: ' ' });
+    expect(props.onCloseDocument).toHaveBeenCalledWith('a');
+  });
+
   it('hides and shows a pane from the View menu', () => {
     setup();
     openMenu('View');
