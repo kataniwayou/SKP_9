@@ -17,9 +17,18 @@ import type { StudioDocument } from './document';
  * problems, and the wires a `schemaEdge` problem names are drawn broken. Validate is advisory: in
  * every non-200 case (400, 409, 422, network) `problems` stays null and the graph still loads.
  *
- * If elkjs fails, the rejection becomes an error result (`http`, status 0) instead of escaping.
+ * This never rejects: elkjs failures, a malformed body (a missing required field) or anything else
+ * thrown becomes an error result (`http`, status 0).
  */
 export async function loadDocument(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDocument>> {
+  try {
+    return await load(api, workflowId);
+  } catch (e) {
+    return { ok: false, error: { kind: 'http', status: 0, detail: `Could not open the workflow: ${e instanceof Error ? e.message : String(e)}` } };
+  }
+}
+
+async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDocument>> {
   const loaded = await api.getGraph(workflowId);
   if (!loaded.ok) return loaded;
 

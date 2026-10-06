@@ -149,4 +149,18 @@ describe('loadDocument', () => {
     });
     expect(await loadDocument(api, 'wf1')).toEqual(failure);
   });
+
+  it('resolves to an error result when the graph body is missing a required field', async () => {
+    const api = fakeApi({ getGraph: vi.fn().mockResolvedValue(ok(graphDto({ workflow: { id: null } } as never))) });
+    const result = await loadDocument(api, 'wf1');
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toMatchObject({ kind: 'http', status: 0 });
+  });
+
+  it('resolves to an error result when getGraph returns 200 with an invalid body', async () => {
+    const api = fakeApi({ getGraph: vi.fn().mockResolvedValue(ok(null as never)) });
+    const result = await loadDocument(api, 'wf1');
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toMatchObject({ kind: 'http', status: 0 });
+  });
 });

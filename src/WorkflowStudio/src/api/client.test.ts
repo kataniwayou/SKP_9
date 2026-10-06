@@ -70,4 +70,11 @@ describe('createApi', () => {
     });
     expect(result).toEqual({ ok: true, value: verdict });
   });
+
+  it('maps a 200 whose body is not JSON to an error result instead of rejecting', async () => {
+    const api = createApi('/api/v1', vi.fn().mockResolvedValue(new Response('<html>', { status: 200 })));
+    const result = await api.getGraph('wf1');
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toMatchObject({ kind: 'http', status: 0 });
+  });
 });

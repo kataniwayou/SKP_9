@@ -67,7 +67,11 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
       return { ok: false, error: { kind: 'network', message: e instanceof Error ? e.message : String(e) } };
     }
     if (!response.ok) return { ok: false, error: await toError(response) };
-    return { ok: true, value: (await response.json()) as T };
+    try {
+      return { ok: true, value: (await response.json()) as T };
+    } catch (e) {
+      return { ok: false, error: { kind: 'http', status: 0, detail: `Unreadable response: ${e instanceof Error ? e.message : String(e)}` } };
+    }
   }
 
   const get = <T>(path: string) => request<T>('GET', path);
