@@ -1,5 +1,8 @@
 /* A document panel and its capsule toolbar (mockup v49 .docpanel, .docbar, .cap-b, .docact, .qb). */
 .docpanel { position: relative; height: 100%; background: var(--ground); }
+/* dockview hides a background tab with an inherited visibility: hidden, but React Flow writes an
+   inline visibility: visible on each node, so without this the nodes show through and take clicks */
+.docpanel.bg .react-flow__node { visibility: hidden !important; }
 .doc-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
 .doc-msg.error { color: var(--f); }
 .docbar { position: absolute; left: 12px; right: 24px; top: 10px; display: flex; align-items: center; gap: 8px; z-index: 7; pointer-events: none; font-family: var(--sans); }

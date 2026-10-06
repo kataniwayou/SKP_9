@@ -3,7 +3,7 @@ import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { CapsuleToolbar } from './CapsuleToolbar';
-import { useLiveStatus, useOwnerDocument, usePanelVisible, type PanelLike } from './panelHooks';
+import { useLiveStatus, useOwnerDocument, usePanelShown, usePanelVisible, type PanelLike } from './panelHooks';
 
 /**
  * One workflow document in its dock tab: its own React Flow canvas and viewport (the panel uses
@@ -16,13 +16,15 @@ export function DocumentPanel({ api, workflowId, panel }: { api: StudioApi; work
   const ownerDocument = useOwnerDocument(panel);
   const fitter = useFitter(ownerDocument);
   const status = useLiveStatus(api, workflowId, usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready');
+  // a background tab's canvas stays mounted; .bg hides its nodes (document.css says why)
+  const cls = usePanelShown(panel) ? 'docpanel' : 'docpanel bg';
 
   if (open === null) return null;
-  if (open.status.kind === 'failed') return <div className="docpanel"><div className="doc-msg error" role="alert">{open.status.message}</div></div>;
-  if (open.status.kind === 'loading' || fitter === null) return <div className="docpanel"><div className="doc-msg">Loading…</div></div>;
+  if (open.status.kind === 'failed') return <div className={cls}><div className="doc-msg error" role="alert">{open.status.message}</div></div>;
+  if (open.status.kind === 'loading' || fitter === null) return <div className={cls}><div className="doc-msg">Loading…</div></div>;
 
   return (
-    <div className="docpanel">
+    <div className={cls}>
       <WorkflowCanvas
         doc={open.status.doc}
         fitter={fitter}

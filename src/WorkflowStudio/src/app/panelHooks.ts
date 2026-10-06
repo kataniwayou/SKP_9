@@ -20,15 +20,21 @@ export function useOwnerDocument(panel: PanelLike): Document {
   return doc;
 }
 
-/** True while the panel's tab is the visible one and its window is not hidden (a background browser tab). */
-export function usePanelVisible(panel: PanelLike, doc: Document): boolean {
+/** True while the panel's tab is the visible one in its group. */
+export function usePanelShown(panel: PanelLike): boolean {
   const [shown, setShown] = useState(panel.isVisible);
-  const [pageVisible, setPageVisible] = useState(doc.visibilityState !== 'hidden');
   useEffect(() => {
     setShown(panel.isVisible);
     const sub = panel.onDidVisibilityChange((e) => setShown(e.isVisible));
     return () => sub.dispose();
   }, [panel]);
+  return shown;
+}
+
+/** True while the panel's tab is the visible one and its window is not hidden (a background browser tab). */
+export function usePanelVisible(panel: PanelLike, doc: Document): boolean {
+  const shown = usePanelShown(panel);
+  const [pageVisible, setPageVisible] = useState(doc.visibilityState !== 'hidden');
   useEffect(() => {
     const update = () => setPageVisible(doc.visibilityState !== 'hidden');
     update();

@@ -102,6 +102,22 @@ test('switches document tabs and comes back with the viewport and selection kept
   await expect(inspector(page).locator('.kindpill')).toHaveText('WORKFLOW');
 });
 
+test('a background document draws nothing and takes no clicks', async ({ page }) => {
+  // React Flow writes an inline `visibility: visible` on every node, which beats the
+  // `visibility: hidden` dockview puts on a background tab's panel
+  const [a, b] = workflows;
+  await openWorkflow(page, a!);
+  const step = documentPanel(page, a!).locator('.react-flow__node-step').first();
+  const at = await box(step);
+  await openWorkflow(page, b!);
+
+  await expect(documentPanel(page, a!).locator('.react-flow__node')).not.toHaveCount(0);
+  for (const node of await documentPanel(page, a!).locator('.react-flow__node').all()) await expect(node).toBeHidden();
+  const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('.docpanel')?.querySelector('.crumb')?.getAttribute('data-tip') ?? null,
+    [at.x + at.width / 2, at.y + at.height / 2]);
+  expect(hit).not.toBe(a!.label);
+});
+
 test('menus, the picker and the tooltip open above a floating group', async ({ page }) => {
   const [wf] = workflows;
   await openWorkflow(page, wf!);
