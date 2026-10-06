@@ -274,6 +274,7 @@ export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: read
 export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLayout): ToolId[] {
   const current = api.toJSON();
   const documents = Object.values(current.panels).filter((p) => isDocPanelId(p.id));
+  const staged = api.panels.filter((p) => isDocPanelId(p.id));
   const active = api.activePanel && isDocPanelId(api.activePanel.id) ? api.activePanel.id : documents[0]?.id ?? null;
   try {
     api.fromJSON(withDocuments(saved.dock, saved.documentGroupId, documents, active), { reuseExistingPanels: true });
@@ -284,6 +285,11 @@ export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLa
     memory.sides = {};
     memory.homes = {};
     memory.documentGroupId = null;
+    // With reuseExistingPanels dockview first parks the open documents in staging groups; when the
+    // layout fails before reaching them it empties those groups without disposing the panels, so
+    // their content (renderer 'always': still mounted in the render overlay) would outlive them
+    // beside the re-opened copies. Dispose every one dockview no longer holds.
+    for (const panel of staged) if (api.getPanel(panel.id) !== panel) panel.dispose();
     for (const doc of documents) {
       const documentId = documentIdOf(doc.id);
       if (documentId !== null && !api.getPanel(doc.id)) addDocument(api, memory, documentId, doc.title ?? documentId);
