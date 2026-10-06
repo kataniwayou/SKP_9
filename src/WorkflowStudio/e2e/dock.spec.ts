@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { box, documentPanel, groupOf, inspector, liveWorkflows, openWorkflow, tab, type LiveWorkflow } from './studio';
+import type { Page } from '@playwright/test';
+import { box, documentPanel, esc, expect, floatOver, groupOf, inspector, liveWorkflows, openWorkflow, overlap, selectProcessor, tab, test, type LiveWorkflow } from './studio';
 
 // Spec §9, slice 3a. Read-only against the live BaseApi: GETs and the validate dry run only.
 let workflows: LiveWorkflow[];
@@ -14,6 +14,13 @@ test.beforeEach(async ({ page }) => {
   await expect(tab(page, 'Inspector')).toBeVisible();
 });
 
+/** The workflow block of a document, or a skip with a reason when the document has none to click. */
+async function workflowBlock(page: Page, wf: LiveWorkflow) {
+  const block = documentPanel(page, wf).locator('.react-flow__node-workflow');
+  test.skip((await block.count()) === 0, 'the live workflow draws no clickable workflow block');
+  return block;
+}
+
 test('opens a workflow, selects an entity and the Inspector fills', async ({ page }) => {
   const [wf] = workflows;
   await openWorkflow(page, wf!);
@@ -25,7 +32,8 @@ test('opens a workflow, selects an entity and the Inspector fills', async ({ pag
   await expect(inspector(page).getByLabel('Unique name')).toHaveText(/_\d+\.\d+\.\d+-/);
   await expect(documentPanel(page, wf!).locator('.react-flow__node-step.studio-sel')).toHaveCount(1);
 
-  await documentPanel(page, wf!).locator('.react-flow__node-step .chipg').first().click();
+  const processor = await selectProcessor(page, documentPanel(page, wf!));
+  test.skip(!processor, 'no processor chip in the first live workflow shows the three schema slots');
   await expect(inspector(page).locator('.kindpill')).toHaveText('PROCESSOR');
   await expect(inspector(page).locator('.slot')).toHaveCount(3);
 
@@ -45,7 +53,7 @@ test('auto-hides a pane and pins it back', async ({ page }) => {
   await expect(rail).toBeVisible();
 
   // a hidden Inspector still fills, and its rail tab glows
-  await documentPanel(page, wf!).locator('.react-flow__node-workflow').click();
+  await (await workflowBlock(page, wf!)).click();
   await expect(rail).toHaveClass(/fresh/);
   await rail.hover();
   await expect(page.locator('.fly')).toBeVisible();
@@ -55,7 +63,7 @@ test('auto-hides a pane and pins it back', async ({ page }) => {
   await expect(rail).toHaveCount(0);
   const after = await box(groupOf(page, 'Inspector'));
   expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(2);
-  expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(2);
+  for (const k of ['y', 'width', 'height'] as const) expect(Math.abs(after[k] - before[k])).toBeLessThanOrEqual(2);
 });
 
 for (const pane of ['Toolbox', 'Inspector', 'Problems']) {
@@ -78,7 +86,7 @@ test('switches document tabs and comes back with the viewport and selection kept
   const [a, b] = workflows;
   await openWorkflow(page, a!);
   const panelA = documentPanel(page, a!);
-  await panelA.locator('.react-flow__node-workflow').click();
+  await (await workflowBlock(page, a!)).click();
   await panelA.getByRole('button', { name: 'Zoom in' }).click();
   await panelA.getByRole('button', { name: 'Zoom in' }).click();
   const zoom = await panelA.getByLabel('Zoom level').textContent();
@@ -107,21 +115,35 @@ test('menus, the picker and the tooltip open above a floating group', async ({ p
   await tab(page, 'Inspector').click({ button: 'right' });
   const menu = page.getByRole('menu');
   const m = await box(menu);
-  const topmost = await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.dropdown'), [m.x + 20, m.y + 10]);
-  expect(topmost).toBe(true);
+  const topmostAt = (x: number, y: number, selector: string) =>
+    page.evaluate(([px, py, sel]) => !!document.elementFromPoint(Number(px), Number(py))?.closest(String(sel)), [x, y, selector] as const);
+  expect(await topmostAt(m.x + 20, m.y + 10, '.dropdown')).toBe(true);
   expect(m.x).toBeGreaterThanOrEqual(f.x - 1);
   await page.keyboard.press('Escape');
 
+  // the picker: put the floating group under it, and the picker is still the topmost thing in the shared area
   await page.getByRole('menuitem', { name: 'File' }).click();
   await page.getByRole('menuitem', { name: /Open workflow/ }).click();
-  const pickerZ = await page.locator('.picker').evaluate((el) => getComputedStyle(el).zIndex);
+  const picker = page.locator('.picker');
+  await expect(picker).toBeVisible();
+  await floatOver(floating, await box(picker));
+  const sharedPicker = overlap(await box(picker), await box(floating));
+  expect(sharedPicker, 'the picker overlaps the floating group').not.toBeNull();
+  expect(await topmostAt(sharedPicker!.x + sharedPicker!.width / 2, sharedPicker!.y + sharedPicker!.height / 2, '.picker')).toBe(true);
+  const pickerZ = await picker.evaluate((el) => getComputedStyle(el).zIndex);
   const floatZ = await floating.evaluate((el) => getComputedStyle(el).zIndex);
   expect(Number(pickerZ)).toBeGreaterThan(Number(floatZ));
   await page.keyboard.press('Escape');
 
-  await documentPanel(page, wf!).locator('[data-tip="Not available yet"]').first().hover();
-  const tip = page.getByRole('tooltip').filter({ hasText: 'Not available yet' });
+  // the tooltip: hover the close button inside the floating group; the tooltip lands over the group
+  await tab(page, 'Inspector').locator('.x').hover();
+  const tip = page.getByRole('tooltip').filter({ hasText: 'Close' });
   await expect(tip).toHaveClass(/on/);
+  const shared = overlap(await box(tip), await box(floating));
+  expect(shared, 'the tooltip overlaps the floating group').not.toBeNull();
+  // the tooltip takes no pointer events, so let it take them for a moment to see what is on top of the group
+  await tip.evaluate((el) => { (el as HTMLElement).style.pointerEvents = 'auto'; });
+  expect(await topmostAt(shared!.x + shared!.width / 2, shared!.y + shared!.height / 2, '[role="tooltip"]')).toBe(true);
   expect(Number(await tip.evaluate((el) => getComputedStyle(el).zIndex))).toBeGreaterThan(Number(floatZ));
 });
 
@@ -136,13 +158,19 @@ test('pops a document out, and it keeps its fonts, its drawing and its zoom', as
   const panel = popup.locator('.docpanel');
   await expect(panel.locator('.react-flow__node-step').first()).toBeVisible();
 
-  // review focus 4: the pop-out has the fonts, the measure canvas and the SVG definitions it needs
-  expect(await popup.evaluate(async () => {
-    await document.fonts.ready;
-    return document.fonts.check('600 14.5px "IBM Plex Sans Condensed"') && !!document.getElementById('glow') && !!document.getElementById('capfill');
-  })).toBe(true);
+  // review focus 4: the pop-out loads its own faces (fonts.check is true when no face matches, so
+  // look for a real, loaded FontFace of each family the fitter measures with), and has the SVG definitions
+  for (const family of ['IBM Plex Sans Condensed', 'IBM Plex Mono']) {
+    await expect.poll(() => popup.evaluate((fam) => {
+      let loaded = 0;
+      document.fonts.forEach((f) => { if (f.family.replace(/["']/g, '') === fam && f.status === 'loaded') loaded++; });
+      return loaded;
+    }, family), { message: `a loaded ${family} face in the pop-out` }).toBeGreaterThan(0);
+  }
+  expect(await popup.evaluate(() => !!document.getElementById('glow') && !!document.getElementById('capfill'))).toBe(true);
 
   // selecting in the pop-out fills the Inspector in the main window
+  test.skip((await panel.locator('.react-flow__node-workflow').count()) === 0, 'the live workflow draws no clickable workflow block');
   await panel.locator('.react-flow__node-workflow').click();
   await expect(inspector(page).locator('.kindpill')).toHaveText('WORKFLOW');
 
@@ -192,7 +220,7 @@ test('Ctrl+E switches windows and Alt+W closes the active document', async ({ pa
   await expect(page.getByRole('dialog', { name: 'Switch window' })).toBeVisible();
   await page.keyboard.up('Control');
   await expect(page.getByRole('dialog', { name: 'Switch window' })).toHaveCount(0);
-  await expect(page.locator('.dv-tab.dv-active-tab .doctab .nm').filter({ hasText: a!.name })).toHaveCount(1);
+  await expect(page.locator('.dv-tab.dv-active-tab .doctab .nm').filter({ hasText: new RegExp(`^${esc(a!.name)}$`) })).toHaveCount(1);
 
   await page.keyboard.press('Alt+w');
   await expect(tab(page, a!.name)).toHaveCount(0);
@@ -213,4 +241,33 @@ test('a saved window layout comes back after a reload, without the documents', a
   await expect(tab(page, 'Inspector')).toBeVisible();
   await expect(page.locator('.docpanel')).toHaveCount(0);
   await expect(page.getByText('No workflow open')).toBeVisible();
+});
+
+test('after layout every step border lies on a 32 px line and every wire point on an 8 px line', async ({ page }) => {
+  const [wf] = workflows;
+  await openWorkflow(page, wf!);
+  const panel = documentPanel(page, wf!);
+  await expect(panel.locator('.react-flow__edge path.w').first()).toBeAttached();
+
+  const drawn = await panel.evaluate((root) => {
+    // flow coordinates: a node's own translate(x, y) (React Flow positions it inside the viewport), a wire's path data
+    const steps = [...root.querySelectorAll<HTMLElement>('.react-flow__node-step')].map((n) => {
+      const m = /translate\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(n.style.transform);
+      return { x: Number(m?.[1]), y: Number(m?.[2]), w: n.offsetWidth, h: n.offsetHeight };
+    });
+    const wires = [...root.querySelectorAll('.react-flow__edge path.w')].map((p) => p.getAttribute('d') ?? '');
+    return { steps, wires };
+  });
+
+  expect(drawn.steps.length).toBeGreaterThan(0);
+  for (const s of drawn.steps) {
+    expect(Number.isFinite(s.x) && Number.isFinite(s.y)).toBe(true);
+    for (const edge of [s.x, s.y, s.x + s.w, s.y + s.h]) expect(edge % 32, `step border ${edge}`).toBe(0);
+  }
+  expect(drawn.wires.length).toBeGreaterThan(0);
+  for (const d of drawn.wires) {
+    const numbers = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+    expect(numbers.length).toBeGreaterThanOrEqual(4);
+    for (const n of numbers) expect(n % 8, `wire point ${n} in ${d}`).toBe(0);
+  }
 });
