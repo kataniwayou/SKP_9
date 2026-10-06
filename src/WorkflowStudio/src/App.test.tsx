@@ -353,6 +353,44 @@ describe('unsaved Inspector edits (slice 3b)', () => {
     expect(screen.getByLabelText('Description')).toHaveValue('typed');
   });
 
+  it('text typed while the dialog\'s Save is in flight is not lost: the dialog asks again (final review 1)', async () => {
+    let answer!: (v: unknown) => void;
+    const api = withEntities({ putEntity: vi.fn().mockReturnValue(new Promise((r) => { answer = r; })) });
+    render(<App api={api} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.putEntity).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'renamed' } });
+    await act(async () => { answer({ ok: true, value: stepDto('s1', { name: 'fetch', description: 'typed' }) }); });
+    expect(await dialog()).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('renamed');
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByLabelText('Name')).toHaveValue('renamed');
+  });
+
+  it('Escape with focus outside the dialog cancels the dialog only (final review 4)', async () => {
+    render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await dialog();
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.getByLabelText('Description')).toHaveValue('typed');
+  });
+
+  it('a second guarded action while the dialog is open does not replace what it asks about (final review 4)', async () => {
+    render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+    fireEvent.keyDown(document.body, { key: 'Escape' });           // asks about clearing the selection
+    await dialog();
+    fireEvent.click(screen.getByRole('button', { name: 'Close alpha' }));
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Discard' }));
+    expect(await screen.findByText(/Nothing selected/)).toBeInTheDocument();
+    expect(screen.getAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(1);
+  });
+
   it('asks before closing a document with unsaved edits', async () => {
     render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
     await screen.findByLabelText('Description');

@@ -129,20 +129,39 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   type Prompt =
     | { kind: 'unsaved'; workflowId: string; proceed: () => void; doc: Document }
     | { kind: 'unlink'; workflowId: string; doc: Document; discards: boolean };
-  const [prompt, setPrompt] = useState<Prompt | null>(null);
+  const [prompt, setPromptState] = useState<Prompt | null>(null);
+  // the open question, read by the guard at once (state would lag a render behind)
+  const asking = useRef<Prompt | null>(null);
+  const setPrompt = useCallback((next: Prompt | null) => { asking.current = next; setPromptState(next); }, []);
 
   const actions: StudioActions = useMemo(() => ({
     service,
+    // while a question is open, nothing else asks or acts: the open question is not replaced
     guard: (workflowId, proceed, doc = document) => {
+      if (asking.current !== null) return;
       const open = store.getState().docs.find((d) => d.workflowId === workflowId);
       if (!open || !hasEdits(open.inspector)) { proceed(); return; }
       setPrompt({ kind: 'unsaved', workflowId, proceed, doc });
     },
     confirmUnlink: (workflowId, doc = document) => {
+      if (asking.current !== null) return;
       const open = store.getState().docs.find((d) => d.workflowId === workflowId);
       setPrompt({ kind: 'unlink', workflowId, doc, discards: open !== undefined && hasEdits(open.inspector) });
     },
-  }), [service, store]);
+  }), [service, store, setPrompt]);
+
+  /**
+   * The dialog's Save: once the save is written, the action is guarded again, so text typed while the
+   * save was in flight is asked about, never dropped. A failed save stays where it is and says why.
+   */
+  const saveThenProceed = useCallback((asked: Extract<Prompt, { kind: 'unsaved' }>) => {
+    setPrompt(null);
+    void service.save(asked.workflowId).then(() => {
+      const after = store.getState().docs.find((d) => d.workflowId === asked.workflowId)?.inspector;
+      if (after && (after.busy || after.failure !== null)) return;
+      actions.guard(asked.workflowId, asked.proceed, asked.doc);
+    });
+  }, [service, store, actions, setPrompt]);
 
   const openWorkflow = useCallback((id: string) => {
     const known = workflows.find((w) => w.id === id);
@@ -230,7 +249,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
           message={<>The Inspector has unsaved changes in <b>{store.getState().docs.find((d) => d.workflowId === prompt.workflowId)?.name}</b>.</>}
           buttons={[
             { label: 'Discard', onClick: () => { setPrompt(null); store.dispatch({ type: 'discard', workflowId: prompt.workflowId }); prompt.proceed(); } },
-            { label: 'Save', primary: true, onClick: () => { setPrompt(null); void service.save(prompt.workflowId).then((saved) => { if (saved) prompt.proceed(); }); } },
+            { label: 'Save', primary: true, onClick: () => saveThenProceed(prompt) },
           ]} />
       )}
       {prompt?.kind === 'unlink' && (

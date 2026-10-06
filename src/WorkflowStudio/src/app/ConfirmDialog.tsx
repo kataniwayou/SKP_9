@@ -9,7 +9,9 @@ export interface DialogButton {
 
 /**
  * The studio's modal question (mockup v49 `.modal`), drawn in the window the action came from.
- * The primary button has focus; Escape is Cancel and goes no further (the dock skips a handled key).
+ * The primary button has focus, and Tab and Shift+Tab cycle within the buttons. While it is open, it
+ * takes its window's keys first: Escape is Cancel wherever the focus is, and any other key outside it
+ * is handled (default prevented), so the dock, which skips a handled key, never acts under the modal.
  */
 export function ConfirmDialog({ doc, title, message, buttons, onCancel }: {
   doc: Document;
@@ -21,13 +23,42 @@ export function ConfirmDialog({ doc, title, message, buttons, onCancel }: {
   const box = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const messageId = useId();
+  const cancel = useRef(onCancel);
+  cancel.current = onCancel;
   useEffect(() => {
     const before = doc.activeElement as HTMLElement | null;
     box.current?.querySelector<HTMLButtonElement>('.btn.primary')?.focus();
     return () => { if (before?.isConnected) before.focus(); };
   }, [doc]);
+  useEffect(() => {
+    const keydown = (e: KeyboardEvent) => {
+      const inside = e.target instanceof Node && box.current?.contains(e.target) === true;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        cancel.current();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const order = [...(box.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+        if (order.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const at = inside ? order.indexOf(e.target as HTMLButtonElement) : -1;
+        const next = at < 0 ? (e.shiftKey ? order.length - 1 : 0) : (at + (e.shiftKey ? -1 : 1) + order.length) % order.length;
+        order[next]!.focus();
+        return;
+      }
+      if (!inside) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    doc.addEventListener('keydown', keydown, true);
+    return () => doc.removeEventListener('keydown', keydown, true);
+  }, [doc]);
   return createPortal(
-    <div className="modal on" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel(); } }}>
+    <div className="modal on">
       <div className="mbox" role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={messageId} ref={box}>
         <div className="mt" id={titleId}>{title}</div>
         <div className="mb" id={messageId}>{message}</div>
