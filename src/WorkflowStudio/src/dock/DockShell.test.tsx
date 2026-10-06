@@ -691,13 +691,23 @@ describe('session (plan 3d)', () => {
   });
 
   it('falls back to the default layout when the restored layout names a tool pane the dock does not know, keeping the documents', () => {
-    const unknown = JSON.parse(REJECTED_BY_DOCKVIEW) as SavedLayout;
-    unknown.dock.panels['tool:mystery'] = { id: 'tool:mystery', contentComponent: 'tool', title: 'Mystery' };
-    expectingDockviewRejection(() => {
-      setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'a', restore: { ...unknown, popped: [] } });
-    });
+    const onLayoutChange = vi.fn();
+    setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'a', onLayoutChange });
+    const valid = onLayoutChange.mock.calls.at(-1)![0] as SavedLayout;
+    cleanup();
+    const unknown = JSON.parse(JSON.stringify(valid)) as SavedLayout;
+    const leaf = JSON.stringify(unknown.dock.grid.root);
+    expect(leaf).toContain('"views"');
+    const addView = (node: { type: string; data: unknown }): boolean => {
+      if (node.type === 'leaf') { (node.data as { views: string[] }).views.push('mystery'); return true; }
+      return (node.data as { type: string; data: unknown }[]).some(addView);
+    };
+    addView(unknown.dock.grid.root as { type: string; data: unknown });
+    unknown.dock.panels['mystery'] = { id: 'mystery', contentComponent: 'tool', title: 'Mystery' };
+    setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'a', restore: unknown });
     expect(toast()).toHaveTextContent(/default layout/);
     for (const id of ['a', 'b']) expect(docTabs(`wf-${id}`)).toHaveLength(1);
+    expect(docTabs('Mystery')).toHaveLength(0);
   });
 
   it('without a session, still applies the saved window layout at startup', () => {

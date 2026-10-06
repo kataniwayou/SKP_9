@@ -218,6 +218,7 @@ export function DockShell(props: DockShellProps) {
   }, [apply, memory, syncDocuments, report]);
 
   // the rails live in React state, not in dockview's layout: report when they change
+  // this effect always reports last, with the current `hidden`: a transient report with a stale `hidden` is corrected
   useEffect(() => { if (api) report(api); }, [api, hidden, report]);
 
   // the open documents decide which document panels exist

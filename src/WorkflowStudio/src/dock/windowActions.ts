@@ -367,6 +367,10 @@ export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: read
  * Returns the panes that go back on a rail. Throws when dockview rejects the layout.
  */
 export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLayout): ToolId[] {
+  // a tool pane the dock does not know would be an empty tab (ToolHost renders nothing): reject it up front
+  for (const panel of Object.values(saved.dock.panels)) {
+    if (isToolId(panel.id) !== (panel.contentComponent === 'tool')) throw new Error(`The layout holds a tool pane the dock does not know: ${panel.id}`);
+  }
   const current = api.toJSON();
   const documents = Object.values(current.panels).filter((p) => isDocPanelId(p.id));
   const staged = api.panels.filter((p) => isDocPanelId(p.id));
