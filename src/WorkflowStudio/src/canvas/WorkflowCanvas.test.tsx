@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useStore } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
@@ -130,6 +131,55 @@ describe('WorkflowCanvas', () => {
       const rings = [...container.querySelectorAll('.nx-health')];
       expect(rings.length).toBe(2);
       for (const ring of rings) expect(ring.getAttribute('data-health')).toBe('unhealthy');
+    });
+
+    it('opens at a saved view that no longer followed Fit, and reports the view when it settles', async () => {
+      const onViewChange = vi.fn();
+      const { container } = render(
+        <WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800}
+          initialView={{ x: -100, y: 40, zoom: 1.5, followFit: false }} onViewChange={onViewChange}>
+          <ZoomControls />
+        </WorkflowCanvas>,
+      );
+      await waitFor(() => expect(screen.getByLabelText('Zoom level')).toHaveTextContent('150%'));
+      // jsdom serializes the transform without the space after the comma
+      expect((container.querySelector('.react-flow__viewport') as HTMLElement).style.transform.replace(/,\s*/g, ', ')).toBe('translate(-100px, 40px) scale(1.5)');
+
+      fireEvent.click(screen.getByLabelText('Zoom in'));
+      await waitFor(() => expect(onViewChange).toHaveBeenCalled());
+      const last = onViewChange.mock.calls.at(-1)![0];
+      expect(last.zoom).toBeGreaterThan(1.5);
+      expect(last.followFit).toBe(false);
+    });
+
+    it('reads the saved view once: a later view handed back queues no fit', async () => {
+      // a queued fit runs on the next node change in a browser (jsdom never measures nodes, so it is checked directly)
+      function FitQueued() {
+        return <output aria-label="Fit queued">{String(useStore((st) => st.fitViewQueued))}</output>;
+      }
+      const doc = await twoSteps();
+      const saved = { x: -100, y: 40, zoom: 1.5, followFit: false };
+      const canvas = (initialView: typeof saved) => (
+        <WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={initialView}>
+          <ZoomControls />
+          <FitQueued />
+        </WorkflowCanvas>
+      );
+      const { rerender } = render(canvas(saved));
+      await waitFor(() => expect(screen.getByLabelText('Zoom level')).toHaveTextContent('150%'));
+
+      // the page hands back what the canvas reported after Fit was pressed
+      rerender(canvas({ ...saved, followFit: true }));
+      expect(screen.getByLabelText('Fit queued')).toHaveTextContent('false');
+    });
+
+    it('fits a document whose saved view still followed Fit', async () => {
+      render(
+        <WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} initialView={{ x: -100, y: 40, zoom: 1.5, followFit: true }}>
+          <ZoomControls />
+        </WorkflowCanvas>,
+      );
+      await waitFor(() => expect(screen.getByLabelText('Zoom level')).not.toHaveTextContent('150%'));
     });
   });
 });

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { StudioApi } from '../api/client';
 import { healthOf } from '../api/liveness';
 import type { LiveArt } from '../canvas/liveArt';
+import type { SavedView } from '../canvas/savedView';
 import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import { useStudio, useStudioStore } from '../store/studioStore';
@@ -13,7 +14,15 @@ import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVi
  * `renderer: 'always'`, so both survive tab switches), its toolbar and its run status. Labels
  * are measured in the document the panel is drawn in, so a pop-out keeps its fonts (spec §6.3).
  */
-export function DocumentPanel({ api, workflowId, panel }: { api: StudioApi; workflowId: string; panel: PanelLike }) {
+export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange }: {
+  api: StudioApi;
+  workflowId: string;
+  panel: PanelLike;
+  /** Where this document's view was when the page was left (the session); null: fit it. */
+  initialView?: SavedView | null;
+  /** Called when the view settles, for the session. */
+  onViewChange?: (view: SavedView) => void;
+}) {
   const open = useStudio((s) => s.docs.find((d) => d.workflowId === workflowId) ?? null);
   const store = useStudioStore();
   const ownerDocument = useOwnerDocument(panel);
@@ -37,6 +46,8 @@ export function DocumentPanel({ api, workflowId, panel }: { api: StudioApi; work
         fitter={fitter}
         selection={open.selection}
         live={live}
+        initialView={initialView}
+        onViewChange={onViewChange}
         onSelect={(selection) => {
           store.dispatch({ type: 'activate', workflowId });
           store.dispatch({ type: 'select', workflowId, selection });

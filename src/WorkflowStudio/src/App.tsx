@@ -3,10 +3,13 @@ import { createApi, type ApiError, type StudioApi } from './api/client';
 import type { WorkflowReadDto } from './api/types';
 import { DocumentPanel } from './app/DocumentPanel';
 import { loadDocument } from './app/loadDocument';
+import { createSaver, readSession, restoredState, sessionOf, writeSession, type Session } from './app/session';
 import { SvgDefs } from './canvas/SvgDefs';
+import type { SavedView } from './canvas/savedView';
 import { fitterFor } from './canvas/useFitter';
 import { DockShell, type DockDocument, type PickerItem } from './dock/DockShell';
 import type { ToolId } from './dock/ids';
+import { browserStorage, type SavedLayout } from './dock/layoutPersistence';
 import { entityName } from './model/entityNames';
 import { Inspector } from './panels/Inspector';
 import { Output, Toolbox } from './panels/PaneNote';
@@ -33,21 +36,27 @@ function renderTool(id: ToolId) {
   }
 }
 
-/** The studio page (slice 3a): one store, the dock, and what goes in its documents and panes. */
+/**
+ * The studio page (slice 3a): one store, the dock, and what goes in its documents and panes. The page
+ * keeps its session (plan 3d): the store starts from it, so a refresh brings back what was open.
+ */
 export function App({ api: injected, storage }: { api?: StudioApi; storage?: Storage | null }) {
   const api = useMemo(() => injected ?? createApi(), [injected]);
-  const store = useMemo(() => createStudioStore(), []);
+  const resolved = useMemo(() => (storage === undefined ? browserStorage() : storage), [storage]);
+  const session = useMemo(() => readSession(resolved), [resolved]);
+  // the session is read once: the store is made once, from the session the page started with
+  const store = useMemo(() => createStudioStore(restoredState(session)), []);
   // the page's fonts start loading at once, so the first document opens with its fitter ready
   useEffect(() => { void fitterFor(document); }, []);
   return (
     <StudioStoreProvider value={store}>
       <SvgDefs />
-      <Studio api={api} storage={storage} />
+      <Studio api={api} storage={resolved} session={session} />
     </StudioStoreProvider>
   );
 }
 
-function Studio({ api, storage }: { api: StudioApi; storage?: Storage | null }) {
+function Studio({ api, storage, session }: { api: StudioApi; storage: Storage | null; session: Session | null }) {
   const store = useStudioStore();
   const docs = useStudio((s) => s.docs);
   const activeId = useStudio((s) => s.activeId);
@@ -69,11 +78,8 @@ function Studio({ api, storage }: { api: StudioApi; storage?: Storage | null }) 
   }, [api]);
   useEffect(readList, [readList]);
 
-  const openWorkflow = useCallback((id: string) => {
-    const known = workflows.find((w) => w.id === id);
-    const alreadyOpen = store.getState().docs.some((d) => d.workflowId === id);
-    store.dispatch({ type: 'open', workflowId: id, name: known?.name ?? id, version: known?.version ?? '' });
-    if (alreadyOpen) return;
+  /** Fetches an open document's workflow; a result that lands after the document was closed is dropped. */
+  const load = useCallback((id: string) => {
     const token = (opens.current.get(id) ?? 0) + 1;
     opens.current.set(id, token);
     void loadDocument(api, id).then((r) => {
@@ -83,7 +89,34 @@ function Studio({ api, storage }: { api: StudioApi; storage?: Storage | null }) 
         ? { type: 'loaded', workflowId: id, doc: r.value }
         : { type: 'failed', workflowId: id, message: describeError(r.error) });
     });
-  }, [api, store, workflows]);
+  }, [api, store]);
+
+  const openWorkflow = useCallback((id: string) => {
+    const known = workflows.find((w) => w.id === id);
+    const alreadyOpen = store.getState().docs.some((d) => d.workflowId === id);
+    store.dispatch({ type: 'open', workflowId: id, name: known?.name ?? id, version: known?.version ?? '' });
+    if (!alreadyOpen) load(id);
+  }, [store, workflows, load]);
+
+  useEffect(() => {
+    for (const d of store.getState().docs) if (d.status.kind === 'loading') load(d.workflowId);
+  }, []); // the restored documents only; later ones are loaded by openWorkflow
+
+  // views and the dock change on every pan and drag, so they are kept outside React state
+  const views = useRef(new Map<string, SavedView>(session?.docs.flatMap((d) => (d.view ? [[d.workflowId, d.view] as const] : [])) ?? []));
+  const dockState = useRef<SavedLayout | null>(session?.dock ?? null);
+  const saver = useMemo(() => createSaver(() => {
+    const state = store.getState();
+    for (const id of [...views.current.keys()]) if (!state.docs.some((d) => d.workflowId === id)) views.current.delete(id);
+    writeSession(storage, sessionOf(state, views.current, dockState.current));
+  }), [store, storage]);
+  useEffect(() => store.subscribe(saver.schedule), [store, saver]);
+  // the last change before the page goes away is written at once, not 300 ms later
+  useEffect(() => {
+    const flush = () => saver.flush();
+    window.addEventListener('pagehide', flush);
+    return () => { window.removeEventListener('pagehide', flush); saver.flush(); };
+  }, [saver]);
 
   // the dock only needs each document's identity and names; a selection change must not re-render every tab
   const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}`).join('\u0001');
@@ -102,12 +135,19 @@ function Studio({ api, storage }: { api: StudioApi; storage?: Storage | null }) 
       documents={documents}
       activeDocumentId={activeId}
       onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
-      onCloseDocument={(id) => store.dispatch({ type: 'close', workflowId: id })}
+      onCloseDocument={(id) => {
+        views.current.delete(id); // reopened later, it fits afresh
+        store.dispatch({ type: 'close', workflowId: id });
+      }}
       workflows={items}
       pickerNote={listError}
       onPickerOpen={readList}
       onOpenWorkflow={openWorkflow}
-      renderDocument={(id, panel) => <DocumentPanel api={api} workflowId={id} panel={panel} />}
+      renderDocument={(id, panel) => (
+        <DocumentPanel api={api} workflowId={id} panel={panel}
+          initialView={views.current.get(id) ?? null}
+          onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }} />
+      )}
       renderTool={renderTool}
       inspectorKey={inspector}
       onEscape={() => {
@@ -116,6 +156,8 @@ function Studio({ api, storage }: { api: StudioApi; storage?: Storage | null }) 
       }}
       popoutContent={<SvgDefs />}
       storage={storage}
+      restore={session?.dock ?? null}
+      onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
     />
   );
 }

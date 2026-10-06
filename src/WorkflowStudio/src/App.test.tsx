@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from './api/client';
 import { graphDto, stepDto, workflowDto } from './api/fixtures';
 import { App } from './App';
+import { SESSION_KEY } from './app/session';
 import { memoryStorage } from './test/memoryStorage';
 
 const ZETA = '11111111-2222-3333-4444-555555555555';
@@ -123,5 +124,96 @@ describe('App', () => {
     rerender(<App api={api} storage={memoryStorage()} />);
     await new Promise((r) => setTimeout(r, 20));
     expect(api.listLive).toHaveBeenCalledTimes(polls);
+  });
+});
+
+describe('session (plan 3d)', () => {
+  const seeded = (session: unknown) => memoryStorage({ [SESSION_KEY]: JSON.stringify(session) });
+
+  it('brings back the open documents, the active one and each selection after a reload', async () => {
+    const api = fakeApi();
+    const storage = seeded({
+      version: 1, activeId: 'wf2', showDetails: false, dock: null,
+      docs: [
+        { workflowId: 'wf1', name: 'orders', version: '1.0.0', selection: { kind: 'workflow' }, view: null },
+        { workflowId: 'wf2', name: 'billing', version: '2.0.0', selection: null, view: null },
+      ],
+    });
+    render(<App api={api} storage={storage} />);
+    expect(await screen.findAllByText('orders', { selector: '.doctab .nm' })).toHaveLength(1);
+    expect(screen.getAllByText('billing', { selector: '.doctab .nm' })).toHaveLength(1);
+    await waitFor(() => expect(api.getGraph).toHaveBeenCalledWith('wf1'));
+    expect(api.getGraph).toHaveBeenCalledWith('wf2');
+
+    // once the graphs load, wf1's restored selection is drawn on its canvas and wf2 (active) shows none
+    await waitFor(() => expect(document.querySelectorAll('.react-flow__node[data-id="wf"]')).toHaveLength(2));
+    expect(document.querySelectorAll('.react-flow__node.studio-sel')).toHaveLength(1);
+    expect(within(inspector()).getByText(/Nothing selected/)).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByText('orders', { selector: '.doctab .nm' }).closest('.dv-tab')!);
+    await waitFor(() => expect(within(inspector()).getByText('WORKFLOW')).toBeInTheDocument());
+  });
+
+  it('opens each restored document at its own view (review focus 5)', async () => {
+    render(<App api={fakeApi()} storage={seeded({
+      version: 1, activeId: 'wf1', showDetails: false, dock: null,
+      docs: [
+        { workflowId: 'wf1', name: 'orders', version: '1.0.0', selection: null, view: { x: -100, y: 40, zoom: 1.5, followFit: false } },
+        { workflowId: 'wf2', name: 'billing', version: '2.0.0', selection: null, view: null },
+      ],
+    })} />);
+    // each panel is found by its workflow: the sphere's unique name ends with the workflow id
+    const transformOf = (workflowId: string) => {
+      const panel = [...document.querySelectorAll('.docpanel')].find((p) => p.querySelector('.react-flow__node[data-id="wf"]')?.textContent?.includes(`-${workflowId}`))!;
+      return (panel.querySelector('.react-flow__viewport') as HTMLElement).style.transform.replace(/,\s*/g, ', ');
+    };
+    await waitFor(() => expect(document.querySelectorAll('.react-flow__viewport')).toHaveLength(2));
+    expect(transformOf('wf1')).toBe('translate(-100px, 40px) scale(1.5)');
+    expect(transformOf('wf2')).not.toBe('translate(-100px, 40px) scale(1.5)');
+  });
+
+  it('keeps a document closed before the reload closed, and forgets its view (review focus 3)', async () => {
+    const storage = memoryStorage();
+    const { unmount } = render(<App api={fakeApi()} storage={storage} />);
+    await pickWorkflow('alpha');
+    await screen.findByText('fetch');
+    fireEvent.click(screen.getByRole('button', { name: /Close alpha/ }));
+    await waitFor(() => expect(screen.queryByText('fetch')).not.toBeInTheDocument());
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    const saved = JSON.parse(storage.getItem(SESSION_KEY)!);
+    expect(saved.docs).toEqual([]);
+    unmount();
+  });
+
+  it('fits a document reopened after it was closed, not at the view it had (review focus 3)', async () => {
+    const storage = memoryStorage();
+    render(<App api={fakeApi()} storage={storage} />);
+    await pickWorkflow('alpha');
+    await screen.findByText('fetch');
+    const level = () => screen.getByLabelText('Zoom level').textContent;
+    await waitFor(() => expect(level()).not.toBe('100%'));
+    const fitted = level();
+    fireEvent.click(screen.getByLabelText('Zoom in'));
+    await waitFor(() => expect(level()).not.toBe(fitted));
+    // the zoom settles, and the saver writes the view 300 ms later
+    await waitFor(() => expect(JSON.parse(storage.getItem(SESSION_KEY) ?? 'null')?.docs[0]?.view).toMatchObject({ followFit: false }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Close alpha/ }));
+    await waitFor(() => expect(screen.queryByText('fetch')).not.toBeInTheDocument());
+    await pickWorkflow('alpha');
+    await screen.findByText('fetch');
+    await waitFor(() => expect(level()).toBe(fitted));
+  });
+
+  it('writes the session at once when the page goes away (review focus 4)', async () => {
+    const storage = memoryStorage();
+    render(<App api={fakeApi()} storage={storage} />);
+    await pickWorkflow('alpha');
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    expect(JSON.parse(storage.getItem(SESSION_KEY)!).docs).toHaveLength(1);
+  });
+
+  it('starts as new when the stored session is broken (review focus 1)', () => {
+    render(<App api={fakeApi()} storage={memoryStorage({ [SESSION_KEY]: '{oops' })} />);
+    expect(screen.getByText('No workflow open')).toBeInTheDocument();
   });
 });

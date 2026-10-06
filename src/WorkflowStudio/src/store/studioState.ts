@@ -20,7 +20,7 @@ export interface OpenDocument {
 
 /**
  * The studio's shared state. Slice 3a holds no drafts and no undo: nothing can be edited yet.
- * Open documents are not restored on reload (spec §6.1), so none of this is persisted.
+ * The page keeps it in its session (app/session.ts), so a refresh brings it back (spec §6.1).
  */
 export interface StudioState {
   /** In the order they were opened. */
