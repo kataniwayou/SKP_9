@@ -1,6 +1,6 @@
 # SKP Studio -- design
 
-Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Amended 2026-10-06: the Inspector shows the unique entity name and the picker uses it (§7); slices reordered to dock (3a) and Inspector editing (3b) before canvas editing (§10); the Inspector edits each entity's DTO metadata with GET/PUT, shared entities are the operator's responsibility, Start/Stop stay disabled (§6.1, §7.1, §8, §9). Branch: `feature/path-importer`.
+Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Amended 2026-10-06: the Inspector shows the unique entity name and the picker uses it (§7); slices reordered to dock (3a) and Inspector editing (3b) before canvas editing (§10); the Inspector edits each entity's DTO metadata with GET/PUT, shared entities are the operator's responsibility, Start/Stop stay disabled (§6.1, §7.1, §8, §9). Amended 2026-10-06 again: locked node art (gallery + v50), cache 160 × 160, live health and started states, slice 3c (§5.1, §10). Branch: `feature/path-importer`.
 
 ## 1. Purpose
 
@@ -149,9 +149,38 @@ The response is the graph re-read through `WorkflowGraphLoader`.
   cell, so block coordinates and drawn lines coincide.
 - **Everything sits on the grid.** Blocks snap to 8 px. A step is **224 × 160 = 7 × 5 cells**; its
   processor middle is **96** (3 cells down), so ports and arrows run along a 32 px line. Ports are
-  **16 px** apart, so even fan-outs (±8, ±24 …) land on 8 px lines. The sphere's radius is 96, a cache tag
-  is 192 × 64, columns are 288 apart. Wire bends, landings, the junction bus and contact points snap to
-  8 px.
+  **16 px** apart, so even fan-outs (±8, ±24 …) land on 8 px lines. The hub's radius is 96, a cache is
+  **160 × 160** (placed at hub x − 80, caches stacked 192 apart), columns are 288 apart. Wire bends,
+  landings, the junction bus and contact points snap to 8 px.
+
+**Node art (locked 2026-10-06; supersedes the v49 block drawings below).** The reference is
+`.superpowers/brainstorm/385-1791189446/content/skp-studio-node-art-final.html` (the locked gallery)
+and mockup **v50** (`skp-studio-dock-v50.html`), which puts it in the dock. Where they differ, **the
+gallery wins**. v50's dock chrome is identical to v49's. Built in slice **3c** (§10).
+
+- **Step:** a notched HUD frame (chamfered corners, notched top and bottom, side ticks) with the title
+  cap (name, `STEP vX`, entry-condition pill, assignment keys) and the processor panel inside (die with
+  its ring, name and version, in / out / cfg slots).
+- **Processor health colours only the die and its ring:** **healthy** green, the orbit spinning;
+  **unhealthy** red and still; **undetermined** grey and blinking slowly. Data: `GET
+  /processors/liveness` (§4.4), polled with the document's live status (every 5 s, visible tab only);
+  `live` → healthy, not live → unhealthy, no answer (poll failed, processor absent) → undetermined.
+- **Workflow:** a hub dial with equal docking points all round. **Started** (its id is in `GET
+  /orchestration/live`): the inside green, the segment ring turning. **Not started**: the inside grey,
+  still and blinking slowly. The two outer rings are static and white. A failed live poll shows not
+  started's look plus the capsule's *status unknown*.
+- **Cache:** a square in the step border style: a hex mark, the name, `CACHE · vX`, and the root on a
+  plate. Static.
+- **Lines:** circuit traces with right-angle bends; an **open chevron head** where a line lands on a
+  processor; colour is the target's entry condition. **Flowing** (workflow started, wire not broken):
+  pulses run toward the target; otherwise still. **Broken:** dashed with a warning gap (the gallery's
+  dash). A junction is a square via in the colour of the lines it merges.
+- **Reduced motion:** no pulses, no spinning, no blinking; full opacity.
+- **The mockup's "Colours" scheme switch is a comparison tool and does not ship;** the product keeps
+  the "Current" colours (§5.3). The legend's icons match the canvas.
+
+The original v49 drawings, kept for history:
+
 - **Workflow:** a **lit sphere** (gradient depth, specular highlight, rim light, contact shadow) showing
   only "WORKFLOW" and its name. No orbit ring, version or cron. It starts centred and can be moved.
 - **Step:** a **sphere-glass cap** block. A glossy blue title cap holds the name, `STEP vX`, the
@@ -434,6 +463,9 @@ editing is built inside real panes.
    pop-outs, overlay layer tokens, window menus, in-house auto-hide, layout in `localStorage`; the
    capsule toolbar with status only (Start/Stop disabled); canvas selection; a **read-only** Inspector
    (unique name, DTO fields, show all); Problems from validate (§7.3); Output and Toolbox as empty panes.
+3c. **Node art and live states** (§5.1, locked 2026-10-06; runs after 3a, before 3b): the gallery's
+   step, processor, hub, cache and line drawings; processor health from `/processors/liveness`; the
+   started hub and flowing pulses from `/orchestration/live`; reduced motion; the legend.
 3b. **Inspector editing** (§7.1): `GET` / `PUT` per entity, drill-downs, assignment add / edit / remove
    from the step, server errors, refresh after save. The only `POST` is creating an assignment; no
    `DELETE`.
