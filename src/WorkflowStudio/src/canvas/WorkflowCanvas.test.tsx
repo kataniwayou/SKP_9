@@ -69,7 +69,7 @@ describe('WorkflowCanvas', () => {
       const { container, rerender } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} />);
       expect(container.querySelector('.wf')!.getAttribute('data-started')).toBe('false');
 
-      rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} live={{ started: true, health: () => 'healthy' }} />);
+      rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} live={{ started: true, status: 'running', health: () => 'healthy' }} />);
       expect(container.querySelector('.wf')!.getAttribute('data-started')).toBe('true');
     });
 
@@ -124,7 +124,7 @@ describe('WorkflowCanvas', () => {
     });
 
     it('draws each processor in the health the canvas live state gives it', async () => {
-      const live = { started: false, health: (id: string) => (id === 'p1' ? 'unhealthy' as const : 'healthy' as const) };
+      const live = { started: false, status: 'stopped' as const, health: (id: string) => (id === 'p1' ? 'unhealthy' as const : 'healthy' as const) };
       const { container } = render(<WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} live={live} />);
       const rings = [...container.querySelectorAll('.nx-health')];
       expect(rings.length).toBe(2);

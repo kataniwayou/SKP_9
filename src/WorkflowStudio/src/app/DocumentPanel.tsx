@@ -21,8 +21,8 @@ export function DocumentPanel({ api, workflowId, panel }: { api: StudioApi; work
   const visible = usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready';
   const status = useLiveStatus(api, workflowId, visible);
   const liveness = useLiveness(api, visible);
-  // a failed live poll is "status unknown" in the capsule and "not started" on the canvas (spec §5.1)
-  const live = useMemo<LiveArt>(() => ({ started: status === 'running', health: healthOf(liveness) }), [status, liveness]);
+  // a failed live poll is "status unknown" in the capsule and on the hub pill, with not started's look (spec §5.1)
+  const live = useMemo<LiveArt>(() => ({ started: status === 'running', status, health: healthOf(liveness) }), [status, liveness]);
   // a background tab's canvas stays mounted; .bg hides its nodes (document.css says why)
   const cls = usePanelShown(panel) ? 'docpanel' : 'docpanel bg';
 

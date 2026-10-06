@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import type { LiveStatus } from '../../api/liveStatus';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { SPHERE_R } from '../../layout/geometry';
 import type { FittedText } from '../fitText';
@@ -19,15 +20,22 @@ const SPINNER = closingDash(R - 9, [44, 14, 8, 14]);
 const TICKS = `1.5 ${(2 * Math.PI * R / 48 - 1.5).toFixed(2)}`;
 /** The pill (gallery wfPill, 200 wide at its r 80 hub, × 1.2): centred under the dial. */
 export const PILL_W = 240;
-const STARTED = '  ● started', NOT_STARTED = '  ○ not started';
+/** The pill's state text for each run status, after two no-break spaces. Only a verdict says started or not started. */
+const PILL_STATES: Record<LiveStatus, string> = {
+  running: '  ● started',
+  stopped: '  ○ not started',
+  unknown: '  ? status unknown',
+  checking: '  checking…',
+};
 
 /**
  * The workflow as the hub dial (spec §5.1; mockup v50 drawWorkflow, gallery hubDial). The two outer
  * rings are static and white. Inside them the state: started is green with the segment ring turning;
  * not started is grey, still and blinking slowly. The dial says only WORKFLOW; the pill under it
- * carries the cron and the state and never blinks.
+ * carries the cron and the state and never blinks. An unknown or unchecked status has not started's
+ * look, but its pill says so rather than "not started" (spec §5.1).
  */
-export function WorkflowView({ tip, cron, started }: WorkflowNodeData & { started: boolean }) {
+export function WorkflowView({ tip, cron, started, status }: WorkflowNodeData & { started: boolean; status: LiveStatus }) {
   const core = `nxcore${useId().replace(/[^\w-]/g, '')}`;
   const pillX = C - PILL_W / 2, pillY = C + R + 14;
   return (
@@ -55,22 +63,22 @@ export function WorkflowView({ tip, cron, started }: WorkflowNodeData & { starte
         <rect className="nx-bd" x={pillX} y={pillY} width={PILL_W} height={18} rx={9} />
         <rect className="nx-ln" x={pillX} y={pillY} width={PILL_W} height={18} rx={9} />
         <Tip full={cron.full} cut={cron.cut}>
-          <text className="nx-state" x={pillX + 12} y={pillY + 12.5}>{cron.text}<tspan>{started ? STARTED : NOT_STARTED}</tspan></text>
+          <text className="nx-state" x={pillX + 12} y={pillY + 12.5}>{cron.text}<tspan>{PILL_STATES[status]}</tspan></text>
         </Tip>
       </g>
     </g>
   );
 }
 
-/** The longest state text, for the room left to the cron on the pill. */
-export const PILL_STATE = NOT_STARTED;
+/** The longest state text (the pill font is mono, so the most characters), for the room left to the cron on the pill. */
+export const PILL_STATE = Object.values(PILL_STATES).reduce((a, b) => (b.length > a.length ? b : a));
 
 export function WorkflowNode({ data }: NodeProps<WorkflowNodeType>) {
-  const { started } = useLiveArt();
+  const { started, status } = useLiveArt();
   return (
     <>
       <svg width={2 * R} height={2 * R} overflow="visible" style={{ display: 'block' }}>
-        <WorkflowView {...data} started={started} />
+        <WorkflowView {...data} started={started} status={status} />
       </svg>
       <Handle id="out" type="source" position={Position.Right} isConnectable={false} style={{ top: R }} />
       <Handle id="down" type="source" position={Position.Bottom} isConnectable={false} />

@@ -147,7 +147,10 @@ describe('toFlow', () => {
   });
 
   it('gives the hub its unique name as a tooltip and the cron for its pill', () => {
-    const hub = toFlow(doc(), fitter).nodes.find((n) => n.id === SPHERE_NODE_ID)!.data as import('./nodes/WorkflowNode').WorkflowNodeData;
+    // measured as IBM Plex Mono draws it: .6em a character, 6 px at the pill's 10 px (the 7 px fake leaves
+    // 90 beside the 18-character longest state, too little for the 15 characters of '⏱ not scheduled')
+    const mono = createTextFitter((text) => text.length * 6);
+    const hub = toFlow(doc(), mono).nodes.find((n) => n.id === SPHERE_NODE_ID)!.data as import('./nodes/WorkflowNode').WorkflowNodeData;
     expect(hub.tip).toBe('orders_1.0.0-wf1');
     expect(hub.cron).toEqual({ text: '⏱ not scheduled', full: '⏱ not scheduled', cut: false });
   });
@@ -158,8 +161,8 @@ describe('toFlow', () => {
     const hub = toFlow(graph, fitter).nodes.find((n) => n.id === SPHERE_NODE_ID)!.data as import('./nodes/WorkflowNode').WorkflowNodeData;
     expect(hub.cron.cut).toBe(true);
     expect(hub.cron.full).toBe(`⏱ ${long}`);
-    // the pill is 240 wide, its text starts 12 in and the state needs 15 characters
-    expect(hub.cron.text.length * 7).toBeLessThanOrEqual(240 - 24 - 15 * 7);
+    // the pill is 240 wide, its text starts 12 in and the longest state ('  ? status unknown') needs 18 characters
+    expect(hub.cron.text.length * 7).toBeLessThanOrEqual(240 - 24 - 18 * 7);
   });
 
   it('measures only with the fonts the page loads before it makes the fitter, and with all of them', () => {
