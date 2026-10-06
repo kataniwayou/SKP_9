@@ -1,0 +1,134 @@
+/* The studio chrome (mockup v49): menu strip, dock, auto-hide rails and flyout, menus, picker,
+   switcher, toast and tooltip. Values are the mockup's, verbatim. Every overlay sits on a
+   --z-* token (canvas/tokens.css), above dockview's floating groups (999). */
+/* not .shell: the canvas's blocks use that class on SVG rects */
+.studio-shell { display: grid; grid-template-rows: 34px 1fr; height: 100vh; }
+
+/* menu strip */
+.menubar { display: flex; align-items: center; gap: 6px; padding: 0 10px; background: #0B1424; border-bottom: 1px solid var(--line); font-size: 13px; position: relative; z-index: 20; }
+.brand { display: flex; align-items: center; gap: 7px; font-weight: 600; letter-spacing: .02em; margin-right: 10px; color: var(--ink); }
+.menus { display: flex; }
+.menu { padding: 6px 10px; border-radius: 5px; color: var(--muted); cursor: pointer; user-select: none; background: none; border: 0; font: inherit; }
+.menu:hover, .menu.open { background: var(--panel-2); color: var(--ink); }
+
+/* dropdown menus: the strip's menus and the window-position menu */
+.dropdown { position: fixed; min-width: 240px; padding: 6px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: 0 18px 40px -12px rgba(0, 0, 0, .7); z-index: var(--z-menu); font-family: var(--sans); }
+.mi { display: flex; justify-content: space-between; gap: 24px; padding: 7px 10px; border-radius: 5px; font-size: 13px; color: var(--ink); cursor: pointer; }
+.mi:hover { background: rgba(125, 211, 252, .10); }
+.mi kbd { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.mi .ml { display: flex; align-items: center; gap: 8px; }
+.mi .mic { width: 16px; text-align: center; color: var(--muted); }
+.mi.dis .mic { opacity: .4; }
+.mi.dis { color: var(--faint); cursor: default; }
+.mi.dis:hover { background: none; }
+.msep { height: 1px; background: var(--line); margin: 5px 4px; }
+
+/* the open-workflow picker */
+.picker { position: fixed; width: 440px; max-height: 60vh; overflow: auto; padding: 8px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 24px 60px -16px rgba(0, 0, 0, .8); z-index: var(--z-menu); font-family: var(--sans); }
+.pk-h { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); padding: 6px 8px 8px; }
+.pk { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 9px 10px; border-radius: 6px; cursor: pointer; }
+.pk:hover, .pk.hi { background: rgba(125, 211, 252, .10); }
+.pk b { font-weight: 600; font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk .o { font-size: 11px; color: var(--accent); }
+.picker .input { font-family: var(--mono); font-size: 12px; background: var(--ground-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 6px 8px; color: var(--ink); width: 100%; margin: 0 0 6px; }
+.picker .note { font-size: 11.5px; color: var(--faint); line-height: 1.5; padding: 8px; }
+
+/* the dock and its auto-hide rails (our own: dockview's auto-hide is an enterprise module) */
+.dockwrap { position: relative; display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: 1fr auto; min-height: 0; }
+.dock { min-height: 0; height: 100%; grid-area: 1 / 2; }
+.rail-r { grid-area: 1 / 3; display: none; flex-direction: column; gap: 4px; padding: 8px 0; width: 28px; background: #0B1424; border-left: 1px solid var(--line); }
+.rail-l { grid-area: 1 / 1; display: none; flex-direction: column; gap: 4px; padding: 8px 0; width: 28px; background: #0B1424; border-right: 1px solid var(--line); }
+.rail-l.on { display: flex; }
+.rail-l .rt { writing-mode: vertical-rl; transform: rotate(180deg); padding: 10px 6px; }
+.rail-b { grid-area: 2 / 1 / 3 / 4; display: none; gap: 4px; padding: 0 8px; height: 26px; align-items: center; background: #0B1424; border-top: 1px solid var(--line); }
+.rail-r.on, .rail-b.on { display: flex; }
+.rt { font-size: 11.5px; color: var(--muted); cursor: pointer; border-radius: 4px; user-select: none; display: flex; align-items: center; gap: 6px; }
+.rail-r .rt { writing-mode: vertical-rl; padding: 10px 6px; }
+.rail-b .rt { padding: 3px 10px; }
+.rt:hover, .rt.open { color: var(--ink); background: var(--panel-2); }
+.rt .fd { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); display: none; }
+.rt.fresh .fd { display: block; }
+.fly { position: absolute; z-index: var(--z-fly); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 20px 60px -12px rgba(0, 0, 0, .85); }
+.fly.r { top: 0; bottom: 0; right: 28px; width: 340px; animation: flyR .16s ease-out; }
+.fly.l { top: 0; bottom: 0; left: 28px; width: 340px; animation: flyL .16s ease-out; }
+.fly.b { left: 0; right: 0; bottom: 26px; height: 220px; animation: flyB .16s ease-out; }
+@keyframes flyL { from { transform: translateX(-24px); opacity: 0; } }
+@keyframes flyR { from { transform: translateX(24px); opacity: 0; } }
+@keyframes flyB { from { transform: translateY(24px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .fly.r, .fly.l, .fly.b { animation: none; } }
+.fly-h { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 12px; background: #0B1424; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.fly-h .spacer { flex: 1; }
+.fly-h button { font-family: var(--sans); font-size: 12px; padding: 3px 8px; border-radius: 4px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; }
+.fly-h button:hover { color: var(--ink); background: var(--panel-2); border-color: var(--line-2); }
+.fly-b { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* tabs */
+.doctab { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 4px 0 2px; font-size: 12.5px; white-space: nowrap; }
+.doctab .tv { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.doctab .nm { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.doctab .x { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; color: var(--faint); font-size: 13px; cursor: pointer; }
+.doctab .x:hover { background: var(--line); color: var(--ink); }
+
+/* group header actions */
+.ghead { display: flex; align-items: center; gap: 2px; height: 100%; padding: 0 6px; }
+.ghead button { width: 24px; height: 22px; border: 1px solid transparent; border-radius: 4px; background: none; color: var(--faint); cursor: pointer; font-size: 12.5px; line-height: 1; }
+.ghead button:hover { color: var(--ink); background: var(--panel-2); border-color: var(--line-2); }
+
+/* an empty document area */
+.empty { position: absolute; inset: 0; display: grid; place-items: center; background: var(--ground); text-align: center; }
+.empty .e1 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+.empty .e2 { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.btn { font-family: var(--sans); font-size: 13px; font-weight: 600; padding: 7px 16px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--ink); cursor: pointer; }
+.btn.primary { background: linear-gradient(180deg, #38BDF8, #0EA5E9); border-color: #38BDF8; color: #04111F; box-shadow: 0 0 0 1px rgba(56, 189, 248, .25), 0 6px 18px -6px rgba(56, 189, 248, .55); }
+
+/* dockview, in the blueprint's colours (VS behaviour, our palette) */
+.dockview-theme-vs {
+  --dv-group-view-background-color: var(--panel);
+  --dv-tabs-and-actions-container-background-color: #0B1424;
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tabs-and-actions-container-font-size: 12.5px;
+  --dv-activegroup-visiblepanel-tab-background-color: var(--panel);
+  --dv-activegroup-hiddenpanel-tab-background-color: #0B1424;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #101C30;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #0B1424;
+  --dv-activegroup-visiblepanel-tab-color: var(--ink);
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--faint);
+  --dv-tab-divider-color: var(--line);
+  --dv-separator-border: var(--line);
+  --dv-paneview-header-border-color: var(--line);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--accent);
+  --dv-drag-over-background-color: rgba(125, 211, 252, .16);
+  --dv-drag-over-border-color: var(--accent);
+  --dv-edge-dock-indicator-color: var(--accent);
+  --dv-floating-box-shadow: 0 24px 60px -16px rgba(0, 0, 0, .85);
+  --dv-floating-titlebar-background-color: #0B1424;
+  --dv-icon-hover-background-color: var(--panel-2);
+  --dv-background-color: var(--ground);
+  --dv-scrollbar-background-color: var(--line-2);
+  font-family: var(--sans);
+}
+.dockview-theme-vs .dv-tab.dv-active-tab { box-shadow: inset 0 2px 0 var(--accent); }
+
+/* toast, switcher, tooltip */
+.toast { position: fixed; left: 50%; top: 44px; z-index: var(--z-toast); transform: translate(-50%, -8px); opacity: 0; padding: 8px 14px; border-radius: 8px; font-size: 13px;
+  background: var(--panel-2); border: 1px solid var(--line-2); color: var(--ink); transition: opacity .2s, transform .2s; pointer-events: none; }
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+.switcher { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: var(--z-switcher); width: 620px; max-width: 92vw; padding: 12px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .9); font-family: var(--sans); }
+.sw-t { font-size: 13px; font-weight: 600; margin: 2px 4px 10px; }
+.sw-t .m, .sw-i .m { font-family: var(--mono); font-size: 11px; color: var(--faint); font-weight: 400; }
+.sw-b { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
+.sw-h { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); margin: 0 6px 6px; }
+.sw-i { padding: 7px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sw-i b { color: var(--ink); font-weight: 500; }
+.sw-i:hover { background: rgba(125, 211, 252, .08); }
+.sw-i.on { background: rgba(125, 211, 252, .16); color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
+.tip { position: fixed; left: 0; top: 0; pointer-events: none; z-index: var(--z-tip); padding: 6px 10px; border-radius: 7px; background: #0B1424; border: 1px solid var(--line-2);
+  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, .8); color: var(--ink); font: 12px/1.5 var(--mono); white-space: pre; opacity: 0; transform: translateY(3px); transition: opacity .12s, transform .12s; }
+.tip.on { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
+
+/* a group auto-hidden in place keeps its slot at zero size; nothing of it may show or take a click */
+.dockview-theme-vs .dv-view:not(.visible) { visibility: hidden; }
