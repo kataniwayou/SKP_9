@@ -56,6 +56,8 @@ export async function openWorkflow(page: Page, workflow: LiveWorkflow): Promise<
   await page.getByRole('menuitem', { name: 'File' }).click();
   await page.getByRole('menuitem', { name: /Open workflow/ }).click();
   await page.getByRole('textbox', { name: 'Search workflows' }).fill(workflow.label);
+  // on a cold dev server the list can still be loading: Enter on an empty list opens nothing
+  await expect(page.getByRole('listbox', { name: 'Workflows' }).getByText(workflow.label, { exact: true })).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(documentPanel(page, workflow).locator('.react-flow__node').first()).toBeVisible();
 }

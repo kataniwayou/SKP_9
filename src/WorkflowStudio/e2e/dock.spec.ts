@@ -154,6 +154,42 @@ test('the canvas follows its size: re-fits until zoomed, then keeps its centre',
   expect(Math.abs((await view()).dx - zoomed.dx)).toBeLessThanOrEqual(4);
 });
 
+test('scroll bars appear only when needed, and dragging or clicking them pans', async ({ page }) => {
+  const [wf] = workflows;
+  await openWorkflow(page, wf!);
+  const panel = documentPanel(page, wf!);
+  const h = panel.getByTestId('scrollbar-h');
+  const viewportX = async () => Number((await panel.locator('.react-flow__viewport').getAttribute('style'))!.match(/translate\((-?[\d.]+)px/)![1]);
+
+  // fitted: everything is in view, so no bars
+  await expect(h).toBeHidden();
+  await expect(panel.getByTestId('scrollbar-v')).toBeHidden();
+
+  for (let i = 0; i < 4; i++) await panel.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(h).toBeVisible();
+
+  // dragging the thumb to the right moves the drawing to the left
+  const thumb = h.locator('.th');
+  const t = await box(thumb);
+  const x0 = await viewportX();
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(t.x + t.width / 2 + 60, t.y + t.height / 2, { steps: 4 });
+  await page.mouse.up();
+  const x1 = await viewportX();
+  expect(x1).toBeLessThan(x0);
+
+  // clicking the track beyond the thumb pages the same way
+  const track = await box(h);
+  const after = await box(thumb);
+  test.skip(after.x + after.width > track.x + track.width - 8, 'the thumb already reaches the end of the track');
+  await page.mouse.click(track.x + track.width - 4, track.y + track.height / 2);
+  expect(await viewportX()).toBeLessThan(x1);
+
+  await panel.getByRole('button', { name: 'Fit' }).click();
+  await expect(h).toBeHidden();
+});
+
 test('menus, the picker and the tooltip open above a floating group', async ({ page }) => {
   const [wf] = workflows;
   await openWorkflow(page, wf!);

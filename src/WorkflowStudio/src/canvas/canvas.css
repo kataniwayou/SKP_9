@@ -56,6 +56,15 @@
 .studio-canvas .react-flow__handle { opacity: 0; pointer-events: none; min-width: 0; min-height: 0; width: 1px; height: 1px; border: 0; }
 
 /* legend */
+/* overlay scroll bars (mockup v50 .sb); ScrollBars.tsx's TRACK_INSET is 12 + 24 */
+.sb { position: absolute; z-index: 5; border-radius: 6px; background: rgba(10, 18, 32, .55); }
+.sb.off { display: none; }
+.sb .th { position: absolute; border-radius: 5px; background: rgba(125, 211, 252, .30); cursor: grab; transition: background .15s; }
+.sb:hover .th, .sb.active .th { background: rgba(125, 211, 252, .62); }
+.sb.h { left: 12px; right: 24px; bottom: 6px; height: 10px; }
+.sb.v { top: 12px; bottom: 24px; right: 6px; width: 10px; }
+.sb.h .th { top: 2px; bottom: 2px; }
+.sb.v .th { left: 2px; right: 2px; }
 .legend { position: absolute; left: 16px; bottom: 22px; z-index: 5; display: flex; gap: 14px; align-items: center; padding: 8px 12px;
   background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid; vertical-align: middle; margin-right: 6px; }

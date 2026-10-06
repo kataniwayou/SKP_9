@@ -9,6 +9,7 @@ import { FollowFitContext, FollowSize } from './followSize';
 import type { TextFitter } from './fitText';
 import { GridBackground } from './GridBackground';
 import { Legend } from './Legend';
+import { ScrollBars } from './ScrollBars';
 import { CacheNode } from './nodes/CacheNode';
 import { StepNode } from './nodes/StepNode';
 import { WorkflowNode } from './nodes/WorkflowNode';
@@ -81,6 +82,7 @@ export function WorkflowCanvas({ doc, fitter, width, height, selection = null, o
             <GridBackground />
           </ReactFlow>
           <FollowSize />
+          <ScrollBars />
           <Legend />
           {children}
         </div>
