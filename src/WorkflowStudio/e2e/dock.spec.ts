@@ -118,6 +118,42 @@ test('a background document draws nothing and takes no clicks', async ({ page })
   expect(hit).not.toBe(a!.label);
 });
 
+test('the canvas follows its size: re-fits until zoomed, then keeps its centre', async ({ page }) => {
+  const [wf] = workflows;
+  await openWorkflow(page, wf!);
+  const panel = documentPanel(page, wf!);
+  // the graph's centre minus the canvas's centre, and the graph's width
+  const view = () => panel.evaluate((p) => {
+    const c = p.querySelector('.react-flow__pane')!.getBoundingClientRect();
+    const ns = [...p.querySelectorAll('.react-flow__node')].map((n) => n.getBoundingClientRect());
+    const l = Math.min(...ns.map((r) => r.left)), r = Math.max(...ns.map((r) => r.right));
+    const t = Math.min(...ns.map((r) => r.top)), b = Math.max(...ns.map((r) => r.bottom));
+    return { dx: (l + r) / 2 - (c.left + c.right) / 2, dy: (t + b) / 2 - (c.top + c.bottom) / 2, width: r - l };
+  });
+  const closeAll = async (names: string[]) => {
+    for (const name of names) await tab(page, name).getByRole('button', { name: `Close ${name}` }).click();
+  };
+  const before = await view();
+
+  // untouched: closing the side panes re-fits, so the graph grows and stays centred
+  await closeAll(['Inspector', 'Toolbox']);
+  await expect.poll(async () => (await view()).width).toBeGreaterThan(before.width + 20);
+  const fitted = await view();
+  expect(Math.abs(fitted.dx)).toBeLessThanOrEqual(4);
+  expect(Math.abs(fitted.dy)).toBeLessThanOrEqual(4);
+
+  // zoomed: the zoom stays and the point at the centre stays at the centre
+  await panel.getByRole('button', { name: 'Zoom in' }).click();
+  const zoom = await panel.getByLabel('Zoom level').textContent();
+  const zoomed = await view();
+  const height = (await box(panel.locator('.react-flow__pane'))).height;
+  await closeAll(['Problems', 'Output']);
+  await expect.poll(async () => (await box(panel.locator('.react-flow__pane'))).height).toBeGreaterThan(height + 50);
+  await expect(panel.getByLabel('Zoom level')).toHaveText(zoom!);
+  await expect.poll(async () => Math.abs((await view()).dy - zoomed.dy)).toBeLessThanOrEqual(4);
+  expect(Math.abs((await view()).dx - zoomed.dx)).toBeLessThanOrEqual(4);
+});
+
 test('menus, the picker and the tooltip open above a floating group', async ({ page }) => {
   const [wf] = workflows;
   await openWorkflow(page, wf!);

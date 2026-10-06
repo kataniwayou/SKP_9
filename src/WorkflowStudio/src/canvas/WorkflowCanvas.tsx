@@ -1,9 +1,11 @@
-import { useMemo, type ReactNode } from 'react';
-import { ReactFlow, ReactFlowProvider, type EdgeTypes, type FitViewOptions, type NodeTypes } from '@xyflow/react';
+import { useMemo, useRef, type ReactNode } from 'react';
+import { ReactFlow, ReactFlowProvider, type EdgeTypes, type NodeTypes } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import type { Selection } from '../store/selection';
 import { CableEdge } from './edges/CableEdge';
 import { TetherEdge } from './edges/TetherEdge';
+import { FIT_VIEW_OPTIONS } from './fitOptions';
+import { FollowFitContext, FollowSize } from './followSize';
 import type { TextFitter } from './fitText';
 import { GridBackground } from './GridBackground';
 import { Legend } from './Legend';
@@ -17,8 +19,7 @@ import { toFlow } from './toFlow';
 const nodeTypes: NodeTypes = { workflow: WorkflowNode, step: StepNode, cache: CacheNode };
 const edgeTypes: EdgeTypes = { cable: CableEdge, tether: TetherEdge };
 
-/** The first fit and the Fit button frame the workflow the same way. */
-export const FIT_VIEW_OPTIONS: FitViewOptions = { padding: 0.12, maxZoom: 1 };
+export { FIT_VIEW_OPTIONS };
 
 interface Props {
   doc: StudioDocument;
@@ -43,42 +44,47 @@ interface Props {
 export function WorkflowCanvas({ doc, fitter, width, height, selection = null, onSelect, children }: Props) {
   const { nodes, edges } = useMemo(() => toFlow(doc, fitter), [doc, fitter]);
   const shown = useMemo(() => withSelection(nodes, selection), [nodes, selection]);
+  const followFit = useRef(true);
 
   return (
     <ReactFlowProvider key={doc.graph.workflow.id}>
-      <div className="studio-canvas" style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}>
-        <ReactFlow
-          nodes={shown}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          width={width}
-          height={height}
-          colorMode="dark"
-          fitView
-          fitViewOptions={FIT_VIEW_OPTIONS}
-          minZoom={0.1}
-          maxZoom={4}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          edgesFocusable={false}
-          nodesFocusable={false}
-          panOnScroll
-          zoomOnScroll={false}
-          zoomActivationKeyCode="Control"
-          panOnDrag={[1]}
-          panActivationKeyCode="Space"
-          zoomOnDoubleClick={false}
-          deleteKeyCode={null}
-          onNodeClick={onSelect ? (event, node) => onSelect(selectionFromClick(node, event.target as Element, doc.graph)) : undefined}
-          onPaneClick={onSelect ? () => onSelect(null) : undefined}
-        >
-          <GridBackground />
-        </ReactFlow>
-        <Legend />
-        {children}
-      </div>
+      <FollowFitContext.Provider value={followFit}>
+        <div className="studio-canvas" style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}>
+          <ReactFlow
+            nodes={shown}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            width={width}
+            height={height}
+            colorMode="dark"
+            fitView
+            fitViewOptions={FIT_VIEW_OPTIONS}
+            minZoom={0.1}
+            maxZoom={4}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable={false}
+            edgesFocusable={false}
+            nodesFocusable={false}
+            panOnScroll
+            zoomOnScroll={false}
+            zoomActivationKeyCode="Control"
+            panOnDrag={[1]}
+            panActivationKeyCode="Space"
+            zoomOnDoubleClick={false}
+            deleteKeyCode={null}
+            onNodeClick={onSelect ? (event, node) => onSelect(selectionFromClick(node, event.target as Element, doc.graph)) : undefined}
+            onPaneClick={onSelect ? () => onSelect(null) : undefined}
+            onMoveStart={(event) => { if (event) followFit.current = false; }}
+          >
+            <GridBackground />
+          </ReactFlow>
+          <FollowSize />
+          <Legend />
+          {children}
+        </div>
+      </FollowFitContext.Provider>
     </ReactFlowProvider>
   );
 }
