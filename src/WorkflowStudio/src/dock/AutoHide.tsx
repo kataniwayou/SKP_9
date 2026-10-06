@@ -34,23 +34,30 @@ export function AutoHide({ hidden, sideOf, flyId, fresh, onOpen, onClose, onPin,
 
   useEffect(() => () => { clearTimeout(openTimer.current); clearTimeout(closeTimer.current); }, []);
 
+  // a pending close belongs to the pane that was open; once it changes, the timer is stale
+  useEffect(() => { clearTimeout(closeTimer.current); }, [flyId]);
+
   useEffect(() => {
-    if (flyId === null) return;
+    // the pane's own document (it may be rendered in a pop-out window), never the global one
+    const doc = flyRef.current?.ownerDocument;
+    if (flyId === null || !doc) return;
     const away = (e: PointerEvent) => {
       const t = e.target instanceof Element ? e.target : null;
       if (t && (t.closest('.fly') || t.closest('[data-rt]') || t.closest('.dropdown') || t.closest('.picker'))) return;
       onClose();
     };
-    document.addEventListener('pointerdown', away, true);
-    return () => document.removeEventListener('pointerdown', away, true);
+    doc.addEventListener('pointerdown', away, true);
+    return () => doc.removeEventListener('pointerdown', away, true);
   }, [flyId, onClose]);
 
   const closeLater = () => {
     clearTimeout(closeTimer.current);
     closeTimer.current = setTimeout(() => {
       const fly = flyRef.current;
-      if (fly && (fly.matches(':hover') || fly.contains(document.activeElement))) return;
-      if (document.querySelector('[data-rt]:hover')) return;
+      if (!fly) return;
+      const doc = fly.ownerDocument;
+      if (fly.matches(':hover') || fly.contains(doc.activeElement)) return;
+      if (doc.querySelector('[data-rt]:hover')) return;
       onClose();
     }, CLOSE_AFTER_MS);
   };
@@ -65,6 +72,12 @@ export function AutoHide({ hidden, sideOf, flyId, fresh, onOpen, onClose, onPin,
             role="tab"
             aria-selected={flyId === id}
             data-rt={id}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              if (flyId === id) onClose(); else onOpen(id);
+            }}
             className={['rt', flyId === id ? 'open' : '', fresh.has(id) ? 'fresh' : ''].filter(Boolean).join(' ')}
             onClick={(e) => { e.stopPropagation(); if (flyId === id) onClose(); else onOpen(id); }}
             onPointerEnter={() => {
