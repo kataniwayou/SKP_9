@@ -1,6 +1,6 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import { findHome, SIDE_DIRECTION, sideOf, toPosition, type GroupBox, type Home, type Rect, type Side } from './home';
-import { docPanelId, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type ToolId } from './ids';
+import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type ToolId } from './ids';
 import { stripDocuments, withDocuments, type SavedLayout } from './layoutPersistence';
 
 /**
@@ -28,6 +28,11 @@ const toolPanel = (id: ToolId) => ({ id, component: 'tool', title: TOOL_TITLES[i
 const inGrid = (group: DockviewGroupPanel | undefined): group is DockviewGroupPanel => group?.api.location.type === 'grid';
 const hasDocument = (group: DockviewGroupPanel) => group.panels.some((p) => isDocPanelId(p.id));
 const rectOf = (el: Element): Rect => el.getBoundingClientRect();
+/** A docked group the user can see: a hidden (auto-hidden) group must not take panes in. */
+const shownInGrid = (group: DockviewGroupPanel | undefined): group is DockviewGroupPanel => inGrid(group) && group.api.isVisible;
+/** Whether the panel or group is still in this dock: a stale handle (a closed pane) is a no-op, never a throw. */
+const livePanel = (api: DockviewApi, panel: IDockviewPanel): boolean => api.getPanel(panel.id) === panel;
+const liveGroup = (api: DockviewApi, group: DockviewGroupPanel): boolean => api.groups.includes(group);
 
 /** The main-grid group documents go into: one that holds a document, else the remembered empty area. */
 export function documentArea(api: DockviewApi, memory: DockMemory, except?: DockviewGroupPanel): DockviewGroupPanel | null {
@@ -114,7 +119,7 @@ export function showTool(api: DockviewApi, memory: DockMemory, id: ToolId): IDoc
   const base = toolPanel(id);
   const home = memory.homes[id];
   const ref = home ? api.getPanel(home.ref) : undefined;
-  if (home && ref && inGrid(ref.group)) {
+  if (home && ref && shownInGrid(ref.group)) {
     const panel = home.direction === 'within'
       ? api.addPanel({ ...base, position: { referencePanel: home.ref } })
       : api.addPanel({ ...base, position: { referencePanel: home.ref, direction: home.direction }, initialWidth: home.size, initialHeight: home.size });
@@ -124,7 +129,7 @@ export function showTool(api: DockviewApi, memory: DockMemory, id: ToolId): IDoc
   const side = toolSide(memory, id);
   const mate = MATE[id];
   const matePanel = mate ? api.getPanel(mate) : undefined;
-  if (mate && matePanel && inGrid(matePanel.group) && toolSide(memory, mate) === side) {
+  if (mate && matePanel && shownInGrid(matePanel.group) && toolSide(memory, mate) === side) {
     return api.addPanel({ ...base, position: { referencePanel: mate } });
   }
   return api.addPanel({ ...base, position: { direction: SIDE_DIRECTION[side] }, initialWidth: TOOL_SIZE[id], initialHeight: TOOL_SIZE[id] });
@@ -132,6 +137,7 @@ export function showTool(api: DockviewApi, memory: DockMemory, id: ToolId): IDoc
 
 /** Floats a panel (the whole group when it is alone in it), remembering where it was. */
 export function floatPanel(api: DockviewApi, memory: DockMemory, panel: IDockviewPanel, dock: Rect): void {
+  if (!livePanel(api, panel)) return;
   const alone = panel.group.panels.length === 1;
   recordHome(api, memory, panel.group, dock, [panel]);
   api.addFloatingGroup(alone ? panel.group : panel);
@@ -139,12 +145,14 @@ export function floatPanel(api: DockviewApi, memory: DockMemory, panel: IDockvie
 
 /** Floats a whole group (the header's ⧉), remembering where it was. */
 export function floatGroup(api: DockviewApi, memory: DockMemory, group: DockviewGroupPanel, dock: Rect): void {
+  if (!liveGroup(api, group)) return;
   recordHome(api, memory, group, dock);
   api.addFloatingGroup(group);
 }
 
 /** Pops a group out into its own browser window, remembering where it was. */
 export function popOut(api: DockviewApi, memory: DockMemory, group: DockviewGroupPanel, dock: Rect): void {
+  if (!liveGroup(api, group)) return;
   recordHome(api, memory, group, dock);
   void api.addPopoutGroup(group);
 }
@@ -154,12 +162,15 @@ export function popOut(api: DockviewApi, memory: DockMemory, group: DockviewGrou
  * home, a document goes into the document area and a tool pane back to its side.
  */
 export function dockBack(api: DockviewApi, memory: DockMemory, group: DockviewGroupPanel): void {
+  if (!liveGroup(api, group)) return;
   const panels = [...group.panels];
   const first = panels[0];
   if (!first) return;
   const home = memory.homes[first.id];
   const ref = home ? api.getPanel(home.ref) : undefined;
-  if (home && ref && ref.group !== group && inGrid(ref.group)) {
+  // A hidden home group is passed over: the pane would vanish into it, on no rail. It falls
+  // through to the no-home path (a tool pane to its side, in a group the user can see).
+  if (home && ref && ref.group !== group && shownInGrid(ref.group)) {
     if (home.direction === 'within') {
       for (const p of panels) p.api.moveTo({ group: ref.group, position: 'center' });
       restoreLayout(api, home.layout);
@@ -189,7 +200,7 @@ export function dockBack(api: DockviewApi, memory: DockMemory, group: DockviewGr
  * leaves the layout instead, remembering where it was. Returns the panes that go to a rail.
  */
 export function autoHide(api: DockviewApi, memory: DockMemory, panel: IDockviewPanel, dock: Rect): ToolId[] {
-  if (!isToolId(panel.id)) return [];
+  if (!isToolId(panel.id) || !livePanel(api, panel)) return [];
   const group = panel.group;
   if (inGrid(group) && !hasDocument(group)) {
     for (const p of group.panels) if (isToolId(p.id)) memory.sides[p.id] = sideOf(rectOf(group.element), dock);
@@ -215,8 +226,9 @@ export function pinBack(api: DockviewApi, memory: DockMemory, id: ToolId): ToolI
 
 /** "Dock as tabbed document": a tool pane becomes a tab of the document area. */
 export function dockAsDocument(api: DockviewApi, memory: DockMemory, panel: IDockviewPanel, dock: Rect): void {
-  const area = documentArea(api, memory, panel.group);
-  if (!area) return;
+  if (!livePanel(api, panel)) return;
+  const area = documentArea(api, memory, panel.group) ?? ensureDocumentArea(api, memory);
+  if (area === panel.group) return;
   recordHome(api, memory, panel.group, dock, [panel]);
   panel.api.moveTo({ group: area, position: 'center' });
   panel.api.setActive();
@@ -263,7 +275,23 @@ export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLa
   const current = api.toJSON();
   const documents = Object.values(current.panels).filter((p) => isDocPanelId(p.id));
   const active = api.activePanel && isDocPanelId(api.activePanel.id) ? api.activePanel.id : documents[0]?.id ?? null;
-  api.fromJSON(withDocuments(saved.dock, saved.documentGroupId, documents, active), { reuseExistingPanels: true });
+  try {
+    api.fromJSON(withDocuments(saved.dock, saved.documentGroupId, documents, active), { reuseExistingPanels: true });
+  } catch (error) {
+    // dockview clears the whole dock when a layout fails halfway, the re-attached documents
+    // included. Open them again (new panels: their canvases start from the default view) so no
+    // document is lost, then report the failure; the caller resets to the default layout.
+    memory.sides = {};
+    memory.homes = {};
+    memory.documentGroupId = null;
+    for (const doc of documents) {
+      const documentId = documentIdOf(doc.id);
+      if (documentId !== null && !api.getPanel(doc.id)) addDocument(api, memory, documentId, doc.title ?? documentId);
+    }
+    const reopened = active === null ? undefined : api.getPanel(active);
+    reopened?.api.setActive();
+    throw error;
+  }
   memory.sides = { ...saved.sides };
   memory.homes = { ...saved.homes };
   memory.documentGroupId = saved.documentGroupId;

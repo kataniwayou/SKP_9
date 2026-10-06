@@ -1,12 +1,16 @@
-import { createDockview, type DockviewApi, type IContentRenderer } from 'dockview-react';
+import { createDockview, type DockviewApi, type IContentRenderer, type ITabRenderer } from 'dockview-react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  addDocument, applyLayout, autoHide, captureLayout, dockAsDocument, dockBack, ensureDocumentArea, floatPanel,
+  addDocument, applyLayout, autoHide, captureLayout, dockAsDocument, dockBack, ensureDocumentArea, floatGroup, floatPanel,
   newMemory, pinBack, resetLayout, showTool, type DockMemory,
 } from './windowActions';
 
 // dockview's core runs in jsdom (no sizes, so recordHome finds no home: tests set homes directly).
 class Part implements IContentRenderer {
+  readonly element = document.createElement('div');
+  init() {}
+}
+class Tab implements ITabRenderer {
   readonly element = document.createElement('div');
   init() {}
 }
@@ -19,7 +23,7 @@ function dock(): { api: DockviewApi; memory: DockMemory } {
   const host = document.createElement('div');
   document.body.appendChild(host);
   hosts.push(host);
-  const api = createDockview(host, { createComponent: () => new Part() });
+  const api = createDockview(host, { createComponent: () => new Part(), createTabComponent: () => new Tab() });
   api.layout(1200, 700);
   return { api, memory: newMemory() };
 }
@@ -180,11 +184,106 @@ describe('window actions on a real dockview', () => {
     expect(where(api, 'doc:a')!.group).toBe(saved.documentGroupId);
   });
 
-  it('throws, and leaves the documents to be re-added, when dockview rejects a layout', () => {
+  it('throws when dockview rejects a layout, and keeps the open documents open', () => {
     const { api, memory } = dock();
     resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    addDocument(api, memory, 'b', 'billing');
+    api.getPanel('doc:a')!.api.setActive();
     const saved = captureLayout(api, memory, []);
     saved.dock = { ...saved.dock, grid: { ...saved.dock.grid, root: { type: 'branch', data: [{ type: 'leaf', data: { views: [] } }] } } } as never;
-    expect(() => applyLayout(api, memory, saved)).toThrow();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(() => applyLayout(api, memory, saved)).toThrow();
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('failed to deserialize layout'), expect.anything());
+    } finally {
+      logged.mockRestore();
+    }
+
+    expect(api.panels.map((p) => p.id).sort()).toEqual(['doc:a', 'doc:b']);
+    expect(api.getPanel('doc:a')!.group).toBe(api.getPanel('doc:b')!.group);
+    expect(api.getPanel('doc:a')!.title).toBe('orders');
+    expect(api.getPanel('doc:a')!.api.renderer).toBe('always');
+    expect(api.activePanel?.id).toBe('doc:a');
+  });
+});
+
+describe('window actions on panels that are no longer in the dock', () => {
+  it('do nothing for a closed tool pane, and report no rail entry', () => {
+    const { api, memory } = dock();
+    addDocument(api, memory, 'a', 'orders');
+    const toolbox = showTool(api, memory, 'toolbox');
+    const output = showTool(api, memory, 'output');
+    const inspector = showTool(api, memory, 'inspector');
+    api.removePanel(toolbox);
+    api.removePanel(output);
+    api.removePanel(inspector);
+    const before = JSON.stringify(api.toJSON());
+
+    expect(() => floatPanel(api, memory, toolbox, NO_RECT)).not.toThrow();
+    expect(() => dockAsDocument(api, memory, toolbox, NO_RECT)).not.toThrow();
+    expect(() => dockAsDocument(api, memory, output, NO_RECT)).not.toThrow();
+    expect(autoHide(api, memory, inspector, NO_RECT)).toEqual([]);
+    expect(autoHide(api, memory, toolbox, NO_RECT)).toEqual([]);
+    expect(JSON.stringify(api.toJSON())).toBe(before);
+  });
+
+  it('do nothing for a group that has gone', () => {
+    const { api, memory } = dock();
+    addDocument(api, memory, 'a', 'orders');
+    const toolbox = showTool(api, memory, 'toolbox');
+    const group = toolbox.group;
+    api.removePanel(toolbox);
+    expect(() => dockBack(api, memory, group)).not.toThrow();
+    expect(() => floatGroup(api, memory, group, NO_RECT)).not.toThrow();
+    expect(api.getPanel('toolbox')).toBeUndefined();
+  });
+});
+
+describe('docking next to a hidden group', () => {
+  it('never puts a pane into a hidden group: Output docks to a visible group of its own', () => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 100, bottom: 100, x: 0, y: 0, width: 100, height: 100 } as DOMRect);
+    try {
+      const { api, memory } = dock();
+      resetLayout(api, memory, 1200);
+      const problems = api.getPanel('problems')!;
+      floatPanel(api, memory, api.getPanel('output')!, { left: 0, top: 0, right: 1200, bottom: 700 });
+      expect(autoHide(api, memory, problems, NO_RECT)).toEqual(['problems']);
+
+      dockBack(api, memory, api.getPanel('output')!.group);
+
+      const landed = api.getPanel('output')!.group;
+      expect(landed.api.location.type).toBe('grid');
+      expect(landed.api.isVisible).toBe(true);
+      expect(landed).not.toBe(problems.group);
+      expect(problems.group.api.isVisible).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('shows a closed tool pane in a visible group, not beside a hidden mate', () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    api.removePanel(api.getPanel('output')!);
+    autoHide(api, memory, api.getPanel('problems')!, NO_RECT);
+
+    const panel = showTool(api, memory, 'output');
+
+    expect(panel.group.api.isVisible).toBe(true);
+  });
+});
+
+describe('dockAsDocument without a document area', () => {
+  it('creates the document area when the last document has closed', () => {
+    const { api, memory } = dock();
+    addDocument(api, memory, 'a', 'orders');
+    api.removePanel(api.getPanel('doc:a')!);
+    const inspector = showTool(api, memory, 'inspector');
+
+    dockAsDocument(api, memory, inspector, NO_RECT);
+
+    expect(where(api, 'inspector')!.location).toBe('grid');
+    expect(where(api, 'inspector')!.group).toBe(ensureDocumentArea(api, memory).id);
   });
 });

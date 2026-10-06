@@ -1,4 +1,4 @@
-import type { GroupviewPanelState, SerializedDockview, SerializedFloatingGroup, SerializedGridObject } from 'dockview-react';
+import { Orientation, type GroupviewPanelState, type SerializedDockview, type SerializedFloatingGroup, type SerializedGridObject } from 'dockview-react';
 import { isDocPanelId, isToolId, type ToolId } from './ids';
 import type { Direction, Home, Side } from './home';
 
@@ -90,8 +90,11 @@ export function readLayout(storage: Storage | null): SavedLayout | null {
 export function stripDocuments(layout: SerializedDockview): { dock: SerializedDockview; documentGroupId: string | null } {
   const dock = JSON.parse(JSON.stringify(layout)) as SerializedDockview;
   let documentGroupId: string | null = null;
+  const heldDocuments = new Set<string>();
   forEachGroup(dock.grid.root, (g) => {
-    if (documentGroupId === null && g.views.some(isDocPanelId)) documentGroupId = g.id;
+    if (!g.views.some(isDocPanelId)) return;
+    heldDocuments.add(g.id);
+    if (documentGroupId === null) documentGroupId = g.id;
   });
 
   const clean = (g: GroupState) => {
@@ -102,6 +105,7 @@ export function stripDocuments(layout: SerializedDockview): { dock: SerializedDo
     }
   };
   forEachGroup(dock.grid.root, clean);
+  pruneGrid(dock, (g) => g.id !== documentGroupId && heldDocuments.has(g.id) && g.views.length === 0);
   for (const id of Object.keys(dock.panels)) if (isDocPanelId(id)) delete dock.panels[id];
 
   dock.floatingGroups = (dock.floatingGroups ?? []).filter((f) => {
@@ -139,6 +143,34 @@ export function withDocuments(
   return dock;
 }
 
+type GridNode = SerializedGridObject<GroupState>;
+
+/**
+ * Removes the leaves `drop` picks from the main grid. A branch left with no child goes, one left
+ * with a single leaf becomes that leaf (keeping its own size), one left with a single branch gives
+ * its children to its parent, since a branch's orientation is its depth: the child's children run
+ * the way the parent's do. At the root that flips the grid's orientation instead.
+ */
+function pruneGrid(dock: SerializedDockview, drop: (group: GroupState) => boolean): void {
+  const prune = (node: GridNode): GridNode[] => {
+    if (node.type === 'leaf') return drop(node.data as GroupState) ? [] : [node];
+    const children = (node.data as GridNode[]).flatMap(prune);
+    if (children.length === 0) return [];
+    if (children.length === 1) {
+      const only = children[0]!;
+      return only.type === 'leaf' ? [{ ...only, size: node.size }] : (only.data as GridNode[]);
+    }
+    return [{ ...node, data: children }];
+  };
+  const root = dock.grid.root;
+  let children = (root.data as GridNode[]).flatMap(prune);
+  if (children.length === 1 && children[0]!.type === 'branch') {
+    children = children[0]!.data as GridNode[];
+    dock.grid.orientation = dock.grid.orientation === Orientation.HORIZONTAL ? Orientation.VERTICAL : Orientation.HORIZONTAL;
+  }
+  dock.grid.root = { ...root, data: children };
+}
+
 /** Every group (grid leaf) in a serialized grid, depth first. */
 function forEachGroup(node: SerializedGridObject<GroupState>, visit: (group: GroupState) => void): void {
   if (node.type === 'leaf') visit(node.data as GroupState);
@@ -149,10 +181,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Whether the value is a layout dockview can load: the whole grid tree (every branch and leaf), the
+ * floating and pop-out groups, and every tab pointing at a panel that exists. A layout failing
+ * halfway through `fromJSON` would cost the open documents, so nothing doubtful may reach it.
+ */
 function isDockLayout(value: unknown): value is SerializedDockview {
   if (!isRecord(value) || !isRecord(value.grid) || !isRecord(value.panels)) return false;
+  const panels = value.panels;
+  if (!Object.values(panels).every((p) => isRecord(p) && typeof p.id === 'string')) return false;
   const root = value.grid.root;
-  return isRecord(root) && root.type === 'branch' && Array.isArray(root.data);
+  if (!isRecord(root) || root.type !== 'branch' || !isGridNode(root, panels)) return false;
+  for (const key of ['floatingGroups', 'popoutGroups'] as const) {
+    const groups = value[key];
+    if (groups === undefined) continue;
+    if (!Array.isArray(groups)) return false;
+    for (const g of groups) {
+      if (!isRecord(g)) return false;
+      const hasData = g.data !== undefined, hasGrid = g.grid !== undefined;
+      if (!hasData && !hasGrid) return false;
+      if (hasData && !isGroupState(g.data, panels)) return false;
+      if (hasGrid && !(isRecord(g.grid) && isGridNode(g.grid.root, panels))) return false;
+    }
+  }
+  return true;
+}
+
+function isGridNode(node: unknown, panels: Record<string, unknown>): boolean {
+  if (!isRecord(node)) return false;
+  if (node.type === 'leaf') return isGroupState(node.data, panels);
+  if (node.type === 'branch') return Array.isArray(node.data) && node.data.every((child) => isGridNode(child, panels));
+  return false;
+}
+
+function isGroupState(data: unknown, panels: Record<string, unknown>): boolean {
+  return isRecord(data) && typeof data.id === 'string' && Array.isArray(data.views)
+    && data.views.every((v) => typeof v === 'string' && Object.prototype.hasOwnProperty.call(panels, v))
+    && (data.activeView === undefined || typeof data.activeView === 'string');
 }
 
 function isSide(value: unknown): value is Side {

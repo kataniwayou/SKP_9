@@ -67,6 +67,44 @@ describe('stripDocuments', () => {
   });
 });
 
+describe('stripDocuments with documents split across groups', () => {
+  const split = (): SerializedDockview => {
+    const l = layout();
+    l.grid.root = {
+      type: 'branch', size: 600,
+      data: [
+        { type: 'leaf', data: { id: 'g1', views: ['doc:a', 'inspector'], activeView: 'doc:a' }, size: 300 },
+        { type: 'branch', size: 300, data: [
+          { type: 'leaf', data: { id: 'g6', views: ['doc:b'], activeView: 'doc:b' }, size: 300 },
+        ] },
+        { type: 'leaf', data: { id: 'g2', views: ['toolbox'], activeView: 'toolbox' }, size: 300 },
+      ],
+    };
+    return l;
+  };
+  const ids = (node: { type: string; data: unknown }): string[] =>
+    node.type === 'leaf' ? [(node.data as { id: string }).id] : (node.data as { type: string; data: unknown }[]).flatMap(ids);
+
+  it('removes the other document-only groups, keeping the first as the document area', () => {
+    const { dock, documentGroupId } = stripDocuments(split());
+    expect(documentGroupId).toBe('g1');
+    expect(ids(dock.grid.root)).toEqual(['g1', 'g2']);
+    expect((dock.grid.root.data as { type: string }[]).every((n) => n.type === 'leaf')).toBe(true);
+  });
+
+  it('collapses a branch left with one child into its parent', () => {
+    const l = split();
+    const root = l.grid.root.data as { type: string; data: unknown; size: number }[];
+    root[1] = { type: 'branch', size: 300, data: [
+      { type: 'leaf', data: { id: 'g6', views: ['doc:b'], activeView: 'doc:b' }, size: 150 },
+      { type: 'leaf', data: { id: 'g8', views: ['problems'], activeView: 'problems' }, size: 150 },
+    ] };
+    const { dock } = stripDocuments(l);
+    expect(ids(dock.grid.root)).toEqual(['g1', 'g8', 'g2']);
+    expect((dock.grid.root.data as { type: string; size?: number }[])[1]).toMatchObject({ type: 'leaf', size: 300 });
+  });
+});
+
 describe('withDocuments', () => {
   const docs = [panel('doc:x', 'document'), panel('doc:y', 'document')];
 
@@ -101,6 +139,25 @@ describe('readLayout and writeLayout (review focus 1: old, corrupt or unreadable
     ['a dock part missing its panels', { [LAYOUT_KEY]: JSON.stringify({ ...saved(), dock: { grid: { root: { type: 'branch', data: [] } } } }) }],
   ])('gives null for %s', (_name, initial) => {
     expect(readLayout(memoryStorage(initial))).toBeNull();
+  });
+
+  it.each([
+    ['a leaf with no id', { type: 'leaf', data: { views: ['inspector'] } }],
+    ['a leaf whose views are not an array', { type: 'leaf', data: { id: 'g1', views: 'inspector' } }],
+    ['a leaf whose view has no panel', { type: 'leaf', data: { id: 'g1', views: ['ghost'] } }],
+    ['a leaf with no data', { type: 'leaf' }],
+    ['an unknown node type', { type: 'tree', data: [] }],
+    ['a nested branch whose data is not an array', { type: 'branch', data: 'x' }],
+  ])('gives null when the grid holds %s', (_name, node) => {
+    const good = saved();
+    const dock = { ...good.dock, grid: { ...good.dock.grid, root: { type: 'branch', data: [node] } } };
+    expect(readLayout(memoryStorage({ [LAYOUT_KEY]: JSON.stringify({ ...good, dock }) }))).toBeNull();
+  });
+
+  it('gives null when a floating group is malformed', () => {
+    const good = saved();
+    const dock = { ...good.dock, floatingGroups: [{ data: { id: 'f', views: 5 }, position: { left: 0, top: 0, width: 1, height: 1 } }] };
+    expect(readLayout(memoryStorage({ [LAYOUT_KEY]: JSON.stringify({ ...good, dock }) }))).toBeNull();
   });
 
   it('drops unknown tool ids, bad sides and malformed homes, and keeps the rest', () => {
