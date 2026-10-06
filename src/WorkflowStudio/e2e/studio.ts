@@ -32,23 +32,28 @@ const label = (name: string, version: string, id: string) => `${name}_${version}
 
 const TOOL_NAMES = new Set(['Toolbox', 'Inspector', 'Problems', 'Output']);
 
-/** `count` workflows with distinct names (and none named like a tool window) that have a step. Read-only. */
-
-export async function liveWorkflows(request: APIRequestContext, count: number): Promise<LiveWorkflow[]> {
+/** Every workflow with a step, each with a distinct name that is not a tool window's. Read-only. */
+export async function workflowsWithSteps(request: APIRequestContext): Promise<LiveWorkflow[]> {
   const list = await request.get('/api/v1/workflows');
   expect(list.ok()).toBe(true);
   const found: LiveWorkflow[] = [];
   const names = new Set<string>(TOOL_NAMES);
   for (const w of (await list.json()) as { id: string; name: string; version: string }[]) {
-    const graph = await request.get(`/api/v1/workflows/${w.id}/graph`);
     if (names.has(w.name)) continue;
+    const graph = await request.get(`/api/v1/workflows/${w.id}/graph`);
     if (graph.ok() && ((await graph.json()) as { steps?: unknown[] }).steps?.length) {
       names.add(w.name);
       found.push({ id: w.id, name: w.name, version: w.version, label: label(w.name, w.version, w.id) });
     }
-    if (found.length === count) return found;
   }
-  throw new Error(`BaseApi has fewer than ${count} workflows with steps and distinct names`);
+  return found;
+}
+
+/** `count` workflows with distinct names (and none named like a tool window) that have a step. Read-only. */
+export async function liveWorkflows(request: APIRequestContext, count: number): Promise<LiveWorkflow[]> {
+  const found = await workflowsWithSteps(request);
+  if (found.length < count) throw new Error(`BaseApi has fewer than ${count} workflows with steps and distinct names`);
+  return found.slice(0, count);
 }
 
 /** File › Open workflow…, search by unique name, Enter; waits until the canvas has drawn. */
