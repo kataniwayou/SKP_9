@@ -44,7 +44,7 @@ export const LIVE_POLL_MS = 5000;
 export function useLiveStatus(api: StudioApi, workflowId: string, visible: boolean): LiveStatus {
   const [status, setStatus] = useState<LiveStatus>('checking');
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) { setStatus('checking'); return; }
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {

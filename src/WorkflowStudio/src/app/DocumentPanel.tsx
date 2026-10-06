@@ -15,7 +15,7 @@ export function DocumentPanel({ api, workflowId, panel }: { api: StudioApi; work
   const store = useStudioStore();
   const ownerDocument = useOwnerDocument(panel);
   const fitter = useFitter(ownerDocument);
-  const status = useLiveStatus(api, workflowId, usePanelVisible(panel, ownerDocument));
+  const status = useLiveStatus(api, workflowId, usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready');
 
   if (open === null) return null;
   if (open.status.kind === 'failed') return <div className="docpanel"><div className="doc-msg error" role="alert">{open.status.message}</div></div>;
