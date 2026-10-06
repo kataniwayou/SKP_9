@@ -67,6 +67,37 @@ describe('routeWires', () => {
   });
 });
 
+describe('routeWires: fan-out of 5 with a back edge', () => {
+  it('routes the back edge round, never through its own source or any block', () => {
+    const next = ['a', 'c', 'd', 'e', 'f'];
+    const positions: Record<string, [number, number]> = {
+      a: [288, 32], b: [576, 32], c: [864, 32], d: [864, 224], e: [864, 416], f: [864, 608],
+    };
+    const wires = setup(
+      [step('a', ['b']), step('b', next), step('c', []), step('d', []), step('e', []), step('f', [])],
+      positions, new Set<string>(),
+    );
+    const boxes = [...Object.entries(positions)].map(([id, [x, y]]) => ({ id: `step:${id}`, x, y, w: 224, h: 160 }));
+    boxes.push({ id: 'wf', x: 32, y: 32, w: 192, h: 192 });
+
+    const back = wires.find((x) => x.id === 'b->a')!;
+    expect(back.points.slice(0, 2).every(([x]) => x >= 800)).toBe(true);
+    for (const wire of wires) {
+      const pts = wire.points;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [ax, ay] = pts[i]!, [bx, by] = pts[i + 1]!;
+        expect(ax === bx || ay === by).toBe(true);
+        for (const b of boxes) {
+          if ((b.id === (wire.source === 'wf' ? 'wf' : `step:${wire.source}`) && i === 0) || (b.id === `step:${wire.target}` && i === pts.length - 2)) continue;
+          const hit = Math.max(ax, bx) > b.x && Math.min(ax, bx) < b.x + b.w && Math.max(ay, by) > b.y && Math.min(ay, by) < b.y + b.h;
+          expect(hit, `${wire.id} segment ${i} crosses ${b.id}`).toBe(false);
+        }
+      }
+      for (const [x, y] of pts) { expect(x % 8).toBe(0); expect(y % 8).toBe(0); }
+    }
+  });
+});
+
 describe('tetherPoints', () => {
   it('drops straight from the sphere bottom to a cache centred under it', () => {
     expect(tetherPoints({ cx: 128, cy: 128 }, { x: 32, y: 288 })).toEqual([[128, 224], [128, 288]]);

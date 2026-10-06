@@ -67,7 +67,8 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
     );
   }
 
-  const x1 = sx + CLEARANCE + nudge, x2 = tx - CLEARANCE;
+  // A large negative fan-out nudge must not pull the U's first vertical back to or through the source's right edge.
+  const x1 = sx + CLEARANCE + Math.max(nudge, -16), x2 = tx - CLEARANCE;
   const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
   const span = boxes.filter((b) => b.x < hi + 20 && b.x + b.w > lo - 20);
   const levels = new Set<number>();

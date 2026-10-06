@@ -54,4 +54,41 @@ describe('computeLandings', () => {
     for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(16);
     for (const y of ys) expect(y % 8).toBe(0);
   });
+
+  const arrivals = (steps: Record<string, [number, number]>, wires: WireEnd[]) =>
+    [...land(placement(steps), wires).get('t')!.values()].sort((a, b) => a - b);
+  const spaced = (ys: number[]) => { for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(16); };
+
+  it('terminates when departures fill the band, and every arrival stays on the step', () => {
+    // t at y 320: band 382..450. Six sources whose departures (y + 96) all fall inside it. A band holds at most 5 slots 16 apart, so one wire takes the band-full path.
+    const steps: Record<string, [number, number]> = { t: [864, 320] };
+    const wires: WireEnd[] = [];
+    for (let k = 0; k < 6; k++) { steps[`s${k}`] = [288, 288 + k * 8]; wires.push({ source: `s${k}`, target: 't' }); }
+    const ys = arrivals(steps, wires);
+
+    expect(ys).toHaveLength(6);
+    spaced(ys);
+    for (const y of ys) { expect(y % 8).toBe(0); expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
+  });
+
+  it('keeps all 8 bent arrivals of a fan-in of 8 on the step', () => {
+    const steps: Record<string, [number, number]> = { t: [864, 320] };
+    const wires: WireEnd[] = [];
+    for (let k = 0; k < 8; k++) { steps[`s${k}`] = [288, 32 + k * 192]; wires.push({ source: `s${k}`, target: 't' }); }
+    const ys = arrivals(steps, wires);
+    for (const y of ys) { expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
+  });
+
+  it('terminates for a fan-in of 12, keeping every arrival 16 apart and on the grid', () => {
+    const steps: Record<string, [number, number]> = { t: [864, 320] };
+    const wires: WireEnd[] = [];
+    for (let k = 0; k < 12; k++) { steps[`s${k}`] = [288, 32 + k * 192]; wires.push({ source: `s${k}`, target: 't' }); }
+    const ys = arrivals(steps, wires);
+
+    expect(ys).toHaveLength(12);
+    spaced(ys);
+    for (const y of ys) expect(y % 8).toBe(0);
+    // a step has room for 8 slots 16 apart below its cap: the first 8 are on it
+    expect(ys.filter((y) => y >= 320 + 40 && y <= 320 + 160).length).toBeGreaterThanOrEqual(8);
+  });
 });

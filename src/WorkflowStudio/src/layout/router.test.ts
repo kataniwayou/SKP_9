@@ -4,6 +4,18 @@ import { route, simplify, type Box, type Pt } from './router';
 const box = (id: string, x: number, y: number, w = 224, h = 160): Box => ({ id, x, y, w, h });
 
 const orthogonal = (pts: Pt[]) => pts.every((p, i) => i === 0 || p[0] === pts[i - 1]![0] || p[1] === pts[i - 1]![1]);
+/** No segment crosses a block's interior, except the source's first segment (leaving it) and the target's last (entering it). */
+const clear = (pts: Pt[], srcId: string, tgtId: string, boxes: Box[]) => {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i]!, [bx, by] = pts[i + 1]!;
+    for (const b of boxes) {
+      if ((b.id === srcId && i === 0) || (b.id === tgtId && i === pts.length - 2)) continue;
+      const hit = Math.max(ax, bx) > b.x && Math.min(ax, bx) < b.x + b.w && Math.max(ay, by) > b.y && Math.min(ay, by) < b.y + b.h;
+      if (hit) return false;
+    }
+  }
+  return true;
+};
 const onGrid = (pts: Pt[]) => pts.every(([x, y]) => x % 8 === 0 && y % 8 === 0);
 
 describe('route', () => {
@@ -26,6 +38,7 @@ describe('route', () => {
     const pts = route(512, 128, 864, 128, 'a', 'c', 0, boxes);
     expect(pts.length).toBeGreaterThan(2);
     expect(orthogonal(pts)).toBe(true);
+    expect(clear(pts, 'a', 'c', boxes)).toBe(true);
   });
 
   it('makes a U for a back edge, entering the target from the left', () => {
@@ -36,6 +49,16 @@ describe('route', () => {
     expect(pts.at(-2)![0]).toBeLessThan(288);
     expect(orthogonal(pts)).toBe(true);
     expect(onGrid(pts)).toBe(true);
+    expect(clear(pts, 'b', 'a', boxes)).toBe(true);
+  });
+
+  it.each([-8, -16, -24, -32, -48, 16, 32])('keeps a back edge clear of its own source block at fan-out nudge %i', (nudge) => {
+    const boxes = [box('a', 288, 32), box('b', 576, 32)];
+    const pts = route(800, 128 + nudge, 288, 128, 'b', 'a', nudge, boxes);
+    expect(pts.slice(0, 2).every(([x]) => x >= 800)).toBe(true);
+    expect(orthogonal(pts)).toBe(true);
+    expect(onGrid(pts)).toBe(true);
+    expect(clear(pts, 'b', 'a', boxes)).toBe(true);
   });
 
   it('makes a U for a self-loop', () => {
@@ -43,6 +66,7 @@ describe('route', () => {
     expect(orthogonal(pts)).toBe(true);
     expect(onGrid(pts)).toBe(true);
     expect(pts.length).toBe(6);
+    expect(clear(pts, 'a', 'a', [box('a', 288, 32)])).toBe(true);
   });
 
   it('still returns a route when there are no boxes at all', () => {

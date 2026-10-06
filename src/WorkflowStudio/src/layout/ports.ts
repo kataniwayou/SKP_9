@@ -1,5 +1,5 @@
 import type { Id } from '../model/graph';
-import { BAND_BOTTOM, BAND_TOP, PMID, PORT_GAP, SPHERE_R, STEP_W, offset } from './geometry';
+import { GRID, BAND_BOTTOM, BAND_TOP, CAP_H, PMID, PORT_GAP, SPHERE_R, STEP_H, STEP_W, offset } from './geometry';
 import type { Placement } from './placement';
 
 /** The sphere as a wire source. */
@@ -66,11 +66,14 @@ export function computeLandings(
       landed.set(s, y);
     }
 
+    // Bent arrivals land below the title cap and within the step's height; a slot outside that
+    // extent is skipped (so the walk turns back the other way). A step has room for 8 slots 16 apart
+    // there, so a larger fan-in (or one the straight landings already crowd) spills past the extent
+    // rather than break the 16 px spacing; the walk still terminates because `used` is finite.
+    const lo = p.y + CAP_H, hi = p.y + STEP_H;
     for (const s of sources) {
       if (landed.has(s)) continue;
-      const direction = departure(s) < middle ? -1 : 1;
-      let y = middle;
-      while (!free(y)) y += direction * PORT_GAP;
+      const y = nearestFreeSlot(middle, departure(s) < middle ? -1 : 1, lo, hi, free);
       used.push(y);
       landed.set(s, y);
     }
@@ -89,4 +92,17 @@ function nearestFreeInBand(d: number, top: number, bottom: number, free: (y: num
     if (downIn && free(down)) return down;
     if (upIn && free(up)) return up;
   }
+}
+
+/** The free slot nearest `middle` (preferring `direction` on ties) inside [lo, hi]; if the extent is full, the nearest free slot anywhere. */
+function nearestFreeSlot(middle: number, direction: 1 | -1, lo: number, hi: number, free: (y: number) => boolean): number {
+  for (const bounded of [true, false]) {
+    for (let k = 0; k < 8192; k++) {
+      for (const y of [middle + direction * k * GRID, middle - direction * k * GRID]) {
+        if (bounded && (y < lo || y > hi)) continue;
+        if (free(y)) return y;
+      }
+    }
+  }
+  throw new Error('no free landing slot');
 }
