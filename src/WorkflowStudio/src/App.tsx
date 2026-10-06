@@ -189,10 +189,10 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         documents={documents}
         activeDocumentId={activeId}
         onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
-        onCloseDocument={(id) => actions.guard(id, () => {
+        onCloseDocument={(id, doc) => actions.guard(id, () => {
           views.current.delete(id); // reopened later, it fits afresh
           store.dispatch({ type: 'close', workflowId: id });
-        })}
+        }, doc)}
         workflows={items}
         pickerNote={listError}
         onPickerOpen={readList}
@@ -211,9 +211,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         )}
         renderTool={renderTool}
         inspectorKey={inspector}
-        onEscape={() => {
+        onEscape={(doc) => {
           const id = store.getState().activeId;
-          if (id !== null) actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection: null }));
+          if (id !== null) actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection: null }), doc);
         }}
         popoutContent={<SvgDefs />}
         storage={storage}

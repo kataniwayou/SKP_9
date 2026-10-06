@@ -1,6 +1,7 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DockShell, type DockDocument, type DockShellProps } from './DockShell';
+import { docPanelId } from './ids';
 import { LAYOUT_KEY, type SavedLayout } from './layoutPersistence';
 import { memoryStorage } from '../test/memoryStorage';
 import { DockviewWillShowOverlayLocationEvent, type DockviewApi, type DockviewGroupPanel } from 'dockview-react';
@@ -82,7 +83,17 @@ describe('DockShell', () => {
     fireEvent(tab('wf-b'), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
     fireEvent.keyDown(window, { key: 'w', altKey: true });
 
-    expect(vi.mocked(props.onCloseDocument).mock.calls).toEqual([['a'], ['b'], ['b']]);
+    expect(vi.mocked(props.onCloseDocument).mock.calls.map(([id]) => id)).toEqual(['a', 'b', 'b']);
+    // each one says the window it came from, where the page asks about unsaved edits
+    expect(vi.mocked(props.onCloseDocument).mock.calls.map(([, d]) => d)).toEqual([document, document, document]);
+  });
+
+  it('puts a document panel back when dockview removed it and the page kept the document (Cancel)', async () => {
+    const { props } = setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'b' });
+    act(() => { dockApi.current!.removePanel(dockApi.current!.getPanel(docPanelId('a'))!); });
+    expect(props.onCloseDocument).toHaveBeenCalledWith('a');
+    await waitFor(() => expect(docTabs('wf-a')).toHaveLength(1));
+    expect(dockApi.current!.getPanel(docPanelId('a'))).toBeDefined();
   });
 
   it('closes a pane or a document from the keyboard on its tab ×', () => {
@@ -93,7 +104,7 @@ describe('DockShell', () => {
     expect(screen.queryAllByText('Inspector', { selector: '.doctab .nm' })).toHaveLength(0);
 
     fireEvent.keyDown(screen.getByRole('button', { name: 'Close wf-a' }), { key: ' ' });
-    expect(props.onCloseDocument).toHaveBeenCalledWith('a');
+    expect(props.onCloseDocument).toHaveBeenCalledWith('a', document);
   });
 
   it('hides and shows a pane from the View menu', () => {
@@ -370,8 +381,21 @@ describe('DockShell, pop-out windows', () => {
     expect(win.document.querySelector('.toast')).toHaveTextContent('Start and Stop are not available yet.');
 
     fireEvent.keyDown(win, { key: 'w', altKey: true });
-    expect(props.onCloseDocument).toHaveBeenCalledWith('a');
+    expect(props.onCloseDocument).toHaveBeenCalledWith('a', win.document);
     expect(props.onEscape).not.toHaveBeenCalled();
+  });
+
+  it("tells the page the pop-out's document on Escape, Alt+W, a tab × and a middle click there (spec §6.3)", async () => {
+    const { props } = setup({ documents: [doc('a')], activeDocumentId: 'a' });
+    const win = await popOut('wf-a');
+
+    fireEvent.keyDown(win, { key: 'Escape' });
+    expect(props.onEscape).toHaveBeenCalledWith(win.document);
+
+    fireEvent.keyDown(win, { key: 'w', altKey: true });
+    fireEvent.click(within(win.document.body).getByRole('button', { name: 'Close wf-a' }));
+    fireEvent(popoutTab(win, 'wf-a'), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+    expect(vi.mocked(props.onCloseDocument).mock.calls).toEqual([['a', win.document], ['a', win.document], ['a', win.document]]);
   });
 
   it('opens a workflow in the main window, shown, while the document group is popped out (review Critical 1)', async () => {
@@ -649,7 +673,7 @@ describe('DockShell, tab gestures and the window-position menu (spec 6.2)', () =
 
     fireEvent.contextMenu(tab('wf-b'));
     choose(/Close document/);
-    expect(props.onCloseDocument).toHaveBeenCalledWith('b');
+    expect(props.onCloseDocument).toHaveBeenCalledWith('b', document);
     expect(api().getPanel('doc:b')).toBeDefined(); // the page's new documents remove it
   });
 

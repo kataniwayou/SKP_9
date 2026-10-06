@@ -27,7 +27,8 @@ export interface DockShellProps {
   /** The document the shared panes follow; when it changes, its tab is focused. */
   activeDocumentId: string | null;
   onActivateDocument: (id: string) => void;
-  onCloseDocument: (id: string) => void;
+  /** `doc`: the window the close came from (a pop-out's, for one there), where the page may ask first. */
+  onCloseDocument: (id: string, doc?: Document) => void;
   /** The picker's list (spec §6.1: searchable, by unique name). */
   workflows: readonly PickerItem[];
   /** Shown in the picker when `workflows` is empty, e.g. why the list could not be read. */
@@ -40,7 +41,7 @@ export interface DockShellProps {
   /** Changes when the Inspector's content changes; a hidden Inspector's rail tab then glows (spec §6.2.5). */
   inspectorKey: string;
   /** Esc with no menu, picker, switcher or flyout open: the page clears the selection. */
-  onEscape: () => void;
+  onEscape: (doc: Document) => void;
   /** Rendered into every pop-out window's body: what panels there need from the page (SVG definitions). */
   popoutContent?: ReactNode;
   /** Where the window layout is kept; tests pass their own. Default: this browser's localStorage. */
@@ -219,6 +220,11 @@ export function DockShell(props: DockShellProps) {
       const documentId = documentIdOf(panel.id);
       if (documentId !== null && !applying.current && latest.current.props.documents.some((d) => d.id === documentId)) {
         latest.current.props.onCloseDocument(documentId);
+        // the page may keep the document (it asks first, and the user can cancel): then its panel comes
+        // back. Checked once React has applied a close the page made at once, so a closed one is not re-added.
+        queueMicrotask(() => {
+          if (latest.current.props.documents.some((d) => d.id === documentId)) syncDocuments(dv);
+        });
       }
     });
     dv.onWillShowOverlay((e) => {
@@ -235,7 +241,7 @@ export function DockShell(props: DockShellProps) {
     apply(dv, true);
     startDocuments(dv);
     setApi(dv);
-  }, [apply, memory, startDocuments, report]);
+  }, [apply, memory, startDocuments, report, syncDocuments]);
 
   // the rails live in React state, not in dockview's layout: report when they change
   // this effect always reports last, with the current `hidden`: a transient report with a stale `hidden` is corrected
@@ -280,8 +286,8 @@ export function DockShell(props: DockShellProps) {
 
   const closePanel = useCallback((panelId: string) => {
     const documentId = documentIdOf(panelId);
-    if (documentId !== null) { latest.current.props.onCloseDocument(documentId); return; }
     const panel = api?.getPanel(panelId);
+    if (documentId !== null) { latest.current.props.onCloseDocument(documentId, panel?.api.getWindow().document ?? document); return; }
     if (api && panel) closeTool(api, memory, panel, dockRect());
   }, [api, memory, dockRect]);
 
@@ -435,7 +441,7 @@ export function DockShell(props: DockShellProps) {
       case 'switcher': case 'switcherBack':
         e.preventDefault(); advanceSwitcher(command === 'switcher' ? 1 : -1, doc); break;
       case 'closeDocument':
-        e.preventDefault(); if (now.props.activeDocumentId) now.props.onCloseDocument(now.props.activeDocumentId); break;
+        e.preventDefault(); if (now.props.activeDocumentId) now.props.onCloseDocument(now.props.activeDocumentId, doc); break;
       case 'open':
         e.preventDefault(); openPicker(doc === document ? fileAnchor() : { x: 8, y: 8, doc }); break;
       case 'start': case 'stop':
@@ -445,7 +451,7 @@ export function DockShell(props: DockShellProps) {
         else if (now.menu) setMenu(null);
         else if (now.picker) setPicker(null);
         else if (now.flyId) closeFly();
-        else now.props.onEscape();
+        else now.props.onEscape(doc);
         break;
     }
   };

@@ -367,6 +367,32 @@ describe('unsaved Inspector edits (slice 3b)', () => {
     expect(await screen.findByLabelText('Description')).toHaveValue('typed');
   });
 
+  it('asks before a Problems click selects another entity, and not for the one already selected', async () => {
+    const problems = [
+      { gate: 'schemaEdge', title: 'On the selected step', detail: 'd1', offending: { childStepId: 's1' } },
+      { gate: 'missingStep', title: 'On the workflow', detail: 'd2', offending: { parentStepId: '00000000-0000-0000-0000-000000000000', missingChildId: 'x' } },
+    ];
+    render(<App api={withEntities({ validate: vi.fn().mockResolvedValue({ ok: true, value: { valid: false, problems } }) })}
+      storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+
+    fireEvent.click(await screen.findByText('On the selected step'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    fireEvent.click(screen.getByText('On the workflow'));
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByLabelText('Description')).toHaveValue('typed');
+  });
+
+  it('asks before closing a document whose draft names an entity that is gone (review focus 4)', async () => {
+    render(<App api={withEntities({ getEntity: vi.fn().mockResolvedValue(notFound) })} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    expect(await screen.findByText('This step no longer exists.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close alpha' }));
+    expect(await dialog()).toBeInTheDocument();
+    expect(screen.getAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(1);
+  });
+
   describe('unlinking an assignment', () => {
     const assignment = assignmentDto('a1', { stepId: 's1' });
     const linked = () => workflowDto({ id: ALPHA, name: 'alpha', assignmentIds: ['a1'] });

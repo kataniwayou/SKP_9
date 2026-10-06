@@ -1,5 +1,6 @@
 import { useGuard } from '../app/studioActions';
 import { problemTarget } from '../store/problemTarget';
+import { selectionKey } from '../store/selection';
 import { activeDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { PaneNote } from './PaneNote';
@@ -25,9 +26,10 @@ export function Problems() {
       <div className="pbody" role="list" aria-label="Problems">
         {doc.problems.map((problem, i) => {
           const target = problemTarget(problem, doc.graph);
+          const choose = () => store.dispatch({ type: 'select', workflowId: active.workflowId, selection: target });
+          // the selection it already is changes nothing, so it needs no asking; the dialog opens in this pane's window (spec §6.3)
           const select = target === null ? undefined
-            // the dialog opens in the window this pane is in (spec §6.3)
-            : (from: Element) => guard(active.workflowId, () => store.dispatch({ type: 'select', workflowId: active.workflowId, selection: target }), from.ownerDocument);
+            : (from: Element) => (selectionKey(target) === selectionKey(active.selection) ? choose() : guard(active.workflowId, choose, from.ownerDocument));
           return (
             <div
               key={i}
