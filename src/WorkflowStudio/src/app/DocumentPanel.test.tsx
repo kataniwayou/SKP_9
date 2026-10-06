@@ -269,6 +269,27 @@ describe('DocumentPanel', () => {
     await screen.findByText('■ stopped');
   });
 
+  it('disables Save while the shown entity would be saved with a blank Name (final review 5)', async () => {
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
+    store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
+    const api = { listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }), listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as unknown as StudioApi;
+    render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}>
+      <DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} onSave={vi.fn()} />
+    </div></StudioStoreProvider>);
+    await screen.findByText('fetch');
+
+    // not read yet: nothing says the name is blank, so Save stays enabled
+    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'name', text: '', saved: 'fetch' }));
+    expect(screen.getByRole('button', { name: '⤓ Save' })).toBeEnabled();
+    act(() => store.dispatch({ type: 'read', workflowId: 'wf1', key: 'step:s1', result: { ok: true, dto: stepDto('s1', { name: 'fetch' }) } }));
+    expect(screen.getByRole('button', { name: '⤓ Save' })).toBeDisabled();
+    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'name', text: 'renamed', saved: 'fetch' }));
+    expect(screen.getByRole('button', { name: '⤓ Save' })).toBeEnabled();
+    await screen.findByText('■ stopped');
+  });
+
   it('shows status unknown, not stopped, when the live poll fails', async () => {
     const { store } = await setup(vi.fn().mockResolvedValue({ ok: false, error: { kind: 'http', status: 500, detail: 'Redis down' } }));
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));

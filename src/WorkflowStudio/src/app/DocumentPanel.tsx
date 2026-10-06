@@ -5,8 +5,11 @@ import type { LiveArt } from '../canvas/liveArt';
 import type { SavedView } from '../canvas/savedView';
 import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
-import type { Selection } from '../store/selection';
+import { missingRequired } from '../store/entityForms';
 import { hasEdits } from '../store/inspector';
+import { entityKindOf, targetKey } from '../store/inspectorTarget';
+import type { Selection } from '../store/selection';
+import { shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { CapsuleToolbar } from './CapsuleToolbar';
 import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVisible, type PanelLike } from './panelHooks';
@@ -47,6 +50,7 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   const cls = usePanelShown(panel) ? 'docpanel' : 'docpanel bg';
 
   if (open === null) return null;
+  const blank = missingRequiredShown(open);
   if (open.status.kind === 'failed') return <div className={cls}><div className="doc-msg error" role="alert">{open.status.message}{onRetry && <button type="button" className="btn" onClick={onRetry}>Retry</button>}</div></div>;
   if (open.status.kind === 'loading' || fitter === null) return <div className={cls}><div className="doc-msg">Loading…</div></div>;
 
@@ -64,8 +68,16 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
           store.dispatch({ type: 'select', workflowId, selection });
         }}
       >
-        <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status} dirty={hasEdits(open.inspector)} busy={open.inspector.busy} onSave={onSave} />
+        <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status} dirty={hasEdits(open.inspector)} busy={open.inspector.busy} blocked={blank} onSave={onSave} />
       </WorkflowCanvas>
     </div>
   );
+}
+
+/** Whether the Inspector's edits would save a required field (Name, Version) blank; false until its entity is read. */
+function missingRequiredShown(open: OpenDocument): boolean {
+  const target = shownTargetOf(open);
+  const saved = open.inspector.saved;
+  if (target === null || saved === null || saved.key !== targetKey(target)) return false;
+  return missingRequired(entityKindOf(target), saved.dto, open.inspector.edits);
 }

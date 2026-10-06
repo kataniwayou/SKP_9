@@ -19,7 +19,12 @@ function StatusPill({ status }: { status: LiveStatus }) {
  * Start and Stop, and its own zoom and Fit. Save saves the Inspector's edits (slice 3b); Start and Stop are
  * still disabled. It must be rendered inside the document's WorkflowCanvas, for ZoomControls.
  */
-export function CapsuleToolbar({ workflow, status, dirty, busy, onSave }: { workflow: Workflow; status: LiveStatus; dirty?: boolean; busy?: boolean; onSave?: () => void }) {
+export function CapsuleToolbar({ workflow, status, dirty, busy, blocked, onSave }: {
+  workflow: Workflow; status: LiveStatus; dirty?: boolean; busy?: boolean;
+  /** The edits would save a required field blank, as the Inspector's own Save says. */
+  blocked?: boolean;
+  onSave?: () => void;
+}) {
   return (
     <div className="docbar" role="toolbar" aria-label="Workflow">
       <div className="cap-b crumb" data-tip={entityName(workflow.name, workflow.version, workflow.id)}>
@@ -31,7 +36,7 @@ export function CapsuleToolbar({ workflow, status, dirty, busy, onSave }: { work
       <span className="spacer" />
       <div className="docact">
         {dirty && onSave
-          ? <button type="button" className="qb" disabled={busy} onClick={onSave} data-tip="Save the Inspector's changes">⤓ Save</button>
+          ? <button type="button" className="qb" disabled={busy || blocked} onClick={onSave} data-tip="Save the Inspector's changes">⤓ Save</button>
           : <span data-tip="Nothing to save yet"><button type="button" className="qb" disabled>⤓ Save</button></span>}
         <span className="qsep" />
         <span data-tip={NOT_YET}><button type="button" className="qb run" disabled>▶ Start</button></span>
