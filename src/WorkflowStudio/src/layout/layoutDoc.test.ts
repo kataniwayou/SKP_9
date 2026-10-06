@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_LAYOUT, parseLayout } from './layoutDoc';
+import { parseLayout } from './layoutDoc';
 
 describe('parseLayout', () => {
   it('reads a version-1 document', () => {
@@ -9,7 +9,7 @@ describe('parseLayout', () => {
   });
 
   it.each([null, undefined, 42, 'text', [1, 2], true])('treats %j as an empty layout', (raw) => {
-    expect(parseLayout(raw)).toEqual(EMPTY_LAYOUT);
+    expect(parseLayout(raw)).toEqual({ sphere: null, steps: {}, caches: {}, parked: [] });
   });
 
   it('ignores entries whose coordinates are not finite numbers, keeping the rest', () => {
@@ -25,5 +25,26 @@ describe('parseLayout', () => {
     const doc = parseLayout({ parked: ['a', 7, '', 'a', null, 'b'], wires: { x: 1 } });
     expect(doc.parked).toEqual(['a', 'b']);
     expect(Object.keys(doc)).toEqual(['sphere', 'steps', 'caches', 'parked']);
+  });
+
+  it('returns a fresh object each call, so mutating one result never reaches another load', () => {
+    const first = parseLayout(null);
+    first.steps['s1'] = { x: 8, y: 8 };
+    first.caches['c1'] = { x: 8, y: 8 };
+    first.parked.push('p');
+    const second = parseLayout(null);
+    expect(second).toEqual({ sphere: null, steps: {}, caches: {}, parked: [] });
+    expect(second.steps).not.toBe(first.steps);
+  });
+
+  it('keeps __proto__, x and constructor ids as plain keys without touching any prototype', () => {
+    const raw = JSON.parse('{"steps":{"__proto__":{"x":8,"y":16},"x":{"x":24,"y":32},"constructor":{"x":40,"y":48}},"caches":{"__proto__":{"x":1,"y":2}}}');
+    const doc = parseLayout(raw);
+    expect(Object.keys(doc.steps).sort()).toEqual(['__proto__', 'constructor', 'x']);
+    expect(Object.getPrototypeOf(doc.steps)).toBeNull();
+    expect(doc.steps['x']).toEqual({ x: 24, y: 32 });
+    expect(({} as Record<string, unknown>)['x']).toBeUndefined();
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    expect(parseLayout(null).steps['x']).toBeUndefined();
   });
 });

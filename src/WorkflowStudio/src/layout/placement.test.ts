@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CELL, GRID, STEP_H, STEP_W } from './geometry';
-import { EMPTY_LAYOUT, type LayoutDoc } from './layoutDoc';
+import { parseLayout, type LayoutDoc } from './layoutDoc';
 import { place, type PlacementInput } from './placement';
 
 const input = (over: Partial<PlacementInput> = {}): PlacementInput => ({
@@ -8,11 +8,11 @@ const input = (over: Partial<PlacementInput> = {}): PlacementInput => ({
   reachable: [{ id: 'a', nextStepIds: ['b'] }, { id: 'b', nextStepIds: [] }],
   parkedIds: [],
   cacheIds: [],
-  layout: EMPTY_LAYOUT,
+  layout: parseLayout(null),
   ...over,
 });
 
-const layout = (over: Partial<LayoutDoc>): LayoutDoc => ({ ...EMPTY_LAYOUT, ...over });
+const layout = (over: Partial<LayoutDoc>): LayoutDoc => ({ ...parseLayout(null), ...over });
 
 function overlaps(a: { x: number; y: number }, b: { x: number; y: number }) {
   return a.x < b.x + STEP_W && b.x < a.x + STEP_W && a.y < b.y + STEP_H && b.y < a.y + STEP_H;
@@ -88,5 +88,11 @@ describe('place', () => {
     const p = await place(input({ entryStepIds: ['ghost'], reachable: [] }));
     expect(p.steps.size).toBe(0);
     expect(p.sphere).toEqual({ cx: 128, cy: 128 });
+  });
+
+  it('does not read a cache position from the prototype', async () => {
+    const caches = Object.create({ c1: { x: 1000, y: 1000 } }) as LayoutDoc['caches'];
+    const p = await place(input({ cacheIds: ['c1'], layout: layout({ caches }) }));
+    expect(p.caches.get('c1')).not.toEqual({ x: 1000, y: 1000 });
   });
 });

@@ -75,7 +75,7 @@ export async function place(input: PlacementInput): Promise<Placement> {
   const caches = new Map<Id, Point>();
   let k = 0;
   for (const id of input.cacheIds) {
-    const stored = input.layout.caches[id];
+    const stored = Object.hasOwn(input.layout.caches, id) ? input.layout.caches[id] : undefined;
     if (stored) caches.set(id, { x: snap(stored.x), y: snap(stored.y) });
     else caches.set(id, { x: sphere.cx - SPHERE_R, y: sphere.cy + SPHERE_R + GAP + k++ * (CACHE_H + 32) });
   }

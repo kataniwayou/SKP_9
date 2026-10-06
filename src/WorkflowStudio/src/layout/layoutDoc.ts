@@ -18,7 +18,6 @@ export interface LayoutDoc {
   parked: Id[];
 }
 
-export const EMPTY_LAYOUT: LayoutDoc = Object.freeze({ sphere: null, steps: {}, caches: {}, parked: [] }) as LayoutDoc;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -29,7 +28,8 @@ function toPoint(v: unknown): Point | null {
 }
 
 function toPoints(v: unknown): Record<Id, Point> {
-  const out: Record<Id, Point> = {};
+  // Null prototype: an id such as `__proto__` or `constructor` is an ordinary key, never an alias.
+  const out: Record<Id, Point> = Object.create(null) as Record<Id, Point>;
   if (!isRecord(v)) return out;
   for (const [id, raw] of Object.entries(v)) {
     const point = toPoint(raw);
@@ -38,8 +38,9 @@ function toPoints(v: unknown): Record<Id, Point> {
   return out;
 }
 
+/** Always a fresh object, so a caller may mutate its result without touching any other load. */
 export function parseLayout(raw: unknown): LayoutDoc {
-  if (!isRecord(raw)) return EMPTY_LAYOUT;
+  if (!isRecord(raw)) return { sphere: null, steps: toPoints(null), caches: toPoints(null), parked: [] };
   const parked = Array.isArray(raw.parked)
     ? [...new Set(raw.parked.filter((id): id is string => typeof id === 'string' && id !== ''))]
     : [];
