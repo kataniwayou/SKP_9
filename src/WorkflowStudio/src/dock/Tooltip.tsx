@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { windowKey } from './windowKey';
+import { asElement } from './nodes';
 
 const DELAY_MS = 350;
 
@@ -29,7 +30,7 @@ function WindowTooltip({ win }: { win: Window }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let current: Element | null = null;
     const move = (e: PointerEvent) => {
-      const found = tipFor(e.target instanceof Element ? e.target : null);
+      const found = tipFor(asElement(e.target));
       if ((found?.el ?? null) !== current) {
         current = found?.el ?? null;
         clearTimeout(timer);

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { asElement, asNode } from './nodes';
 
 /** Where an overlay opens: viewport coordinates in one window's document (a pop-out has its own). */
 export interface Anchor { x: number; y: number; doc: Document }
@@ -12,7 +13,7 @@ export function anchorBelow(el: Element): Anchor {
 
 /** At the pointer, in the document the event happened in. */
 export function anchorAt(e: { clientX: number; clientY: number; target: EventTarget | null }): Anchor {
-  const doc = e.target instanceof Node ? e.target.ownerDocument ?? document : document;
+  const doc = asNode(e.target)?.ownerDocument ?? document;
   return { x: e.clientX, y: e.clientY, doc };
 }
 
@@ -39,8 +40,9 @@ export function Menu({ entries, anchor, onClose, label }: { entries: readonly Me
 
   useEffect(() => {
     const away = (e: PointerEvent) => {
-      if (e.target instanceof Element && e.target.closest('[role="menubar"]')) return;
-      if (ref.current && e.target instanceof Node && !ref.current.contains(e.target)) onClose();
+      if (asElement(e.target)?.closest('[role="menubar"]')) return;
+      const target = asNode(e.target);
+      if (ref.current && target && !ref.current.contains(target)) onClose();
     };
     anchor.doc.addEventListener('pointerdown', away, true);
     return () => anchor.doc.removeEventListener('pointerdown', away, true);

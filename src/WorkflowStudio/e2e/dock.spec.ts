@@ -276,6 +276,38 @@ test('pops a document out, and it keeps its fonts, its drawing and its zoom', as
   await expect.poll(level).toBeGreaterThan(zoomed);
 });
 
+test('in a popped-out pane, tooltips show and a press outside closes a menu or the picker', async ({ page }) => {
+  // what React draws in a pop-out after it opened belongs to the pop-out window's JS realm
+  const [wf] = workflows;
+  await openWorkflow(page, wf!);
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup'),
+    groupOf(page, 'Inspector').getByRole('button', { name: 'Pop out to its own window' }).click(),
+  ]);
+  await popup.waitForLoadState();
+
+  // the header's Dock button is drawn in the pop-out: its tooltip shows there
+  await popup.getByRole('button', { name: 'Dock back into the main layout' }).hover();
+  await expect(popup.getByRole('tooltip').filter({ hasText: 'Dock back into the main layout' })).toHaveClass(/on/);
+
+  // a selection in the main window draws new Inspector rows in the pop-out
+  await documentPanel(page, wf!).locator('.react-flow__node-step').first().click({ position: { x: 20, y: 12 } });
+  const pill = popup.locator('[data-pane="inspector"] .kindpill');
+  await expect(pill).toHaveText(/STEP/);
+
+  await popup.getByRole('button', { name: 'Window position' }).click();
+  await expect(popup.getByRole('menu')).toBeVisible();
+  await pill.click();
+  await expect(popup.getByRole('menu')).toHaveCount(0);
+
+  await pill.click();
+  await popup.keyboard.press('Control+o');
+  await expect(popup.locator('.picker')).toBeVisible();
+  // the picker opens at the pop-out's top left, over the pill: press it without a mouse
+  await pill.dispatchEvent('pointerdown', { bubbles: true });
+  await expect(popup.locator('.picker')).toHaveCount(0);
+});
+
 test('a document drops only into or beside the document area', async ({ page }) => {
   const [a, b] = workflows;
   await openWorkflow(page, a!);

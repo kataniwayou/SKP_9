@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Anchor } from './Menu';
+import { asNode } from './nodes';
 
 export interface PickerItem {
   id: string;
@@ -31,7 +32,8 @@ export function Picker({ items, anchor, onPick, onClose, note }: {
 
   useEffect(() => {
     const away = (e: PointerEvent) => {
-      if (ref.current && e.target instanceof Node && !ref.current.contains(e.target)) onClose();
+      const target = asNode(e.target);
+      if (ref.current && target && !ref.current.contains(target)) onClose();
     };
     anchor.doc.addEventListener('pointerdown', away, true);
     return () => anchor.doc.removeEventListener('pointerdown', away, true);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import type { Side } from './home';
 import { TOOL_TITLES, type ToolId } from './ids';
+import { asElement } from './nodes';
 
 export type Rail = 'l' | 'r' | 'b';
 /** A pane on the top edge hides to the bottom rail, as in the mockup (there is no top rail). */
@@ -42,7 +43,7 @@ export function AutoHide({ hidden, sideOf, flyId, fresh, onOpen, onClose, onPin,
     const doc = flyRef.current?.ownerDocument;
     if (flyId === null || !doc) return;
     const away = (e: PointerEvent) => {
-      const t = e.target instanceof Element ? e.target : null;
+      const t = asElement(e.target);
       if (t && (t.closest('.fly') || t.closest('[data-rt]') || t.closest('.dropdown') || t.closest('.picker'))) return;
       onClose();
     };
