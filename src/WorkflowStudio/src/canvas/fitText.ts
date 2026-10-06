@@ -18,18 +18,28 @@ export interface TextFitter {
   fit(text: string, maxWidth: number, font: string): FittedText;
 }
 
+/** Splits into user-perceived characters so a cut never lands inside an emoji, flag or combining sequence. */
+function graphemes(text: string): string[] {
+  const Segmenter = (Intl as { Segmenter?: new (l?: string, o?: { granularity: 'grapheme' }) => { segment(s: string): Iterable<{ segment: string }> } }).Segmenter;
+  if (Segmenter) return Array.from(new Segmenter(undefined, { granularity: 'grapheme' }).segment(text), (s) => s.segment);
+  return Array.from(text); // code points: never splits a surrogate pair
+}
+
 export function createTextFitter(measure: Measure): TextFitter {
   return {
     width: measure,
     fit(text, maxWidth, font) {
-      if (measure(text, font) <= maxWidth) return { text, full: text, cut: false };
-      let lo = 0, hi = text.length;
+      if (text === '' || measure(text, font) <= maxWidth) return { text, full: text, cut: false };
+      if (measure('…', font) > maxWidth) return { text: '', full: text, cut: true };
+      const parts = graphemes(text);
+      const prefix = (n: number) => parts.slice(0, n).join('');
+      let lo = 0, hi = parts.length;
       while (lo < hi) {
         const mid = (lo + hi + 1) >> 1;
-        if (measure(text.slice(0, mid) + '…', font) <= maxWidth) lo = mid;
+        if (measure(prefix(mid) + '…', font) <= maxWidth) lo = mid;
         else hi = mid - 1;
       }
-      return { text: text.slice(0, lo) + '…', full: text, cut: true };
+      return { text: prefix(lo) + '…', full: text, cut: true };
     },
   };
 }
