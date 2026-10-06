@@ -1,0 +1,83 @@
+import type { ApiResult, StudioApi } from '../api/client';
+import { graphFromDto, processorFromDto, stepFromDto } from '../api/toModel';
+import { parseLayout } from '../layout/layoutDoc';
+import { place, type Placement } from '../layout/placement';
+import { routeWires } from '../layout/wires';
+import type { Graph, Id, WorkflowProblem } from '../model/graph';
+import { reachableStepIds } from '../model/reachability';
+import type { StudioDocument } from './document';
+
+/**
+ * Opens one workflow: the graph, then the parked steps its layout lists (they are not reachable, so
+ * GET /graph does not return them; spec §4.3) and any processor they need, then placement and wires.
+ * A parked id the server no longer has is dropped silently (spec §8); any other failure is returned.
+ * Any malformed part of the layout is ignored by `parseLayout`; missing blocks get an elkjs position.
+ *
+ * Whether the workflow may start is BaseApi's answer, not ours: one `validate` call supplies the
+ * problems, and the wires a `schemaEdge` problem names are drawn broken. Validate is advisory: in
+ * every non-200 case (400, 409, 422, network) `problems` stays null and the graph still loads.
+ *
+ * If elkjs fails, the rejection becomes an error result (`http`, status 0) instead of escaping.
+ */
+export async function loadDocument(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDocument>> {
+  const loaded = await api.getGraph(workflowId);
+  if (!loaded.ok) return loaded;
+
+  const graph: Graph = graphFromDto(loaded.value);
+  const verdict = await api.validate(workflowId);
+  const problems: WorkflowProblem[] | null = verdict.ok
+    ? (verdict.value.problems ?? []).map((p) => ({
+        gate: p.gate ?? '', title: p.title ?? '', detail: p.detail ?? '', offending: p.offending,
+      }))
+    : null;
+  const brokenEdges = brokenEdgeKeys(problems ?? []);
+  const layout = parseLayout(graph.layout);
+  const reachable = reachableStepIds(graph.workflow.entryStepIds, graph.steps);
+  const reachableSet = new Set(reachable);
+
+  const parkedIds: Id[] = [];
+  for (const id of layout.parked) {
+    if (reachableSet.has(id)) continue;
+    const step = await api.getStep(id);
+    if (!step.ok) {
+      if (step.error.kind === 'notFound') continue;
+      return step;
+    }
+    const model = stepFromDto(step.value);
+    graph.steps.set(id, model);
+    parkedIds.push(id);
+    if (!graph.processors.has(model.processorId)) {
+      const processor = await api.getProcessor(model.processorId);
+      if (processor.ok) graph.processors.set(model.processorId, processorFromDto(processor.value));
+      else if (processor.error.kind !== 'notFound') return processor;
+    }
+  }
+
+  let placement: Placement;
+  try {
+    placement = await place({
+      entryStepIds: graph.workflow.entryStepIds,
+      reachable: reachable.map((id) => ({ id, nextStepIds: graph.steps.get(id)!.nextStepIds })),
+      parkedIds,
+      cacheIds: [...graph.caches.keys()],
+      layout,
+    });
+  } catch (e) {
+    return { ok: false, error: { kind: 'http', status: 0, detail: `Layout failed: ${e instanceof Error ? e.message : String(e)}` } };
+  }
+  // routeWires only wires ends that are both placed and known, so every wire end has a position.
+  const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps, brokenEdges }, placement);
+
+  return { ok: true, value: { graph, parkedIds, placement, wires, problems } };
+}
+
+/** `${parentStepId}->${childStepId}` for each schemaEdge problem; offending is read defensively. */
+function brokenEdgeKeys(problems: WorkflowProblem[]): Set<string> {
+  const keys = new Set<string>();
+  for (const problem of problems) {
+    if (problem.gate !== 'schemaEdge' || typeof problem.offending !== 'object' || problem.offending === null) continue;
+    const { parentStepId, childStepId } = problem.offending as { parentStepId?: unknown; childStepId?: unknown };
+    if (typeof parentStepId === 'string' && typeof childStepId === 'string') keys.add(`${parentStepId}->${childStepId}`);
+  }
+  return keys;
+}

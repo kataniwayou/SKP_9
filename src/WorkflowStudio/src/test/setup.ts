@@ -1,4 +1,9 @@
 import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
+
+// Vitest globals are off, so Testing Library does not unmount between tests by itself.
+afterEach(cleanup);
 
 // React Flow measures with ResizeObserver, reads transforms through DOMMatrixReadOnly and sizes
 // nodes from offsetWidth/offsetHeight. jsdom has none of them; these shims are the ones React
@@ -7,7 +12,9 @@ import '@testing-library/jest-dom/vitest';
 class ResizeObserverShim {
   constructor(private readonly callback: ResizeObserverCallback) {}
   observe(target: Element) {
-    this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
+    const el = target as HTMLElement;
+    const contentRect = { width: parseFloat(el.style.width) || 1, height: parseFloat(el.style.height) || 1 };
+    this.callback([{ target, contentRect } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
   }
   unobserve() {}
   disconnect() {}
