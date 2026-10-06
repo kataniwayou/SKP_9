@@ -347,23 +347,30 @@ test('Ctrl+E switches windows and Alt+W closes the active document', async ({ pa
   await expect(tab(page, b!.name)).toHaveCount(1);
 });
 
-test('a saved window layout comes back after a reload, without the documents', async ({ page }) => {
+test('Window › Apply brings back the saved layout after a refresh changed nothing else', async ({ page }) => {
   await openWorkflow(page, workflows[0]!);
   await tab(page, 'Output').click({ button: 'right' });
   await page.getByRole('menuitem', { name: /Auto hide/ }).click();
   await page.getByRole('menuitem', { name: 'Window' }).click();
   await page.getByRole('menuitem', { name: /Save window layout/ }).click();
   await expect(page.locator('.toast')).toHaveText('Window layout saved in this browser');
+  await page.locator('[data-rt="output"]').click();
+  await page.locator('.fly').getByRole('button', { name: /Dock/ }).click();
+  await expect(page.locator('[data-rt="output"]')).toHaveCount(0);
 
   await page.reload();
 
+  // the refresh keeps the page as it was: the document is back, Output docked
+  await expect(documentPanel(page, workflows[0]!).locator('.react-flow__node').first()).toBeVisible();
+  await expect(page.locator('[data-rt="output"]')).toHaveCount(0);
+  // the saved layout is still there for Apply, and Apply keeps the document
+  await page.getByRole('menuitem', { name: 'Window' }).click();
+  await page.getByRole('menuitem', { name: /Apply saved layout/ }).click();
   await expect(page.locator('[data-rt="output"]')).toBeVisible();
-  await expect(tab(page, 'Inspector')).toBeVisible();
-  await expect(page.locator('.docpanel')).toHaveCount(0);
-  await expect(page.getByText('No workflow open')).toBeVisible();
+  await expect(documentPanel(page, workflows[0]!)).toHaveCount(1);
 });
 
-test('a pane popped out when the layout was saved comes back docked after a reload', async ({ page }) => {
+test('a pane popped out at the refresh comes back docked',async ({ page }) => {
   const before = await box(groupOf(page, 'Inspector'));
   const toolbox = (await box(groupOf(page, 'Toolbox'))).width;
   const [popup] = await Promise.all([

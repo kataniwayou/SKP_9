@@ -279,14 +279,14 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
   included), a processor die, a cache and the sphere. Esc or an empty-canvas click clears the
   selection; selecting never moves or wires anything.
 - The open dropdown lists workflows by their unique name (§7). Opening a workflow that is already open
-  focuses its tab. The window layout persists; **open documents are not restored on reload**.
+  focuses its tab. **A refresh keeps the page as it was** (user decision 2026-10-06): the open documents (fetched again), the active tab, each document's selection and view (zoom and scroll; a view still following Fit is fitted again), the dock with floating and auto-hidden panes, and the Inspector's show-all. Pop-out windows come back docked. It is one per-browser `localStorage` session (`skp.studio.session`), never the database. **Unsaved work is never lost to a refresh:** from slice 3b on, every edit not yet saved is kept in the session as its document's draft (written on every change and on `pagehide`) and comes back on reload, marked unsaved, until it is saved or discarded.
 
 ### 6.2 Docking behaviour (all built on the free core)
 
 1. A ▾ **window-position menu**, also on a tab's right-click: Float, Dock, Dock as tabbed document,
    Auto hide, Close. **Ctrl+double-click** toggles float and dock.
 2. Window menu: **Save, Apply and Reset window layout**, kept in `localStorage` per user, **never in
-   the DB** (separate from the workflow's `Layout` column).
+   the DB** (separate from the workflow's `Layout` column). At startup the session (§6.1) wins over the saved layout; Apply still brings the saved one back, keeping the open documents.
 3. **Exact re-dock memory:** a pane returns to the neighbour, side and size it had.
 4. **Documents can only be dropped into or beside the document area.**
 5. **Auto-hide built in-house:** left, right and bottom rails, sliding out on hover or click; Dock pins
@@ -468,9 +468,9 @@ editing is built inside real panes.
    started hub and flowing pulses from `/orchestration/live`; reduced motion; the legend.
 3b. **Inspector editing** (§7.1): `GET` / `PUT` per entity, drill-downs, assignment add / edit / remove
    from the step, server errors, refresh after save. The only `POST` is creating an assignment; no
-   `DELETE`.
+   `DELETE`. Its unsaved edits are kept in the session as the document's draft and survive a refresh (§6.1).
 4. **Canvas editing:** wiring, moving, connector editing (§5.5) and alignment guides, undo/redo, parked
-   blocks, draft save through `/graph`.
+   blocks, draft save through `/graph`. Its unsaved edits are kept in the session as the document's draft and survive a refresh (§6.1).
 5. **Richer editors and the full Problems pane** (§7.2, §7.3).
 6. **Toolbox:** drag-and-drop onto the canvas, **+ New** step / processor / cache, delete (✕) from the
    toolbox (§4.3).
