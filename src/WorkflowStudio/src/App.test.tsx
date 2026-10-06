@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from './api/client';
 import { graphDto, stepDto, workflowDto } from './api/fixtures';
@@ -153,6 +153,20 @@ describe('session (plan 3d)', () => {
     await waitFor(() => expect(within(inspector()).getByText('WORKFLOW')).toBeInTheDocument());
   });
 
+  it('keeps the restored active document active when the session has no dock, and the Inspector follows it', async () => {
+    render(<App api={fakeApi()} storage={seeded({
+      version: 1, activeId: 'wf1', showDetails: false, dock: null,
+      docs: [
+        { workflowId: 'wf1', name: 'orders', version: '1.0.0', selection: { kind: 'workflow' }, view: null },
+        { workflowId: 'wf2', name: 'billing', version: '2.0.0', selection: null, view: null },
+      ],
+    })} />);
+    const ordersTab = await screen.findByText('orders', { selector: '.doctab .nm' });
+    await waitFor(() => expect(within(inspector()).getByText('WORKFLOW')).toBeInTheDocument());
+    expect(ordersTab.closest('.dv-tab')).toHaveClass('dv-active-tab');
+    expect(screen.getByText('billing', { selector: '.doctab .nm' }).closest('.dv-tab')).not.toHaveClass('dv-active-tab');
+  });
+
   it('opens each restored document at its own view (review focus 5)', async () => {
     render(<App api={fakeApi()} storage={seeded({
       version: 1, activeId: 'wf1', showDetails: false, dock: null,
@@ -168,7 +182,17 @@ describe('session (plan 3d)', () => {
     };
     await waitFor(() => expect(document.querySelectorAll('.react-flow__viewport')).toHaveLength(2));
     expect(transformOf('wf1')).toBe('translate(-100px, 40px) scale(1.5)');
-    expect(transformOf('wf2')).not.toBe('translate(-100px, 40px) scale(1.5)');
+    const restoredFresh = transformOf('wf2');
+    cleanup();
+
+    // the same document opened fresh, with no session: wf2 must sit exactly where Fit puts it
+    render(<App api={fakeApi()} storage={seeded({
+      version: 1, activeId: 'wf2', showDetails: false, dock: null,
+      docs: [{ workflowId: 'wf2', name: 'billing', version: '2.0.0', selection: null, view: null }],
+    })} />);
+    await waitFor(() => expect(document.querySelectorAll('.react-flow__viewport')).toHaveLength(1));
+    await waitFor(() => expect(transformOf('wf2')).not.toBe('translate(0px, 0px) scale(1)'));
+    expect(restoredFresh).toBe(transformOf('wf2'));
   });
 
   it('keeps a document closed before the reload closed, and forgets its view (review focus 3)', async () => {
@@ -208,6 +232,8 @@ describe('session (plan 3d)', () => {
     const storage = memoryStorage();
     render(<App api={fakeApi()} storage={storage} />);
     await pickWorkflow('alpha');
+    // nothing written yet: the saver's 300 ms have not passed, so only the pagehide flush can write it
+    expect(JSON.parse(storage.getItem(SESSION_KEY) ?? '{"docs":[]}').docs).toHaveLength(0);
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
     expect(JSON.parse(storage.getItem(SESSION_KEY)!).docs).toHaveLength(1);
   });

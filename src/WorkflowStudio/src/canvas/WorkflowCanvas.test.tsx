@@ -154,6 +154,8 @@ describe('WorkflowCanvas', () => {
 
     it('reads the saved view once: a later view handed back queues no fit', async () => {
       // a queued fit runs on the next node change in a browser (jsdom never measures nodes, so it is checked directly)
+      // `fitViewQueued` is a React Flow internal store field (not public api), read here because jsdom never
+      // measures nodes, so the queued fit itself never runs; if React Flow renames it, this test must follow
       function FitQueued() {
         return <output aria-label="Fit queued">{String(useStore((st) => st.fitViewQueued))}</output>;
       }

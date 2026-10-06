@@ -710,6 +710,35 @@ describe('session (plan 3d)', () => {
     expect(docTabs('Mystery')).toHaveLength(0);
   });
 
+  describe('keeps the page\'s active document at startup when no document panels are restored', () => {
+    const savedWindowLayout = () => {
+      const storage = memoryStorage();
+      setup({ storage });
+      openMenu('Window');
+      choose(/Save window layout/);
+      cleanup();
+      return storage;
+    };
+    const startups: [string, () => Partial<DockShellProps>, boolean][] = [
+      ['no session dock and no saved layout', () => ({ restore: null }), false],
+      ['the saved window layout (it holds no documents)', () => ({ restore: null, storage: savedWindowLayout() }), false],
+      ['a session dock dockview rejects', () => ({ restore: { ...JSON.parse(REJECTED_BY_DOCKVIEW), popped: [] } }), true],
+    ];
+    it.each(startups)('%s', (_name, over, rejected) => {
+      const startup = over();
+      const onLayoutChange = vi.fn();
+      let props!: DockShellProps;
+      const run = () => { ({ props } = setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'a', onLayoutChange, ...startup })); };
+      if (rejected) expectingDockviewRejection(run); else run();
+
+      expect(props.onActivateDocument).not.toHaveBeenCalled();
+      expect(dockApi.current!.activePanel?.id).toBe('doc:a');
+      // the layout is still reported once the documents are in, with both of them
+      const last = onLayoutChange.mock.calls.at(-1)![0] as SavedLayout;
+      expect(Object.keys(last.dock.panels)).toEqual(expect.arrayContaining(['doc:a', 'doc:b']));
+    });
+  });
+
   it('without a session, still applies the saved window layout at startup', () => {
     const storage = memoryStorage();
     setup({ storage, restore: null });

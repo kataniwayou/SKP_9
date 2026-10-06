@@ -174,9 +174,27 @@ export function DockShell(props: DockShellProps) {
       showToast('The saved window layout could not be applied; the default layout is shown.');
     } finally {
       applying.current = false;
-      syncDocuments(dv);
+      // at startup onReady puts the documents in itself, keeping the page's active one
+      if (!atStartup) syncDocuments(dv);
     }
   }, [storage, memory, reset, showToast, syncDocuments]);
+
+  /**
+   * Startup: puts in the documents the layout did not bring back, then shows the page's active one.
+   * Adding a panel activates it, which must not reach the page: the last document added would
+   * replace the active document the page restored. The layout is reported afterwards, once `api` is set.
+   */
+  const startDocuments = useCallback((dv: DockviewApi) => {
+    applying.current = true;
+    try {
+      syncDocuments(dv);
+      const activeId = latest.current.props.activeDocumentId;
+      const panel = activeId === null ? undefined : dv.getPanel(docPanelId(activeId));
+      if (panel && dv.activePanel !== panel) panel.api.setActive();
+    } finally {
+      applying.current = false;
+    }
+  }, [syncDocuments]);
 
   /** Hands the page the dock's current state for its session; never while a layout is being applied. */
   const report = useCallback((dv: DockviewApi) => {
@@ -213,9 +231,9 @@ export function DockShell(props: DockShellProps) {
     dv.onDidAddPopoutGroup((p) => setPopouts((ws) => (ws.includes(p.window) ? ws : [...ws, p.window])));
     dv.onDidRemovePopoutGroup((p) => setPopouts((ws) => ws.filter((w) => w !== p.window)));
     apply(dv, true);
-    syncDocuments(dv);
+    startDocuments(dv);
     setApi(dv);
-  }, [apply, memory, syncDocuments, report]);
+  }, [apply, memory, startDocuments, report]);
 
   // the rails live in React state, not in dockview's layout: report when they change
   // this effect always reports last, with the current `hidden`: a transient report with a stale `hidden` is corrected
