@@ -36,6 +36,9 @@ interface Props {
   children?: ReactNode;
 }
 
+/** React Flow's attribution badge is hidden (MIT licence): it would sit on the horizontal scroll bar. */
+const PRO_OPTIONS = { hideAttribution: true } as const;
+
 /**
  * The workflow canvas. Pan with Space+drag, the middle button or the wheel; Ctrl+wheel zooms at
  * the pointer (spec §5.4). Slice 3a makes it clickable (spec §6.1): a step, a processor die, a
@@ -61,6 +64,7 @@ export function WorkflowCanvas({ doc, fitter, width, height, selection = null, o
             colorMode="dark"
             fitView
             fitViewOptions={FIT_VIEW_OPTIONS}
+            proOptions={PRO_OPTIONS}
             minZoom={0.1}
             maxZoom={4}
             nodesDraggable={false}

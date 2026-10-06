@@ -64,6 +64,12 @@ describe('WorkflowCanvas', () => {
     }
     const node = (container: HTMLElement, id: string) => container.querySelector(`.react-flow__node[data-id="${id}"]`) as HTMLElement;
 
+    it('shows no React Flow attribution badge (it would sit on the horizontal scroll bar)', async () => {
+      const { container } = render(<WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} />);
+      expect(container.querySelector('.react-flow__node')).not.toBeNull();
+      expect(container.querySelector('.react-flow__attribution')).toBeNull();
+    });
+
     it('reports a click on a step, on its die, on the sphere and on empty canvas', async () => {
       const onSelect = vi.fn();
       const { container } = render(<WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} onSelect={onSelect} />);
