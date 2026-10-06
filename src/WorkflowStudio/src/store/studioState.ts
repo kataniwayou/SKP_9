@@ -1,5 +1,9 @@
 import type { StudioDocument } from '../app/document';
+import type { EntityReadDto } from '../api/entities';
 import type { Id } from '../model/graph';
+import { savedText } from './entityForms';
+import { EMPTY_INSPECTOR, type InspectorState, type SaveFailure } from './inspector';
+import { currentTarget, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
 import { selectionKey, type Selection } from './selection';
 
 /** Where one open document is in its life: being read, ready to draw, or failed with a message. */
@@ -16,11 +20,13 @@ export interface OpenDocument {
   status: DocStatus;
   /** Kept per document, so switching tabs and coming back keeps it (spec §9). */
   selection: Selection | null;
+  /** This document's Inspector (slice 3b): its trail and edits are the draft the session keeps. */
+  inspector: InspectorState;
 }
 
 /**
- * The studio's shared state. Slice 3a holds no drafts and no undo: nothing can be edited yet.
- * The page keeps it in its session (app/session.ts), so a refresh brings it back (spec §6.1).
+ * The studio's shared state. The page keeps it in its session (app/session.ts), so a refresh brings it back
+ * (spec §6.1); a document's Inspector edits are its draft.
  */
 export interface StudioState {
   /** In the order they were opened. */
@@ -38,7 +44,22 @@ export type StudioAction =
   | { type: 'close'; workflowId: Id }
   | { type: 'activate'; workflowId: Id }
   | { type: 'select'; workflowId: Id; selection: Selection | null }
-  | { type: 'toggleDetails' };
+  | { type: 'toggleDetails' }
+  | { type: 'drill'; workflowId: Id; target: InspectorTarget }
+  /** Keeps the first `depth` drill-downs (0: back to the selection). */
+  | { type: 'back'; workflowId: Id; depth: number }
+  | { type: 'edit'; workflowId: Id; key: string; text: string; saved: string }
+  | { type: 'discard'; workflowId: Id }
+  | { type: 'read'; workflowId: Id; key: string; result: { ok: true; dto: EntityReadDto } | { ok: false; message: string } }
+  | { type: 'busy'; workflowId: Id; busy: boolean }
+  | { type: 'saveFailed'; workflowId: Id; failure: SaveFailure }
+  /** `sent`: the edits the PUT carried; only those are cleared. */
+  | { type: 'saved'; workflowId: Id; key: string; sent: Record<string, string>; dto: EntityReadDto }
+  | { type: 'created'; workflowId: Id; target: InspectorTarget; dto: EntityReadDto }
+  /** A ready document re-read after a write: the new graph, keeping selection, view and Inspector. */
+  | { type: 'refreshed'; workflowId: Id; doc: StudioDocument }
+  /** A failed document goes back to loading. */
+  | { type: 'retry'; workflowId: Id };
 
 export const INITIAL_STATE: StudioState = { docs: [], activeId: null, showDetails: false };
 
@@ -52,18 +73,35 @@ const update = (state: StudioState, id: Id, change: (doc: OpenDocument) => OpenD
   return { ...state, docs };
 };
 
+/** The target a document's Inspector shows, or null when nothing is selected. */
+export function shownTargetOf(doc: OpenDocument): InspectorTarget | null {
+  const root = rootTarget(doc.selection, doc.workflowId);
+  return root === null ? null : currentTarget(root, doc.inspector.trail);
+}
+
+const inspect = (state: StudioState, id: Id, change: (i: InspectorState, d: OpenDocument) => InspectorState): StudioState =>
+  update(state, id, (d) => {
+    const next = change(d.inspector, d);
+    return next === d.inspector ? d : { ...d, inspector: next };
+  });
+
+const without = (edits: Record<string, string>, drop: (key: string, text: string) => boolean): Record<string, string> =>
+  Object.fromEntries(Object.entries(edits).filter(([key, text]) => !drop(key, text)));
+
 /** Pure: every change to the studio's state goes through here. Unknown ids leave the state as it was. */
 export function reduce(state: StudioState, action: StudioAction): StudioState {
   switch (action.type) {
     case 'open': {
       if (state.docs.some((d) => d.workflowId === action.workflowId)) return { ...state, activeId: action.workflowId };
       const doc: OpenDocument = {
-        workflowId: action.workflowId, name: action.name, version: action.version, status: { kind: 'loading' }, selection: null,
+        workflowId: action.workflowId, name: action.name, version: action.version, status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR,
       };
       return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
     }
     case 'loaded':
-      return update(state, action.workflowId, (d) => ({ ...d, status: { kind: 'ready', doc: action.doc } }));
+      return update(state, action.workflowId, (d) => ({
+        ...d, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc },
+      }));
     case 'failed':
       return update(state, action.workflowId, (d) => ({ ...d, status: { kind: 'failed', message: action.message } }));
     case 'close': {
@@ -81,9 +119,49 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         : state;
     case 'select':
       return update(state, action.workflowId, (d) =>
-        selectionKey(d.selection) === selectionKey(action.selection) ? d : { ...d, selection: action.selection });
+        selectionKey(d.selection) === selectionKey(action.selection) ? d : { ...d, selection: action.selection, inspector: EMPTY_INSPECTOR });
     case 'toggleDetails':
       return { ...state, showDetails: !state.showDetails };
+    case 'drill':
+      return inspect(state, action.workflowId, (i) => ({ ...EMPTY_INSPECTOR, trail: [...i.trail, action.target] }));
+    case 'back':
+      return inspect(state, action.workflowId, (i) =>
+        action.depth >= i.trail.length ? i : { ...EMPTY_INSPECTOR, trail: i.trail.slice(0, Math.max(0, action.depth)) });
+    case 'edit':
+      return inspect(state, action.workflowId, (i) => {
+        const edits = without(i.edits, (key) => key === action.key);
+        if (action.text !== action.saved) edits[action.key] = action.text;
+        return { ...i, edits };
+      });
+    case 'discard':
+      return inspect(state, action.workflowId, (i) => ({ ...i, edits: {}, failure: null }));
+    case 'read':
+      return inspect(state, action.workflowId, (i, d) => {
+        if (targetKey(shownTargetOf(d)) !== action.key) return i;
+        if (!action.result.ok) return { ...i, saved: null, readError: action.result.message };
+        const dto = action.result.dto;
+        return { ...i, saved: { key: action.key, dto }, readError: null, edits: without(i.edits, (key, text) => text === savedText(dto, key)) };
+      });
+    case 'busy':
+      return inspect(state, action.workflowId, (i) => (i.busy === action.busy ? i : { ...i, busy: action.busy }));
+    case 'saveFailed':
+      return inspect(state, action.workflowId, (i) => ({ ...i, busy: false, failure: action.failure }));
+    case 'saved':
+      return inspect(state, action.workflowId, (i, d) => {
+        if (targetKey(shownTargetOf(d)) !== action.key) return { ...i, busy: false };
+        const edits = without(i.edits, (key, text) => action.sent[key] === text);
+        return { ...i, edits, busy: false, failure: null, readError: null, saved: { key: action.key, dto: action.dto } };
+      });
+    case 'created':
+      return inspect(state, action.workflowId, (i) => ({
+        ...EMPTY_INSPECTOR, trail: [...i.trail.slice(0, -1), action.target], saved: { key: targetKey(action.target), dto: action.dto },
+      }));
+    case 'refreshed':
+      return update(state, action.workflowId, (d) => (d.status.kind !== 'ready' ? d : {
+        ...d, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc },
+      }));
+    case 'retry':
+      return update(state, action.workflowId, (d) => (d.status.kind !== 'failed' ? d : { ...d, status: { kind: 'loading' } }));
   }
 }
 
@@ -97,5 +175,5 @@ export function activeDocument(state: StudioState): OpenDocument | null {
  */
 export function inspectorKey(state: StudioState): string {
   const active = activeDocument(state);
-  return active === null ? 'none' : `${active.workflowId}|${active.status.kind}|${selectionKey(active.selection)}`;
+  return active === null ? 'none' : `${active.workflowId}|${active.status.kind}|${selectionKey(active.selection)}|${active.inspector.trail.map(targetKey).join('>')}`;
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memoryStorage } from '../test/memoryStorage';
+import { EMPTY_INSPECTOR } from '../store/inspector';
 import { INITIAL_STATE, type StudioState } from '../store/studioState';
 import { createSaver, readSession, readTabSession, restoredState, SESSION_KEY, sessionOf, writeSession, writeTabSession, type Session } from './session';
 
@@ -87,7 +88,7 @@ describe('the session per tab (sessionStorage), mirrored to localStorage (contro
     expect(readTabSession(refusing, holding(other))).toEqual(other);
     expect(readTabSession(refusing, refusing)).toBeNull();
     const mirror = memoryStorage();
-    expect(writeTabSession(refusing, mirror, good)).toBe(false);   // the refresh would read the tab's older session
+    expect(writeTabSession(refusing, mirror, good)).toBe(true);    // an unreadable tab holds no entry: the refresh reads the mirror
     expect(readSession(mirror)).toEqual(good);
     expect(writeTabSession(null, mirror, good)).toBe(true);        // no tab storage: the refresh seeds from the mirror
     expect(writeTabSession(memoryStorage(), refusing, good)).toBe(true);
@@ -99,7 +100,7 @@ describe('sessionOf / restoredState', () => {
   it('keeps each open document with its selection and view, and drops views of closed documents', () => {
     const state: StudioState = {
       ...INITIAL_STATE,
-      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' } }],
+      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR }],
       activeId: 'a',
       showDetails: true,
     };
@@ -143,5 +144,44 @@ describe('createSaver', () => {
     expect(write).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(1000);
     expect(write).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the draft (slice 3b, spec §6.1)', () => {
+  const draft = { trail: [{ kind: 'processor', id: 'p1' }], edits: { description: 'typed' } };
+
+  it('reads a valid draft and drops a broken one, never the session', () => {
+    const storage = memoryStorage({ [SESSION_KEY]: JSON.stringify({
+      ...good,
+      docs: [{ ...good.docs[0], draft }, { ...good.docs[1], draft: { trail: [{ kind: 'wire' }], edits: { a: 1 } } }],
+    }) });
+    const read = readSession(storage)!;
+    expect(read.docs[0]!.draft).toEqual(draft);
+    expect(read.docs[1]!.draft).toBeUndefined();
+    expect(read.version).toBe(1);
+  });
+
+  it("writes a document's draft only when it has one, and restores it into the Inspector", () => {
+    const state: StudioState = {
+      ...INITIAL_STATE,
+      docs: [
+        { workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'step', stepId: 's1' }, inspector: { ...EMPTY_INSPECTOR, ...draft, trail: draft.trail as never } },
+        { workflowId: 'b', name: 'billing', version: '1.0.0', status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR },
+      ],
+      activeId: 'a',
+    };
+    const session = sessionOf(state, new Map(), null);
+    expect(session.docs[0]!.draft).toEqual(draft);
+    expect('draft' in session.docs[1]!).toBe(false);
+    expect(restoredState(session).docs[0]!.inspector).toEqual({ ...EMPTY_INSPECTOR, ...draft });
+    expect(restoredState(session).docs[1]!.inspector).toEqual(EMPTY_INSPECTOR);
+  });
+
+  it('a session write counts as kept when the next refresh will read it', () => {
+    const refusing = { getItem: () => null, setItem: () => { throw new Error('full'); } } as unknown as Storage;
+    expect(writeTabSession(refusing, memoryStorage(), good)).toBe(true);             // the tab holds no entry: the mirror is read
+    const stale = memoryStorage({ [SESSION_KEY]: JSON.stringify(good) });
+    const staleRefusing = { getItem: (k: string) => stale.getItem(k), setItem: () => { throw new Error('full'); } } as unknown as Storage;
+    expect(writeTabSession(staleRefusing, memoryStorage(), good)).toBe(false);       // a refresh would read the tab's old entry
   });
 });

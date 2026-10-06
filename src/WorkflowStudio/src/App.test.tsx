@@ -132,9 +132,15 @@ describe('App', () => {
 
 describe('session (plan 3d)', () => {
   const seeded = (session: unknown) => memoryStorage({ [SESSION_KEY]: JSON.stringify(session) });
+  /** The graphs carry the names the seeded session holds, as the server would return them. */
+  const restoredApi = () => fakeApi({
+    getGraph: vi.fn().mockImplementation(async (id: string) => ({
+      ok: true, value: graphDto({ workflow: workflowDto({ id, name: id === 'wf2' ? 'billing' : 'orders' }), steps: [stepDto('s1', { name: 'fetch' })] }),
+    })),
+  });
 
   it('brings back the open documents, the active one and each selection after a reload', async () => {
-    const api = fakeApi();
+    const api = restoredApi();
     const storage = seeded({
       version: 1, activeId: 'wf2', showDetails: false, dock: null,
       docs: [
@@ -157,7 +163,7 @@ describe('session (plan 3d)', () => {
   });
 
   it('keeps the restored active document active when the session has no dock, and the Inspector follows it', async () => {
-    render(<App api={fakeApi()} storage={seeded({
+    render(<App api={restoredApi()} storage={seeded({
       version: 1, activeId: 'wf1', showDetails: false, dock: null,
       docs: [
         { workflowId: 'wf1', name: 'orders', version: '1.0.0', selection: { kind: 'workflow' }, view: null },

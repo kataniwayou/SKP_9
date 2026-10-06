@@ -1,5 +1,7 @@
 import type { SavedView } from '../canvas/savedView';
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
+import { EMPTY_INSPECTOR, hasEdits, type InspectorDraft } from '../store/inspector';
+import { isTarget } from '../store/inspectorTarget';
 import type { Selection } from '../store/selection';
 import { INITIAL_STATE, type StudioState } from '../store/studioState';
 
@@ -20,6 +22,8 @@ export interface SessionDoc {
   selection: Selection | null;
   /** null: the view still followed Fit, or was never reported; the document is fitted on restore. */
   view: SavedView | null;
+  /** The document's unsaved Inspector work (slice 3b): absent when there is none. Optional, so the version stays 1. */
+  draft?: InspectorDraft;
 }
 
 export interface Session {
@@ -54,6 +58,7 @@ export function readSession(storage: Storage | null): Session | null {
       workflowId: d.workflowId, name: d.name, version: d.version,
       selection: isSelection(d.selection) ? d.selection : null,
       view: isView(d.view) ? d.view : null,
+      ...(isDraft(d.draft) ? { draft: { trail: d.draft.trail, edits: d.draft.edits } } : {}),
     });
   }
   const activeId = typeof value.activeId === 'string' && docs.some((d) => d.workflowId === value.activeId)
@@ -101,18 +106,22 @@ export function readTabSession(tab: Storage | null, mirror: Storage | null): Ses
 
 /**
  * Writes the session to the tab and mirrors it. True when the next refresh will find it: the tab
- * took it, or there is no tab storage and the mirror took it. Never throws.
+ * took it, or the tab holds no entry (or there is no tab storage) and the mirror took it. Never throws.
  */
 export function writeTabSession(tab: Storage | null, mirror: Storage | null, session: Session): boolean {
   const mirrored = writeSession(mirror, session);
-  return tab === null ? mirrored : writeSession(tab, session);
+  // a tab that refused the write is read again only if it already holds an (older) entry
+  return writeSession(tab, session) || (mirrored && !holdsSession(tab));
 }
 
 /** The session for the current state: views of documents that are no longer open are dropped. */
 export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedView>, dock: SavedLayout | null): Session {
   return {
     version: SESSION_VERSION,
-    docs: state.docs.map((d) => ({ workflowId: d.workflowId, name: d.name, version: d.version, selection: d.selection, view: views.get(d.workflowId) ?? null })),
+    docs: state.docs.map((d) => ({
+      workflowId: d.workflowId, name: d.name, version: d.version, selection: d.selection, view: views.get(d.workflowId) ?? null,
+      ...(d.inspector.trail.length > 0 || hasEdits(d.inspector) ? { draft: { trail: d.inspector.trail, edits: d.inspector.edits } } : {}),
+    })),
     activeId: state.activeId,
     showDetails: state.showDetails,
     dock,
@@ -123,7 +132,9 @@ export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedVi
 export function restoredState(session: Session | null): StudioState {
   if (session === null) return INITIAL_STATE;
   return {
-    docs: session.docs.map((d) => ({ workflowId: d.workflowId, name: d.name, version: d.version, status: { kind: 'loading' }, selection: d.selection })),
+    docs: session.docs.map((d) => ({ workflowId: d.workflowId, name: d.name, version: d.version, status: { kind: 'loading' }, selection: d.selection,
+      inspector: { ...EMPTY_INSPECTOR, ...(d.draft ?? {}) },
+    })),
     activeId: session.activeId,
     showDetails: session.showDetails,
   };
@@ -153,6 +164,11 @@ function isSelection(value: unknown): value is Selection {
     case 'cache': return typeof value.cacheId === 'string';
     default: return false;
   }
+}
+
+function isDraft(value: unknown): value is InspectorDraft {
+  return isRecord(value) && Array.isArray(value.trail) && value.trail.every(isTarget)
+    && isRecord(value.edits) && Object.values(value.edits).every((text) => typeof text === 'string');
 }
 
 function isView(value: unknown): value is SavedView {
