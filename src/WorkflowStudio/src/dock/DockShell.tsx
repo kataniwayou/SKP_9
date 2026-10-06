@@ -221,8 +221,11 @@ export function DockShell(props: DockShellProps) {
     if (hidden.includes('inspector') && flyId !== 'inspector') setFresh((f) => new Set(f).add('inspector'));
   }, [inspectorKey, hidden, flyId]);
 
+  // the menu, the picker and the switcher are mutually exclusive: opening one closes the others,
+  // so Esc (and Enter) always reach the one that is shown
   const openPicker = useCallback((anchor: Anchor) => {
     setMenu(null);
+    setSwitcher(null);
     setPicker(anchor);
     latest.current.props.onPickerOpen?.();
   }, []);
@@ -271,6 +274,7 @@ export function DockShell(props: DockShellProps) {
     }
     entries.push('separator', { id: 'close', icon: '×', label: isDoc ? 'Close document' : 'Close', kbd: isDoc ? 'Alt+W' : '', onSelect: () => closePanel(panelId) });
     setPicker(null);
+    setSwitcher(null);
     setMenu({ label: 'Window position', entries, anchor });
   }, [api, memory, dockRect, hide, closePanel, toggleMaximize]);
 
@@ -380,13 +384,15 @@ export function DockShell(props: DockShellProps) {
   keyHandlers.current.down = (e: KeyboardEvent) => {
     const now = latest.current;
     const doc = documentOf(e);
+    // a key an overlay already handled (the picker's Enter, a menu's arrows) is not the studio's
+    if (e.defaultPrevented) return;
     if (now.switcher) {
       if (e.key === 'ArrowDown') { e.preventDefault(); advanceSwitcher(1, doc); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); advanceSwitcher(-1, doc); return; }
       if (e.key === 'Enter') { e.preventDefault(); finishSwitcher(); return; }
     }
     const command = keyCommand(e);
-    if (command === null || e.defaultPrevented) return;
+    if (command === null) return;
     switch (command) {
       case 'switcher': case 'switcherBack':
         e.preventDefault(); advanceSwitcher(command === 'switcher' ? 1 : -1, doc); break;
@@ -449,6 +455,7 @@ export function DockShell(props: DockShellProps) {
                   e.stopPropagation();
                   if (menu?.strip === name) { setMenu(null); return; }
                   setPicker(null);
+                  setSwitcher(null);
                   setMenu({ label: name, entries: stripEntries(name), anchor: anchorBelow(e.currentTarget), strip: name });
                 }}
               >
