@@ -322,6 +322,13 @@ lists; `null` clears them).
   unreachable". The form always keeps what was typed. Exceptions that are not business rules: Name
   and Version may not be empty (Save is disabled; the placeholder shows the last saved value, or a
   generated one for a new assignment), and JSON text areas mark invalid JSON while typing.
+- **One JSON Schema validator: BaseApi's.** Schema definitions and payload-against-config-schema
+  checks use **JsonSchema.Net 9.2.1, draft 2020-12, external `$ref` fetching disabled**
+  (`BaseApi.Service/Features/Schema/JsonSchemaConfig.cs`; mirrored in
+  `BaseProcessor.Core/Validation/ProcessorJsonSchemaValidator.cs`). A Schema definition is judged by
+  `PUT /schemas/{id}` (`SchemaDtoValidator`: valid JSON, then `MetaSchemas.Draft202012`); payload
+  conformance by validate (§4.4). **The browser runs no JSON Schema validator of its own** (user
+  decision, 2026-10-06), so the studio can never disagree with the server or the processors.
 - **Save and Revert**, never autosave. Selecting another entity, drilling down, going back or closing
   the document with unsaved changes asks **Save / Discard / Cancel**. Drill-downs keep a breadcrumb
   (e.g. **Step › Processor › Config schema**) with a back button.
@@ -343,10 +350,10 @@ lists; `null` clears them).
 These build on §7.1 once canvas editing exists:
 
 - **Step:** "also reached by" (shared); wired from/to lists.
-- **Assignment:** `vanilla-jsoneditor` in tree/table plus raw mode, with **Ajv draft 2020-12 validation
-  against the processor's config schema**. Missing `required` keys get "add" hints, `enum` values
-  become dropdowns, `default` values are offered. Limit 1 MB. Invalid raw text keeps the last valid
-  value.
+- **Assignment:** `vanilla-jsoneditor` in tree/table plus raw mode. Conformance to the processor's
+  config schema comes from BaseApi's validator (§7.1), not a browser one; hints derived from the config
+  schema's own keywords (missing `required` keys, `enum` values as dropdowns, `default` values offered)
+  are presentation, not validation. Limit 1 MB. Invalid raw text keeps the last valid value.
 - **Processor / Schema:** an impact panel showing usage and the wires that would break, noting that
   replicas need a restart; creating a new schema version for a frozen definition.
 - **Workflow:** cron with a plain-English reading and the next 3 fire times.
