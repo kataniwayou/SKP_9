@@ -15,13 +15,6 @@
 .wire .brk + text { font-family: var(--sans); }
 .tether { fill: none; stroke: var(--line-2); stroke-width: 1.2; stroke-dasharray: 3 4; }
 
-/* cache shell (plan 2; the locked cache replaces it in plan 3c Task 5) */
-.cachetag .contact { fill: #000; opacity: .5; filter: url(#soft); }
-.cachetag .shell { fill: url(#darkbody); }
-.cachetag .cap { fill: url(#capfill); }
-.cachetag .rimr { fill: none; stroke: url(#rimline); stroke-width: 1.2; }
-.cachetag .cname { font-size: 13px; font-weight: 600; fill: #F4F9FF; paint-order: stroke; stroke: rgba(3, 12, 28, .35); stroke-width: 2.5px; }
-.cachetag .csub { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
 .badge { font-family: var(--mono); font-size: 9.5px; }
 
 /* handles exist only so React Flow can attach edges; they are never seen or used */
@@ -41,11 +34,6 @@
   background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid; vertical-align: middle; margin-right: 6px; }
 .legend .pill { font-family: var(--mono); font-size: 10px; border-radius: 3px; padding: 0 4px; color: #04111F; margin-right: 4px; font-weight: 600; }
-
-/* hover and selection (mockup v49, the .sel rules); the selection class sits on React Flow's node wrapper */
-.cachetag:hover .cap { filter: brightness(1.1); }
-.studio-sel .cachetag .rimr { stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: none; }
-.studio-sel .cachetag .shell { filter: url(#glow); }
 
 /* a document's zoom (mockup v49 .zoom, .docbar .zoom) */
 .zoom { display: flex; align-items: center; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); }

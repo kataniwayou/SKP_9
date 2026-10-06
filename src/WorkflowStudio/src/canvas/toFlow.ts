@@ -6,11 +6,11 @@ import { WORKFLOW_SOURCE } from '../layout/ports';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { conditionInfo } from '../model/entryConditions';
 import { entityName } from '../model/entityNames';
-import type { Graph, Id, Processor, Step } from '../model/graph';
+import type { Cache, Graph, Id, Processor, Step } from '../model/graph';
 import type { CableEdgeType } from './edges/CableEdge';
 import type { TetherEdgeType } from './edges/TetherEdge';
 import { FONT, type FittedText, type TextFitter } from './fitText';
-import type { CacheNodeType } from './nodes/CacheNode';
+import type { CacheNodeData, CacheNodeType } from './nodes/CacheNode';
 import type { ProcessorView, StepNodeType } from './nodes/StepNode';
 import { PILL_STATE, PILL_W, type WorkflowNodeType } from './nodes/WorkflowNode';
 
@@ -76,14 +76,10 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
   for (const [id, position] of placement.caches) {
     const cache = graph.caches.get(id);
     if (!cache) continue;
-    const count = payloadKeyCount(cache.items);
     nodes.push({
       id: cacheNodeId(id), type: 'cache', position, width: CACHE_W, height: CACHE_H, draggable: false, selectable: false,
       handles: [handle('in', 'target', Position.Top, CACHE_W / 2, 0)],
-      data: {
-        name: fitter.fit(cache.name, CACHE_W - 12 - 52, FONT.cacheName),
-        sub: fitter.fit(`root ${cache.root} · ${count ?? '?'} items`, CACHE_W - 12 - 52, FONT.cacheSub),
-      },
+      data: cacheData(cache, fitter),
     });
   }
 
@@ -117,6 +113,30 @@ function stepLabels(step: Step, parked: boolean, fitter: TextFitter): { name: Fi
     name: fitter.fit(step.name, STEP_W - 12 - 34, FONT.stepName),
     version: fitter.fit(`v${step.version}`, STEP_W - versionX - 74, FONT.stepVersion),
     parked,
+  };
+}
+
+/** Room inside the cache frame (mockup v50 drawCacheTag): a name line, the root, and the plate. */
+const CACHE_NAME_ROOM = 132, CACHE_ROOT_ROOM = 112, PLATE_MAX = 128;
+
+/** The cache's name split after `-`, `_` and `.` onto at most two lines, each fitted; the root fitted to its plate. */
+function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
+  const font = FONT.cacheName;
+  const parts: string[] = [];
+  let current = '';
+  for (const segment of cache.name.split(/(?<=[-_.])/)) {
+    if (current && fitter.width(current + segment, font) > CACHE_NAME_ROOM) { parts.push(current); current = segment; }
+    else current += segment;
+  }
+  parts.push(current);
+  if (parts.length > 2) parts.splice(1, parts.length - 1, parts.slice(1).join(''));
+  const root = fitter.fit(cache.root, CACHE_ROOT_ROOM, FONT.cacheRoot);
+  return {
+    lines: parts.map((line) => fitter.fit(line, CACHE_NAME_ROOM, font).text),
+    version: cache.version,
+    root,
+    plateWidth: Math.min(PLATE_MAX, fitter.width(root.text, FONT.cacheRoot) + 22),
+    tooltip: `${cache.name} ${cache.version}\nroot ${cache.root}`,
   };
 }
 

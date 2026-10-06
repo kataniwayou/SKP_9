@@ -125,6 +125,26 @@ describe('toFlow', () => {
     expect(a.name.text.length * 7).toBeLessThanOrEqual(178);
   });
 
+  it('wraps a cache name at its separators onto at most two lines, and plates the root (review focus 5)', () => {
+    const cacheOf = (name: string, root: string) => {
+      const graph = doc({ caches: new Map([['c1', { id: 'c1', name, version: '1.0.0', description: null, root, items: '{}', audit: AUDIT }]]) });
+      return toFlow(graph, fitter).nodes.find((n) => n.id === cacheNodeId('c1'))!.data as import('./nodes/CacheNode').CacheNodeData;
+    };
+
+    const short = cacheOf('lookups', 'lk');
+    expect(short.lines).toEqual(['lookups']);
+    expect(short.plateWidth).toBe(2 * 7 + 22);
+    expect(short.tooltip).toBe('lookups 1.0.0\nroot lk');
+
+    expect(cacheOf('chain-artist-whitelist', 'chain-artists').lines).toEqual(['chain-artist-', 'whitelist']);
+
+    const long = cacheOf('one-two-three-four-five-six-seven-eight-nine', 'r'.repeat(40));
+    expect(long.lines).toHaveLength(2);
+    for (const line of long.lines) expect(line.length * 7).toBeLessThanOrEqual(132);
+    expect(long.root.cut).toBe(true);
+    expect(long.plateWidth).toBe(128);
+  });
+
   it('gives the hub its unique name as a tooltip and the cron for its pill', () => {
     const hub = toFlow(doc(), fitter).nodes.find((n) => n.id === SPHERE_NODE_ID)!.data as import('./nodes/WorkflowNode').WorkflowNodeData;
     expect(hub.tip).toBe('orders_1.0.0-wf1');

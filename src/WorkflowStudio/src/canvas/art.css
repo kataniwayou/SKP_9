@@ -69,6 +69,17 @@
 .wf.nx:hover .sphere { filter: brightness(1.08); }
 .studio-sel .wf .sphere { filter: url(#glow); }
 
+/* cache: static, structure white */
+.cachetag .nx-brk { stroke-width: 1.1; }
+.cachetag .nx-thin { stroke-width: 1; }
+.cachetag .nx-hex { stroke-width: 1.2; }
+.cachetag .nx-plate { stroke-width: .9; }
+.cachetag .nx-cn { font: 400 12.5px var(--sans); fill: #F4F9FF; }
+.cachetag .nx-cl { font: 400 8px var(--mono); fill: var(--nh); letter-spacing: .2em; }
+.cachetag .nx-root { font: 400 10px var(--mono); fill: var(--nh); }
+.cachetag.nx:hover .nx-brk { stroke-width: 1.6; }
+.studio-sel .cachetag.nx .nx-brk { stroke: var(--accent); stroke-width: 1.8; }
+
 @media (prefers-reduced-motion: reduce) {
   .nx-spin, .nx-wait, .wf.nx-idlewf .hub-inner { animation: none; }
 }

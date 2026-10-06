@@ -11,8 +11,8 @@ export const MONO = '"IBM Plex Mono",ui-monospace,Consolas,monospace';
  * nothing has asked for yet, and @fontsource faces load lazily.
  */
 export const FONT = {
-  cacheName: `600 13px ${SANS}`,
-  cacheSub: `10px ${MONO}`,
+  cacheName: `12.5px ${SANS}`,
+  cacheRoot: `10px ${MONO}`,
   stepName: `13px ${SANS}`,
   stepVersion: `9.5px ${MONO}`,
   processorTitle: `11px ${SANS}`,
