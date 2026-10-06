@@ -186,6 +186,14 @@ describe('window actions on a real dockview', () => {
     expect(where(api, 'doc:a')!.group).toBe(saved.documentGroupId);
   });
 
+  it('keeps the documents in the session snapshot (keepDocuments) and strips them by default', () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    expect(captureLayout(api, memory, [], { keepDocuments: true }).dock.panels['doc:a']).toBeDefined();
+    expect(captureLayout(api, memory, []).dock.panels['doc:a']).toBeUndefined();
+  });
+
   it('throws when dockview rejects a layout, and keeps the open documents open', () => {
     const { api, memory } = dock();
     resetLayout(api, memory, 1200);

@@ -1,6 +1,6 @@
 import { Orientation, type SerializedDockview } from 'dockview-react';
 import { describe, expect, it, vi } from 'vitest';
-import { LAYOUT_KEY, readLayout, stripDocuments, withDocuments, writeLayout, type SavedLayout } from './layoutPersistence';
+import { LAYOUT_KEY, parseLayout, readLayout, sessionDock, stripDocuments, withDocuments, writeLayout, type SavedLayout } from './layoutPersistence';
 import { memoryStorage } from '../test/memoryStorage';
 
 const panel = (id: string, contentComponent = 'tool') => ({ id, contentComponent, title: id });
@@ -69,6 +69,29 @@ describe('stripDocuments', () => {
   });
 });
 
+describe('sessionDock', () => {
+  it('keeps the documents where they are, drops pop-out windows and returns the panes they held', () => {
+    const input = layout();
+    input.popoutGroups = [{ data: { id: 'g5', views: ['output', 'doc:c'], activeView: 'output' }, position: null }];
+    input.floatingGroups = [];
+    const { dock, documentGroupId, popped } = sessionDock(input);
+    expect(Object.keys(dock.panels)).toEqual(expect.arrayContaining(['doc:a', 'doc:b']));
+    expect(dock.panels['doc:c']).toBeUndefined();          // a popped-out document comes back in the document area
+    expect(dock.panels['output']).toBeUndefined();
+    expect(dock.popoutGroups).toEqual([]);
+    expect(popped).toEqual([['output']]);
+    expect(documentGroupId).toBe('g1');
+  });
+
+  it('keeps a floating document and does not touch its input', () => {
+    const input = layout();
+    const { dock } = sessionDock(input);
+    expect(dock.floatingGroups?.map((f) => f.data?.id)).toEqual(['g3', 'g4']);
+    expect(dock.panels['doc:c']).toBeDefined();
+    expect(input).toEqual(layout());
+  });
+});
+
 describe('stripDocuments with documents split across groups', () => {
   const split = (): SerializedDockview => {
     const l = layout();
@@ -121,6 +144,19 @@ describe('withDocuments', () => {
   it('uses the first group of the main grid when the document area is gone', () => {
     const dock = withDocuments(stripDocuments(layout()).dock, 'g9', docs, null);
     expect((dock.grid.root.data as { data: { views: string[] } }[])[0]!.data.views).toContain('doc:x');
+  });
+});
+
+describe('parseLayout', () => {
+  it('reads a value as readLayout reads the same text, valid or not', () => {
+    const valid = JSON.stringify(saved());
+    const invalid = JSON.stringify({ ...saved(), version: 2 });
+    for (const text of [valid, invalid]) {
+      expect(parseLayout(JSON.parse(text))).toEqual(readLayout(memoryStorage({ [LAYOUT_KEY]: text })));
+    }
+    expect(parseLayout(JSON.parse(valid))).not.toBeNull();
+    expect(parseLayout(JSON.parse(invalid))).toBeNull();
+    expect(parseLayout(undefined)).toBeNull();
   });
 });
 

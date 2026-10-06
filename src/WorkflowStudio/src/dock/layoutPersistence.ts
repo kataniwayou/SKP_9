@@ -9,7 +9,7 @@ export const LAYOUT_VERSION = 1;
 
 type GroupState = NonNullable<SerializedFloatingGroup['data']>;
 
-/** What Window › Save window layout stores. It never holds a document: they are not restored. */
+/** What Window › Save window layout stores. Window › Save keeps no document; the session (app/session.ts) keeps the same shape with its documents. */
 export interface SavedLayout {
   version: typeof LAYOUT_VERSION;
   /** `DockviewApi.toJSON()` with every document panel taken out and no pop-out windows. */
@@ -66,6 +66,11 @@ export function readLayout(storage: Storage | null): SavedLayout | null {
   } catch {
     return null;
   }
+  return parseLayout(value);
+}
+
+/** The layout in an already-parsed value (the saved layout, or the session's dock), or null when it is not one. */
+export function parseLayout(value: unknown): SavedLayout | null {
   if (!isRecord(value) || value.version !== LAYOUT_VERSION || !isDockLayout(value.dock)) return null;
 
   const hidden = Array.isArray(value.hidden) ? value.hidden.filter((id): id is ToolId => typeof id === 'string' && isToolId(id)) : [];
@@ -123,14 +128,38 @@ export function stripDocuments(layout: SerializedDockview): { dock: SerializedDo
     if (f.grid) forEachGroup(f.grid.root, visit);
     return views > 0;
   });
+  const popped = takePopouts(dock);
+  fixRootSize(dock);
+  return { dock, documentGroupId, popped };
+}
+
+/** Takes the pop-out windows out of a layout copy and returns the tool panes each held; their documents just go. */
+function takePopouts(dock: SerializedDockview): string[][] {
   const popped: string[][] = [];
   for (const p of dock.popoutGroups ?? []) {
-    const visit = (g: GroupState) => { const views = g.views.filter((v) => !isDocPanelId(v)); if (views.length > 0) popped.push(views); };
+    const visit = (g: GroupState) => {
+      const tools = g.views.filter((v) => !isDocPanelId(v));
+      if (tools.length > 0) popped.push(tools);
+      for (const v of g.views) delete dock.panels[v];
+    };
     if (p.data) visit(p.data);
     if (p.grid) forEachGroup(p.grid.root, visit);
   }
-  for (const views of popped) for (const id of views) delete dock.panels[id];
   dock.popoutGroups = [];
+  return popped;
+}
+
+/**
+ * A copy of `toJSON()` for the session: documents stay where they are. Pop-out windows go (a reload
+ * cannot reopen a browser window); the tool panes they held are returned so they can be docked on
+ * restore, and the documents they held come back in the document area (the page adds every open
+ * document the layout does not hold).
+ */
+export function sessionDock(layout: SerializedDockview): { dock: SerializedDockview; documentGroupId: string | null; popped: string[][] } {
+  const dock = JSON.parse(JSON.stringify(layout)) as SerializedDockview;
+  let documentGroupId: string | null = null;
+  forEachGroup(dock.grid.root, (g) => { if (documentGroupId === null && g.views.some(isDocPanelId)) documentGroupId = g.id; });
+  const popped = takePopouts(dock);
   fixRootSize(dock);
   return { dock, documentGroupId, popped };
 }

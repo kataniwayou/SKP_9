@@ -1,7 +1,7 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import { findHome, SIDE_DIRECTION, sideOf, toPosition, type GroupBox, type Home, type Rect, type Side } from './home';
 import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type ToolId } from './ids';
-import { stripDocuments, withDocuments, type SavedLayout } from './layoutPersistence';
+import { sessionDock, stripDocuments, withDocuments, type SavedLayout } from './layoutPersistence';
 
 /**
  * What the dock remembers beyond dockview's own state (mockup v49 SIDE and HOME): the edge each tool
@@ -338,9 +338,12 @@ export function resetLayout(api: DockviewApi, memory: DockMemory, dockWidth: num
   area.activePanel?.api.setActive();
 }
 
-/** Window › Save window layout: dockview's layout without documents, plus what the dock remembers. */
-export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: readonly ToolId[]): SavedLayout {
-  const { dock, documentGroupId, popped: poppedGroups } = stripDocuments(api.toJSON());
+/**
+ * Window › Save window layout: dockview's layout without documents, plus what the dock remembers.
+ * With `keepDocuments` it is the session's snapshot: the documents stay where they are.
+ */
+export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: readonly ToolId[], { keepDocuments = false }: { keepDocuments?: boolean } = {}): SavedLayout {
+  const { dock, documentGroupId, popped: poppedGroups } = (keepDocuments ? sessionDock : stripDocuments)(api.toJSON());
   const homes: SavedLayout['homes'] = {};
   for (const id of TOOL_IDS) { const h = memory.homes[id]; if (h) homes[id] = h; }
   // a popped-out group goes back docked: its first pane to the home it left (its place only, not
