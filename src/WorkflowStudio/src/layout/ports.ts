@@ -1,5 +1,5 @@
 import type { Id } from '../model/graph';
-import { GRID, BAND_BOTTOM, BAND_TOP, CAP_H, PMID, PORT_GAP, SPHERE_R, STEP_H, STEP_W, offset } from './geometry';
+import { GRID, BAND_BOTTOM, BAND_TOP, CAP_H, PMID, PORT_GAP, SPHERE_R, STEP_H, STEP_W, STRAIGHT_MIN_GAP, offset } from './geometry';
 import type { Placement } from './placement';
 
 /** The sphere as a wire source. */
@@ -65,7 +65,7 @@ export function computeLandings(
 
     for (const s of sources) {
       const d = departure(s);
-      if (d < top || d > bottom || departureX(s, placement) > p.x - 16) continue;
+      if (d < top || d > bottom || departureX(s, placement) > p.x - STRAIGHT_MIN_GAP) continue;
       const y = nearestFreeInBand(d, top, bottom, free);
       if (y === null) continue;
       used.push(y);

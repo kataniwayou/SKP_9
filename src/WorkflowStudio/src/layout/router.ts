@@ -57,8 +57,10 @@ export function simplify(pts: Pt[]): Pt[] {
 export function route(sx: number, sy: number, tx: number, ty: number, srcId: string, tgtId: string, nudge: number, boxes: Box[]): Pt[] {
   const candidates: Pt[][] = [];
 
+  // Level and to the right: straight is always on offer (the landing rule sends such wires from a
+  // gap of STRAIGHT_MIN_GAP, below the CLEARANCE the bent shapes need).
+  if (sy === ty && tx > sx) candidates.push([[sx, sy], [tx, ty]]);
   if (tx - sx >= CLEARANCE) {
-    if (sy === ty) candidates.push([[sx, sy], [tx, ty]]);
     for (const f of [0.5, 0.3, 0.7]) {
       const mx = snap(sx + (tx - sx) * f) + nudge;
       candidates.push([[sx, sy], [mx, sy], [mx, ty], [tx, ty]]);

@@ -20,6 +20,9 @@ export const CHIP = { x: 24, y: 56, w: 176, h: 80 } as const;
 export const BAND_TOP = 62;
 export const BAND_BOTTOM = 130;
 
+/** The least gap, source edge to target edge, at which a level wire may run straight (spec §5.2). */
+export const STRAIGHT_MIN_GAP = 16;
+
 export const SPHERE_R = 96;
 export const CACHE_W = 192;
 export const CACHE_H = 64;

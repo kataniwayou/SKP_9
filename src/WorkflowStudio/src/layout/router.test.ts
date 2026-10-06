@@ -91,4 +91,11 @@ describe('simplify', () => {
   it('drops repeated and collinear points', () => {
     expect(simplify([[0, 0], [0, 0], [8, 0], [16, 0], [16, 8]])).toEqual([[0, 0], [16, 0], [16, 8]]);
   });
+
+  it('runs straight across a 16 px gap, where the landing rule sends a level wire straight', () => {
+    const boxes = [box('a', 288, 32), box('b', 528, 32)];
+    const pts = route(512, 128, 528, 128, 'a', 'b', 0, boxes);
+    expect(pts).toEqual([[512, 128], [528, 128]]);
+    expect(clear(pts, 'a', 'b', boxes)).toBe(true);
+  });
 });
