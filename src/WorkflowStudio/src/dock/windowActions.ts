@@ -277,11 +277,22 @@ export function resetLayout(api: DockviewApi, memory: DockMemory, dockWidth: num
 
 /** Window › Save window layout: dockview's layout without documents, plus what the dock remembers. */
 export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: readonly ToolId[]): SavedLayout {
-  const { dock, documentGroupId } = stripDocuments(api.toJSON());
+  const { dock, documentGroupId, popped: poppedGroups } = stripDocuments(api.toJSON());
   const homes: SavedLayout['homes'] = {};
   for (const id of TOOL_IDS) { const h = memory.homes[id]; if (h) homes[id] = h; }
+  // a popped-out group goes back docked: its first pane to the home it left (its place only, not
+  // the old sizes of the others), the rest as tabs beside it
+  const popped: ToolId[] = [];
+  for (const group of poppedGroups) {
+    const [first, ...rest] = group.filter(isToolId);
+    if (!first) continue;
+    popped.push(first, ...rest);
+    const home = homes[first];
+    if (home) homes[first] = { ...home, layout: [] };
+    for (const id of rest) homes[id] = { ref: first, direction: 'within', size: 0, layout: [] };
+  }
   const remembered = memory.documentGroupId !== null && api.groups.some((g) => g.id === memory.documentGroupId) ? memory.documentGroupId : null;
-  return { version: 1, dock, documentGroupId: documentGroupId ?? remembered, hidden: [...hidden], sides: { ...memory.sides }, homes };
+  return { version: 1, dock, documentGroupId: documentGroupId ?? remembered, hidden: [...hidden], sides: { ...memory.sides }, homes, popped };
 }
 
 /**
@@ -319,5 +330,6 @@ export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLa
   memory.sides = { ...saved.sides };
   memory.homes = { ...saved.homes };
   memory.documentGroupId = saved.documentGroupId;
+  for (const id of saved.popped) if (!api.getPanel(id)) showTool(api, memory, id);
   return saved.hidden.filter((id) => { const p = api.getPanel(id); return !p || !p.group.api.isVisible; });
 }

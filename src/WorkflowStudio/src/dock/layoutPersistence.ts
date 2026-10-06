@@ -20,6 +20,11 @@ export interface SavedLayout {
   hidden: ToolId[];
   sides: Partial<Record<ToolId, Side>>;
   homes: Partial<Record<ToolId, Home>>;
+  /**
+   * Tool panes that were in a pop-out window, in the order they go back into the dock (each one's
+   * home says where). Apply never opens a window, so they are docked instead of lost.
+   */
+  popped: ToolId[];
 }
 
 /** `window.localStorage`, or null where reading it throws (blocked storage, sandboxed frames). */
@@ -72,6 +77,7 @@ export function readLayout(storage: Storage | null): SavedLayout | null {
   if (isRecord(value.homes)) {
     for (const [id, home] of Object.entries(value.homes)) if (isToolId(id) && isHome(home)) homes[id] = home;
   }
+  const popped = Array.isArray(value.popped) ? value.popped.filter((id): id is ToolId => typeof id === 'string' && isToolId(id)) : [];
   return {
     version: LAYOUT_VERSION,
     dock: value.dock,
@@ -79,15 +85,17 @@ export function readLayout(storage: Storage | null): SavedLayout | null {
     hidden: [...new Set(hidden)],
     sides,
     homes,
+    popped: [...new Set(popped)],
   };
 }
 
 /**
  * A copy of `toJSON()` without documents: their panels and tab entries go, a floating window left
  * empty goes, and pop-out windows go (Apply never opens a browser window). The main-grid group that
- * held documents stays, empty, and its id is returned as the document area.
+ * held documents stays, empty, and its id is returned as the document area. The panes the pop-out
+ * windows held go too; they are returned, one list per group, so they can be docked on Apply.
  */
-export function stripDocuments(layout: SerializedDockview): { dock: SerializedDockview; documentGroupId: string | null } {
+export function stripDocuments(layout: SerializedDockview): { dock: SerializedDockview; documentGroupId: string | null; popped: string[][] } {
   const dock = JSON.parse(JSON.stringify(layout)) as SerializedDockview;
   let documentGroupId: string | null = null;
   const heldDocuments = new Set<string>();
@@ -115,8 +123,15 @@ export function stripDocuments(layout: SerializedDockview): { dock: SerializedDo
     if (f.grid) forEachGroup(f.grid.root, visit);
     return views > 0;
   });
+  const popped: string[][] = [];
+  for (const p of dock.popoutGroups ?? []) {
+    const visit = (g: GroupState) => { const views = g.views.filter((v) => !isDocPanelId(v)); if (views.length > 0) popped.push(views); };
+    if (p.data) visit(p.data);
+    if (p.grid) forEachGroup(p.grid.root, visit);
+  }
+  for (const views of popped) for (const id of views) delete dock.panels[id];
   dock.popoutGroups = [];
-  return { dock, documentGroupId };
+  return { dock, documentGroupId, popped };
 }
 
 /**
@@ -229,6 +244,8 @@ const DIRECTIONS: readonly Direction[] = ['left', 'right', 'above', 'below', 'wi
 function isHome(value: unknown): value is Home {
   const finite = (n: unknown) => typeof n === 'number' && Number.isFinite(n);
   const isBox = (b: unknown) => isRecord(b) && typeof b.ref === 'string' && finite(b.left) && finite(b.top) && finite(b.width) && finite(b.height);
+  // a home `within` a group (a tab of it) needs no size
   return isRecord(value) && typeof value.ref === 'string' && DIRECTIONS.includes(value.direction as Direction)
-    && finite(value.size) && (value.size as number) > 0 && Array.isArray(value.layout) && value.layout.every(isBox);
+    && finite(value.size) && ((value.size as number) > 0 || (value.direction === 'within' && value.size === 0))
+    && Array.isArray(value.layout) && value.layout.every(isBox);
 }

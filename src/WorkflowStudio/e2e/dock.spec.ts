@@ -363,6 +363,25 @@ test('a saved window layout comes back after a reload, without the documents', a
   await expect(page.getByText('No workflow open')).toBeVisible();
 });
 
+test('a pane popped out when the layout was saved comes back docked after a reload', async ({ page }) => {
+  const before = await box(groupOf(page, 'Inspector'));
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup'),
+    groupOf(page, 'Inspector').getByRole('button', { name: 'Pop out to its own window' }).click(),
+  ]);
+  await popup.waitForLoadState();
+  await expect(tab(page, 'Inspector')).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Window' }).click();
+  await page.getByRole('menuitem', { name: /Save window layout/ }).click();
+  await expect(page.locator('.toast')).toHaveText('Window layout saved in this browser');
+
+  await page.reload();
+
+  await expect(tab(page, 'Inspector')).toBeVisible();
+  const after = await box(groupOf(page, 'Inspector'));
+  for (const k of ['x', 'width'] as const) expect(Math.abs(after[k] - before[k])).toBeLessThanOrEqual(2);
+});
+
 test('after layout every step border lies on a 32 px line and every wire point on an 8 px line', async ({ page }) => {
   const [wf] = workflows;
   await openWorkflow(page, wf!);

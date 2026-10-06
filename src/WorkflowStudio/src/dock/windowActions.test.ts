@@ -4,6 +4,8 @@ import {
   addDocument, applyLayout, autoHide, captureLayout, dockAsDocument, dockBack, ensureDocumentArea, floatGroup, floatPanel,
   closeTool, newMemory, pinBack, resetLayout, showTool, type DockMemory,
 } from './windowActions';
+import { readLayout, writeLayout } from './layoutPersistence';
+import { memoryStorage } from '../test/memoryStorage';
 
 // dockview's core runs in jsdom (no sizes, so recordHome finds no home: tests set homes directly).
 class Part implements IContentRenderer {
@@ -371,5 +373,59 @@ describe('tool pane homes (review Important 2)', () => {
 
     expect(api.getPanel('toolbox')).toBeUndefined();
     expect(memory.homes.toolbox).toEqual({ ref: 'inspector', direction: 'right', size: 290, layout: [] });
+  });
+});
+
+describe('a tool pane popped out when the layout was saved (review Minor 3)', () => {
+  /** The dock's layout as if the given floating panes' group were popped out to its own window instead. */
+  const asPoppedOut = (api: DockviewApi, ids: readonly string[]) => {
+    const json = api.toJSON();
+    const floating = (json.floatingGroups ?? []).filter((f) => f.data && ids.some((id) => f.data!.views.includes(id)));
+    json.floatingGroups = (json.floatingGroups ?? []).filter((f) => !floating.includes(f));
+    json.popoutGroups = floating.map((f) => ({ data: f.data, gridReferenceGroup: undefined, position: null, url: '/popout.html' }));
+    return json;
+  };
+
+  it('is saved without its pop-out window, and comes back docked where it was after Apply', () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    floatPanel(api, memory, api.getPanel('toolbox')!, NO_RECT);
+    vi.spyOn(api, 'toJSON').mockReturnValueOnce(asPoppedOut(api, ['toolbox']));
+    memory.homes.toolbox = { ref: 'inspector', direction: 'right', size: 290, layout: [{ ref: 'inspector', left: 0, top: 0, width: 999, height: 500 }] };
+
+    const saved = captureLayout(api, memory, []);
+    vi.restoreAllMocks();
+
+    expect(saved.dock.popoutGroups).toEqual([]);
+    expect(saved.dock.panels.toolbox).toBeUndefined();
+    expect(saved.homes.toolbox).toEqual({ ref: 'inspector', direction: 'right', size: 290, layout: [] });
+
+    resetLayout(api, memory, 1200);
+    api.removePanel(api.getPanel('toolbox')!);
+    applyLayout(api, memory, saved);
+
+    expect(where(api, 'toolbox')?.location).toBe('grid');
+    const root = JSON.stringify(api.toJSON().grid.root);
+    expect(root.indexOf('"inspector"')).toBeLessThan(root.indexOf('"toolbox"'));
+  });
+
+  it('comes back after a reload too, a popped-out tab group as one group', () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    floatGroup(api, memory, api.getPanel('problems')!.group, NO_RECT);
+    vi.spyOn(api, 'toJSON').mockReturnValueOnce(asPoppedOut(api, ['problems']));
+    const storage = memoryStorage();
+    writeLayout(storage, captureLayout(api, memory, []));
+    vi.restoreAllMocks();
+
+    const { api: fresh, memory: freshMemory } = dock();
+    addDocument(fresh, freshMemory, 'b', 'billing');
+    applyLayout(fresh, freshMemory, readLayout(storage)!);
+
+    expect(where(fresh, 'problems')?.location).toBe('grid');
+    expect(where(fresh, 'output')).toEqual(where(fresh, 'problems'));
+    expect(fresh.getPanel('problems')!.group.api.isVisible).toBe(true);
   });
 });

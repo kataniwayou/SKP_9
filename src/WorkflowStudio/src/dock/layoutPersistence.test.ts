@@ -35,7 +35,7 @@ function layout(): SerializedDockview {
 
 const saved = (over: Partial<SavedLayout> = {}): SavedLayout => ({
   version: 1, dock: stripDocuments(layout()).dock, documentGroupId: 'g1', hidden: ['output'], sides: { inspector: 'right' },
-  homes: { output: { ref: 'problems', direction: 'below', size: 180, layout: [{ ref: 'problems', left: 0, top: 450, width: 700, height: 180 }] } }, ...over,
+  homes: { output: { ref: 'problems', direction: 'below', size: 180, layout: [{ ref: 'problems', left: 0, top: 450, width: 700, height: 180 }] } }, popped: [], ...over,
 });
 
 describe('stripDocuments', () => {
@@ -43,15 +43,17 @@ describe('stripDocuments', () => {
     const { dock, documentGroupId } = stripDocuments(layout());
 
     expect(documentGroupId).toBe('g1');
-    expect(Object.keys(dock.panels).sort()).toEqual(['inspector', 'output', 'problems', 'toolbox']);
+    // the popped-out Output's entry goes with its window (it is returned in `popped`)
+    expect(Object.keys(dock.panels).sort()).toEqual(['inspector', 'problems', 'toolbox']);
     const g1 = (dock.grid.root.data as { data: { views: string[]; activeView?: string } }[])[0]!.data;
     expect(g1).toEqual({ id: 'g1', views: ['inspector'], activeView: 'inspector' });
   });
 
   it('drops a floating window left empty and every pop-out window, and keeps a floating tool pane', () => {
-    const { dock } = stripDocuments(layout());
+    const { dock, popped } = stripDocuments(layout());
     expect(dock.floatingGroups?.map((f) => f.data?.id)).toEqual(['g4']);
     expect(dock.popoutGroups).toEqual([]);
+    expect(popped).toEqual([['output']]);
   });
 
   it('does not touch its input', () => {
@@ -177,6 +179,23 @@ describe('readLayout and writeLayout (review focus 1: old, corrupt or unreadable
     expect(read.sides).toEqual({ inspector: 'left' });
     expect(read.homes).toEqual({ output: { ref: 'problems', direction: 'below', size: 180, layout: [{ ref: 'problems', left: 0, top: 450, width: 700, height: 180 }] } });
     expect(read.documentGroupId).toBeNull();
+  });
+
+  it('keeps the popped-out panes (dropping unknown ids) and a home as a tab of a group, which has no size', () => {
+    const within = { ref: 'problems', direction: 'within', size: 0, layout: [] };
+    const storage = memoryStorage({
+      [LAYOUT_KEY]: JSON.stringify({ ...saved(), popped: ['problems', 'terminal', 'output'], homes: { output: within, toolbox: { ref: 'inspector', direction: 'right', size: 0, layout: [] } } }),
+    });
+
+    const read = readLayout(storage)!;
+
+    expect(read.popped).toEqual(['problems', 'output']);
+    expect(read.homes).toEqual({ output: within });
+  });
+
+  it('reads a layout saved before pop-outs were kept as having none', () => {
+    const { popped: _, ...older } = saved();
+    expect(readLayout(memoryStorage({ [LAYOUT_KEY]: JSON.stringify(older) }))!.popped).toEqual([]);
   });
 
   it('never throws when the storage itself throws', () => {
