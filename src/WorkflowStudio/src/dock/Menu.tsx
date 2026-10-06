@@ -54,7 +54,13 @@ export function Menu({ entries, anchor, onClose, label }: { entries: readonly Me
   useEffect(() => {
     const before = anchor.doc.activeElement as HTMLElement | null;
     items()[0]?.focus();
-    return () => { if (before && before.isConnected && typeof before.focus === 'function') before.focus(); };
+    const menu = ref.current;
+    return () => {
+      // only if focus is lost or still in the closing menu: another overlay may have taken it (the picker)
+      const now = anchor.doc.activeElement;
+      const lost = !now || now === anchor.doc.body || (menu !== null && menu.contains(now));
+      if (lost && before && before.isConnected && typeof before.focus === 'function') before.focus();
+    };
   }, []);
 
   const onKeyDown = (e: KeyboardEvent) => {

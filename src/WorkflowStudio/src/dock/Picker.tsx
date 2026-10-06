@@ -62,7 +62,7 @@ export function Picker({ items, anchor, onPick, onClose, note }: {
         aria-controls={`${baseId}-list`}
         onKeyDown={(e) => {
           if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
-          if (e.key === 'ArrowDown') { e.preventDefault(); setChosen(Math.min(at + 1, shown.length - 1)); }
+          if (e.key === 'ArrowDown') { e.preventDefault(); setChosen(Math.min(at + 1, Math.max(0, shown.length - 1))); }
           if (e.key === 'ArrowUp') { e.preventDefault(); setChosen(Math.max(at - 1, 0)); }
           if (e.key === 'Enter' && shown[at]) { e.preventDefault(); pick(shown[at].id); }
         }}

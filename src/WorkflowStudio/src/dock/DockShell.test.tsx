@@ -181,6 +181,14 @@ describe('DockShell', () => {
     expect(screen.queryByRole('dialog', { name: 'Open workflow' })).toBeNull();
   });
 
+  it('leaves focus in the picker search box when File > Open workflow replaces the menu', () => {
+    setup();
+    screen.getByRole('menuitem', { name: 'File' }).focus();   // a real click focuses the trigger
+    openMenu('File');
+    choose(/Open workflow/);
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search workflows' }));
+  });
+
   it('keeps Edit present but disabled, and Start/Stop keys harmless', () => {
     setup();
     openMenu('Edit');
