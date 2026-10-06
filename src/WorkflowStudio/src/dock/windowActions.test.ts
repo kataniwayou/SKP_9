@@ -563,3 +563,41 @@ describe('a document area left hidden (the place a popped-out document group lef
     expect(fresh.groups.filter((g) => !g.api.isVisible)).toEqual([]);
   });
 });
+
+describe('Apply with a saved layout that lost its document group (a Save made while the group was popped out)', () => {
+  /** Saves a layout the way Window > Save does while the only document is popped out (group left hidden and empty), then has the document back. */
+  const savedWhilePopped = (railed: readonly ('inspector' | 'toolbox' | 'output')[]) => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    const hidden = [...railed].flatMap((id) => autoHide(api, memory, api.getPanel(id)!, NO_RECT));
+    const area = api.getPanel('doc:a')!.group;
+    api.getPanel('doc:a')!.api.close();
+    area.api.setVisible(false);
+    const saved = captureLayout(api, memory, hidden);
+    expect(JSON.stringify(saved.dock.grid.root)).not.toContain(`"${area.id}"`);
+    area.api.setVisible(true);
+    addDocument(api, memory, 'a', 'orders');
+    return { api, memory, saved };
+  };
+  const expectDocumentArea = (api: DockviewApi) => {
+    const group = api.getPanel('doc:a')!.group;
+    expect(group.api.isVisible).toBe(true);
+    expect(group.api.location.type).toBe('grid');
+    expect(group.panels.map((p) => p.id)).toEqual(['doc:a']);
+  };
+
+  it('keeps the document, shown in a document area, when every other group is a rail', () => {
+    const { api, memory, saved } = savedWhilePopped(['inspector', 'toolbox', 'output']);
+    applyLayout(api, memory, saved);
+    expect(api.panels.filter((p) => p.id.startsWith('doc:')).map((p) => p.id)).toEqual(['doc:a']);
+    expectDocumentArea(api);
+    expect(memory.documentGroupId).toBe(api.getPanel('doc:a')!.group.id);
+  });
+
+  it('opens the document in a document area of its own, not as a tab of a tool group', () => {
+    const { api, memory, saved } = savedWhilePopped([]);
+    applyLayout(api, memory, saved);
+    expectDocumentArea(api);
+  });
+});

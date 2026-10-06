@@ -157,9 +157,10 @@ describe('withDocuments', () => {
     expect(dock.panels['doc:x']).toEqual(docs[0]);
   });
 
-  it('uses the first group of the main grid when the document area is gone', () => {
+  it('leaves the documents out when the document area is gone, never making a tool group their tabs', () => {
     const dock = withDocuments(stripDocuments(layout()).dock, 'g9', docs, null);
-    expect((dock.grid.root.data as { data: { views: string[] } }[])[0]!.data.views).toContain('doc:x');
+    expect(JSON.stringify(dock.grid.root)).not.toContain('doc:x');
+    expect(Object.keys(dock.panels)).not.toContain('doc:x');
   });
 });
 
@@ -280,7 +281,7 @@ describe('Window > Save after a pop-out left a hidden empty group', () => {
     expect(root).toContain('"g2"');
   });
 
-  it('withDocuments never puts documents into a hidden target', () => {
+  it('withDocuments never puts documents into a hidden target, nor a tool group in its place', () => {
     const out = withDocuments(popped(), 'g0', [panel('doc:a', 'document')], 'doc:a');
     const held: string[] = [];
     const walk = (n: { type: string; data: unknown; visible?: boolean }): void => {
@@ -289,6 +290,6 @@ describe('Window > Save after a pop-out left a hidden empty group', () => {
       } else (n.data as typeof n[]).forEach(walk);
     };
     walk(out.grid.root);
-    expect(held).toEqual(['shown']);
+    expect(held).toEqual([]);
   });
 });

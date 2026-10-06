@@ -169,7 +169,7 @@ export function sessionDock(layout: SerializedDockview): { dock: SerializedDockv
 
 /**
  * A copy of a stripped layout with the given document panels put back as tabs of the document
- * area (the saved group, or the first group of the main grid when that group is gone). Applied
+ * area (the saved group, when the main grid still holds it shown; else the layout gets no documents). Applied
  * with `reuseExistingPanels`, dockview then moves the open documents there instead of re-creating
  * them, so their canvases keep their viewport.
  */
@@ -179,15 +179,12 @@ export function withDocuments(
   const dock = JSON.parse(JSON.stringify(stripped)) as SerializedDockview;
   fixRootSize(dock);
   if (documents.length === 0) return dock;
-  // never a hidden group: dockview does not show a group a panel is added to
-  let target: GroupState | null = null;
-  const shown = (node: GridNode, visit: (g: GroupState) => void): void => {
-    if (node.type === 'leaf') { if (node.visible !== false) visit(node.data as GroupState); }
-    else for (const child of node.data as GridNode[]) shown(child, visit);
-  };
-  shown(dock.grid.root, (g) => { if (g.id === documentGroupId) target = g; });
-  if (target === null) shown(dock.grid.root, (g) => { target ??= g; });
-  const area = target as GroupState | null;
+  // Only the saved document group, and never a hidden one (dockview does not show a group a panel is
+  // added to). Without one the documents stay out of the layout, never tabs of a tool group; the
+  // caller opens them in a document area of its own after loading.
+  let found: GroupState | null = null;
+  forEachGroup(dock.grid.root, (g, leaf) => { if (g.id === documentGroupId && leaf.visible !== false) found = g; });
+  const area = found as GroupState | null;
   if (area === null) return dock;
   for (const panel of documents) {
     dock.panels[panel.id] = panel;
@@ -246,8 +243,8 @@ export function gridHolds(dock: SerializedDockview, groupId: string): boolean {
 }
 
 /** Every group (grid leaf) in a serialized grid, depth first. */
-function forEachGroup(node: SerializedGridObject<GroupState>, visit: (group: GroupState) => void): void {
-  if (node.type === 'leaf') visit(node.data as GroupState);
+function forEachGroup(node: SerializedGridObject<GroupState>, visit: (group: GroupState, leaf: GridNode) => void): void {
+  if (node.type === 'leaf') visit(node.data as GroupState, node);
   else for (const child of node.data as SerializedGridObject<GroupState>[]) forEachGroup(child, visit);
 }
 

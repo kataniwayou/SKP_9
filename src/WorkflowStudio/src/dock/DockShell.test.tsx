@@ -399,11 +399,14 @@ describe('DockShell, pop-out windows', () => {
     const storage = memoryStorage();
     setup({ documents: [doc('a')], activeDocumentId: 'a', storage });
     const win = await popOut('wf-a');
+    const hiddenPlaceholder = dockApi.current!.groups.find((g) => !g.api.isVisible && g.panels.length === 0)!.id;
     openMenu('Window');
     choose(/Save window layout/);
     // the place the pop-out left (hidden, empty) is not saved, nor remembered as the document area
     const saved = JSON.parse(storage.getItem(LAYOUT_KEY)!) as SavedLayout;
     expect(JSON.stringify(saved.dock.grid.root)).not.toContain('"visible":false');
+    expect(JSON.stringify(saved.dock.grid.root)).not.toContain(`"id":"${hiddenPlaceholder}"`);
+    expect(saved.documentGroupId).not.toBe(hiddenPlaceholder);
     vi.spyOn(win, 'close').mockImplementation(() => {});
     const group = popoutTab(win, 'wf-a').closest('.dv-groupview') as HTMLElement;
     act(() => { fireEvent.click(within(group).getByRole('button', { name: 'Dock back into the main layout' })); });
@@ -412,6 +415,7 @@ describe('DockShell, pop-out windows', () => {
     expect(docTabs('wf-a')).toHaveLength(1);
     expect(tab('wf-a').closest('.dv-view')).toHaveClass('visible');
     expect(dockApi.current!.getPanel('doc:a')!.group.api.isVisible).toBe(true);
+    expect(dockApi.current!.getPanel('doc:a')!.group.panels.map((p) => p.id)).toEqual(['doc:a']);
   });
 
   it('stops listening to a pop-out once its group is docked back', async () => {

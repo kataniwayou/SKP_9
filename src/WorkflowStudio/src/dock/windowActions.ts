@@ -422,6 +422,12 @@ export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLa
   memory.homes = { ...saved.homes };
   memory.documentGroupId = saved.documentGroupId;
   markDocumentArea(api, memory);
+  // a layout without a usable document group holds no documents: open them in a shown document area
+  for (const doc of documents) {
+    const documentId = documentIdOf(doc.id);
+    if (documentId !== null && !api.getPanel(doc.id)) addDocument(api, memory, documentId, doc.title ?? documentId);
+  }
+  if (active !== null) api.getPanel(active)?.api.setActive();
   for (const id of saved.popped) if (!api.getPanel(id)) showTool(api, memory, id);
   return saved.hidden.filter((id) => { const p = api.getPanel(id); return !p || !p.group.api.isVisible; });
 }
