@@ -61,7 +61,8 @@ describe('toFlow', () => {
     const ab = edges.find((e) => e.id === 'a->b')!;
 
     expect([ab.source, ab.target, ab.type]).toEqual(['a', 'b', 'cable']);
-    expect(ab.data).toEqual({ points: [[512, 128], [576, 128]], colour: '#FF7A66', broken: true });
+    expect(ab.data).toEqual({ points: [[512, 128], [576, 128]], colour: '#FF7A66', broken: true, delay: -0.41 });
+    expect(edges.find((e) => e.id === 'wf->a')!.data).toMatchObject({ delay: 0 });
     expect(edges.find((e) => e.id === 'wf->a')!.source).toBe(SPHERE_NODE_ID);
   });
 

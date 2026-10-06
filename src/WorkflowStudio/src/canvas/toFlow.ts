@@ -83,10 +83,11 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
     });
   }
 
-  const edges: StudioEdge[] = wires.map((w) => ({
+  const edges: StudioEdge[] = wires.map((w, i) => ({
     id: w.id, type: 'cable', source: w.source === WORKFLOW_SOURCE ? SPHERE_NODE_ID : w.source, target: w.target,
     sourceHandle: 'out', targetHandle: 'in', selectable: false, focusable: false,
-    data: { points: w.points, colour: conditionInfo(w.condition).colour, broken: w.broken },
+    // the gallery staggers its pulses by 0.41 s a wire; `|| 0` keeps the first one at +0, not -0
+    data: { points: w.points, colour: conditionInfo(w.condition).colour, broken: w.broken, delay: -Math.round(i * 41) / 100 || 0 },
   }));
   for (const [id, position] of placement.caches) {
     if (!graph.caches.has(id)) continue;

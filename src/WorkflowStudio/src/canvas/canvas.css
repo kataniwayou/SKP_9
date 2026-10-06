@@ -3,16 +3,7 @@
 .studio-canvas .react-flow__node { cursor: pointer; }
 .studio-canvas svg text { font-family: var(--sans); }
 
-/* wires */
-.wire path.w { fill: none; stroke-width: 2.2; stroke-linejoin: miter; }
-.wire.broken path.w { stroke-dasharray: 7 5; }
-.wire.broken .wcore { display: none; }
-.wire .wshadow { fill: none; stroke: #000; stroke-width: 3.2; opacity: .5; transform: translate(1.5px, 2.5px); filter: url(#wsoft); stroke-linejoin: miter; }
-.wire .ashadow { fill: #000; opacity: .45; transform: translate(1.5px, 2.5px); filter: url(#wsoft); }
-.wire .whalo { fill: none; stroke-width: 5; opacity: .1; stroke-linejoin: miter; }
-.wire .wcore { fill: none; stroke: #fff; stroke-width: .7; opacity: .38; stroke-linejoin: miter; pointer-events: none; }
-.wire .alit { fill: none; stroke: #fff; stroke-width: .9; opacity: .5; pointer-events: none; }
-.wire .brk + text { font-family: var(--sans); }
+/* the dashed tether from the hub to a cache */
 .tether { fill: none; stroke: var(--line-2); stroke-width: 1.2; stroke-dasharray: 3 4; }
 
 .badge { font-family: var(--mono); font-size: 9.5px; }
