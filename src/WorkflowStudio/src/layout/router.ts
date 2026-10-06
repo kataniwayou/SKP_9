@@ -1,4 +1,4 @@
-import { snap } from './geometry';
+import { COLUMN_PITCH, GRID, STEP_W, snap } from './geometry';
 
 export type Pt = readonly [number, number];
 
@@ -36,6 +36,8 @@ function cost(pts: Pt[], srcId: string, tgtId: string, boxes: Box[]): number {
   return length + (pts.length - 2) * BEND_COST + hits * HIT_COST;
 }
 
+const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
 /** Drops repeated points and points that lie on the line between their neighbours. */
 export function simplify(pts: Pt[]): Pt[] {
   const unique = pts.filter((p, i) => i === 0 || p[0] !== pts[i - 1]![0] || p[1] !== pts[i - 1]![1]);
@@ -67,8 +69,11 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
     );
   }
 
-  // A large negative fan-out nudge must not pull the U's first vertical back to or through the source's right edge.
-  const x1 = sx + CLEARANCE + Math.max(nudge, -16), x2 = tx - CLEARANCE;
+  // The U's first vertical must stay in the free gap right of the source: at least one grid step off
+  // its edge (a large negative fan-out nudge must not pull it back through the source) and at least
+  // one grid step short of the next column (the gap is COLUMN_PITCH - STEP_W = 64; a large positive
+  // nudge must not land it on the neighbouring block's edge).
+  const x1 = sx + clamp(CLEARANCE + nudge, GRID, COLUMN_PITCH - STEP_W - GRID), x2 = tx - CLEARANCE;
   const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
   const span = boxes.filter((b) => b.x < hi + 20 && b.x + b.w > lo - 20);
   const levels = new Set<number>();

@@ -91,4 +91,48 @@ describe('computeLandings', () => {
     // a step has room for 8 slots 16 apart below its cap: the first 8 are on it
     expect(ys.filter((y) => y >= 320 + 40 && y <= 320 + 160).length).toBeGreaterThanOrEqual(8);
   });
+
+  it('keeps all 8 arrivals on the step when one straight landing is 8 off the bent walk phase', () => {
+    // p (fan-out 2: t then z) departs t at 448 - 8 = 440, in t's band: a straight landing at step-local 120.
+    const steps: Record<string, [number, number]> = { t: [864, 320], p: [576, 352], z: [864, 640] };
+    const wires: WireEnd[] = [{ source: 'p', target: 't' }, { source: 'p', target: 'z' }];
+    for (let k = 1; k <= 7; k++) { steps[`r${k}`] = [1152, 32 + k * 96]; wires.push({ source: `r${k}`, target: 't' }); }
+    const ys = arrivals(steps, wires);
+
+    expect(ys).toHaveLength(8);
+    spaced(ys);
+    expect(ys).toContain(320 + 120);
+    for (const y of ys) { expect(y % 8).toBe(0); expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
+  });
+
+  it('property: a fan-in of 8 lands on the step whenever a 16-spaced packing around the straight landings exists', () => {
+    let seed = 12345;
+    const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    for (let trial = 0; trial < 300; trial++) {
+      const steps: Record<string, [number, number]> = { t: [864, 320] };
+      const wires: WireEnd[] = [];
+      for (let k = 0; k < 8; k++) {
+        const x = [288, 576, 1152][rnd(3)]!;
+        steps[`s${k}`] = [x, rnd(100) * 8];
+        wires.push({ source: `s${k}`, target: 't' });
+        const extra = rnd(3); // fan-out 1..3, so departures are offset by 0, 8 or 16
+        for (let e = 0; e < extra; e++) { steps[`z${k}_${e}`] = [2000, 1000 + 200 * (k * 3 + e)]; wires.push({ source: `s${k}`, target: `z${k}_${e}` }); }
+      }
+      const p = placement(steps);
+      const deps = computeDepartures(wires, p);
+      const landed = computeLandings(wires, p, deps).get('t')!;
+      const ys = [...landed.values()].sort((a, b) => a - b);
+
+      spaced(ys);
+      for (const y of ys) expect(y % 8).toBe(0);
+
+      const straight = [...landed].filter(([s, y]) => y === deps.get(s)!.get('t')).map(([, y]) => y);
+      let packed = 0, last = -Infinity;
+      for (let y = 320 + 40; y <= 320 + 160; y += 8) {
+        if (straight.some((u) => Math.abs(u - y) < 16)) continue;
+        if (y - last >= 16) { packed++; last = y; }
+      }
+      if (packed >= 8 - straight.length) for (const y of ys) { expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
+    }
+  });
 });

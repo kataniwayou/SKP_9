@@ -37,8 +37,14 @@ export function computeDepartures(wires: WireEnd[], placement: Placement): Map<S
 /**
  * The landing rule (spec §5.2). A wire keeps the height it left at when that height is inside the
  * target processor's band and the source sits at least 16 px to the left, so it runs straight. Any
- * other wire bends and lands at the processor middle, stepping 16 toward the side it comes from
- * while that slot is taken. Arrivals into one step stay at least 16 apart.
+ * other wire bends and lands near the processor middle, on the nearest free 8 px slot (the side it
+ * comes from first), skipping slots outside the step's landing extent. If that walk cannot keep
+ * every bent arrival in the extent, the bent arrivals are packed into the extent's free slots
+ * instead (so any fan-in that can fit, fits). Arrivals into one step stay at least 16 apart.
+ *
+ * Landing extent: step-local 40 (just below the title cap) to 160 inclusive; the bottom edge
+ * (step-local 160, the bottom corner) counts as on the step. It holds 8 slots 16 apart; a larger
+ * fan-in spills past the extent rather than break the spacing.
  */
 export function computeLandings(
   wires: WireEnd[],
@@ -66,16 +72,23 @@ export function computeLandings(
       landed.set(s, y);
     }
 
-    // Bent arrivals land below the title cap and within the step's height; a slot outside that
-    // extent is skipped (so the walk turns back the other way). A step has room for 8 slots 16 apart
-    // there, so a larger fan-in (or one the straight landings already crowd) spills past the extent
-    // rather than break the 16 px spacing; the walk still terminates because `used` is finite.
     const lo = p.y + CAP_H, hi = p.y + STEP_H;
-    for (const s of sources) {
-      if (landed.has(s)) continue;
-      const y = nearestFreeSlot(middle, departure(s) < middle ? -1 : 1, lo, hi, free);
-      used.push(y);
-      landed.set(s, y);
+    const bent = sources.filter((s) => !landed.has(s)).sort((x, y) => departure(x) - departure(y));
+    if (bent.length > 0) {
+      const walkUsed = [...used];
+      const walkFree = (y: number) => !walkUsed.some((u) => Math.abs(u - y) < PORT_GAP);
+      const walked = new Map<SourceId, number>();
+      for (const s of bent) {
+        const y = nearestFreeSlot(middle, departure(s) < middle ? -1 : 1, lo, hi, walkFree);
+        walkUsed.push(y);
+        walked.set(s, y);
+      }
+      let chosen = walked;
+      if ([...walked.values()].some((y) => y < lo || y > hi)) {
+        const packed = packSlots(lo, hi, used);
+        if (packed.length >= bent.length) chosen = new Map(bent.map((s, i) => [s, packed[i]!]));
+      }
+      for (const [s, y] of chosen) { used.push(y); landed.set(s, y); }
     }
 
     result.set(target, landed);
@@ -105,4 +118,14 @@ function nearestFreeSlot(middle: number, direction: 1 | -1, lo: number, hi: numb
     }
   }
   throw new Error('no free landing slot');
+}
+
+/** Greedy leftmost packing of the 8 px slots in [lo, hi] that are 16 apart from `used` and from each other (maximal count). */
+function packSlots(lo: number, hi: number, used: number[]): number[] {
+  const slots: number[] = [];
+  for (let y = lo; y <= hi; y += GRID) {
+    if (used.some((u) => Math.abs(u - y) < PORT_GAP)) continue;
+    if (slots.length === 0 || y - slots[slots.length - 1]! >= PORT_GAP) slots.push(y);
+  }
+  return slots;
 }

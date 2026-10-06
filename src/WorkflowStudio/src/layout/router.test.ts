@@ -52,10 +52,20 @@ describe('route', () => {
     expect(clear(pts, 'b', 'a', boxes)).toBe(true);
   });
 
-  it.each([-8, -16, -24, -32, -48, 16, 32])('keeps a back edge clear of its own source block at fan-out nudge %i', (nudge) => {
+  it.each([-48, -40, -32, -24, -16, -8, 0, 8, 16, 24, 32, 40])('keeps a back edge clear of its own source block at fan-out nudge %i', (nudge) => {
     const boxes = [box('a', 288, 32), box('b', 576, 32)];
     const pts = route(800, 128 + nudge, 288, 128, 'b', 'a', nudge, boxes);
     expect(pts.slice(0, 2).every(([x]) => x >= 800)).toBe(true);
+    expect(orthogonal(pts)).toBe(true);
+    expect(onGrid(pts)).toBe(true);
+    expect(clear(pts, 'b', 'a', boxes)).toBe(true);
+  });
+
+  it('keeps a +40 back edge (fan-out 6, target last) out of the next column and clear of every block', () => {
+    // the gap between columns is 64, so x1 = sx + 24 + 40 would sit on the next column's left edge
+    const boxes = [box('a', 288, 32), box('b', 576, 416), box('c', 864, 416), box('d', 864, 224), box('e', 864, 32)];
+    const pts = route(800, 512, 288, 128, 'b', 'a', 40, boxes);
+    expect(pts[1]![0]).toBeLessThanOrEqual(800 + 56);
     expect(orthogonal(pts)).toBe(true);
     expect(onGrid(pts)).toBe(true);
     expect(clear(pts, 'b', 'a', boxes)).toBe(true);
