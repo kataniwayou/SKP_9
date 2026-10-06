@@ -1,6 +1,6 @@
 # SKP Studio -- design
 
-Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Amended 2026-10-06: the Inspector shows the unique entity name; the workflow picker uses it (§7). Branch: `feature/path-importer`.
+Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Amended 2026-10-06: the Inspector shows the unique entity name and the picker uses it (§7); slices reordered to dock (3a) and Inspector editing (3b) before canvas editing (§10); the Inspector edits each entity's DTO metadata with GET/PUT, shared entities are the operator's responsibility, Start/Stop stay disabled (§6.1, §7.1, §8, §9). Branch: `feature/path-importer`.
 
 ## 1. Purpose
 
@@ -243,8 +243,14 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
   from a searchable dropdown. Closing an unsaved one asks **Save / Discard / Cancel**.
 - **Shared tool panes:** Inspector, Toolbox, Problems, Output.
 - Each document has a capsule toolbar: name, cron, status, Save / Start / Stop, its own zoom and Fit.
-  The status comes from `GET /orchestration/live` (§4.4).
-- Clicking anything fills the Inspector, whether it is shown or hidden.
+  The status comes from `GET /orchestration/live` (§4.4), polled every 5 s while the tab is visible;
+  a failed poll shows *status unknown*. **Start and Stop stay disabled** ("Not available yet") until a
+  later slice enables them (user decision, 2026-10-06): the studio writes nothing to orchestration yet.
+- Clicking anything fills the Inspector, whether it is shown or hidden. Selectable: a step (parked
+  included), a processor die, a cache and the sphere. Esc or an empty-canvas click clears the
+  selection; selecting never moves or wires anything.
+- The open dropdown lists workflows by their unique name (§7). Opening a workflow that is already open
+  focuses its tab. The window layout persists; **open documents are not restored on reload**.
 
 ### 6.2 Docking behaviour (all built on the free core)
 
@@ -290,26 +296,73 @@ Two rules hold for every view:
   Created by, Updated at, Updated by**; **▾ hide details** folds them away. It is one switch for all
   entities, so it stays as the operator left it while they click around.
 
-- **Step:** semver version; an entry-condition dropdown (never 0; `Never` noted for entry steps); a
-  processor swap that previews which wires would break; wired from/to lists; "also reached by"
-  (shared).
+### 7.1 What the Inspector edits (decided 2026-10-06; built in slice 3b)
+
+**The Inspector edits an entity's own metadata, never the graph.** Structure (next steps, entry steps,
+which assignments and caches a workflow holds, a step's processor, a processor's schemas, an
+assignment's step) comes from the designer graph. Every save is `PUT /{entity}/{id}` with the entity's
+update DTO built from its last `GET`, only the writable fields changed and **every structural field
+sent back exactly as read** (a step `PUT` replaces `NextStepIds`; a workflow `PUT` replaces its three
+lists; `null` clears them).
+
+| Entity | Writable (free text unless noted) | Not editable here |
+|---|---|---|
+| Workflow | Name, Version, Description, CronExpression | EntryStepIds, CacheIds (from the graph); AssignmentIds (not shown) |
+| Step (incl. parked) | Name, Version, Description, EntryCondition (dropdown C/F/X/A/N) | NextStepIds (graph); ProcessorId: **drill-down** to the Processor; the step's assignment: **drill-down** |
+| Assignment (reached from its step) | Name, Version, Description, Payload (JSON) | StepId |
+| Processor | Name, Version, Description, SourceHash, InstanceId | Input/Output/Config schema ids: one **drill-down** per slot to the Schema (∅ when empty) |
+| Schema (reached from a slot) | Name, Version, Description, Definition (JSON) | none |
+| Cache | Name, Version, Description, Root, Items (JSON object of strings) | none |
+
+- **Server is the validator.** Free text means the Inspector does not re-check business rules: cron
+  (blank, or a parsed 5/6-field expression), Version (semver `x.y.z`), Name (≤ 200), SourceHash (64
+  lowercase hex, unique), InstanceId (≤ 200, unique), Root (no `:`, ≤ 200, unique), JSON sizes (≤ 1 MB),
+  and the frozen schema definition are BaseApi's. A 400 shows its messages under their fields; 404,
+  409 and 422 show as a banner with the server's text; a network failure shows "Not saved: BaseApi
+  unreachable". The form always keeps what was typed. Exceptions that are not business rules: Name
+  and Version may not be empty (Save is disabled; the placeholder shows the last saved value, or a
+  generated one for a new assignment), and JSON text areas mark invalid JSON while typing.
+- **Save and Revert**, never autosave. Selecting another entity, drilling down, going back or closing
+  the document with unsaved changes asks **Save / Discard / Cancel**. Drill-downs keep a breadcrumb
+  (e.g. **Step › Processor › Config schema**) with a back button.
+- **After a save** the form takes the returned DTO as its baseline, and every open document re-reads
+  its graph and re-runs validate (a shared entity may sit in several), so the canvas and Problems
+  update.
+- **Shared entities are the operator's responsibility** (user decision, 2026-10-06). A `PUT` to a
+  shared processor, step, schema, assignment or cache changes it for every user; there is no warning,
+  no copy and no stale check (last write wins). Validate surfaces the consequences afterwards.
+- **Assignments, from the step's drill-down:** **Edit** is `PUT /assignments/{id}`. **Add** (only when
+  the step has none in this workflow) is `POST /assignments` with the step's id (defaults: Name
+  `{step name}-assignment`, Version `1.0.0`, Payload `{}`), then `PUT /workflows/{id}` adding it to
+  `AssignmentIds`; the two calls are not atomic, and a failed second call is reported as "created but
+  not linked". **Remove** unlinks it from this workflow only (`PUT /workflows/{id}` without it, after a
+  confirmation); the row is kept. No `DELETE` in slice 3b.
+
+### 7.2 Richer editors (later slices)
+
+These build on §7.1 once canvas editing exists:
+
+- **Step:** "also reached by" (shared); wired from/to lists.
 - **Assignment:** `vanilla-jsoneditor` in tree/table plus raw mode, with **Ajv draft 2020-12 validation
   against the processor's config schema**. Missing `required` keys get "add" hints, `enum` values
   become dropdowns, `default` values are offered. Limit 1 MB. Invalid raw text keeps the last valid
   value.
-- **Processor:** read-only identity. **In, Out and Config slots are editable**: a JSON-Schema editor
-  validated against the meta-schema; "remove" sets a slot to ∅. An impact panel shows usage and the
-  wires that would break, and notes that replicas need a restart.
-- **Workflow:** cron with a plain-English reading and the next 3 fire times. Entry steps are read-only
-  (they come from the wires). Linked caches can be unlinked.
-- **Cache:** root and keys may not contain `:`, and the root must be unique. Items use a TanStack
-  table. **It saves independently** (`PUT /caches/{id}`, with "Apply"), not through the document save,
-  because caches are shared. New caches are created from the toolbox.
+- **Processor / Schema:** an impact panel showing usage and the wires that would break, noting that
+  replicas need a restart; creating a new schema version for a frozen definition.
+- **Workflow:** cron with a plain-English reading and the next 3 fire times.
+- **Cache:** Items in a TanStack table.
 - **Wire, junction and multi-select** views.
-- **Problems** has two severities:
-  - **start blockers:** cycle, broken wire, invalid payload, dangling step;
-  - **notes:** fan-in, shared, parked, frozen.
-  Start blockers come from `POST /workflows/{id}/validate` (§4.4), called shortly after each edit pause
+
+### 7.3 Problems
+
+From slice 3a, Problems lists the document's validate result (gate, title, detail), shows "Problems
+unavailable." when validate fails and "No problems" when the list is empty, and a click selects the
+entity a problem names, when it names one. The full pane (later) has two severities:
+
+- **start blockers:** cycle, broken wire, invalid payload, dangling step;
+- **notes:** fan-in, shared, parked, frozen.
+
+Start blockers come from `POST /workflows/{id}/validate` (§4.4), called shortly after each edit pause
   and on demand, and include **processor liveness**, so a dead processor shows before Start. Notes are
   drawing facts the studio computes itself.
 
@@ -319,7 +372,8 @@ Two rules hold for every view:
 |---|---|
 | Save, 409 (stale workflow or step) | Output names the stale entity; the draft is kept; "Reload and re-apply" is offered |
 | Save, 422 (FK violation) | Whole save rolled back; Output shows the constraint and who references the entity; draft kept |
-| Toolbox delete, 422 | The entity stays; the referencing rows are listed |
+| Toolbox delete, 422 | The entity stays; the referencing rows are listed. **Not supported by BaseApi yet** (found 2026-10-06): its 422 names one FK column, not the rows; slice 6 must add a usages read |
+| Inspector save, 400 / 404 / 409 / 422 | §7.1: field messages under their fields; otherwise a banner with the server's text; the form keeps what was typed |
 | Start, 422 (validation or liveness) | Output shows the orchestrator's reasons; Problems is not changed |
 | Schema update on a referenced schema, 409 | Never sent: the UI always creates a new schema version instead |
 | Stale ids in `Layout` | Ignored silently; new blocks get an elkjs position |
@@ -350,7 +404,15 @@ Two rules hold for every view:
   - moving a junction's source step stretches only its own line (the bus, trunk and other lines stay);
   - a segment drag makes a route manual, it survives a block move, and Reset route restores it;
   - dragging an arrow head onto a step rewires it; dropped on empty canvas it snaps back;
-  - after layout, every step border lies on a 32 px line and every wire point on an 8 px line.
+  - after layout, every step border lies on a 32 px line and every wire point on an 8 px line;
+  - (3a) open a workflow, select an entity and see the Inspector fill; auto-hide a pane and pin it back;
+  - (3b) edit and save each entity kind, see a 400 under its field and a 409/422 banner, and add, edit
+    and unlink a step's assignment.
+- **The Inspector's DTO round trip (Vitest, 3b).** For every entity, a save sends exactly the DTO it
+  read with only the writable fields changed; structural fields (`NextStepIds`, `EntryStepIds`,
+  `AssignmentIds`, `CacheIds`, `StepId`, `ProcessorId`, schema ids) go back unchanged.
+- **End-to-end tests never edit shared dev data.** Tests that save create their own throwaway
+  entities through BaseApi in setup and remove them afterwards.
 
 ## 10. Build order (vertical slices)
 
@@ -358,11 +420,19 @@ Two rules hold for every view:
 1b. **Backend reads:** the gates' collect mode, `POST /workflows/{id}/validate`, `GET /orchestration/live`,
    `GET /processors/liveness` (§4.4).
 2. **Read-only canvas:** load, render and route with the section 5 visuals.
-3. **Editing:** wiring, moving, connector editing (§5.5) and alignment guides, undo/redo, parked
+Reordered 2026-10-06 (user decision): the dock and the Inspector come before canvas editing, so
+editing is built inside real panes.
+
+3a. **Dock chrome** on dockview-core 8.4 (§6): `renderer: 'always'` for documents, `ownerDocument` in
+   pop-outs, overlay layer tokens, window menus, in-house auto-hide, layout in `localStorage`; the
+   capsule toolbar with status only (Start/Stop disabled); canvas selection; a **read-only** Inspector
+   (unique name, DTO fields, show all); Problems from validate (§7.3); Output and Toolbox as empty panes.
+3b. **Inspector editing** (§7.1): `GET` / `PUT` per entity, drill-downs, assignment add / edit / remove
+   from the step, server errors, refresh after save. The only `POST` is creating an assignment; no
+   `DELETE`.
+4. **Canvas editing:** wiring, moving, connector editing (§5.5) and alignment guides, undo/redo, parked
    blocks, draft save through `/graph`.
-4. **Inspectors:** Step, Assignment, Processor, Workflow, Cache, then the Problems pane.
-5. **Dock chrome** on dockview-core 8.4: `renderer: 'always'` for documents, `ownerDocument` in
-   pop-outs, overlay layer tokens, window menus, in-house auto-hide, layout in `localStorage`.
+5. **Richer editors and the full Problems pane** (§7.2, §7.3).
 6. **Toolbox:** drag-and-drop onto the canvas, **+ New** step / processor / cache, delete (✕) from the
    toolbox (§4.3).
 7. **Junctions and polish:** positioned junctions (bus, trunk, node, contact points) and their drags.
