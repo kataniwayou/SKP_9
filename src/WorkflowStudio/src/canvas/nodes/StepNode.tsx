@@ -18,6 +18,8 @@ export type StepNodeData = {
   colour: string;
   /** `◆ 3 keys`, `◇ {}`, or null when the step has no assignment in this workflow. */
   assignment: string | null;
+  /** The step's tooltip (unique name, entry condition, assignment, parked); the processor panel has its own. */
+  tip: string;
   fanIn: number;
   /** Step-local heights where wires land (left edge) and leave (right edge). */
   ins: number[];
@@ -51,6 +53,7 @@ export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
 
   return (
     <g className={d.parked ? 'blk nx parked' : 'blk nx'}>
+      <title>{d.tip}</title>
       <path className="nx-bd" d={STEP_FRAME} />
       <g className="nx-g"><path className="nx-hl nx-frame" d={STEP_FRAME} /></g>
       <path className="nx-ln nx-d2" d={STEP_FRAME_IN} />

@@ -203,4 +203,15 @@ describe('toFlow', () => {
 
     expect([...used].sort()).toEqual([...MEASURED_FONTS].sort());
   });
+
+  it('gives each step a tooltip: unique name, entry condition, assignment, and parked when it is', () => {
+    const graph = doc({}, ['p']);
+    graph.graph.steps.set('p', step('p', { entryCondition: 4 }));
+    const nodes = toFlow(graph, fitter).nodes;
+    const tip = (id: string) => (nodes.find((n) => n.id === id)!.data as import('./nodes/StepNode').StepNodeData).tip;
+
+    expect(tip('a')).toBe('a_1.0.0-a\nentry C · Completed\nassignment ◆ 2 keys');
+    expect(tip('b')).toBe('b_1.0.0-b\nentry F · Failed\nno assignment');
+    expect(tip('p')).toBe('p_1.0.0-p\nentry A · Always\nno assignment\nparked: placed but not wired into this workflow');
+  });
 });

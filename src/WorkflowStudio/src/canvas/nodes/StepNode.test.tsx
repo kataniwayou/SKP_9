@@ -11,6 +11,7 @@ const data: StepNodeData = {
   letter: 'C',
   colour: '#2DD4BF',
   assignment: '◆ 2 keys',
+  tip: 'fetch-orders-from-the-api_1.0.0-s1\nentry C · Completed\nassignment ◆ 2 keys',
   fanIn: 2,
   ins: [96, 112],
   outs: [96],
@@ -93,5 +94,11 @@ describe('StepView', () => {
     const { container, getByText } = view({ parked: true });
     expect(getByText('PARKED')).toBeInTheDocument();
     expect(container.querySelector('.blk')!.classList.contains('parked')).toBe(true);
+  });
+
+  it('shows the step tooltip on the step, and keeps the processor its own', () => {
+    const { container } = view();
+    expect(container.querySelector('.blk > title')!.textContent).toBe('fetch-orders-from-the-api_1.0.0-s1\nentry C · Completed\nassignment ◆ 2 keys');
+    expect(container.querySelector('.chipg > title')!.textContent).toBe('fetcher 2.1.0');
   });
 });

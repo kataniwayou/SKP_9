@@ -57,14 +57,22 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
   for (const [id, position] of placement.steps) {
     const step = graph.steps.get(id);
     if (!step) continue;
+    const condition = conditionInfo(step.entryCondition);
+    const assignment = badge(assignments.get(id)?.payload);
     nodes.push({
       id, type: 'step', position, width: STEP_W, height: STEP_H, draggable: false, selectable: false,
       handles: [handle('in', 'target', Position.Left, 0, PMID), handle('out', 'source', Position.Right, STEP_W, PMID)],
       data: {
         ...stepLabels(step, parked.has(id), fitter),
-        letter: conditionInfo(step.entryCondition).letter,
-        colour: conditionInfo(step.entryCondition).colour,
-        assignment: badge(assignments.get(id)?.payload),
+        letter: condition.letter,
+        colour: condition.colour,
+        assignment,
+        tip: [
+          entityName(step.name, step.version, step.id),
+          `entry ${condition.letter} · ${condition.name}`,
+          assignment === null ? 'no assignment' : `assignment ${assignment}`,
+          ...(parked.has(id) ? ['parked: placed but not wired into this workflow'] : []),
+        ].join('\n'),
         fanIn: ins.get(id)?.length ?? 0,
         ins: ins.get(id) ?? [],
         outs: outs.get(id) ?? [],
