@@ -255,7 +255,7 @@ test('pops a document out, and it keeps its fonts, its drawing and its zoom', as
       return loaded;
     }, family), { message: `a loaded ${family} face in the pop-out` }).toBeGreaterThan(0);
   }
-  expect(await popup.evaluate(() => !!document.getElementById('glow') && !!document.getElementById('capfill'))).toBe(true);
+  expect(await popup.evaluate(() => !!document.getElementById('glow') && !!document.getElementById('nxCap'))).toBe(true);
 
   // selecting in the pop-out fills the Inspector in the main window
   test.skip((await panel.locator('.react-flow__node-workflow').count()) === 0, 'the live workflow draws no clickable workflow block');

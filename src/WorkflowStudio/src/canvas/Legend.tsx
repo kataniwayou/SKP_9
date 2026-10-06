@@ -1,26 +1,31 @@
+import type { CSSProperties } from 'react';
 import { CONDITIONS } from '../model/entryConditions';
 
-/** The colour key (mockup v49, the legend builder): each entry condition, broken and parked. */
+/** The colour key (spec §5.1, §5.3): icons drawn like the canvas. Junctions join it with plan 7. */
 export function Legend() {
   return (
     <div className="legend">
       {CONDITIONS.map((c) => (
-        <span key={c.value}>
+        <span key={c.value} className="lg-item">
           <span className="pill" style={{ background: c.colour }}>{c.letter}</span>
-          <i style={{ borderColor: c.colour }} />
+          <svg width="26" height="12" viewBox="0 0 26 12" className="lg-icon" style={{ '--nc': c.colour } as CSSProperties} aria-hidden="true">
+            <circle className="lg-src" cx="3" cy="6" r="2" />
+            <path className="lg-w" d="M5 6H23" stroke={c.colour} />
+            <path className="lg-head" d="M18 2.5L23 6L18 9.5" stroke={c.colour} />
+          </svg>
           {c.name}
         </span>
       ))}
-      <span title={'Broken wire: Out schema ≠ In schema.\nAny wire can break, whatever its colour.'}>
-        <svg width="28" height="14" viewBox="0 0 28 14" style={{ verticalAlign: 'middle', marginRight: 6 }}>
-          <path d="M1 7 H9 M19 7 H27" stroke="#9FB0C8" strokeWidth="2" strokeDasharray="4 2.5" />
-          <text x="14" y="11" fontSize="10" textAnchor="middle" fill="#9FB0C8">⚠</text>
+      <span className="lg-item" title={'Broken wire: Out schema ≠ In schema.\nAny wire can break, whatever its colour.'}>
+        <svg width="30" height="14" viewBox="0 0 30 14" className="lg-icon" aria-hidden="true">
+          <path className="lg-dash" d="M1 7H10 M20 7H29" />
+          <text className="lg-warn" x="15" y="11" textAnchor="middle">⚠</text>
         </svg>
         broken
       </span>
-      <span title={'Parked step: placed but not wired in,\nso not part of the workflow.'}>
-        <svg width="20" height="14" viewBox="0 0 20 14" style={{ verticalAlign: 'middle', marginRight: 6 }}>
-          <rect x="1.5" y="1.5" width="17" height="11" rx="2.5" fill="none" stroke="#6B7A90" strokeWidth="1.4" strokeDasharray="3 2" />
+      <span className="lg-item" title={'Parked step: placed but not wired in,\nso not part of the workflow.'}>
+        <svg width="22" height="16" viewBox="0 0 22 16" className="lg-icon" aria-hidden="true">
+          <path className="lg-parked" d="M3 1H8L9 2H13L14 1H19L21 3V13L19 15H14L13 14H9L8 15H3L1 13V3Z" />
         </svg>
         parked
       </span>

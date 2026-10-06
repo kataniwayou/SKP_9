@@ -20,7 +20,7 @@ function selectedNode(selection: Selection): { id: string; className: string } {
 export function withSelection(nodes: StudioNode[], selection: Selection | null): StudioNode[] {
   if (selection === null) return nodes;
   const { id, className } = selectedNode(selection);
-  return nodes.map((n) => (n.id === id ? { ...n, className } : n));
+  return nodes.map((n) => (n.id === id ? { ...n, className: n.className ? `${n.className} ${className}` : className } : n));
 }
 
 /**

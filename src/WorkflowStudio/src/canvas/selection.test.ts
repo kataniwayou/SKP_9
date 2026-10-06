@@ -12,6 +12,11 @@ const graph = graphFromDto(graphDto({
 } as never));
 
 describe('withSelection', () => {
+  it('keeps a node class it already had beside the selection class', () => {
+    const own = [{ id: 's1', type: 'step', position: { x: 0, y: 0 }, className: 'mine', data: {} }] as unknown as StudioNode[];
+    expect(withSelection(own, { kind: 'step', stepId: 's1' })[0]!.className).toBe('mine studio-sel');
+  });
+
   it('returns the same array when nothing is selected', () => {
     expect(withSelection(nodes, null)).toBe(nodes);
   });
