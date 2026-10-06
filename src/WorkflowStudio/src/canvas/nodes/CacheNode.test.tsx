@@ -5,7 +5,7 @@ import { CACHE_FRAME } from './nxShapes';
 
 const data: CacheNodeData = {
   lines: ['chain-artist-', 'whitelist'],
-  version: '1.0.0',
+  versionLine: { text: 'CACHE · v1.0.0', full: 'CACHE · v1.0.0', cut: false },
   root: { text: 'chain-artists', full: 'chain-artists', cut: false },
   plateWidth: 100,
   tooltip: 'chain-artist-whitelist 1.0.0\nroot chain-artists',

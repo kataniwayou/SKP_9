@@ -9,7 +9,7 @@ import { entityName } from '../model/entityNames';
 import type { Cache, Graph, Id, Processor, Step } from '../model/graph';
 import type { CableEdgeType } from './edges/CableEdge';
 import type { TetherEdgeType } from './edges/TetherEdge';
-import { FONT, type FittedText, type TextFitter } from './fitText';
+import { createTextFitter, FONT, type FittedText, type TextFitter } from './fitText';
 import type { CacheNodeData, CacheNodeType } from './nodes/CacheNode';
 import type { ProcessorView, StepNodeType } from './nodes/StepNode';
 import { PILL_STATE, PILL_W, type WorkflowNodeType } from './nodes/WorkflowNode';
@@ -117,8 +117,10 @@ function stepLabels(step: Step, parked: boolean, fitter: TextFitter): { name: Fi
   };
 }
 
-/** Room inside the cache frame (mockup v50 drawCacheTag): a name line, the root, and the plate. */
+/** Room inside the cache frame (mockup v50 drawCacheTag): a name line (and the CACHE · v line), the root, and the plate. */
 const CACHE_NAME_ROOM = 132, CACHE_ROOT_ROOM = 112, PLATE_MAX = 128;
+/** The CACHE · v line's letter spacing (art.css `.nx-cl`: .2em of 8 px), added after every character. */
+const CACHE_LABEL_SPACING = 0.2 * 8;
 
 /** The cache's name split after `-`, `_` and `.` onto at most two lines, each fitted; the root fitted to its plate. */
 function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
@@ -132,9 +134,11 @@ function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
   parts.push(current);
   if (parts.length > 2) parts.splice(1, parts.length - 1, parts.slice(1).join(''));
   const root = fitter.fit(cache.root, CACHE_ROOT_ROOM, FONT.cacheRoot);
+  // a canvas measurement leaves out CSS letter spacing, so add it for each character
+  const spaced = createTextFitter((text, f) => fitter.width(text, f) + CACHE_LABEL_SPACING * Array.from(text).length);
   return {
     lines: parts.map((line) => fitter.fit(line, CACHE_NAME_ROOM, font).text),
-    version: cache.version,
+    versionLine: spaced.fit(`CACHE · v${cache.version}`, CACHE_NAME_ROOM, FONT.cacheLabel),
     root,
     plateWidth: Math.min(PLATE_MAX, fitter.width(root.text, FONT.cacheRoot) + 22),
     tooltip: `${cache.name} ${cache.version}\nroot ${cache.root}`,
@@ -148,7 +152,9 @@ const VALUE_ROOM = 76;
 function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitter): ProcessorView {
   const name = p?.name ?? '(missing processor)';
   const version = p?.version ?? '';
-  const fitsWithVersion = version !== '' && fitter.width(`${name} ${version}`, FONT.processorTitle) <= TITLE_ROOM;
+  // the name is drawn in the title face and the version after it in 9 px mono (Chip .nx-pv), so each is measured in its own
+  const fitsWithVersion = version !== ''
+    && fitter.width(name, FONT.processorTitle) + fitter.width(` ${version}`, FONT.processorRow) <= TITLE_ROOM;
   const schemaLabel = (id: Id | null | undefined) => {
     if (!id) return null;
     const s = graph.schemas.get(id);

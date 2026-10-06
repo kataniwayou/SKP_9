@@ -13,6 +13,8 @@ export const MONO = '"IBM Plex Mono",ui-monospace,Consolas,monospace';
 export const FONT = {
   cacheName: `12.5px ${SANS}`,
   cacheRoot: `10px ${MONO}`,
+  /** CACHE · v<version>, drawn with .2em letter spacing, which a canvas measurement leaves out. */
+  cacheLabel: `8px ${MONO}`,
   stepName: `13px ${SANS}`,
   stepVersion: `9.5px ${MONO}`,
   processorTitle: `11px ${SANS}`,

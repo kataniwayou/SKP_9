@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { StudioDocument } from '../app/document';
 import { AUDIT } from '../model/fixtures';
 import type { Graph, Step } from '../model/graph';
-import { createTextFitter, MEASURED_FONTS } from './fitText';
+import { createTextFitter, FONT, MEASURED_FONTS } from './fitText';
 import { cacheNodeId, SPHERE_NODE_ID, toFlow } from './toFlow';
 
 const fitter = createTextFitter((text) => text.length * 7);
@@ -107,6 +107,36 @@ describe('toFlow', () => {
     expect(value.text.length * 7).toBeLessThanOrEqual(76);
     expect(a.processor.version).toBeNull();
     expect(a.processor.title.text.length * 7).toBeLessThanOrEqual(92);
+  });
+
+  it('measures the processor version in the mono face it is drawn in, not the title face', () => {
+    // a fitter whose 9 px mono is wider than the 11 px sans: 5 px a character in sans, 9 in mono
+    const fonts = createTextFitter((text, font) => text.length * (font === FONT.processorRow ? 9 : 5));
+    const graph = doc();
+    graph.graph.processors.set('p1', { ...graph.graph.processors.get('p1')!, name: 'fetcher-proc' }); // 60 sans
+    const b = toFlow(graph, fonts).nodes.find((n) => n.id === 'a')!.data as import('./nodes/StepNode').StepNodeData;
+    // old measure: 'fetcher-proc 2.1.0' in sans = 90 <= 92, fits; drawn: 60 + 54 = 114 > 92, it does not
+    expect(b.processor.version).toBeNull();
+    expect(b.processor.title.text).toBe('fetcher-proc');
+
+    graph.graph.processors.set('p1', { ...graph.graph.processors.get('p1')!, name: 'fetch' }); // 25 + 54 = 79
+    const c = toFlow(graph, fonts).nodes.find((n) => n.id === 'a')!.data as import('./nodes/StepNode').StepNodeData;
+    expect(c.processor.version).toBe('2.1.0');
+  });
+
+  it('cuts a long cache version to the frame, counting its .2em letter spacing, and keeps it whole in the tooltip (review focus 5)', () => {
+    const version = '1.0.0-prerelease.build.20261006.sha.abcdef';
+    const graph = doc({ caches: new Map([['c1', { id: 'c1', name: 'lookups', version, description: null, root: 'lk', items: '{}', audit: AUDIT }]]) });
+    const c = toFlow(graph, fitter).nodes.find((n) => n.id === cacheNodeId('c1'))!.data as import('./nodes/CacheNode').CacheNodeData;
+    expect(c.versionLine.cut).toBe(true);
+    expect(c.versionLine.full).toBe(`CACHE · v${version}`);
+    expect(c.versionLine.text.endsWith('…')).toBe(true);
+    // 7 px a character plus .2em of 8 px (1.6 px) spacing on each: at most 132 (the name's room)
+    expect(c.versionLine.text.length * (7 + 1.6)).toBeLessThanOrEqual(132);
+    expect(c.tooltip).toContain(version);
+
+    const short = toFlow(doc(), fitter).nodes.find((n) => n.id === cacheNodeId('c1'))!.data as import('./nodes/CacheNode').CacheNodeData;
+    expect(short.versionLine).toEqual({ text: 'CACHE · v1.0.0', full: 'CACHE · v1.0.0', cut: false });
   });
 
   it('labels a parked step PARKED', () => {
