@@ -111,7 +111,7 @@ function badge(payload: string | undefined): string | null {
 }
 
 function stepLabels(step: Step, parked: boolean, fitter: TextFitter): { name: FittedText; version: FittedText; parked: boolean } {
-  const versionX = parked ? 60 : 44;
+  const versionX = parked ? 56 : 42;
   return {
     name: fitter.fit(step.name, STEP_W - 12 - 34, FONT.stepName),
     version: fitter.fit(`v${step.version}`, STEP_W - versionX - 74, FONT.stepVersion),
@@ -119,13 +119,14 @@ function stepLabels(step: Step, parked: boolean, fitter: TextFitter): { name: Fi
   };
 }
 
-const ROOM = 152 - 16; // the die's inner width
+/** Room on the processor panel (mockup v50 drawChip): the title line, and a slot's value after its label. */
+const TITLE_ROOM = 92;
+const VALUE_ROOM = 76;
 
 function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitter): ProcessorView {
   const name = p?.name ?? '(missing processor)';
   const version = p?.version ?? '';
-  const titleFont = FONT.processorTitle, rowFont = FONT.processorRow;
-  const fitsWithVersion = version !== '' && fitter.width(`${name} ${version}`, titleFont) <= ROOM;
+  const fitsWithVersion = version !== '' && fitter.width(`${name} ${version}`, FONT.processorTitle) <= TITLE_ROOM;
   const schemaLabel = (id: Id | null | undefined) => {
     if (!id) return null;
     const s = graph.schemas.get(id);
@@ -133,7 +134,7 @@ function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitte
   };
   const row = (label: string, id: Id | null | undefined) => {
     const value = schemaLabel(id);
-    return { label, value: value === null ? null : fitter.fit(value, ROOM - fitter.width(label, rowFont), rowFont) };
+    return { label, value: value === null ? null : fitter.fit(value, VALUE_ROOM, FONT.processorRow) };
   };
   const tip = (label: string, id: Id | null | undefined) => {
     const s = id ? graph.schemas.get(id) : undefined;
@@ -141,9 +142,10 @@ function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitte
   };
 
   return {
-    title: fitsWithVersion ? { text: name, full: name, cut: false } : fitter.fit(name, ROOM, titleFont),
+    processorId: p?.id ?? '',
+    title: fitsWithVersion ? { text: name, full: name, cut: false } : fitter.fit(name, TITLE_ROOM, FONT.processorTitle),
     version: fitsWithVersion ? version : null,
-    rows: [row('in  ', p?.inputSchemaId), row('out ', p?.outputSchemaId), row('cfg ', p?.configSchemaId)],
+    rows: [row('in', p?.inputSchemaId), row('out', p?.outputSchemaId), row('cfg', p?.configSchemaId)],
     inputLit: !!p?.inputSchemaId,
     outputLit: !!p?.outputSchemaId,
     tooltip: [`${name} ${version}`.trim(), tip('in ', p?.inputSchemaId), tip('out', p?.outputSchemaId), tip('cfg', p?.configSchemaId)].join('\n'),

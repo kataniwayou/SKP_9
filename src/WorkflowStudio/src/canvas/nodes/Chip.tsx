@@ -1,7 +1,11 @@
+import type { Health } from '../../api/liveness';
 import type { FittedText } from '../fitText';
-import { Tip } from './Label';
+import { Label, Tip } from './Label';
+import { closingDash } from './nxShapes';
 
 export interface ProcessorView {
+  /** The processor's id ('' when the step's processor is not in the graph): its health is looked up by it. */
+  processorId: string;
   title: FittedText;
   /** null when the title had no room for it (the version drops first). */
   version: string | null;
@@ -11,52 +15,78 @@ export interface ProcessorView {
   tooltip: string;
 }
 
-const W = 176, H = 80, DX = 12, DY = 6, DW = W - 24, DH = H - 14;
+const W = 176, H = 80;
+/** The processor image's centre, panel-local: on the step's processor middle (step y 96). */
+const CX = 36, CY = 40;
+/** The gallery's HUD ring (FRAMES.hud.ring: r 38 / 44 / 49) at the panel's scale, 0.58. */
+const SPINNER = closingDash(28.5, [30, 12, 6, 12], 0.58);
+const HEALTH_CLASS: Record<Health, string> = { healthy: '', unhealthy: ' nx-halted', undetermined: ' nx-halted nx-wait' };
+
+/** The gear chip (mockup v50 nxGearChip): a chip outline with three pins a side and a gear in its core. */
+function GearChip() {
+  const h = 12.5, pin = 5, r = 4.6, offs = [-h * 0.55, 0, h * 0.55];
+  const pins = offs.map((o) => `M${CX + o} ${CY - h}v${-pin}M${CX + o} ${CY + h}v${pin}M${CX - h} ${CY + o}h${-pin}M${CX + h} ${CY + o}h${pin}`).join('');
+  return (
+    <>
+      <g className="nx-g">
+        <path className="nx-hl nx-pins" d={pins} />
+        <rect className="nx-hl nx-bd nx-chipbody" x={CX - h} y={CY - h} width={2 * h} height={2 * h} rx={h * 0.22} />
+      </g>
+      <rect className="nx-ln nx-core" x={CX - h * 0.62} y={CY - h * 0.62} width={h * 1.24} height={h * 1.24} rx={h * 0.12} />
+      <g className="nx-g">
+        {Array.from({ length: 8 }, (_, i) => (
+          <rect key={i} className="nx-fh" x={CX - 1.45} y={CY - r - 2.1} width={2.9} height={3.3} rx={0.6} transform={`rotate(${i * 45} ${CX} ${CY})`} />
+        ))}
+        <circle className="nx-fh" cx={CX} cy={CY} r={r} />
+      </g>
+      <circle className="nx-bd" cx={CX} cy={CY} r={r * 0.42} />
+    </>
+  );
+}
 
 /**
- * The processor drawn as a glossy die on a substrate (spec §5.1, mockup drawChip): SMD parts on
- * the border and an edge contact with a bond trace at every height a wire lands or leaves. A contact
- * is lit when the processor declares that side's schema. `ins` and `outs` are chip-local heights.
+ * The processor panel inside a step (spec §5.1; mockup v50 drawChip, gallery HUD ring). On the left
+ * the processor image in its health colour: healthy green with the ring turning, unhealthy red and
+ * still, undetermined grey, still and blinking slowly. On the right its name and the in / out / cfg
+ * slots. A contact sits on the panel edge at every height a wire lands or leaves, lit when that side
+ * declares a schema. `ins` and `outs` are panel-local heights.
  */
-export function ChipView({ p, ins, outs }: { p: ProcessorView; ins: number[]; outs: number[] }) {
-  const contact = (key: string, edgeX: number, y: number, lit: boolean, dir: 1 | -1) => (
-    <g key={key}>
-      <path className={lit ? 'bond-on' : 'bond-off'} d={`M${edgeX + dir * 2} ${y} H${dir > 0 ? DX : DX + DW}`} />
-      <rect className={lit ? 'pad-io' : 'pad-null'} x={dir > 0 ? 0 : W - 4} y={y - 3} width={4} height={6} rx={1} />
-    </g>
-  );
-
+export function ChipView({ p, ins, outs, health }: { p: ProcessorView; ins: number[]; outs: number[]; health: Health }) {
   return (
-    <g className="chipg" transform="translate(24,56)">
+    <g className="chipg nx" transform="translate(24,56)" data-processor={p.processorId}>
       <title>{p.tooltip}</title>
-      <rect className="cbody" width={W} height={H} rx={5} />
-      <rect className="crim" x={0.6} y={0.6} width={W - 1.2} height={H - 1.2} rx={4.5} />
-      {[30, 46, W - 46, W - 30].map((px) => (
-        <g key={px}>
-          <rect className="smd" x={px - 3} y={H - 7} width={6} height={3} rx={0.5} />
-          <rect className="smdc" x={px - 3} y={H - 7} width={1.4} height={3} />
-          <rect className="smdc" x={px + 1.6} y={H - 7} width={1.4} height={3} />
-        </g>
-      ))}
-      {ins.map((y, i) => contact(`in${i}`, 0, y, p.inputLit, 1))}
-      {outs.map((y, i) => contact(`out${i}`, W, y, p.outputLit, -1))}
-      <rect className="diebody" x={DX} y={DY} width={DW} height={DH} rx={3} />
-      <ellipse cx={DX + 38} cy={DY + 5} rx={42} ry={6} fill="url(#glint)" opacity={0.4} />
-      <rect className="dierim" x={DX + 0.5} y={DY + 0.5} width={DW - 1} height={DH - 1} rx={2.5} />
+      <rect className="nx-bd" width={W} height={H} rx={5} />
+      <g className="nx-g"><rect className="nx-ln nx-panel" width={W} height={H} rx={5} /></g>
+      <rect className="nx-fc nx-d1" x={146} y={5} width={8} height={3} rx={1} />
+      <rect className="nx-fc nx-d1" x={158} y={5} width={8} height={3} rx={1} />
+      {ins.map((y, i) => <rect key={`in${i}`} className={p.inputLit ? 'nx-fh nx-g' : 'nx-nd'} x={-2} y={y - 4} width={6} height={8} rx={1.2} />)}
+      {outs.map((y, i) => <rect key={`out${i}`} className={p.outputLit ? 'nx-fh nx-g' : 'nx-nd'} x={W - 4} y={y - 4} width={6} height={8} rx={1.2} />)}
+      <g className={`nx nx-health${HEALTH_CLASS[health]}`} data-health={health}>
+        <g className="nx-g"><circle className="nx-ln nx-dots" cx={CX} cy={CY} r={22} /></g>
+        <circle className="nx-ln nx-d2" cx={CX} cy={CY} r={25.5} />
+        <circle className="nx-hl nx-spin nx-spinner" cx={CX} cy={CY} r={28.5} style={{ strokeDasharray: SPINNER }} />
+        <GearChip />
+      </g>
+      <path className="nx-ln nx-d2" d="M74 30H170" />
+      <text className="nx-tp" x={74} y={13}>PROCESSOR</text>
       <Tip full={p.title.full} cut={p.title.cut}>
-        <text className="ptitle" x={DX + 8} y={DY + 14}>
+        <text className="nx-pn" x={74} y={26}>
           <tspan>{p.title.text}</tspan>
-          {p.version && <tspan className="pv">{` ${p.version}`}</tspan>}
+          {p.version && <tspan className="nx-pv">{` ${p.version}`}</tspan>}
         </text>
       </Tip>
-      {p.rows.map((row, i) => (
-        <Tip key={row.label} full={`${row.label.trim()}  ${row.value?.full ?? ''}`} cut={row.value?.cut ?? false}>
-          <text className="io" x={DX + 8} y={DY + 35 + i * 13}>
-            <tspan className="lab">{row.label}</tspan>
-            {row.value ? <tspan>{row.value.text}</tspan> : <tspan className="nul">∅</tspan>}
-          </text>
-        </Tip>
-      ))}
+      {p.rows.map((row, i) => {
+        const y = 43 + i * 14;
+        return (
+          <g key={row.label}>
+            <text className="nx-tl" x={74} y={y}>{row.label}</text>
+            {row.value
+              ? <Label className="nx-tv" x={94} y={y} fitted={{ ...row.value, full: `${row.label}  ${row.value.full}` }} />
+              : <text className="nx-tn" x={94} y={y}>∅</text>}
+            <rect className={row.value ? 'nx-fc nx-gs' : 'nx-fc nx-d3'} x={74} y={y + 3.75} width={96} height={0.5} rx={0.25} />
+          </g>
+        );
+      })}
     </g>
   );
 }

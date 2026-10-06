@@ -75,7 +75,7 @@ describe('WorkflowCanvas', () => {
       const { container } = render(<WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} onSelect={onSelect} />);
 
       fireEvent.click(node(container, 's1'));
-      fireEvent.click(node(container, 's2').querySelector('.chipg .diebody')!);
+      fireEvent.click(node(container, 's2').querySelector('.chipg .nx-panel')!);
       fireEvent.click(node(container, 'wf'));
       fireEvent.click(container.querySelector('.react-flow__pane')!);
 
@@ -112,6 +112,14 @@ describe('WorkflowCanvas', () => {
       fireEvent.click(screen.getByLabelText('Zoom in'));
 
       await waitFor(() => expect(level()).toBeGreaterThan(before));
+    });
+
+    it('draws each processor in the health the canvas live state gives it', async () => {
+      const live = { started: false, health: (id: string) => (id === 'p1' ? 'unhealthy' as const : 'healthy' as const) };
+      const { container } = render(<WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} live={live} />);
+      const rings = [...container.querySelectorAll('.nx-health')];
+      expect(rings.length).toBe(2);
+      for (const ring of rings) expect(ring.getAttribute('data-health')).toBe('unhealthy');
     });
   });
 });

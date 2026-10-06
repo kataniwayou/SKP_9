@@ -1,0 +1,57 @@
+/* The node art (spec §5.1, locked 2026-10-06): the gallery skp-studio-node-art-final.html at the grid sizes
+   of mockup v50. --nc is an element's colour and --nh its hot (lighter) tint. Base stroke widths live in
+   classes, never inline, so the hover and selection rules can override them. */
+.nx { --nh: color-mix(in srgb, var(--nc) 45%, white); }
+.blk.nx, .chipg.nx, .cachetag.nx { --nc: var(--structure); }
+.nx-ln { fill: none; stroke: var(--nc); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.nx-hl { fill: none; stroke: var(--nh); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* after .nx-hl on purpose: an element that is both a dark body and a hot outline keeps the dark fill */
+.nx-fc { fill: var(--nc); }
+.nx-fh { fill: var(--nh); }
+.nx-bd { fill: #07122a; }
+.nx-nd { fill: #060c17; stroke: var(--nh); stroke-width: 1.6; }
+.nx-g { filter: drop-shadow(0 0 2px var(--nc)) drop-shadow(0 0 6px var(--nc)); }
+.nx-gs { filter: drop-shadow(0 0 1.5px var(--nc)); }
+.nx-d1 { opacity: .55; }
+.nx-d2 { opacity: .3; }
+.nx-d3 { opacity: .15; }
+.nx-spin { transform-box: fill-box; transform-origin: center; animation: nxspin 18s linear infinite; }
+@keyframes nxspin { to { transform: rotate(360deg); } }
+.nx-wait { animation: nxwait 2.6s ease-in-out infinite; }
+@keyframes nxwait { 50% { opacity: .35; } }
+.nx-halted .nx-spin { animation: none; }
+
+/* step: dark text on the glossy cap */
+.blk .nx-frame { stroke-width: 1.1; }
+.blk .nx-sn { font: 400 13px var(--sans); fill: #04111F; }
+.blk .nx-sk { font: 400 9px var(--mono); fill: rgba(4, 17, 31, .75); letter-spacing: .12em; }
+.blk .nx-skv { font: 400 9.5px var(--mono); fill: rgba(4, 17, 31, .75); }
+.blk .nx-asg { fill: #04111F; }
+.blk .nx-socket .nx-nd { stroke-width: 1; }
+.blk.parked { opacity: .6; }
+.blk.parked .nx-frame { stroke-dasharray: 6 4; }
+.blk.nx:hover .nx-frame { stroke-width: 1.6; }
+.studio-sel .blk.nx .nx-frame { stroke: var(--accent); stroke-width: 2; }
+
+/* processor: light text on the dark panel; health colours only the ring and the gear chip */
+.chipg .nx-panel { stroke-width: 1; }
+.chipg .nx-tp { font: 400 7px var(--mono); fill: var(--nh); letter-spacing: .16em; opacity: .85; }
+.chipg .nx-pn { font: 400 11px var(--sans); fill: var(--ink); }
+.chipg .nx-pv { font: 400 9px var(--mono); fill: var(--muted); }
+.chipg .nx-tl { font: 400 8.5px var(--mono); fill: var(--muted); }
+.chipg .nx-tv { font: 400 9px var(--mono); fill: var(--ink); }
+.chipg .nx-tn { font: 400 9px var(--mono); fill: var(--faint); }
+.nx-health[data-health="healthy"] { --nc: var(--healthy); }
+.nx-health[data-health="unhealthy"] { --nc: var(--unhealthy); }
+.nx-health[data-health="undetermined"] { --nc: var(--undetermined); }
+.chipg.nx:hover .nx-panel { stroke-width: 1.5; }
+.studio-die-sel .chipg.nx .nx-panel { stroke: var(--accent); stroke-width: 1.8; }
+.chipg .nx-dots { stroke-dasharray: .6 1.75; stroke-width: 2.9; opacity: .6; }
+.chipg .nx-spinner { stroke-width: .95; opacity: .8; }
+.chipg .nx-pins { stroke-width: 1.1; stroke-linecap: butt; }
+.chipg .nx-chipbody { stroke-width: 1.1; }
+.chipg .nx-core { stroke-width: .85; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-spin, .nx-wait { animation: none; }
+}

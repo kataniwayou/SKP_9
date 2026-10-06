@@ -1,5 +1,7 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import type { Health } from '../../api/liveness';
+import { STEP_FRAME } from './nxShapes';
 import { StepView, type StepNodeData } from './StepNode';
 
 const data: StepNodeData = {
@@ -13,12 +15,13 @@ const data: StepNodeData = {
   ins: [96, 112],
   outs: [96],
   processor: {
+    processorId: 'p1',
     title: { text: 'fetcher', full: 'fetcher', cut: false },
     version: '2.1.0',
     rows: [
-      { label: 'in  ', value: { text: 'orders-in', full: 'orders-in', cut: false } },
-      { label: 'out ', value: null },
-      { label: 'cfg ', value: null },
+      { label: 'in', value: { text: 'orders-in', full: 'orders-in', cut: false } },
+      { label: 'out', value: null },
+      { label: 'cfg', value: null },
     ],
     inputLit: true,
     outputLit: false,
@@ -26,10 +29,12 @@ const data: StepNodeData = {
   },
 };
 
-describe('StepView', () => {
-  it('draws the cap text, the pill, the assignment badge and the fan-in badge', () => {
-    const { getByText } = render(<svg><StepView {...data} /></svg>);
+const view = (over: Partial<StepNodeData> = {}, health: Health = 'healthy') =>
+  render(<svg><StepView {...data} {...over} health={health} /></svg>);
 
+describe('StepView', () => {
+  it('draws the cap text, the condition pill, the assignment badge and the fan-in badge', () => {
+    const { getByText } = view();
     expect(getByText('fetch…')).toBeInTheDocument();
     expect(getByText('STEP')).toBeInTheDocument();
     expect(getByText('v1.0.0')).toBeInTheDocument();
@@ -38,21 +43,54 @@ describe('StepView', () => {
     expect(getByText('fan-in ×2')).toBeInTheDocument();
   });
 
+  it('draws the notched frame and the glossy cap of the locked art', () => {
+    const { container } = view();
+    expect(container.querySelector('path.nx-frame')!.getAttribute('d')).toBe(STEP_FRAME);
+    expect(container.querySelector('path[fill="url(#nxCap)"]')).not.toBeNull();
+  });
+
   it('puts the full name in a tooltip when it was cut', () => {
-    const { container } = render(<svg><StepView {...data} /></svg>);
-    // the <title> sits beside the <text> in a wrapping <g>, so the text keeps only what is drawn
-    expect(container.querySelector('text.name')!.parentElement!.querySelector(':scope > title')!.textContent)
+    const { container } = view();
+    expect(container.querySelector('text.nx-sn')!.parentElement!.querySelector(':scope > title')!.textContent)
       .toBe('fetch-orders-from-the-api');
   });
 
-  it('draws one edge contact per landing and per departure, lit when the side has a schema', () => {
-    const { container } = render(<svg><StepView {...data} /></svg>);
-    expect(container.querySelectorAll('.pad-io')).toHaveLength(2);    // two landings, In schema set
-    expect(container.querySelectorAll('.pad-null')).toHaveLength(1);  // one departure, no Out schema
+  it('puts a socket on the frame edge and a contact on the panel for every landing and departure, lit only where the side has a schema', () => {
+    const { container } = view();
+    expect(container.querySelectorAll('.nx-socket')).toHaveLength(3);
+    expect(container.querySelectorAll('.nx-socket circle.nx-fh:not(.nx-d2)')).toHaveLength(2);   // two landings, In schema set
+    expect(container.querySelectorAll('.chipg rect.nx-fh.nx-g')).toHaveLength(2);
+    expect(container.querySelectorAll('.chipg rect.nx-nd')).toHaveLength(1);                     // one departure, no Out schema
+  });
+
+  it.each([
+    ['healthy', false, false],
+    ['unhealthy', true, false],
+    ['undetermined', true, true],
+  ] as const)('draws a %s processor: halted %s, blinking %s', (health, halted, waiting) => {
+    const { container } = view({}, health);
+    const ring = container.querySelector('.nx-health')!;
+    expect(ring.getAttribute('data-health')).toBe(health);
+    expect(ring.classList.contains('nx-halted')).toBe(halted);
+    expect(ring.classList.contains('nx-wait')).toBe(waiting);
+    expect(ring.querySelector('.nx-spin')).not.toBeNull();
+  });
+
+  it('names its processor on the panel, for the live check', () => {
+    expect(view().container.querySelector('.chipg')!.getAttribute('data-processor')).toBe('p1');
+  });
+
+  it('shows the processor title with its version, a set slot by value and an empty one as ∅', () => {
+    const { container, getByText, getAllByText } = view();
+    expect(getByText('PROCESSOR')).toBeInTheDocument();
+    expect(getByText('fetcher')).toBeInTheDocument();
+    expect(container.querySelector('.nx-pv')!.textContent).toBe(' 2.1.0');
+    expect(getByText('orders-in')).toBeInTheDocument();
+    expect(getAllByText('∅')).toHaveLength(2);
   });
 
   it('marks a parked step with the PARKED label and the parked class', () => {
-    const { container, getByText } = render(<svg><StepView {...data} parked /></svg>);
+    const { container, getByText } = view({ parked: true });
     expect(getByText('PARKED')).toBeInTheDocument();
     expect(container.querySelector('.blk')!.classList.contains('parked')).toBe(true);
   });

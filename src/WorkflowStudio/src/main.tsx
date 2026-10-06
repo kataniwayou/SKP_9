@@ -9,6 +9,7 @@ import '@xyflow/react/dist/style.css';
 import 'dockview-react/dist/styles/dockview.css';
 import './canvas/tokens.css';
 import './canvas/canvas.css';
+import './canvas/art.css';
 import './dock/dock.css';
 import './panels/panels.css';
 import './app/document.css';

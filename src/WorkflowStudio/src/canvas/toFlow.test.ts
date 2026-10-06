@@ -84,13 +84,28 @@ describe('toFlow', () => {
     expect(b.ins).toEqual([96]);
   });
 
-  it('shows the processor die: name and version, In schema by name, empty slots as null', () => {
+  it('shows the processor panel: id, name and version, In schema by name, empty slots as null', () => {
     const a = toFlow(doc(), fitter).nodes.find((n) => n.id === 'a')!.data as import('./nodes/StepNode').StepNodeData;
 
+    expect(a.processor.processorId).toBe('p1');
     expect(a.processor.title.text).toBe('fetcher');
     expect(a.processor.version).toBe('2.1.0');
-    expect(a.processor.rows.map((r) => [r.label.trim(), r.value?.text ?? null])).toEqual([['in', 'orders-in'], ['out', null], ['cfg', null]]);
+    expect(a.processor.rows.map((r) => [r.label, r.value?.text ?? null])).toEqual([['in', 'orders-in'], ['out', null], ['cfg', null]]);
     expect([a.processor.inputLit, a.processor.outputLit]).toEqual([true, false]);
+  });
+
+  it('cuts a schema name to the panel (76 px) and drops the version when name and version pass 92 px (review focus 5)', () => {
+    const graph = doc();
+    graph.graph.schemas.set('sIn', { ...graph.graph.schemas.get('sIn')!, name: 'a-schema-name-that-is-far-too-long' });
+    graph.graph.processors.set('p1', { ...graph.graph.processors.get('p1')!, name: 'a-processor-name' });
+    const a = toFlow(graph, fitter).nodes.find((n) => n.id === 'a')!.data as import('./nodes/StepNode').StepNodeData;
+
+    const value = a.processor.rows[0]!.value!;
+    expect(value.cut).toBe(true);
+    expect(value.full).toBe('a-schema-name-that-is-far-too-long');
+    expect(value.text.length * 7).toBeLessThanOrEqual(76);
+    expect(a.processor.version).toBeNull();
+    expect(a.processor.title.text.length * 7).toBeLessThanOrEqual(92);
   });
 
   it('labels a parked step PARKED', () => {

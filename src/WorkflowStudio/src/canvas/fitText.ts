@@ -13,10 +13,10 @@ export const MONO = '"IBM Plex Mono",ui-monospace,Consolas,monospace';
 export const FONT = {
   cacheName: `600 13px ${SANS}`,
   cacheSub: `10px ${MONO}`,
-  stepName: `600 14.5px ${SANS}`,
-  stepVersion: `10.5px ${MONO}`,
-  processorTitle: `11px ${MONO}`,
-  processorRow: `10px ${MONO}`,
+  stepName: `13px ${SANS}`,
+  stepVersion: `9.5px ${MONO}`,
+  processorTitle: `11px ${SANS}`,
+  processorRow: `9px ${MONO}`,
   sphere: `600 14px ${SANS}`,
 } as const;
 

@@ -18,39 +18,14 @@
 /* sphere */
 .wf .wft { paint-order: stroke; stroke: rgba(3, 12, 28, .55); stroke-width: 3px; stroke-linejoin: round; }
 
-/* step and cache shells */
-.blk .contact, .cachetag .contact { fill: #000; opacity: .5; filter: url(#soft); }
-.blk .shell, .cachetag .shell { fill: url(#darkbody); }
-.blk .cap, .cachetag .cap { fill: url(#capfill); }
-.blk .rimr, .cachetag .rimr { fill: none; stroke: url(#rimline); stroke-width: 1.2; }
-.blk.parked { opacity: .6; }
-.blk.parked .rimr { stroke: var(--faint); stroke-dasharray: 5 4; }
-.blk.parked .cap { filter: saturate(.35) brightness(.8); }
-.blk .name { font-size: 14.5px; font-weight: 600; fill: #F4F9FF; paint-order: stroke; stroke: rgba(3, 12, 28, .35); stroke-width: 2.5px; }
-.blk .kind { font-size: 9.5px; letter-spacing: .14em; fill: #BFE6FF; }
-.blk .ver { font-family: var(--mono); font-size: 10.5px; fill: #CFE6FA; }
-.badge { font-family: var(--mono); font-size: 9.5px; }
-.blk .asg { fill: #E0F4FF; }
-.trace { stroke: #2C4A78; stroke-width: 1.4; }
+/* cache shell (plan 2; the locked cache replaces it in plan 3c Task 5) */
+.cachetag .contact { fill: #000; opacity: .5; filter: url(#soft); }
+.cachetag .shell { fill: url(#darkbody); }
+.cachetag .cap { fill: url(#capfill); }
+.cachetag .rimr { fill: none; stroke: url(#rimline); stroke-width: 1.2; }
 .cachetag .cname { font-size: 13px; font-weight: 600; fill: #F4F9FF; paint-order: stroke; stroke: rgba(3, 12, 28, .35); stroke-width: 2.5px; }
 .cachetag .csub { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
-
-/* processor: a die on a substrate */
-.chipg .cbody { fill: url(#substrate); }
-.chipg .crim { fill: none; stroke: #203A60; stroke-width: 1; }
-.chipg .diebody { fill: url(#dieFill); }
-.chipg .dierim { fill: none; stroke: url(#chipRim); }
-.chipg .smd { fill: #22344F; }
-.chipg .smdc { fill: #8EA4C0; }
-.chipg .bond-on { stroke: #7DD3FC; stroke-width: 1; opacity: .8; }
-.chipg .bond-off { stroke: #2E4566; stroke-width: 1; }
-.chipg .pad-io { fill: #7DD3FC; filter: url(#pinGlow); }
-.chipg .pad-null { fill: none; stroke: #3A5274; stroke-width: .8; }
-.chipg .ptitle { font-family: var(--mono); font-size: 11px; fill: #D5E1F2; }
-.chipg .ptitle .pv { fill: var(--faint); }
-.chipg .io { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
-.chipg .io .lab { fill: var(--faint); }
-.chipg .io .nul { fill: var(--faint); }
+.badge { font-family: var(--mono); font-size: 9.5px; }
 
 /* handles exist only so React Flow can attach edges; they are never seen or used */
 .studio-canvas .react-flow__handle { opacity: 0; pointer-events: none; min-width: 0; min-height: 0; width: 1px; height: 1px; border: 0; }
@@ -71,14 +46,11 @@
 .legend .pill { font-family: var(--mono); font-size: 10px; border-radius: 3px; padding: 0 4px; color: #04111F; margin-right: 4px; font-weight: 600; }
 
 /* hover and selection (mockup v49, the .sel rules); the selection class sits on React Flow's node wrapper */
-.blk:hover .cap, .cachetag:hover .cap { filter: brightness(1.1); }
+.cachetag:hover .cap { filter: brightness(1.1); }
 .wf:hover .sphere { filter: brightness(1.08); }
-.chipg:hover .crim { stroke: #35598A; }
-.studio-sel .blk .rimr, .studio-sel .cachetag .rimr { stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: none; }
-.studio-sel .blk .shell, .studio-sel .cachetag .shell { filter: url(#glow); }
+.studio-sel .cachetag .rimr { stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: none; }
+.studio-sel .cachetag .shell { filter: url(#glow); }
 .studio-sel .wf .sphere { filter: url(#glow); }
-.studio-die-sel .chipg .crim { stroke: var(--accent); stroke-width: 1.6; }
-.studio-die-sel .chipg .diebody { filter: url(#glow); }
 
 /* a document's zoom (mockup v49 .zoom, .docbar .zoom) */
 .zoom { display: flex; align-items: center; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); }
