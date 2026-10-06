@@ -31,7 +31,7 @@ export function WorkflowCanvas({ doc, fitter, width, height }: Props) {
   const { nodes, edges } = useMemo(() => toFlow(doc, fitter), [doc, fitter]);
 
   return (
-    <ReactFlowProvider>
+    <ReactFlowProvider key={doc.graph.workflow.id}>
       <div className="studio-canvas" style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}>
         <ReactFlow
           nodes={nodes}
@@ -42,7 +42,7 @@ export function WorkflowCanvas({ doc, fitter, width, height }: Props) {
           height={height}
           colorMode="dark"
           fitView
-          fitViewOptions={{ padding: 0.12 }}
+          fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
           minZoom={0.1}
           maxZoom={4}
           nodesDraggable={false}
