@@ -429,3 +429,92 @@ describe('a tool pane popped out when the layout was saved (review Minor 3)', ()
     expect(fresh.getPanel('problems')!.group.api.isVisible).toBe(true);
   });
 });
+
+describe('the document area takes the resize slack (ruling)', () => {
+  // as the studio's dock: no proportional layout
+  function fixedDock(): { api: DockviewApi; memory: DockMemory } {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    hosts.push(host);
+    const api = createDockview(host, { createComponent: () => new Part(), createTabComponent: () => new Tab(), proportionalLayout: false });
+    api.layout(1200, 700);
+    return { api, memory: newMemory() };
+  }
+  const sizes = (api: DockviewApi) => {
+    const g = (id: string) => api.getPanel(id)!.group.api;
+    return { area: g('doc:a').width, areaHeight: g('doc:a').height, inspector: g('inspector').width, toolbox: g('toolbox').width, problems: g('problems').height };
+  };
+
+  it('when the dock grows or shrinks, after Reset', () => {
+    const { api, memory } = fixedDock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    const before = sizes(api);
+    expect(before).toEqual({ area: 570, areaHeight: 550, inspector: 340, toolbox: 290, problems: 150 });
+
+    api.layout(1500, 800);
+    expect(sizes(api)).toEqual({ ...before, area: before.area + 300, areaHeight: before.areaHeight + 100 });
+    api.layout(1000, 650);
+    expect(sizes(api)).toEqual({ ...before, area: before.area - 200, areaHeight: before.areaHeight - 50 });
+  });
+
+  it('when the dock grows or shrinks, after a saved layout is applied', () => {
+    const { api, memory } = fixedDock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    const saved = captureLayout(api, memory, []);
+    resetLayout(api, memory, 1200);
+    applyLayout(api, memory, saved);
+    const before = sizes(api);
+
+    api.layout(1500, 700);
+    expect(sizes(api)).toEqual({ ...before, area: before.area + 300 });
+    api.layout(1000, 700);
+    expect(sizes(api)).toEqual({ ...before, area: before.area - 200 });
+  });
+
+  it('when a pane is closed or opened, the other panes keep their size', () => {
+    const { api, memory } = fixedDock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    const before = sizes(api);
+
+    closeTool(api, memory, api.getPanel('toolbox')!, NO_RECT);
+    expect(api.getPanel('inspector')!.group.api.width).toBe(before.inspector);
+    expect(api.getPanel('doc:a')!.group.api.width).toBe(before.area + before.toolbox);
+
+    showTool(api, memory, 'toolbox');
+    expect(api.getPanel('inspector')!.group.api.width).toBe(before.inspector);
+    expect(api.getPanel('toolbox')!.group.api.width).toBe(before.toolbox);
+    expect(api.getPanel('doc:a')!.group.api.width).toBe(before.area);
+
+    closeTool(api, memory, api.getPanel('problems')!, NO_RECT);
+    closeTool(api, memory, api.getPanel('output')!, NO_RECT);
+    expect(api.getPanel('doc:a')!.group.api.height).toBe(700);
+    showTool(api, memory, 'problems');
+    expect(api.getPanel('problems')!.group.api.height).toBe(before.problems);
+    expect(api.getPanel('inspector')!.group.api.width).toBe(before.inspector);
+  });
+});
+
+describe('applying a saved layout whose root size is the wrong dimension', () => {
+  it('keeps the saved heights (dockview can write the root branch size as the width after a Reset)', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    hosts.push(host);
+    const api = createDockview(host, { createComponent: () => new Part(), createTabComponent: () => new Tab(), proportionalLayout: false });
+    api.layout(1200, 700);
+    const memory = newMemory();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    const saved = captureLayout(api, memory, []);
+    expect(saved.dock.grid.root.size).toBe(700);
+    saved.dock.grid.root.size = 1200;
+
+    resetLayout(api, memory, 1200);
+    applyLayout(api, memory, saved);
+
+    expect(api.getPanel('problems')!.group.api.height).toBe(150);
+    expect(api.getPanel('doc:a')!.group.api.height).toBe(550);
+  });
+});

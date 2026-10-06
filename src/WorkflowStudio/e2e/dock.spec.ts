@@ -365,12 +365,15 @@ test('a saved window layout comes back after a reload, without the documents', a
 
 test('a pane popped out when the layout was saved comes back docked after a reload', async ({ page }) => {
   const before = await box(groupOf(page, 'Inspector'));
+  const toolbox = (await box(groupOf(page, 'Toolbox'))).width;
   const [popup] = await Promise.all([
     page.waitForEvent('popup'),
     groupOf(page, 'Inspector').getByRole('button', { name: 'Pop out to its own window' }).click(),
   ]);
   await popup.waitForLoadState();
   await expect(tab(page, 'Inspector')).toHaveCount(0);
+  // the space it left goes to the document area, not to the Toolbox
+  await expect.poll(async () => Math.abs((await box(groupOf(page, 'Toolbox'))).width - toolbox)).toBeLessThanOrEqual(2);
   await page.getByRole('menuitem', { name: 'Window' }).click();
   await page.getByRole('menuitem', { name: /Save window layout/ }).click();
   await expect(page.locator('.toast')).toHaveText('Window layout saved in this browser');
@@ -380,6 +383,58 @@ test('a pane popped out when the layout was saved comes back docked after a relo
   await expect(tab(page, 'Inspector')).toBeVisible();
   const after = await box(groupOf(page, 'Inspector'));
   for (const k of ['x', 'width'] as const) expect(Math.abs(after[k] - before[k])).toBeLessThanOrEqual(2);
+});
+
+/**
+ * Resizes the window wider and taller, then narrower and shorter: the tool panes keep their width
+ * (Inspector, Toolbox) and height (Problems) within 2 px, and the document group takes the difference.
+ */
+async function expectDocumentAreaTakesSlack(page: Page, wf: LiveWorkflow) {
+  const start = page.viewportSize()!;
+  const sizes = async () => ({
+    inspector: (await box(groupOf(page, 'Inspector'))).width,
+    toolbox: (await box(groupOf(page, 'Toolbox'))).width,
+    problems: (await box(groupOf(page, 'Problems'))).height,
+    doc: await box(groupOf(page, wf.name)),
+  });
+  const before = await sizes();
+  for (const [dw, dh] of [[240, 120], [-260, -110]] as const) {
+    await page.setViewportSize({ width: start.width + dw, height: start.height + dh });
+    await expect.poll(async () => Math.abs((await box(groupOf(page, wf.name))).width - (before.doc.width + dw)), { message: `the document group takes ${dw} px of width` }).toBeLessThanOrEqual(2);
+    await expect.poll(async () => Math.abs((await box(groupOf(page, wf.name))).height - (before.doc.height + dh)), { message: `the document group takes ${dh} px of height` }).toBeLessThanOrEqual(2);
+    const now = await sizes();
+    expect(Math.abs(now.inspector - before.inspector), 'the Inspector keeps its width').toBeLessThanOrEqual(2);
+    expect(Math.abs(now.toolbox - before.toolbox), 'the Toolbox keeps its width').toBeLessThanOrEqual(2);
+    expect(Math.abs(now.problems - before.problems), 'Problems keeps its height').toBeLessThanOrEqual(2);
+  }
+  await page.setViewportSize(start);
+  await expect.poll(async () => Math.abs((await box(groupOf(page, wf.name))).width - before.doc.width)).toBeLessThanOrEqual(2);
+}
+
+test('the document area takes the resize slack: at load, after Reset and after Apply saved layout', async ({ page }) => {
+  const [wf] = workflows;
+  await openWorkflow(page, wf!);
+  await expectDocumentAreaTakesSlack(page, wf!);
+
+  await page.getByRole('menuitem', { name: 'Window' }).click();
+  await page.getByRole('menuitem', { name: /Reset window layout/ }).click();
+  await expectDocumentAreaTakesSlack(page, wf!);
+
+  // a saved layout with a wider Inspector, applied over the default one
+  const sash = await box(groupOf(page, 'Inspector'));
+  await page.mouse.move(sash.x - 1, sash.y + sash.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sash.x - 81, sash.y + sash.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await page.getByRole('menuitem', { name: 'Window' }).click();
+  await page.getByRole('menuitem', { name: /Save window layout/ }).click();
+  await page.getByRole('menuitem', { name: 'Window' }).click();
+  await page.getByRole('menuitem', { name: /Reset window layout/ }).click();
+  await page.getByRole('menuitem', { name: 'Window' }).click();
+  await page.getByRole('menuitem', { name: /Apply saved layout/ }).click();
+  await expect(page.locator('.toast')).toHaveText('Saved window layout applied');
+  expect(Math.abs((await box(groupOf(page, 'Inspector'))).width - (sash.width + 80))).toBeLessThanOrEqual(3);
+  await expectDocumentAreaTakesSlack(page, wf!);
 });
 
 test('after layout every step border lies on a 32 px line and every wire point on an 8 px line', async ({ page }) => {

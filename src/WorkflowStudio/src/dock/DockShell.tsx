@@ -15,7 +15,7 @@ import { Tooltips } from './Tooltip';
 import { windowKey } from './windowKey';
 import {
   addDocument, applyLayout, autoHide, captureLayout, closeTool, dockAsDocument, dockBack, documentArea, ensureDocumentArea, floatGroup,
-  floatPanel, newMemory, pinBack as pinToolBack, popOut, resetLayout, showTool, toolSide,
+  floatPanel, markDocumentArea, newMemory, pinBack as pinToolBack, popOut, resetLayout, showTool, toolSide,
 } from './windowActions';
 
 export type { DockDocument } from './parts';
@@ -196,6 +196,8 @@ export function DockShell(props: DockShellProps) {
       const emptyArea = !!e.group && e.group.panels.length === 0 && e.group.id === memory.documentGroupId;
       if (!canDrop(dragged, e.kind, target, emptyArea)) e.preventDefault();
     });
+    // the document area takes the resize slack: keep its groups marked through drags, splits and moves
+    dv.onDidLayoutChange(() => markDocumentArea(dv, memory));
     dv.onDidAddPopoutGroup((p) => setPopouts((ws) => (ws.includes(p.window) ? ws : [...ws, p.window])));
     dv.onDidRemovePopoutGroup((p) => setPopouts((ws) => ws.filter((w) => w !== p.window)));
     apply(dv, true);

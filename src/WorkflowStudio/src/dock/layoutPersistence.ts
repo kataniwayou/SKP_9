@@ -131,6 +131,7 @@ export function stripDocuments(layout: SerializedDockview): { dock: SerializedDo
   }
   for (const views of popped) for (const id of views) delete dock.panels[id];
   dock.popoutGroups = [];
+  fixRootSize(dock);
   return { dock, documentGroupId, popped };
 }
 
@@ -144,6 +145,7 @@ export function withDocuments(
   stripped: SerializedDockview, documentGroupId: string | null, documents: readonly GroupviewPanelState[], activeId: string | null,
 ): SerializedDockview {
   const dock = JSON.parse(JSON.stringify(stripped)) as SerializedDockview;
+  fixRootSize(dock);
   if (documents.length === 0) return dock;
   let target: GroupState | null = null;
   forEachGroup(dock.grid.root, (g) => { if (g.id === documentGroupId) target = g; });
@@ -159,6 +161,16 @@ export function withDocuments(
 }
 
 type GridNode = SerializedGridObject<GroupState>;
+
+/**
+ * The root branch's size is its cross size: the grid's height when it runs horizontally, else its
+ * width. dockview can write the other dimension (seen after Reset window layout re-created the
+ * panes; pruneGrid flipping the orientation would too), and `fromJSON` then lays the nested
+ * branches out against the wrong size, squeezing the document area to its minimum.
+ */
+function fixRootSize(dock: SerializedDockview): void {
+  dock.grid.root = { ...dock.grid.root, size: dock.grid.orientation === Orientation.HORIZONTAL ? dock.grid.height : dock.grid.width };
+}
 
 /**
  * Removes the leaves `drop` picks from the main grid. A branch left with no child goes, one left

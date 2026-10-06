@@ -34,6 +34,57 @@ const shownInGrid = (group: DockviewGroupPanel | undefined): group is DockviewGr
 const livePanel = (api: DockviewApi, panel: IDockviewPanel): boolean => api.getPanel(panel.id) === panel;
 const liveGroup = (api: DockviewApi, group: DockviewGroupPanel): boolean => api.groups.includes(group);
 
+/** A group of the document area: it holds a document, or it is the remembered (empty) area. */
+const isDocumentGroup = (group: DockviewGroupPanel, memory: DockMemory) => hasDocument(group) || group.id === memory.documentGroupId;
+
+/** dockview's layout priority: a view marked 'high' takes a resize's difference before the others. */
+const SLACK = 'high';
+type Prioritised = { readonly priority?: string; _priority?: string };
+
+/**
+ * The document area takes the resize slack (Visual Studio): when the dock grows or shrinks, the
+ * document groups get or give the difference and the tool panes keep their width or height.
+ * dockview has no public option for a dock group's layout priority: its grid reads `priority` from
+ * the group, which only `init` sets, so it is written here. `setConstraints({})` changes nothing
+ * but makes the branches above drop the priority they cached. Call it whenever the document area
+ * may have changed; it does nothing when every group is already marked right.
+ */
+export function markDocumentArea(api: DockviewApi, memory: DockMemory): void {
+  for (const group of api.groups) {
+    const want = inGrid(group) && isDocumentGroup(group, memory) ? SLACK : undefined;
+    const g = group as unknown as Prioritised;
+    if (g.priority === want) continue;
+    g._priority = want;
+    group.api.setConstraints({});
+  }
+}
+
+/**
+ * Notes the width of every docked tall tool group and the height of every wide one, and returns
+ * what puts them back after a change that adds a group to the grid or takes one out: dockview
+ * would otherwise take the space from, or give it to, the change's neighbours. The document area
+ * takes it instead.
+ */
+function noteToolSizes(api: DockviewApi, memory: DockMemory): () => void {
+  const kept = api.groups.filter((g) => shownInGrid(g) && !isDocumentGroup(g, memory))
+    .map((group) => ({ group, tall: group.api.height > group.api.width, width: group.api.width, height: group.api.height }));
+  return () => {
+    markDocumentArea(api, memory);
+    for (const { group, tall, width, height } of kept) {
+      if (!liveGroup(api, group) || !shownInGrid(group) || isDocumentGroup(group, memory)) continue;
+      if (tall ? group.api.width !== width : group.api.height !== height) group.api.setSize(tall ? { width } : { height });
+    }
+  };
+}
+
+/** Runs a change that adds a group to the grid or takes one out, keeping the other tool groups' sizes. */
+function keepingToolSizes<T>(api: DockviewApi, memory: DockMemory, change: () => T): T {
+  const putBack = noteToolSizes(api, memory);
+  const result = change();
+  putBack();
+  return result;
+}
+
 /** The main-grid group documents go into: one that holds a document, else the remembered empty area. */
 export function documentArea(api: DockviewApi, memory: DockMemory, except?: DockviewGroupPanel): DockviewGroupPanel | null {
   const withDoc = api.groups.find((g) => g !== except && inGrid(g) && hasDocument(g));
@@ -51,6 +102,7 @@ export function ensureDocumentArea(api: DockviewApi, memory: DockMemory): Dockvi
     ? api.addGroup({ referencePanel: 'inspector', direction: 'left' })
     : api.groups.length === 0 ? api.addGroup() : api.addGroup({ direction: 'left' });
   memory.documentGroupId = group.id;
+  markDocumentArea(api, memory);
   return group;
 }
 
@@ -62,6 +114,7 @@ export function addDocument(api: DockviewApi, memory: DockMemory, documentId: st
     position: { referenceGroup: area },
   });
   memory.documentGroupId = panel.group.id;
+  markDocumentArea(api, memory);
   return panel;
 }
 
@@ -122,9 +175,12 @@ export function showTool(api: DockviewApi, memory: DockMemory, id: ToolId): IDoc
   delete memory.homes[id];
   const ref = home ? api.getPanel(home.ref) : undefined;
   if (home && ref && shownInGrid(ref.group)) {
-    const panel = home.direction === 'within'
+    const add = () => home.direction === 'within'
       ? api.addPanel({ ...base, position: { referencePanel: home.ref } })
       : api.addPanel({ ...base, position: { referencePanel: home.ref, direction: home.direction }, initialWidth: home.size, initialHeight: home.size });
+    // a home with a snapshot puts every group back as it was; one without keeps the others as they are
+    if (home.layout.length === 0) return keepingToolSizes(api, memory, add);
+    const panel = add();
     restoreLayout(api, home.layout);
     return panel;
   }
@@ -134,7 +190,8 @@ export function showTool(api: DockviewApi, memory: DockMemory, id: ToolId): IDoc
   if (mate && matePanel && shownInGrid(matePanel.group) && toolSide(memory, mate) === side) {
     return api.addPanel({ ...base, position: { referencePanel: mate } });
   }
-  return api.addPanel({ ...base, position: { direction: SIDE_DIRECTION[side] }, initialWidth: TOOL_SIZE[id], initialHeight: TOOL_SIZE[id] });
+  return keepingToolSizes(api, memory, () =>
+    api.addPanel({ ...base, position: { direction: SIDE_DIRECTION[side] }, initialWidth: TOOL_SIZE[id], initialHeight: TOOL_SIZE[id] }));
 }
 
 /**
@@ -149,7 +206,7 @@ export function closeTool(api: DockviewApi, memory: DockMemory, panel: IDockview
     const home = memory.homes[panel.id];
     if (home) memory.homes[panel.id] = { ...home, layout: [] };
   }
-  api.removePanel(panel);
+  keepingToolSizes(api, memory, () => api.removePanel(panel));
 }
 
 /** Floats a panel (the whole group when it is alone in it), remembering where it was. */
@@ -157,21 +214,23 @@ export function floatPanel(api: DockviewApi, memory: DockMemory, panel: IDockvie
   if (!livePanel(api, panel)) return;
   const alone = panel.group.panels.length === 1;
   recordHome(api, memory, panel.group, dock, [panel]);
-  api.addFloatingGroup(alone ? panel.group : panel);
+  keepingToolSizes(api, memory, () => api.addFloatingGroup(alone ? panel.group : panel));
 }
 
 /** Floats a whole group (the header's ⧉), remembering where it was. */
 export function floatGroup(api: DockviewApi, memory: DockMemory, group: DockviewGroupPanel, dock: Rect): void {
   if (!liveGroup(api, group)) return;
   recordHome(api, memory, group, dock);
-  api.addFloatingGroup(group);
+  keepingToolSizes(api, memory, () => api.addFloatingGroup(group));
 }
 
 /** Pops a group out into its own browser window, remembering where it was. */
 export function popOut(api: DockviewApi, memory: DockMemory, group: DockviewGroupPanel, dock: Rect): void {
   if (!liveGroup(api, group)) return;
   recordHome(api, memory, group, dock);
-  void api.addPopoutGroup(group);
+  // the group leaves the grid once the window has opened
+  const putBack = noteToolSizes(api, memory);
+  void api.addPopoutGroup(group).then(putBack);
 }
 
 /**
@@ -226,7 +285,7 @@ export function autoHide(api: DockviewApi, memory: DockMemory, panel: IDockviewP
     return group.panels.map((p) => p.id).filter(isToolId);
   }
   recordHome(api, memory, group, dock, [panel]);
-  api.removePanel(panel);
+  keepingToolSizes(api, memory, () => api.removePanel(panel));
   return [panel.id];
 }
 
@@ -248,7 +307,7 @@ export function dockAsDocument(api: DockviewApi, memory: DockMemory, panel: IDoc
   const area = documentArea(api, memory, panel.group) ?? ensureDocumentArea(api, memory);
   if (area === panel.group) return;
   recordHome(api, memory, panel.group, dock, [panel]);
-  panel.api.moveTo({ group: area, position: 'center' });
+  keepingToolSizes(api, memory, () => panel.api.moveTo({ group: area, position: 'center' }));
   panel.api.setActive();
 }
 
@@ -270,8 +329,12 @@ export function resetLayout(api: DockviewApi, memory: DockMemory, dockWidth: num
   api.addPanel({ ...toolPanel('toolbox'), position: { referencePanel: 'inspector', direction: 'right' }, initialWidth: TOOL_SIZE.toolbox });
   api.addPanel({ ...toolPanel('problems'), position: { referenceGroup: area, direction: 'below' }, initialHeight: TOOL_SIZE.problems });
   api.addPanel({ ...toolPanel('output'), position: { referencePanel: 'problems' }, inactive: true });
-  area.api.setSize({ width: Math.max(480, dockWidth - TOOL_SIZE.inspector - TOOL_SIZE.toolbox) });
+  // the document area takes what the panes leave (it takes the slack), but keeps 480 px at least
+  markDocumentArea(api, memory);
   api.getPanel('inspector')?.group.api.setSize({ width: TOOL_SIZE.inspector });
+  api.getPanel('toolbox')?.group.api.setSize({ width: TOOL_SIZE.toolbox });
+  api.getPanel('problems')?.group.api.setSize({ height: TOOL_SIZE.problems });
+  if (dockWidth - TOOL_SIZE.inspector - TOOL_SIZE.toolbox < 480) area.api.setSize({ width: 480 });
   area.activePanel?.api.setActive();
 }
 
@@ -330,6 +393,7 @@ export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLa
   memory.sides = { ...saved.sides };
   memory.homes = { ...saved.homes };
   memory.documentGroupId = saved.documentGroupId;
+  markDocumentArea(api, memory);
   for (const id of saved.popped) if (!api.getPanel(id)) showTool(api, memory, id);
   return saved.hidden.filter((id) => { const p = api.getPanel(id); return !p || !p.group.api.isVisible; });
 }
