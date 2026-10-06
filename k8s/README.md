@@ -32,6 +32,15 @@ kind load docker-image processor-sample:local
 kind load docker-image orchestrator:local
 ```
 
+SKP Studio (the workflow editor) is a static build served by nginx. Its image is built from the same
+root context and reached at `http://localhost:18081` through the port-forward script:
+
+```bash
+docker build -f src/WorkflowStudio/Dockerfile -t workflow-studio:local .
+kind load docker-image workflow-studio:local --name desktop
+kubectl apply -f k8s/31-workflow-studio.yaml
+```
+
 Every application manifest uses `imagePullPolicy: IfNotPresent` against a `:local` tag, so there is
 no registry and nothing is ever pulled. The corollary is that rebuilding an image does **not**
 update a running pod — `kubectl rollout restart` is what picks up new bits.

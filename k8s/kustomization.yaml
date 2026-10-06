@@ -19,6 +19,7 @@ resources:
   - 23-grafana.yaml
   - 24-kibana.yaml
   - 30-baseapi-service.yaml
+  - 31-workflow-studio.yaml
   - 33-processor-sample.yaml
   - 34-processor-kafkaimporter.yaml
   - 35-processor-kafkaexporter.yaml
