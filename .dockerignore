@@ -23,3 +23,6 @@ docs/
 k8s/
 **/TestResults/
 **/*.md
+
+**/node_modules/
+**/dist/

@@ -465,3 +465,6 @@ analyzer-reports/phase-88-screenshots/
 
 # Staged deltas produced by tools/ship-delta.ps1 -Out/-Zip. Carried across, then discarded.
 /drops/
+
+# SKP Studio build output
+src/WorkflowStudio/dist/
