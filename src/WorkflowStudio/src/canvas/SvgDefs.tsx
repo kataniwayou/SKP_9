@@ -25,6 +25,8 @@ export function SvgDefs() {
         <linearGradient id="substrate" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#0E1C30" /><stop offset="1" stopColor="#08121F" /></linearGradient>
         <linearGradient id="dieFill" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#1E4774" /><stop offset=".45" stopColor="#14325A" /><stop offset="1" stopColor="#0B1E3B" /></linearGradient>
         <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="7" /></filter>
+        {/* the selection glow (mockup v49 #glow): the selected block, die or sphere */}
+        <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4" result="b" /><feFlood floodColor="#7DD3FC" floodOpacity=".45" /><feComposite in2="b" operator="in" /><feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge></filter>
         <filter id="pinGlow" x="-100%" y="-200%" width="300%" height="500%"><feGaussianBlur stdDeviation="1.6" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
         {/* userSpaceOnUse: a perfectly straight wire has a zero-height bounding box, which would erase it */}
         <filter id="wsoft" filterUnits="userSpaceOnUse" x="-100000" y="-100000" width="200000" height="200000"><feGaussianBlur stdDeviation="1.3" /></filter>

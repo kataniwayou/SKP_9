@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createTextFitter } from './fitText';
+import { describe, expect, it, vi } from 'vitest';
+import { canvasMeasure, createTextFitter, loadMeasuredFonts, MEASURED_FONTS } from './fitText';
 
 // A deterministic measurer: every character is 7 px wide whatever the font.
 const fitter = createTextFitter((text) => text.length * 7);
@@ -55,5 +55,33 @@ describe('createTextFitter', () => {
 
   it('measures through the injected measurer', () => {
     expect(fitter.width('abcd', 'f')).toBe(28);
+  });
+});
+
+describe('measuring in the document the labels are drawn in (spec §6.3)', () => {
+  it('canvasMeasure makes its canvas in the given document, once', () => {
+    const measureText = vi.fn((t: string) => ({ width: t.length * 3 }));
+    const createElement = vi.fn(() => ({ getContext: () => ({ font: '', measureText }) }));
+    const popout = { createElement } as unknown as Document;
+
+    const measure = canvasMeasure(popout);
+    expect(createElement).not.toHaveBeenCalled();
+    expect(measure('abcd', '10px x')).toBe(12);
+    expect(measure('ab', '10px x')).toBe(6);
+    expect(createElement).toHaveBeenCalledTimes(1);
+  });
+
+  it('loadMeasuredFonts loads every measured face in the given document', async () => {
+    const load = vi.fn().mockResolvedValue([]);
+    const popout = { fonts: { load, ready: Promise.resolve() } } as unknown as Document;
+
+    await loadMeasuredFonts(popout);
+
+    expect(load.mock.calls.map((c) => c[0]).sort()).toEqual([...MEASURED_FONTS].sort());
+  });
+
+  it('loadMeasuredFonts never rejects when a face fails to load', async () => {
+    const popout = { fonts: { load: vi.fn().mockRejectedValue(new Error('404')), ready: Promise.resolve() } } as unknown as Document;
+    await expect(loadMeasuredFonts(popout)).resolves.toBeUndefined();
   });
 });

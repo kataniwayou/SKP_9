@@ -1,10 +1,11 @@
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadDocument } from '../app/loadDocument';
 import { createTextFitter } from './fitText';
 import { WorkflowCanvas } from './WorkflowCanvas';
+import { ZoomControls } from './ZoomControls';
 
 const fitter = createTextFitter((t) => t.length * 7);
 
@@ -49,5 +50,62 @@ describe('WorkflowCanvas', () => {
     expect(container.querySelector('.studio-canvas')).toBe(first);
     rerender(<WorkflowCanvas doc={b} fitter={fitter} width={1200} height={800} />);
     expect(container.querySelector('.studio-canvas')).not.toBe(first);
+  });
+
+  describe('selection (slice 3a)', () => {
+    async function twoSteps() {
+      const api = {
+        getGraph: async () => ({ ok: true, value: graphDto({ steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2', { name: 'store' })] }) }),
+        validate: async () => ({ ok: true, value: { valid: true, problems: [] } }),
+      } as unknown as StudioApi;
+      const r = await loadDocument(api, 'wf1');
+      if (!r.ok) throw new Error('load failed');
+      return r.value;
+    }
+    const node = (container: HTMLElement, id: string) => container.querySelector(`.react-flow__node[data-id="${id}"]`) as HTMLElement;
+
+    it('reports a click on a step, on its die, on the sphere and on empty canvas', async () => {
+      const onSelect = vi.fn();
+      const { container } = render(<WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} onSelect={onSelect} />);
+
+      fireEvent.click(node(container, 's1'));
+      fireEvent.click(node(container, 's2').querySelector('.chipg .diebody')!);
+      fireEvent.click(node(container, 'wf'));
+      fireEvent.click(container.querySelector('.react-flow__pane')!);
+
+      expect(onSelect.mock.calls.map((c) => c[0])).toEqual([
+        { kind: 'step', stepId: 's1' },
+        { kind: 'processor', processorId: 'p1', stepId: 's2' },
+        { kind: 'workflow' },
+        null,
+      ]);
+    });
+
+    it('marks the selected step, and a selected processor on its own step only', async () => {
+      const doc = await twoSteps();
+      const { container, rerender } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} selection={{ kind: 'step', stepId: 's2' }} />);
+      expect(node(container, 's2')).toHaveClass('studio-sel');
+      expect(node(container, 's1')).not.toHaveClass('studio-sel');
+
+      rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} selection={{ kind: 'processor', processorId: 'p1', stepId: 's1' }} />);
+      expect(node(container, 's1')).toHaveClass('studio-die-sel');
+      expect(node(container, 's2')).not.toHaveClass('studio-die-sel');
+      expect(container.querySelectorAll('.studio-sel')).toHaveLength(0);
+    });
+
+    it('drives its own React Flow instance from controls passed as children', async () => {
+      render(
+        <WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800}>
+          <ZoomControls />
+        </WorkflowCanvas>,
+      );
+      const level = () => Number(screen.getByLabelText('Zoom level').textContent!.replace('%', ''));
+      await waitFor(() => expect(level()).toBeGreaterThan(0));
+      const before = level();
+
+      fireEvent.click(screen.getByLabelText('Zoom in'));
+
+      await waitFor(() => expect(level()).toBeGreaterThan(before));
+    });
   });
 });

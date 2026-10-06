@@ -1,6 +1,6 @@
 /* Block and wire styles (mockup v49, the effective block, chip and wire rules). */
 .studio-canvas { background: var(--ground); font-family: var(--sans); }
-.studio-canvas .react-flow__node { cursor: default; }
+.studio-canvas .react-flow__node { cursor: pointer; }
 .studio-canvas svg text { font-family: var(--sans); }
 
 /* wires */
@@ -60,3 +60,20 @@
   background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid; vertical-align: middle; margin-right: 6px; }
 .legend .pill { font-family: var(--mono); font-size: 10px; border-radius: 3px; padding: 0 4px; color: #04111F; margin-right: 4px; font-weight: 600; }
+
+/* hover and selection (mockup v49, the .sel rules); the selection class sits on React Flow's node wrapper */
+.blk:hover .cap, .cachetag:hover .cap { filter: brightness(1.1); }
+.wf:hover .sphere { filter: brightness(1.08); }
+.chipg:hover .crim { stroke: #35598A; }
+.studio-sel .blk .rimr, .studio-sel .cachetag .rimr { stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: none; }
+.studio-sel .blk .shell, .studio-sel .cachetag .shell { filter: url(#glow); }
+.studio-sel .wf .sphere { filter: url(#glow); }
+.studio-die-sel .chipg .crim { stroke: var(--accent); stroke-width: 1.6; }
+.studio-die-sel .chipg .diebody { filter: url(#glow); }
+
+/* a document's zoom (mockup v49 .zoom, .docbar .zoom) */
+.zoom { display: flex; align-items: center; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); }
+.zoom button { background: var(--panel-2); border: 0; color: var(--ink); width: 30px; height: 28px; cursor: pointer; font-size: 15px; }
+.zoom button:hover { background: var(--line); }
+.zoom button.fit { width: 38px; font-size: 11px; font-family: var(--sans); }
+.zoom span { font-family: var(--mono); font-size: 12px; width: 52px; text-align: center; color: var(--muted); }

@@ -22,9 +22,12 @@ export const FONT = {
 
 export const MEASURED_FONTS: readonly string[] = [...new Set(Object.values(FONT))];
 
-/** Requests every measured face, then waits for fonts to settle. Safe where `document.fonts` is missing (jsdom). */
-export async function loadMeasuredFonts(): Promise<void> {
-  const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+/**
+ * Requests every measured face in `doc`, then waits for its fonts to settle. Each document loads its
+ * own faces: a pop-out window starts with none (spec §6.3). Safe where `fonts` is missing (jsdom).
+ */
+export async function loadMeasuredFonts(doc: Document | undefined = typeof document === 'undefined' ? undefined : document): Promise<void> {
+  const fonts = doc?.fonts;
   if (!fonts) return;
   try {
     await Promise.all(MEASURED_FONTS.map((f) => fonts.load(f)));
@@ -74,14 +77,15 @@ export function createTextFitter(measure: Measure): TextFitter {
 }
 
 /**
- * Measures with an offscreen 2D canvas. Call after `document.fonts.ready`. The context is created on
- * the first measurement, so merely creating the measurer touches no canvas (jsdom has none and logs
- * an error when one is asked for).
+ * Measures with an offscreen 2D canvas of `doc`, the document the labels are drawn in (its
+ * `ownerDocument`, never the global one, so a pop-out measures with the fonts it has; spec §6.3).
+ * Call after `loadMeasuredFonts(doc)`. The context is created on the first measurement, so merely
+ * creating the measurer touches no canvas (jsdom has none and logs an error when one is asked for).
  */
-export function canvasMeasure(): Measure {
+export function canvasMeasure(doc: Document = document): Measure {
   let context: CanvasRenderingContext2D | null | undefined;
   return (text, font) => {
-    if (context === undefined) context = document.createElement('canvas').getContext('2d');
+    if (context === undefined) context = doc.createElement('canvas').getContext('2d');
     if (!context) return text.length * 7;
     context.font = font;
     return context.measureText(text).width;
