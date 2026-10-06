@@ -24,8 +24,11 @@ export const BAND_BOTTOM = 130;
 export const STRAIGHT_MIN_GAP = 16;
 
 export const SPHERE_R = 96;
-export const CACHE_W = 192;
-export const CACHE_H = 64;
+/** A cache is a 5 × 5-cell square, a step's height (locked art, spec §5.1). */
+export const CACHE_W = 160;
+export const CACHE_H = 160;
+/** Caches stack under the hub one cache plus one cell apart. */
+export const CACHE_PITCH = CACHE_H + CELL;
 export const COLUMN_PITCH = 288;
 
 export interface Point {

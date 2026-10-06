@@ -74,8 +74,8 @@ describe('place', () => {
     }));
     const { cx, cy } = p.sphere;
 
-    expect(p.caches.get('c1')).toEqual({ x: cx - 96, y: cy + 96 + 64 });
-    expect(p.caches.get('c2')).toEqual({ x: cx - 96, y: cy + 96 + 64 + 96 });
+    expect(p.caches.get('c1')).toEqual({ x: cx - 80, y: cy + 96 + 64 });
+    expect(p.caches.get('c2')).toEqual({ x: cx - 80, y: cy + 96 + 64 + 192 });
     expect(p.caches.get('c3')).toEqual({ x: 1000, y: 1000 });
   });
 

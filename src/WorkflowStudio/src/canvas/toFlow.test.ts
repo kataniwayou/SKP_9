@@ -51,7 +51,9 @@ describe('toFlow', () => {
     expect(a.position).toEqual({ x: 288, y: 32 });
     expect([a.width, a.height]).toEqual([224, 160]);
 
-    expect(nodes.find((n) => n.id === cacheNodeId('c1'))!.position).toEqual({ x: 32, y: 288 });
+    const cache = nodes.find((n) => n.id === cacheNodeId('c1'))!;
+    expect(cache.position).toEqual({ x: 32, y: 288 });
+    expect([cache.width, cache.height]).toEqual([160, 160]);
   });
 
   it('turns wires into cable edges carrying their points, colour and broken flag', () => {

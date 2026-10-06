@@ -101,10 +101,10 @@ describe('routeWires: fan-out of 5 with a back edge', () => {
 
 describe('tetherPoints', () => {
   it('drops straight from the sphere bottom to a cache centred under it', () => {
-    expect(tetherPoints({ cx: 128, cy: 128 }, { x: 32, y: 288 })).toEqual([[128, 224], [128, 288]]);
+    expect(tetherPoints({ cx: 128, cy: 128 }, { x: 48, y: 288 })).toEqual([[128, 224], [128, 288]]);
   });
 
   it('bends at right angles to a cache that was moved aside', () => {
-    expect(tetherPoints({ cx: 128, cy: 128 }, { x: 320, y: 400 })).toEqual([[128, 224], [128, 312], [416, 312], [416, 400]]);
+    expect(tetherPoints({ cx: 128, cy: 128 }, { x: 320, y: 400 })).toEqual([[128, 224], [128, 312], [400, 312], [400, 400]]);
   });
 });
