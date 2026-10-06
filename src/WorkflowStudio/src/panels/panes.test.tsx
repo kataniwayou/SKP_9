@@ -152,6 +152,35 @@ describe('Inspector editing (slice 3b)', () => {
     expect(store.getState().docs[0]!.inspector.edits).toEqual({});
   });
 
+  it('a failed re-read keeps the form and what was typed, with a note (final review 2)', async () => {
+    const getEntity = vi.fn().mockResolvedValueOnce(ok(step)).mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } });
+    const { service } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' } });
+    fireEvent.change(await screen.findByLabelText('Description'), { target: { value: 'typed' } });
+    act(() => service.read('wf1', true));
+    expect(await screen.findByText('Could not read it. Network error: down')).toBeInTheDocument();
+    expect(screen.getByLabelText('Description')).toHaveValue('typed');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  it('a read that failed with nothing to show offers Retry, which reads it again (final review 2)', async () => {
+    const getEntity = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: 'network', message: 'down' } }).mockResolvedValue(ok(step));
+    const { store } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' } });
+    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'restored', saved: '' }));
+    expect(await screen.findByText('Could not read it. Network error: down')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Discard unsaved changes' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByLabelText('Description')).toHaveValue('restored');
+    expect(getEntity).toHaveBeenCalledTimes(2);
+  });
+
+  it('Discard unsaved changes is disabled while a write is in flight', async () => {
+    const { store } = await renderInspector({ getEntity: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'notFound', status: 404 } }) },
+      { selection: { kind: 'step', stepId: 's1' } });
+    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'restored', saved: '' }));
+    act(() => store.dispatch({ type: 'busy', workflowId: 'wf1', busy: true }));
+    expect(await screen.findByRole('button', { name: 'Discard unsaved changes' })).toBeDisabled();
+  });
+
   const withAssignment = graphDto({
     ...inspectorGraph,
     assignments: [assignmentDto('a1', { stepId: 's1', payload: '{"k":1,"j":2}' })],

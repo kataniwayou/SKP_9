@@ -73,14 +73,20 @@ function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocu
         <div className="pbody">
           <div className="sec">
             <p className={inspector.readError ? 'note warn' : 'note'}>{inspector.readError ?? 'Loading…'}</p>
+            {inspector.readError && (
+              <button type="button" className="btn" onClick={() => service.read(workflowId, true)}>Retry</button>
+            )}
             {inspector.readError && dirty && (
-              <button type="button" className="btn" onClick={() => store.dispatch({ type: 'discard', workflowId })}>Discard unsaved changes</button>
+              <button type="button" className="btn" disabled={inspector.busy}
+                onClick={() => store.dispatch({ type: 'discard', workflowId })}>Discard unsaved changes</button>
             )}
           </div>
         </div>
       ) : (
         <>
           <div className="pbody">
+            {/* a failed re-read keeps the form (spec §8): it only says so */}
+            {inspector.readError && <div className="sec"><p className="note warn">{inspector.readError}</p></div>}
             <EntityForm open={open} doc={doc} target={target} saved={saved} showDetails={showDetails} drill={drill} />
           </div>
           <div className="savebar">
