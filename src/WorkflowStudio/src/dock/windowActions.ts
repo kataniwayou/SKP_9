@@ -118,6 +118,8 @@ export function showTool(api: DockviewApi, memory: DockMemory, id: ToolId): IDoc
   if (existing) { existing.api.setActive(); return existing; }
   const base = toolPanel(id);
   const home = memory.homes[id];
+  // a home is used once: kept, a later reopen would replay its snapshot over the user's layout
+  delete memory.homes[id];
   const ref = home ? api.getPanel(home.ref) : undefined;
   if (home && ref && shownInGrid(ref.group)) {
     const panel = home.direction === 'within'
@@ -133,6 +135,21 @@ export function showTool(api: DockviewApi, memory: DockMemory, id: ToolId): IDoc
     return api.addPanel({ ...base, position: { referencePanel: mate } });
   }
   return api.addPanel({ ...base, position: { direction: SIDE_DIRECTION[side] }, initialWidth: TOOL_SIZE[id], initialHeight: TOOL_SIZE[id] });
+}
+
+/**
+ * Closes a tool pane (its × or View), remembering where it sat and its side, so View brings it
+ * back there. Only its own place is kept, not the other groups' sizes: they stay as the user
+ * leaves them. A floating pane keeps the place it was floated from, on the same terms.
+ */
+export function closeTool(api: DockviewApi, memory: DockMemory, panel: IDockviewPanel, dock: Rect): void {
+  if (!livePanel(api, panel)) return;
+  if (isToolId(panel.id)) {
+    recordHome(api, memory, panel.group, dock, [panel]);
+    const home = memory.homes[panel.id];
+    if (home) memory.homes[panel.id] = { ...home, layout: [] };
+  }
+  api.removePanel(panel);
 }
 
 /** Floats a panel (the whole group when it is alone in it), remembering where it was. */
@@ -167,6 +184,7 @@ export function dockBack(api: DockviewApi, memory: DockMemory, group: DockviewGr
   const first = panels[0];
   if (!first) return;
   const home = memory.homes[first.id];
+  for (const p of panels) delete memory.homes[p.id];
   const ref = home ? api.getPanel(home.ref) : undefined;
   // A hidden home group is passed over: the pane would vanish into it, on no rail. It falls
   // through to the no-home path (a tool pane to its side, in a group the user can see).

@@ -14,7 +14,7 @@ import { Switcher, switcherOrder, touch } from './Switcher';
 import { Tooltips } from './Tooltip';
 import { windowKey } from './windowKey';
 import {
-  addDocument, applyLayout, autoHide, captureLayout, dockAsDocument, dockBack, documentArea, ensureDocumentArea, floatGroup,
+  addDocument, applyLayout, autoHide, captureLayout, closeTool, dockAsDocument, dockBack, documentArea, ensureDocumentArea, floatGroup,
   floatPanel, newMemory, pinBack as pinToolBack, popOut, resetLayout, showTool, toolSide,
 } from './windowActions';
 
@@ -143,8 +143,8 @@ export function DockShell(props: DockShellProps) {
       return;
     }
     const panel = api.getPanel(id);
-    if (panel) api.removePanel(panel); else showTool(api, memory, id);
-  }, [api, memory, openFly, closeFly]);
+    if (panel) closeTool(api, memory, panel, dockRect()); else showTool(api, memory, id);
+  }, [api, memory, openFly, closeFly, dockRect]);
 
   const reset = useCallback((dv: DockviewApi) => {
     resetLayout(dv, memory, dockRect().right - dockRect().left || 1200);
@@ -244,8 +244,8 @@ export function DockShell(props: DockShellProps) {
     const documentId = documentIdOf(panelId);
     if (documentId !== null) { latest.current.props.onCloseDocument(documentId); return; }
     const panel = api?.getPanel(panelId);
-    if (api && panel) api.removePanel(panel);
-  }, [api]);
+    if (api && panel) closeTool(api, memory, panel, dockRect());
+  }, [api, memory, dockRect]);
 
   const toggleMaximize = useCallback((group: DockviewGroupPanel) => {
     if (group.api.location.type !== 'grid') return;

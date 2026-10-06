@@ -2,7 +2,7 @@ import { createDockview, type DockviewApi, type IContentRenderer, type ITabRende
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   addDocument, applyLayout, autoHide, captureLayout, dockAsDocument, dockBack, ensureDocumentArea, floatGroup, floatPanel,
-  newMemory, pinBack, resetLayout, showTool, type DockMemory,
+  closeTool, newMemory, pinBack, resetLayout, showTool, type DockMemory,
 } from './windowActions';
 
 // dockview's core runs in jsdom (no sizes, so recordHome finds no home: tests set homes directly).
@@ -285,5 +285,91 @@ describe('dockAsDocument without a document area', () => {
 
     expect(where(api, 'inspector')!.location).toBe('grid');
     expect(where(api, 'inspector')!.group).toBe(ensureDocumentArea(api, memory).id);
+  });
+});
+
+describe('tool pane homes (review Important 2)', () => {
+  const DOCK = { left: 0, top: 0, right: 1200, bottom: 700 };
+
+  it('forgets a home once it was used: a later reopen does not put back old sizes', () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    const area = () => api.getPanel('doc:a')!.group;
+    floatPanel(api, memory, api.getPanel('inspector')!, NO_RECT);
+    memory.homes.inspector = { ref: 'toolbox', direction: 'left', size: 340, layout: [{ ref: 'doc:a', left: 0, top: 0, width: 300, height: 500 }] };
+
+    dockBack(api, memory, api.getPanel('inspector')!.group);
+    expect(area().api.width).toBe(300);
+    expect(memory.homes.inspector).toBeUndefined();
+
+    // the user widens the document area, then closes the Inspector and reopens it from View
+    area().api.setSize({ width: 600 });
+    api.removePanel(api.getPanel('inspector')!);
+    const resize = vi.spyOn(area().api, 'setSize');
+    showTool(api, memory, 'inspector');
+
+    expect(resize).not.toHaveBeenCalled();
+    expect(area().api.width).not.toBe(300);
+  });
+
+  it('forgets a home once showTool used it', () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    api.removePanel(api.getPanel('output')!);
+    memory.homes.output = { ref: 'problems', direction: 'within', size: 0, layout: [] };
+
+    showTool(api, memory, 'output');
+
+    expect(api.getPanel('output')!.group).toBe(api.getPanel('problems')!.group);
+    expect(memory.homes.output).toBeUndefined();
+  });
+
+  it('closing a pane remembers its side, and it reopens there', () => {
+    // a tall group at the dock's left edge
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 100, bottom: 600, x: 0, y: 0, width: 100, height: 600 } as DOMRect);
+    try {
+      const { api, memory } = dock();
+      resetLayout(api, memory, 1200);
+      addDocument(api, memory, 'a', 'orders');
+
+      closeTool(api, memory, api.getPanel('inspector')!, DOCK);
+      expect(api.getPanel('inspector')).toBeUndefined();
+      expect(memory.sides.inspector).toBe('left');
+
+      showTool(api, memory, 'inspector');
+      const root = JSON.stringify(api.toJSON().grid.root);
+      expect(root.indexOf('"inspector"')).toBeLessThan(root.indexOf('"doc:a"'));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('closing a tab of a group remembers that group, but no other group sizes', () => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 100, bottom: 100, x: 0, y: 0, width: 100, height: 100 } as DOMRect);
+    try {
+      const { api, memory } = dock();
+      resetLayout(api, memory, 1200);
+
+      closeTool(api, memory, api.getPanel('output')!, DOCK);
+      expect(memory.homes.output).toEqual({ ref: 'problems', direction: 'within', size: 0, layout: [] });
+
+      showTool(api, memory, 'output');
+      expect(api.getPanel('output')!.group).toBe(api.getPanel('problems')!.group);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('closing a floating pane keeps where it came from, but not the old sizes of the others', () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    floatPanel(api, memory, api.getPanel('toolbox')!, NO_RECT);
+    memory.homes.toolbox = { ref: 'inspector', direction: 'right', size: 290, layout: [{ ref: 'inspector', left: 0, top: 0, width: 999, height: 500 }] };
+
+    closeTool(api, memory, api.getPanel('toolbox')!, DOCK);
+
+    expect(api.getPanel('toolbox')).toBeUndefined();
+    expect(memory.homes.toolbox).toEqual({ ref: 'inspector', direction: 'right', size: 290, layout: [] });
   });
 });

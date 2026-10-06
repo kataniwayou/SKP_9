@@ -530,6 +530,37 @@ describe('DockShell, tab gestures and the window-position menu (spec 6.2)', () =
     expect(api().activePanel?.id).toBe('toolbox');
   });
 
+  it('reopens a pane closed with its × or from View on the side it was on', () => {
+    // the dock is 1200 wide; every group is a tall box at its left edge
+    const real = Element.prototype.getBoundingClientRect;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.classList.contains('dock')) return { left: 0, top: 0, right: 1200, bottom: 700, x: 0, y: 0, width: 1200, height: 700 } as DOMRect;
+      if (this.classList.contains('dv-groupview')) return { left: 0, top: 0, right: 100, bottom: 600, x: 0, y: 0, width: 100, height: 600 } as DOMRect;
+      return real.call(this);
+    });
+    try {
+      withDocuments();
+      const leftOfDocuments = () => { const root = JSON.stringify(api().toJSON().grid.root); return root.indexOf('"inspector"') < root.indexOf('"doc:a"'); };
+      expect(leftOfDocuments()).toBe(false);
+
+      fireEvent.click(within(tab('Inspector')).getByRole('button', { name: 'Close Inspector' }));
+      expect(api().getPanel('inspector')).toBeUndefined();
+      openMenu('View');
+      choose(/Inspector/);
+      expect(leftOfDocuments()).toBe(true);
+
+      openMenu('View');
+      choose(/Toolbox/);
+      expect(api().getPanel('toolbox')).toBeUndefined();
+      openMenu('View');
+      choose(/Toolbox/);
+      const root = JSON.stringify(api().toJSON().grid.root);
+      expect(root.indexOf('"toolbox"')).toBeLessThan(root.indexOf('"doc:a"'));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('closes a pane from the menu, and asks the page to close a document', () => {
     const { props } = withDocuments();
     fireEvent.contextMenu(tab('Toolbox'));
