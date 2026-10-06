@@ -16,15 +16,18 @@ const api = (over: Partial<StudioApi>): StudioApi => ({
 } as StudioApi);
 
 describe('App', () => {
-  it('lists the workflows in the picker, sorted by name', async () => {
+  it('lists the workflows in the picker by entity name, sorted by name', async () => {
+    const zeta = '11111111-2222-3333-4444-555555555555';
+    const alpha = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     render(<App api={api({
-      listWorkflows: vi.fn().mockResolvedValue({ ok: true, value: [workflowDto({ id: 'w2', name: 'zeta' }), workflowDto({ id: 'w1', name: 'alpha' })] }),
+      listWorkflows: vi.fn().mockResolvedValue({ ok: true, value: [workflowDto({ id: zeta, name: 'zeta' }), workflowDto({ id: alpha, name: 'alpha' })] }),
     })} />);
 
     // The placeholder option is there from the first render, so wait for the list itself.
     await waitFor(() => {
       const options = screen.getAllByRole('option');
-      expect(options.map((o) => o.textContent)).toEqual(['Open a workflow…', 'alpha 1.0.0', 'zeta 1.0.0']);
+      expect(options.map((o) => o.textContent)).toEqual(
+        ['Open a workflow…', 'alpha_1.0.0-dddd-eeeeeeeeeeee', 'zeta_1.0.0-4444-555555555555']);
     });
   });
 

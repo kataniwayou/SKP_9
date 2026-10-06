@@ -6,6 +6,7 @@ import { loadDocument } from './app/loadDocument';
 import { canvasMeasure, createTextFitter, loadMeasuredFonts, type TextFitter } from './canvas/fitText';
 import { SvgDefs } from './canvas/SvgDefs';
 import { WorkflowCanvas } from './canvas/WorkflowCanvas';
+import { entityName } from './model/entityNames';
 
 function describe(error: ApiError): string {
   switch (error.kind) {
@@ -69,7 +70,7 @@ export function App({ api: injected }: { api?: StudioApi }) {
         <h1>SKP STUDIO</h1>
         <select aria-label="Workflow" value={selected ?? ''} onChange={(e) => open(e.target.value)}>
           <option value="">Open a workflow…</option>
-          {workflows.map((w) => <option key={w.id} value={w.id ?? ''}>{`${w.name} ${w.version}`}</option>)}
+          {workflows.map((w) => <option key={w.id} value={w.id ?? ''}>{entityName(w.name ?? '', w.version ?? '', w.id ?? '')}</option>)}
         </select>
         <span role="status" className={status.error ? 'app-status error' : 'app-status'}>{status.text}</span>
       </header>
