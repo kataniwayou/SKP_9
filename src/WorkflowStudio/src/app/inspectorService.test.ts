@@ -156,6 +156,51 @@ describe('InspectorService', () => {
     expect(getEntity).toHaveBeenCalledTimes(1);
   });
 
+  it('a save is not clean while text typed during it is left unsaved (final review 1)', async () => {
+    let answer!: (r: ApiResult<unknown>) => void;
+    const getEntity = vi.fn().mockResolvedValue(ok(stepDto('s1')));
+    const putEntity = vi.fn().mockReturnValue(new Promise((r) => { answer = r; }));
+    const { store, service, inspector } = await setup({ getEntity, putEntity });
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'sent', saved: '' });
+    const saving = service.save('wf1');
+    await flush();
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'name', text: 'typed meanwhile', saved: 'step-s1' });
+    answer(ok(stepDto('s1', { description: 'sent' })));
+    expect(await saving).toBe(false);
+    expect(inspector()).toMatchObject({ edits: { name: 'typed meanwhile' }, busy: false, failure: null });
+  });
+
+  it('a create keeps the text typed while it was in flight, on the new assignment (final review 1)', async () => {
+    let answer!: (r: ApiResult<unknown>) => void;
+    const createAssignment = vi.fn().mockReturnValue(new Promise((r) => { answer = r; }));
+    const { store, service, inspector } = await setup({
+      createAssignment, getEntity: vi.fn().mockResolvedValue(ok(workflowDto())), putEntity: vi.fn().mockResolvedValue(ok(workflowDto())),
+    });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'step-s1' } });
+    service.read('wf1');
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'payload', text: '{"k":1}', saved: '{}' });
+    const creating = service.create('wf1');
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed meanwhile', saved: '' });
+    answer(ok(assignmentDto('a9', { stepId: 's1', payload: '{"k":1}' })));
+    await creating;
+    expect(inspector().trail).toEqual([{ kind: 'assignment', id: 'a9', stepId: 's1' }]);
+    expect(inspector().edits).toEqual({ description: 'typed meanwhile' });
+  });
+
+  it('an unlink that lands after the user went elsewhere leaves that Inspector alone (final review 3)', async () => {
+    let answer!: (r: ApiResult<unknown>) => void;
+    const getEntity = vi.fn().mockReturnValue(new Promise((r) => { answer = r; }));
+    const { store, service, inspector } = await setup({ getEntity, putEntity: vi.fn().mockResolvedValue(ok(workflowDto())) });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
+    const unlinking = service.unlink('wf1');
+    store.dispatch({ type: 'back', workflowId: 'wf1', depth: 0 });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
+    answer(ok(workflowDto({ assignmentIds: ['a1'] })));
+    expect(await unlinking).toBe(true);
+    expect(inspector()).toMatchObject({ trail: [{ kind: 'processor', id: 'p1' }], edits: { description: 'typed' }, busy: false });
+  });
+
   it('an assignment answer without an id is a failure and links nothing', async () => {
     const putEntity = vi.fn();
     const { store, service, inspector } = await setup({

@@ -85,7 +85,9 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     if (!put.ok) return fail(workflowId, key, failureOf(target, put.error));
     store.dispatch({ type: 'saved', workflowId, key, sent, dto: put.value });
     afterWrite();
-    return true;
+    // text typed while the save was in flight is still unsaved
+    const after = docOf(workflowId);
+    return after === null || Object.keys(after.inspector.edits).length === 0;
   }
 
   /** Re-reads the workflow and PUTs it back with its assignment ids changed; null when done, else why not. */
@@ -102,12 +104,13 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     const target = shown(workflowId);
     if (doc === null || target?.kind !== 'newAssignment' || doc.inspector.saved === null || doc.inspector.busy) return false;
     const from = targetKey(target);
+    const sent = doc.inspector.edits;
     store.dispatch({ type: 'busy', workflowId, busy: true });
-    const made = await api.createAssignment(createAssignmentDto(doc.inspector.saved.dto as AssignmentReadDto, doc.inspector.edits));
+    const made = await api.createAssignment(createAssignmentDto(doc.inspector.saved.dto as AssignmentReadDto, sent));
     if (!made.ok) return fail(workflowId, from, failureOf(target, made.error));
     const id = made.value.id;
     if (!id) return fail(workflowId, from, { fields: {}, banner: 'Not saved: BaseApi returned no id for the new assignment' });
-    store.dispatch({ type: 'created', workflowId, from, target: { kind: 'assignment', id, stepId: target.stepId }, dto: made.value });
+    store.dispatch({ type: 'created', workflowId, from, target: { kind: 'assignment', id, stepId: target.stepId }, sent, dto: made.value });
     const why = await relink(workflowId, (ids) => [...ids, id]);
     afterWrite();
     return why === null ? true : fail(workflowId, targetKey({ kind: 'assignment', id, stepId: target.stepId }), { fields: {}, banner: `Created but not linked to this workflow: ${why}` });
@@ -121,7 +124,7 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     store.dispatch({ type: 'busy', workflowId, busy: true });
     const why = await relink(workflowId, (ids) => ids.filter((x) => x !== target.id));
     if (why !== null) return fail(workflowId, from, { fields: {}, banner: `Not unlinked: ${why}` });
-    store.dispatch({ type: 'back', workflowId, depth: doc.inspector.trail.length - 1 });
+    store.dispatch({ type: 'back', workflowId, depth: doc.inspector.trail.length - 1, from });
     afterWrite();
     return true;
   }

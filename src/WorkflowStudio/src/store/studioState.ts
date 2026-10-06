@@ -46,8 +46,11 @@ export type StudioAction =
   | { type: 'select'; workflowId: Id; selection: Selection | null }
   | { type: 'toggleDetails' }
   | { type: 'drill'; workflowId: Id; target: InspectorTarget }
-  /** Keeps the first `depth` drill-downs (0: back to the selection). */
-  | { type: 'back'; workflowId: Id; depth: number }
+  /**
+   * Keeps the first `depth` drill-downs (0: back to the selection). With `from`, it applies only while the
+   * entity of that key is shown; otherwise it only clears busy (an unlink that lands after the user moved on).
+   */
+  | { type: 'back'; workflowId: Id; depth: number; from?: string }
   | { type: 'edit'; workflowId: Id; key: string; text: string; saved: string }
   | { type: 'discard'; workflowId: Id }
   | { type: 'read'; workflowId: Id; key: string; result: { ok: true; dto: EntityReadDto } | { ok: false; message: string } }
@@ -55,7 +58,8 @@ export type StudioAction =
   | { type: 'saveFailed'; workflowId: Id; key: string; failure: SaveFailure }
   /** `sent`: the edits the PUT carried; only those are cleared. */
   | { type: 'saved'; workflowId: Id; key: string; sent: Record<string, string>; dto: EntityReadDto }
-  | { type: 'created'; workflowId: Id; from: string; target: InspectorTarget; dto: EntityReadDto }
+  /** `sent`: the edits the POST carried; text typed meanwhile stays, on the new assignment. */
+  | { type: 'created'; workflowId: Id; from: string; target: InspectorTarget; sent: Record<string, string>; dto: EntityReadDto }
   /** A ready document re-read after a write: the new graph, keeping selection, view and Inspector. */
   | { type: 'refreshed'; workflowId: Id; doc: StudioDocument }
   /** A failed document goes back to loading. */
@@ -125,8 +129,10 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'drill':
       return inspect(state, action.workflowId, (i) => ({ ...EMPTY_INSPECTOR, trail: [...i.trail, action.target] }));
     case 'back':
-      return inspect(state, action.workflowId, (i) =>
-        action.depth >= i.trail.length ? i : { ...EMPTY_INSPECTOR, trail: i.trail.slice(0, Math.max(0, action.depth)) });
+      return inspect(state, action.workflowId, (i, d) => {
+        if (action.from !== undefined && targetKey(shownTargetOf(d)) !== action.from) return i.busy ? { ...i, busy: false } : i;
+        return action.depth >= i.trail.length ? i : { ...EMPTY_INSPECTOR, trail: i.trail.slice(0, Math.max(0, action.depth)) };
+      });
     case 'edit':
       return inspect(state, action.workflowId, (i) => {
         const edits = without(i.edits, (key) => key === action.key);
@@ -138,7 +144,8 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'read':
       return inspect(state, action.workflowId, (i, d) => {
         if (targetKey(shownTargetOf(d)) !== action.key) return i;
-        if (!action.result.ok) return { ...i, saved: null, readError: action.result.message };
+        // a failed re-read keeps the form it had, with a note (spec §8); with nothing read, only why
+        if (!action.result.ok) return { ...i, saved: i.saved?.key === action.key ? i.saved : null, readError: action.result.message };
         const dto = action.result.dto;
         return { ...i, saved: { key: action.key, dto }, readError: null, edits: without(i.edits, (key, text) => text === savedText(dto, key)) };
       });
@@ -156,6 +163,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'created':
       return inspect(state, action.workflowId, (i, d) => (targetKey(shownTargetOf(d)) !== action.from ? { ...i, busy: false } : {
         ...EMPTY_INSPECTOR, trail: [...i.trail.slice(0, -1), action.target], saved: { key: targetKey(action.target), dto: action.dto },
+        edits: without(i.edits, (key, text) => action.sent[key] === text),
       }));
     case 'refreshed':
       return update(state, action.workflowId, (d) => (d.status.kind !== 'ready' ? d : {
