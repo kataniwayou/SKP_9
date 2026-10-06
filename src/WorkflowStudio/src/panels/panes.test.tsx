@@ -1,10 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
+import { assignmentDto, cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { createStudioStore, StudioStoreProvider, type StudioStore } from '../store/studioStore';
-import { renderInspector } from '../test/inspector';
+import { inspectorGraph, renderInspector } from '../test/inspector';
 import { Output, Toolbox } from './PaneNote';
 import { Problems } from './Problems';
 
@@ -150,6 +150,58 @@ describe('Inspector editing (slice 3b)', () => {
     expect(await screen.findByText('This step no longer exists.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Discard unsaved changes' }));
     expect(store.getState().docs[0]!.inspector.edits).toEqual({});
+  });
+
+  const withAssignment = graphDto({
+    ...inspectorGraph,
+    assignments: [assignmentDto('a1', { stepId: 's1', payload: '{"k":1,"j":2}' })],
+  } as never);
+
+  it("opens a step's assignment and saves it with its step unchanged", async () => {
+    const assignment = assignmentDto('a1', { stepId: 's1', payload: '{"k":1,"j":2}' });
+    const putEntity = vi.fn().mockResolvedValue(ok({ ...assignment, payload: '{"k":3}' }));
+    const getEntity = vi.fn(async (kind: string) => ok(kind === 'step' ? step : assignment));
+    await renderInspector({ getEntity, putEntity }, { selection: { kind: 'step', stepId: 's1' }, graph: withAssignment });
+    fireEvent.click(await screen.findByRole('button', { name: '◆ 2 keys' }));
+    fireEvent.change(await screen.findByLabelText('Payload'), { target: { value: '{"k":3}' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(putEntity).toHaveBeenCalledWith('assignment', 'a1', {
+      name: 'assignment-a1', version: '1.0.0', description: null, stepId: 's1', payload: '{"k":3}',
+    }));
+  });
+
+  it('adds an assignment to a step that has none: a prefilled form, then Create', async () => {
+    const created = assignmentDto('a9', { name: 'fetch-assignment', stepId: 's1' });
+    const createAssignment = vi.fn().mockResolvedValue(ok(created));
+    const getEntity = vi.fn(async (kind: string) => ok(kind === 'step' ? step : kind === 'workflow' ? workflowDto() : created));
+    const putEntity = vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a9'] })));
+    await renderInspector({ getEntity, putEntity, createAssignment }, { selection: { kind: 'step', stepId: 's1' } });
+
+    fireEvent.click(await screen.findByRole('button', { name: '＋ Add assignment' }));
+    expect(await screen.findByText('NEW ASSIGNMENT')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('fetch-assignment');
+    expect(screen.getByLabelText('Payload')).toHaveValue('{}');
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(putEntity).toHaveBeenCalledWith('workflow', 'wf1', expect.objectContaining({ assignmentIds: ['a9'] })));
+    expect(createAssignment).toHaveBeenCalledWith({ name: 'fetch-assignment', version: '1.0.0', description: null, stepId: 's1', payload: '{}' });
+    expect(await screen.findByText('ASSIGNMENT')).toBeInTheDocument();
+  });
+
+  it('the new-assignment form cancels back to its step', async () => {
+    await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
+    fireEvent.click(await screen.findByRole('button', { name: '＋ Add assignment' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByText('STEP')).toBeInTheDocument();
+  });
+
+  it('asks the page before unlinking an assignment from this workflow', async () => {
+    const assignment = assignmentDto('a1', { stepId: 's1' });
+    const { confirmUnlink } = await renderInspector({ getEntity: vi.fn(async (kind: string) => ok(kind === 'step' ? step : assignment)) },
+      { selection: { kind: 'step', stepId: 's1' }, graph: withAssignment });
+    fireEvent.click(await screen.findByRole('button', { name: '◆ 2 keys' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unlink from this workflow' }));
+    expect(confirmUnlink).toHaveBeenCalledWith('wf1', document);
   });
 });
 

@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useRef } from 'react';
 import type { EntityReadDto } from '../api/entities';
-import type { ProcessorReadDto, StepReadDto } from '../api/types';
+import type { AssignmentReadDto, ProcessorReadDto, StepReadDto } from '../api/types';
 import type { StudioDocument } from '../app/document';
 import { useStudioActions } from '../app/studioActions';
+import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { entityName } from '../model/entityNames';
 import { FIELDS, missingRequired, savedText, shownText, type FieldSpec } from '../store/entityForms';
 import { hasEdits } from '../store/inspector';
@@ -44,7 +45,7 @@ export function Inspector() {
 function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocument; target: InspectorTarget }) {
   const store = useStudioStore();
   const showDetails = useStudio((s) => s.showDetails);
-  const { service, guard } = useStudioActions();
+  const { service, guard, confirmUnlink } = useStudioActions();
   const owner = useRef<HTMLDivElement>(null);
   const { workflowId, inspector } = open;
   const go = (proceed: () => void) => guard(workflowId, proceed, owner.current?.ownerDocument ?? document);
@@ -84,9 +85,23 @@ function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocu
           </div>
           <div className="savebar">
             {inspector.failure?.banner && <div className="banner" role="alert">{inspector.failure.banner}</div>}
-            <button type="button" className="btn" disabled={!dirty || inspector.busy} onClick={() => store.dispatch({ type: 'discard', workflowId })}>Revert</button>
-            <button type="button" className="btn primary" disabled={!dirty || inspector.busy || missingRequired(entityKindOf(target), saved, inspector.edits)}
-              onClick={() => void service.save(workflowId)}>{inspector.busy ? 'Saving…' : 'Save'}</button>
+            {target.kind === 'newAssignment' ? (
+              <>
+                <button type="button" className="btn" onClick={() => back(inspector.trail.length - 1)}>Cancel</button>
+                <button type="button" className="btn primary" disabled={inspector.busy || missingRequired('assignment', saved, inspector.edits)}
+                  onClick={() => void service.create(workflowId)}>{inspector.busy ? 'Creating…' : 'Create'}</button>
+              </>
+            ) : (
+              <>
+                {target.kind === 'assignment' && (
+                  <button type="button" className="link danger" disabled={inspector.busy}
+                    onClick={() => confirmUnlink(workflowId, owner.current?.ownerDocument ?? document)}>Unlink from this workflow</button>
+                )}
+                <button type="button" className="btn" disabled={!dirty || inspector.busy} onClick={() => store.dispatch({ type: 'discard', workflowId })}>Revert</button>
+                <button type="button" className="btn primary" disabled={!dirty || inspector.busy || missingRequired(entityKindOf(target), saved, inspector.edits)}
+                  onClick={() => void service.save(workflowId)}>{inspector.busy ? 'Saving…' : 'Save'}</button>
+              </>
+            )}
           </div>
         </>
       )}
@@ -111,8 +126,10 @@ function EntityForm({ open, doc, target, saved, showDetails, drill }: {
       errors={inspector.failure?.fields[spec.key] ?? []}
       onChange={(text) => store.dispatch({ type: 'edit', workflowId, key: spec.key, text, saved: savedText(saved, spec.key) })} />
   );
-  const name = uniqueNameOf(saved);
   const { graph } = doc;
+  const name = target.kind === 'newAssignment'
+    ? `New assignment for ${(() => { const s = graph.steps.get(target.stepId); return s ? entityName(s.name, s.version, s.id) : target.stepName; })()}`
+    : uniqueNameOf(saved);
 
   return (
     <>
@@ -120,12 +137,14 @@ function EntityForm({ open, doc, target, saved, showDetails, drill }: {
         <div className="uname" aria-label="Unique name"><span className="ro" data-tipcut={name}>{name}</span></div>
         <div className="sec-title">{crumbLabel(target)}</div>
         {FIELDS[kind].slice(0, 2).map(editor)}
-        <div className="metatog">
-          <button type="button" className="link" onClick={() => store.dispatch({ type: 'toggleDetails' })}>
-            {showDetails ? '▾ hide details' : '▸ show all'}
-          </button>
-        </div>
-        {showDetails && <div className="meta">{detailRows(saved).map(readOnly)}</div>}
+        {target.kind !== 'newAssignment' && (
+          <div className="metatog">
+            <button type="button" className="link" onClick={() => store.dispatch({ type: 'toggleDetails' })}>
+              {showDetails ? '▾ hide details' : '▸ show all'}
+            </button>
+          </div>
+        )}
+        {showDetails && target.kind !== 'newAssignment' && <div className="meta">{detailRows(saved).map(readOnly)}</div>}
         {FIELDS[kind].slice(2).map(editor)}
         {target.kind === 'step' && (() => {
           const step = saved as StepReadDto;
@@ -137,6 +156,31 @@ function EntityForm({ open, doc, target, saved, showDetails, drill }: {
               <button type="button" className="drill" data-tipcut={label} onClick={() => drill({ kind: 'processor', id: step.processorId ?? '' })}>{label}</button>
             </div>
           );
+        })()}
+        {target.kind === 'step' && (() => {
+          const assignment = assignmentByStep(graph.assignments).get(target.id);
+          if (!assignment) {
+            const stepName = (saved as StepReadDto).name ?? '';
+            return (
+              <div className="field">
+                <label>Assignment</label>
+                <button type="button" className="link" onClick={() => drill({ kind: 'newAssignment', stepId: target.id, stepName })}>＋ Add assignment</button>
+              </div>
+            );
+          }
+          const keys = payloadKeyCount(assignment.payload);
+          const label = keys === null ? '◆ payload' : `◆ ${keys} key${keys === 1 ? '' : 's'}`;
+          return (
+            <div className="field">
+              <label>Assignment</label>
+              <button type="button" className="drill" onClick={() => drill({ kind: 'assignment', id: assignment.id, stepId: target.id })}>{label}</button>
+            </div>
+          );
+        })()}
+        {(target.kind === 'assignment' || target.kind === 'newAssignment') && (() => {
+          const stepId = (saved as AssignmentReadDto).stepId ?? target.stepId;
+          const s = graph.steps.get(stepId);
+          return readOnly({ label: 'Step', value: s ? entityName(s.name, s.version, s.id) : stepId });
         })()}
         {target.kind === 'step' && doc.parkedIds.includes(target.id) && <div className="note warn">⚠ Parked: not connected, so not part of this workflow.</div>}
       </div>
