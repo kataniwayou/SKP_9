@@ -1,7 +1,7 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import { findHome, SIDE_DIRECTION, sideOf, toPosition, type GroupBox, type Home, type Rect, type Side } from './home';
 import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type ToolId } from './ids';
-import { sessionDock, stripDocuments, withDocuments, type SavedLayout } from './layoutPersistence';
+import { gridHolds, sessionDock, stripDocuments, withDocuments, type SavedLayout } from './layoutPersistence';
 
 /**
  * What the dock remembers beyond dockview's own state (mockup v49 SIDE and HOME): the edge each tool
@@ -85,18 +85,38 @@ function keepingToolSizes<T>(api: DockviewApi, memory: DockMemory, change: () =>
   return result;
 }
 
-/** The main-grid group documents go into: one that holds a document, else the remembered empty area. */
+/** The remembered document area, when it is still a group of the main grid. */
+const rememberedArea = (api: DockviewApi, memory: DockMemory): DockviewGroupPanel | undefined => {
+  const group = memory.documentGroupId === null ? undefined : api.groups.find((g) => g.id === memory.documentGroupId);
+  return inGrid(group) ? group : undefined;
+};
+
+/**
+ * The main-grid group documents go into: one that holds a document, else the remembered empty
+ * area. Never a hidden group: dockview does not show a group a panel is added to, so a document
+ * put there would be invisible (a pop-out leaves its group's place in the grid hidden).
+ */
 export function documentArea(api: DockviewApi, memory: DockMemory, except?: DockviewGroupPanel): DockviewGroupPanel | null {
-  const withDoc = api.groups.find((g) => g !== except && inGrid(g) && hasDocument(g));
+  const withDoc = api.groups.find((g) => g !== except && shownInGrid(g) && hasDocument(g));
   if (withDoc) return withDoc;
-  const remembered = memory.documentGroupId === null ? undefined : api.groups.find((g) => g.id === memory.documentGroupId);
-  return remembered && remembered !== except && inGrid(remembered) ? remembered : null;
+  const remembered = rememberedArea(api, memory);
+  return remembered && remembered !== except && shownInGrid(remembered) ? remembered : null;
 }
 
-/** The document area, created as an empty group left of the Inspector (or of everything) when there is none. */
+/**
+ * The document area. When the remembered area is hidden and empty (the place a popped-out document
+ * group left), it is shown again; otherwise one is created as an empty group left of the Inspector
+ * (or of everything).
+ */
 export function ensureDocumentArea(api: DockviewApi, memory: DockMemory): DockviewGroupPanel {
   const area = documentArea(api, memory);
   if (area) return area;
+  const left = rememberedArea(api, memory);
+  if (left && !left.api.isVisible && left.panels.length === 0) {
+    left.api.setVisible(true);
+    markDocumentArea(api, memory);
+    return left;
+  }
   const inspector = api.getPanel('inspector');
   const group = inGrid(inspector?.group)
     ? api.addGroup({ referencePanel: 'inspector', direction: 'left' })
@@ -357,7 +377,8 @@ export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: read
     if (home) homes[first] = { ...home, layout: [] };
     for (const id of rest) homes[id] = { ref: first, direction: 'within', size: 0, layout: [] };
   }
-  const remembered = memory.documentGroupId !== null && api.groups.some((g) => g.id === memory.documentGroupId) ? memory.documentGroupId : null;
+  // the remembered area only when the snapshot still holds it (the session drops a pop-out's hidden place)
+  const remembered = memory.documentGroupId !== null && gridHolds(dock, memory.documentGroupId) ? memory.documentGroupId : null;
   return { version: 1, dock, documentGroupId: documentGroupId ?? remembered, hidden: [...hidden], sides: { ...memory.sides }, homes, popped };
 }
 

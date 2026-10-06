@@ -83,6 +83,22 @@ describe('sessionDock', () => {
     expect(documentGroupId).toBe('g1');
   });
 
+  it('drops a hidden empty group (the place a pop-out left), keeping a hidden group of tool panes (a rail)', () => {
+    const input = layout();
+    input.grid.root = {
+      type: 'branch', size: 600,
+      data: [
+        { type: 'leaf', data: { id: 'g0', views: [] }, size: 300, visible: false },
+        { type: 'leaf', data: { id: 'g1', views: ['doc:a', 'doc:b', 'inspector'], activeView: 'doc:b' }, size: 300 },
+        { type: 'leaf', data: { id: 'g2', views: ['toolbox'], activeView: 'toolbox' }, size: 300, visible: false },
+      ],
+    };
+    const root = JSON.stringify(sessionDock(input).dock.grid.root);
+    expect(root).not.toContain('"g0"');
+    expect(root).toContain('"g1"');
+    expect(root).toContain('"g2"');
+  });
+
   it('keeps a floating document and does not touch its input', () => {
     const input = layout();
     const { dock } = sessionDock(input);

@@ -358,6 +358,27 @@ describe('DockShell, pop-out windows', () => {
     expect(props.onEscape).not.toHaveBeenCalled();
   });
 
+  it('opens a workflow in the main window, shown, while the document group is popped out (review Critical 1)', async () => {
+    const { update } = setup({ documents: [doc('a')], activeDocumentId: 'a' });
+    await popOut('wf-a');
+    update({ documents: [doc('a'), doc('b')], activeDocumentId: 'b' });
+    expect(docTabs('wf-b')).toHaveLength(1);
+    expect(tab('wf-b').closest('.dv-view')).toHaveClass('visible');
+  });
+
+  it('brings a popped-out document back shown after a refresh (review Critical 1)', async () => {
+    const onLayoutChange = vi.fn();
+    setup({ documents: [doc('a')], activeDocumentId: 'a', onLayoutChange });
+    await popOut('wf-a');
+    const last = onLayoutChange.mock.calls.at(-1)![0] as SavedLayout;
+    cleanup();
+
+    setup({ documents: [doc('a')], activeDocumentId: 'a', restore: last });
+    expect(docTabs('wf-a')).toHaveLength(1);
+    expect(tab('wf-a').closest('.dv-view')).toHaveClass('visible');
+    expect(dockApi.current!.groups.filter((g) => !g.api.isVisible)).toEqual([]);
+  });
+
   it('stops listening to a pop-out once its group is docked back', async () => {
     const { props } = setup();
     const win = await popOut('Output');

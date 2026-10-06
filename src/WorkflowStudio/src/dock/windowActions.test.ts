@@ -1,7 +1,7 @@
 import { createDockview, type DockviewApi, type IContentRenderer, type ITabRenderer } from 'dockview-react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  addDocument, applyLayout, autoHide, captureLayout, dockAsDocument, dockBack, ensureDocumentArea, floatGroup, floatPanel,
+  addDocument, applyLayout, autoHide, captureLayout, dockAsDocument, dockBack, documentArea, ensureDocumentArea, floatGroup, floatPanel,
   closeTool, newMemory, pinBack, resetLayout, showTool, type DockMemory,
 } from './windowActions';
 import { readLayout, writeLayout } from './layoutPersistence';
@@ -524,5 +524,42 @@ describe('applying a saved layout whose root size is the wrong dimension', () =>
 
     expect(api.getPanel('problems')!.group.api.height).toBe(150);
     expect(api.getPanel('doc:a')!.group.api.height).toBe(550);
+  });
+});
+
+describe('a document area left hidden (the place a popped-out document group left, review Critical 1)', () => {
+  /** A dock whose remembered document area is in the grid but hidden and empty, as a pop-out leaves it. */
+  const leftBehind = () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    const area = ensureDocumentArea(api, memory);
+    area.api.setVisible(false);
+    return { api, memory, area };
+  };
+
+  it('is never given a document while hidden: the document is shown', () => {
+    const { api, memory } = leftBehind();
+    const panel = addDocument(api, memory, 'a', 'orders');
+    expect(panel.group.api.location.type).toBe('grid');
+    expect(panel.group.api.isVisible).toBe(true);
+  });
+
+  it('is not offered as the document area while hidden', () => {
+    const { api, memory } = leftBehind();
+    expect(documentArea(api, memory)).toBeNull();
+  });
+
+  it('is left out of the session snapshot, so a restore cannot bring it back hidden', () => {
+    const { api, memory, area } = leftBehind();
+    const session = captureLayout(api, memory, [], { keepDocuments: true });
+    expect(JSON.stringify(session.dock.grid.root)).not.toContain(`"${area.id}"`);
+    expect(session.documentGroupId).not.toBe(area.id);
+
+    const { api: fresh, memory: freshMemory } = dock();
+    applyLayout(fresh, freshMemory, session);
+    const panel = addDocument(fresh, freshMemory, 'a', 'orders');
+    expect(panel.group.api.location.type).toBe('grid');
+    expect(panel.group.api.isVisible).toBe(true);
+    expect(fresh.groups.filter((g) => !g.api.isVisible)).toEqual([]);
   });
 });

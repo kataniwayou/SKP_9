@@ -160,6 +160,9 @@ export function sessionDock(layout: SerializedDockview): { dock: SerializedDockv
   let documentGroupId: string | null = null;
   forEachGroup(dock.grid.root, (g) => { if (documentGroupId === null && g.views.some(isDocPanelId)) documentGroupId = g.id; });
   const popped = takePopouts(dock);
+  // A pop-out leaves its group's place in the grid hidden and empty. It would come back hidden, and
+  // pile up refresh after refresh; its documents come back in the document area, its panes docked.
+  pruneGrid(dock, (g, leaf) => leaf.visible === false && g.views.length === 0);
   fixRootSize(dock);
   return { dock, documentGroupId, popped };
 }
@@ -207,9 +210,9 @@ function fixRootSize(dock: SerializedDockview): void {
  * its children to its parent, since a branch's orientation is its depth: the child's children run
  * the way the parent's do. At the root that flips the grid's orientation instead.
  */
-function pruneGrid(dock: SerializedDockview, drop: (group: GroupState) => boolean): void {
+function pruneGrid(dock: SerializedDockview, drop: (group: GroupState, leaf: GridNode) => boolean): void {
   const prune = (node: GridNode): GridNode[] => {
-    if (node.type === 'leaf') return drop(node.data as GroupState) ? [] : [node];
+    if (node.type === 'leaf') return drop(node.data as GroupState, node) ? [] : [node];
     const children = (node.data as GridNode[]).flatMap(prune);
     if (children.length === 0) return [];
     if (children.length === 1) {
@@ -225,6 +228,13 @@ function pruneGrid(dock: SerializedDockview, drop: (group: GroupState) => boolea
     dock.grid.orientation = dock.grid.orientation === Orientation.HORIZONTAL ? Orientation.VERTICAL : Orientation.HORIZONTAL;
   }
   dock.grid.root = { ...root, data: children };
+}
+
+/** Whether the layout's main grid holds the group. */
+export function gridHolds(dock: SerializedDockview, groupId: string): boolean {
+  let found = false;
+  forEachGroup(dock.grid.root, (g) => { found ||= g.id === groupId; });
+  return found;
 }
 
 /** Every group (grid leaf) in a serialized grid, depth first. */
