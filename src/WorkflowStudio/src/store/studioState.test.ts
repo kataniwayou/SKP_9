@@ -146,7 +146,7 @@ describe('the Inspector (slice 3b)', () => {
   it('a failed save keeps the edits and says why; discard drops both', () => {
     let s = opened();
     s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'version', text: 'abc', saved: '1.0.0' });
-    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', failure: { fields: { version: ['Version must be x.y.z.'] }, banner: null } });
+    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', key: 'step:s1', failure: { fields: { version: ['Version must be x.y.z.'] }, banner: null } });
     expect(insp(s)).toMatchObject({ edits: { version: 'abc' }, busy: false, failure: { fields: { version: ['Version must be x.y.z.'] } } });
     s = reduce(s, { type: 'discard', workflowId: 'wf1' });
     expect(insp(s)).toMatchObject({ edits: {}, failure: null });
@@ -155,9 +155,20 @@ describe('the Inspector (slice 3b)', () => {
   it('a created assignment replaces the new-assignment form in the trail', () => {
     let s = opened();
     s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'fetch' } });
-    s = reduce(s, { type: 'created', workflowId: 'wf1', target: { kind: 'assignment', id: 'a9', stepId: 's1' }, dto: { id: 'a9', stepId: 's1' } as never });
+    s = reduce(s, { type: 'created', workflowId: 'wf1', from: 'newAssignment:s1', target: { kind: 'assignment', id: 'a9', stepId: 's1' }, dto: { id: 'a9', stepId: 's1' } as never });
     expect(insp(s).trail).toEqual([{ kind: 'assignment', id: 'a9', stepId: 's1' }]);
     expect(insp(s).saved?.key).toBe('assignment:a9');
+  });
+
+  it('a late saveFailed or created, for an entity no longer shown, only clears busy', () => {
+    let s = opened();
+    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
+    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true });
+    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', key: 'step:s1', failure: { fields: {}, banner: 'late' } });
+    expect(insp(s)).toMatchObject({ busy: false, failure: null });
+    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true });
+    s = reduce(s, { type: 'created', workflowId: 'wf1', from: 'newAssignment:s1', target: { kind: 'assignment', id: 'a9', stepId: 's1' }, dto: { id: 'a9' } as never });
+    expect(insp(s)).toMatchObject({ busy: false, trail: [{ kind: 'processor', id: 'p1' }] });
   });
 
   it('a refreshed document takes the new graph and name, keeping its Inspector; retry reloads a failed one', async () => {

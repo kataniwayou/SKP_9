@@ -43,8 +43,8 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     const doc = docOf(id);
     return doc === null ? null : shownTargetOf(doc);
   };
-  const fail = (workflowId: Id, failure: SaveFailure): false => {
-    store.dispatch({ type: 'saveFailed', workflowId, failure });
+  const fail = (workflowId: Id, key: string, failure: SaveFailure): false => {
+    store.dispatch({ type: 'saveFailed', workflowId, key, failure });
     return false;
   };
 
@@ -73,15 +73,17 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     const doc = docOf(workflowId);
     const target = shown(workflowId);
     if (doc === null || target === null || Object.keys(doc.inspector.edits).length === 0) return true;
+    if (doc.inspector.busy) return false;
     if (target.kind === 'newAssignment') return create(workflowId);
     const sent = doc.inspector.edits;
+    const key = targetKey(target);
     store.dispatch({ type: 'busy', workflowId, busy: true });
     // built from a GET made now: structural fields go back exactly as the server holds them (review focus 3)
     const fresh = await api.getEntity(target.kind, target.id);
-    if (!fresh.ok) return fail(workflowId, failureOf(target, fresh.error));
+    if (!fresh.ok) return fail(workflowId, key, failureOf(target, fresh.error));
     const put = await api.putEntity(target.kind, target.id, updateDto(target.kind, fresh.value, sent));
-    if (!put.ok) return fail(workflowId, failureOf(target, put.error));
-    store.dispatch({ type: 'saved', workflowId, key: targetKey(target), sent, dto: put.value });
+    if (!put.ok) return fail(workflowId, key, failureOf(target, put.error));
+    store.dispatch({ type: 'saved', workflowId, key, sent, dto: put.value });
     afterWrite();
     return true;
   }
@@ -98,24 +100,27 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
   async function create(workflowId: Id): Promise<boolean> {
     const doc = docOf(workflowId);
     const target = shown(workflowId);
-    if (doc === null || target?.kind !== 'newAssignment' || doc.inspector.saved === null) return false;
+    if (doc === null || target?.kind !== 'newAssignment' || doc.inspector.saved === null || doc.inspector.busy) return false;
+    const from = targetKey(target);
     store.dispatch({ type: 'busy', workflowId, busy: true });
     const made = await api.createAssignment(createAssignmentDto(doc.inspector.saved.dto as AssignmentReadDto, doc.inspector.edits));
-    if (!made.ok) return fail(workflowId, failureOf(target, made.error));
-    const id = made.value.id ?? '';
-    store.dispatch({ type: 'created', workflowId, target: { kind: 'assignment', id, stepId: target.stepId }, dto: made.value });
+    if (!made.ok) return fail(workflowId, from, failureOf(target, made.error));
+    const id = made.value.id;
+    if (!id) return fail(workflowId, from, { fields: {}, banner: 'Not saved: BaseApi returned no id for the new assignment' });
+    store.dispatch({ type: 'created', workflowId, from, target: { kind: 'assignment', id, stepId: target.stepId }, dto: made.value });
     const why = await relink(workflowId, (ids) => [...ids, id]);
     afterWrite();
-    return why === null ? true : fail(workflowId, { fields: {}, banner: `Created but not linked to this workflow: ${why}` });
+    return why === null ? true : fail(workflowId, targetKey({ kind: 'assignment', id, stepId: target.stepId }), { fields: {}, banner: `Created but not linked to this workflow: ${why}` });
   }
 
   async function unlink(workflowId: Id): Promise<boolean> {
     const doc = docOf(workflowId);
     const target = shown(workflowId);
-    if (doc === null || target?.kind !== 'assignment') return false;
+    if (doc === null || target?.kind !== 'assignment' || doc.inspector.busy) return false;
+    const from = targetKey(target);
     store.dispatch({ type: 'busy', workflowId, busy: true });
     const why = await relink(workflowId, (ids) => ids.filter((x) => x !== target.id));
-    if (why !== null) return fail(workflowId, { fields: {}, banner: `Not unlinked: ${why}` });
+    if (why !== null) return fail(workflowId, from, { fields: {}, banner: `Not unlinked: ${why}` });
     store.dispatch({ type: 'back', workflowId, depth: doc.inspector.trail.length - 1 });
     afterWrite();
     return true;

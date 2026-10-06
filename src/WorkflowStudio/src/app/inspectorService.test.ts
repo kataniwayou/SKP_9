@@ -132,4 +132,40 @@ describe('InspectorService', () => {
     expect(inspector().trail).toEqual([]);
     expect(afterWrite).toHaveBeenCalledTimes(1);
   });
+
+  it('a save that fails after the user drilled away leaves the shown entity without a failure', async () => {
+    let answer!: (r: ApiResult<unknown>) => void;
+    const getEntity = vi.fn().mockReturnValue(new Promise((r) => { answer = r; }));
+    const { store, service, inspector } = await setup({ getEntity });
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'version', text: 'abc', saved: '1.0.0' });
+    const saving = service.save('wf1');
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
+    answer({ ok: false, error: { kind: 'network', message: 'down' } });
+    expect(await saving).toBe(false);
+    expect(inspector().failure).toBeNull();
+    expect(inspector().busy).toBe(false);
+  });
+
+  it('a second write while one is in flight is refused', async () => {
+    const getEntity = vi.fn().mockReturnValue(new Promise(() => {}));
+    const { store, service } = await setup({ getEntity });
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'version', text: 'abc', saved: '1.0.0' });
+    void service.save('wf1');
+    expect(await service.save('wf1')).toBe(false);
+    expect(await service.unlink('wf1')).toBe(false);
+    expect(getEntity).toHaveBeenCalledTimes(1);
+  });
+
+  it('an assignment answer without an id is a failure and links nothing', async () => {
+    const putEntity = vi.fn();
+    const { store, service, inspector } = await setup({
+      createAssignment: vi.fn().mockResolvedValue(ok({ ...assignmentDto('a9'), id: undefined })),
+      getEntity: vi.fn().mockResolvedValue(ok(workflowDto())), putEntity,
+    });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'step-s1' } });
+    service.read('wf1');
+    expect(await service.create('wf1')).toBe(false);
+    expect(putEntity).not.toHaveBeenCalled();
+    expect(inspector().failure?.banner).toBe('Not saved: BaseApi returned no id for the new assignment');
+  });
 });

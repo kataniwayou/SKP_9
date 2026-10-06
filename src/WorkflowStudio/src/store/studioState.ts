@@ -52,10 +52,10 @@ export type StudioAction =
   | { type: 'discard'; workflowId: Id }
   | { type: 'read'; workflowId: Id; key: string; result: { ok: true; dto: EntityReadDto } | { ok: false; message: string } }
   | { type: 'busy'; workflowId: Id; busy: boolean }
-  | { type: 'saveFailed'; workflowId: Id; failure: SaveFailure }
+  | { type: 'saveFailed'; workflowId: Id; key: string; failure: SaveFailure }
   /** `sent`: the edits the PUT carried; only those are cleared. */
   | { type: 'saved'; workflowId: Id; key: string; sent: Record<string, string>; dto: EntityReadDto }
-  | { type: 'created'; workflowId: Id; target: InspectorTarget; dto: EntityReadDto }
+  | { type: 'created'; workflowId: Id; from: string; target: InspectorTarget; dto: EntityReadDto }
   /** A ready document re-read after a write: the new graph, keeping selection, view and Inspector. */
   | { type: 'refreshed'; workflowId: Id; doc: StudioDocument }
   /** A failed document goes back to loading. */
@@ -145,7 +145,8 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'busy':
       return inspect(state, action.workflowId, (i) => (i.busy === action.busy ? i : { ...i, busy: action.busy }));
     case 'saveFailed':
-      return inspect(state, action.workflowId, (i) => ({ ...i, busy: false, failure: action.failure }));
+      return inspect(state, action.workflowId, (i, d) =>
+        targetKey(shownTargetOf(d)) !== action.key ? { ...i, busy: false } : { ...i, busy: false, failure: action.failure });
     case 'saved':
       return inspect(state, action.workflowId, (i, d) => {
         if (targetKey(shownTargetOf(d)) !== action.key) return { ...i, busy: false };
@@ -153,7 +154,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         return { ...i, edits, busy: false, failure: null, readError: null, saved: { key: action.key, dto: action.dto } };
       });
     case 'created':
-      return inspect(state, action.workflowId, (i) => ({
+      return inspect(state, action.workflowId, (i, d) => (targetKey(shownTargetOf(d)) !== action.from ? { ...i, busy: false } : {
         ...EMPTY_INSPECTOR, trail: [...i.trail.slice(0, -1), action.target], saved: { key: targetKey(action.target), dto: action.dto },
       }));
     case 'refreshed':
