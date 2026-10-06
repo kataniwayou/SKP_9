@@ -20,6 +20,15 @@ async function runningAndIdle(request: APIRequestContext): Promise<{ running: Li
   };
 }
 
+/** The first workflow with steps whose graph has a cache, or null. Read-only. */
+async function workflowWithCache(request: APIRequestContext): Promise<LiveWorkflow | null> {
+  for (const w of await workflowsWithSteps(request)) {
+    const graph = await request.get(`/api/v1/workflows/${w.id}/graph`);
+    if (graph.ok() && ((await graph.json()) as { caches?: unknown[] }).caches?.length) return w;
+  }
+  return null;
+}
+
 async function liveness(request: APIRequestContext): Promise<Map<string, string>> {
   const res = await request.get('/api/v1/processors/liveness');
   expect(res.ok()).toBe(true);
@@ -34,6 +43,7 @@ async function open(page: Page, wf: LiveWorkflow) {
 
 test('every processor shows the health BaseApi reports for it', async ({ page, request }) => {
   const [wf] = await workflowsWithSteps(request);
+  test.skip(!wf, 'BaseApi has no workflow with steps');
   const panel = await open(page, wf!);
   const verdicts = await liveness(request);
 
@@ -45,57 +55,89 @@ test('every processor shows the health BaseApi reports for it', async ({ page, r
   }
 });
 
-test('a running workflow is started and its intact wires pulse; an idle one is still', async ({ page, request }) => {
-  const { running, idle } = await runningAndIdle(request);
-  test.skip(!running && !idle, 'BaseApi has no workflow with steps');
+test('a running workflow is started and its intact wires pulse', async ({ page, request }) => {
+  const { running } = await runningAndIdle(request);
+  test.skip(!running, 'no running workflow in BaseApi');
+  const panel = await open(page, running!);
 
-  if (running) {
-    const panel = await open(page, running);
-    await expect(panel.locator('.wf')).toHaveAttribute('data-started', 'true');
-    const intact = panel.locator('.react-flow__edge .wire:not(.broken)');
-    await expect.poll(() => panel.locator('.nx-pulse').count()).toBe(await intact.count());
-    expect(await intact.count()).toBeGreaterThan(0);
+  await expect(panel.locator('.wf')).toHaveAttribute('data-started', 'true');
+  const intact = panel.locator('.react-flow__edge .wire:not(.broken)');
+  await expect.poll(() => intact.count()).toBeGreaterThan(0);
+  for (const wire of await intact.all()) {
+    await expect(wire.locator('.nx-pulse')).toHaveCount(1);
   }
-  if (idle) {
-    const panel = await open(page, idle);
-    await expect(panel.locator('.wf')).toHaveAttribute('data-started', 'false');
-    await expect(panel.locator('.wf')).toHaveClass(/nx-idlewf/);
-    await expect(panel.locator('.nx-pulse')).toHaveCount(0);
-  }
+  await expect(panel.locator('.react-flow__edge .wire.broken .nx-pulse')).toHaveCount(0);
 });
 
-test('with reduced motion nothing spins, blinks or pulses', async ({ page, request }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  const { running, idle } = await runningAndIdle(request);
-  const wf = running ?? idle;
-  test.skip(!wf, 'BaseApi has no workflow with steps');
-  const panel = await open(page, wf!);
+test('an idle workflow is still', async ({ page, request }) => {
+  const { idle } = await runningAndIdle(request);
+  test.skip(!idle, 'no idle workflow with steps in BaseApi');
+  const panel = await open(page, idle!);
 
-  const animation = (selector: string) => panel.locator(selector).first().evaluate((e) => getComputedStyle(e).animationName);
-  await expect.poll(() => animation('.chipg .nx-spin')).toBe('none');
-  await expect.poll(() => animation('.wf .hub-inner')).toBe('none');
+  await expect(panel.locator('.wf')).toHaveAttribute('data-started', 'false');
+  await expect(panel.locator('.wf')).toHaveClass(/nx-idlewf/);
+  await expect(panel.locator('.nx-pulse')).toHaveCount(0);
+});
+
+const animation = (el: import('@playwright/test').Locator) => el.evaluate((e) => getComputedStyle(e).animationName);
+
+test('with reduced motion a started workflow, nothing spins or pulses', async ({ page, request }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const { running } = await runningAndIdle(request);
+  test.skip(!running, 'no running workflow in BaseApi');
+  const panel = await open(page, running!);
+
+  await expect.poll(() => panel.locator('.nx-pulse').count()).toBeGreaterThan(0);
   for (const pulse of await panel.locator('.nx-pulse').all()) {
     expect(await pulse.evaluate((e) => getComputedStyle(e).display)).toBe('none');
   }
-  for (const wait of await panel.locator('.nx-wait').all()) {
-    expect(await wait.evaluate((e) => getComputedStyle(e).animationName)).toBe('none');
+  for (const selector of ['.chipg .nx-spin', '.wf .nx-spin']) {
+    await expect.poll(() => panel.locator(selector).count()).toBeGreaterThan(0);
+    for (const spin of await panel.locator(selector).all()) expect(await animation(spin)).toBe('none');
+  }
+  const waits = panel.locator('.nx-health.nx-wait');
+  if ((await waits.count()) === 0) {
+    test.info().annotations.push({ type: 'note', description: 'no undetermined processor in the live data; processor blink not checked' });
+  } else {
+    for (const wait of await waits.all()) expect(await animation(wait)).toBe('none');
   }
 });
 
-test('a selected step, die and cache draw the cyan selection stroke', async ({ page, request }) => {
+test('with reduced motion an idle hub does not blink', async ({ page, request }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const { idle } = await runningAndIdle(request);
+  test.skip(!idle, 'no idle workflow with steps in BaseApi');
+  const panel = await open(page, idle!);
+
+  const hubInner = panel.locator('.wf.nx-idlewf .hub-inner');
+  await expect(hubInner).toHaveCount(1);
+  await expect.poll(() => animation(hubInner)).toBe('none');
+});
+
+test('a selected step and die draw the cyan selection stroke', async ({ page, request }) => {
   const [wf] = await workflowsWithSteps(request);
+  test.skip(!wf, 'BaseApi has no workflow with steps');
   const panel = await open(page, wf!);
   const cyan = 'rgb(125, 211, 252)';
   const stroke = (selector: string) => panel.locator(selector).first().evaluate((e) => getComputedStyle(e).stroke);
 
+  await expect.poll(() => stroke('.react-flow__node-step .nx-frame')).not.toBe(cyan);
   await panel.locator('.react-flow__node-step').first().click({ position: { x: 20, y: 12 } });
   await expect.poll(() => stroke('.studio-sel .nx-frame')).toBe(cyan);
 
+  await expect.poll(() => stroke('.react-flow__node-step .nx-panel')).not.toBe(cyan);
   await panel.locator('.react-flow__node-step .chipg').first().click();
   await expect.poll(() => stroke('.studio-die-sel .nx-panel')).toBe(cyan);
+});
 
-  const cache = panel.locator('.react-flow__node-cache');
-  test.skip((await cache.count()) === 0, 'the first live workflow has no cache');
-  await cache.first().click();
+test('a selected cache draws the cyan selection stroke', async ({ page, request }) => {
+  const wf = await workflowWithCache(request);
+  test.skip(!wf, 'no workflow with a cache in BaseApi');
+  const panel = await open(page, wf!);
+  const cyan = 'rgb(125, 211, 252)';
+  const stroke = (selector: string) => panel.locator(selector).first().evaluate((e) => getComputedStyle(e).stroke);
+
+  await expect.poll(() => stroke('.react-flow__node-cache .nx-brk')).not.toBe(cyan);
+  await panel.locator('.react-flow__node-cache').first().click();
   await expect.poll(() => stroke('.studio-sel .nx-brk')).toBe(cyan);
 });
