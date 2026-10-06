@@ -19,7 +19,7 @@ const SPINNER = closingDash(R - 9, [44, 14, 8, 14]);
 const TICKS = `1.5 ${(2 * Math.PI * R / 48 - 1.5).toFixed(2)}`;
 /** The pill (gallery wfPill, 200 wide at its r 80 hub, × 1.2): centred under the dial. */
 export const PILL_W = 240;
-const STARTED = '  ● started', NOT_STARTED = '  ○ not started';
+const STARTED = '  ● started', NOT_STARTED = '  ○ not started';
 
 /**
  * The workflow as the hub dial (spec §5.1; mockup v50 drawWorkflow, gallery hubDial). The two outer

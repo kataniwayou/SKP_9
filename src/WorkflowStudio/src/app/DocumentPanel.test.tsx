@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
@@ -241,8 +241,7 @@ describe('DocumentPanel', () => {
     act(() => store.dispatch({ type: 'loaded', workflowId: 'wf1', doc }));
 
     expect(await screen.findByText('fetch')).toBeInTheDocument();
-    // the toolbar and the hub's pill both show the cron
-    expect(screen.getAllByText('⏱ 0 * * * * *')).toHaveLength(2);
+    expect(within(screen.getByRole('toolbar', { name: 'Workflow' })).getByText('⏱ 0 * * * * *')).toBeInTheDocument();
     expect(await screen.findByText('▶ running')).toBeInTheDocument();
     for (const name of ['⤓ Save', '▶ Start', '■ Stop']) expect(screen.getByRole('button', { name })).toBeDisabled();
     expect(screen.getByRole('button', { name: '▶ Start' }).parentElement).toHaveAttribute('data-tip', 'Not available yet');
@@ -254,6 +253,15 @@ describe('DocumentPanel', () => {
     act(() => store.dispatch({ type: 'loaded', workflowId: 'wf1', doc }));
     expect(await screen.findByText('status unknown')).toBeInTheDocument();
     expect(screen.queryByText('■ stopped')).not.toBeInTheDocument();
+    expect(document.querySelector('.wf')!.getAttribute('data-started')).toBe('false'); // review focus 3
+  });
+
+  it('shows the hub started when the live list names the workflow', async () => {
+    const { store } = await setup(vi.fn().mockResolvedValue({ ok: true, value: ['wf1'] }));
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));
+    act(() => store.dispatch({ type: 'loaded', workflowId: 'wf1', doc }));
+    expect(await screen.findByText('▶ running')).toBeInTheDocument();
+    expect(document.querySelector('.wf')!.getAttribute('data-started')).toBe('true');
   });
 
   it('does not poll while the document is loading or has failed', async () => {

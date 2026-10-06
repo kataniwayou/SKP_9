@@ -17,7 +17,7 @@ describe('WorkflowView', () => {
     const wf = container.querySelector('.wf')!;
     expect(wf.classList.contains('nx-idlewf')).toBe(true);
     expect(wf.getAttribute('data-started')).toBe('false');
-    expect(container.querySelector('.nx-state')!.textContent).toBe('⏱ 0 * * * * *  ○ not started');
+    expect(container.querySelector('.nx-state')!.textContent).toBe('⏱ 0 * * * * *  ○ not started');
   });
 
   it('is green and turning when started', () => {
@@ -26,7 +26,7 @@ describe('WorkflowView', () => {
     expect(wf.classList.contains('started')).toBe(true);
     expect(wf.classList.contains('nx-idlewf')).toBe(false);
     expect(container.querySelector('.hub-inner .nx-spin')).not.toBeNull();
-    expect(container.querySelector('.nx-state')!.textContent).toBe('⏱ 0 * * * * *  ● started');
+    expect(container.querySelector('.nx-state')!.textContent).toBe('⏱ 0 * * * * *  ● started');
   });
 
   it('gives each hub its own core gradient, so two documents never share one', () => {
