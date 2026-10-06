@@ -14,6 +14,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     getProcessor: vi.fn().mockResolvedValue(notFound),
     getSchema: vi.fn().mockResolvedValue(notFound),
     listLive: vi.fn(),
+    listLiveness: vi.fn(),
     validate: vi.fn().mockResolvedValue(ok({ valid: true, problems: [] })),
     ...over,
   };

@@ -6,6 +6,7 @@ import { CableEdge } from './edges/CableEdge';
 import { TetherEdge } from './edges/TetherEdge';
 import { FIT_VIEW_OPTIONS } from './fitOptions';
 import { FollowFitContext, FollowSize } from './followSize';
+import { LiveArtContext, NO_LIVE_ART, type LiveArt } from './liveArt';
 import type { TextFitter } from './fitText';
 import { GridBackground } from './GridBackground';
 import { Legend } from './Legend';
@@ -32,6 +33,8 @@ interface Props {
   selection?: Selection | null;
   /** Called with what a click selects, or null for a click on empty canvas. Omitted: clicks do nothing. */
   onSelect?: (selection: Selection | null) => void;
+  /** What the art shows of the running system; omitted, nothing is started and every processor is undetermined. */
+  live?: LiveArt;
   /** Drawn over the canvas inside its React Flow provider: the document's toolbar and zoom controls. */
   children?: ReactNode;
 }
@@ -45,7 +48,7 @@ const PRO_OPTIONS = { hideAttribution: true } as const;
  * cache or the sphere can be selected. Nothing can be dragged or connected, and React Flow's own
  * selection stays off: the selection lives in the store and is drawn with a class.
  */
-export function WorkflowCanvas({ doc, fitter, width, height, selection = null, onSelect, children }: Props) {
+export function WorkflowCanvas({ doc, fitter, width, height, selection = null, onSelect, live = NO_LIVE_ART, children }: Props) {
   const { nodes, edges } = useMemo(() => toFlow(doc, fitter), [doc, fitter]);
   const shown = useMemo(() => withSelection(nodes, selection), [nodes, selection]);
   const followFit = useRef(true);
@@ -53,43 +56,45 @@ export function WorkflowCanvas({ doc, fitter, width, height, selection = null, o
   return (
     <ReactFlowProvider key={doc.graph.workflow.id}>
       <FollowFitContext.Provider value={followFit}>
-        <div className="studio-canvas" style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}>
-          <ReactFlow
-            nodes={shown}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            width={width}
-            height={height}
-            colorMode="dark"
-            fitView
-            fitViewOptions={FIT_VIEW_OPTIONS}
-            proOptions={PRO_OPTIONS}
-            minZoom={0.1}
-            maxZoom={4}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable={false}
-            edgesFocusable={false}
-            nodesFocusable={false}
-            panOnScroll
-            zoomOnScroll={false}
-            zoomActivationKeyCode="Control"
-            panOnDrag={[1]}
-            panActivationKeyCode="Space"
-            zoomOnDoubleClick={false}
-            deleteKeyCode={null}
-            onNodeClick={onSelect ? (event, node) => onSelect(selectionFromClick(node, event.target as Element, doc.graph)) : undefined}
-            onPaneClick={onSelect ? () => onSelect(null) : undefined}
-            onMoveStart={(event) => { if (event) followFit.current = false; }}
-          >
-            <GridBackground />
-          </ReactFlow>
-          <FollowSize />
-          <ScrollBars />
-          <Legend />
-          {children}
-        </div>
+        <LiveArtContext.Provider value={live}>
+          <div className="studio-canvas" style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}>
+            <ReactFlow
+              nodes={shown}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              width={width}
+              height={height}
+              colorMode="dark"
+              fitView
+              fitViewOptions={FIT_VIEW_OPTIONS}
+              proOptions={PRO_OPTIONS}
+              minZoom={0.1}
+              maxZoom={4}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              elementsSelectable={false}
+              edgesFocusable={false}
+              nodesFocusable={false}
+              panOnScroll
+              zoomOnScroll={false}
+              zoomActivationKeyCode="Control"
+              panOnDrag={[1]}
+              panActivationKeyCode="Space"
+              zoomOnDoubleClick={false}
+              deleteKeyCode={null}
+              onNodeClick={onSelect ? (event, node) => onSelect(selectionFromClick(node, event.target as Element, doc.graph)) : undefined}
+              onPaneClick={onSelect ? () => onSelect(null) : undefined}
+              onMoveStart={(event) => { if (event) followFit.current = false; }}
+            >
+              <GridBackground />
+            </ReactFlow>
+            <FollowSize />
+            <ScrollBars />
+            <Legend />
+            {children}
+          </div>
+        </LiveArtContext.Provider>
       </FollowFitContext.Provider>
     </ReactFlowProvider>
   );

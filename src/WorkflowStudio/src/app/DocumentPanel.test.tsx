@@ -5,7 +5,7 @@ import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { createStudioStore, StudioStoreProvider } from '../store/studioStore';
 import { DocumentPanel } from './DocumentPanel';
 import { loadedDocument } from './fixtures';
-import { LIVE_POLL_MS, useLiveStatus, useOwnerDocument, usePanelVisible, type PanelLike } from './panelHooks';
+import { LIVE_POLL_MS, useLiveness, useLiveStatus, useOwnerDocument, usePanelVisible, type PanelLike } from './panelHooks';
 
 /** A stand-in for a dockview panel api: visible or not, in a given window, with events we fire. */
 function fakePanel(visible = true, win: Window = window) {
@@ -78,6 +78,31 @@ describe('useLiveStatus', () => {
     expect(result.current).toBe('unknown');
     await act(async () => { await vi.advanceTimersByTimeAsync(LIVE_POLL_MS); });
     expect(result.current).toBe('running');
+  });
+});
+
+describe('useLiveness', () => {
+  it('polls every 5 s while visible, returns the last answer, and null while hidden', async () => {
+    vi.useFakeTimers();
+    const answer = { ok: true, value: [{ processorId: 'p1', live: true }] };
+    const listLiveness = vi.fn().mockResolvedValue(answer);
+    const api = { listLiveness } as unknown as StudioApi;
+    const { result, rerender } = renderHook(({ visible }) => useLiveness(api, visible), { initialProps: { visible: true } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current).toEqual(answer);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2 * LIVE_POLL_MS); });
+    expect(listLiveness).toHaveBeenCalledTimes(3);
+
+    rerender({ visible: false });
+    expect(result.current).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * LIVE_POLL_MS); });
+    expect(listLiveness).toHaveBeenCalledTimes(3);
+  });
+
+  it('turns a thrown call into a network failure', async () => {
+    const api = { listLiveness: vi.fn().mockRejectedValue(new Error('boom')) } as unknown as StudioApi;
+    const { result } = renderHook(() => useLiveness(api, true));
+    await waitFor(() => expect(result.current).toEqual({ ok: false, error: { kind: 'network', message: 'Error: boom' } }));
   });
 });
 
@@ -199,13 +224,13 @@ describe('useOwnerDocument', () => {
 });
 
 describe('DocumentPanel', () => {
-  async function setup(listLive = vi.fn().mockResolvedValue({ ok: true, value: [] })) {
+  async function setup(listLive = vi.fn().mockResolvedValue({ ok: true, value: [] }), listLiveness = vi.fn().mockResolvedValue({ ok: true, value: [] })) {
     const store = createStudioStore();
     store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
     const fake = fakePanel();
-    const api = { listLive } as unknown as StudioApi;
+    const api = { listLive, listLiveness } as unknown as StudioApi;
     render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}><DocumentPanel api={api} workflowId="wf1" panel={fake.panel} /></div></StudioStoreProvider>);
-    return { store, fake, listLive };
+    return { store, fake, listLive, listLiveness };
   }
 
   it('shows Loading…, then the canvas with its toolbar and status', async () => {
@@ -238,6 +263,30 @@ describe('DocumentPanel', () => {
     act(() => store.dispatch({ type: 'failed', workflowId: 'wf1', message: 'gone' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(3 * LIVE_POLL_MS); });
     expect(listLive).not.toHaveBeenCalled();
+  });
+
+  it('polls processor liveness beside the live status, and neither while loading or failed', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })); // before the fake clock: the loader awaits real time
+    vi.useFakeTimers();
+    const { store, listLive, listLiveness } = await setup();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * LIVE_POLL_MS); });
+    expect(listLiveness).not.toHaveBeenCalled();
+
+    act(() => store.dispatch({ type: 'loaded', workflowId: 'wf1', doc }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(listLiveness).toHaveBeenCalledTimes(1);
+    expect(listLive).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops polling liveness when its tab is hidden', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));
+    vi.useFakeTimers();
+    const { store, fake, listLiveness } = await setup();
+    act(() => store.dispatch({ type: 'loaded', workflowId: 'wf1', doc }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    act(() => fake.show(false));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * LIVE_POLL_MS); });
+    expect(listLiveness).toHaveBeenCalledTimes(1);
   });
 
   it('shows why a document could not be opened (review focus 2: a workflow deleted since the list was read)', async () => {

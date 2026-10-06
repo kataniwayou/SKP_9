@@ -1,9 +1,12 @@
+import { useMemo } from 'react';
 import type { StudioApi } from '../api/client';
+import { healthOf } from '../api/liveness';
+import type { LiveArt } from '../canvas/liveArt';
 import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { CapsuleToolbar } from './CapsuleToolbar';
-import { useLiveStatus, useOwnerDocument, usePanelShown, usePanelVisible, type PanelLike } from './panelHooks';
+import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVisible, type PanelLike } from './panelHooks';
 
 /**
  * One workflow document in its dock tab: its own React Flow canvas and viewport (the panel uses
@@ -15,7 +18,11 @@ export function DocumentPanel({ api, workflowId, panel }: { api: StudioApi; work
   const store = useStudioStore();
   const ownerDocument = useOwnerDocument(panel);
   const fitter = useFitter(ownerDocument);
-  const status = useLiveStatus(api, workflowId, usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready');
+  const visible = usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready';
+  const status = useLiveStatus(api, workflowId, visible);
+  const liveness = useLiveness(api, visible);
+  // a failed live poll is "status unknown" in the capsule and "not started" on the canvas (spec §5.1)
+  const live = useMemo<LiveArt>(() => ({ started: status === 'running', health: healthOf(liveness) }), [status, liveness]);
   // a background tab's canvas stays mounted; .bg hides its nodes (document.css says why)
   const cls = usePanelShown(panel) ? 'docpanel' : 'docpanel bg';
 
@@ -29,6 +36,7 @@ export function DocumentPanel({ api, workflowId, panel }: { api: StudioApi; work
         doc={open.status.doc}
         fitter={fitter}
         selection={open.selection}
+        live={live}
         onSelect={(selection) => {
           store.dispatch({ type: 'activate', workflowId });
           store.dispatch({ type: 'select', workflowId, selection });

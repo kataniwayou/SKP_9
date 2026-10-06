@@ -25,6 +25,11 @@ export interface StudioApi {
    * on purpose: callers read it defensively (api/liveStatus.ts), never trusting its shape.
    */
   listLive(): Promise<ApiResult<unknown>>;
+  /**
+   * Every processor's liveness (`GET /processors/liveness`), judged as the start gate judges.
+   * Typed `unknown` like listLive: api/liveness.ts reads it defensively.
+   */
+  listLiveness(): Promise<ApiResult<unknown>>;
   /** Plan 1b's dry run of the stored workflow: POST, no body. Saves and starts nothing. */
   validate(workflowId: string): Promise<ApiResult<WorkflowValidationDto>>;
 }
@@ -90,6 +95,7 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     getProcessor: (processorId) => get<ProcessorReadDto>(`/processors/${id(processorId)}`),
     getSchema: (schemaId) => get<SchemaReadDto>(`/schemas/${id(schemaId)}`),
     listLive: () => get<unknown>('/orchestration/live'),
+    listLiveness: () => get<unknown>('/processors/liveness'),
     validate: (workflowId) => request<WorkflowValidationDto>('POST', `/workflows/${id(workflowId)}/validate`),
   };
 }
