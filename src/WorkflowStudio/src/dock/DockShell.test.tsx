@@ -57,6 +57,20 @@ const choose = (label: RegExp | string) => fireEvent.click(screen.getByRole('men
 afterEach(() => { vi.useRealTimers(); });
 
 describe('DockShell', () => {
+  it("marks an unsaved document's tab (mockup v49 .doctab.dirty)", () => {
+    setup({ documents: [{ ...doc('a'), dirty: true }, doc('b')] });
+    const tabs = [...document.querySelectorAll('.doctab')].filter((t) => t.querySelector('.nm')?.textContent?.startsWith('wf-'));
+    expect(tabs.map((t) => [t.querySelector('.nm')!.textContent, t.classList.contains('dirty')])).toEqual([['wf-a', true], ['wf-b', false]]);
+    expect(tabs[0]!.querySelector('.ud')).toHaveAttribute('data-tip', 'unsaved changes');
+  });
+
+  it('shows a toast for each new notice', () => {
+    const { update } = setup({ notice: { id: 1, text: 'first' } });
+    expect(toast()).toHaveTextContent('first');
+    update({ notice: { id: 2, text: 'second' } });
+    expect(toast()).toHaveTextContent('second');
+  });
+
   it('starts with the default layout: the four panes and an empty document area', () => {
     setup();
     for (const name of ['Inspector', 'Toolbox', 'Problems', 'Output']) expect(tab(name)).toBeInTheDocument();

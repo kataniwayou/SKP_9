@@ -95,7 +95,9 @@ async function loadMissingSchemas(api: StudioApi, graph: Graph): Promise<void> {
   }
   for (const id of missing) {
     const schema = await api.getSchema(id);
-    if (schema.ok) graph.schemas.set(id, schemaFromDto(schema.value));
+    if (schema.ok) {
+      try { graph.schemas.set(id, schemaFromDto(schema.value)); } catch { /* a body without an id is left out: the slot shows its raw id */ }
+    }
   }
 }
 

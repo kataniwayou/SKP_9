@@ -247,6 +247,28 @@ describe('DocumentPanel', () => {
     expect(screen.getByRole('button', { name: '▶ Start' }).parentElement).toHaveAttribute('data-tip', 'Not available yet');
   });
 
+  it('enables Save only with edits, says so, and hands a click to onSave', async () => {
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
+    const api = { listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }), listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as unknown as StudioApi;
+    const onSave = vi.fn();
+    render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}>
+      <DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} onSave={onSave} />
+    </div></StudioStoreProvider>);
+
+    const save = await screen.findByRole('button', { name: '⤓ Save' });
+    expect(save).toBeDisabled();
+    expect(save.parentElement).toHaveAttribute('data-tip', 'Nothing to save yet');
+    expect(screen.queryByText('● unsaved changes')).not.toBeInTheDocument();
+
+    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' }));
+    expect(screen.getByText('● unsaved changes')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '⤓ Save' }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    await screen.findByText('■ stopped');
+  });
+
   it('shows status unknown, not stopped, when the live poll fails', async () => {
     const { store } = await setup(vi.fn().mockResolvedValue({ ok: false, error: { kind: 'http', status: 500, detail: 'Redis down' } }));
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));

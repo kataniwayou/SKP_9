@@ -100,8 +100,8 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     });
   }, [api, store]);
 
-  // the "could not be re-read" toast; Task 8 hands it to the dock
-  const [_notice, setNotice] = useState({ id: 0, text: '' });
+  // the page's toasts ("could not be re-read", a refused session write), shown by the dock
+  const [notice, setNotice] = useState({ id: 0, text: '' });
 
   /** Re-reads a ready document after a write (spec §7.1); a failure keeps its last drawing. */
   const refresh = useCallback((id: string) => {
@@ -158,10 +158,13 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   // views and the dock change on every pan and drag, so they are kept outside React state
   const views = useRef(new Map<string, SavedView>(session?.docs.flatMap((d) => (d.view ? [[d.workflowId, d.view] as const] : [])) ?? []));
   const dockState = useRef<SavedLayout | null>(session?.dock ?? null);
+  const sessionRefused = useRef(false);
   const saver = useMemo(() => createSaver(() => {
     const state = store.getState();
     for (const id of [...views.current.keys()]) if (!state.docs.some((d) => d.workflowId === id)) views.current.delete(id);
-    writeTabSession(tabStorage, storage, sessionOf(state, views.current, dockState.current));
+    const kept = writeTabSession(tabStorage, storage, sessionOf(state, views.current, dockState.current));
+    if (!kept && !sessionRefused.current) setNotice((n) => ({ id: n.id + 1, text: 'This browser would not keep the session: a refresh may lose unsaved changes' }));
+    sessionRefused.current = !kept;
   }), [store, storage, tabStorage]);
   useEffect(() => store.subscribe(saver.schedule), [store, saver]);
   // the last change before the page goes away is written at once, not 300 ms later
@@ -172,9 +175,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   }, [saver]);
 
   // the dock only needs each document's identity and names; a selection change must not re-render every tab
-  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}`).join('\u0001');
+  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}\u0000${hasEdits(d.inspector)}`).join('\u0001');
   const documents: DockDocument[] = useMemo(
-    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId) })),
+    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId), dirty: hasEdits(d.inspector) })),
     [identity], // the part of `docs` the dock shows; `docs` itself changes on every selection
 
   );
@@ -187,6 +190,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     <StudioActionsProvider value={actions}>
       <DockShell
         documents={documents}
+        notice={notice}
         activeDocumentId={activeId}
         onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
         onCloseDocument={(id, doc) => actions.guard(id, () => {
@@ -207,7 +211,8 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
               if (open && selectionKey(open.selection) === selectionKey(selection)) return;
               actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection }), doc);
             }}
-            onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }} />
+            onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }}
+            onSave={() => void service.save(id)} />
         )}
         renderTool={renderTool}
         inspectorKey={inspector}

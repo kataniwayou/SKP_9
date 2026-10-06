@@ -111,6 +111,18 @@ describe('loadDocument', () => {
     expect(result.ok && result.value.graph.schemas.has('gone')).toBe(false);
   });
 
+  it('still opens when a parked processor\'s schema comes back without an id', async () => {
+    const api = fakeApi({
+      getGraph: vi.fn().mockResolvedValue(ok(graphDto({ layout: { parked: ['pk'] } } as never))),
+      getStep: vi.fn().mockResolvedValue(ok(stepDto('pk', { processorId: 'p9' }))),
+      getProcessor: vi.fn().mockResolvedValue(ok(processorDto('p9', { inputSchemaId: 'noid' }))),
+      getSchema: vi.fn().mockResolvedValue(ok({ name: 'broken' } as never)),
+    });
+    const result = await loadDocument(api, 'wf1');
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value.graph.schemas.has('noid')).toBe(false);
+  });
+
   it('ignores a parked id the server no longer has, and one that is actually wired (review focus 1)', async () => {
     const api = fakeApi({
       getGraph: vi.fn().mockResolvedValue(ok(graphDto({ layout: { parked: ['gone', 's1'], steps: { gone: { x: 8, y: 8 } } } } as never))),

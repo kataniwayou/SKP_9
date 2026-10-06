@@ -10,6 +10,8 @@ export interface DockDocument {
   version: string;
   /** The tab's tooltip: the unique entity name (spec §7). */
   tooltip: string;
+  /** Unsaved changes: the tab shows the amber dot. */
+  dirty?: boolean;
 }
 
 export type GroupAction = 'open' | 'menu' | 'hide' | 'float' | 'popout' | 'maximize' | 'dock';
@@ -63,7 +65,7 @@ export function StudioTab({ api }: IDockviewPanelHeaderProps) {
   const name = info?.name ?? (isToolId(id) ? TOOL_TITLES[id] : id);
   return (
     <div
-      className="doctab"
+      className={info?.dirty ? 'doctab dirty' : 'doctab'}
       data-tip={info?.tooltip}
       onContextMenu={(e) => { e.preventDefault(); shell.windowMenu(id, anchorAt(e)); }}
       onDoubleClick={(e) => {
@@ -74,6 +76,7 @@ export function StudioTab({ api }: IDockviewPanelHeaderProps) {
       onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
       onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); shell.closePanel(id); } }}
     >
+      {info && <span className="ud" data-tip="unsaved changes" />}
       <span className="nm">{name}</span>
       {info && <span className="tv">{info.version}</span>}
       <span

@@ -277,6 +277,19 @@ describe('session (plan 3d)', () => {
   });
 });
 
+describe('a refused session write', () => {
+  it('shows the toast once per failure streak', async () => {
+    const refusing = { ...memoryStorage(), getItem: () => null, setItem: () => { throw new Error('quota'); } } as Storage;
+    render(<App api={fakeApi({ getEntity: vi.fn().mockResolvedValue({ ok: true, value: stepDto('s1', { name: 'fetch' }) }) })} storage={refusing} tabStorage={refusing} />);
+    await pickWorkflow('alpha');
+    const message = 'This browser would not keep the session: a refresh may lose unsaved changes';
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    fireEvent.click((await screen.findByText('fetch')).closest('.react-flow__node')!);
+    await waitFor(() => expect(inspector()).toHaveTextContent('STEP'));
+    expect(screen.getAllByText(message)).toHaveLength(1);
+  });
+});
+
 describe('unsaved Inspector edits (slice 3b)', () => {
   const draftSession = (edits: Record<string, string>, extra: object[] = [], trail: object[] = []) => memoryStorage({ [SESSION_KEY]: JSON.stringify({
     version: 1, activeId: ALPHA, showDetails: false, dock: null,
@@ -292,7 +305,9 @@ describe('unsaved Inspector edits (slice 3b)', () => {
   it('brings a draft back after a refresh, marked unsaved', async () => {
     render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
     expect(await screen.findByLabelText('Description')).toHaveValue('typed');
-    expect(screen.getByText('● unsaved changes')).toBeInTheDocument();
+    expect(within(screen.getByRole('toolbar', { name: 'Workflow' })).getByText('● unsaved changes')).toBeInTheDocument();
+    expect(within(inspector()).getByText('● unsaved changes')).toBeInTheDocument();
+    expect(document.querySelector('.doctab.dirty')).not.toBeNull();
   });
 
   it('asks before Escape drops a selection with unsaved edits: Cancel keeps, Discard drops', async () => {
@@ -419,7 +434,7 @@ describe('unsaved Inspector edits (slice 3b)', () => {
 
     it('says the unsaved changes of the assignment will be discarded (Task 6 review ruling)', async () => {
       render(<App api={unlinkApi()} storage={memoryStorage()} tabStorage={atAssignment({ payload: '{"k":3}' })} />);
-      expect(await screen.findByText('● unsaved changes')).toBeInTheDocument();
+      expect(await within(await screen.findByRole('toolbar', { name: 'Workflow' })).findByText('● unsaved changes')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Unlink from this workflow' }));
       expect(await unlinkDialog()).toHaveTextContent('Its unsaved changes will be discarded.');
     });

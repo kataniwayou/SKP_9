@@ -50,6 +50,8 @@ export interface DockShellProps {
   restore?: SavedLayout | null;
   /** Called with the dock's state, documents included, whenever it changes: the page keeps it in its session. */
   onLayoutChange?: (dock: SavedLayout) => void;
+  /** A message for the toast; a new id shows it (the page's notices, e.g. a refused session write). */
+  notice?: { id: number; text: string };
 }
 
 const COMPONENTS = { document: DocumentHost, tool: ToolHost };
@@ -109,6 +111,8 @@ export function DockShell(props: DockShellProps) {
     toastTimer.current = setTimeout(() => setToast((t) => ({ ...t, text: '' })), TOAST_MS);
   }, []);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
+  // the id is the trigger: the same text again, with a new id, shows again
+  useEffect(() => { if (props.notice && props.notice.text) showToast(props.notice.text); }, [props.notice?.id]);
 
   /** Makes dockview's document panels match the open documents. */
   const syncDocuments = useCallback((dv: DockviewApi) => {

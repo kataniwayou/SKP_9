@@ -64,6 +64,8 @@
 
 /* tabs */
 .doctab { display: flex; align-items: center; gap: 7px; height: 100%; padding: 0 4px 0 2px; font-size: 12.5px; white-space: nowrap; }
+.doctab .ud { width: 7px; height: 7px; border-radius: 50%; background: var(--x); display: none; flex: none; }
+.doctab.dirty .ud { display: block; }
 .doctab .tv { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
 .doctab .nm { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .doctab .x { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; color: var(--faint); font-size: 13px; cursor: pointer; }
