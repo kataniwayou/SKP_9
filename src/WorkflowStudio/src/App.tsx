@@ -3,7 +3,7 @@ import { createApi, type ApiError, type StudioApi } from './api/client';
 import type { WorkflowReadDto } from './api/types';
 import { DocumentPanel } from './app/DocumentPanel';
 import { loadDocument } from './app/loadDocument';
-import { createSaver, readSession, restoredState, sessionOf, writeSession, type Session } from './app/session';
+import { browserTabStorage, createSaver, readTabSession, restoredState, sessionOf, writeTabSession, type Session } from './app/session';
 import { SvgDefs } from './canvas/SvgDefs';
 import type { SavedView } from './canvas/savedView';
 import { fitterFor } from './canvas/useFitter';
@@ -36,14 +36,23 @@ function renderTool(id: ToolId) {
   }
 }
 
+export interface AppProps {
+  api?: StudioApi;
+  /** The browser's storage: the saved window layout, and the session's mirror. Default: localStorage. */
+  storage?: Storage | null;
+  /** This tab's storage, where its session lives. Default: sessionStorage. */
+  tabStorage?: Storage | null;
+}
+
 /**
  * The studio page (slice 3a): one store, the dock, and what goes in its documents and panes. The page
  * keeps its session (plan 3d): the store starts from it, so a refresh brings back what was open.
  */
-export function App({ api: injected, storage }: { api?: StudioApi; storage?: Storage | null }) {
+export function App({ api: injected, storage, tabStorage }: AppProps) {
   const api = useMemo(() => injected ?? createApi(), [injected]);
   const resolved = useMemo(() => (storage === undefined ? browserStorage() : storage), [storage]);
-  const session = useMemo(() => readSession(resolved), [resolved]);
+  const tab = useMemo(() => (tabStorage === undefined ? browserTabStorage() : tabStorage), [tabStorage]);
+  const session = useMemo(() => readTabSession(tab, resolved), [tab, resolved]);
   // the session is read once: the store is made once, from the session the page started with
   const store = useMemo(() => createStudioStore(restoredState(session)), []);
   // the page's fonts start loading at once, so the first document opens with its fitter ready
@@ -51,12 +60,12 @@ export function App({ api: injected, storage }: { api?: StudioApi; storage?: Sto
   return (
     <StudioStoreProvider value={store}>
       <SvgDefs />
-      <Studio api={api} storage={resolved} session={session} />
+      <Studio api={api} storage={resolved} tabStorage={tab} session={session} />
     </StudioStoreProvider>
   );
 }
 
-function Studio({ api, storage, session }: { api: StudioApi; storage: Storage | null; session: Session | null }) {
+function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage: Storage | null; tabStorage: Storage | null; session: Session | null }) {
   const store = useStudioStore();
   const docs = useStudio((s) => s.docs);
   const activeId = useStudio((s) => s.activeId);
@@ -108,8 +117,8 @@ function Studio({ api, storage, session }: { api: StudioApi; storage: Storage | 
   const saver = useMemo(() => createSaver(() => {
     const state = store.getState();
     for (const id of [...views.current.keys()]) if (!state.docs.some((d) => d.workflowId === id)) views.current.delete(id);
-    writeSession(storage, sessionOf(state, views.current, dockState.current));
-  }), [store, storage]);
+    writeTabSession(tabStorage, storage, sessionOf(state, views.current, dockState.current));
+  }), [store, storage, tabStorage]);
   useEffect(() => store.subscribe(saver.schedule), [store, saver]);
   // the last change before the page goes away is written at once, not 300 ms later
   useEffect(() => {

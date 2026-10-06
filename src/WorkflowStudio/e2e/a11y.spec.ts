@@ -2,7 +2,7 @@ import { documentPanel, expect, liveWorkflows, tab, test } from './studio';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.reload();
 });
 

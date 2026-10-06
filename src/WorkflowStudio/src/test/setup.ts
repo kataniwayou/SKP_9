@@ -3,7 +3,9 @@ import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
 // Vitest globals are off, so Testing Library does not unmount between tests by itself.
-afterEach(cleanup);
+// The page keeps its session in this tab's sessionStorage by default, and writes it when it unmounts:
+// cleared after the unmount, so no test inherits another's.
+afterEach(() => { cleanup(); sessionStorage.clear(); });
 
 // React Flow measures with ResizeObserver, reads transforms through DOMMatrixReadOnly and sizes
 // nodes from offsetWidth/offsetHeight. jsdom has none of them; these shims are the ones React

@@ -9,7 +9,7 @@ test.beforeAll(async ({ request }) => { workflows = await liveWorkflows(request,
 test.beforeEach(async ({ page }) => {
   // every test starts from the default layout: no saved window layout in this browser
   await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.reload();
   await expect(tab(page, 'Inspector')).toBeVisible();
 });

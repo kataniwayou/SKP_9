@@ -5,7 +5,9 @@ import { INITIAL_STATE, type StudioState } from '../store/studioState';
 
 /**
  * The page as the user left it (spec §6.1, amended 2026-10-06): a refresh keeps the open documents,
- * the dock and each document's selection and view. One localStorage entry, separate from Window ›
+ * the dock and each document's selection and view. The session is kept per tab, in sessionStorage
+ * (it survives a refresh and is not shared between tabs), and every write is mirrored to
+ * localStorage under the same key, to seed a new tab or a browser restart. Separate from Window ›
  * Save's named layout. Documents are fetched again on load: only where things were is kept.
  */
 export const SESSION_KEY = 'skp.studio.session';
@@ -68,6 +70,42 @@ export function writeSession(storage: Storage | null, session: Session): boolean
   } catch {
     return false;
   }
+}
+
+/** `window.sessionStorage` (this tab's storage), or null where reading it throws (blocked storage, sandboxed frames). */
+export function browserTabStorage(): Storage | null {
+  try {
+    return globalThis.sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether the storage holds a session entry; a storage that cannot be read holds none. */
+function holdsSession(storage: Storage | null): boolean {
+  try {
+    return storage?.getItem(SESSION_KEY) != null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * This tab's session: the tab's own entry when it has one (a refresh), else the mirror (a new tab,
+ * a browser restart). A tab entry that cannot be used is no session; the mirror, another tab's
+ * last write, is not read in its place. Never throws.
+ */
+export function readTabSession(tab: Storage | null, mirror: Storage | null): Session | null {
+  return readSession(holdsSession(tab) ? tab : mirror);
+}
+
+/**
+ * Writes the session to the tab and mirrors it. True when the next refresh will find it: the tab
+ * took it, or there is no tab storage and the mirror took it. Never throws.
+ */
+export function writeTabSession(tab: Storage | null, mirror: Storage | null, session: Session): boolean {
+  const mirrored = writeSession(mirror, session);
+  return tab === null ? mirrored : writeSession(tab, session);
 }
 
 /** The session for the current state: views of documents that are no longer open are dropped. */

@@ -185,8 +185,8 @@ describe('session (plan 3d)', () => {
     const restoredFresh = transformOf('wf2');
     cleanup();
 
-    // the same document opened fresh, with no session: wf2 must sit exactly where Fit puts it
-    render(<App api={fakeApi()} storage={seeded({
+    // the same document opened fresh, with no session: wf2 must sit exactly where Fit puts it (a new tab)
+    render(<App api={fakeApi()} tabStorage={memoryStorage()} storage={seeded({
       version: 1, activeId: 'wf2', showDetails: false, dock: null,
       docs: [{ workflowId: 'wf2', name: 'billing', version: '2.0.0', selection: null, view: null }],
     })} />);
@@ -236,6 +236,30 @@ describe('session (plan 3d)', () => {
     expect(JSON.parse(storage.getItem(SESSION_KEY) ?? '{"docs":[]}').docs).toHaveLength(0);
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
     expect(JSON.parse(storage.getItem(SESSION_KEY)!).docs).toHaveLength(1);
+  });
+
+  it('keeps a session per tab: refreshing one tab never brings up what another tab has open (controller ruling)', async () => {
+    const mirror = memoryStorage();
+    const tabA = memoryStorage(), tabB = memoryStorage();
+    const leave = async (unmount: () => void) => { await act(async () => { window.dispatchEvent(new Event('pagehide')); }); unmount(); };
+
+    const a = render(<App api={fakeApi()} storage={mirror} tabStorage={tabA} />);
+    await pickWorkflow('alpha');
+    await leave(a.unmount);
+    const b = render(<App api={fakeApi()} storage={mirror} tabStorage={tabB} />);
+    // a new tab starts from the mirror (alpha, from tab A); it closes alpha and opens zeta
+    expect(await screen.findAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /Close alpha/ }));
+    await pickWorkflow('zeta');
+    await screen.findAllByText('zeta', { selector: '.doctab .nm' });
+    await leave(b.unmount);
+
+    // tab A refreshes: its own session, not the one tab B wrote last
+    render(<App api={fakeApi()} storage={mirror} tabStorage={tabA} />);
+    expect(await screen.findAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(1);
+    expect(screen.queryAllByText('zeta', { selector: '.doctab .nm' })).toHaveLength(0);
+    // and the mirror holds the last write of any tab, to seed the next new tab
+    await waitFor(() => expect(JSON.parse(mirror.getItem(SESSION_KEY)!).docs.map((d: { name: string }) => d.name)).toEqual(['alpha']));
   });
 
   it('starts as new when the stored session is broken (review focus 1)', () => {

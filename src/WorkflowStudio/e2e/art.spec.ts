@@ -4,7 +4,7 @@ import { documentPanel, expect, openWorkflow, test, workflowsWithSteps, type Liv
 // Spec §5.1, slice 3c: the live states against the live BaseApi. Read-only: GETs only.
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.reload();
 });
 

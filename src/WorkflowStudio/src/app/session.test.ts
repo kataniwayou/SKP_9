@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memoryStorage } from '../test/memoryStorage';
 import { INITIAL_STATE, type StudioState } from '../store/studioState';
-import { createSaver, readSession, restoredState, SESSION_KEY, sessionOf, writeSession, type Session } from './session';
+import { createSaver, readSession, readTabSession, restoredState, SESSION_KEY, sessionOf, writeSession, writeTabSession, type Session } from './session';
 
 const dock = { version: 1, dock: { grid: { root: { type: 'branch', data: [] }, width: 1200, height: 700, orientation: 'HORIZONTAL' }, panels: {} }, documentGroupId: null, hidden: [], sides: {}, homes: {}, popped: [] };
 
@@ -55,6 +55,43 @@ describe('readSession / writeSession', () => {
     expect(writeSession(refusing, good)).toBe(false);
     expect(readSession(null)).toBeNull();
     expect(writeSession(null, good)).toBe(false);
+  });
+});
+
+describe('the session per tab (sessionStorage), mirrored to localStorage (controller ruling)', () => {
+  const other: Session = { ...good, docs: [good.docs[1]!], activeId: 'b' };
+  const holding = (session: Session) => memoryStorage({ [SESSION_KEY]: JSON.stringify(session) });
+
+  it('reads the session of the tab itself over the mirror another tab may have written', () => {
+    expect(readTabSession(holding(good), holding(other))).toEqual(good);
+  });
+
+  it('seeds an empty tab (a new tab, a browser restart) from the mirror', () => {
+    expect(readTabSession(memoryStorage(), holding(other))).toEqual(other);
+    expect(readTabSession(null, holding(other))).toEqual(other);
+  });
+
+  it('does not fall back to the mirror when the tab holds a session that cannot be used', () => {
+    expect(readTabSession(memoryStorage({ [SESSION_KEY]: '{oops' }), holding(other))).toBeNull();
+  });
+
+  it('writes the tab and the mirror', () => {
+    const tab = memoryStorage(), mirror = memoryStorage();
+    expect(writeTabSession(tab, mirror, good)).toBe(true);
+    expect(readSession(tab)).toEqual(good);
+    expect(readSession(mirror)).toEqual(good);
+  });
+
+  it('never throws, and reports whether the next refresh will find the session', () => {
+    const refusing = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('full'); } } as unknown as Storage;
+    expect(readTabSession(refusing, holding(other))).toEqual(other);
+    expect(readTabSession(refusing, refusing)).toBeNull();
+    const mirror = memoryStorage();
+    expect(writeTabSession(refusing, mirror, good)).toBe(false);   // the refresh would read the tab's older session
+    expect(readSession(mirror)).toEqual(good);
+    expect(writeTabSession(null, mirror, good)).toBe(true);        // no tab storage: the refresh seeds from the mirror
+    expect(writeTabSession(memoryStorage(), refusing, good)).toBe(true);
+    expect(writeTabSession(null, null, good)).toBe(false);
   });
 });
 
