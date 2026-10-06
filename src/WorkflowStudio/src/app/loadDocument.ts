@@ -1,5 +1,5 @@
 import type { ApiResult, StudioApi } from '../api/client';
-import { graphFromDto, processorFromDto, stepFromDto } from '../api/toModel';
+import { graphFromDto, processorFromDto, schemaFromDto, stepFromDto } from '../api/toModel';
 import { parseLayout } from '../layout/layoutDoc';
 import { place, type Placement } from '../layout/placement';
 import { routeWires } from '../layout/wires';
@@ -11,6 +11,9 @@ import type { StudioDocument } from './document';
  * Opens one workflow: the graph, then the parked steps its layout lists (they are not reachable, so
  * GET /graph does not return them; spec §4.3) and any processor they need, then placement and wires.
  * A parked id the server no longer has is dropped silently (spec §8); any other failure is returned.
+ * Last, the schemas a parked step's processor names but the graph does not carry are read one by
+ * one, so the Inspector and the die can name every slot; a schema that cannot be read is left out
+ * (the slot then shows its raw id).
  * Any malformed part of the layout is ignored by `parseLayout`; missing blocks get an elkjs position.
  *
  * Whether the workflow may start is BaseApi's answer, not ours: one `validate` call supplies the
@@ -62,6 +65,8 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
     }
   }
 
+  await loadMissingSchemas(api, graph);
+
   let placement: Placement;
   try {
     placement = await place({
@@ -78,6 +83,20 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
   const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps, brokenEdges }, placement);
 
   return { ok: true, value: { graph, parkedIds, placement, wires, problems } };
+}
+
+/** GET /schemas/{id} for every processor slot the graph names but does not carry (parked steps only). */
+async function loadMissingSchemas(api: StudioApi, graph: Graph): Promise<void> {
+  const missing = new Set<Id>();
+  for (const p of graph.processors.values()) {
+    for (const id of [p.inputSchemaId, p.outputSchemaId, p.configSchemaId]) {
+      if (id && !graph.schemas.has(id)) missing.add(id);
+    }
+  }
+  for (const id of missing) {
+    const schema = await api.getSchema(id);
+    if (schema.ok) graph.schemas.set(id, schemaFromDto(schema.value));
+  }
 }
 
 /** `${parentStepId}->${childStepId}` for each schemaEdge problem; offending is read defensively. */

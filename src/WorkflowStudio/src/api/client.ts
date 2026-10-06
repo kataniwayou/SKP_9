@@ -1,4 +1,4 @@
-import type { ProcessorReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto, WorkflowValidationDto } from './types';
+import type { ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto, WorkflowValidationDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -19,6 +19,12 @@ export interface StudioApi {
   getGraph(workflowId: string): Promise<ApiResult<WorkflowGraphDto>>;
   getStep(stepId: string): Promise<ApiResult<StepReadDto>>;
   getProcessor(processorId: string): Promise<ApiResult<ProcessorReadDto>>;
+  getSchema(schemaId: string): Promise<ApiResult<SchemaReadDto>>;
+  /**
+   * The running workflow ids (`GET /orchestration/live`, the `skp:live` set). Typed `unknown`
+   * on purpose: callers read it defensively (api/liveStatus.ts), never trusting its shape.
+   */
+  listLive(): Promise<ApiResult<unknown>>;
   /** Plan 1b's dry run of the stored workflow: POST, no body. Saves and starts nothing. */
   validate(workflowId: string): Promise<ApiResult<WorkflowValidationDto>>;
 }
@@ -82,6 +88,8 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     getGraph: (workflowId) => get<WorkflowGraphDto>(`/workflows/${id(workflowId)}/graph`),
     getStep: (stepId) => get<StepReadDto>(`/steps/${id(stepId)}`),
     getProcessor: (processorId) => get<ProcessorReadDto>(`/processors/${id(processorId)}`),
+    getSchema: (schemaId) => get<SchemaReadDto>(`/schemas/${id(schemaId)}`),
+    listLive: () => get<unknown>('/orchestration/live'),
     validate: (workflowId) => request<WorkflowValidationDto>('POST', `/workflows/${id(workflowId)}/validate`),
   };
 }

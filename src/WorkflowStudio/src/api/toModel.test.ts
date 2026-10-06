@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { graphDto, processorDto, stepDto, workflowDto } from './fixtures';
+import { cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from './fixtures';
 import { graphFromDto, stepFromDto } from './toModel';
 
 describe('graphFromDto', () => {
@@ -36,6 +36,34 @@ describe('graphFromDto', () => {
 
   it('maps an absent layout to null', () => {
     expect(graphFromDto(graphDto({ layout: undefined } as never)).layout).toBeNull();
+  });
+});
+
+describe('the fields the Inspector shows', () => {
+  it('keeps description, audit, source hash, instance id and cache version', () => {
+    const who = { createdAt: '2026-10-01T08:00:00Z', createdBy: 'ana', updatedAt: '2026-10-02T09:30:00Z', updatedBy: null };
+    const graph = graphFromDto(graphDto({
+      workflow: workflowDto({ description: 'nightly', ...who }),
+      steps: [stepDto('s1', { description: 'first', ...who })],
+      processors: [processorDto('p1', { description: 'reads', sourceHash: 'f'.repeat(64), instanceId: 'blue', ...who })],
+      schemas: [schemaDto('sc1', { description: 'in', ...who })],
+      caches: [cacheDto('c1', { version: '2.0.0', description: 'lookups', ...who })],
+    }));
+
+    const audit = { createdAt: '2026-10-01T08:00:00Z', createdBy: 'ana', updatedAt: '2026-10-02T09:30:00Z', updatedBy: null };
+    expect(graph.workflow).toMatchObject({ description: 'nightly', audit });
+    expect(graph.steps.get('s1')).toMatchObject({ description: 'first', audit });
+    expect(graph.processors.get('p1')).toMatchObject({ description: 'reads', sourceHash: 'f'.repeat(64), instanceId: 'blue', audit });
+    expect(graph.schemas.get('sc1')).toMatchObject({ description: 'in', audit });
+    expect(graph.caches.get('c1')).toMatchObject({ version: '2.0.0', description: 'lookups', audit });
+  });
+
+  it('turns absent audit fields into empty text and null, never undefined', () => {
+    const graph = graphFromDto(graphDto({
+      workflow: workflowDto({ createdAt: undefined, createdBy: undefined, updatedAt: undefined, updatedBy: undefined, description: undefined } as never),
+    }));
+    expect(graph.workflow.audit).toEqual({ createdAt: '', createdBy: null, updatedAt: '', updatedBy: null });
+    expect(graph.workflow.description).toBeNull();
   });
 });
 

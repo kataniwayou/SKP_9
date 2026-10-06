@@ -9,5 +9,7 @@ export type WorkflowGraphDto = Schemas['WorkflowGraphDto'];
 export type WorkflowReadDto = Schemas['WorkflowReadDto'];
 export type StepReadDto = Schemas['StepReadDto'];
 export type ProcessorReadDto = Schemas['ProcessorReadDto'];
+export type SchemaReadDto = Schemas['SchemaReadDto'];
+export type CacheReadDto = Schemas['CacheReadDto'];
 export type WorkflowValidationDto = Schemas['WorkflowValidationDto'];
 export type WorkflowProblemDto = Schemas['WorkflowProblemDto'];

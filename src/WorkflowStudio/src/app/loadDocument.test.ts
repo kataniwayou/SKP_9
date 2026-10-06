@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ApiResult, StudioApi } from '../api/client';
-import { graphDto, processorDto, stepDto } from '../api/fixtures';
+import { graphDto, processorDto, schemaDto, stepDto } from '../api/fixtures';
 import { loadDocument } from './loadDocument';
 
 const ok = <T,>(value: T): ApiResult<T> => ({ ok: true, value });
@@ -12,6 +12,8 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     getGraph: vi.fn().mockResolvedValue(ok(graphDto())),
     getStep: vi.fn().mockResolvedValue(notFound),
     getProcessor: vi.fn().mockResolvedValue(notFound),
+    getSchema: vi.fn().mockResolvedValue(notFound),
+    listLive: vi.fn(),
     validate: vi.fn().mockResolvedValue(ok({ valid: true, problems: [] })),
     ...over,
   };
@@ -82,6 +84,27 @@ describe('loadDocument', () => {
     expect(result.ok && result.value.placement.steps.get('p1')).toEqual({ x: 288, y: 400 });
     expect(result.ok && result.value.graph.processors.has('p9')).toBe(true);
     expect(api.getStep).toHaveBeenCalledWith('p1');
+  });
+
+  it('reads the schemas a parked processor names that the graph does not carry, and only those', async () => {
+    const api = fakeApi({
+      getGraph: vi.fn().mockResolvedValue(ok(graphDto({
+        processors: [processorDto('p1', { inputSchemaId: 'known' })],
+        schemas: [schemaDto('known')],
+        layout: { parked: ['pk'] },
+      } as never))),
+      getStep: vi.fn().mockResolvedValue(ok(stepDto('pk', { processorId: 'p9' }))),
+      getProcessor: vi.fn().mockResolvedValue(ok(processorDto('p9', { inputSchemaId: 'known', outputSchemaId: 'sOut', configSchemaId: 'gone' }))),
+      getSchema: vi.fn().mockImplementation(async (id: string) => (id === 'sOut' ? ok(schemaDto('sOut', { name: 'orders-out' })) : notFound)),
+    });
+
+    const result = await loadDocument(api, 'wf1');
+
+    expect(api.getSchema).toHaveBeenCalledTimes(2);
+    expect(api.getSchema).toHaveBeenCalledWith('sOut');
+    expect(api.getSchema).toHaveBeenCalledWith('gone');
+    expect(result.ok && result.value.graph.schemas.get('sOut')?.name).toBe('orders-out');
+    expect(result.ok && result.value.graph.schemas.has('gone')).toBe(false);
   });
 
   it('ignores a parked id the server no longer has, and one that is actually wired (review focus 1)', async () => {

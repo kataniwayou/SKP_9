@@ -1,4 +1,4 @@
-import type { ProcessorReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { CacheReadDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
 
 // Builders for complete DTOs, so tests state only what they care about. Every field the server
 // sends is present, which satisfies the generated types whether they mark fields optional or not.
@@ -16,6 +16,14 @@ export function processorDto(id: string, over: Partial<ProcessorReadDto> = {}): 
     id, name: `proc-${id}`, version: '1.0.0', description: null, sourceHash: 'a'.repeat(64),
     instanceId: null, inputSchemaId: null, outputSchemaId: null, configSchemaId: null, ...audit, ...over,
   } as ProcessorReadDto;
+}
+
+export function schemaDto(id: string, over: Partial<SchemaReadDto> = {}): SchemaReadDto {
+  return { id, name: `schema-${id}`, version: '1.0.0', description: null, definition: '{}', ...audit, ...over } as SchemaReadDto;
+}
+
+export function cacheDto(id: string, over: Partial<CacheReadDto> = {}): CacheReadDto {
+  return { id, name: `cache-${id}`, version: '1.0.0', description: null, root: id, items: '{}', ...audit, ...over } as CacheReadDto;
 }
 
 export function workflowDto(over: Partial<WorkflowReadDto> = {}): WorkflowReadDto {

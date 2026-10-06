@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StudioDocument } from '../app/document';
+import { AUDIT } from '../model/fixtures';
 import type { Graph, Step } from '../model/graph';
 import { createTextFitter, MEASURED_FONTS } from './fitText';
 import { cacheNodeId, SPHERE_NODE_ID, toFlow } from './toFlow';
@@ -7,17 +8,17 @@ import { cacheNodeId, SPHERE_NODE_ID, toFlow } from './toFlow';
 const fitter = createTextFitter((text) => text.length * 7);
 
 const step = (id: string, over: Partial<Step> = {}): Step => ({
-  id, name: id, version: '1.0.0', processorId: 'p1', nextStepIds: [], entryCondition: 1, updatedAt: '', ...over,
+  id, name: id, version: '1.0.0', description: null, processorId: 'p1', nextStepIds: [], entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
 });
 
 function doc(over: Partial<Graph> = {}, parkedIds: string[] = []): StudioDocument {
   const graph: Graph = {
-    workflow: { id: 'wf1', name: 'orders', version: '1.0.0', cronExpression: null, entryStepIds: ['a'], assignmentIds: [], cacheIds: ['c1'], updatedAt: '' },
+    workflow: { id: 'wf1', name: 'orders', version: '1.0.0', description: null, cronExpression: null, entryStepIds: ['a'], assignmentIds: [], cacheIds: ['c1'], updatedAt: '', audit: AUDIT },
     steps: new Map([['a', step('a', { nextStepIds: ['b'] })], ['b', step('b', { entryCondition: 2 })]]),
-    processors: new Map([['p1', { id: 'p1', name: 'fetcher', version: '2.1.0', inputSchemaId: 'sIn', outputSchemaId: null, configSchemaId: null }]]),
-    schemas: new Map([['sIn', { id: 'sIn', name: 'orders-in', version: '1.0.0' }]]),
+    processors: new Map([['p1', { id: 'p1', name: 'fetcher', version: '2.1.0', description: null, sourceHash: '', instanceId: null, inputSchemaId: 'sIn', outputSchemaId: null, configSchemaId: null, audit: AUDIT }]]),
+    schemas: new Map([['sIn', { id: 'sIn', name: 'orders-in', version: '1.0.0', description: null, audit: AUDIT }]]),
     assignments: [{ id: 'x1', stepId: 'a', payload: '{"url":"u","retries":3}' }],
-    caches: new Map([['c1', { id: 'c1', name: 'lookups', root: 'lk', items: '{"k1":"v","k2":"v"}' }]]),
+    caches: new Map([['c1', { id: 'c1', name: 'lookups', version: '1.0.0', description: null, root: 'lk', items: '{"k1":"v","k2":"v"}', audit: AUDIT }]]),
     layout: null,
     ...over,
   };

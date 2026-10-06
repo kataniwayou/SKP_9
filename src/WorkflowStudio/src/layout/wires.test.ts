@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { AUDIT } from '../model/fixtures';
 import type { Step } from '../model/graph';
 import type { Placement } from './placement';
 import { routeWires, tetherPoints, type WiringInput } from './wires';
 
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
-  id, name: id, version: '1.0.0', processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', ...over,
+  id, name: id, version: '1.0.0', description: null, processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
 });
 function setup(steps: Step[], positions: Record<string, [number, number]>, brokenEdges: ReadonlySet<string>) {
   const input: WiringInput = {

@@ -71,6 +71,18 @@ describe('createApi', () => {
     expect(result).toEqual({ ok: true, value: verdict });
   });
 
+  it('GETs a schema by id', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond(200, { id: 'sc1' }));
+    expect(await createApi('/api/v1', fetchImpl).getSchema('sc1')).toEqual({ ok: true, value: { id: 'sc1' } });
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/schemas/sc1', expect.objectContaining({ method: 'GET' }));
+  });
+
+  it('GETs the live set and passes its body through untouched', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond(200, ['a', 7]));
+    expect(await createApi('/api/v1', fetchImpl).listLive()).toEqual({ ok: true, value: ['a', 7] });
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/orchestration/live', expect.objectContaining({ method: 'GET' }));
+  });
+
   it('maps a 200 whose body is not JSON to an error result instead of rejecting', async () => {
     const api = createApi('/api/v1', vi.fn().mockResolvedValue(new Response('<html>', { status: 200 })));
     const result = await api.getGraph('wf1');

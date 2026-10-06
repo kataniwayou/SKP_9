@@ -6,41 +6,64 @@
  */
 export type Id = string;
 
+/**
+ * The base-entity fields every BaseApi read DTO carries. The Inspector shows them under
+ * "▸ show all" (spec §7). `updatedAt` here is for display; `Workflow.updatedAt` and
+ * `Step.updatedAt` stay the concurrency tokens a later save sends back.
+ */
+export interface Audit {
+  createdAt: string;
+  createdBy: string | null;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
 export interface Workflow {
   id: Id;
   name: string;
   version: string;
+  description: string | null;
   cronExpression: string | null;
   entryStepIds: Id[];
   assignmentIds: Id[];
   cacheIds: Id[];
   updatedAt: string;
+  audit: Audit;
 }
 
 export interface Step {
   id: Id;
   name: string;
   version: string;
+  description: string | null;
   processorId: Id;
   nextStepIds: Id[];
   /** 0..5 on the wire; see model/entryConditions.ts. 0 is invalid but can still arrive. */
   entryCondition: number;
   updatedAt: string;
+  audit: Audit;
 }
 
 export interface Processor {
   id: Id;
   name: string;
   version: string;
+  description: string | null;
+  /** 64 lowercase hex characters (BaseApi's rule); shown whole in a tooltip, cut on screen. */
+  sourceHash: string;
+  instanceId: string | null;
   inputSchemaId: Id | null;
   outputSchemaId: Id | null;
   configSchemaId: Id | null;
+  audit: Audit;
 }
 
 export interface Schema {
   id: Id;
   name: string;
   version: string;
+  description: string | null;
+  audit: Audit;
 }
 
 export interface Assignment {
@@ -53,9 +76,12 @@ export interface Assignment {
 export interface Cache {
   id: Id;
   name: string;
+  version: string;
+  description: string | null;
   root: string;
   /** JSON text of an object of string items. */
   items: string;
+  audit: Audit;
 }
 
 /**
