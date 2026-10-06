@@ -5,6 +5,7 @@ import type { LiveArt } from '../canvas/liveArt';
 import type { SavedView } from '../canvas/savedView';
 import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
+import type { Selection } from '../store/selection';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { CapsuleToolbar } from './CapsuleToolbar';
 import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVisible, type PanelLike } from './panelHooks';
@@ -14,7 +15,7 @@ import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVi
  * `renderer: 'always'`, so both survive tab switches), its toolbar and its run status. Labels
  * are measured in the document the panel is drawn in, so a pop-out keeps its fonts (spec §6.3).
  */
-export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange }: {
+export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange, onSelect, onRetry }: {
   api: StudioApi;
   workflowId: string;
   panel: PanelLike;
@@ -22,6 +23,13 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   initialView?: SavedView | null;
   /** Called when the view settles, for the session. */
   onViewChange?: (view: SavedView) => void;
+  /**
+   * A click on the canvas, with the window the panel is drawn in (where a dialog opens); the page's
+   * guard. Default: this document is activated and selects it.
+   */
+  onSelect?: (selection: Selection | null, doc: Document) => void;
+  /** Reads a failed document again; a Retry button shows when given. */
+  onRetry?: () => void;
 }) {
   const open = useStudio((s) => s.docs.find((d) => d.workflowId === workflowId) ?? null);
   const store = useStudioStore();
@@ -36,7 +44,7 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   const cls = usePanelShown(panel) ? 'docpanel' : 'docpanel bg';
 
   if (open === null) return null;
-  if (open.status.kind === 'failed') return <div className={cls}><div className="doc-msg error" role="alert">{open.status.message}</div></div>;
+  if (open.status.kind === 'failed') return <div className={cls}><div className="doc-msg error" role="alert">{open.status.message}{onRetry && <button type="button" className="btn" onClick={onRetry}>Retry</button>}</div></div>;
   if (open.status.kind === 'loading' || fitter === null) return <div className={cls}><div className="doc-msg">Loading…</div></div>;
 
   return (
@@ -48,7 +56,7 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
         live={live}
         initialView={initialView}
         onViewChange={onViewChange}
-        onSelect={(selection) => {
+        onSelect={onSelect ? (selection) => onSelect(selection, ownerDocument) : (selection) => {
           store.dispatch({ type: 'activate', workflowId });
           store.dispatch({ type: 'select', workflowId, selection });
         }}

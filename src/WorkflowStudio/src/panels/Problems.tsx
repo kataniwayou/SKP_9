@@ -1,3 +1,4 @@
+import { useGuard } from '../app/studioActions';
 import { problemTarget } from '../store/problemTarget';
 import { activeDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
@@ -10,6 +11,7 @@ import { PaneNote } from './PaneNote';
 export function Problems() {
   const active = useStudio(activeDocument);
   const store = useStudioStore();
+  const guard = useGuard();
 
   if (active === null) return <PaneNote pane="problems">Open a workflow to see its problems.</PaneNote>;
   if (active.status.kind === 'loading') return <PaneNote pane="problems">Loading…</PaneNote>;
@@ -24,15 +26,16 @@ export function Problems() {
         {doc.problems.map((problem, i) => {
           const target = problemTarget(problem, doc.graph);
           const select = target === null ? undefined
-            : () => store.dispatch({ type: 'select', workflowId: active.workflowId, selection: target });
+            // the dialog opens in the window this pane is in (spec §6.3)
+            : (from: Element) => guard(active.workflowId, () => store.dispatch({ type: 'select', workflowId: active.workflowId, selection: target }), from.ownerDocument);
           return (
             <div
               key={i}
               role="listitem"
               className={target === null ? 'prob static' : 'prob'}
               tabIndex={select ? 0 : undefined}
-              onClick={select}
-              onKeyDown={select ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); } } : undefined}
+              onClick={select ? (e) => select(e.currentTarget) : undefined}
+              onKeyDown={select ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(e.currentTarget); } } : undefined}
               data-tip={target === null ? undefined : 'Select it'}
             >
               <span className="gate">{problem.gate}</span>

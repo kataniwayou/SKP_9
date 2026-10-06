@@ -317,4 +317,37 @@ describe('DocumentPanel', () => {
     expect(store.getState().activeId).toBe('wf1');
     expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's1' });
   });
+
+  it('offers Retry on a failed document when given onRetry, and none without it', async () => {
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'failed', workflowId: 'wf1', message: 'BaseApi unreachable' });
+    const api = { listLive: vi.fn(), listLiveness: vi.fn() } as unknown as StudioApi;
+    const onRetry = vi.fn();
+    const { rerender } = render(<StudioStoreProvider value={store}><DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} /></StudioStoreProvider>);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+
+    rerender(<StudioStoreProvider value={store}><DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} onRetry={onRetry} /></StudioStoreProvider>);
+    expect(screen.getByRole('alert')).toHaveTextContent('BaseApi unreachable');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands a click to onSelect when given, instead of selecting itself', async () => {
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc });
+    const api = { listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }), listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as unknown as StudioApi;
+    const onSelect = vi.fn();
+    render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}>
+      <DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} onSelect={onSelect} />
+    </div></StudioStoreProvider>);
+
+    fireEvent.click((await screen.findByText('fetch')).closest('.react-flow__node')!);
+
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'step', stepId: 's1' }, document);
+    expect(store.getState().docs[0]!.selection).toBeNull();
+    await screen.findByText('■ stopped');
+  });
 });

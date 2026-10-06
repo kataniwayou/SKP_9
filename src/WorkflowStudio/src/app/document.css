@@ -25,3 +25,15 @@
 /* a disabled button takes no pointer events, so its wrapper's tooltip still shows */
 .qb:disabled { opacity: .35; cursor: default; background: none; border-color: transparent; pointer-events: none; }
 .qsep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+
+/* the modal question (mockup v49 .modal) */
+.modal { position: fixed; inset: 0; display: none; place-items: center; background: rgba(3, 8, 16, .6); backdrop-filter: blur(2px); z-index: var(--z-modal); font-family: var(--sans); }
+.modal.on { display: grid; }
+.mbox { width: 420px; max-width: calc(100vw - 32px); padding: 20px 20px 16px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .85); color: var(--ink); }
+.mt { font-size: 16px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.mt::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--x); }
+.mb { font-size: 13px; color: var(--muted); line-height: 1.55; margin-bottom: 18px; }
+.mb b { color: var(--ink); font-weight: 600; }
+.mbtns { display: flex; gap: 8px; align-items: center; }
+.mbtns .spacer { flex: 1; }
+.doc-msg .btn { margin-left: 10px; }

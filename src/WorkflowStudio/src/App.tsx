@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
 import type { WorkflowReadDto } from './api/types';
+import { ConfirmDialog } from './app/ConfirmDialog';
 import { DocumentPanel } from './app/DocumentPanel';
 import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
@@ -17,6 +18,8 @@ import { entityName } from './model/entityNames';
 import { Inspector } from './panels/Inspector';
 import { Output, Toolbox } from './panels/PaneNote';
 import { Problems } from './panels/Problems';
+import { hasEdits } from './store/inspector';
+import { selectionKey, type Selection } from './store/selection';
 import { inspectorKey } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
 
@@ -97,6 +100,50 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     });
   }, [api, store]);
 
+  // the "could not be re-read" toast; Task 8 hands it to the dock
+  const [_notice, setNotice] = useState({ id: 0, text: '' });
+
+  /** Re-reads a ready document after a write (spec §7.1); a failure keeps its last drawing. */
+  const refresh = useCallback((id: string) => {
+    const token = (opens.current.get(id) ?? 0) + 1;
+    opens.current.set(id, token);
+    void loadDocument(api, id).then((r) => {
+      const current = store.getState().docs.find((d) => d.workflowId === id);
+      if (opens.current.get(id) !== token || current?.status.kind !== 'ready') return;
+      if (r.ok) store.dispatch({ type: 'refreshed', workflowId: id, doc: r.value });
+      else setNotice((n) => ({ id: n.id + 1, text: `${current.name} could not be re-read: ${describeError(r.error)}` }));
+    });
+  }, [api, store]);
+
+  const serviceRef = useRef<ReturnType<typeof createInspectorService> | null>(null);
+  /** After any write, every open document and every Inspector is read again (spec §7.1). */
+  const afterWrite = useCallback(() => {
+    for (const d of store.getState().docs) {
+      if (d.status.kind === 'ready') refresh(d.workflowId);
+      serviceRef.current?.read(d.workflowId, true);
+    }
+  }, [store, refresh]);
+  const service = useMemo(() => createInspectorService(api, store, afterWrite), [api, store, afterWrite]);
+  serviceRef.current = service;
+
+  type Prompt =
+    | { kind: 'unsaved'; workflowId: string; proceed: () => void; doc: Document }
+    | { kind: 'unlink'; workflowId: string; doc: Document; discards: boolean };
+  const [prompt, setPrompt] = useState<Prompt | null>(null);
+
+  const actions: StudioActions = useMemo(() => ({
+    service,
+    guard: (workflowId, proceed, doc = document) => {
+      const open = store.getState().docs.find((d) => d.workflowId === workflowId);
+      if (!open || !hasEdits(open.inspector)) { proceed(); return; }
+      setPrompt({ kind: 'unsaved', workflowId, proceed, doc });
+    },
+    confirmUnlink: (workflowId, doc = document) => {
+      const open = store.getState().docs.find((d) => d.workflowId === workflowId);
+      setPrompt({ kind: 'unlink', workflowId, doc, discards: open !== undefined && hasEdits(open.inspector) });
+    },
+  }), [service, store]);
+
   const openWorkflow = useCallback((id: string) => {
     const known = workflows.find((w) => w.id === id);
     const alreadyOpen = store.getState().docs.some((d) => d.workflowId === id);
@@ -136,23 +183,16 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     [workflows, documents],
   );
 
-  // interim: Task 7 (the page's guard and refresh) replaces these actions
-  const actions: StudioActions = useMemo(() => ({
-    service: createInspectorService(api, store, () => {}),
-    guard: (_workflowId, proceed) => proceed(),
-    confirmUnlink: () => {},
-  }), [api, store]);
-
   return (
     <StudioActionsProvider value={actions}>
       <DockShell
         documents={documents}
         activeDocumentId={activeId}
         onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
-        onCloseDocument={(id) => {
+        onCloseDocument={(id) => actions.guard(id, () => {
           views.current.delete(id); // reopened later, it fits afresh
           store.dispatch({ type: 'close', workflowId: id });
-        }}
+        })}
         workflows={items}
         pickerNote={listError}
         onPickerOpen={readList}
@@ -160,19 +200,41 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         renderDocument={(id, panel) => (
           <DocumentPanel api={api} workflowId={id} panel={panel}
             initialView={views.current.get(id) ?? null}
-            onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }} />
+            onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }}
+            onSelect={(selection: Selection | null, doc: Document) => {
+              store.dispatch({ type: 'activate', workflowId: id });
+              const open = store.getState().docs.find((d) => d.workflowId === id);
+              if (open && selectionKey(open.selection) === selectionKey(selection)) return;
+              actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection }), doc);
+            }}
+            onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }} />
         )}
         renderTool={renderTool}
         inspectorKey={inspector}
         onEscape={() => {
           const id = store.getState().activeId;
-          if (id !== null) store.dispatch({ type: 'select', workflowId: id, selection: null });
+          if (id !== null) actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection: null }));
         }}
         popoutContent={<SvgDefs />}
         storage={storage}
         restore={session?.dock ?? null}
         onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
       />
+      {prompt?.kind === 'unsaved' && (
+        <ConfirmDialog doc={prompt.doc} title="Unsaved changes" onCancel={() => setPrompt(null)}
+          message={<>The Inspector has unsaved changes in <b>{store.getState().docs.find((d) => d.workflowId === prompt.workflowId)?.name}</b>.</>}
+          buttons={[
+            { label: 'Discard', onClick: () => { setPrompt(null); store.dispatch({ type: 'discard', workflowId: prompt.workflowId }); prompt.proceed(); } },
+            { label: 'Save', primary: true, onClick: () => { setPrompt(null); void service.save(prompt.workflowId).then((saved) => { if (saved) prompt.proceed(); }); } },
+          ]} />
+      )}
+      {prompt?.kind === 'unlink' && (
+        <ConfirmDialog doc={prompt.doc} title="Unlink assignment" onCancel={() => setPrompt(null)}
+          message={prompt.discards
+            ? 'This workflow stops using the assignment. The assignment itself is kept. Its unsaved changes will be discarded.'
+            : 'This workflow stops using the assignment. The assignment itself is kept.'}
+          buttons={[{ label: 'Unlink', primary: true, onClick: () => { setPrompt(null); void service.unlink(prompt.workflowId); } }]} />
+      )}
     </StudioActionsProvider>
   );
 }

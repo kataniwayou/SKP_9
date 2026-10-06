@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from './api/client';
-import { graphDto, stepDto, workflowDto } from './api/fixtures';
+import { assignmentDto, graphDto, stepDto, workflowDto } from './api/fixtures';
 import { App } from './App';
 import { SESSION_KEY } from './app/session';
 import { memoryStorage } from './test/memoryStorage';
@@ -274,5 +274,128 @@ describe('session (plan 3d)', () => {
   it('starts as new when the stored session is broken (review focus 1)', () => {
     render(<App api={fakeApi()} storage={memoryStorage({ [SESSION_KEY]: '{oops' })} />);
     expect(screen.getByText('No workflow open')).toBeInTheDocument();
+  });
+});
+
+describe('unsaved Inspector edits (slice 3b)', () => {
+  const draftSession = (edits: Record<string, string>, extra: object[] = [], trail: object[] = []) => memoryStorage({ [SESSION_KEY]: JSON.stringify({
+    version: 1, activeId: ALPHA, showDetails: false, dock: null,
+    docs: [{ workflowId: ALPHA, name: 'alpha', version: '1.0.0', selection: { kind: 'step', stepId: 's1' }, view: null, draft: { trail, edits } }, ...extra],
+  }) });
+  const withEntities = (over: Partial<StudioApi> = {}) => fakeApi({
+    getEntity: vi.fn().mockResolvedValue({ ok: true, value: stepDto('s1', { name: 'fetch' }) }),
+    putEntity: vi.fn().mockResolvedValue({ ok: true, value: stepDto('s1', { name: 'fetch', description: 'typed' }) }),
+    ...over,
+  });
+  const dialog = () => screen.findByRole('alertdialog', { name: 'Unsaved changes' });
+
+  it('brings a draft back after a refresh, marked unsaved', async () => {
+    render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    expect(await screen.findByLabelText('Description')).toHaveValue('typed');
+    expect(screen.getByText('● unsaved changes')).toBeInTheDocument();
+  });
+
+  it('asks before Escape drops a selection with unsaved edits: Cancel keeps, Discard drops', async () => {
+    render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByLabelText('Description')).toHaveValue('typed');
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Discard' }));
+    expect(await screen.findByText(/Nothing selected/)).toBeInTheDocument();
+  });
+
+  it('Save in the dialog saves, then goes on', async () => {
+    const api = withEntities();
+    render(<App api={api} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/Nothing selected/)).toBeInTheDocument();
+    expect(api.putEntity).toHaveBeenCalledWith('step', 's1', expect.objectContaining({ description: 'typed' }));
+  });
+
+  it('a failed Save in the dialog moves nothing and shows why', async () => {
+    render(<App api={withEntities({ putEntity: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } }) })}
+      storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save' }));
+    // dockview keeps an empty live region of role alert, so the banner is found by its text
+    expect(await screen.findByText('Not saved: BaseApi unreachable')).toHaveAttribute('role', 'alert');
+    expect(screen.getByLabelText('Description')).toHaveValue('typed');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('Escape inside the dialog cancels it only (review focus 5)', async () => {
+    render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.keyDown(within(await dialog()).getByRole('button', { name: 'Save' }), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.getByLabelText('Description')).toHaveValue('typed');
+  });
+
+  it('asks before closing a document with unsaved edits', async () => {
+    render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    await screen.findByLabelText('Description');
+    fireEvent.click(screen.getByRole('button', { name: 'Close alpha' }));
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(0));
+  });
+
+  it('re-reads every open document after a save', async () => {
+    const api = withEntities();
+    render(<App api={api} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' },
+      [{ workflowId: ZETA, name: 'zeta', version: '1.0.0', selection: null, view: null }])} />);
+    await screen.findByLabelText('Description');
+    await waitFor(() => expect(api.getGraph).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.getGraph).toHaveBeenCalledTimes(4));
+    expect(api.validate).toHaveBeenCalledTimes(4);
+  });
+
+  it('a failed document can be retried, and keeps its draft meanwhile', async () => {
+    const getGraph = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: { kind: 'network', message: 'down' } })
+      .mockResolvedValue({ ok: true, value: graphDto({ workflow: workflowDto({ id: ALPHA, name: 'alpha' }), steps: [stepDto('s1', { name: 'fetch' })] }) });
+    const tab = draftSession({ description: 'typed' });
+    render(<App api={withEntities({ getGraph })} storage={memoryStorage()} tabStorage={tab} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    expect(await screen.findByLabelText('Description')).toHaveValue('typed');
+  });
+
+  describe('unlinking an assignment', () => {
+    const assignment = assignmentDto('a1', { stepId: 's1' });
+    const linked = () => workflowDto({ id: ALPHA, name: 'alpha', assignmentIds: ['a1'] });
+    const unlinkApi = () => withEntities({
+      getGraph: vi.fn().mockResolvedValue({ ok: true, value: graphDto({ workflow: linked(), steps: [stepDto('s1', { name: 'fetch' })], assignments: [assignment] } as never) }),
+      getEntity: vi.fn(async (kind: string) => ({ ok: true, value: kind === 'assignment' ? assignment : kind === 'workflow' ? linked() : stepDto('s1', { name: 'fetch' }) })),
+      putEntity: vi.fn().mockResolvedValue({ ok: true, value: workflowDto({ id: ALPHA, name: 'alpha', assignmentIds: [] }) }),
+    } as Partial<StudioApi>);
+    const atAssignment = (edits: Record<string, string>) => draftSession(edits, [], [{ kind: 'assignment', id: 'a1', stepId: 's1' }]);
+    const unlinkDialog = () => screen.findByRole('alertdialog', { name: 'Unlink assignment' });
+
+    it('asks first, and Unlink unlinks it from this workflow', async () => {
+      const api = unlinkApi();
+      render(<App api={api} storage={memoryStorage()} tabStorage={atAssignment({})} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Unlink from this workflow' }));
+      const box = await unlinkDialog();
+      expect(box).toHaveTextContent('This workflow stops using the assignment. The assignment itself is kept.');
+      expect(box).not.toHaveTextContent(/discarded/);
+      expect(api.putEntity).not.toHaveBeenCalled();
+      fireEvent.click(within(box).getByRole('button', { name: 'Unlink' }));
+      await waitFor(() => expect(api.putEntity).toHaveBeenCalledWith('workflow', ALPHA, expect.objectContaining({ assignmentIds: [] })));
+      expect(await screen.findByText('STEP', { selector: '.kindpill' })).toBeInTheDocument();
+    });
+
+    it('says the unsaved changes of the assignment will be discarded (Task 6 review ruling)', async () => {
+      render(<App api={unlinkApi()} storage={memoryStorage()} tabStorage={atAssignment({ payload: '{"k":3}' })} />);
+      expect(await screen.findByText('● unsaved changes')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Unlink from this workflow' }));
+      expect(await unlinkDialog()).toHaveTextContent('Its unsaved changes will be discarded.');
+    });
   });
 });
