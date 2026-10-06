@@ -1,82 +1,121 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApi, type ApiError, type StudioApi } from './api/client';
 import type { WorkflowReadDto } from './api/types';
-import type { StudioDocument } from './app/document';
+import { DocumentPanel } from './app/DocumentPanel';
 import { loadDocument } from './app/loadDocument';
-import { canvasMeasure, createTextFitter, loadMeasuredFonts, type TextFitter } from './canvas/fitText';
 import { SvgDefs } from './canvas/SvgDefs';
-import { WorkflowCanvas } from './canvas/WorkflowCanvas';
+import { fitterFor } from './canvas/useFitter';
+import { DockShell, type DockDocument, type PickerItem } from './dock/DockShell';
+import type { ToolId } from './dock/ids';
 import { entityName } from './model/entityNames';
+import { Inspector } from './panels/Inspector';
+import { Output, Toolbox } from './panels/PaneNote';
+import { Problems } from './panels/Problems';
+import { inspectorKey } from './store/studioState';
+import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
 
-function describe(error: ApiError): string {
+export function describeError(error: ApiError): string {
   switch (error.kind) {
-    case 'notFound': return 'Not found.';
+    case 'notFound': return 'This workflow no longer exists.';
     case 'network': return `Network error: ${error.message}`;
     default: return error.status === 0 ? error.detail : `${error.status}: ${error.detail}`;
   }
 }
 
-const workflowFromUrl = () => new URLSearchParams(window.location.search).get('workflow');
+const uniqueName = (w: WorkflowReadDto) => entityName(w.name ?? '', w.version ?? '', w.id ?? '');
 
-/**
- * The slice-2 page: a picker, a status line and the canvas. The open workflow is in the URL
- * (`?workflow=<id>`), so a reload or a shared link reopens it. The dock arrives in plan 5.
- */
-export function App({ api: injected }: { api?: StudioApi }) {
+function renderTool(id: ToolId) {
+  switch (id) {
+    case 'inspector': return <Inspector />;
+    case 'problems': return <Problems />;
+    case 'output': return <Output />;
+    case 'toolbox': return <Toolbox />;
+  }
+}
+
+/** The studio page (slice 3a): one store, the dock, and what goes in its documents and panes. */
+export function App({ api: injected, storage }: { api?: StudioApi; storage?: Storage | null }) {
   const api = useMemo(() => injected ?? createApi(), [injected]);
+  const store = useMemo(() => createStudioStore(), []);
+  // the page's fonts start loading at once, so the first document opens with its fitter ready
+  useEffect(() => { void fitterFor(document); }, []);
+  return (
+    <StudioStoreProvider value={store}>
+      <SvgDefs />
+      <Studio api={api} storage={storage} />
+    </StudioStoreProvider>
+  );
+}
+
+function Studio({ api, storage }: { api: StudioApi; storage?: Storage | null }) {
+  const store = useStudioStore();
+  const docs = useStudio((s) => s.docs);
+  const activeId = useStudio((s) => s.activeId);
+  const inspector = useStudio(inspectorKey);
+  // one token per open: a result from an earlier open of the same workflow (closed and reopened while loading) is ignored
+  const opens = useRef(new Map<string, number>());
   const [workflows, setWorkflows] = useState<WorkflowReadDto[]>([]);
-  const [selected, setSelected] = useState<string | null>(workflowFromUrl);
-  const [doc, setDoc] = useState<StudioDocument | null>(null);
-  const [status, setStatus] = useState<{ text: string; error: boolean }>({ text: '', error: false });
-  const [fitter, setFitter] = useState<TextFitter | null>(null);
+  const [listError, setListError] = useState<string | undefined>(undefined);
 
-  // Labels are measured with the real fonts, so the fitter is made once the fonts have loaded.
-  useEffect(() => {
-    let live = true;
-    void loadMeasuredFonts().then(() => { if (live) setFitter(createTextFitter(canvasMeasure())); });
-    return () => { live = false; };
-  }, []);
-
-  useEffect(() => {
+  const readList = useCallback(() => {
     void api.listWorkflows().then((r) => {
-      if (r.ok) setWorkflows([...r.value].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')));
-      else setStatus({ text: describe(r.error), error: true });
+      if (r.ok) {
+        setWorkflows([...r.value].sort((a, b) => uniqueName(a).localeCompare(uniqueName(b))));
+        setListError(undefined);
+      } else {
+        setListError(`Workflows could not be listed. ${describeError(r.error)}`);
+      }
     });
   }, [api]);
+  useEffect(readList, [readList]);
 
-  useEffect(() => {
-    if (!selected) { setDoc(null); return; }
-    let live = true;
-    setStatus({ text: 'Loading…', error: false });
-    void loadDocument(api, selected).then((r) => {
-      if (!live) return;
-      if (r.ok) { setDoc(r.value); setStatus({ text: r.value.problems === null ? 'Problems unavailable.' : '', error: false }); }
-      else { setDoc(null); setStatus({ text: describe(r.error), error: true }); }
+  const openWorkflow = useCallback((id: string) => {
+    const known = workflows.find((w) => w.id === id);
+    const alreadyOpen = store.getState().docs.some((d) => d.workflowId === id);
+    store.dispatch({ type: 'open', workflowId: id, name: known?.name ?? id, version: known?.version ?? '' });
+    if (alreadyOpen) return;
+    const token = (opens.current.get(id) ?? 0) + 1;
+    opens.current.set(id, token);
+    void loadDocument(api, id).then((r) => {
+      const current = store.getState().docs.find((d) => d.workflowId === id);
+      if (opens.current.get(id) !== token || current?.status.kind !== 'loading') return;
+      store.dispatch(r.ok
+        ? { type: 'loaded', workflowId: id, doc: r.value }
+        : { type: 'failed', workflowId: id, message: describeError(r.error) });
     });
-    return () => { live = false; };
-  }, [api, selected]);
+  }, [api, store, workflows]);
 
-  const open = (id: string) => {
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('workflow', id); else url.searchParams.delete('workflow');
-    window.history.replaceState(null, '', url);
-    setSelected(id || null);
-  };
+  // the dock only needs each document's identity and names; a selection change must not re-render every tab
+  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}`).join('\u0001');
+  const documents: DockDocument[] = useMemo(
+    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId) })),
+    [identity], // the part of `docs` the dock shows; `docs` itself changes on every selection
+
+  );
+  const items: PickerItem[] = useMemo(
+    () => workflows.filter((w) => w.id).map((w) => ({ id: w.id!, label: uniqueName(w), open: documents.some((d) => d.id === w.id) })),
+    [workflows, documents],
+  );
 
   return (
-    <div className="app">
-      <SvgDefs />
-      <header className="app-bar">
-        <h1>SKP STUDIO</h1>
-        <select aria-label="Workflow" value={selected ?? ''} onChange={(e) => open(e.target.value)}>
-          <option value="">Open a workflow…</option>
-          {workflows.map((w) => <option key={w.id} value={w.id ?? ''}>{entityName(w.name ?? '', w.version ?? '', w.id ?? '')}</option>)}
-        </select>
-        <span role="status" className={status.error ? 'app-status error' : 'app-status'}>{status.text}</span>
-      </header>
-      <main className="app-main">
-        {doc && fitter ? <WorkflowCanvas doc={doc} fitter={fitter} /> : <div className="app-empty">{selected ? '' : 'Pick a workflow to open it.'}</div>}
-      </main>
-    </div>
+    <DockShell
+      documents={documents}
+      activeDocumentId={activeId}
+      onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
+      onCloseDocument={(id) => store.dispatch({ type: 'close', workflowId: id })}
+      workflows={items}
+      pickerNote={listError}
+      onPickerOpen={readList}
+      onOpenWorkflow={openWorkflow}
+      renderDocument={(id, panel) => <DocumentPanel api={api} workflowId={id} panel={panel} />}
+      renderTool={renderTool}
+      inspectorKey={inspector}
+      onEscape={() => {
+        const id = store.getState().activeId;
+        if (id !== null) store.dispatch({ type: 'select', workflowId: id, selection: null });
+      }}
+      popoutContent={<SvgDefs />}
+      storage={storage}
+    />
   );
 }

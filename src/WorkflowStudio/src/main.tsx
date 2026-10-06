@@ -6,8 +6,12 @@ import '@fontsource/ibm-plex-sans-condensed/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import '@xyflow/react/dist/style.css';
+import 'dockview-react/dist/styles/dockview.css';
 import './canvas/tokens.css';
 import './canvas/canvas.css';
+import './dock/dock.css';
+import './panels/panels.css';
+import './app/document.css';
 import './app.css';
 import { App } from './App';
 
