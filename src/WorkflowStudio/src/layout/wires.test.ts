@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AUDIT } from '../model/fixtures';
 import type { Step } from '../model/graph';
 import type { Placement } from './placement';
-import { routeWires, tetherPoints, type WiringInput } from './wires';
+import { drawnLine, routeWires, tetherPoints, type WiringInput } from './wires';
 
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
   id, name: id, version: '1.0.0', description: null, processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
@@ -241,6 +241,15 @@ describe('junctions (plan 7)', () => {
     const br = w.joint!.branch;
     expect(br[br.length - 1]![0]).toBe(576);
     expect(square(br)).toBe(true);
+  });
+
+  it('the drawn line is its own line, then its branch when the branch has a run (one measure for contacts and hits)', () => {
+    const wires = setup(steps(), at, new Set<string>(), { ...join('t->c', 's->b', 176), ...join('u->b', 's->b', 176) });
+    const plain = wires.find((x) => x.id === 's->b')!, t = wires.find((x) => x.id === 't->c')!, u = wires.find((x) => x.id === 'u->b')!;
+    expect(drawnLine(plain)).toEqual([plain.points]);
+    expect(drawnLine(t)).toEqual([t.points, t.joint!.branch]);
+    expect(drawnLine(u)).toEqual([u.points]);
+    expect(drawnLine({ ...t, joint: { ...t.joint!, branch: [t.joint!.contact] } })).toEqual([t.points]);
   });
 
   it('a host line too short to hold a contact leaves the wire plain', () => {

@@ -126,9 +126,14 @@ function joinWires(routed: WireRoute[], input: WiringInput, boxes: Box[]): WireR
   return routed.map((r) => byId.get(r.id)!);
 }
 
+/** A wire's drawn line: its own line, then its branch when the branch has a run; what a contact's distance is measured on (plan 7). */
+export function drawnLine(w: WireRoute): Pt[][] {
+  return w.joint && w.joint.branch.length >= 2 ? [w.points, w.joint.branch] : [w.points];
+}
+
 /** A on host B (spec §5.3); null when B's line is too short to hold a contact. */
 function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, shape: WireShape, boxes: Box[]): { route: WireRoute; travel: Pt[] } | null {
-  const drawn = host.joint && host.joint.branch.length > 0 ? [host.points, host.joint.branch] : [host.points];
+  const drawn = drawnLine(host);
   const total = lengthOf(drawn);
   if (total < 2 * CONTACT_MARGIN) return null;
   const atC = Math.min(Math.max(snap(at, GRID), CONTACT_MARGIN), total - CONTACT_MARGIN);

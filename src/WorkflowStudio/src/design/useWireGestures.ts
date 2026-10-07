@@ -234,15 +234,18 @@ export function useWireGestures(
 
   /**
    * Drags a wire end (spec §4.4, option "a"), drawn as `path` to the pointer: the block under it is outlined green
-   * when `verdict` allows the drop and red when not; `current` (the end's own block) is not outlined. With no
+   * when `verdict` allows the drop and red when not; `current` (the end's own block) is outlined green with the
+   * `selfWhy` label, and dropping there runs `onSelf` (a new wire has no `current`). With no
    * block under it, a wire line within the drop reach gets a halo the same way (plan 7 §6.1): `line` joins it,
    * the wire previewed joined there, or names why it may not.
-   * Dropped on an allowed block, `done` commits; on an allowed line, `line.done`; anywhere else, refused, or
-   * back on `current`, nothing changes and no step is made.
+   * Dropped on an allowed block, `done` commits; on an allowed line, `line.done`; back on `current`, `onSelf`
+   * (which makes no step when nothing would change); anywhere else or refused, nothing changes and no step is made.
    */
   const dropGesture = (e: ReactPointerEvent, o: {
     wire: string | null; path: (p: Point, over: string | null) => Pt[]; current: string | null; verdict: (over: string) => DropVerdict;
-    done: (over: string, p: Point) => void; onSelf?: (p: Point) => void;
+    done: (over: string, p: Point) => void;
+    /** Dropped back on `current`; required whenever `current` is set. */
+    onSelf?: (p: Point) => void;
     /** The label over `current`: 'move' (a head slides its contact) or 'here' (a tail stays where it starts). */
     selfWhy?: 'move' | 'here';
     /** What a line under the pointer does: joins (`LineDrop`) or refuses with a reason. */
@@ -268,7 +271,7 @@ export function useWireGestures(
         // an allowed line: the wire is drawn joined there (the preview) instead of the ghost
         if (why === 'ok') { setGhost(null); setPreview(o.line.preview(onLine.id, onLine.at)); return; }
       } else if (onLine) setHint({ id: onLine.id, line: true, ok: false, why: o.line as Refusal, newWire, at: p });
-      else if (over === null || (over === o.current && !o.onSelf)) setHint(null);
+      else if (over === null) setHint(null);
       else if (over === o.current) setHint({ id: over, line: false, ok: true, why: o.selfWhy ?? 'move', newWire, at: p });
       else { const why = o.verdict(over); setHint({ id: over, line: false, ok: why === 'ok', why, newWire, at: p }); }
       setPreview(null);

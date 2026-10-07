@@ -53,7 +53,7 @@ export function canJoin(shown: StudioDocument, wire: string, host: string): Join
   return 'ok';
 }
 
-/** What the pointer's label says over a block while a wire end or a new wire is dragged (plan 4 trial). */
+/** What the pointer's label says over a block or a wire's line while a wire end or a new wire is dragged (plan 4 trial, plan 7). */
 export function dropLabel(verdict: DropVerdict | 'move' | 'here' | JoinVerdict | Refusal, newWire: boolean, line = false): string {
   switch (verdict) {
     case 'ok': return line ? 'join here' : newWire ? 'connect here' : 're-attach here';
