@@ -356,8 +356,14 @@ export function useWireGestures(
         // the contact is kept; on a step of another colour it is ignored (drawn plain, plan 7 §5.2)
         d.onCommit(setShape(next, id, { bends: shape?.bends ?? null, landing: landingAt(over, p), contact: shape?.contact ?? null }), { picks: [{ kind: 'wire', id }] });
       },
-      // back on its own step: the arrow's landing moves there
-      onSelf: (p) => d.onCommit(setShape(base, wire.id, { bends: shape?.bends ?? null, landing: landingAt(wire.target, p), contact: shape?.contact ?? null }), { picks: [{ kind: 'wire', id: wire.id }] }),
+      // back on its own step: the arrow's landing moves there; at the height it already has, no step
+      onSelf: (p) => {
+        const landing = landingAt(wire.target, p);
+        const step = shown.current.placement.steps.get(wire.target);
+        const tip = wire.joint!.branch[wire.joint!.branch.length - 1];
+        if (!step || (tip && step.y + landing === tip[1])) return;
+        d.onCommit(setShape(base, wire.id, { bends: shape?.bends ?? null, landing, contact: shape?.contact ?? null }), { picks: [{ kind: 'wire', id: wire.id }] });
+      },
       // the arrow ends on a step: only the contact square joins a line
       line: 'needStep',
       part: 'branch',

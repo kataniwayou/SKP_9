@@ -588,6 +588,28 @@ describe('wire gestures', () => {
     expect(next.routes['s3->s2']!.contact).toEqual({ host: 's1->s2', at: 40 });
   });
 
+  it('the arrow square dropped back on its own step at the same height makes no step; at another height, one step with the new landing and the contact kept', async () => {
+    const doc = await joinable();
+    const design = designOf({ draft: joined(), picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const arrow = () => container.querySelector('.design-wire[data-wire="s3->s4"] .design-handle.end[data-end="arrow"]')!;
+    const s4 = doc.placement.steps.get('s4')!;
+    const branch = applyDraft(doc, joined()).wires.find((w) => w.id === 's3->s4')!.joint!.branch;
+    const now = branch[branch.length - 1]![1] - s4.y;
+    fireEvent.pointerDown(arrow(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: s4.x + 40, y: s4.y + now }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: s4.x + 40, y: s4.y + now }), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+    const to = now === LANDING_MIN ? LANDING_MAX : LANDING_MIN;
+    fireEvent.pointerDown(arrow(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: s4.x + 40, y: s4.y + to }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: s4.x + 40, y: s4.y + to }), pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    const shape = vi.mocked(design.onCommit).mock.calls[0]![0].routes['s3->s4']!;
+    expect(shape.landing).toBe(to);
+    expect(shape.contact).toEqual({ host: 's1->s2', at: 40 });
+  });
+
   it('a run drag on a joined wire with a slid landing is committed against its contact, not its landing height', async () => {
     const doc = await joinable();
     const draft = setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: 40, contact: { host: 's1->s2', at: 40 } });
