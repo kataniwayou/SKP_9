@@ -1,6 +1,7 @@
 import type { ApiError, StudioApi } from '../api/client';
 import { describeError } from '../api/describeError';
 import type { AssignmentReadDto } from '../api/types';
+import { entityName } from '../model/entityNames';
 import type { Id } from '../model/graph';
 import { createAssignmentDto, newAssignmentDto, splitErrors, updateDto } from '../store/entityForms';
 import type { SaveFailure } from '../store/inspector';
@@ -16,8 +17,11 @@ export interface InspectorService {
   save(workflowId: Id): Promise<boolean>;
   /** Creates the assignment the new-assignment form describes, then links it to the workflow. */
   create(workflowId: Id): Promise<boolean>;
-  /** Unlinks the shown assignment from this workflow; the assignment itself is kept. */
-  unlink(workflowId: Id): Promise<boolean>;
+  /**
+   * Removes a step's assignment, shown or on the shown step: takes it off this workflow, then deletes it.
+   * Refused, changing nothing, while another workflow also uses it, so nothing is left orphaned or half done.
+   */
+  remove(workflowId: Id, assignmentId: Id): Promise<boolean>;
 }
 
 /** What a failed write shows (spec §7.1, §8): a 400 under its fields, everything else in the banner. */
@@ -123,17 +127,33 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     return why === null ? true : fail(workflowId, write, { fields: {}, banner: `Created but not linked to this workflow: ${why}` });
   }
 
-  async function unlink(workflowId: Id): Promise<boolean> {
+  async function remove(workflowId: Id, assignmentId: Id): Promise<boolean> {
     const doc = docOf(workflowId);
     const target = shown(workflowId);
-    if (doc === null || target?.kind !== 'assignment' || doc.inspector.busy) return false;
+    if (doc === null || doc.inspector.busy) return false;
+    const fromItself = target?.kind === 'assignment' && target.id === assignmentId;
+    if (!fromItself && target?.kind !== 'step') return false;
     const write = begin(workflowId);
-    const why = await relink(workflowId, (ids) => ids.filter((x) => x !== target.id));
-    if (why !== null) return fail(workflowId, write, { fields: {}, banner: `Not unlinked: ${why}` });
-    store.dispatch({ type: 'back', workflowId, depth: doc.inspector.trail.length - 1, write });
+    const workflows = await api.listWorkflows();
+    if (!workflows.ok) return fail(workflowId, write, { fields: {}, banner: `Not removed: ${describeError(workflows.error)}` });
+    const others = workflows.value.filter((w) => w.id !== workflowId && (w.assignmentIds ?? []).includes(assignmentId));
+    if (others.length > 0) {
+      const names = others.map((w) => entityName(w.name ?? '', w.version ?? '', w.id ?? '')).join(', ');
+      return fail(workflowId, write, { fields: {}, banner: `Not removed: also used by ${names}.` });
+    }
+    const why = await relink(workflowId, (ids) => ids.filter((x) => x !== assignmentId));
+    if (why !== null) return fail(workflowId, write, { fields: {}, banner: `Not removed: ${why}` });
+    const deleted = await api.deleteAssignment(assignmentId);
+    // a 404: already gone, which is what was asked
+    if (!deleted.ok && deleted.error.kind !== 'notFound') {
+      afterWrite();
+      return fail(workflowId, write, { fields: {}, banner: `Taken off this workflow, but not deleted: ${describeError(deleted.error)}` });
+    }
+    if (fromItself) store.dispatch({ type: 'back', workflowId, depth: doc.inspector.trail.length - 1, write });
+    else store.dispatch({ type: 'busy', workflowId, busy: false, write });
     afterWrite();
     return true;
   }
 
-  return { read, save, create, unlink };
+  return { read, save, create, remove };
 }

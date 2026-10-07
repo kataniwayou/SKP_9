@@ -10,8 +10,8 @@ export interface StudioActions {
    * Save (and it worked) or Discard in the dialog (spec §7.1). `doc`: the window the action came from.
    */
   guard(workflowId: Id, proceed: () => void, doc?: Document): void;
-  /** Asks before unlinking the shown assignment from this workflow, then unlinks it. */
-  confirmUnlink(workflowId: Id, doc?: Document): void;
+  /** Asks before removing a step's assignment (taken off this workflow and deleted), then removes it. */
+  confirmRemove(workflowId: Id, assignmentId: Id, doc?: Document): void;
 }
 
 const Context = createContext<StudioActions | null>(null);

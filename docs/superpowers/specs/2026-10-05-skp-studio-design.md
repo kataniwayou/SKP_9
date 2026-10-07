@@ -376,8 +376,14 @@ as the server holds them at that moment (decided 2026-10-06, plan 3b).
   the step has none in this workflow) is `POST /assignments` with the step's id (defaults: Name
   `{step name}-assignment`, Version `1.0.0`, Payload `{}`), then `PUT /workflows/{id}` adding it to
   `AssignmentIds`; the two calls are not atomic, and a failed second call is reported as "created but
-  not linked". **Remove** unlinks it from this workflow only (`PUT /workflows/{id}` without it, after a
-  confirmation); the row is kept. No `DELETE` in slice 3b.
+  not linked". **Create** (formerly Add) and **Remove** sit on the step's Assignment row; Remove also
+  sits in the assignment's own view. **Remove** (amended 2026-10-07; unlink-only was dropped because it
+  left orphaned assignments) asks first, then lists the workflows: if any other workflow also lists
+  the assignment it is refused and changes nothing, with the banner "Not removed: also used by {names}."
+  Otherwise it is `PUT /workflows/{id}` without it, then `DELETE /assignments/{id}` (BaseApi refuses
+  the delete while any workflow still lists it, hence the order; a 404 counts as done). A delete that
+  fails after the PUT says "Taken off this workflow, but not deleted". Results show in the Inspector's
+  banner only; Output does not log them yet.
 
 ### 7.2 Richer editors (later slices)
 
@@ -448,7 +454,7 @@ Start blockers come from `POST /workflows/{id}/validate` (§4.4), called shortly
   - after layout, every step border lies on a 32 px line and every wire point on an 8 px line;
   - (3a) open a workflow, select an entity and see the Inspector fill; auto-hide a pane and pin it back;
   - (3b) edit and save each entity kind, see a 400 under its field and a 409/422 banner, and add, edit
-    and unlink a step's assignment.
+    and remove a step's assignment.
 - **The Inspector's DTO round trip (Vitest, 3b).** For every entity, a save sends exactly the DTO it
   read with only the writable fields changed; structural fields (`NextStepIds`, `EntryStepIds`,
   `AssignmentIds`, `CacheIds`, `StepId`, `ProcessorId`, schema ids) go back unchanged.

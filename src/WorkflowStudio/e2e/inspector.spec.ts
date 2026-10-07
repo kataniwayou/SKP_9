@@ -127,12 +127,12 @@ test('a 409 shows as a banner and keeps what was typed', async ({ page }) => {
   await expect(page.getByText('● unsaved changes')).toHaveCount(0);
 });
 
-test('an assignment is added, edited and unlinked from the step', async ({ page, request }) => {
+test('an assignment is created, edited and removed from the step', async ({ page, request }) => {
   const panel = await open(page);
   const assignmentIds = async () => (await get<{ assignmentIds: string[] | null }>(request, `workflows/${t.workflow.id}`)).assignmentIds ?? [];
   await selectStep(page, panel);
 
-  await inspector(page).getByRole('button', { name: '＋ Add assignment' }).click();
+  await inspector(page).getByRole('button', { name: '＋ Create' }).click();
   await expect(pill(page)).toHaveText('NEW ASSIGNMENT');
   await inspector(page).getByRole('button', { name: 'Create' }).click();
   await expect(pill(page)).toHaveText('ASSIGNMENT');
@@ -146,10 +146,12 @@ test('an assignment is added, edited and unlinked from the step', async ({ page,
   await save(page);
   expect(JSON.parse((await get<{ payload: string }>(request, `assignments/${id}`)).payload)).toEqual({ k: 1 });
 
-  await inspector(page).getByRole('button', { name: 'Unlink from this workflow' }).click();
-  await page.getByRole('alertdialog', { name: 'Unlink assignment' }).getByRole('button', { name: 'Unlink' }).click();
+  await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
+  await page.getByRole('alertdialog', { name: 'Remove assignment' }).getByRole('button', { name: 'Remove' }).click();
   await expect(pill(page)).toHaveText('STEP');
   await expect.poll(assignmentIds).toEqual([]);
+  expect((await request.get(`/api/v1/assignments/${id}`)).status()).toBe(404);
+  await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
 });
 
 test('unsaved edits are guarded and survive a refresh', async ({ page }) => {

@@ -206,7 +206,7 @@ describe('Inspector editing (slice 3b)', () => {
     const putEntity = vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a9'] })));
     await renderInspector({ getEntity, putEntity, createAssignment }, { selection: { kind: 'step', stepId: 's1' } });
 
-    fireEvent.click(await screen.findByRole('button', { name: '＋ Add assignment' }));
+    fireEvent.click(await screen.findByRole('button', { name: '＋ Create' }));
     expect(await screen.findByText('NEW ASSIGNMENT')).toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toHaveValue('fetch-assignment');
     expect(screen.getByLabelText('Payload')).toHaveValue('{}');
@@ -217,18 +217,18 @@ describe('Inspector editing (slice 3b)', () => {
     expect(await screen.findByText('ASSIGNMENT')).toBeInTheDocument();
   });
 
-  it('a created assignment keeps Save and Unlink disabled until it is linked; a failed link says so and keeps the typed text', async () => {
+  it('a created assignment keeps Save and Remove disabled until it is linked; a failed link says so and keeps the typed text', async () => {
     const created = assignmentDto('a9', { name: 'fetch-assignment', stepId: 's1' });
     let answer!: (r: unknown) => void;
     const linking = new Promise((r) => { answer = r; });
     const getEntity = vi.fn(async (kind: string) => (kind === 'workflow' ? linking : ok(kind === 'step' ? step : created)));
     const putEntity = vi.fn();
     await renderInspector({ getEntity, putEntity, createAssignment: vi.fn().mockResolvedValue(ok(created)) } as never, { selection: { kind: 'step', stepId: 's1' } });
-    fireEvent.click(await screen.findByRole('button', { name: '＋ Add assignment' }));
+    fireEvent.click(await screen.findByRole('button', { name: '＋ Create' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Create' }));
     expect(await screen.findByText('ASSIGNMENT')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'typed' } });
-    expect(screen.getByRole('button', { name: 'Unlink from this workflow' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove assignment' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
     await act(async () => answer({ ok: false, error: { kind: 'network', message: 'down' } }));
     expect(await screen.findByText('Created but not linked to this workflow: Network error: down')).toBeInTheDocument();
@@ -239,18 +239,34 @@ describe('Inspector editing (slice 3b)', () => {
 
   it('the new-assignment form cancels back to its step', async () => {
     await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
-    fireEvent.click(await screen.findByRole('button', { name: '＋ Add assignment' }));
+    fireEvent.click(await screen.findByRole('button', { name: '＋ Create' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     expect(await screen.findByText('STEP')).toBeInTheDocument();
   });
 
-  it('asks the page before unlinking an assignment from this workflow', async () => {
+  it('asks the page before removing an assignment, from the assignment itself', async () => {
     const assignment = assignmentDto('a1', { stepId: 's1' });
-    const { confirmUnlink } = await renderInspector({ getEntity: vi.fn(async (kind: string) => ok(kind === 'step' ? step : assignment)) },
+    const { confirmRemove } = await renderInspector({ getEntity: vi.fn(async (kind: string) => ok(kind === 'step' ? step : assignment)) },
       { selection: { kind: 'step', stepId: 's1' }, graph: withAssignment });
     fireEvent.click(await screen.findByRole('button', { name: '◆ 2 keys' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Unlink from this workflow' }));
-    expect(confirmUnlink).toHaveBeenCalledWith('wf1', document);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove assignment' }));
+    expect(confirmRemove).toHaveBeenCalledWith('wf1', 'a1', document);
+    expect(screen.queryByRole('button', { name: /Unlink/ })).toBeNull();
+  });
+
+  it("asks the page before removing an assignment, from its step's row", async () => {
+    const { confirmRemove } = await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) },
+      { selection: { kind: 'step', stepId: 's1' }, graph: withAssignment });
+    expect(await screen.findByRole('button', { name: '◆ 2 keys' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '＋ Create' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '✕ Remove' }));
+    expect(confirmRemove).toHaveBeenCalledWith('wf1', 'a1', document);
+  });
+
+  it('a step without an assignment offers Create and no Remove', async () => {
+    await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
+    expect(await screen.findByRole('button', { name: '＋ Create' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '✕ Remove' })).toBeNull();
   });
 });
 

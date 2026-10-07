@@ -16,6 +16,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     getEntity: vi.fn().mockResolvedValue(notFound),
     putEntity: vi.fn().mockResolvedValue(notFound),
     createAssignment: vi.fn().mockResolvedValue(notFound),
+    deleteAssignment: vi.fn().mockResolvedValue(notFound),
     listLive: vi.fn(),
     listLiveness: vi.fn(),
     validate: vi.fn().mockResolvedValue(ok({ valid: true, problems: [] })),

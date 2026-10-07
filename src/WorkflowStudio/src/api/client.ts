@@ -27,6 +27,8 @@ export interface StudioApi {
   putEntity<K extends EntityKind>(kind: K, id: string, dto: UpdateDtoOf[K]): Promise<ApiResult<ReadDtoOf[K]>>;
   /** `POST /assignments`: the only create in slice 3b; BaseApi answers 201 with the new assignment. */
   createAssignment(dto: AssignmentCreateDto): Promise<ApiResult<AssignmentReadDto>>;
+  /** `DELETE /assignments/{id}`: 204. BaseApi refuses (422) while any workflow still lists it. */
+  deleteAssignment(id: string): Promise<ApiResult<null>>;
   /**
    * The running workflow ids (`GET /orchestration/live`, the `skp:live` set). Typed `unknown`
    * on purpose: callers read it defensively (api/liveStatus.ts), never trusting its shape.
@@ -89,7 +91,7 @@ async function toError(response: Response): Promise<ApiError> {
 
 /** Relative URLs only: the studio is served from the same origin as BaseApi. */
 export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)): StudioApi {
-  async function request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<ApiResult<T>> {
+  async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<ApiResult<T>> {
     const init: RequestInit = body === undefined
       ? { method, headers: { Accept: 'application/json' } }
       : { method, headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -100,6 +102,7 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
       return { ok: false, error: { kind: 'network', message: e instanceof Error ? e.message : String(e) } };
     }
     if (!response.ok) return { ok: false, error: await toError(response) };
+    if (response.status === 204) return { ok: true, value: null as T };
     try {
       return { ok: true, value: (await response.json()) as T };
     } catch (e) {
@@ -123,6 +126,7 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
       return request<ReadDtoOf[K]>('PUT', `/${ENTITY_PATH[kind]}/${id(entityId)}`, dto);
     },
     createAssignment: (dto) => request<AssignmentReadDto>('POST', '/assignments', dto),
+    deleteAssignment: (assignmentId) => request<null>('DELETE', `/assignments/${id(assignmentId)}`),
     listLive: () => get<unknown>('/orchestration/live'),
     listLiveness: () => get<unknown>('/processors/liveness'),
     validate: (workflowId) => request<WorkflowValidationDto>('POST', `/workflows/${id(workflowId)}/validate`),

@@ -9,7 +9,7 @@ export interface InspectorDraft {
   edits: Record<string, string>;
 }
 
-/** Why the last save, create or unlink did not happen: messages under their fields, a banner for the rest. */
+/** Why the last save, create or remove did not happen: messages under their fields, a banner for the rest. */
 export interface SaveFailure {
   fields: Record<string, string[]>;
   banner: string | null;
@@ -20,7 +20,7 @@ export interface InspectorState extends InspectorDraft {
   saved: { key: string; dto: EntityReadDto } | null;
   /** Why the shown entity could not be read. */
   readError: string | null;
-  /** A save, create or unlink is in flight. */
+  /** A save, create or remove is in flight. */
   busy: boolean;
   /**
    * The token of the last write started here; a write's results apply only while it is still this one.

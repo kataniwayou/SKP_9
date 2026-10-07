@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from './api/client';
+import type { WorkflowReadDto } from './api/types';
 import { assignmentDto, graphDto, stepDto, workflowDto } from './api/fixtures';
 import { App } from './App';
 import { SESSION_KEY } from './app/session';
@@ -22,6 +23,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     getEntity: vi.fn().mockResolvedValue(notFound),
     putEntity: vi.fn().mockResolvedValue(notFound),
     createAssignment: vi.fn().mockResolvedValue(notFound),
+    deleteAssignment: vi.fn().mockResolvedValue(notFound),
     listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     validate: vi.fn().mockResolvedValue({ ok: true, value: { valid: true, problems: [] } }),
@@ -446,35 +448,49 @@ describe('unsaved Inspector edits (slice 3b)', () => {
     expect(screen.getAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(1);
   });
 
-  describe('unlinking an assignment', () => {
+  describe('removing an assignment', () => {
     const assignment = assignmentDto('a1', { stepId: 's1' });
     const linked = () => workflowDto({ id: ALPHA, name: 'alpha', assignmentIds: ['a1'] });
-    const unlinkApi = () => withEntities({
+    const removeApi = (others: WorkflowReadDto[] = []) => withEntities({
+      listWorkflows: vi.fn().mockResolvedValue({ ok: true, value: [linked(), ...others] }),
+      deleteAssignment: vi.fn().mockResolvedValue({ ok: true, value: null }),
       getGraph: vi.fn().mockResolvedValue({ ok: true, value: graphDto({ workflow: linked(), steps: [stepDto('s1', { name: 'fetch' })], assignments: [assignment] } as never) }),
       getEntity: vi.fn(async (kind: string) => ({ ok: true, value: kind === 'assignment' ? assignment : kind === 'workflow' ? linked() : stepDto('s1', { name: 'fetch' }) })),
       putEntity: vi.fn().mockResolvedValue({ ok: true, value: workflowDto({ id: ALPHA, name: 'alpha', assignmentIds: [] }) }),
     } as Partial<StudioApi>);
     const atAssignment = (edits: Record<string, string>) => draftSession(edits, [], [{ kind: 'assignment', id: 'a1', stepId: 's1' }]);
-    const unlinkDialog = () => screen.findByRole('alertdialog', { name: 'Unlink assignment' });
+    const removeDialog = () => screen.findByRole('alertdialog', { name: 'Remove assignment' });
 
-    it('asks first, and Unlink unlinks it from this workflow', async () => {
-      const api = unlinkApi();
+    it('asks first, and Remove takes it off this workflow and deletes it', async () => {
+      const api = removeApi();
       render(<App api={api} storage={memoryStorage()} tabStorage={atAssignment({})} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Unlink from this workflow' }));
-      const box = await unlinkDialog();
-      expect(box).toHaveTextContent('This workflow stops using the assignment. The assignment itself is kept.');
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove assignment' }));
+      const box = await removeDialog();
+      expect(box).toHaveTextContent('The assignment is taken off this workflow and deleted. This cannot be undone.');
       expect(box).not.toHaveTextContent(/discarded/);
       expect(api.putEntity).not.toHaveBeenCalled();
-      fireEvent.click(within(box).getByRole('button', { name: 'Unlink' }));
-      await waitFor(() => expect(api.putEntity).toHaveBeenCalledWith('workflow', ALPHA, expect.objectContaining({ assignmentIds: [] })));
+      fireEvent.click(within(box).getByRole('button', { name: 'Remove' }));
+      await waitFor(() => expect(api.deleteAssignment).toHaveBeenCalledWith('a1'));
+      expect(api.putEntity).toHaveBeenCalledWith('workflow', ALPHA, expect.objectContaining({ assignmentIds: [] }));
       expect(await screen.findByText('STEP', { selector: '.kindpill' })).toBeInTheDocument();
     });
 
+    it('a shared assignment is not removed: the banner names the other workflows', async () => {
+      const api = removeApi([workflowDto({ id: '11111111-2222-3333-4444-555555555555', name: 'sc-chain', assignmentIds: ['a1'] })]);
+      render(<App api={api} storage={memoryStorage()} tabStorage={atAssignment({})} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove assignment' }));
+      fireEvent.click(within(await removeDialog()).getByRole('button', { name: 'Remove' }));
+      expect(await screen.findByText('Not removed: also used by sc-chain_1.0.0-4444-555555555555.', { selector: '.banner' })).toBeInTheDocument();
+      expect(api.putEntity).not.toHaveBeenCalled();
+      expect(api.deleteAssignment).not.toHaveBeenCalled();
+      expect(screen.getByText('ASSIGNMENT', { selector: '.kindpill' })).toBeInTheDocument();
+    });
+
     it('says the unsaved changes of the assignment will be discarded (Task 6 review ruling)', async () => {
-      render(<App api={unlinkApi()} storage={memoryStorage()} tabStorage={atAssignment({ payload: '{"k":3}' })} />);
+      render(<App api={removeApi()} storage={memoryStorage()} tabStorage={atAssignment({ payload: '{"k":3}' })} />);
       expect(await within(await screen.findByRole('toolbar', { name: 'Workflow' })).findByText('● unsaved changes')).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: 'Unlink from this workflow' }));
-      expect(await unlinkDialog()).toHaveTextContent('Its unsaved changes will be discarded.');
+      fireEvent.click(screen.getByRole('button', { name: 'Remove assignment' }));
+      expect(await removeDialog()).toHaveTextContent('Its unsaved changes will be discarded.');
     });
   });
 });

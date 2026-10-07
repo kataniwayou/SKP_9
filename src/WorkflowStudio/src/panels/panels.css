@@ -68,3 +68,5 @@ textarea.input.json { white-space: pre; overflow: auto; }
 .banner { flex: 1 0 100%; padding: 6px 8px; font-size: 12px; color: var(--f); background: rgba(255, 122, 102, .08); border: 1px solid rgba(255, 122, 102, .35); border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
 .btn:disabled { opacity: .45; cursor: default; }
 .link.danger { color: var(--f); }
+.link:disabled { opacity: .45; cursor: default; }
+.arow { display: flex; align-items: center; gap: 12px; }

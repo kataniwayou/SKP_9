@@ -232,7 +232,7 @@ describe('the Inspector (slice 3b)', () => {
     expect(insp(s)).toMatchObject({ busy: false, trail: [{ kind: 'assignment', id: 'a9', stepId: 's1' }], failure: { banner: 'not linked' } });
   });
 
-  it('a late back from an unlink, after the user left and re-opened the same assignment and typed, leaves the edits', () => {
+  it('a late back from a remove, after the user left and re-opened the same assignment and typed, leaves the edits', () => {
     let s = opened();
     s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
     s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });

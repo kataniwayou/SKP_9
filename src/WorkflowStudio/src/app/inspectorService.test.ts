@@ -7,6 +7,11 @@ import { createInspectorService } from './inspectorService';
 
 const ok = <T,>(value: T): ApiResult<T> => ({ ok: true, value });
 const flush = () => new Promise((r) => setTimeout(r, 0));
+/** No other workflow uses the assignment, and its delete succeeds. */
+const removable = () => ({
+  listWorkflows: vi.fn().mockResolvedValue(ok([workflowDto({ assignmentIds: ['a1'] })])),
+  deleteAssignment: vi.fn().mockResolvedValue(ok(null)),
+});
 
 async function setup(api: Partial<StudioApi>) {
   const store = createStudioStore();
@@ -121,16 +126,89 @@ describe('InspectorService', () => {
     expect(inspector().failure?.banner).toBe('Created but not linked to this workflow: Network error: down');
   });
 
-  it('unlinks the shown assignment from this workflow only, and goes back to its step', async () => {
+  it('removes the shown assignment: off this workflow, then deleted, and back to its step', async () => {
     const putEntity = vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a2'] })));
+    const deleteAssignment = vi.fn().mockResolvedValue(ok(null));
     const { store, service, afterWrite, inspector } = await setup({
-      getEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a1', 'a2'] }))), putEntity,
+      listWorkflows: vi.fn().mockResolvedValue(ok([workflowDto({ assignmentIds: ['a1', 'a2'] }), workflowDto({ id: 'wf2', assignmentIds: ['a2'] })])),
+      getEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a1', 'a2'] }))), putEntity, deleteAssignment,
     });
     store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
-    expect(await service.unlink('wf1')).toBe(true);
+    expect(await service.remove('wf1', 'a1')).toBe(true);
     expect(putEntity).toHaveBeenCalledWith('workflow', 'wf1', expect.objectContaining({ assignmentIds: ['a2'] }));
-    expect(inspector().trail).toEqual([]);
+    expect(deleteAssignment).toHaveBeenCalledWith('a1');
+    expect(putEntity.mock.invocationCallOrder[0]).toBeLessThan(deleteAssignment.mock.invocationCallOrder[0]!);
+    expect(inspector()).toMatchObject({ trail: [], busy: false, failure: null });
     expect(afterWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes the shown step's assignment and stays on the step, keeping its edits", async () => {
+    const deleteAssignment = vi.fn().mockResolvedValue(ok(null));
+    const { store, service, inspector } = await setup({
+      listWorkflows: vi.fn().mockResolvedValue(ok([workflowDto({ assignmentIds: ['a1'] })])),
+      getEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a1'] }))),
+      putEntity: vi.fn().mockResolvedValue(ok(workflowDto())), deleteAssignment,
+    });
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
+    expect(await service.remove('wf1', 'a1')).toBe(true);
+    expect(deleteAssignment).toHaveBeenCalledWith('a1');
+    expect(inspector()).toMatchObject({ trail: [], edits: { description: 'typed' }, busy: false, failure: null });
+  });
+
+  it('refuses, changing nothing, while another workflow also uses the assignment, and names those workflows', async () => {
+    const putEntity = vi.fn();
+    const deleteAssignment = vi.fn();
+    const { store, service, afterWrite, inspector } = await setup({
+      listWorkflows: vi.fn().mockResolvedValue(ok([
+        workflowDto({ assignmentIds: ['a1'] }),
+        workflowDto({ id: '11111111-2222-3333-4444-555555555555', name: 'kafka-import-export', version: '2.0.0', assignmentIds: ['a1'] }),
+        workflowDto({ id: 'wf3', name: 'sc-chain', assignmentIds: ['a1'] }),
+        workflowDto({ id: 'wf4', name: 'other', assignmentIds: ['a2'] }),
+      ])),
+      putEntity, deleteAssignment,
+    });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
+    expect(await service.remove('wf1', 'a1')).toBe(false);
+    expect(putEntity).not.toHaveBeenCalled();
+    expect(deleteAssignment).not.toHaveBeenCalled();
+    expect(afterWrite).not.toHaveBeenCalled();
+    expect(inspector()).toMatchObject({
+      trail: [{ kind: 'assignment', id: 'a1', stepId: 's1' }], busy: false,
+      failure: { banner: 'Not removed: also used by kafka-import-export_2.0.0-4444-555555555555, sc-chain_1.0.0-wf3.' },
+    });
+  });
+
+  it('refuses when the workflows cannot be listed', async () => {
+    const putEntity = vi.fn();
+    const { service, inspector } = await setup({ listWorkflows: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } }), putEntity });
+    expect(await service.remove('wf1', 'a1')).toBe(false);
+    expect(putEntity).not.toHaveBeenCalled();
+    expect(inspector().failure?.banner).toBe('Not removed: Network error: down');
+  });
+
+  it('a delete refused after the assignment was taken off says so, and the documents are re-read', async () => {
+    const { store, service, afterWrite, inspector } = await setup({
+      listWorkflows: vi.fn().mockResolvedValue(ok([workflowDto({ assignmentIds: ['a1'] })])),
+      getEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a1'] }))),
+      putEntity: vi.fn().mockResolvedValue(ok(workflowDto())),
+      deleteAssignment: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'unprocessable', status: 422, detail: 'in use' } }),
+    });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
+    expect(await service.remove('wf1', 'a1')).toBe(false);
+    expect(inspector().failure?.banner).toMatch(/^Taken off this workflow, but not deleted: /);
+    expect(afterWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it('an assignment already deleted (404) counts as removed', async () => {
+    const { store, service, inspector } = await setup({
+      listWorkflows: vi.fn().mockResolvedValue(ok([workflowDto({ assignmentIds: ['a1'] })])),
+      getEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a1'] }))),
+      putEntity: vi.fn().mockResolvedValue(ok(workflowDto())),
+      deleteAssignment: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'notFound', status: 404 } }),
+    });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
+    expect(await service.remove('wf1', 'a1')).toBe(true);
+    expect(inspector()).toMatchObject({ trail: [], failure: null });
   });
 
   it('a save that fails after the user drilled away leaves the shown entity without a failure', async () => {
@@ -152,7 +230,7 @@ describe('InspectorService', () => {
     store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'version', text: 'abc', saved: '1.0.0' });
     void service.save('wf1');
     expect(await service.save('wf1')).toBe(false);
-    expect(await service.unlink('wf1')).toBe(false);
+    expect(await service.remove('wf1', 'a1')).toBe(false);
     expect(getEntity).toHaveBeenCalledTimes(1);
   });
 
@@ -187,35 +265,35 @@ describe('InspectorService', () => {
     expect(inspector().edits).toEqual({ description: 'typed meanwhile' });
   });
 
-  it('an unlink that lands after the user went elsewhere leaves that Inspector alone (final review 3)', async () => {
+  it('a remove that lands after the user went elsewhere leaves that Inspector alone (final review 3)', async () => {
     let answer!: (r: ApiResult<unknown>) => void;
     const getEntity = vi.fn().mockReturnValue(new Promise((r) => { answer = r; }));
-    const { store, service, inspector } = await setup({ getEntity, putEntity: vi.fn().mockResolvedValue(ok(workflowDto())) });
+    const { store, service, inspector } = await setup({ getEntity, putEntity: vi.fn().mockResolvedValue(ok(workflowDto())), ...removable() });
     store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
-    const unlinking = service.unlink('wf1');
+    const removing = service.remove('wf1', 'a1');
     store.dispatch({ type: 'back', workflowId: 'wf1', depth: 0 });
     store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
     store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
     answer(ok(workflowDto({ assignmentIds: ['a1'] })));
-    expect(await unlinking).toBe(true);
+    expect(await removing).toBe(true);
     expect(inspector()).toMatchObject({ trail: [{ kind: 'processor', id: 'p1' }], edits: { description: 'typed' }, busy: false });
   });
 
-  it('an unlink that lands after the user left and re-opened the same assignment keeps what was typed there', async () => {
+  it('a remove that lands after the user left and re-opened the same assignment keeps what was typed there', async () => {
     let answer!: (r: ApiResult<unknown>) => void;
     const putEntity = vi.fn().mockReturnValue(new Promise((r) => { answer = r; }));
     const { store, service, afterWrite, inspector } = await setup({
-      getEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a1'] }))), putEntity,
+      getEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a1'] }))), putEntity, ...removable(),
     });
     store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
-    const unlinking = service.unlink('wf1');
+    const removing = service.remove('wf1', 'a1');
     await flush();
     expect(putEntity).toHaveBeenCalledTimes(1);
     store.dispatch({ type: 'back', workflowId: 'wf1', depth: 0 });
     store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
     store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
     answer(ok(workflowDto({ assignmentIds: [] })));
-    expect(await unlinking).toBe(true);
+    expect(await removing).toBe(true);
     expect(inspector()).toMatchObject({ trail: [{ kind: 'assignment', id: 'a1', stepId: 's1' }], edits: { description: 'typed' }, busy: false });
     expect(afterWrite).toHaveBeenCalledTimes(1);
   });
@@ -234,7 +312,7 @@ describe('InspectorService', () => {
     expect(inspector()).toMatchObject({ trail: [{ kind: 'assignment', id: 'a9', stepId: 's1' }], busy: true });
     store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
     expect(await service.save('wf1')).toBe(false);
-    expect(await service.unlink('wf1')).toBe(false);
+    expect(await service.remove('wf1', 'a1')).toBe(false);
     expect(getEntity).toHaveBeenCalledTimes(1);
     answer({ ok: false, error: { kind: 'network', message: 'down' } });
     expect(await creating).toBe(false);

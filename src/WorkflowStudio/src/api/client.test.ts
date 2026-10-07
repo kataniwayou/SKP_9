@@ -115,6 +115,12 @@ describe('createApi', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/v1/assignments', expect.objectContaining({ method: 'POST', body: JSON.stringify(dto) }));
   });
 
+  it('DELETEs an assignment and takes the 204 as done', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    expect(await createApi('/api/v1', fetchImpl).deleteAssignment('a9')).toEqual({ ok: true, value: null });
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/assignments/a9', expect.objectContaining({ method: 'DELETE' }));
+  });
+
   it("keeps a 400's field messages by property name, and only the strings", async () => {
     const api = createApi('/api/v1', vi.fn().mockResolvedValue(respond(400, {
       title: 'Validation failed',

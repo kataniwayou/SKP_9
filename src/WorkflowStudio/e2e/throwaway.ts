@@ -23,9 +23,9 @@ export type Kind = 'workflows' | 'steps' | 'processors' | 'schemas' | 'assignmen
  */
 export const created: { workflowId?: string; stepId?: string; processorId?: string; schemaId?: string; cacheId?: string } = {};
 
-/** `kind/id` of every entity the browser may PUT. */
+/** `kind/id` of every entity the browser may PUT (and, for an assignment, DELETE). */
 const allowed = new Set<string>();
-/** Lets the browser PUT one of this run's entities (e.g. an assignment the test created). */
+/** Lets the browser PUT one of this run's entities, or DELETE an assignment the test created. */
 export const allow = (kind: Kind, id: string): void => { allowed.add(`${kind}/${id}`); };
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -108,12 +108,14 @@ function refusal(r: Request): string | null {
   }
   const put = method === 'PUT' ? PUT_PATH.exec(path) : null;
   if (put && allowed.has(`${put[1]}/${put[2]}`)) return null;
+  const del = method === 'DELETE' ? PUT_PATH.exec(path) : null;
+  if (del && del[1] === 'assignments' && allowed.has(`${del[1]}/${del[2]}`)) return null;
   return `${method} ${path}`;
 }
 
 /**
  * The page test for writing specs: the browser may write only to this run's entities (a PUT to one of
- * them, or POST /assignments for this run's step). Any other write is aborted before it reaches
+ * them, POST /assignments for this run's step, or DELETE of an assignment it made). Any other write is aborted before it reaches
  * BaseApi, and fails the test, like the read-only guard elsewhere.
  */
 export const test = base.extend<{ writeGuard: void }>({

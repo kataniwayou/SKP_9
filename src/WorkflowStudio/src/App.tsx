@@ -20,7 +20,7 @@ import { Output, Toolbox } from './panels/PaneNote';
 import { Problems } from './panels/Problems';
 import { hasEdits } from './store/inspector';
 import { selectionKey, type Selection } from './store/selection';
-import { inspectorKey } from './store/studioState';
+import { inspectorKey, shownTargetOf } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
 
 export { describeError } from './api/describeError';
@@ -128,7 +128,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
 
   type Prompt =
     | { kind: 'unsaved'; workflowId: string; proceed: () => void; doc: Document }
-    | { kind: 'unlink'; workflowId: string; doc: Document; discards: boolean };
+    | { kind: 'remove'; workflowId: string; assignmentId: string; doc: Document; discards: boolean };
   const [prompt, setPromptState] = useState<Prompt | null>(null);
   // the open question, read by the guard at once (state would lag a render behind)
   const asking = useRef<Prompt | null>(null);
@@ -143,10 +143,13 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
       if (!open || !hasEdits(open.inspector)) { proceed(); return; }
       setPrompt({ kind: 'unsaved', workflowId, proceed, doc });
     },
-    confirmUnlink: (workflowId, doc = document) => {
+    confirmRemove: (workflowId, assignmentId, doc = document) => {
       if (asking.current !== null) return;
       const open = store.getState().docs.find((d) => d.workflowId === workflowId);
-      setPrompt({ kind: 'unlink', workflowId, doc, discards: open !== undefined && hasEdits(open.inspector) });
+      // only the assignment's own edits go with it; a step's edits stay
+      const shown = open ? shownTargetOf(open) : null;
+      const discards = open !== undefined && shown?.kind === 'assignment' && hasEdits(open.inspector);
+      setPrompt({ kind: 'remove', workflowId, assignmentId, doc, discards });
     },
   }), [service, store, setPrompt]);
 
@@ -252,12 +255,12 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
             { label: 'Save', primary: true, onClick: () => saveThenProceed(prompt) },
           ]} />
       )}
-      {prompt?.kind === 'unlink' && (
-        <ConfirmDialog doc={prompt.doc} title="Unlink assignment" onCancel={() => setPrompt(null)}
+      {prompt?.kind === 'remove' && (
+        <ConfirmDialog doc={prompt.doc} title="Remove assignment" onCancel={() => setPrompt(null)}
           message={prompt.discards
-            ? 'This workflow stops using the assignment. The assignment itself is kept. Its unsaved changes will be discarded.'
-            : 'This workflow stops using the assignment. The assignment itself is kept.'}
-          buttons={[{ label: 'Unlink', primary: true, onClick: () => { setPrompt(null); void service.unlink(prompt.workflowId); } }]} />
+            ? 'The assignment is taken off this workflow and deleted. This cannot be undone. Its unsaved changes will be discarded.'
+            : 'The assignment is taken off this workflow and deleted. This cannot be undone.'}
+          buttons={[{ label: 'Remove', primary: true, onClick: () => { setPrompt(null); void service.remove(prompt.workflowId, prompt.assignmentId); } }]} />
       )}
     </StudioActionsProvider>
   );

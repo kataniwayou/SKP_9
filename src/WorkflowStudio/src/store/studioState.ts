@@ -48,7 +48,7 @@ export type StudioAction =
   | { type: 'drill'; workflowId: Id; target: InspectorTarget }
   /**
    * Keeps the first `depth` drill-downs (0: back to the selection). The user's back carries no `write`;
-   * an unlink's back carries its write's token and applies only while that write is the Inspector's.
+   * a remove's back carries its write's token and applies only while that write is the Inspector's.
    */
   | { type: 'back'; workflowId: Id; depth: number; write?: number }
   | { type: 'edit'; workflowId: Id; key: string; text: string; saved: string }

@@ -45,7 +45,8 @@ export function Inspector() {
 function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocument; target: InspectorTarget }) {
   const store = useStudioStore();
   const showDetails = useStudio((s) => s.showDetails);
-  const { service, guard, confirmUnlink } = useStudioActions();
+  const { service, guard, confirmRemove } = useStudioActions();
+  const askRemove = (assignmentId: string) => confirmRemove(workflowId, assignmentId, owner.current?.ownerDocument ?? document);
   const owner = useRef<HTMLDivElement>(null);
   const { workflowId, inspector } = open;
   const go = (proceed: () => void) => guard(workflowId, proceed, owner.current?.ownerDocument ?? document);
@@ -87,7 +88,7 @@ function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocu
           <div className="pbody">
             {/* a failed re-read keeps the form (spec §8): it only says so */}
             {inspector.readError && <div className="sec"><p className="note warn">{inspector.readError}</p></div>}
-            <EntityForm open={open} doc={doc} target={target} saved={saved} showDetails={showDetails} drill={drill} />
+            <EntityForm open={open} doc={doc} target={target} saved={saved} showDetails={showDetails} drill={drill} askRemove={askRemove} />
           </div>
           <div className="savebar">
             {inspector.failure?.banner && <div className="banner" role="alert">{inspector.failure.banner}</div>}
@@ -101,7 +102,7 @@ function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocu
               <>
                 {target.kind === 'assignment' && (
                   <button type="button" className="link danger" disabled={inspector.busy}
-                    onClick={() => confirmUnlink(workflowId, owner.current?.ownerDocument ?? document)}>Unlink from this workflow</button>
+                    onClick={() => askRemove(target.id)}>Remove assignment</button>
                 )}
                 <button type="button" className="btn" disabled={!dirty || inspector.busy} onClick={() => store.dispatch({ type: 'discard', workflowId })}>Revert</button>
                 <button type="button" className="btn primary" disabled={!dirty || inspector.busy || missingRequired(entityKindOf(target), saved, inspector.edits)}
@@ -121,8 +122,9 @@ const SLOTS: ReadonlyArray<{ slot: SchemaSlot; label: string; key: 'inputSchemaI
   { slot: 'config', label: 'Config', key: 'configSchemaId' },
 ];
 
-function EntityForm({ open, doc, target, saved, showDetails, drill }: {
+function EntityForm({ open, doc, target, saved, showDetails, drill, askRemove }: {
   open: OpenDocument; doc: StudioDocument; target: InspectorTarget; saved: EntityReadDto; showDetails: boolean; drill: (t: InspectorTarget) => void;
+  askRemove: (assignmentId: string) => void;
 }) {
   const store = useStudioStore();
   const { workflowId, inspector } = open;
@@ -170,7 +172,7 @@ function EntityForm({ open, doc, target, saved, showDetails, drill }: {
             return (
               <div className="field">
                 <label>Assignment</label>
-                <button type="button" className="link" onClick={() => drill({ kind: 'newAssignment', stepId: target.id, stepName })}>＋ Add assignment</button>
+                <button type="button" className="link" disabled={inspector.busy} onClick={() => drill({ kind: 'newAssignment', stepId: target.id, stepName })}>＋ Create</button>
               </div>
             );
           }
@@ -179,7 +181,10 @@ function EntityForm({ open, doc, target, saved, showDetails, drill }: {
           return (
             <div className="field">
               <label>Assignment</label>
-              <button type="button" className="drill" onClick={() => drill({ kind: 'assignment', id: assignment.id, stepId: target.id })}>{label}</button>
+              <div className="fval arow">
+                <button type="button" className="drill" onClick={() => drill({ kind: 'assignment', id: assignment.id, stepId: target.id })}>{label}</button>
+                <button type="button" className="link danger" disabled={inspector.busy} onClick={() => askRemove(assignment.id)}>✕ Remove</button>
+              </div>
             </div>
           );
         })()}

@@ -25,16 +25,17 @@ export async function renderInspector(api: Partial<StudioApi>, { selection, grap
   store.dispatch({ type: 'select', workflowId: 'wf1', selection });
   const full = {
     getEntity: vi.fn().mockResolvedValue(notFound), putEntity: vi.fn().mockResolvedValue(notFound),
-    createAssignment: vi.fn().mockResolvedValue(notFound), ...api,
+    createAssignment: vi.fn().mockResolvedValue(notFound),
+    deleteAssignment: vi.fn().mockResolvedValue(notFound), ...api,
   } as unknown as StudioApi;
   const afterWrite = vi.fn();
   const service = createInspectorService(full, store, afterWrite);
   const guard = vi.fn<StudioActions['guard']>((_id, proceed) => proceed());
-  const confirmUnlink = vi.fn<StudioActions['confirmUnlink']>();
+  const confirmRemove = vi.fn<StudioActions['confirmRemove']>();
   const view = render(
     <StudioStoreProvider value={store}>
-      <StudioActionsProvider value={{ service, guard, confirmUnlink }}><Inspector /></StudioActionsProvider>
+      <StudioActionsProvider value={{ service, guard, confirmRemove }}><Inspector /></StudioActionsProvider>
     </StudioStoreProvider>,
   );
-  return { ...view, store, api: full, service, guard, confirmUnlink, afterWrite };
+  return { ...view, store, api: full, service, guard, confirmRemove, afterWrite };
 }
