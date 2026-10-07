@@ -6,7 +6,7 @@ import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { loadDocument } from '../app/loadDocument';
 import type { DesignProps } from '../design/designProps';
-import { EMPTY_DRAFT } from '../design/draft';
+import { EMPTY_DRAFT, setShape } from '../design/draft';
 import { createTextFitter } from './fitText';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { ZoomControls } from './ZoomControls';
@@ -369,5 +369,23 @@ describe('WorkflowCanvas', () => {
       expect(onSelect.mock.calls[0]![1][0]).toEqual({ kind: 'wire', id: 'gone' });
       expect(onSelect.mock.calls[0]![1]).toContainEqual({ kind: 'node', id: 's2' });
     });
+  });
+
+  it('draws a joined wire as its own line to a dot, a split dot and a branch with the only arrow head (plan 7)', async () => {
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { entryCondition: 2 }), stepDto('s3', { nextStepIds: ['s4'] }), stepDto('s4', { entryCondition: 2 })],
+    }));
+    const draft = setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
+    const design: DesignProps = { draft, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() };
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const edge = container.querySelector('[data-testid="rf__edge-s3->s4"]')!;
+    expect(edge.querySelectorAll('circle.nx-joint').length).toBeGreaterThanOrEqual(1);
+    expect(edge.querySelectorAll('.nx-head')).toHaveLength(edge.querySelector('path.w.branch') ? 1 : 0);
+    expect(edge.querySelectorAll('circle.nx-src')).toHaveLength(1);
+    // a plain wire keeps its ring and its arrow head, and no dot
+    const plain = container.querySelector('[data-testid="rf__edge-s1->s2"]')!;
+    expect(plain.querySelectorAll('circle.nx-joint')).toHaveLength(0);
+    expect(plain.querySelectorAll('.nx-head')).toHaveLength(1);
   });
 });

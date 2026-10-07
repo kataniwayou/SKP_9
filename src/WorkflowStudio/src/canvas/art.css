@@ -87,6 +87,11 @@
 .wire.broken path.w { stroke-dasharray: 6 4; }
 .wire .nx-head { fill: none; stroke-width: 2.2; stroke-linejoin: miter; filter: drop-shadow(0 0 3px var(--nc)); pointer-events: none; }
 .wire .nx-src { fill: #060c17; stroke: var(--nc); stroke-width: 1.4; pointer-events: none; }
+/* plan 7: a filled dot where a wire meets another wire's line (its contact, and its split); never at a step */
+.wire .nx-joint { fill: var(--nc); stroke: #060c17; stroke-width: 1; filter: drop-shadow(0 0 3px var(--nc)); pointer-events: none; }
+/* the line under a dragged wire end: may be joined (green) or not (red) */
+.wire.halo-ok path.w { stroke-width: 3; filter: drop-shadow(0 0 4px #34D399) drop-shadow(0 0 8px #34D399); }
+.wire.halo-no path.w { stroke-width: 3; filter: drop-shadow(0 0 4px #F87171) drop-shadow(0 0 8px #F87171); }
 .wire .nx-warn { font: 600 13px var(--sans); fill: var(--warn); }
 .nx-pulse { fill: none; stroke: #e8f8ff; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 5 300; animation: nxrun 2.8s linear infinite; pointer-events: none; }
 @keyframes nxrun { from { stroke-dashoffset: 305; } to { stroke-dashoffset: 0; } }

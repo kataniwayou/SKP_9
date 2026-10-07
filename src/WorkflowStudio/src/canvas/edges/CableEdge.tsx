@@ -13,6 +13,12 @@ export type CableEdgeData = {
   delay: number;
   /** Picked in design mode (plan 4): drawn with a halo. */
   picked?: boolean;
+  /** A joined wire's branch, from its split to its landing (plan 7). */
+  branch?: Pt[];
+  /** A joined wire's filled dots: its contact, then its split. */
+  joints?: Pt[];
+  /** The line under a dragged wire end: green when it may be joined, red when not (plan 7). */
+  halo?: 'ok' | 'no';
 };
 export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
 
@@ -22,23 +28,27 @@ export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
  * Broken: dashed, with a soft transparent gap cut at the middle of the longest segment and ⚠ in it.
  * While `flowing` (the workflow is started) an intact wire carries a pulse toward its target.
  */
-export function CableEdgeView({ points, colour, broken, delay, picked, flowing }: CableEdgeData & { flowing: boolean }) {
+export function CableEdgeView({ points, colour, broken, delay, picked, flowing, branch, joints, halo }: CableEdgeData & { flowing: boolean }) {
   const gap = `nxgap${useId().replace(/[^\w-]/g, '')}`;
   const d = pathOf(points);
   const [sx, sy] = points[0]!;
-  const [tx, ty] = points[points.length - 1]!;
+  // the arrow head goes on the line that enters a step: a plain wire's end, or a joined wire's branch end (spec §3)
+  const into = joints ? (branch && branch.length > 1 ? branch : null) : points;
+  const tip = into ? into[into.length - 1]! : null;
   const mark = broken ? longestSegmentMiddle(points) : null;
 
   const trace = (
     <>
       <circle className="nx-src" cx={sx} cy={sy} r={2.6} />
       <path className="w" d={d} stroke={colour} />
-      <path className="nx-head" d={`M${tx - 9} ${ty - 6}L${tx} ${ty}L${tx - 9} ${ty + 6}`} stroke={colour} />
+      {branch && branch.length > 1 && <path className="w branch" d={pathOf(branch)} stroke={colour} />}
+      {tip && <path className="nx-head" d={`M${tip[0] - 9} ${tip[1] - 6}L${tip[0]} ${tip[1]}L${tip[0] - 9} ${tip[1] + 6}`} stroke={colour} />}
+      {joints?.map(([x, y], i) => <circle key={i} className="nx-joint" cx={x} cy={y} r={4.5} />)}
     </>
   );
 
   return (
-    <g className={`${broken ? 'wire broken' : 'wire'}${picked ? ' picked' : ''}`} style={{ '--nc': colour } as CSSProperties}>
+    <g className={`${broken ? 'wire broken' : 'wire'}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}`} style={{ '--nc': colour } as CSSProperties}>
       {mark ? (
         <>
           <defs>
@@ -53,6 +63,7 @@ export function CableEdgeView({ points, colour, broken, delay, picked, flowing }
         </>
       ) : trace}
       {flowing && !broken && <path className="nx-pulse" d={d} style={{ animationDelay: `${delay}s` }} />}
+      {flowing && !broken && branch && branch.length > 1 && <path className="nx-pulse" d={pathOf(branch)} style={{ animationDelay: `${delay}s` }} />}
     </g>
   );
 }
@@ -65,7 +76,10 @@ export function CableEdge({ id, data }: EdgeProps<CableEdgeType>) {
     <>
       <CableEdgeView {...data} flowing={started} />
       {/* an invisible band about 8 px wide, so the hand cursor and clicks need no pixel precision (spec §4.1) */}
-      <path className="nx-hit" d={pathOf(data.points)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e) : undefined} />
+      <path className="nx-hit" d={pathOf(data.points)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'own') : undefined} />
+      {data.branch && data.branch.length > 1 && (
+        <path className="nx-hit branch" d={pathOf(data.branch)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'branch') : undefined} />
+      )}
     </>
   );
 }

@@ -289,7 +289,9 @@ export function useWireGestures(
 
   // stable, so every wire does not re-render with each canvas render
   const gestures = useMemo<DesignGestures>(() => ({
-    wirePointerDown(wireId, e) {
+    wirePointerDown(wireId, e, part = 'own') {
+      // the branch is automatic: it has no runs to drag (plan 7)
+      if (part === 'branch') return;
       const d = designRef.current;
       if (!d || e.button !== 0 || !d.picks.some((p) => p.kind === 'wire' && p.id === wireId)) return;
       const wire = shown.current.wires.find((w) => w.id === wireId);
