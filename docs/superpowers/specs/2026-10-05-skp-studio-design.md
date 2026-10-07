@@ -201,6 +201,11 @@ The original v49 drawings, kept for history:
   on a horizontal **bus** at its own contact point, and one **trunk** leaves the bus at the **junction node**
   (⊕) and lands on the step as the single arrow. A junction merges only wires into the same step, so they
   share its colour.
+- **User note (2026-10-07, plan 4 trial):** "wires from the same colour (same entry condition) can merge"; an end
+  that touches another wire's body has no arrow head (a contact point), the default being a line with an arrow
+  head. To settle when plan 7 is designed: whether wires into *different* steps that share an entry condition may
+  share a bus, or only wires into the same step (which always share a colour). Junctions wait until the user
+  approves the plan 4 designer.
 - **A junction is positioned state, like a block.** Its node position (the bus height and the trunk's
   lane) is seeded once and stored in `Layout`; it never follows blocks. Moving a source step stretches
   **only that step's own line, up to its contact point**; the bus, the trunk and the other lines stay.
