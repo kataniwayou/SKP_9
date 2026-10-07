@@ -86,7 +86,7 @@ export function WorkflowNode({ data }: NodeProps<WorkflowNodeType>) {
       <Handle id="out" type="source" position={Position.Right} isConnectable={false} style={{ top: R }} />
       <Handle id="down" type="source" position={Position.Bottom} isConnectable={false} />
       {/* where entry wires are drawn from (spec §4.5): the dial's right side at its centre height; design mode only */}
-      {gestures && <div className="nx-port nodrag nopan" style={{ left: 2 * R - 6, top: R - 6 }} onPointerDown={(e) => gestures.portPointerDown(WORKFLOW_SOURCE, e)} />}
+      {gestures && <div className="nx-port nodrag nopan" style={{ left: 2 * R, top: R }} onPointerDown={(e) => gestures.portPointerDown(WORKFLOW_SOURCE, e)} />}
     </>
   );
 }

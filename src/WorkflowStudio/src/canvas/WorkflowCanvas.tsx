@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { ReactFlow, ReactFlowProvider, type EdgeMouseHandler, type EdgeTypes, type NodeMouseHandler, type NodeTypes } from '@xyflow/react';
+import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { ReactFlow, ReactFlowProvider, useStore, type EdgeMouseHandler, type EdgeTypes, type NodeMouseHandler, type NodeTypes } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { applyDraft } from '../design/apply';
 import { DesignContext } from '../design/DesignContext';
@@ -116,6 +116,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const { band, banding, pressing, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
   const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick);
   const wiring = useWireGestures(doc, shownRef, design, setPreview);
+  // --inv (1 / zoom) lets canvas.css keep drop outlines and connection points one size on screen at any zoom
+  const zoom = useStore((s) => s.transform[2]);
   // a key while a gesture runs would be overwritten by its drop: the canvas's keys wait for it (Escape is the gesture's)
   const onKeyDown = useDesignKeys(doc, shownRef, design, () => pressing() || wiring.running() || drag.dragging());
   // the block under a dragged wire end, outlined green or red (spec §4.4)
@@ -163,7 +165,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   return (
     <FollowFitContext.Provider value={followFit}>
       <LiveArtContext.Provider value={live}>
-        <div className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}
+        <div className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%', '--inv': String(1 / zoom) } as CSSProperties}
           tabIndex={design ? 0 : undefined}
           onKeyDown={design ? onKeyDown : undefined}
           onPointerDownCapture={design ? (e) => { e.currentTarget.focus({ preventScroll: true }); drag.notePress(e.target as Element); onPointerDownCapture(e); } : undefined}>
@@ -210,7 +212,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={onViewChange ? (_event, v) => onViewChange({ x: v.x, y: v.y, zoom: v.zoom, followFit: followFit.current }) : undefined}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost} hint={wiring.hint} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize />

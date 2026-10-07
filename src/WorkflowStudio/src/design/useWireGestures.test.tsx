@@ -26,18 +26,20 @@ const middleOf = (doc: StudioDocument, id: string): Point => {
 };
 const nodeClass = (container: HTMLElement, id: string) => container.querySelector(`.react-flow__node[data-id="${id}"]`)!.getAttribute('class') ?? '';
 const tick = () => new Promise((r) => setTimeout(r, 0));
+/** 100 % zoom: jsdom's fit is so small that a short run's square would hide under its end dots (as it does on screen). */
+const AT_100 = { x: 0, y: 0, zoom: 1, followFit: false };
 
 describe('wire gestures', () => {
   it('a picked wire shows its end dots and run handles', async () => {
     const doc = await two();
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
     expect(container.querySelectorAll('.design-handle.end')).toHaveLength(2);
     expect(container.querySelectorAll('.design-handle.seg').length).toBeGreaterThan(0);
   });
 
   it('a wire that is not picked, or a pick naming a wire that is gone, shows no handles', async () => {
     const doc = await two();
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ picks: [{ kind: 'wire', id: 'gone->s2' }] })} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ picks: [{ kind: 'wire', id: 'gone->s2' }] })} onSelect={vi.fn()} />);
     expect(container.querySelectorAll('.design-handle')).toHaveLength(0);
   });
 
@@ -45,7 +47,7 @@ describe('wire gestures', () => {
     const doc = await two();
     const onSelect = vi.fn();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={onSelect} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={onSelect} />);
     const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     expect(container.querySelector('.studio-canvas')!.classList.contains('gesture')).toBe(true);
@@ -64,7 +66,7 @@ describe('wire gestures', () => {
     // a manual wire with one vertical run, landing below the processor middle so the run has length
     const draft = setShape(EMPTY_DRAFT, 's1->s2', { bends: { xs: [(s1.x + STEP_W + s2.x) / 2], ys: [] }, landing: 128 });
     const design = designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const canvas = container.querySelector('.studio-canvas')!;
     const across = container.querySelector('.design-handle.seg[data-k="0"]')!;
     const upright = container.querySelector('.design-handle.seg[data-k="1"]')!;
@@ -87,10 +89,32 @@ describe('wire gestures', () => {
     fireEvent.pointerUp(document, { clientX: 100, clientY: 100, pointerId: 1 });
   });
 
+  it('handles, outline and ghost keep their size on screen whatever the zoom', async () => {
+    const doc = await two();
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
+    const zoom = Number(/scale\(([-\d.e]+)\)/.exec((container.querySelector('.react-flow__viewport') as HTMLElement).style.transform)![1]);
+    const dot = container.querySelector('.design-handle.end')!;
+    expect(Number(dot.getAttribute('r')) * zoom).toBeCloseTo(5);
+    const square = container.querySelector('.design-handle.seg')!;
+    expect(Number(square.getAttribute('width')) * zoom).toBeCloseTo(9);
+    // the node outline (CSS) scales by the canvas's --inv
+    expect(Number((container.querySelector('.studio-canvas') as HTMLElement).style.getPropertyValue('--inv')) * zoom).toBeCloseTo(1);
+  });
+
+  it('a run too short on screen to keep its square clear of an end dot shows no square (the dot wins)', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!;
+    // the first run is one grid step long: at any zoom below 2 its square would sit under the start dot
+    const draft = setShape(EMPTY_DRAFT, 's1->s2', { bends: { xs: [s1.x + STEP_W + 8], ys: [] }, landing: 128 });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
+    expect(container.querySelector('.design-handle.seg[data-k="0"]')).toBeNull();
+    expect(container.querySelector('.design-handle.seg[data-k="1"]')).not.toBeNull();
+  });
+
   it('a press on a handle that does not move makes no step', async () => {
     const doc = await two();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerUp(handle.ownerDocument, { clientX: 101, clientY: 100, pointerId: 1 });
@@ -100,7 +124,7 @@ describe('wire gestures', () => {
   it('Escape during a run drag cancels it: no step, and the Escape goes no further', async () => {
     const doc = await two();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(handle.ownerDocument, { clientX: 100, clientY: 164, pointerId: 1 });
@@ -117,7 +141,7 @@ describe('wire gestures', () => {
   it('a pointer cancel ends the drag with no step', async () => {
     const doc = await two();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(handle.ownerDocument, { clientX: 100, clientY: 164, pointerId: 1 });
@@ -129,7 +153,7 @@ describe('wire gestures', () => {
   it('a canvas unmounted mid-drag leaves no listeners behind', async () => {
     const doc = await two();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container, unmount } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const { container, unmount } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(document, { clientX: 100, clientY: 164, pointerId: 1 });
@@ -146,7 +170,7 @@ describe('wire gestures', () => {
   it('pressing a picked wire\'s body drags a run; an unpicked wire\'s body does nothing', async () => {
     const doc = await two();
     const picked = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const view = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={picked} onSelect={vi.fn()} />);
+    const view = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={picked} onSelect={vi.fn()} />);
     const hit = view.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!;
     fireEvent.pointerDown(hit, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(document, { clientX: 100, clientY: 164, pointerId: 1 });
@@ -155,7 +179,7 @@ describe('wire gestures', () => {
     view.unmount();
 
     const none = designOf();
-    const other = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={none} onSelect={vi.fn()} />);
+    const other = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={none} onSelect={vi.fn()} />);
     const hit2 = other.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!;
     fireEvent.pointerDown(hit2, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(document, { clientX: 100, clientY: 164, pointerId: 1 });
@@ -168,7 +192,7 @@ describe('wire gestures', () => {
     const shaped = setShape(EMPTY_DRAFT, 's1->s2', { bends: { xs: [400], ys: [] }, landing: 96 });
     const onSelect = vi.fn();
     const design = designOf({ draft: shaped });
-    const view = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={onSelect} />);
+    const view = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={onSelect} />);
     fireEvent.contextMenu(view.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!, { clientX: 50, clientY: 50 });
     expect(onSelect).toHaveBeenCalledWith(null, [{ kind: 'wire', id: 's1->s2' }]);
     fireEvent.click(view.getByRole('menuitem', { name: /Reset route/ }));
@@ -177,16 +201,16 @@ describe('wire gestures', () => {
     view.unmount();
 
     const auto = designOf();
-    const other = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={auto} onSelect={vi.fn()} />);
+    const other = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={auto} onSelect={vi.fn()} />);
     fireEvent.contextMenu(other.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!, { clientX: 50, clientY: 50 });
     const item = other.getByRole('menuitem', { name: /Reset route/ });
     expect(item).toHaveAttribute('aria-disabled', 'true');
   });
   it('a step offers a connection point only in design mode', async () => {
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
-    const { container, rerender } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} />);
+    const { container, rerender } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} />);
     expect(container.querySelector('.nx-port')).toBeNull();
-    rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={vi.fn()} />);
+    rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf()} onSelect={vi.fn()} />);
     expect(container.querySelectorAll('.nx-port').length).toBe(2); // the hub's and the step's
   });
 
@@ -194,7 +218,7 @@ describe('wire gestures', () => {
     const doc = await three();
     const onSelect = vi.fn();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={onSelect} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={onSelect} />);
     const head = container.querySelector('.design-handle.end[data-end="target"]')!;
     fireEvent.pointerDown(head, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
@@ -211,13 +235,16 @@ describe('wire gestures', () => {
   it('a refused drop (a cycle) outlines red and snaps back; so do its own block and empty canvas', async () => {
     const doc = await three();
     const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const head = () => container.querySelector('.design-handle.end[data-end="target"]')!;
     // the head of s2->s3 on s1 would make s1 -> s2 -> s1
     fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
     expect(nodeClass(container, 's1')).toContain('drop-no');
+    // the reason is said next to the pointer, at a size that does not shrink with the zoom
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('would make a loop');
     fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')).toBeNull();
     // back on its own block: no outline, no step
     fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
@@ -233,7 +260,7 @@ describe('wire gestures', () => {
   it('dragging the start dot onto the hub makes the wire an entry wire', async () => {
     const doc = await three();
     const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const dot = container.querySelector('.design-handle.end[data-end="source"]')!;
     const hub = { x: doc.placement.sphere.cx, y: doc.placement.sphere.cy };
     fireEvent.pointerDown(dot, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
@@ -247,7 +274,7 @@ describe('wire gestures', () => {
     const doc = await three();
     const onSelect = vi.fn();
     const design = designOf();
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={onSelect} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={onSelect} />);
     const port = container.querySelector('.react-flow__node[data-id="s1"] .nx-port')!;
     fireEvent.pointerDown(port, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     expect(container.querySelector('.studio-canvas')!.classList.contains('gesture')).toBe(true);
@@ -267,7 +294,7 @@ describe('wire gestures', () => {
     const doc = await three();
     const onSelect = vi.fn();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={onSelect} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={onSelect} />);
     fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
     fireEvent.keyDown(document.body, { key: 'Escape' });
@@ -289,14 +316,16 @@ describe('wire gestures', () => {
     const doc = await two();
     const shaped = setShape(EMPTY_DRAFT, 's1->s2', { bends: { xs: [528, 560], ys: [400] }, landing: null });
     const design = designOf({ draft: shaped, picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const run = () => container.querySelector('.design-handle.seg[data-k="1"]')!;
-    expect(run().getAttribute('x')).toBe('524');
-    const y = Number(run().getAttribute('y')) + 4;
+    // a square's centre (its size is in screen pixels, so its corner moves with the zoom)
+    const centre = (axis: 'x' | 'y', size: 'width' | 'height') => Number(run().getAttribute(axis)) + Number(run().getAttribute(size)) / 2;
+    expect(centre('x', 'width')).toBeCloseTo(528);
+    const y = centre('y', 'height');
     // the zoom is small in jsdom: the press is far off so the move counts as a drag
     fireEvent.pointerDown(run(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, { x: 544, y }), pointerId: 1 });
-    expect(run().getAttribute('x')).toBe('540');
+    expect(centre('x', 'width')).toBeCloseTo(544);
     fireEvent.keyDown(document.body, { key: 'Escape' });
   });
 });

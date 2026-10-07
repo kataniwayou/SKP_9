@@ -89,6 +89,23 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
   await page.mouse.up();
 }
 
+/**
+ * Zooms in on a wire with Ctrl+wheel at its middle (zoom follows the pointer, spec §5.4), as a person
+ * does before editing it: at the fitted zoom a short run's square hides under the end dots.
+ */
+async function zoomInOn(page: Page, panel: Locator, id: string): Promise<void> {
+  const p = await pointOnWire(panel, id);
+  await page.mouse.move(p.x, p.y);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -240);
+  await page.keyboard.up('Control');
+  await expect.poll(async () => Number((await page.getByRole('status', { name: 'Zoom level' }).first().textContent())?.replace('%', ''))).toBeGreaterThan(70);
+  // the wheel zoom eases in: wait until the view stops moving, or a handle's position is read mid-move
+  const transform = () => panel.locator('.react-flow__viewport').getAttribute('style');
+  let last = await transform();
+  await expect.poll(async () => { const now = await transform(); const still = now === last; last = now; return still; }, { intervals: [150] }).toBe(true);
+}
+
 async function open(page: Page): Promise<Locator> {
   await openWorkflow(page, chain!.workflow);
   return documentPanel(page, chain!.workflow);
@@ -135,11 +152,14 @@ test('a run drags and Reset route restores the automatic shape', async ({ page }
   const panel = await open(page);
   const id = `${chain!.a}->${chain!.b}`;
   const before = await pathOf(panel, id);
+  await zoomInOn(page, panel, id);
   const p = await pointOnWire(panel, id);
   await page.mouse.click(p.x, p.y);
   const handle = panel.locator('.design-handle.seg').first();
   const at = await centreOf(handle);
-  await drag(page, at, { x: at.x, y: at.y + 48 });
+  // a horizontal run (class h) moves up and down, a vertical one (v) sideways
+  const across = /\bh\b/.test((await handle.getAttribute('class')) ?? '');
+  await drag(page, at, across ? { x: at.x, y: at.y + 48 } : { x: at.x + 48, y: at.y });
   await expect.poll(() => pathOf(panel, id)).not.toBe(before);
   const q = await pointOnWire(panel, id, 0.3);
   await page.mouse.click(q.x, q.y, { button: 'right' });
@@ -217,6 +237,7 @@ test('arrow keys nudge the picked step on the focused canvas; Ctrl+Z puts it bac
 test('dragging the last run of a picked wire up and down slides where its arrow lands', async ({ page }) => {
   const panel = await open(page);
   const id = `${chain!.a}->${chain!.b}`;
+  await zoomInOn(page, panel, id);
   const p = await pointOnWire(panel, id);
   await page.mouse.click(p.x, p.y);
   const before = await arrowEndOf(panel, id);

@@ -90,8 +90,8 @@ export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
   );
 }
 
-/** Where a new wire is drawn from (spec §4.5): the step's output side, at its processor middle; design mode only. */
-const PORT = { left: W - 6, top: PMID - 6 } as const;
+/** Where a new wire is drawn from (spec §4.5): the centre of the step's output side at its processor middle (canvas.css sizes it to ignore the zoom); design mode only. */
+const PORT = { left: W, top: PMID } as const;
 
 export function StepNode({ id, data }: NodeProps<StepNodeType>) {
   const { health } = useLiveArt();

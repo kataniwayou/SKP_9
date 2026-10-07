@@ -11,6 +11,17 @@ import { addWire, reattach, setShape, wireId, type Draft } from './draft';
 import { blockAt } from './hit';
 import { canWire, type DropVerdict } from './rules';
 
+/** The block under a dragged wire end: its outline (ok), why (the drop rule's verdict) and where the pointer is, for the label. */
+export interface DropHint {
+  id: string;
+  ok: boolean;
+  why: DropVerdict;
+  /** A new wire, not a re-attached end: an allowed drop says "connect here". */
+  newWire: boolean;
+  /** The pointer, in flow coordinates. */
+  at: Point;
+}
+
 /** Below this many screen pixels a press is a click, not a drag. */
 const MOVE_START = 3;
 
@@ -114,7 +125,7 @@ export function useWireGestures(
   const { screenToFlowPosition } = useReactFlow();
   // the dragged end's line, and the outline of the block under it (spec §4.4)
   const [ghost, setGhost] = useState<{ from: Point; to: Point } | null>(null);
-  const [hint, setHint] = useState<{ id: string; ok: boolean } | null>(null);
+  const [hint, setHint] = useState<DropHint | null>(null);
   // the way a dragged run moves, for its double-arrow cursor: a horizontal run (even k) moves up and down
   const [resize, setResize] = useState<'ns' | 'ew' | null>(null);
   const designRef = useRef(design);
@@ -161,13 +172,14 @@ export function useWireGestures(
    * Dropped on an allowed block, `done` commits; anywhere else, refused, or back on `current`, nothing
    * changes and no step is made.
    */
-  const dropGesture = (e: ReactPointerEvent, from: Point, current: string | null, verdict: (over: string) => DropVerdict, done: (over: string) => void) => {
+  const dropGesture = (e: ReactPointerEvent, from: Point, current: string | null, verdict: (over: string) => DropVerdict, done: (over: string) => void, newWire = false) => {
     let over: string | null = null;
     setResize(null);
     run(e, (p) => {
       setGhost({ from, to: p });
       over = blockAt(shown.current, p);
-      setHint(over === null || over === current ? null : { id: over, ok: verdict(over) === 'ok' });
+      if (over === null || over === current) setHint(null);
+      else { const why = verdict(over); setHint({ id: over, ok: why === 'ok', why, newWire, at: p }); }
     }, (cancelled) => {
       setGhost(null);
       setHint(null);
@@ -203,7 +215,7 @@ export function useWireGestures(
       : { x: (at?.x ?? 0) + STEP_W, y: (at?.y ?? 0) + PMID };
     dropGesture(e, from, null, (over) => canWire(shown.current, source, over), (over) => {
       d.onCommit(addWire(d.draft, saved, source, over), { picks: [{ kind: 'wire', id: wireId(source, over) }] });
-    });
+    }, true);
   };
 
   /** The press point in flow coordinates (React Flow's own transform, so a pop-out's window works too). */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { canWire } from './rules';
+import { canWire, dropLabel } from './rules';
 
 const chain = () => loadedDocument(graphDto({
   workflow: workflowDto({ entryStepIds: ['s1'] }),
@@ -29,5 +29,16 @@ describe('canWire', () => {
     const doc = await chain();
     expect(canWire(doc, 's1', 's2', 's1->s2')).toBe('ok');
     expect(canWire(doc, 's2', 's1', 's2->s3')).toBe('cycle');
+  });
+});
+
+describe('dropLabel', () => {
+  it('says why a drop is refused, and what an allowed drop does', () => {
+    expect(dropLabel('cycle', false)).toBe('would make a loop');
+    expect(dropLabel('duplicate', false)).toBe('already wired');
+    expect(dropLabel('self', true)).toBe('same step');
+    expect(dropLabel('notStep', false)).toBe('not a step');
+    expect(dropLabel('ok', false)).toBe('re-attach here');
+    expect(dropLabel('ok', true)).toBe('connect here');
   });
 });
