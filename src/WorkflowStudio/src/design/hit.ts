@@ -43,13 +43,17 @@ export function itemsInRect(doc: StudioDocument, r: FlowRect): Pick[] {
   return picks;
 }
 
-/** The step or the hub under a point (a wire end may be dropped on them), or null; `reach` grows each block on every side. */
+/**
+ * The block under a point by node id: a step, the hub or a cache (a dragged wire end is judged over each:
+ * the rules refuse a cache as "not a step"), or null; `reach` grows each block on every side.
+ */
 export function blockAt(doc: StudioDocument, p: Point, reach = 0): string | null {
-  for (const [id, at] of doc.placement.steps) {
-    if (p.x >= at.x - reach && p.x <= at.x + STEP_W + reach && p.y >= at.y - reach && p.y <= at.y + STEP_H + reach) return id;
-  }
+  const within = (x: number, y: number, w: number, h: number) => p.x >= x - reach && p.x <= x + w + reach && p.y >= y - reach && p.y <= y + h + reach;
+  for (const [id, at] of doc.placement.steps) if (within(at.x, at.y, STEP_W, STEP_H)) return id;
   const { cx, cy } = doc.placement.sphere;
-  return Math.hypot(p.x - cx, p.y - cy) <= SPHERE_R + reach ? SPHERE_NODE_ID : null;
+  if (Math.hypot(p.x - cx, p.y - cy) <= SPHERE_R + reach) return SPHERE_NODE_ID;
+  for (const [id, at] of doc.placement.caches) if (within(at.x, at.y, CACHE_W, CACHE_H)) return cacheNodeId(id);
+  return null;
 }
 
 /** The wire line nearest `p` within `tolerance` (flow units), and how far along its drawn line (own line, then branch); plan 7. */

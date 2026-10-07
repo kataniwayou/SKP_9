@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { cacheDto, graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { SPHERE_R } from '../layout/geometry';
+import { CACHE_H, CACHE_W, SPHERE_R } from '../layout/geometry';
 import { blockAt, itemsInRect, rectOf, topLeftOf, wireAt } from './hit';
 
 const two = () => loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
@@ -48,5 +48,16 @@ describe('blockAt reach (plan 7, one drop reach)', () => {
     const { cx, cy } = doc.placement.sphere;
     expect(blockAt(doc, { x: cx + SPHERE_R + 5, y: cy })).toBeNull();
     expect(blockAt(doc, { x: cx + SPHERE_R + 5, y: cy }, 8)).toBe('wf');
+  });
+});
+
+describe('blockAt caches (plan 7, one hit test)', () => {
+  it('names a cache node inside its box and within the reach, so a dragged end over it is refused out loud', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1')], caches: [cacheDto('c1')] }));
+    const c = doc.placement.caches.get('c1')!;
+    expect(blockAt(doc, { x: c.x + CACHE_W / 2, y: c.y + CACHE_H / 2 })).toBe('cache:c1');
+    expect(blockAt(doc, { x: c.x - 5, y: c.y + CACHE_H / 2 })).toBeNull();
+    expect(blockAt(doc, { x: c.x - 5, y: c.y + CACHE_H / 2 }, 8)).toBe('cache:c1');
+    expect(blockAt(doc, { x: c.x + CACHE_W + 5, y: c.y + CACHE_H + 5 }, 8)).toBe('cache:c1');
   });
 });

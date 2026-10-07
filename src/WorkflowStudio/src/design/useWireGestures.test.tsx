@@ -1,11 +1,11 @@
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { cacheDto, graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { StudioDocument } from '../app/document';
-import { clampLanding, LANDING_MAX, LANDING_MIN, STEP_H, STEP_W, type Point } from '../layout/geometry';
+import { CACHE_H, CACHE_W, clampLanding, LANDING_MAX, LANDING_MIN, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { EMPTY_DRAFT, addWire, reattach, resetRoute, setShape } from './draft';
 import { endsOf, pointsOfShape } from '../layout/shape';
 import type { DesignProps } from './designProps';
@@ -500,6 +500,20 @@ describe('wire gestures', () => {
     expect(nodeClass(container, 's3')).toContain('drop-ok');
     fireEvent.pointerUp(document, { ...screenOf(container, near), pointerId: 1 });
     expect(vi.mocked(design.onCommit).mock.calls[0]![1]).toEqual({ picks: [{ kind: 'wire', id: 's1->s3' }] });
+  });
+
+  it('a head dragged over a cache is refused out loud: red "not a step", the cache outlined red, no step on release', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')], caches: [cacheDto('c1')] }));
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const c = doc.placement.caches.get('c1')!;
+    const over = { x: c.x + CACHE_W / 2, y: c.y + CACHE_H / 2 };
+    fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, over), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('not a step');
+    expect(nodeClass(container, 'cache:c1')).toContain('drop-no');
+    fireEvent.pointerUp(document, { ...screenOf(container, over), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
   });
 
   const joined = () => setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });

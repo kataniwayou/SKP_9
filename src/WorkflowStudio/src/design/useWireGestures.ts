@@ -6,6 +6,7 @@ import { clampLanding, PMID, snap, SPHERE_R, STEP_W, type Point } from '../layou
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { route, type Box, type Pt } from '../layout/router';
 import { dragSegment, endsOf, nearestSegment, normalize, shapeFromPoints, type Bends, type WireShape } from '../layout/shape';
+import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
@@ -41,11 +42,13 @@ const boxOf = (source: SourceId) => (source === WORKFLOW_SOURCE ? SPHERE_BOX_ID 
 /**
  * Where a dragged wire's free end is drawn (spec §4.4): at the pointer on empty canvas; over a block, on
  * its border, never inside it. A wire lands on a block's left side (a step's landing band) and leaves a
- * block's right side (a step's port, the hub's middle). `box` is the block's id, or '' on empty canvas.
- * `reach` grows each block on every side: an end that close to a border is already on it (plan 7 §6.1a).
+ * block's right side (a step's port, the hub's middle). `over` is the block `blockAt` found under the
+ * pointer (node id, the drop reach included), so the end snaps exactly where the drop is judged (plan 7
+ * §6.1a); `box` is that block's router id, or '' on empty canvas.
  */
-export function freeEnd(p: Point, end: 'source' | 'target', boxes: Box[], reach = 0): { x: number; y: number; box: string } {
-  const b = boxes.find((x) => p.x >= x.x - reach && p.x <= x.x + x.w + reach && p.y >= x.y - reach && p.y <= x.y + x.h + reach);
+export function freeEnd(p: Point, end: 'source' | 'target', boxes: Box[], over: string | null): { x: number; y: number; box: string } {
+  const id = over === null ? null : over === SPHERE_NODE_ID || over.startsWith(CACHE_NODE_PREFIX) ? over : stepBoxId(over);
+  const b = id === null ? undefined : boxes.find((x) => x.id === id);
   if (!b) return { x: p.x, y: p.y, box: '' };
   const isStep = b.id.startsWith('step:');
   const along = (v: number) => b.y + Math.min(Math.max(snap(v - b.y), 16), b.h - 16);
@@ -238,7 +241,7 @@ export function useWireGestures(
    * back on `current`, nothing changes and no step is made.
    */
   const dropGesture = (e: ReactPointerEvent, o: {
-    wire: string | null; path: (p: Point) => Pt[]; current: string | null; verdict: (over: string) => DropVerdict;
+    wire: string | null; path: (p: Point, over: string | null) => Pt[]; current: string | null; verdict: (over: string) => DropVerdict;
     done: (over: string, p: Point) => void; onSelf?: (p: Point) => void;
     /** The label over `current`: 'move' (a head slides its contact) or 'here' (a tail stays where it starts). */
     selfWhy?: 'move' | 'here';
@@ -251,7 +254,8 @@ export function useWireGestures(
     let onLine: { id: string; at: number } | null = null;
     let at: Point = { x: 0, y: 0 };
     const newWire = o.wire === null;
-    const ghost = (p: Point) => setGhost({ wire: o.wire, part: o.part, points: o.path({ x: snap(p.x), y: snap(p.y) }) });
+    // the drawn end snaps to the very block the drop is judged over: one hit test (plan 7 §6.1a)
+    const ghost = (p: Point) => setGhost({ wire: o.wire, part: o.part, points: o.path({ x: snap(p.x), y: snap(p.y) }, over) });
     run(e, (p) => {
       at = p;
       // a block counts from the drop reach outside its border, like a line (plan 7 §6.1a)
@@ -295,8 +299,8 @@ export function useWireGestures(
     const boxes = blockBoxes(shown.current.placement);
     // the wire itself follows the pointer, right-angled from the end that stays: it leaves a source and lands heading right
     const path = end === 'target'
-      ? (p: Point) => { const f = freeEnd(p, 'target', boxes, DROP_REACH / getZoom()); return clearPath(route(ends.sx, ends.sy, f.x, f.y, boxOf(wire.source), f.box, 0, boxes), boxes); }
-      : (p: Point) => { const f = freeEnd(p, 'source', boxes, DROP_REACH / getZoom()); return clearPath(route(f.x, f.y, ends.tx, ends.ty, f.box, stepBoxId(wire.target), 0, boxes), boxes); };
+      ? (p: Point, over: string | null) => { const f = freeEnd(p, 'target', boxes, over); return clearPath(route(ends.sx, ends.sy, f.x, f.y, boxOf(wire.source), f.box, 0, boxes), boxes); }
+      : (p: Point, over: string | null) => { const f = freeEnd(p, 'source', boxes, over); return clearPath(route(f.x, f.y, ends.tx, ends.ty, f.box, stepBoxId(wire.target), 0, boxes), boxes); };
     const landingAt = (step: string, p: Point) => clampLanding(p.y - (shown.current.placement.steps.get(step)?.y ?? 0));
     const current = end === 'target' ? wire.target : wire.source;
     // joined on a line (plan 7 §6.1): its own line automatic, its landing kept
@@ -343,7 +347,7 @@ export function useWireGestures(
     setResize('ew');
     dropGesture(e, {
       wire: wire.id,
-      path: (p) => { const f = freeEnd(p, 'target', boxes, DROP_REACH / getZoom()); return clearPath(route(sx, sy, f.x, f.y, '', f.box, 0, boxes), boxes); },
+      path: (p, over) => { const f = freeEnd(p, 'target', boxes, over); return clearPath(route(sx, sy, f.x, f.y, '', f.box, 0, boxes), boxes); },
       current: wire.target,
       verdict: (over) => canWire(shown.current, wire.source, over, wire.id),
       done: (over, p) => {
@@ -371,7 +375,7 @@ export function useWireGestures(
       : { x: (at?.x ?? 0) + STEP_W, y: (at?.y ?? 0) + PMID };
     const boxes = blockBoxes(placement);
     setResize(null);
-    const path = (p: Point) => { const f = freeEnd(p, 'target', boxes, DROP_REACH / getZoom()); return clearPath(route(from.x, from.y, f.x, f.y, boxOf(source), f.box, 0, boxes), boxes); };
+    const path = (p: Point, over: string | null) => { const f = freeEnd(p, 'target', boxes, over); return clearPath(route(from.x, from.y, f.x, f.y, boxOf(source), f.box, 0, boxes), boxes); };
     dropGesture(e, {
       wire: null, path, current: null,
       verdict: (over) => canWire(shown.current, source, over),
