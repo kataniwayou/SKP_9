@@ -547,3 +547,43 @@ test('a joined wire\'s contact square has the four-way move cursor, a plain end 
   await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(0);
   await expect(wire(panel, a).locator('path.w')).toHaveCount(1);
 });
+
+/** A live workflow with a cache tag on its canvas and at least one step wire, and that workflow's step wires. */
+async function findCache(request: APIRequestContext): Promise<{ workflow: LiveWorkflow; wires: string[] } | null> {
+  for (const workflow of await workflowsWithSteps(request)) {
+    const g = (await (await request.get(`/api/v1/workflows/${workflow.id}/graph`)).json()) as { steps: { id: string; nextStepIds: string[] }[]; caches?: unknown[] };
+    const ids = new Set(g.steps.map((s) => s.id));
+    const wires = g.steps.flatMap((s) => s.nextStepIds.filter((t) => ids.has(t)).map((t) => `${s.id}->${t}`));
+    if ((g.caches?.length ?? 0) > 0 && wires.length > 0) return { workflow, wires };
+  }
+  return null;
+}
+
+test('a wire\'s arrow dragged over a cache tag is refused out loud: red "not a step", the cache outlined red, and it snaps back', async ({ page, request }) => {
+  const k = await findCache(request);
+  test.skip(k === null, 'BaseApi has no workflow with a cache and a step wire');
+  await openWorkflow(page, k!.workflow);
+  const panel = documentPanel(page, k!.workflow);
+  const cache = panel.locator('.react-flow__node[data-id^="cache:"]').first();
+  test.skip((await cache.count()) === 0, 'the workflow shows no cache tag on its canvas');
+  // the first wire with an uncovered point to pick it by
+  let id: string | null = null, p: { x: number; y: number } | null = null;
+  for (const w of k!.wires) {
+    try { p = await pointOnWire(panel, w); id = w; break; } catch { /* covered: try the next */ }
+  }
+  test.skip(id === null, 'every step wire is covered by another wire or a block');
+  const before = await pathOf(panel, id!);
+  await page.mouse.click(p!.x, p!.y);
+  const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+  const over = await centreOf(cache);
+  await page.mouse.move(head.x, head.y);
+  await page.mouse.down();
+  await page.mouse.move(over.x, over.y, { steps: 10 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('not a step');
+  await expect(cache).toHaveClass(/drop-no/);
+  await page.mouse.up();
+  await expect(panel.locator('.design-drop-label')).toHaveCount(0);
+  await expect(cache).not.toHaveClass(/drop-/);
+  expect(await pathOf(panel, id!)).toBe(before);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+});
