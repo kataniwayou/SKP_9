@@ -25,21 +25,21 @@ export interface DesignOverlayProps {
 }
 
 /** On-screen sizes (px) that do not shrink with the zoom: at the fitted zoom a 2 px line would vanish. */
-const DOT_R = 5, SQUARE = 9, BEND = 4, LINE = 1.5, GHOST = 1.6, LABEL_H = 18, LABEL_PAD = 6, LABEL_FONT = 11.5;
+const SQUARE = 9, BEND = 4, LINE = 1.5, GHOST = 1.6, LABEL_H = 18, LABEL_PAD = 6, LABEL_FONT = 11.5;
 
 /**
- * A run square is drawn only where an end dot does not cover it: on a run too short on screen, the dot
- * (drawn above) would take every press meant for the square. That run is still dragged through the wire's body.
+ * A run square is drawn only where an end square does not cover it: on a run too short on screen, the end
+ * square (drawn above) would take every press meant for it. That run is still dragged through the wire's body.
  */
-function clearOfDots(h: { x: number; y: number }, ends: Ends, k: number): boolean {
-  const room = (DOT_R + SQUARE / 2 + 1) * k;
+function clearOfEnds(h: { x: number; y: number }, ends: Ends, k: number): boolean {
+  const room = (SQUARE + 1) * k;
   return Math.hypot(h.x - ends.sx, h.y - ends.sy) >= room && Math.hypot(h.x - ends.tx, h.y - ends.ty) >= room;
 }
 
 /**
  * Drawn above the blocks in flow coordinates: the rubber band (spec §3.2), the alignment guides (§3.4),
- * and a picked wire's handles (§4.2, Visio): a green dot on each end, a square in the middle of each run,
- * a diamond on each bend; and the ghost wire while an end or a new wire is dragged (§4.4-§4.5).
+ * and a picked wire's handles (§4.2, Visio): a square on each end (dragged to detach it), a square in the
+ * middle of each run, a diamond on each bend; and the ghost wire while an end or a new wire is dragged (§4.4-§4.5).
  */
 export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hint = null }: DesignOverlayProps) {
   // one screen pixel in flow units
@@ -56,12 +56,12 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
           return (
             <g key={w.id} className="design-wire" data-wire={w.id}>
               {inner.map(([x, y], i) => <path key={`b${i}`} className="design-handle bend" d={`M${x} ${y - BEND * k}L${x + BEND * k} ${y}L${x} ${y + BEND * k}L${x - BEND * k} ${y}Z`} />)}
-              {segmentHandles(ends, bendsOf(w)).filter((h) => clearOfDots(h, ends, k)).map((h) => (
+              {segmentHandles(ends, bendsOf(w)).filter((h) => clearOfEnds(h, ends, k)).map((h) => (
                 <rect key={`s${h.k}`} className={h.vertical ? 'design-handle seg v' : 'design-handle seg h'} data-k={h.k} x={h.x - (SQUARE / 2) * k} y={h.y - (SQUARE / 2) * k} width={SQUARE * k} height={SQUARE * k} strokeWidth={LINE * k}
                   onPointerDown={(e) => onSegment(w, h.k, e)} />
               ))}
-              <circle className="design-handle end" data-end="source" cx={ends.sx} cy={ends.sy} r={DOT_R * k} strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, 'source', e)} />
-              <circle className="design-handle end" data-end="target" cx={ends.tx} cy={ends.ty} r={DOT_R * k} strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, 'target', e)} />
+              <rect className="design-handle end" data-end="source" x={ends.sx - (SQUARE / 2) * k} y={ends.sy - (SQUARE / 2) * k} width={SQUARE * k} height={SQUARE * k} strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, 'source', e)} />
+              <rect className="design-handle end" data-end="target" x={ends.tx - (SQUARE / 2) * k} y={ends.ty - (SQUARE / 2) * k} width={SQUARE * k} height={SQUARE * k} strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, 'target', e)} />
             </g>
           );
         })}

@@ -50,13 +50,15 @@
 .design-band { fill: rgba(125, 211, 252, .08); stroke: var(--accent); }
 .design-guide { stroke: #fff; filter: drop-shadow(0 0 2px rgba(125, 211, 252, .9)); }
 .design-handle { pointer-events: all; cursor: pointer; }
-.design-handle.end { fill: #34D399; stroke: #04111F; }
+.design-handle.end { fill: var(--accent); stroke: #04111F; cursor: move; }
 .design-handle.seg { fill: var(--panel); stroke: var(--accent); }
 /* a run square shows the way its run moves (Visio): a horizontal run goes up and down, a vertical one sideways */
 .design-handle.seg.h { cursor: ns-resize; }
 .design-handle.seg.v { cursor: ew-resize; }
 .studio-canvas.gesture.gesture-ns, .studio-canvas.gesture.gesture-ns * { cursor: ns-resize !important; }
 .studio-canvas.gesture.gesture-ew, .studio-canvas.gesture.gesture-ew * { cursor: ew-resize !important; }
+/* a dragged wire end keeps its four-way arrow */
+.studio-canvas.gesture.gesture-move, .studio-canvas.gesture.gesture-move * { cursor: move !important; }
 .design-handle.bend { fill: var(--accent); pointer-events: none; }
 
 /* plan 4: the block under a dragged wire end (green: the drop is allowed; red: refused), the ghost wire, and the connection points */

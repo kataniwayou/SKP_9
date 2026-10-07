@@ -82,26 +82,28 @@ describe('wire gestures', () => {
     expect(canvas.classList.contains('gesture-ns')).toBe(true);
     fireEvent.pointerUp(across.ownerDocument, { clientX: 100, clientY: 100, pointerId: 1 });
 
-    // an end drag keeps the closed hand: no double arrow left over from the run drag
+    // an end drag shows the four-way arrow: no double arrow left over from the run drag
     fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
-    expect(canvas.classList.contains('gesture')).toBe(true);
+    expect(canvas.classList.contains('gesture-move')).toBe(true);
     expect(canvas.className).not.toMatch(/gesture-(ns|ew)/);
     fireEvent.pointerUp(document, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(canvas.classList.contains('gesture-move')).toBe(false);
   });
 
   it('handles, outline and ghost keep their size on screen whatever the zoom', async () => {
     const doc = await two();
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
     const zoom = Number(/scale\(([-\d.e]+)\)/.exec((container.querySelector('.react-flow__viewport') as HTMLElement).style.transform)![1]);
-    const dot = container.querySelector('.design-handle.end')!;
-    expect(Number(dot.getAttribute('r')) * zoom).toBeCloseTo(5);
+    const end = container.querySelector('.design-handle.end')!;
+    expect(end.tagName).toBe('rect');
+    expect(Number(end.getAttribute('width')) * zoom).toBeCloseTo(9);
     const square = container.querySelector('.design-handle.seg')!;
     expect(Number(square.getAttribute('width')) * zoom).toBeCloseTo(9);
     // the node outline (CSS) scales by the canvas's --inv
     expect(Number((container.querySelector('.studio-canvas') as HTMLElement).style.getPropertyValue('--inv')) * zoom).toBeCloseTo(1);
   });
 
-  it('a run too short on screen to keep its square clear of an end dot shows no square (the dot wins)', async () => {
+  it('a run too short on screen to keep its square clear of an end square shows no square (the end wins)', async () => {
     const doc = await two();
     const s1 = doc.placement.steps.get('s1')!;
     // the first run is one grid step long: at any zoom below 2 its square would sit under the start dot

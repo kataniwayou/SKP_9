@@ -126,8 +126,8 @@ export function useWireGestures(
   // the dragged end's line, and the outline of the block under it (spec §4.4)
   const [ghost, setGhost] = useState<{ from: Point; to: Point } | null>(null);
   const [hint, setHint] = useState<DropHint | null>(null);
-  // the way a dragged run moves, for its double-arrow cursor: a horizontal run (even k) moves up and down
-  const [resize, setResize] = useState<'ns' | 'ew' | null>(null);
+  // the drag's cursor: a run's double arrow (a horizontal run, even k, moves up and down), or an end's four-way arrow
+  const [resize, setResize] = useState<'ns' | 'ew' | 'move' | null>(null);
   const designRef = useRef(design);
   designRef.current = design;
 
@@ -202,6 +202,7 @@ export function useWireGestures(
         const id = end === 'target' ? wireId(wire.source, over) : wireId(over, wire.target);
         d.onCommit(reattach(d.draft, saved, wire.id, end, over), { picks: [{ kind: 'wire', id }] });
       });
+    setResize('move');
   };
 
   /** Draws a new wire from a step's output side or the hub (spec §4.5); it is automatic and becomes the pick. */
