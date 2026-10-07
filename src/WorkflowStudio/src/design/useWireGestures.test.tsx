@@ -40,6 +40,8 @@ describe('wire gestures', () => {
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
     expect(container.querySelectorAll('.design-handle.end')).toHaveLength(2);
     expect(container.querySelectorAll('.design-handle.seg').length).toBeGreaterThan(0);
+    // only the end squares and the run squares: no mark on a bend
+    expect(container.querySelectorAll('.design-handle:not(.end):not(.seg)')).toHaveLength(0);
   });
 
   it('a wire that is not picked, or a pick naming a wire that is gone, shows no handles', async () => {

@@ -295,6 +295,9 @@ test('a run dragged onto a block goes around it, while dragged and after the dro
     await page.mouse.click(p.x, p.y);
     const n = await runs.count();
     expect(n, 'the picked wire shows run squares').toBeGreaterThan(0);
+    // a picked wire shows its end squares and run squares only, never a mark on a bend
+    await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle:not(.end):not(.seg)`)).toHaveCount(0);
+    await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end`)).toHaveCount(2);
     for (let i = 0; i < n; i++) {
       const p2 = await pointOnWire(panel, id);
       await page.mouse.click(p2.x, p2.y);
