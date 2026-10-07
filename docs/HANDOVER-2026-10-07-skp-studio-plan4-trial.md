@@ -1,7 +1,7 @@
 # Handover 2026-10-07: SKP Studio plan 4 (canvas designer trial)
 
 Branch `feature/path-importer` (not pushed, not merged). Studio deployed to the dev cluster as
-`workflow-studio:local` in ns `skp`; bundle `index-B44Jo27e.js`. Port-forward studio `localhost:18081`,
+`workflow-studio:local` in ns `skp`; bundle `index-ByuqKojD.js`. Port-forward studio `localhost:18081`,
 BaseApi `localhost:18080` (restart after every redeploy: `kubectl port-forward -n skp svc/workflow-studio 18081:8080`).
 
 ## Where we are
@@ -44,6 +44,19 @@ block under it (now `freeEnd` puts it on the block's border). An arrow dropped b
 its contact point there ("move contact here"; landing band 64-128); a re-attached arrow lands where dropped.
 Empty canvas still snaps back (a wire always joins two blocks). e2e: `blocksCrossed` checks every run of the
 wire against every block on screen; both new tests fail on the old code. Verify UI changes with Playwright.
+
+## Built: plan 7 junctions (`30996e5..a2a8c96`, deployed, bundle `index-ByuqKojD.js`)
+
+Spec `docs/superpowers/specs/2026-10-07-skp-studio-07-junctions-design.md`, plan
+`docs/superpowers/plans/2026-10-07-skp-studio-07-junctions.md` (Tasks 1-8 + 6b, subagent-driven, final review + one
+fix wave). A wire's arrow dropped on a same-colour line (8 px reach) joins it: own line square-on to a filled dot,
+split dot (one dot when within 16 px), branch with the only arrow head; drawing only (`routes[id].contact`). Contact
+square = four-way cursor; arrow square re-attaches keeping the contact. Every dragged end (head, tail, contact,
+arrow, new wire, caches, hub) gets green/red + label (user rule, spec §6.1a). Also fixed: a refresh right after a
+zoom kept the old view (`60eed9f`). Tests: Vitest 774, Playwright 53 + 2 skips; designer e2e 16/16 on the deployed
+studio. Follow-ups (not built): re-sourcing a joined wire drops its junction (user to confirm); canJoin vs routing on
+ignored contacts; contacts on a deleted host revive if the id is redrawn; contact exactly on a host corner; preview
+re-routes on every move.
 
 ## Junctions (plan 7) — wait until the user approves the designer
 
