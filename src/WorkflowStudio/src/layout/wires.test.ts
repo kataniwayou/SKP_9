@@ -179,6 +179,9 @@ describe('junctions (plan 7)', () => {
       const wires = setup(steps(), at, new Set<string>(), shapes);
       expect(wires.find((x) => x.id === 't->c')!.joint).toBeUndefined();
     }
+    const loop = setup(steps(), at, new Set<string>(), cases[2]!);
+    expect(loop.find((x) => x.id === 't->c')!.joint).toBeUndefined();
+    expect(loop.find((x) => x.id === 'u->b')!.joint).toBeUndefined();
     const other = setup([...steps(), step('v', ['x'])], { ...at, v: [288, 800] }, new Set<string>(), join('v->x', 's->b', 40));
     expect(other.find((x) => x.id === 'v->x')!.joint).toBeUndefined();
   });
