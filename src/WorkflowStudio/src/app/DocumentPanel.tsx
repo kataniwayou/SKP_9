@@ -10,9 +10,11 @@ import { hasEdits } from '../store/inspector';
 import { entityKindOf, targetKey } from '../store/inspectorTarget';
 import type { Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
-import { shownTargetOf, type OpenDocument } from '../store/studioState';
+import { designDirty, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
+import { canRedo, canUndo } from '../design/history';
 import { CapsuleToolbar } from './CapsuleToolbar';
+import { useStudioActionsOrNull } from './studioActions';
 import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVisible, type PanelLike } from './panelHooks';
 
 /**
@@ -40,6 +42,7 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
 }) {
   const open = useStudio((s) => s.docs.find((d) => d.workflowId === workflowId) ?? null);
   const store = useStudioStore();
+  const actions = useStudioActionsOrNull();
   const ownerDocument = useOwnerDocument(panel);
   const fitter = useFitter(ownerDocument);
   const visible = usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready';
@@ -77,7 +80,13 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
           store.dispatch({ type: 'select', workflowId, selection, picks });
         }}
       >
-        <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status} dirty={hasEdits(open.inspector)} busy={open.inspector.busy} blocked={blank} onSave={onSave} />
+        <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status} dirty={hasEdits(open.inspector)} busy={open.inspector.busy} blocked={blank} onSave={onSave}
+          design={actions ? {
+            dirty: designDirty(open), canUndo: canUndo(open.design), canRedo: canRedo(open.design),
+            onUndo: () => store.dispatch({ type: 'undo', workflowId }),
+            onRedo: () => store.dispatch({ type: 'redo', workflowId }),
+            onDiscard: () => actions.confirmDiscardDesign(workflowId, ownerDocument),
+          } : undefined} />
       </WorkflowCanvas>
     </div>
   );

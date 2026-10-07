@@ -33,9 +33,10 @@ export async function renderInspector(api: Partial<StudioApi>, { selection, pick
   const service = createInspectorService(full, store, afterWrite);
   const guard = vi.fn<StudioActions['guard']>((_id, proceed) => proceed());
   const confirmRemove = vi.fn<StudioActions['confirmRemove']>();
+  const confirmDiscardDesign = vi.fn<StudioActions['confirmDiscardDesign']>();
   const view = render(
     <StudioStoreProvider value={store}>
-      <StudioActionsProvider value={{ service, guard, confirmRemove }}><Inspector /></StudioActionsProvider>
+      <StudioActionsProvider value={{ service, guard, confirmRemove, confirmDiscardDesign }}><Inspector /></StudioActionsProvider>
     </StudioStoreProvider>,
   );
   return { ...view, store, api: full, service, guard, confirmRemove, afterWrite };

@@ -21,7 +21,7 @@ import { Problems } from './panels/Problems';
 import { hasEdits } from './store/inspector';
 import type { Pick } from './store/picks';
 import { selectionKey, type Selection } from './store/selection';
-import { inspectorKey, shownTargetOf } from './store/studioState';
+import { designDirty, inspectorKey, shownTargetOf } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
 
 export { describeError } from './api/describeError';
@@ -129,7 +129,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
 
   type Prompt =
     | { kind: 'unsaved'; workflowId: string; proceed: () => void; doc: Document }
-    | { kind: 'remove'; workflowId: string; assignmentId: string; doc: Document; discards: boolean };
+    | { kind: 'remove'; workflowId: string; assignmentId: string; doc: Document; discards: boolean }
+    | { kind: 'design'; workflowId: string; doc: Document }
+    | { kind: 'closeDesign'; workflowId: string; doc: Document; proceed: () => void };
   const [prompt, setPromptState] = useState<Prompt | null>(null);
   // the open question, read by the guard at once (state would lag a render behind)
   const asking = useRef<Prompt | null>(null);
@@ -151,6 +153,10 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
       const shown = open ? shownTargetOf(open) : null;
       const discards = open !== undefined && shown?.kind === 'assignment' && hasEdits(open.inspector);
       setPrompt({ kind: 'remove', workflowId, assignmentId, doc, discards });
+    },
+    confirmDiscardDesign: (workflowId, doc = document) => {
+      if (asking.current !== null) return;
+      setPrompt({ kind: 'design', workflowId, doc });
     },
   }), [service, store, setPrompt]);
 
@@ -198,9 +204,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   }, [saver]);
 
   // the dock only needs each document's identity and names; a selection change must not re-render every tab
-  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}\u0000${hasEdits(d.inspector)}`).join('\u0001');
+  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}\u0000${hasEdits(d.inspector) || designDirty(d)}`).join('\u0001');
   const documents: DockDocument[] = useMemo(
-    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId), dirty: hasEdits(d.inspector) })),
+    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId), dirty: hasEdits(d.inspector) || designDirty(d) })),
     [identity], // the part of `docs` the dock shows; `docs` itself changes on every selection
 
   );
@@ -216,10 +222,16 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         notice={notice}
         activeDocumentId={activeId}
         onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
-        onCloseDocument={(id, doc) => actions.guard(id, () => {
-          views.current.delete(id); // reopened later, it fits afresh
-          store.dispatch({ type: 'close', workflowId: id });
-        }, doc)}
+        onCloseDocument={(id, doc) => {
+          const close = () => actions.guard(id, () => {
+            views.current.delete(id); // reopened later, it fits afresh
+            store.dispatch({ type: 'close', workflowId: id });
+          }, doc);
+          // a design draft cannot be saved by the trial: ask first, then the Inspector's own guard
+          const open = store.getState().docs.find((d) => d.workflowId === id);
+          if (open && designDirty(open) && asking.current === null) setPrompt({ kind: 'closeDesign', workflowId: id, doc: doc ?? document, proceed: close });
+          else close();
+        }}
         workflows={items}
         pickerNote={listError}
         onPickerOpen={readList}
@@ -266,6 +278,16 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
             ? 'The assignment is taken off this workflow and deleted. This cannot be undone. Its unsaved changes will be discarded.'
             : 'The assignment is taken off this workflow and deleted. This cannot be undone.'}
           buttons={[{ label: 'Remove', primary: true, onClick: () => { setPrompt(null); void service.remove(prompt.workflowId, prompt.assignmentId); } }]} />
+      )}
+      {prompt?.kind === 'design' && (
+        <ConfirmDialog doc={prompt.doc} title="Discard design" onCancel={() => setPrompt(null)}
+          message="Every design change in this workflow is dropped, and the canvas shows the saved workflow again."
+          buttons={[{ label: 'Discard', primary: true, onClick: () => { setPrompt(null); store.dispatch({ type: 'discardDesign', workflowId: prompt.workflowId }); } }]} />
+      )}
+      {prompt?.kind === 'closeDesign' && (
+        <ConfirmDialog doc={prompt.doc} title="Discard design changes?" onCancel={() => setPrompt(null)}
+          message="This workflow has design changes that are not saved. The trial cannot save them."
+          buttons={[{ label: 'Discard', primary: true, onClick: () => { setPrompt(null); store.dispatch({ type: 'discardDesign', workflowId: prompt.workflowId }); prompt.proceed(); } }]} />
       )}
     </StudioActionsProvider>
   );

@@ -12,6 +12,8 @@ export interface StudioActions {
   guard(workflowId: Id, proceed: () => void, doc?: Document): void;
   /** Asks before removing a step's assignment (taken off this workflow and deleted), then removes it. */
   confirmRemove(workflowId: Id, assignmentId: Id, doc?: Document): void;
+  /** Asks before dropping a document's design draft (spec §5.4), then drops it. */
+  confirmDiscardDesign(workflowId: Id, doc?: Document): void;
 }
 
 const Context = createContext<StudioActions | null>(null);
@@ -22,6 +24,11 @@ export function useStudioActions(): StudioActions {
   const actions = useContext(Context);
   if (!actions) throw new Error('useStudioActions needs a StudioActionsProvider above it.');
   return actions;
+}
+
+/** The page's actions, or null (a panel rendered on its own, in a test, has no page). */
+export function useStudioActionsOrNull(): StudioActions | null {
+  return useContext(Context);
 }
 
 const UNGUARDED: StudioActions['guard'] = (_workflowId, proceed) => proceed();

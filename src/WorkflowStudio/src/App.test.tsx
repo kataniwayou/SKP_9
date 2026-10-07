@@ -503,3 +503,43 @@ describe('unsaved Inspector edits (slice 3b)', () => {
     });
   });
 });
+
+describe('the design draft (plan 4)', () => {
+  const designSession = () => memoryStorage({ [SESSION_KEY]: JSON.stringify({
+    version: 1, activeId: ALPHA, showDetails: false, dock: null,
+    docs: [{ workflowId: ALPHA, name: 'alpha', version: '1.0.0', selection: null, view: null, design: { steps: { s1: { x: 800, y: 800 } } } }],
+  }) });
+  const api = () => fakeApi({ getEntity: vi.fn().mockResolvedValue({ ok: true, value: stepDto('s1', { name: 'fetch' }) }) });
+
+  it('marks the document, and Undo is disabled after a refresh', async () => {
+    render(<App api={api()} storage={memoryStorage()} tabStorage={designSession()} />);
+    expect(await screen.findByText('● design draft')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '↶ Undo' })).toBeDisabled();
+  });
+
+  it('Discard design asks, then drops the draft', async () => {
+    render(<App api={api()} storage={memoryStorage()} tabStorage={designSession()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard design' }));
+    const box = await screen.findByRole('alertdialog', { name: 'Discard design' });
+    fireEvent.click(within(box).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByText('● design draft')).toBeNull());
+  });
+
+  it('closing a document with a design draft asks; Cancel keeps it open', async () => {
+    render(<App api={api()} storage={memoryStorage()} tabStorage={designSession()} />);
+    expect(await screen.findByText('● design draft')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close alpha' }));
+    const box = await screen.findByRole('alertdialog', { name: 'Discard design changes?' });
+    fireEvent.click(within(box).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(1);
+  });
+
+  it('closing and choosing Discard closes the document', async () => {
+    render(<App api={api()} storage={memoryStorage()} tabStorage={designSession()} />);
+    expect(await screen.findByText('● design draft')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close alpha' }));
+    const box = await screen.findByRole('alertdialog', { name: 'Discard design changes?' });
+    fireEvent.click(within(box).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(0));
+  });
+});
