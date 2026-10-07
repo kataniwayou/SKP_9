@@ -6,7 +6,7 @@ import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { StudioDocument } from '../app/document';
 import { clampLanding, LANDING_MAX, LANDING_MIN, STEP_H, STEP_W, type Point } from '../layout/geometry';
-import { EMPTY_DRAFT, addWire, reattach, setShape } from './draft';
+import { EMPTY_DRAFT, addWire, reattach, resetRoute, setShape } from './draft';
 import { endsOf, pointsOfShape } from '../layout/shape';
 import type { DesignProps } from './designProps';
 
@@ -499,5 +499,81 @@ describe('wire gestures', () => {
     expect(nodeClass(container, 's3')).toContain('drop-ok');
     fireEvent.pointerUp(document, { ...screenOf(container, near), pointerId: 1 });
     expect(vi.mocked(design.onCommit).mock.calls[0]![1]).toEqual({ picks: [{ kind: 'wire', id: 's1->s3' }] });
+  });
+
+  const joined = () => setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
+
+  it('a picked joined wire shows a start square, a contact square with the four-way cursor, an arrow square, and no square on its last run', async () => {
+    const doc = await joinable();
+    const design = designOf({ draft: joined(), picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const g = container.querySelector('.design-wire[data-wire="s3->s4"]')!;
+    expect(g.querySelector('.design-handle.end[data-end="source"]')).not.toBeNull();
+    expect(g.querySelector('.design-handle.end.contact[data-end="target"]')).not.toBeNull();
+    expect(g.querySelector('.design-handle.end[data-end="arrow"]')).not.toBeNull();
+    fireEvent.pointerDown(g.querySelector('.design-handle.contact')!, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(container.querySelector('.studio-canvas')!.classList.contains('gesture-move')).toBe(true);
+    fireEvent.pointerUp(document, { clientX: 0, clientY: 0, pointerId: 1 });
+  });
+
+  it('the contact square slides along its host, and dropped on its own step makes the wire plain', async () => {
+    const doc = await joinable();
+    const design = designOf({ draft: joined(), picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const contact = () => container.querySelector('.design-wire[data-wire="s3->s4"] .design-handle.contact')!;
+    const along = onLine(doc, 's1->s2');
+    fireEvent.pointerDown(contact(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, along), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, along), pointerId: 1 });
+    const slid = vi.mocked(design.onCommit).mock.calls[0]![0].routes['s3->s4']!;
+    expect(slid.contact!.host).toBe('s1->s2');
+    expect(slid.contact!.at).not.toBe(40);
+    fireEvent.pointerDown(contact(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's4')), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's4')), pointerId: 1 });
+    const plain = vi.mocked(design.onCommit).mock.calls[1]![0].routes['s3->s4'];
+    expect(plain?.contact ?? null).toBeNull();
+  });
+
+  it("a run drag on a joined wire's own line keeps its contact", async () => {
+    const doc = await joinable();
+    const design = designOf({ draft: joined(), picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const run = container.querySelector('.design-wire[data-wire="s3->s4"] .design-handle.seg')!;
+    fireEvent.pointerDown(run, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(document, { clientX: 140, clientY: 140, pointerId: 1 });
+    fireEvent.pointerUp(document, { clientX: 140, clientY: 140, pointerId: 1 });
+    expect(vi.mocked(design.onCommit).mock.calls[0]![0].routes['s3->s4']!.contact).toEqual({ host: 's1->s2', at: 40 });
+  });
+
+  it('a dragged contact square draws the wire plain to the pointer; the arrow square drags the branch only, its runs staying, and re-attaches keeping the contact', async () => {
+    const doc = await joinable();
+    const design = designOf({ draft: joined(), picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const edge = () => container.querySelector('[data-testid="rf__edge-s3->s4"]')!;
+    const g = () => container.querySelector('.design-wire[data-wire="s3->s4"]')!;
+    fireEvent.pointerDown(g().querySelector('.design-handle.contact')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
+    expect(edge().querySelectorAll('circle.nx-joint')).toHaveLength(0);
+    expect(edge().querySelector('path.w.branch')).toBeNull();
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+    const runs = () => [...g().querySelectorAll('.design-handle.seg')].map((r) => `${r.getAttribute('x')},${r.getAttribute('y')}`);
+    const before = runs();
+    fireEvent.pointerDown(g().querySelector('.design-handle.end[data-end="arrow"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's2')), pointerId: 1 });
+    expect(runs()).toEqual(before);
+    expect(edge().querySelectorAll('circle.nx-joint')).toHaveLength(2);
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's2')), pointerId: 1 });
+    const [next, picks] = vi.mocked(design.onCommit).mock.calls[0]!;
+    expect(picks).toEqual({ picks: [{ kind: 'wire', id: 's3->s2' }] });
+    expect(next.routes['s3->s2']!.contact).toEqual({ host: 's1->s2', at: 40 });
+  });
+
+  it('Reset route removes the junction', async () => {
+    const doc = await joinable();
+    const design = designOf({ draft: joined(), picks: [{ kind: 'wire', id: 's3->s4' }] });
+    render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    expect(resetRoute(joined(), 's3->s4').routes['s3->s4']).toBeUndefined();
   });
 });

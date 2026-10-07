@@ -58,6 +58,9 @@
 .design-handle.seg.v { cursor: ew-resize; }
 .studio-canvas.gesture.gesture-ns, .studio-canvas.gesture.gesture-ns * { cursor: ns-resize !important; }
 .studio-canvas.gesture.gesture-ew, .studio-canvas.gesture.gesture-ew * { cursor: ew-resize !important; }
+/* plan 7: a joined wire's contact square moves its contact along any same-colour line (four-way arrow) */
+.design-handle.end.contact { cursor: move; }
+.studio-canvas.gesture.gesture-move, .studio-canvas.gesture.gesture-move * { cursor: move !important; }
 
 /* plan 4: the block under a dragged wire end (green: the drop is allowed; red: refused), the ghost wire, and the connection points */
 /* --inv (1 / zoom, set on the canvas) keeps the outline 3 px on screen at any zoom */

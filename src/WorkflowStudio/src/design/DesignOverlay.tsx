@@ -18,7 +18,8 @@ export interface DesignOverlayProps {
   /** A wire's shape as bends (the draft's manual bends, else the router's): its run squares follow it. */
   bendsOf: (wire: WireRoute) => Bends;
   onSegment: (wire: WireRoute, k: number, e: ReactPointerEvent) => void;
-  onEnd: (wire: WireRoute, end: 'source' | 'target', e: ReactPointerEvent) => void;
+  /** An end square pressed: its start, its arrow (a joined wire: its contact), or a joined wire's branch arrow (plan 7). */
+  onEnd: (wire: WireRoute, end: 'source' | 'target' | 'arrow', e: ReactPointerEvent) => void;
   /** A new wire's path, right-angled from its source to the pointer (spec §4.5); a dragged end moves its own wire. */
   ghost: Pt[] | null;
   /** The block under a dragged end: the label next to the pointer says why a drop is refused, or what it does. */
@@ -53,14 +54,22 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
         {guides.map((l, i) => <line key={i} className="design-guide" x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} strokeWidth={k} />)}
         {wires.map((w) => {
           const ends = endsOf(w.points);
+          // a joined wire's runs are its own line's (plan 7 §6.2): the branch and the split dot have no handles
+          const shapeEnds = w.joint?.ownEnds ?? ends;
+          const bends = bendsOf(w);
+          // a joined wire's last own run ends on its host: its height is the contact's, so it has no square
+          const last = 2 * bends.xs.length;
+          const arrow = w.joint && w.joint.branch.length > 1 ? w.joint.branch[w.joint.branch.length - 1]! : null;
+          const sq = (x: number, y: number) => ({ x: x - (SQUARE / 2) * k, y: y - (SQUARE / 2) * k, width: SQUARE * k, height: SQUARE * k, strokeWidth: LINE * k });
           return (
             <g key={w.id} className="design-wire" data-wire={w.id}>
-              {segmentHandles(ends, bendsOf(w)).filter((h) => clearOfEnds(h, ends, k)).map((h) => (
-                <rect key={`s${h.k}`} className={h.vertical ? 'design-handle seg v' : 'design-handle seg h'} data-k={h.k} x={h.x - (SQUARE / 2) * k} y={h.y - (SQUARE / 2) * k} width={SQUARE * k} height={SQUARE * k} strokeWidth={LINE * k}
+              {segmentHandles(shapeEnds, bends).filter((h) => !(w.joint && h.k === last) && clearOfEnds(h, ends, k)).map((h) => (
+                <rect key={`s${h.k}`} className={h.vertical ? 'design-handle seg v' : 'design-handle seg h'} data-k={h.k} {...sq(h.x, h.y)}
                   onPointerDown={(e) => onSegment(w, h.k, e)} />
               ))}
-              <rect className="design-handle end" data-end="source" x={ends.sx - (SQUARE / 2) * k} y={ends.sy - (SQUARE / 2) * k} width={SQUARE * k} height={SQUARE * k} strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, 'source', e)} />
-              <rect className="design-handle end" data-end="target" x={ends.tx - (SQUARE / 2) * k} y={ends.ty - (SQUARE / 2) * k} width={SQUARE * k} height={SQUARE * k} strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, 'target', e)} />
+              <rect className="design-handle end" data-end="source" {...sq(ends.sx, ends.sy)} onPointerDown={(e) => onEnd(w, 'source', e)} />
+              <rect className={w.joint ? 'design-handle end contact' : 'design-handle end'} data-end="target" {...sq(ends.tx, ends.ty)} onPointerDown={(e) => onEnd(w, 'target', e)} />
+              {arrow && <rect className="design-handle end" data-end="arrow" {...sq(arrow[0], arrow[1])} onPointerDown={(e) => onEnd(w, 'arrow', e)} />}
             </g>
           );
         })}

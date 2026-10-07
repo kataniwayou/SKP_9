@@ -5,7 +5,7 @@ import { clearBends, clearPath, clearRun } from '../layout/detour';
 import { clampLanding, PMID, snap, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { route, type Box, type Pt } from '../layout/router';
-import { dragSegment, endsOf, nearestSegment, normalize, shapeFromPoints, type Bends } from '../layout/shape';
+import { dragSegment, endsOf, nearestSegment, normalize, shapeFromPoints, type Bends, type WireShape } from '../layout/shape';
 import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
@@ -31,6 +31,8 @@ export interface DropHint {
 /** A dragged wire end's wire, right-angled from its fixed end to the pointer; `wire` null: a new wire. */
 export interface WireGhost {
   wire: string | null;
+  /** The dragged arrow of a joined wire moves its branch, not its own line (plan 7 §6.2). */
+  part?: 'branch';
   points: Pt[];
 }
 
@@ -164,8 +166,9 @@ export function useWireGestures(
   // the dragged end's line, and the outline of the block under it (spec §4.4)
   const [ghost, setGhost] = useState<WireGhost | null>(null);
   const [hint, setHint] = useState<DropHint | null>(null);
-  // the drag's double-arrow cursor: a horizontal run (even k) moves up and down; an end leaves its block sideways
-  const [resize, setResize] = useState<'ns' | 'ew' | null>(null);
+  // the drag's double-arrow cursor: a horizontal run (even k) moves up and down; an end leaves its block sideways;
+  // a joined wire's contact moves any way along lines (four-way, plan 7 §6.2)
+  const [resize, setResize] = useState<'ns' | 'ew' | 'move' | null>(null);
   const designRef = useRef(design);
   designRef.current = design;
 
@@ -181,22 +184,27 @@ export function useWireGestures(
     if (!d || e.button !== 0) return;
     const base = d.draft;
     const existing = base.routes[wire.id];
-    const ends = endsOf(wire.points);
-    const bends: Bends = existing?.bends ?? shapeFromPoints(wire.points);
+    // a joined wire's runs are its own line's, from its start to its contact (plan 7 §6.2)
+    const ends = wire.joint?.ownEnds ?? endsOf(wire.points);
+    const bends: Bends = existing?.bends ?? shapeFromPoints(wire.joint?.own ?? wire.points);
+    // a joined wire's last own run ends on its host: it does not slide a landing
+    if (wire.joint && k === 2 * bends.xs.length) return;
+    // a run drag keeps the wire's junction
+    const contact = existing?.contact ?? null;
     const targetY = shown.current.placement.steps.get(wire.target)?.y ?? 0;
     // a dragged wire goes around the blocks, never through one (spec §4.2)
     const boxes = blockBoxes(shown.current.placement);
-    let latest: { bends: Bends | null; landing: number | null } = { bends: existing?.bends ?? null, landing: existing?.landing ?? null };
+    let latest: WireShape = { bends: existing?.bends ?? null, landing: existing?.landing ?? null, contact };
     setResize(k % 2 === 0 ? 'ns' : 'ew');
     run(e, (p) => {
       const r = dragSegment(bends, k, p, ends);
       if ('landingY' in r) {
         const landing = clampLanding(r.landingY - targetY);
-        latest = { bends: bends.xs.length > 0 ? clearBends({ ...ends, ty: targetY + landing }, bends, boxes) : null, landing };
+        latest = { bends: bends.xs.length > 0 ? clearBends({ ...ends, ty: targetY + landing }, bends, boxes) : null, landing, contact };
       } else {
         // the run under the pointer is pushed off any block it would lie on; the rest detours around blocks
         const run = clearRun(r.bends, ends, draggedRun(bends.xs.length, k), boxes);
-        latest = { bends: clearBends(ends, run, boxes), landing: latest.landing };
+        latest = { bends: clearBends(ends, run, boxes), landing: latest.landing, contact };
       }
       setPreview(setShape(base, wire.id, latest));
     }, (cancelled, moved) => {
@@ -204,7 +212,7 @@ export function useWireGestures(
       if (cancelled || !moved) return;
       const ty = latest.landing !== null ? targetY + latest.landing : ends.ty;
       const tidy = latest.bends ? normalize({ ...ends, ty }, latest.bends) : null;
-      const next = setShape(base, wire.id, { bends: tidy, landing: latest.landing });
+      const next = setShape(base, wire.id, { bends: tidy, landing: latest.landing, contact });
       // dragged back where it was: no step
       if (JSON.stringify(next.routes[wire.id] ?? null) === JSON.stringify(base.routes[wire.id] ?? null)) return;
       d.onCommit(next);
@@ -235,12 +243,14 @@ export function useWireGestures(
     selfWhy?: 'move' | 'here';
     /** What a line under the pointer does: joins (`LineDrop`) or refuses with a reason. */
     line: LineDrop | Refusal;
+    /** A joined wire's arrow: the ghost is its branch (plan 7 §6.2). */
+    part?: 'branch';
   }) => {
     let over: string | null = null;
     let onLine: { id: string; at: number } | null = null;
     let at: Point = { x: 0, y: 0 };
     const newWire = o.wire === null;
-    const ghost = (p: Point) => setGhost({ wire: o.wire, points: o.path({ x: snap(p.x), y: snap(p.y) }) });
+    const ghost = (p: Point) => setGhost({ wire: o.wire, part: o.part, points: o.path({ x: snap(p.x), y: snap(p.y) }) });
     run(e, (p) => {
       at = p;
       // a block counts from the drop reach outside its border, like a line (plan 7 §6.1a)
@@ -290,7 +300,8 @@ export function useWireGestures(
     const current = end === 'target' ? wire.target : wire.source;
     // joined on a line (plan 7 §6.1): its own line automatic, its landing kept
     const joined = (host: string, at: number) => setShape(base, wire.id, { bends: null, landing: base.routes[wire.id]?.landing ?? null, contact: { host, at: snap(at) } });
-    setResize('ew');
+    // a joined wire's contact square: the four-way cursor (plan 7 §6.2)
+    setResize(wire.joint && end === 'target' ? 'move' : 'ew');
     dropGesture(e, {
       wire: wire.id, path, current,
       verdict: (over) => (end === 'target' ? canWire(shown.current, wire.source, over, wire.id) : canWire(shown.current, over, wire.target, wire.id)),
@@ -302,6 +313,8 @@ export function useWireGestures(
       onSelf: end === 'target' ? (p) => {
         // its own step: the contact point slides along the landing band; the shape it had stays
         const landing = landingAt(wire.target, p);
+        // a joined wire's contact square back on its own step: the wire is plain again (plan 7 §6.3)
+        if (wire.joint) { d.onCommit(setShape(base, wire.id, { bends: null, landing, contact: null }), { picks: [{ kind: 'wire', id: wire.id }] }); return; }
         const step = shown.current.placement.steps.get(wire.target);
         if (!step || step.y + landing === ends.ty) return;
         d.onCommit(setShape(d.draft, wire.id, { bends: d.draft.routes[wire.id]?.bends ?? null, landing }), { picks: [{ kind: 'wire', id: wire.id }] });
@@ -313,6 +326,36 @@ export function useWireGestures(
         preview: joined,
         done: (host, at) => d.onCommit(joined(host, at), { picks: [{ kind: 'wire', id: wire.id }] }),
       } : 'start',
+    });
+  };
+
+  /** Drags a joined wire's arrow (its branch end) to another step: re-attached, its contact kept (plan 7 §6.2). */
+  const startArrow = (wire: WireRoute, e: ReactPointerEvent) => {
+    const d = designRef.current;
+    if (!d || e.button !== 0 || !wire.joint?.split) return;
+    const base = d.draft;
+    const shape = base.routes[wire.id];
+    // the branch leaves the split dot: it follows the pointer from there
+    const [sx, sy] = wire.joint.split;
+    const boxes = blockBoxes(shown.current.placement);
+    const landingAt = (step: string, p: Point) => clampLanding(p.y - (shown.current.placement.steps.get(step)?.y ?? 0));
+    setResize('ew');
+    dropGesture(e, {
+      wire: wire.id,
+      path: (p) => { const f = freeEnd(p, 'target', boxes, DROP_REACH / getZoom()); return clearPath(route(sx, sy, f.x, f.y, '', f.box, 0, boxes), boxes); },
+      current: wire.target,
+      verdict: (over) => canWire(shown.current, wire.source, over, wire.id),
+      done: (over, p) => {
+        const id = wireId(wire.source, over);
+        const next = reattach(base, saved, wire.id, 'target', over);
+        // the contact is kept; on a step of another colour it is ignored (drawn plain, plan 7 §5.2)
+        d.onCommit(setShape(next, id, { bends: shape?.bends ?? null, landing: landingAt(over, p), contact: shape?.contact ?? null }), { picks: [{ kind: 'wire', id }] });
+      },
+      // back on its own step: the arrow's landing moves there
+      onSelf: (p) => d.onCommit(setShape(base, wire.id, { bends: shape?.bends ?? null, landing: landingAt(wire.target, p), contact: shape?.contact ?? null }), { picks: [{ kind: 'wire', id: wire.id }] }),
+      // the arrow ends on a step: only the contact square joins a line
+      line: 'needStep',
+      part: 'branch',
     });
   };
 
@@ -352,9 +395,9 @@ export function useWireGestures(
       const wire = shown.current.wires.find((w) => w.id === wireId);
       if (!wire) return;
       // dragging a picked wire's body drags its nearest run, and never detaches it (spec §4.2)
-      const bends = d.draft.routes[wireId]?.bends ?? shapeFromPoints(wire.points);
+      const bends = d.draft.routes[wireId]?.bends ?? shapeFromPoints(wire.joint?.own ?? wire.points);
       const { startSegment: start, flowPointOf } = latestRef.current;
-      start(wire, nearestSegment(endsOf(wire.points), bends, flowPointOf(e)), e);
+      start(wire, nearestSegment(wire.joint?.ownEnds ?? endsOf(wire.points), bends, flowPointOf(e)), e);
     },
     portPointerDown(source, e) {
       latestRef.current.startNew(source, e);
@@ -362,5 +405,5 @@ export function useWireGestures(
   }), [shown]);
 
   // a run or end drag's cursor only while that drag runs; a new wire keeps the closed hand
-  return { gestures, startSegment, startEnd, ghost, hint, active, running, resize: active ? resize : null };
+  return { gestures, startSegment, startEnd, startArrow, ghost, hint, active, running, resize: active ? resize : null };
 }

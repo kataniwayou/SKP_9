@@ -123,11 +123,13 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   // the block under a dragged wire end, outlined green or red (spec §4.4); a line gets a halo instead (plan 7)
   const shown = useMemo(() => withHint(selected, wiring.hint && !wiring.hint.line ? wiring.hint : null), [selected, wiring.hint]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
-  const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
+  // a joined wire's dragged arrow moves its branch, not its own line (plan 7 §6.2)
+  const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, part: wiring.ghost.part, points: wiring.ghost.points } : null;
   const edges = useMemo(() => marked.edges.map((e) => {
     if (e.type !== 'cable' || !e.data) return e;
     let data = e.data;
-    if (dragged && e.id === dragged.id) data = { ...data, points: dragged.points };
+    // a joined wire's dragged contact: drawn plain to the pointer, its old branch and dots gone (plan 7 §6.2)
+    if (dragged && e.id === dragged.id) data = dragged.part === 'branch' ? { ...data, branch: dragged.points } : { ...data, points: dragged.points, branch: undefined, joints: undefined };
     // the line under a dragged arrow end: green when it may be joined, red when not (plan 7 §6.1)
     if (wiring.hint?.line && e.id === wiring.hint.id) data = { ...data, halo: wiring.hint.ok ? 'ok' : 'no' };
     return data === e.data ? e : { ...e, data };
@@ -135,14 +137,17 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   // picks naming wires that are gone (after an undo) draw nothing
   const pickedWires = useMemo(
     () => (design
-      ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)).map((w) => (dragged && w.id === dragged.id ? { ...w, points: dragged.points } : w))
+      ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)).map((w) => (dragged && w.id === dragged.id
+        ? dragged.part === 'branch' && w.joint ? { ...w, joint: { ...w.joint, branch: dragged.points } } : { ...w, points: dragged.points, joint: undefined }
+        : w))
       : []),
     [shownDoc, design?.picks, wiring.ghost],
   );
   // the run squares follow a drag's preview, not only the committed draft
-  const bendsOf = (w: WireRoute) => (dragged && w.id === dragged.id
+  // (a dragged branch leaves the own line, and its runs, where they are)
+  const bendsOf = (w: WireRoute) => (dragged && w.id === dragged.id && dragged.part !== 'branch'
     ? shapeFromPoints(w.points)
-    : (preview ?? design?.draft)?.routes[w.id]?.bends ?? shapeFromPoints(w.points));
+    : (preview ?? design?.draft)?.routes[w.id]?.bends ?? shapeFromPoints(w.joint?.own ?? w.points));
   // the wire's right-click menu (spec §4.3)
   const [menu, setMenu] = useState<{ anchor: Anchor; wireId: string } | null>(null);
 
@@ -226,7 +231,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={onViewChange ? (_event, v) => onViewChange({ x: v.x, y: v.y, zoom: v.zoom, followFit: followFit.current }) : undefined}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hint={wiring.hint} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={(w, end, e) => (end === 'arrow' ? wiring.startArrow(w, e) : wiring.startEnd(w, end, e))} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hint={wiring.hint} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize />
