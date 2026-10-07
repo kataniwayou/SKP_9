@@ -1,7 +1,7 @@
 # Handover 2026-10-07: SKP Studio plan 4 (canvas designer trial)
 
 Branch `feature/path-importer` (not pushed, not merged). Studio deployed to the dev cluster as
-`workflow-studio:local` in ns `skp`; bundle `index-DqyGNXBe.js`. Port-forward studio `localhost:18081`,
+`workflow-studio:local` in ns `skp`; bundle `index-B44Jo27e.js`. Port-forward studio `localhost:18081`,
 BaseApi `localhost:18080` (restart after every redeploy: `kubectl port-forward -n skp svc/workflow-studio 18081:8080`).
 
 ## Where we are
@@ -34,6 +34,16 @@ wire itself, right-angled from its fixed end to the pointer (`route()`), no slop
 re-attach on drop kept); a run dragged onto a step is pushed off it (`clearRun`) and every other run detours
 around steps (`clearPath`, a small Dijkstra on the clearance lines, `layout/detour.ts`); the detour is saved
 with the shape. A new wire's ghost is right-angled and solid too.
+
+## Built: user trial round 3 (`00e742a`, deployed)
+
+User: the two-headed end cursor works; but an end dropped returned to its contact point, and wires went
+inside steps. Reproduced with a Playwright probe: the detour exempted a wire's own source/target box for its
+whole first/last run (now only straight out/in, heading right); a dragged end ran to the pointer inside the
+block under it (now `freeEnd` puts it on the block's border). An arrow dropped back on its own step now moves
+its contact point there ("move contact here"; landing band 64-128); a re-attached arrow lands where dropped.
+Empty canvas still snaps back (a wire always joins two blocks). e2e: `blocksCrossed` checks every run of the
+wire against every block on screen; both new tests fail on the old code. Verify UI changes with Playwright.
 
 ## Junctions (plan 7) — wait until the user approves the designer
 
