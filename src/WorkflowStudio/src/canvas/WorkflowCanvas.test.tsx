@@ -6,7 +6,7 @@ import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { loadDocument } from '../app/loadDocument';
 import type { DesignProps } from '../design/designProps';
-import { EMPTY_DRAFT, setShape } from '../design/draft';
+import { EMPTY_DRAFT, moveBlocks, setShape } from '../design/draft';
 import { createTextFitter } from './fitText';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { ZoomControls } from './ZoomControls';
@@ -390,12 +390,30 @@ describe('WorkflowCanvas', () => {
     });
   });
 
+  it('draws one dot when the split falls on the contact (a target behind it, plan 7)', async () => {
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { entryCondition: 2 }), stepDto('s3', { nextStepIds: ['s4'] }), stepDto('s4', { entryCondition: 2 })],
+    }));
+    // s1 -> s2 straight along y 128; s4 sits left of the contact, so the branch leaves from the contact itself
+    const moved = moveBlocks(EMPTY_DRAFT, doc, new Map([['wf', { x: -2000, y: -2000 }], ['s1', { x: 288, y: 32 }], ['s2', { x: 864, y: 32 }], ['s3', { x: 32, y: 288 }], ['s4', { x: 576, y: 288 }]]));
+    const draft = setShape(moved, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 176 } });
+    const design: DesignProps = { draft, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() };
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const edge = container.querySelector('[data-testid="rf__edge-s3->s4"]')!;
+    expect(edge.querySelectorAll('circle.nx-joint')).toHaveLength(1);
+    expect(edge.querySelectorAll('path.w.branch')).toHaveLength(1);
+    expect(edge.querySelectorAll('.nx-head')).toHaveLength(1);
+  });
+
   it('draws a joined wire as its own line to a dot, a split dot and a branch with the only arrow head (plan 7)', async () => {
     const doc = await loadedDocument(graphDto({
       workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
       steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { entryCondition: 2 }), stepDto('s3', { nextStepIds: ['s4'] }), stepDto('s4', { entryCondition: 2 })],
     }));
-    const draft = setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
+    // s2 and s4 spread right: the host is long and the split lies well past the contact (one dot when they would touch)
+    const spread = moveBlocks(EMPTY_DRAFT, doc, new Map([['s2', { x: 1152, y: 32 }], ['s4', { x: 864, y: 480 }]]));
+    const draft = setShape(spread, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
     const design: DesignProps = { draft, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() };
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
     const edge = container.querySelector('[data-testid="rf__edge-s3->s4"]')!;

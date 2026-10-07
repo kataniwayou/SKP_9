@@ -6,7 +6,7 @@ import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { StudioDocument } from '../app/document';
 import { CACHE_H, CACHE_W, clampLanding, LANDING_MAX, LANDING_MIN, STEP_H, STEP_W, type Point } from '../layout/geometry';
-import { EMPTY_DRAFT, addWire, reattach, resetRoute, setShape } from './draft';
+import { EMPTY_DRAFT, addWire, moveBlocks, reattach, resetRoute, setShape } from './draft';
 import { endsOf, pointsOfShape } from '../layout/shape';
 import type { DesignProps } from './designProps';
 import { applyDraft } from './apply';
@@ -563,7 +563,10 @@ describe('wire gestures', () => {
 
   it('a dragged contact square draws the wire plain to the pointer; the arrow square drags the branch only, its runs staying, and re-attaches keeping the contact', async () => {
     const doc = await joinable();
-    const design = designOf({ draft: joined(), picks: [{ kind: 'wire', id: 's3->s4' }] });
+    // s2 and s4 spread right: the split lies well past the contact, two dots
+    const draft = moveBlocks(joined(), doc, new Map([['s2', { x: 1152, y: 32 }], ['s4', { x: 864, y: 480 }]]));
+    const shownDoc = applyDraft(doc, draft);
+    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's3->s4' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const edge = () => container.querySelector('[data-testid="rf__edge-s3->s4"]')!;
     const g = () => container.querySelector('.design-wire[data-wire="s3->s4"]')!;
@@ -576,10 +579,10 @@ describe('wire gestures', () => {
     const runs = () => [...g().querySelectorAll('.design-handle.seg')].map((r) => `${r.getAttribute('x')},${r.getAttribute('y')}`);
     const before = runs();
     fireEvent.pointerDown(g().querySelector('.design-handle.end[data-end="arrow"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
-    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's2')), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(shownDoc, 's2')), pointerId: 1 });
     expect(runs()).toEqual(before);
     expect(edge().querySelectorAll('circle.nx-joint')).toHaveLength(2);
-    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's2')), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(shownDoc, 's2')), pointerId: 1 });
     const [next, picks] = vi.mocked(design.onCommit).mock.calls[0]!;
     expect(picks).toEqual({ picks: [{ kind: 'wire', id: 's3->s2' }] });
     expect(next.routes['s3->s2']!.contact).toEqual({ host: 's1->s2', at: 40 });

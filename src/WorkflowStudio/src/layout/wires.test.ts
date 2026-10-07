@@ -222,6 +222,19 @@ describe('junctions (plan 7)', () => {
     })).toBe(true);
   });
 
+  it('a target behind the contact: the split is the contact (one dot), the branch leaving from it', () => {
+    // s (288,32) -> b (864,32) along y 128; t -> c, c left of the contact at 688
+    const st = [step('s', ['b']), step('t', ['c']), step('b', [], { entryCondition: 2 }), step('c', [], { entryCondition: 2 })];
+    const pos = { s: [288, 32], b: [864, 32], t: [32, 288], c: [576, 288] } as Record<string, [number, number]>;
+    const w = setup(st, pos, new Set<string>(), join('t->c', 's->b', 176)).find((x) => x.id === 't->c')!;
+    expect(w.joint!.contact).toEqual([688, 128]);
+    expect(w.joint!.split).toEqual(w.joint!.contact);
+    expect(w.joint!.branch[0]).toEqual(w.joint!.contact);
+    const br = w.joint!.branch;
+    expect(br[br.length - 1]![0]).toBe(576);
+    expect(square(br)).toBe(true);
+  });
+
   it('a host line too short to hold a contact leaves the wire plain', () => {
     const st = [step('s', ['k']), step('t', ['c']), step('k', [], { entryCondition: 2 }), step('c', [], { entryCondition: 2 })];
     const pos = { s: [288, 32], k: [528, 32], t: [288, 288], c: [864, 288] } as Record<string, [number, number]>;

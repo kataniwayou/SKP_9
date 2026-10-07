@@ -20,6 +20,7 @@ export type StudioEdge = CableEdgeType | TetherEdgeType;
 
 export { SPHERE_NODE_ID, cacheNodeId } from '../layout/nodeIds';
 
+const samePt = (a: readonly number[], b: readonly number[]) => a[0] === b[0] && a[1] === b[1];
 const handle = (id: string, type: 'source' | 'target', position: Position, x: number, y: number): NodeHandle =>
   ({ id, type, position, x, y, width: 1, height: 1 });
 
@@ -97,7 +98,8 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
     // the gallery staggers its pulses by 0.41 s a wire; `|| 0` keeps the first one at +0, not -0
     data: {
       points: w.points, colour: conditionInfo(w.condition).colour, broken: w.broken, delay: -Math.round(i * 41) / 100 || 0,
-      ...(w.joint ? { branch: w.joint.branch, joints: w.joint.split ? [w.joint.contact, w.joint.split] : [w.joint.contact] } : {}),
+      // a split on the contact is the same mark: one dot (plan 7 §3)
+      ...(w.joint ? { branch: w.joint.branch, joints: w.joint.split && !samePt(w.joint.split, w.joint.contact) ? [w.joint.contact, w.joint.split] : [w.joint.contact] } : {}),
     },
   }));
   for (const [id, position] of placement.caches) {

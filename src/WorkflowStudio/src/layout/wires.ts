@@ -24,7 +24,7 @@ export interface Joint {
   host: string;
   /** The filled dot on the host's line where the own line ends. */
   contact: Pt;
-  /** The filled dot where the branch leaves the shared line; null when the wire goes into its host's step. */
+  /** The filled dot where the branch leaves the shared line (the contact itself when they would nearly touch); null when the wire goes into its host's step. */
   split: Pt | null;
   /** From the split to the wire's landing, ending in its arrow head; empty when `split` is null. */
   branch: Pt[];
@@ -149,10 +149,13 @@ function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, sh
   // aim a router clearance left of the landing so the branch can head right into its step; never on the contact itself (window end if the line is short)
   const end = travelLen - CONTACT_MARGIN;
   const s = nearestOn([hostTravel], [landing[0] - CLEARANCE, landing[1]], Math.min(onTravel + GRID, end), end);
-  const split: Pt = [snap(s.p[0], GRID), snap(s.p[1], GRID)];
+  // a split this close to the contact would smear into it: the split IS the contact, one mark (spec §3)
+  const atContact = s.at - onTravel < 2 * GRID;
+  const split: Pt = atContact ? contact : [snap(s.p[0], GRID), snap(s.p[1], GRID)];
   const branch = clearPath(route(split[0], split[1], landing[0], landing[1], '', stepBoxId(r.target), 0, boxes), boxes);
   const joint: Joint = { host: host.id, contact, split, branch, own, ownEnds: ends };
-  return { route: { ...r, points, joint }, travel: [...points, ...slice(hostTravel, onTravel, s.at).slice(1), ...branch.slice(1)] };
+  const shared = atContact ? [] : slice(hostTravel, onTravel, s.at).slice(1);
+  return { route: { ...r, points, joint }, travel: [...points, ...shared, ...branch.slice(1)] };
 }
 
 /** The dashed tether from the sphere's bottom to a cache's top centre, right-angled. */
