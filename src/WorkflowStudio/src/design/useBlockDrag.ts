@@ -1,4 +1,4 @@
-import { useRef, type MutableRefObject } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NodeChange, OnNodeDrag, OnNodesChange } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { PMID, snap, type Point } from '../layout/geometry';
@@ -54,6 +54,17 @@ export function useBlockDrag(
 ): BlockDrag {
   const drag = useRef<Drag | null>(null);
   const pressed = useRef<Element | null>(null);
+  // a drag React Flow will never stop (the canvas unmounts, or design mode ends mid-drag) must not leave
+  // its Escape listener behind: it would swallow every later Escape in that window
+  useEffect(() => () => { drag.current?.stopEscape(); drag.current = null; }, []);
+  const designOff = design === undefined;
+  useEffect(() => {
+    if (!designOff || !drag.current) return;
+    drag.current.stopEscape();
+    drag.current = null;
+    setGuides([]);
+    setPreview(null);
+  }, [designOff, setGuides, setPreview]);
   if (!design) return { notePress: () => {} };
 
   const end = () => {

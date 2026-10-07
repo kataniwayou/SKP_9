@@ -19,7 +19,7 @@ function setup(doc: StudioDocument, picks: Pick[]) {
   const setGuides = vi.fn();
   const onSelect = vi.fn();
   const suppress = { current: false };
-  const { result } = renderHook(() => useBlockDrag(doc, { current: doc }, design, setPreview, setGuides, onSelect, suppress));
+  const { result, rerender, unmount } = renderHook(({ on }: { on: boolean }) => useBlockDrag(doc, { current: doc }, on ? design : undefined, setPreview, setGuides, onSelect, suppress), { initialProps: { on: true } });
   const blocks = new Map<string, HTMLElement>();
   const blockOf = (id: string) => {
     if (!blocks.has(id)) {
@@ -41,7 +41,7 @@ function setup(doc: StudioDocument, picks: Pick[]) {
   });
   const move = (id: string, x: number, y: number) => act(() => result.current.onNodesChange!([{ type: 'position', id, position: { x, y }, dragging: true } as NodeChange]));
   const stop = (id: string) => act(() => result.current.onNodeDragStop!({ target: window } as unknown as MouseEvent, node(id), []));
-  return { design, setPreview, setGuides, onSelect, suppress, start, move, stop, target };
+  return { design, setPreview, setGuides, onSelect, suppress, start, move, stop, target, rerender, unmount };
 }
 
 describe('dragging blocks', () => {
@@ -128,6 +128,31 @@ describe('dragging blocks', () => {
     t.stop('s1');
     expect(t.design.onCommit).not.toHaveBeenCalled();
     expect(t.onSelect).not.toHaveBeenCalled();
+  });
+
+  it('a canvas unmounted mid-drag leaves no Escape listener behind', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!;
+    const t = setup(doc, []);
+    t.start('s1');
+    t.move('s1', s1.x + 1003, s1.y + 4005);
+    t.unmount();
+    expect(fireEvent.keyDown(t.target, { key: 'Escape' })).toBe(true);
+    expect(t.design.onPick).toHaveBeenCalledTimes(1);
+  });
+
+  it('design mode ending mid-drag ends the drag: no listener, no preview, no guides', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!;
+    const t = setup(doc, []);
+    t.start('s1');
+    t.move('s1', s1.x + 1003, s1.y + 4005);
+    act(() => t.rerender({ on: false }));
+    expect(t.setPreview).toHaveBeenLastCalledWith(null);
+    expect(t.setGuides).toHaveBeenLastCalledWith([]);
+    expect(fireEvent.keyDown(t.target, { key: 'Escape' })).toBe(true);
+    expect(t.design.onPick).toHaveBeenCalledTimes(1);
+    t.unmount();
   });
 
   it('a drag that never moved, or came back, commits nothing', async () => {
