@@ -6,17 +6,28 @@ import type { DesignProps } from './designProps';
 import { moveBlocks, removeWires } from './draft';
 import { nodeBox } from './hit';
 
+/** The capsule toolbar and its zoom are drawn inside the canvas: their keys are their own. */
+const NOT_CANVAS = '.docbar, .zoom';
+
 const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
 /**
  * The canvas's own keys while it has focus (spec §3.4, §4.5, §5.3): arrows nudge the picked blocks 8 px
  * (a run of nudges is one step), Delete removes the picked wires, Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z
  * redo. Keys typed in an Inspector field never reach here: the Inspector is outside the canvas. Picks
- * naming blocks or wires the document no longer has (after an undo) are skipped.
+ * naming blocks or wires the document no longer has (after an undo) are skipped. While `busy` (a rectangle,
+ * a wire gesture or a block drag runs) no key acts: the drop would overwrite it. Escape is the gesture's own.
  */
-export function useDesignKeys(saved: StudioDocument, shown: MutableRefObject<StudioDocument>, design: DesignProps | undefined) {
+export function useDesignKeys(
+  saved: StudioDocument,
+  shown: MutableRefObject<StudioDocument>,
+  design: DesignProps | undefined,
+  busy: () => boolean = () => false,
+) {
   return (e: ReactKeyboardEvent) => {
     if (!design) return;
+    if ((e.target as Element).closest?.(NOT_CANVAS)) return;
+    if (busy()) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     if (mod && !e.altKey && key === 'z') { e.preventDefault(); if (e.shiftKey) design.onRedo(); else design.onUndo(); return; }

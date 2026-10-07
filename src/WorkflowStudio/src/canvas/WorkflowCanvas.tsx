@@ -113,10 +113,11 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const selected = useMemo(() => withSelection(marked.nodes, selection), [marked.nodes, selection]);
   const suppressPaneClick = useRef(false);
   const suppressNodeClick = useRef(false);
-  const { band, banding, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
+  const { band, banding, pressing, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
   const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick);
-  const onKeyDown = useDesignKeys(doc, shownRef, design);
   const wiring = useWireGestures(doc, shownRef, design, setPreview);
+  // a key while a gesture runs would be overwritten by its drop: the canvas's keys wait for it (Escape is the gesture's)
+  const onKeyDown = useDesignKeys(doc, shownRef, design, () => pressing() || wiring.running() || drag.dragging());
   // the block under a dragged wire end, outlined green or red (spec §4.4)
   const shown = useMemo(() => withHint(selected, wiring.hint), [selected, wiring.hint]);
   // picks naming wires that are gone (after an undo) draw nothing

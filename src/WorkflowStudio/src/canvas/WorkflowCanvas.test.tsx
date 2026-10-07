@@ -326,6 +326,35 @@ describe('WorkflowCanvas', () => {
       expect(design.onUndo).toHaveBeenCalledTimes(1);
     });
 
+    it('keys do nothing while a rectangle runs, and act again after its release', async () => {
+      const doc = await two();
+      const design = designOf({ picks: [{ kind: 'node', id: 's2' }] });
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+      const canvas = container.querySelector('.studio-canvas')!;
+      const pane = container.querySelector('.react-flow__pane')!;
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
+      fireEvent.keyDown(canvas, { key: 'ArrowUp' });
+      fireEvent.keyDown(canvas, { key: 'z', ctrlKey: true });
+      expect(design.onCommit).not.toHaveBeenCalled();
+      expect(design.onUndo).not.toHaveBeenCalled();
+      fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5 });
+      fireEvent.keyDown(canvas, { key: 'z', ctrlKey: true });
+      expect(design.onUndo).toHaveBeenCalledTimes(1);
+    });
+
+    it('keys on the capsule toolbar drawn inside the canvas do not nudge', async () => {
+      const doc = await two();
+      const design = designOf({ picks: [{ kind: 'node', id: 's2' }] });
+      render(
+        <WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design}>
+          <div className="docbar" role="toolbar" aria-label="Workflow"><button type="button">Save</button></div>
+        </WorkflowCanvas>,
+      );
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Save' }), { key: 'ArrowUp' });
+      expect(design.onCommit).not.toHaveBeenCalled();
+    });
+
     it('a rectangle with Ctrl adds to the picks; a press that does not move is a click', async () => {
       const doc = await two();
       const onSelect = vi.fn();

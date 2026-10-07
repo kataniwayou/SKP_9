@@ -18,6 +18,8 @@ export interface Gesture {
   run: (e: ReactPointerEvent, onMove: (p: Point) => void, onEnd: (cancelled: boolean, moved: boolean) => void) => void;
   /** Drops the running gesture, if any: its listeners go and `onEnd` never runs. */
   abort: () => void;
+  /** A gesture is running (read at once, not on the next render). */
+  running: () => boolean;
 }
 
 /**
@@ -92,7 +94,7 @@ export function useGesture(setActive: (on: boolean) => void): Gesture {
     doc.addEventListener('keydown', key, true);
     stop.current = () => { detach(); setActive(false); };
   };
-  return { run, abort: () => stop.current?.() };
+  return { run, abort: () => stop.current?.(), running: () => stop.current !== null };
 }
 
 /**
@@ -108,7 +110,7 @@ export function useWireGestures(
   setPreview: (d: Draft | null) => void,
 ) {
   const [active, setActive] = useState(false);
-  const { run, abort } = useGesture(setActive);
+  const { run, abort, running } = useGesture(setActive);
   const { screenToFlowPosition } = useReactFlow();
   // the dragged end's line, and the outline of the block under it (spec §4.4)
   const [ghost, setGhost] = useState<{ from: Point; to: Point } | null>(null);
@@ -222,5 +224,5 @@ export function useWireGestures(
     },
   }), [shown]);
 
-  return { gestures, startSegment, startEnd, ghost, hint, active };
+  return { gestures, startSegment, startEnd, ghost, hint, active, running };
 }

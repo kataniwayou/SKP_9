@@ -41,6 +41,8 @@ export interface BlockDrag {
   onNodeDragStart?: OnNodeDrag;
   onNodesChange?: OnNodesChange;
   onNodeDragStop?: OnNodeDrag;
+  /** A drag is running (from its start until its drop, a cancelled one included). */
+  dragging: () => boolean;
 }
 
 export function useBlockDrag(
@@ -65,7 +67,8 @@ export function useBlockDrag(
     setGuides([]);
     setPreview(null);
   }, [designOff, setGuides, setPreview]);
-  if (!design) return { notePress: () => {} };
+  const dragging = () => drag.current !== null;
+  if (!design) return { notePress: () => {}, dragging };
 
   const end = () => {
     const d = drag.current;
@@ -142,5 +145,5 @@ export function useBlockDrag(
   };
 
   const notePress = (target: Element) => { pressed.current = target; };
-  return { notePress, onNodeDragStart, onNodesChange, onNodeDragStop };
+  return { notePress, onNodeDragStart, onNodesChange, onNodeDragStop, dragging };
 }
