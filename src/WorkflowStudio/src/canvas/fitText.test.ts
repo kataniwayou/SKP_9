@@ -84,4 +84,13 @@ describe('measuring in the document the labels are drawn in (spec §6.3)', () =>
     const popout = { fonts: { load: vi.fn().mockRejectedValue(new Error('404')), ready: Promise.resolve() } } as unknown as Document;
     await expect(loadMeasuredFonts(popout)).resolves.toBeUndefined();
   });
+
+  it('measures each text and font once (plan 4: a drag re-fits every frame)', () => {
+    const measure = vi.fn((t: string) => t.length * 7);
+    const fitter = createTextFitter(measure);
+    fitter.fit('a long name', 40, 'f');
+    const calls = measure.mock.calls.length;
+    fitter.fit('a long name', 40, 'f');
+    expect(measure.mock.calls.length).toBe(calls);
+  });
 });
