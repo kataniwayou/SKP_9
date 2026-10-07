@@ -19,10 +19,15 @@ test('a refresh brings back the open workflows, the active tab, each selection a
   await panelB.getByRole('button', { name: 'Zoom in' }).click();
   await panelB.getByRole('button', { name: 'Zoom in' }).click();
   const zoom = await panelB.getByLabel('Zoom level').textContent();
-  const transform = await panelB.locator('.react-flow__viewport').getAttribute('style');
   await tab(page, 'Problems').click({ button: 'right' });
   await page.getByRole('menuitem', { name: /Auto hide/ }).click();
   await expect(page.locator('[data-rt="problems"]')).toBeVisible();
+  // the canvas grows when Problems hides (then gives back its strip's height) and keeps its centre: the view
+  // as left is the one it settles at
+  const viewport = panelB.locator('.react-flow__viewport');
+  let transform: string | null;
+  let now = await viewport.getAttribute('style');
+  do { transform = now; await page.waitForTimeout(150); now = await viewport.getAttribute('style'); } while (now !== transform);
 
   await page.reload();
 

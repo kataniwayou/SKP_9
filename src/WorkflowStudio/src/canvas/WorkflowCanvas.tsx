@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ReactFlow, ReactFlowProvider, useStore, type EdgeMouseHandler, type EdgeTypes, type NodeMouseHandler, type NodeTypes } from '@xyflow/react';
+import { ReactFlow, ReactFlowProvider, useStore, type EdgeMouseHandler, type EdgeTypes, type NodeMouseHandler, type NodeTypes, type Viewport } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { applyDraft } from '../design/apply';
 import { DesignContext } from '../design/DesignContext';
@@ -101,6 +101,9 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   // one must not move the canvas or turn `fitView` on (React Flow queues a fit for the next node change when it does)
   const [restored] = useState(() => (initialView && !initialView.followFit ? initialView : null));
   const followFit = useRef(restored === null);
+  // every view the canvas takes is reported as it happens, not only when the move ends: React Flow calls
+  // onMoveEnd 150 ms late (panOnScroll), and a refresh inside that time must still find the view in the session
+  const report = (v: Viewport) => onViewChange?.({ x: v.x, y: v.y, zoom: v.zoom, followFit: followFit.current });
 
   // a gesture's draft while it runs; null: the committed draft is shown
   const [preview, setPreview] = useState<Draft | null>(null);
@@ -227,8 +230,9 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onEdgeClick={design ? onEdgeClick : undefined}
               onEdgeContextMenu={design ? onEdgeContextMenu : undefined}
               onPaneClick={onSelect ? onPaneClick : undefined}
-              onMoveStart={(event) => { if (event) followFit.current = false; }}
-              onMoveEnd={onViewChange ? (_event, v) => onViewChange({ x: v.x, y: v.y, zoom: v.zoom, followFit: followFit.current }) : undefined}
+              onMoveStart={(event, v) => { if (event) followFit.current = false; report(v); }}
+              onMove={(_event, v) => report(v)}
+              onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
               {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={(w, end, e) => (end === 'arrow' ? wiring.startArrow(w, e) : wiring.startEnd(w, end, e))} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hint={wiring.hint} />}

@@ -157,6 +157,25 @@ describe('WorkflowCanvas', () => {
       expect(last.followFit).toBe(false);
     });
 
+    it('reports a view change at once, so a refresh right after it still finds it in the session', async () => {
+      // React Flow calls onMoveEnd 150 ms after the move when panOnScroll is on; a refresh inside that time
+      // (a zoom click, then a pane hidden, then F5) wrote the view from before the move
+      const onViewChange = vi.fn();
+      render(
+        <WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800}
+          initialView={{ x: -100, y: 40, zoom: 1.5, followFit: false }} onViewChange={onViewChange}>
+          <ZoomControls />
+        </WorkflowCanvas>,
+      );
+      await waitFor(() => expect(screen.getByLabelText('Zoom level')).toHaveTextContent('150%'));
+      onViewChange.mockClear();
+      fireEvent.click(screen.getByLabelText('Zoom in'));
+      expect(onViewChange).toHaveBeenCalled();
+      const last = onViewChange.mock.calls.at(-1)![0];
+      expect(last.zoom).toBeCloseTo(1.8);
+      expect(last.followFit).toBe(false);
+    });
+
     it('reads the saved view once: a later view handed back queues no fit', async () => {
       // a queued fit runs on the next node change in a browser (jsdom never measures nodes, so it is checked directly)
       // `fitViewQueued` is a React Flow internal store field (not public api), read here because jsdom never
