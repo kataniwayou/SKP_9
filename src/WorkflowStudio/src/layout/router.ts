@@ -70,6 +70,11 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
       [[sx, sy], [tx - 16, sy], [tx - 16, ty], [tx, ty]],
     );
   }
+  // A forward gap of 16 to 23 px is too short for the shapes above; a Z with its elbow one grid step
+  // past the source still beats a U that crosses both blocks (parked since plan 2).
+  if (tx - sx >= 2 * GRID && tx - sx < CLEARANCE && sy !== ty) {
+    candidates.push([[sx, sy], [sx + GRID, sy], [sx + GRID, ty], [tx, ty]]);
+  }
 
   // The U's first vertical must stay in the free gap right of the source: at least one grid step off
   // its edge (a large negative fan-out nudge must not pull it back through the source) and at least

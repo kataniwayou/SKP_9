@@ -98,4 +98,8 @@ describe('simplify', () => {
     expect(pts).toEqual([[512, 128], [528, 128]]);
     expect(clear(pts, 'a', 'b', boxes)).toBe(true);
   });
+
+  it('a short forward gap with different heights gets a Z with its elbow 8 past the source (plan 4)', () => {
+    expect(route(0, 0, 16, 32, 'a', 'b', 0, [])).toEqual([[0, 0], [8, 0], [8, 32], [16, 32]]);
+  });
 });

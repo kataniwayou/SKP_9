@@ -107,4 +107,16 @@ describe('tetherPoints', () => {
   it('bends at right angles to a cache that was moved aside', () => {
     expect(tetherPoints({ cx: 128, cy: 128 }, { x: 320, y: 400 })).toEqual([[128, 224], [128, 312], [400, 312], [400, 400]]);
   });
+
+  it('draws a manual shape with its bends kept, and a slid landing (plan 4)', () => {
+    const placement: Placement = { sphere: { cx: 128, cy: 128 }, steps: new Map([['a', { x: 288, y: 32 }], ['b', { x: 576, y: 160 }]]), caches: new Map() };
+    const input: WiringInput = {
+      entryStepIds: ['a'],
+      steps: new Map([['a', step('a', ['b'])], ['b', step('b', [])]]),
+      brokenEdges: new Set<string>(),
+      shapes: { 'a->b': { bends: { xs: [560], ys: [] }, landing: 72 } },
+    };
+    const ab = routeWires(input, placement).find((w) => w.id === 'a->b')!;
+    expect(ab.points).toEqual([[512, 128], [560, 128], [560, 232], [576, 232]]);
+  });
 });

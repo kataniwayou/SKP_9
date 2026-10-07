@@ -1,8 +1,9 @@
 import type { Id, Step } from '../model/graph';
-import { CACHE_H, CACHE_W, PORT_GAP, SPHERE_R, STEP_H, STEP_W, offset, type Point } from './geometry';
+import { CACHE_H, CACHE_W, PORT_GAP, clampLanding, SPHERE_R, STEP_H, STEP_W, offset, type Point } from './geometry';
 import type { Placement, Sphere } from './placement';
 import { computeDepartures, computeLandings, departureX, WORKFLOW_SOURCE, type SourceId, type WireEnd } from './ports';
-import { route, type Box, type Pt } from './router';
+import { route, simplify, type Box, type Pt } from './router';
+import { pointsOfShape, type WireShape } from './shape';
 
 export interface WireRoute {
   /** `${source}->${target}`; unique because a step's nextStepIds are unique. */
@@ -21,6 +22,8 @@ export interface WiringInput {
   steps: ReadonlyMap<Id, Step>;
   /** `${parentStepId}->${childStepId}` for every wire BaseApi's validate reported as a schemaEdge problem. */
   brokenEdges: ReadonlySet<string>;
+  /** The draft's wire shapes by wire id (plan 4); absent: every wire is automatic. */
+  shapes?: Readonly<Record<string, WireShape>>;
 }
 
 export const SPHERE_BOX_ID = 'wf';
@@ -56,18 +59,25 @@ export function routeWires(input: WiringInput, placement: Placement): WireRoute[
   const boxes = blockBoxes(placement);
 
   return wires.map((w) => {
+    const id = `${w.source}->${w.target}`;
+    const shape = input.shapes && Object.hasOwn(input.shapes, id) ? input.shapes[id] : undefined;
     const targets = [...departures.get(w.source)!.keys()];
     const nudge = offset(targets.indexOf(w.target), targets.length, PORT_GAP);
     const sx = departureX(w.source, placement), sy = departures.get(w.source)!.get(w.target)!;
-    const tx = placement.steps.get(w.target)!.x, ty = landings.get(w.target)!.get(w.source)!;
+    const at = placement.steps.get(w.target)!;
+    const tx = at.x;
+    const ty = shape?.landing != null ? at.y + clampLanding(shape.landing) : landings.get(w.target)!.get(w.source)!;
     const target = input.steps.get(w.target)!;
+    const points = shape?.bends && shape.bends.xs.length > 0
+      ? simplify(pointsOfShape({ sx, sy, tx, ty }, shape.bends))
+      : route(sx, sy, tx, ty, boxIdOf(w.source), stepBoxId(w.target), nudge, boxes);
     return {
-      id: `${w.source}->${w.target}`,
+      id,
       source: w.source,
       target: w.target,
-      points: route(sx, sy, tx, ty, boxIdOf(w.source), stepBoxId(w.target), nudge, boxes),
+      points,
       condition: target.entryCondition,
-      broken: w.source !== WORKFLOW_SOURCE && input.brokenEdges.has(`${w.source}->${w.target}`),
+      broken: w.source !== WORKFLOW_SOURCE && input.brokenEdges.has(id),
     };
   });
 }
