@@ -380,8 +380,13 @@ describe('WorkflowCanvas', () => {
     const design: DesignProps = { draft, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() };
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
     const edge = container.querySelector('[data-testid="rf__edge-s3->s4"]')!;
-    expect(edge.querySelectorAll('circle.nx-joint').length).toBeGreaterThanOrEqual(1);
-    expect(edge.querySelectorAll('.nx-head')).toHaveLength(edge.querySelector('path.w.branch') ? 1 : 0);
+    // s3->s4 enters a different step than its host, so it has a contact dot, a split dot and a branch
+    expect(edge.querySelectorAll('circle.nx-joint')).toHaveLength(2);
+    expect(edge.querySelectorAll('path.w.branch')).toHaveLength(1);
+    expect(edge.querySelectorAll('.nx-head')).toHaveLength(1);
+    // the one head sits on the branch end
+    const branchEnd = [...edge.querySelector('path.w.branch')!.getAttribute('d')!.matchAll(/[ML]([-\d.e]+) ([-\d.e]+)/g)].map((m) => [Number(m[1]), Number(m[2])]).at(-1)!;
+    expect(edge.querySelector('.nx-head')!.getAttribute('d')).toContain(`L${branchEnd[0]} ${branchEnd[1]}`);
     expect(edge.querySelectorAll('circle.nx-src')).toHaveLength(1);
     // a plain wire keeps its ring and its arrow head, and no dot
     const plain = container.querySelector('[data-testid="rf__edge-s1->s2"]')!;

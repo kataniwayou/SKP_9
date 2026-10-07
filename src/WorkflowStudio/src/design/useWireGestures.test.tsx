@@ -1,6 +1,6 @@
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { graphDto, stepDto } from '../api/fixtures';
+import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
@@ -120,6 +120,30 @@ describe('wire gestures', () => {
     expect(canvas.classList.contains('gesture-ns')).toBe(false);
     fireEvent.pointerUp(document, { clientX: 100, clientY: 100, pointerId: 1 });
     expect(canvas.classList.contains('gesture-ew')).toBe(false);
+  });
+
+  it('a press on the branch of a joined wire never drags a run; its own line still does (plan 7)', async () => {
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { entryCondition: 2 }), stepDto('s3', { nextStepIds: ['s4'] }), stepDto('s4', { entryCondition: 2 })],
+    }));
+    const draft = setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
+    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const edge = container.querySelector('[data-testid="rf__edge-s3->s4"]')!;
+    const branch = edge.querySelector('path.nx-hit.branch')!;
+    expect(branch).not.toBeNull();
+    const at = screenOf(container, middleOf(doc, 's3'));
+    fireEvent.pointerDown(branch, { button: 0, ...at, pointerId: 1 });
+    fireEvent.pointerMove(document, { clientX: at.clientX + 40, clientY: at.clientY, pointerId: 1 });
+    fireEvent.pointerUp(document, { clientX: at.clientX + 40, clientY: at.clientY, pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+
+    const own = edge.querySelector('path.nx-hit:not(.branch)')!;
+    fireEvent.pointerDown(own, { button: 0, ...at, pointerId: 1 });
+    fireEvent.pointerMove(document, { clientX: at.clientX + 40, clientY: at.clientY + 40, pointerId: 1 });
+    fireEvent.pointerUp(document, { clientX: at.clientX + 40, clientY: at.clientY + 40, pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
   });
 
   it('handles, outline and ghost keep their size on screen whatever the zoom', async () => {
