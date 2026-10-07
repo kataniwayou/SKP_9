@@ -47,19 +47,23 @@ export type StudioAction =
   | { type: 'toggleDetails' }
   | { type: 'drill'; workflowId: Id; target: InspectorTarget }
   /**
-   * Keeps the first `depth` drill-downs (0: back to the selection). With `from`, it applies only while the
-   * entity of that key is shown; otherwise it only clears busy (an unlink that lands after the user moved on).
+   * Keeps the first `depth` drill-downs (0: back to the selection). The user's back carries no `write`;
+   * an unlink's back carries its write's token and applies only while that write is the Inspector's.
    */
-  | { type: 'back'; workflowId: Id; depth: number; from?: string }
+  | { type: 'back'; workflowId: Id; depth: number; write?: number }
   | { type: 'edit'; workflowId: Id; key: string; text: string; saved: string }
   | { type: 'discard'; workflowId: Id }
   | { type: 'read'; workflowId: Id; key: string; result: { ok: true; dto: EntityReadDto } | { ok: false; message: string } }
-  | { type: 'busy'; workflowId: Id; busy: boolean }
-  | { type: 'saveFailed'; workflowId: Id; key: string; failure: SaveFailure }
+  /**
+   * Write results below carry the token `busy: true` started their write with (from the service's counter).
+   * Each applies only while `inspector.write` is that token; otherwise it changes nothing, not even busy.
+   */
+  | { type: 'busy'; workflowId: Id; busy: boolean; write: number }
+  | { type: 'saveFailed'; workflowId: Id; write: number; failure: SaveFailure }
   /** `sent`: the edits the PUT carried; only those are cleared. */
-  | { type: 'saved'; workflowId: Id; key: string; sent: Record<string, string>; dto: EntityReadDto }
+  | { type: 'saved'; workflowId: Id; write: number; key: string; sent: Record<string, string>; dto: EntityReadDto }
   /** `sent`: the edits the POST carried; text typed meanwhile stays, on the new assignment. */
-  | { type: 'created'; workflowId: Id; from: string; target: InspectorTarget; sent: Record<string, string>; dto: EntityReadDto }
+  | { type: 'created'; workflowId: Id; write: number; target: InspectorTarget; sent: Record<string, string>; dto: EntityReadDto }
   /** A ready document re-read after a write: the new graph, keeping selection, view and Inspector. */
   | { type: 'refreshed'; workflowId: Id; doc: StudioDocument }
   /** A failed document goes back to loading. */
@@ -129,8 +133,8 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'drill':
       return inspect(state, action.workflowId, (i) => ({ ...EMPTY_INSPECTOR, trail: [...i.trail, action.target] }));
     case 'back':
-      return inspect(state, action.workflowId, (i, d) => {
-        if (action.from !== undefined && targetKey(shownTargetOf(d)) !== action.from) return i.busy ? { ...i, busy: false } : i;
+      return inspect(state, action.workflowId, (i) => {
+        if (action.write !== undefined && i.write !== action.write) return i;
         return action.depth >= i.trail.length ? i : { ...EMPTY_INSPECTOR, trail: i.trail.slice(0, Math.max(0, action.depth)) };
       });
     case 'edit':
@@ -142,6 +146,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'discard':
       return inspect(state, action.workflowId, (i) => ({ ...i, edits: {}, failure: null }));
     case 'read':
+      // a read has no write token: the key check is what drops a read for an entity no longer shown
       return inspect(state, action.workflowId, (i, d) => {
         if (targetKey(shownTargetOf(d)) !== action.key) return i;
         // a failed re-read keeps the form it had, with a note (spec §8); with nothing read, only why
@@ -149,21 +154,27 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         const dto = action.result.dto;
         return { ...i, saved: { key: action.key, dto }, readError: null, edits: without(i.edits, (key, text) => text === savedText(dto, key)) };
       });
+    // Write results are guarded by the write token alone: only select, drill, back and created change what the
+    // Inspector shows, and the first three reset `write` to null, so a matching token means the entity the write
+    // began on (or, after created, the assignment it made) is still shown. No key check is needed on top.
     case 'busy':
-      return inspect(state, action.workflowId, (i) => (i.busy === action.busy ? i : { ...i, busy: action.busy }));
+      return inspect(state, action.workflowId, (i) => {
+        if (action.busy) return i.busy && i.write === action.write ? i : { ...i, busy: true, write: action.write };
+        return i.write !== action.write || !i.busy ? i : { ...i, busy: false };
+      });
     case 'saveFailed':
-      return inspect(state, action.workflowId, (i, d) =>
-        targetKey(shownTargetOf(d)) !== action.key ? { ...i, busy: false } : { ...i, busy: false, failure: action.failure });
+      return inspect(state, action.workflowId, (i) => (i.write !== action.write ? i : { ...i, busy: false, failure: action.failure }));
     case 'saved':
-      return inspect(state, action.workflowId, (i, d) => {
-        if (targetKey(shownTargetOf(d)) !== action.key) return { ...i, busy: false };
+      return inspect(state, action.workflowId, (i) => {
+        if (i.write !== action.write) return i;
         const edits = without(i.edits, (key, text) => action.sent[key] === text);
         return { ...i, edits, busy: false, failure: null, readError: null, saved: { key: action.key, dto: action.dto } };
       });
     case 'created':
-      return inspect(state, action.workflowId, (i, d) => (targetKey(shownTargetOf(d)) !== action.from ? { ...i, busy: false } : {
+      // keeps the token: the link that follows may still fail, and says so on the new assignment
+      return inspect(state, action.workflowId, (i) => (i.write !== action.write ? i : {
         ...EMPTY_INSPECTOR, trail: [...i.trail.slice(0, -1), action.target], saved: { key: targetKey(action.target), dto: action.dto },
-        edits: without(i.edits, (key, text) => action.sent[key] === text),
+        edits: without(i.edits, (key, text) => action.sent[key] === text), write: action.write,
       }));
     case 'refreshed':
       return update(state, action.workflowId, (d) => (d.status.kind !== 'ready' ? d : {

@@ -43,8 +43,15 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     const doc = docOf(id);
     return doc === null ? null : shownTargetOf(doc);
   };
-  const fail = (workflowId: Id, key: string, failure: SaveFailure): false => {
-    store.dispatch({ type: 'saveFailed', workflowId, key, failure });
+  /** Each write's token; the store applies a result only while its token is the Inspector's current write. */
+  let writes = 0;
+  const begin = (workflowId: Id): number => {
+    const write = ++writes;
+    store.dispatch({ type: 'busy', workflowId, busy: true, write });
+    return write;
+  };
+  const fail = (workflowId: Id, write: number, failure: SaveFailure): false => {
+    store.dispatch({ type: 'saveFailed', workflowId, write, failure });
     return false;
   };
 
@@ -77,13 +84,13 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     if (target.kind === 'newAssignment') return create(workflowId);
     const sent = doc.inspector.edits;
     const key = targetKey(target);
-    store.dispatch({ type: 'busy', workflowId, busy: true });
+    const write = begin(workflowId);
     // built from a GET made now: structural fields go back exactly as the server holds them (review focus 3)
     const fresh = await api.getEntity(target.kind, target.id);
-    if (!fresh.ok) return fail(workflowId, key, failureOf(target, fresh.error));
+    if (!fresh.ok) return fail(workflowId, write, failureOf(target, fresh.error));
     const put = await api.putEntity(target.kind, target.id, updateDto(target.kind, fresh.value, sent));
-    if (!put.ok) return fail(workflowId, key, failureOf(target, put.error));
-    store.dispatch({ type: 'saved', workflowId, key, sent, dto: put.value });
+    if (!put.ok) return fail(workflowId, write, failureOf(target, put.error));
+    store.dispatch({ type: 'saved', workflowId, write, key, sent, dto: put.value });
     afterWrite();
     // text typed while the save was in flight is still unsaved
     const after = docOf(workflowId);
@@ -103,28 +110,26 @@ export function createInspectorService(api: StudioApi, store: StudioStore, after
     const doc = docOf(workflowId);
     const target = shown(workflowId);
     if (doc === null || target?.kind !== 'newAssignment' || doc.inspector.saved === null || doc.inspector.busy) return false;
-    const from = targetKey(target);
     const sent = doc.inspector.edits;
-    store.dispatch({ type: 'busy', workflowId, busy: true });
+    const write = begin(workflowId);
     const made = await api.createAssignment(createAssignmentDto(doc.inspector.saved.dto as AssignmentReadDto, sent));
-    if (!made.ok) return fail(workflowId, from, failureOf(target, made.error));
+    if (!made.ok) return fail(workflowId, write, failureOf(target, made.error));
     const id = made.value.id;
-    if (!id) return fail(workflowId, from, { fields: {}, banner: 'Not saved: BaseApi returned no id for the new assignment' });
-    store.dispatch({ type: 'created', workflowId, from, target: { kind: 'assignment', id, stepId: target.stepId }, sent, dto: made.value });
+    if (!id) return fail(workflowId, write, { fields: {}, banner: 'Not saved: BaseApi returned no id for the new assignment' });
+    store.dispatch({ type: 'created', workflowId, write, target: { kind: 'assignment', id, stepId: target.stepId }, sent, dto: made.value });
     const why = await relink(workflowId, (ids) => [...ids, id]);
     afterWrite();
-    return why === null ? true : fail(workflowId, targetKey({ kind: 'assignment', id, stepId: target.stepId }), { fields: {}, banner: `Created but not linked to this workflow: ${why}` });
+    return why === null ? true : fail(workflowId, write, { fields: {}, banner: `Created but not linked to this workflow: ${why}` });
   }
 
   async function unlink(workflowId: Id): Promise<boolean> {
     const doc = docOf(workflowId);
     const target = shown(workflowId);
     if (doc === null || target?.kind !== 'assignment' || doc.inspector.busy) return false;
-    const from = targetKey(target);
-    store.dispatch({ type: 'busy', workflowId, busy: true });
+    const write = begin(workflowId);
     const why = await relink(workflowId, (ids) => ids.filter((x) => x !== target.id));
-    if (why !== null) return fail(workflowId, from, { fields: {}, banner: `Not unlinked: ${why}` });
-    store.dispatch({ type: 'back', workflowId, depth: doc.inspector.trail.length - 1, from });
+    if (why !== null) return fail(workflowId, write, { fields: {}, banner: `Not unlinked: ${why}` });
+    store.dispatch({ type: 'back', workflowId, depth: doc.inspector.trail.length - 1, write });
     afterWrite();
     return true;
   }

@@ -201,6 +201,25 @@ describe('InspectorService', () => {
     expect(inspector()).toMatchObject({ trail: [{ kind: 'processor', id: 'p1' }], edits: { description: 'typed' }, busy: false });
   });
 
+  it('an unlink that lands after the user left and re-opened the same assignment keeps what was typed there', async () => {
+    let answer!: (r: ApiResult<unknown>) => void;
+    const putEntity = vi.fn().mockReturnValue(new Promise((r) => { answer = r; }));
+    const { store, service, afterWrite, inspector } = await setup({
+      getEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a1'] }))), putEntity,
+    });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
+    const unlinking = service.unlink('wf1');
+    await flush();
+    expect(putEntity).toHaveBeenCalledTimes(1);
+    store.dispatch({ type: 'back', workflowId: 'wf1', depth: 0 });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
+    answer(ok(workflowDto({ assignmentIds: [] })));
+    expect(await unlinking).toBe(true);
+    expect(inspector()).toMatchObject({ trail: [{ kind: 'assignment', id: 'a1', stepId: 's1' }], edits: { description: 'typed' }, busy: false });
+    expect(afterWrite).toHaveBeenCalledTimes(1);
+  });
+
   it('an assignment answer without an id is a failure and links nothing', async () => {
     const putEntity = vi.fn();
     const { store, service, inspector } = await setup({

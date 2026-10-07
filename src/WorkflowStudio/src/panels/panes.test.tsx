@@ -177,7 +177,7 @@ describe('Inspector editing (slice 3b)', () => {
     const { store } = await renderInspector({ getEntity: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'notFound', status: 404 } }) },
       { selection: { kind: 'step', stepId: 's1' } });
     act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'restored', saved: '' }));
-    act(() => store.dispatch({ type: 'busy', workflowId: 'wf1', busy: true }));
+    act(() => store.dispatch({ type: 'busy', workflowId: 'wf1', busy: true, write: 1 }));
     expect(await screen.findByRole('button', { name: 'Discard unsaved changes' })).toBeDisabled();
   });
 

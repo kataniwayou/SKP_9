@@ -22,10 +22,15 @@ export interface InspectorState extends InspectorDraft {
   readError: string | null;
   /** A save, create or unlink is in flight. */
   busy: boolean;
+  /**
+   * The token of the last write started here; a write's results apply only while it is still this one.
+   * Navigation resets it to null, so a result that lands after the user moved on changes nothing.
+   */
+  write: number | null;
   failure: SaveFailure | null;
 }
 
-export const EMPTY_INSPECTOR: InspectorState = { trail: [], edits: {}, saved: null, readError: null, busy: false, failure: null };
+export const EMPTY_INSPECTOR: InspectorState = { trail: [], edits: {}, saved: null, readError: null, busy: false, write: null, failure: null };
 
 export function hasEdits(draft: InspectorDraft): boolean {
   return Object.keys(draft.edits).length > 0;
