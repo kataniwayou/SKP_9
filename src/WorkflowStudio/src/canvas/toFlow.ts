@@ -2,6 +2,7 @@ import { Position, type NodeHandle } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { CACHE_H, CACHE_W, PMID, SPHERE_R, STEP_H, STEP_W } from '../layout/geometry';
 import { tetherPoints } from '../layout/wires';
+import { SPHERE_NODE_ID, cacheNodeId } from '../layout/nodeIds';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { conditionInfo } from '../model/entryConditions';
@@ -17,8 +18,7 @@ import { PILL_STATE, PILL_W, type WorkflowNodeType } from './nodes/WorkflowNode'
 export type StudioNode = WorkflowNodeType | StepNodeType | CacheNodeType;
 export type StudioEdge = CableEdgeType | TetherEdgeType;
 
-export const SPHERE_NODE_ID = 'wf';
-export const cacheNodeId = (id: Id) => `cache:${id}`;
+export { SPHERE_NODE_ID, cacheNodeId } from '../layout/nodeIds';
 
 const handle = (id: string, type: 'source' | 'target', position: Position, x: number, y: number): NodeHandle =>
   ({ id, type, position, x, y, width: 1, height: 1 });
