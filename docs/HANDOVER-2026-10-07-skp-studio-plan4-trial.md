@@ -1,7 +1,7 @@
 # Handover 2026-10-07: SKP Studio plan 4 (canvas designer trial)
 
 Branch `feature/path-importer` (not pushed, not merged). Studio deployed to the dev cluster as
-`workflow-studio:local` in ns `skp`; bundle `index-B3m5deJC.js`. Port-forward studio `localhost:18081`,
+`workflow-studio:local` in ns `skp`; bundle `index-Cr4hgH3r.js`. Port-forward studio `localhost:18081`,
 BaseApi `localhost:18080` (restart after every redeploy: `kubectl port-forward -n skp svc/workflow-studio 18081:8080`).
 
 ## Where we are
@@ -21,17 +21,11 @@ BaseApi `localhost:18080` (restart after every redeploy: `kubectl port-forward -
 - **Tests at HEAD:** `npx tsc -b` clean; Vitest 719/719; Playwright 46 passed + 2 expected `art.spec.ts` skips;
   `e2e/designer.spec.ts` 9/9 (read-only guard on every test).
 
-## Confirmed with the user, NOT built yet (next step; ask "build it?" first, the user had not said yes)
+## Built: end squares (`eff225c`, deployed)
 
-Wire handles, shown only when a wire is **selected** (clicked), not on hover:
-- a square in the middle of each run (as now; drag moves the run; cursor ↕ / ↔);
-- a **square at each end** of the wire, **replacing the green end dots**; dragging an end square detaches that
-  end (drop on a step, or the hub for the start, re-attaches; elsewhere it snaps back); cursor over an end square
-  is the **four-way arrow** (`cursor: move`).
-Where: `src/WorkflowStudio/src/design/DesignOverlay.tsx` (end `<circle>`s → `<rect>`s, keep classes
-`design-handle end` and `data-end`, sizes in screen px via `k = 1/zoom`, keep the `clearOfDots` rule for run
-squares), `src/canvas/canvas.css` (`.design-handle.end` fill/cursor), tests in
-`src/design/useWireGestures.test.tsx` and `e2e/designer.spec.ts` (selectors use `.design-handle.end[data-end=…]`).
+A selected wire's ends are squares (`<rect class="design-handle end" data-end=…>`, accent fill) replacing the
+green end dots; cursor `move`, kept while an end is dragged (`gesture-move`). Run squares unchanged. Awaiting the
+user's trial verdict.
 
 ## Junctions (plan 7) — wait until the user approves the designer
 
