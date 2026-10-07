@@ -1,0 +1,198 @@
+# SKP Studio plan 8: design on virtual entities, save by staged sync -- design
+
+Date: 2026-10-07. Branch `feature/path-importer`. Builds on plans 3b (Inspector), 4 (designer) and 7 (junctions).
+Where this document differs from the main spec (`2026-10-05-skp-studio-design.md`) §4 (graph save), §6.1 and §7.1
+(Inspector writes), or the plan 4 spec §4.4-§4.6 (drop rules), this document wins.
+
+## 1. Purpose
+
+The designer works offline on virtual copies of every entity of the opened workflow. Nothing is written while
+designing; the design is kept as the designer left it, partly wired or not runnable, and **Save** pushes it to the
+database, applying as much as can be applied. In the user's words: like source code with syntax errors — the
+compiler shows the errors, but the file can be saved at any time. Whether the workflow can start is not this
+phase's question: BaseApi's start validators run when a workflow is started.
+
+Decisions taken with the user (2026-10-07):
+
+1. **Load with GETs only**, then work offline. No `POST /workflows/{id}/validate` (start checks are not this phase).
+   The live-light polls (`GET /orchestration/live`, `GET /processors/liveness`) stay as they are (SignalR later).
+2. **Every edit is virtual**: the workflow, steps (fields and wiring), assignments, processors, schemas and caches
+   are edited as copies in the browser.
+3. **Ownership.** Steps and assignments belong to one workflow and are never shared (the studio guarantees it by
+   giving every new one a new id). Processors, schemas and caches are shared: **last write wins**.
+4. **For now, update only** — except assignments, which are created, updated and deleted. No step, processor,
+   cache or schema is created or deleted from the designer in this plan.
+5. **A schema edit is a background copy.** Editing a processor's schema makes a virtual schema with a new id,
+   copying the original's **name and version**, holding the edited definition; Save inserts it and re-points that
+   processor's slot. The designer does not notice. Other processors keep the original.
+6. **Save always saves the design, regardless of validity**, and BaseApi syncs the database in **ordered stages**,
+   writing every valid entity and reporting every failure. The failures are shown in the Problems and Output panels.
+   They are deterministic: the same design saved again gives the same failures, so they are not stored in the
+   database.
+7. **Wires can be dropped anywhere.** A wire with no affinity is drawn **grey and dashed**, with an open end where
+   it was dropped. The legend gains it; **"parked" is removed** (an unwired step is an ordinary step).
+
+## 2. Scope
+
+In: the virtual design (load, edit, session), the Inspector writing to it instead of BaseApi, assignment create /
+update / delete on it, the schema background copy, free wire drops and the no-affinity wire, Save with staged sync
+(a new BaseApi endpoint), Problems and Output for save results, the legend.
+
+Out: creating or deleting steps, processors, caches or schemas; start checks; SignalR; the Toolbox; deleting a
+workflow; several designers on one workflow at once beyond the per-entity conflict check (§6.3).
+
+## 3. The virtual design
+
+### 3.1 Load
+
+Opening a workflow reads, with GETs only: `GET /workflows/{id}/graph` (the workflow, reachable steps, their
+processors and schemas, the workflow's assignments and caches, the layout), then `GET /steps/{id}` for the unwired
+steps the layout lists and `GET /processors/{id}` / `GET /schemas/{id}` for what they name (as today). The validate
+call is removed; nothing is marked broken on load.
+
+These DTOs are the **base**. The **design** is the base with the designer's changes laid over it.
+
+### 3.2 What the design holds
+
+The plan 4 draft grows into the design. Besides what it holds today (block positions, `next`, `entries`, wire
+shapes, junction contacts), it holds:
+
+- **Entity edits**: per kind (`workflow`, `step`, `processor`, `cache`, `assignment`) and id, the changed fields
+  (only fields that differ from the base).
+- **Assignment operations**: per step of this workflow, *create* (payload), *update* (payload) or *delete*.
+- **Schema copies**: per processor slot (`input` / `output` / `config`), a virtual schema `{ id, name, version,
+  description, definition }` — id new, name / version / description copied from the slot's current schema
+  (`<processor>-<slot>` and `1.0.0` when the slot was empty).
+- **Loose wires** (§5): wires with no affinity, with their source and the point where they were dropped.
+
+What the canvas, the Inspector and the panels show is always the design. The session keeps the design (the
+existing per-tab session, spec §6.1), so a refresh never loses it. **Discard design** drops it all and returns to
+the base.
+
+### 3.3 The Inspector
+
+The Inspector edits the design, never BaseApi:
+
+- Editing a field of the workflow, a step, a processor, a cache or an assignment changes the design.
+- **Create** / **Remove** assignment on a step change the design (Remove no longer checks other workflows:
+  assignments are not shared).
+- Editing a schema (from its processor) makes or updates the slot's schema copy (§1.5); the Inspector shows the
+  copy as the schema, with the same name and version.
+- The per-entity save, re-GET and write tokens of plan 3b are removed. The dirty mark, the close guard and Discard
+  cover every kind of change.
+
+## 4. Save
+
+### 4.1 The studio
+
+**Save** (toolbar, enabled when the design differs from the base) sends the design's changes in one request to
+`PUT /workflows/{id}/design` (§4.2) and waits. Saving never asks whether the design is valid. While saving, the
+design is read-only.
+
+When the answer comes:
+
+- The studio reloads the base with GETs (§3.1) — the database as it now is.
+- What was **applied** is removed from the design (it is in the base now); what **failed** stays in the design, so
+  the canvas still shows the designer's intent and Save can be pressed again.
+- The failures go to **Problems** (one row each: entity, field, message; clicking it selects the entity) and a
+  summary line to **Output** (time, applied count, failed count).
+- The last save's failures are kept in the session with the design, so a refresh or reopening the workflow in the
+  same browser shows them again. They are never stored in the database (they are deterministic: saving again
+  gives them again).
+
+### 4.2 BaseApi: `PUT /workflows/{id}/design`
+
+A new endpoint; `PUT /workflows/{id}/graph` (atomic) stays as it is. The body carries only changes:
+
+- `workflow`: changed fields with the loaded `updatedAt`; its entry step ids, cache ids (as lists, when changed);
+- `steps`: changed steps (fields and/or next step ids) with their loaded `updatedAt`;
+- `processors`: changed fields, and slot re-points to schema copies;
+- `caches`: changed fields;
+- `schemas`: the schema copies (new rows: id, name, version, description, definition);
+- `assignments`: per step, create / update (payload) or delete;
+- `layout`: the canvas layout, including loose wires.
+
+### 4.3 Staged sync
+
+BaseApi applies the stages in this order; within a stage, each entity is applied (and committed) on its own:
+
+1. **Schemas**: insert each copy (field rules of the schema CRUD, definition a valid draft 2020-12 schema).
+2. **Processors**: update fields; re-point a slot to its copy. A re-point to a copy that failed in stage 1 is
+   skipped, with its own failure.
+3. **Caches**: update fields.
+4. **Steps**: update fields.
+5. **Wires**: replace each changed step's next step ids.
+6. **Assignments**: create (new row, linked to this workflow), update in place, delete (unlink, then delete the
+   row).
+7. **Workflow**: fields, entry step ids, cache ids and the assignment links stage 6 produced.
+8. **Layout**.
+
+Rules for every stage:
+
+- **Only the field rules the CRUD endpoints already enforce** decide a failure (and the workflow's "at least one
+  entry step"). No cycle, schema-edge, payload or liveness check.
+- **Owned entities** (the workflow, its steps, its assignments) keep the conflict check: an entity whose stored
+  `updatedAt` is newer than the loaded one fails with "changed by someone else since you opened it".
+- **Shared entities** (processors, caches) have **no conflict check**: last write wins.
+- A database error on one entity (a foreign key, a constraint) fails that entity only.
+- The answer is `200` with one outcome per entity sent: `{ kind, id, stage, ok, errors: [{ field, message }] }`.
+  Only a malformed body (not a design at all) is a `400`; a workflow that does not exist is a `404`.
+
+### 4.4 The schema copy's version
+
+Plan 1's atomic save bumps the copied version's patch (`1.2.3` → `1.2.4`); the design save copies it unchanged
+(§1.5). Schemas have no unique rule on name + version; copies are told apart by id (lists already show BaseApi's
+entity-name format with part of the id).
+
+## 5. Wires dropped anywhere
+
+- A wire end (head, tail, contact, arrow of a joined wire) or a new wire may be released anywhere. Released on a
+  place a wire can join (a step for a head; a step or the hub for a tail; a same-colour line for a junction), it
+  attaches as today and takes its target's colour.
+- **Cycles are allowed** (a design may be anything; starting is when cycles are judged). The "would make a loop"
+  refusal is removed.
+- A wire **still cannot attach to itself** (a step to itself, a line to itself): that drop snaps back.
+- Released anywhere else — empty canvas, a cache, the hub as a target, a step it already goes to — the wire becomes
+  a **loose wire**: grey, dashed, with its tail on its source and an **open end** (a small open circle) where it
+  was dropped. It is kept in the design and the layout; it is not a next step, so the database never sees it. Its
+  end can be dragged again onto a place it can attach to, which makes it an ordinary wire.
+- While a wire end is dragged, every place still gets the plan 7 §6.1a feedback: green with what the drop does,
+  or grey "loose wire" where it would become one.
+- The legend gains the loose wire (grey dashed, open end) and loses "parked". Unwired steps look like every other
+  step (no dashed outline).
+
+## 6. Edge cases
+
+1. **A partial save** leaves the base and the design consistent: the base is the database; the design holds only
+   what failed. Wires to a step whose fields failed are still applied (stage 5 does not depend on stage 4).
+2. **Someone else changed a step** since it was opened: that step fails with the conflict message; the designer
+   can Discard design (reload) or keep it.
+3. **Two designers** on one workflow: owned entities are protected per entity (§4.3); shared ones are last write
+   wins, as decided.
+4. **A loose wire** is never sent as a next step; reopening shows it from the layout.
+5. **A schema copy whose insert failed**: the processor keeps its old schema; the copy stays in the design with
+   its failure.
+6. **No entry step**: the workflow stage fails ("at least one entry step"); every other stage still applies.
+
+## 7. Structure
+
+- BaseApi: `Features/Workflow/Design/` — request and outcome DTOs, `WorkflowDesignSyncer` (the stages), the
+  endpoint; reuses the CRUD validators and mappers.
+- Studio: `design/` grows the design model (entity edits, assignment operations, schema copies, loose wires) and
+  `applyDesign`; `app/loadDocument.ts` drops validate; `app/inspectorService.ts` becomes design edits;
+  `app/saveDesign.ts` builds the request and folds the outcomes back; Problems / Output show save results;
+  `canvas/Legend.tsx`, `canvas/edges/CableEdge.tsx` draw the loose wire.
+
+## 8. Testing
+
+- **BaseApi**: unit tests for each stage; integration tests (Postgres) for a partial save (one invalid step, the
+  rest applied), the per-entity conflict, last write wins on a processor, the schema copy with the same name and
+  version and the re-point, assignment create / update / delete, the staged order (a failed schema skips its
+  re-point).
+- **Studio, Vitest**: the design model and `applyDesign`; the Inspector writing to the design; the save request
+  built from a design; outcomes folded back (applied removed, failed kept); loose wires.
+- **Playwright, real mouse and keyboard, on the dev server and the deployed studio**: the e2e tests stop being
+  read-only for Save only. Each save test works on a **throwaway workflow** it creates through BaseApi's CRUD in
+  its setup (steps, processor reuse, assignments) and deletes in its teardown, so live workflows are never written.
+  It edits on the canvas and in the Inspector, saves, checks the Problems and Output rows, reopens the workflow and
+  checks what was applied. Loose wires: dropped on empty canvas, grey dashed with an open end, kept over a refresh.
