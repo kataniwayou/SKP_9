@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
-import { clampLanding, PMID, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
-import { WORKFLOW_SOURCE } from '../layout/ports';
+import { clearBends, clearRun } from '../layout/detour';
+import { clampLanding, PMID, snap, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
+import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
+import { route, type Pt } from '../layout/router';
 import { dragSegment, endsOf, nearestSegment, normalize, shapeFromPoints, type Bends } from '../layout/shape';
-import type { WireRoute } from '../layout/wires';
+import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
 import { addWire, reattach, setShape, wireId, type Draft } from './draft';
@@ -20,6 +22,20 @@ export interface DropHint {
   newWire: boolean;
   /** The pointer, in flow coordinates. */
   at: Point;
+}
+
+/** A dragged wire end's wire, right-angled from its fixed end to the pointer; `wire` null: a new wire. */
+export interface WireGhost {
+  wire: string | null;
+  points: Pt[];
+}
+
+const boxOf = (source: SourceId) => (source === WORKFLOW_SOURCE ? SPHERE_BOX_ID : stepBoxId(source));
+
+/** Which run of the dragged shape is the one under the pointer (`dragSegment`'s run k of a shape with n verticals). */
+function draggedRun(n: number, k: number): { vertical: boolean; index: number } {
+  if (n === 0 || k === 0) return { vertical: false, index: 0 };
+  return k % 2 === 1 ? { vertical: true, index: (k - 1) / 2 } : { vertical: false, index: k / 2 - 1 };
 }
 
 /** Below this many screen pixels a press is a click, not a drag. */
@@ -124,10 +140,10 @@ export function useWireGestures(
   const { run, abort, running } = useGesture(setActive);
   const { screenToFlowPosition } = useReactFlow();
   // the dragged end's line, and the outline of the block under it (spec §4.4)
-  const [ghost, setGhost] = useState<{ from: Point; to: Point } | null>(null);
+  const [ghost, setGhost] = useState<WireGhost | null>(null);
   const [hint, setHint] = useState<DropHint | null>(null);
-  // the drag's cursor: a run's double arrow (a horizontal run, even k, moves up and down), or an end's four-way arrow
-  const [resize, setResize] = useState<'ns' | 'ew' | 'move' | null>(null);
+  // the drag's double-arrow cursor: a horizontal run (even k) moves up and down; an end leaves its block sideways
+  const [resize, setResize] = useState<'ns' | 'ew' | null>(null);
   const designRef = useRef(design);
   designRef.current = design;
 
@@ -146,13 +162,20 @@ export function useWireGestures(
     const ends = endsOf(wire.points);
     const bends: Bends = existing?.bends ?? shapeFromPoints(wire.points);
     const targetY = shown.current.placement.steps.get(wire.target)?.y ?? 0;
+    // a dragged wire goes around the blocks, never through one (spec §4.2)
+    const boxes = blockBoxes(shown.current.placement);
     let latest: { bends: Bends | null; landing: number | null } = { bends: existing?.bends ?? null, landing: existing?.landing ?? null };
     setResize(k % 2 === 0 ? 'ns' : 'ew');
     run(e, (p) => {
       const r = dragSegment(bends, k, p, ends);
-      latest = 'landingY' in r
-        ? { bends: bends.xs.length > 0 ? bends : null, landing: clampLanding(r.landingY - targetY) }
-        : { bends: r.bends, landing: latest.landing };
+      if ('landingY' in r) {
+        const landing = clampLanding(r.landingY - targetY);
+        latest = { bends: bends.xs.length > 0 ? clearBends({ ...ends, ty: targetY + landing }, bends, boxes) : null, landing };
+      } else {
+        // the run under the pointer is pushed off any block it would lie on; the rest detours around blocks
+        const run = clearRun(r.bends, ends, draggedRun(bends.xs.length, k), boxes);
+        latest = { bends: clearBends(ends, run, boxes), landing: latest.landing };
+      }
       setPreview(setShape(base, wire.id, latest));
     }, (cancelled, moved) => {
       setPreview(null);
@@ -167,16 +190,16 @@ export function useWireGestures(
   };
 
   /**
-   * Drags a wire end from `from` (spec §4.4, option "a"): the block under the pointer is outlined green
+   * Drags a wire end (spec §4.4, option "a"), drawn as `path` to the pointer: the block under it is outlined green
    * when `verdict` allows the drop and red when not; `current` (the end's own block) is not outlined.
    * Dropped on an allowed block, `done` commits; anywhere else, refused, or back on `current`, nothing
    * changes and no step is made.
    */
-  const dropGesture = (e: ReactPointerEvent, from: Point, current: string | null, verdict: (over: string) => DropVerdict, done: (over: string) => void, newWire = false) => {
+  const dropGesture = (e: ReactPointerEvent, wire: string | null, path: (p: Point) => Pt[], current: string | null, verdict: (over: string) => DropVerdict, done: (over: string) => void) => {
     let over: string | null = null;
-    setResize(null);
+    const newWire = wire === null;
     run(e, (p) => {
-      setGhost({ from, to: p });
+      setGhost({ wire, points: path({ x: snap(p.x), y: snap(p.y) }) });
       over = blockAt(shown.current, p);
       if (over === null || over === current) setHint(null);
       else { const why = verdict(over); setHint({ id: over, ok: why === 'ok', why, newWire, at: p }); }
@@ -188,21 +211,24 @@ export function useWireGestures(
     });
   };
 
-  /** Drags a picked wire's arrow head or start dot onto another block; the wire becomes automatic (spec §4.4). */
+  /** Drags a picked wire's end square onto another block; the wire becomes automatic (spec §4.4). */
   const startEnd = (wire: WireRoute, end: 'source' | 'target', e: ReactPointerEvent) => {
     const d = designRef.current;
     if (!d || e.button !== 0) return;
     const ends = endsOf(wire.points);
-    // the ghost runs from the end that stays
-    const from = end === 'target' ? { x: ends.sx, y: ends.sy } : { x: ends.tx, y: ends.ty };
+    const boxes = blockBoxes(shown.current.placement);
+    // the wire itself follows the pointer, right-angled from the end that stays: it leaves a source and lands heading right
+    const path = end === 'target'
+      ? (p: Point) => route(ends.sx, ends.sy, p.x, p.y, boxOf(wire.source), '', 0, boxes)
+      : (p: Point) => route(p.x, p.y, ends.tx, ends.ty, '', stepBoxId(wire.target), 0, boxes);
     const current = end === 'target' ? wire.target : wire.source;
-    dropGesture(e, from, current,
+    setResize('ew');
+    dropGesture(e, wire.id, path, current,
       (over) => (end === 'target' ? canWire(shown.current, wire.source, over, wire.id) : canWire(shown.current, over, wire.target, wire.id)),
       (over) => {
         const id = end === 'target' ? wireId(wire.source, over) : wireId(over, wire.target);
         d.onCommit(reattach(d.draft, saved, wire.id, end, over), { picks: [{ kind: 'wire', id }] });
       });
-    setResize('move');
   };
 
   /** Draws a new wire from a step's output side or the hub (spec §4.5); it is automatic and becomes the pick. */
@@ -214,9 +240,11 @@ export function useWireGestures(
     const from = source === WORKFLOW_SOURCE
       ? { x: placement.sphere.cx + SPHERE_R, y: placement.sphere.cy }
       : { x: (at?.x ?? 0) + STEP_W, y: (at?.y ?? 0) + PMID };
-    dropGesture(e, from, null, (over) => canWire(shown.current, source, over), (over) => {
+    const boxes = blockBoxes(placement);
+    setResize(null);
+    dropGesture(e, null, (p) => route(from.x, from.y, p.x, p.y, boxOf(source), '', 0, boxes), null, (over) => canWire(shown.current, source, over), (over) => {
       d.onCommit(addWire(d.draft, saved, source, over), { picks: [{ kind: 'wire', id: wireId(source, over) }] });
-    }, true);
+    });
   };
 
   /** The press point in flow coordinates (React Flow's own transform, so a pop-out's window works too). */
@@ -241,6 +269,6 @@ export function useWireGestures(
     },
   }), [shown]);
 
-  // a run drag's cursor only while that drag runs; an end drag or new wire keeps the closed hand
+  // a run or end drag's cursor only while that drag runs; a new wire keeps the closed hand
   return { gestures, startSegment, startEnd, ghost, hint, active, running, resize: active ? resize : null };
 }

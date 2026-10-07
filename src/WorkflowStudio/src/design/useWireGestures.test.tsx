@@ -7,6 +7,7 @@ import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { StudioDocument } from '../app/document';
 import { STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { EMPTY_DRAFT, addWire, reattach, setShape } from './draft';
+import { endsOf, pointsOfShape } from '../layout/shape';
 import type { DesignProps } from './designProps';
 
 const fitter = createTextFitter((t) => t.length * 7);
@@ -26,6 +27,10 @@ const middleOf = (doc: StudioDocument, id: string): Point => {
 };
 const nodeClass = (container: HTMLElement, id: string) => container.querySelector(`.react-flow__node[data-id="${id}"]`)!.getAttribute('class') ?? '';
 const tick = () => new Promise((r) => setTimeout(r, 0));
+const pointsOfD = (d: string): [number, number][] => [...d.matchAll(/[ML]([-\d.e]+) ([-\d.e]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+const rightAngled = (pts: readonly (readonly [number, number])[]) => pts.length >= 2 && pts.every((p, i) => i === 0 || p[0] === pts[i - 1]![0] || p[1] === pts[i - 1]![1]);
+/** A wire as drawn: its trace's points. */
+const wirePath = (container: HTMLElement, id: string) => pointsOfD(container.querySelector(`[data-testid="rf__edge-${id}"] path.w`)!.getAttribute('d')!);
 /** 100 % zoom: jsdom's fit is so small that a short run's square would hide under its end dots (as it does on screen). */
 const AT_100 = { x: 0, y: 0, zoom: 1, followFit: false };
 
@@ -60,6 +65,31 @@ describe('wire gestures', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it('a run dragged onto a step is pushed off it: the wire goes around the step, never through it', async () => {
+    const doc = await three();
+    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+    // s1 -> s2 drops below both steps and comes back up just before s2
+    const draft = setShape(EMPTY_DRAFT, 's1->s2', { bends: { xs: [s1.x + STEP_W + 16, s2.x - 16], ys: [s1.y + STEP_H + 48] }, landing: null });
+    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const ends = endsOf(wirePath(container, 's1->s2'));
+    // the run that comes back up, dragged into the middle of s2
+    const handle = container.querySelector('.design-handle.seg[data-k="3"]')!;
+    fireEvent.pointerDown(handle, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's2')), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's2')), pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    const bends = vi.mocked(design.onCommit).mock.calls[0]![0].routes['s1->s2']!.bends!;
+    const pts = pointsOfShape(ends, bends);
+    expect(rightAngled(pts)).toBe(true);
+    // no run lies inside s2 (its landing touches the border, from outside)
+    const into = pts.some((a, i) => {
+      const c = pts[i + 1];
+      return c !== undefined && Math.max(a[0], c[0]) > s2.x && Math.min(a[0], c[0]) < s2.x + STEP_W && Math.max(a[1], c[1]) > s2.y && Math.min(a[1], c[1]) < s2.y + STEP_H;
+    });
+    expect(into).toBe(false);
+  });
+
   it('a run square shows the way its run moves, and keeps that double arrow while it is dragged', async () => {
     const doc = await two();
     const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
@@ -82,12 +112,12 @@ describe('wire gestures', () => {
     expect(canvas.classList.contains('gesture-ns')).toBe(true);
     fireEvent.pointerUp(across.ownerDocument, { clientX: 100, clientY: 100, pointerId: 1 });
 
-    // an end drag shows the four-way arrow: no double arrow left over from the run drag
+    // an end drag shows the sideways double arrow (an end leaves its block sideways), not the run's up-down one
     fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
-    expect(canvas.classList.contains('gesture-move')).toBe(true);
-    expect(canvas.className).not.toMatch(/gesture-(ns|ew)/);
+    expect(canvas.classList.contains('gesture-ew')).toBe(true);
+    expect(canvas.classList.contains('gesture-ns')).toBe(false);
     fireEvent.pointerUp(document, { clientX: 100, clientY: 100, pointerId: 1 });
-    expect(canvas.classList.contains('gesture-move')).toBe(false);
+    expect(canvas.classList.contains('gesture-ew')).toBe(false);
   });
 
   it('handles, outline and ghost keep their size on screen whatever the zoom', async () => {
@@ -216,16 +246,23 @@ describe('wire gestures', () => {
     expect(container.querySelectorAll('.nx-port').length).toBe(2); // the hub's and the step's
   });
 
-  it('dragging the arrow head onto another step re-targets the wire: green outline, a ghost, one step, the new wire picked', async () => {
+  it('dragging the arrow head onto another step re-targets the wire: green outline, the wire follows right-angled, one step, the new wire picked', async () => {
     const doc = await three();
     const onSelect = vi.fn();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={onSelect} />);
     const head = container.querySelector('.design-handle.end[data-end="target"]')!;
     fireEvent.pointerDown(head, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    const before = wirePath(container, 's1->s2');
     fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
     expect(nodeClass(container, 's3')).toContain('drop-ok');
-    expect(container.querySelector('.design-ghost')).not.toBeNull();
+    // no sloped ghost line: the wire itself runs to the pointer, every run level or upright
+    expect(container.querySelector('.design-ghost')).toBeNull();
+    const moving = wirePath(container, 's1->s2');
+    expect(moving).not.toEqual(before);
+    expect(rightAngled(moving)).toBe(true);
+    const m = middleOf(doc, 's3');
+    expect(moving[moving.length - 1]).toEqual([Math.round(m.x / 8) * 8, Math.round(m.y / 8) * 8]);
     fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
     expect(design.onCommit).toHaveBeenCalledTimes(1);
     expect(design.onCommit).toHaveBeenCalledWith(reattach(EMPTY_DRAFT, doc, 's1->s2', 'target', 's3'), { picks: [{ kind: 'wire', id: 's1->s3' }] });
@@ -287,6 +324,7 @@ describe('wire gestures', () => {
     fireEvent.pointerDown(port, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
     expect(nodeClass(container, 's3')).toContain('drop-ok');
+    expect(rightAngled(pointsOfD(container.querySelector('.design-ghost')!.getAttribute('d')!))).toBe(true);
     fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
     expect(design.onCommit).toHaveBeenCalledWith(addWire(EMPTY_DRAFT, doc, 's1', 's3'), { picks: [{ kind: 'wire', id: 's1->s3' }] });
     expect(onSelect).not.toHaveBeenCalled();

@@ -122,13 +122,23 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const onKeyDown = useDesignKeys(doc, shownRef, design, () => pressing() || wiring.running() || drag.dragging());
   // the block under a dragged wire end, outlined green or red (spec §4.4)
   const shown = useMemo(() => withHint(selected, wiring.hint), [selected, wiring.hint]);
+  // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
+  const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
+  const edges = useMemo(
+    () => (dragged ? marked.edges.map((e) => (e.id === dragged.id && e.type === 'cable' && e.data ? { ...e, data: { ...e.data, points: dragged.points } } : e)) : marked.edges),
+    [marked.edges, wiring.ghost],
+  );
   // picks naming wires that are gone (after an undo) draw nothing
   const pickedWires = useMemo(
-    () => (design ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)) : []),
-    [shownDoc, design?.picks],
+    () => (design
+      ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)).map((w) => (dragged && w.id === dragged.id ? { ...w, points: dragged.points } : w))
+      : []),
+    [shownDoc, design?.picks, wiring.ghost],
   );
   // the run squares follow a drag's preview, not only the committed draft
-  const bendsOf = (w: WireRoute) => (preview ?? design?.draft)?.routes[w.id]?.bends ?? shapeFromPoints(w.points);
+  const bendsOf = (w: WireRoute) => (dragged && w.id === dragged.id
+    ? shapeFromPoints(w.points)
+    : (preview ?? design?.draft)?.routes[w.id]?.bends ?? shapeFromPoints(w.points));
   // the wire's right-click menu (spec §4.3)
   const [menu, setMenu] = useState<{ anchor: Anchor; wireId: string } | null>(null);
 
@@ -172,7 +182,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
           <DesignContext.Provider value={design ? wiring.gestures : null}>
             <ReactFlow
               nodes={shown}
-              edges={marked.edges}
+              edges={edges}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               width={width}
@@ -212,7 +222,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={onViewChange ? (_event, v) => onViewChange({ x: v.x, y: v.y, zoom: v.zoom, followFit: followFit.current }) : undefined}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost} hint={wiring.hint} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hint={wiring.hint} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize />

@@ -2,7 +2,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useStore, ViewportPortal } from '@xyflow/react';
 import { endsOf, segmentHandles, type Bends, type Ends } from '../layout/shape';
 import type { WireRoute } from '../layout/wires';
-import type { Point } from '../layout/geometry';
+import type { Pt } from '../layout/router';
+import { pathOf } from '../canvas/svgPath';
 import type { GuideLine } from './guides';
 import type { FlowRect } from './hit';
 import { dropLabel } from './rules';
@@ -18,8 +19,8 @@ export interface DesignOverlayProps {
   bendsOf: (wire: WireRoute) => Bends;
   onSegment: (wire: WireRoute, k: number, e: ReactPointerEvent) => void;
   onEnd: (wire: WireRoute, end: 'source' | 'target', e: ReactPointerEvent) => void;
-  /** The line from a dragged wire end's fixed side to the pointer (spec §4.4-§4.5). */
-  ghost: { from: Point; to: Point } | null;
+  /** A new wire's path, right-angled from its source to the pointer (spec §4.5); a dragged end moves its own wire. */
+  ghost: Pt[] | null;
   /** The block under a dragged end: the label next to the pointer says why a drop is refused, or what it does. */
   hint?: DropHint | null;
 }
@@ -39,7 +40,7 @@ function clearOfEnds(h: { x: number; y: number }, ends: Ends, k: number): boolea
 /**
  * Drawn above the blocks in flow coordinates: the rubber band (spec §3.2), the alignment guides (§3.4),
  * and a picked wire's handles (§4.2, Visio): a square on each end (dragged to detach it), a square in the
- * middle of each run, a diamond on each bend; and the ghost wire while an end or a new wire is dragged (§4.4-§4.5).
+ * middle of each run, a diamond on each bend; and the ghost of a new wire while it is drawn (§4.5).
  */
 export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hint = null }: DesignOverlayProps) {
   // one screen pixel in flow units
@@ -65,7 +66,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
             </g>
           );
         })}
-        {ghost && <path className="design-ghost" d={`M${ghost.from.x} ${ghost.from.y}L${ghost.to.x} ${ghost.to.y}`} strokeWidth={GHOST * k} strokeDasharray={`${5 * k} ${4 * k}`} />}
+        {ghost && <path className="design-ghost" d={pathOf(ghost)} strokeWidth={GHOST * k} />}
         {hint && label && (
           // drawn in screen pixels: the group undoes the zoom, offset below-right of the pointer
           <g className={hint.ok ? 'design-drop-label ok' : 'design-drop-label no'} transform={`translate(${hint.at.x + 14 * k} ${hint.at.y + 14 * k}) scale(${k})`}>
