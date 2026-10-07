@@ -7,11 +7,12 @@ import { routeWires, tetherPoints, type WiringInput } from './wires';
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
   id, name: id, version: '1.0.0', description: null, processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
 });
-function setup(steps: Step[], positions: Record<string, [number, number]>, brokenEdges: ReadonlySet<string>) {
+function setup(steps: Step[], positions: Record<string, [number, number]>, brokenEdges: ReadonlySet<string>, shapes?: WiringInput['shapes']) {
   const input: WiringInput = {
     entryStepIds: ['a'],
     steps: new Map(steps.map((s) => [s.id, s])),
     brokenEdges,
+    shapes,
   };
   const placement: Placement = {
     sphere: { cx: 128, cy: 128 },
@@ -118,5 +119,72 @@ describe('tetherPoints', () => {
     };
     const ab = routeWires(input, placement).find((w) => w.id === 'a->b')!;
     expect(ab.points).toEqual([[512, 128], [560, 128], [560, 232], [576, 232]]);
+  });
+});
+
+describe('junctions (plan 7)', () => {
+  // s (288,32) -> b (864,32): a straight host along y 128; t (288,288) -> c (864,288); u (288,544) -> b
+  const steps = () => [
+    step('s', ['b']), step('t', ['c']), step('u', ['b']),
+    step('b', [], { entryCondition: 2 }), step('c', [], { entryCondition: 2 }), step('x', [], { entryCondition: 1 }),
+  ];
+  const at = { s: [288, 32], t: [288, 288], u: [288, 544], b: [864, 32], c: [864, 288], x: [864, 544] } as Record<string, [number, number]>;
+  const boxes = Object.values(at).map(([x, y]) => ({ x, y, w: 224, h: 160 }));
+  const through = (pts: readonly (readonly [number, number])[]) => pts.some((a, i) => {
+    const c = pts[i + 1];
+    return c !== undefined && boxes.some((b) => Math.max(a[0], c[0]) > b.x && Math.min(a[0], c[0]) < b.x + b.w && Math.max(a[1], c[1]) > b.y && Math.min(a[1], c[1]) < b.y + b.h);
+  });
+  const square = (pts: readonly (readonly [number, number])[]) => pts.every((p, i) => i === 0 || p[0] === pts[i - 1]![0] || p[1] === pts[i - 1]![1]);
+  const join = (id: string, host: string, d: number) => ({ [id]: { bends: null, landing: null, contact: { host, at: d } } });
+
+  it('a wire on another goes to a dot on its line, square-on, and splits off to its own step', () => {
+    const wires = setup(steps(), at, new Set<string>(), join('t->c', 's->b', 176));
+    const host = wires.find((w) => w.id === 's->b')!, w = wires.find((x) => x.id === 't->c')!;
+    expect(w.joint!.host).toBe('s->b');
+    expect(w.joint!.contact).toEqual([688, 128]);
+    // own line: last leg vertical onto the horizontal host run
+    const n = w.points.length;
+    expect(w.points[n - 1]).toEqual([688, 128]);
+    expect(w.points[n - 2]![0]).toBe(688);
+    // split on the host line, after the contact, short of the host's arrow tip
+    expect(w.joint!.split![1]).toBe(128);
+    expect(w.joint!.split![0]).toBeGreaterThan(688);
+    expect(w.joint!.split![0]).toBeLessThanOrEqual(host.points[host.points.length - 1]![0] - 16);
+    // the branch lands on c, heading right
+    const br = w.joint!.branch;
+    expect(br[0]).toEqual(w.joint!.split);
+    expect(br[br.length - 1]![0]).toBe(864);
+    expect(br[br.length - 2]![1]).toBe(br[br.length - 1]![1]);
+    for (const line of [w.points, br]) { expect(square(line)).toBe(true); expect(through(line)).toBe(false); }
+  });
+
+  it('a wire into its host\'s step merges: no split, no branch', () => {
+    const wires = setup(steps(), at, new Set<string>(), join('u->b', 's->b', 176));
+    const w = wires.find((x) => x.id === 'u->b')!;
+    expect(w.joint!.split).toBeNull();
+    expect(w.joint!.branch).toEqual([]);
+  });
+
+  it('a chain routes host first: a wire may sit on a joined wire\'s own line', () => {
+    const wires = setup(steps(), at, new Set<string>(), { ...join('u->b', 't->c', 40), ...join('t->c', 's->b', 176) });
+    expect(wires.find((x) => x.id === 't->c')!.joint).toBeDefined();
+    const u = wires.find((x) => x.id === 'u->b')!;
+    expect(u.joint!.host).toBe('t->c');
+    expect(u.joint!.split).not.toBeNull();
+  });
+
+  it('another colour, a missing host, itself or a loop: drawn plain', () => {
+    const cases = [join('t->c', 'nope', 40), join('t->c', 't->c', 40), { ...join('t->c', 'u->b', 40), ...join('u->b', 't->c', 40) }];
+    for (const shapes of cases) {
+      const wires = setup(steps(), at, new Set<string>(), shapes);
+      expect(wires.find((x) => x.id === 't->c')!.joint).toBeUndefined();
+    }
+    const other = setup([...steps(), step('v', ['x'])], { ...at, v: [288, 800] }, new Set<string>(), join('v->x', 's->b', 40));
+    expect(other.find((x) => x.id === 'v->x')!.joint).toBeUndefined();
+  });
+
+  it('keeps the contact clear of the host\'s ends', () => {
+    const wires = setup(steps(), at, new Set<string>(), join('t->c', 's->b', 0));
+    expect(wires.find((x) => x.id === 't->c')!.joint!.contact).toEqual([528, 128]);
   });
 });
