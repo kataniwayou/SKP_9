@@ -191,6 +191,14 @@ describe('junctions (plan 7)', () => {
     expect(wires.find((x) => x.id === 't->c')!.joint!.contact).toEqual([528, 128]);
   });
 
+  it('an ignored contact draws the wire truly plain: bends measured for its own line are not applied', () => {
+    const auto = setup(steps(), at, new Set<string>()).find((x) => x.id === 't->c')!;
+    const shapes = { 't->c': { bends: { xs: [560, 704], ys: [240] }, landing: null, contact: { host: 'nope', at: 40 } } };
+    const w = setup(steps(), at, new Set<string>(), shapes).find((x) => x.id === 't->c')!;
+    expect(w.joint).toBeUndefined();
+    expect(w.points).toEqual(auto.points);
+  });
+
   it('a host passing over the target column: the branch still heads right into its step', () => {
     // s -> z runs along y 128 far past c (864,288); t->c joins it
     const st = [step('s', ['z']), step('t', ['c']), step('z', [], { entryCondition: 2 }), step('c', [], { entryCondition: 2 })];

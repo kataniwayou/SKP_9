@@ -85,7 +85,8 @@ export function routeWires(input: WiringInput, placement: Placement): WireRoute[
     const tx = at.x;
     const ty = shape?.landing != null ? at.y + clampLanding(shape.landing) : landings.get(w.target)!.get(w.source)!;
     const target = input.steps.get(w.target)!;
-    const points = shape?.bends && shape.bends.xs.length > 0
+    // a junction's bends are measured on its own line (to the contact): a wire whose contact is ignored is drawn plain (spec §5.2)
+    const points = shape?.bends && shape.bends.xs.length > 0 && !shape.contact
       ? simplify(pointsOfShape({ sx, sy, tx, ty }, shape.bends))
       : route(sx, sy, tx, ty, boxIdOf(w.source), stepBoxId(w.target), nudge, boxes);
     return {
