@@ -229,6 +229,10 @@ The original v49 drawings, kept for history:
 
 ### 5.5 Connector editing (Visio-like)
 
+**Plan 4 (2026-10-07):** `2026-10-07-skp-studio-04-canvas-designer-design.md` decides plan 4 and wins
+where it differs from §5.4 and this section: it is a no-save trial; it adds drawing new wires; it
+refuses cycles; junctions stay in plan 7.
+
 Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a deliberate adaptation).
 
 - **Parts.** A plain wire runs from its source to its arrow head. With a junction there are three kinds of
@@ -478,10 +482,12 @@ editing is built inside real panes.
    step, processor, hub, cache and line drawings; processor health from `/processors/liveness`; the
    started hub and flowing pulses from `/orchestration/live`; reduced motion; the legend.
 3b. **Inspector editing** (§7.1): `GET` / `PUT` per entity, drill-downs, assignment add / edit / remove
-   from the step, server errors, refresh after save. The only `POST` is creating an assignment; no
-   `DELETE`. Its unsaved edits are kept in the session as the document's draft and survive a refresh (§6.1).
+   from the step, server errors, refresh after save. The only `POST` is creating an assignment; the
+   only `DELETE` is removing one (amended 2026-10-07, §7.1). Its unsaved edits are kept in the session as the document's draft and survive a refresh (§6.1).
 4. **Canvas editing:** wiring, moving, connector editing (§5.5) and alignment guides, undo/redo, parked
-   blocks, draft save through `/graph`. Its unsaved edits are kept in the session as the document's draft and survive a refresh (§6.1).
+   blocks, draft save through `/graph`. **Amended 2026-10-07:** plan 4 is first a **trial** with no save,
+   designed in `2026-10-07-skp-studio-04-canvas-designer-design.md`; plans 5 to 7 wait for the user to
+   approve the designer, and Save follows the trial. Its unsaved edits are kept in the session as the document's draft and survive a refresh (§6.1).
 5. **Richer editors and the full Problems pane** (§7.2, §7.3).
 6. **Toolbox:** drag-and-drop onto the canvas, **+ New** step / processor / cache, delete (✕) from the
    toolbox (§4.3).
