@@ -115,6 +115,8 @@ export function useWireGestures(
   // the dragged end's line, and the outline of the block under it (spec §4.4)
   const [ghost, setGhost] = useState<{ from: Point; to: Point } | null>(null);
   const [hint, setHint] = useState<{ id: string; ok: boolean } | null>(null);
+  // the way a dragged run moves, for its double-arrow cursor: a horizontal run (even k) moves up and down
+  const [resize, setResize] = useState<'ns' | 'ew' | null>(null);
   const designRef = useRef(design);
   designRef.current = design;
 
@@ -134,6 +136,7 @@ export function useWireGestures(
     const bends: Bends = existing?.bends ?? shapeFromPoints(wire.points);
     const targetY = shown.current.placement.steps.get(wire.target)?.y ?? 0;
     let latest: { bends: Bends | null; landing: number | null } = { bends: existing?.bends ?? null, landing: existing?.landing ?? null };
+    setResize(k % 2 === 0 ? 'ns' : 'ew');
     run(e, (p) => {
       const r = dragSegment(bends, k, p, ends);
       latest = 'landingY' in r
@@ -160,6 +163,7 @@ export function useWireGestures(
    */
   const dropGesture = (e: ReactPointerEvent, from: Point, current: string | null, verdict: (over: string) => DropVerdict, done: (over: string) => void) => {
     let over: string | null = null;
+    setResize(null);
     run(e, (p) => {
       setGhost({ from, to: p });
       over = blockAt(shown.current, p);
@@ -224,5 +228,6 @@ export function useWireGestures(
     },
   }), [shown]);
 
-  return { gestures, startSegment, startEnd, ghost, hint, active, running };
+  // a run drag's cursor only while that drag runs; an end drag or new wire keeps the closed hand
+  return { gestures, startSegment, startEnd, ghost, hint, active, running, resize: active ? resize : null };
 }

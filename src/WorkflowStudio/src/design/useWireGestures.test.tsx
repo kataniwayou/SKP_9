@@ -58,6 +58,35 @@ describe('wire gestures', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it('a run square shows the way its run moves, and keeps that double arrow while it is dragged', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+    // a manual wire with one vertical run, landing below the processor middle so the run has length
+    const draft = setShape(EMPTY_DRAFT, 's1->s2', { bends: { xs: [(s1.x + STEP_W + s2.x) / 2], ys: [] }, landing: 128 });
+    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const canvas = container.querySelector('.studio-canvas')!;
+    const across = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    const upright = container.querySelector('.design-handle.seg[data-k="1"]')!;
+    expect(across.getAttribute('class')).toContain('seg h');
+    expect(upright.getAttribute('class')).toContain('seg v');
+
+    fireEvent.pointerDown(upright, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    expect(canvas.classList.contains('gesture-ew')).toBe(true);
+    fireEvent.pointerUp(upright.ownerDocument, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(canvas.classList.contains('gesture-ew')).toBe(false);
+
+    fireEvent.pointerDown(across, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    expect(canvas.classList.contains('gesture-ns')).toBe(true);
+    fireEvent.pointerUp(across.ownerDocument, { clientX: 100, clientY: 100, pointerId: 1 });
+
+    // an end drag keeps the closed hand: no double arrow left over from the run drag
+    fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    expect(canvas.classList.contains('gesture')).toBe(true);
+    expect(canvas.className).not.toMatch(/gesture-(ns|ew)/);
+    fireEvent.pointerUp(document, { clientX: 100, clientY: 100, pointerId: 1 });
+  });
+
   it('a press on a handle that does not move makes no step', async () => {
     const doc = await two();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });

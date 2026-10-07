@@ -163,7 +163,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   return (
     <FollowFitContext.Provider value={followFit}>
       <LiveArtContext.Provider value={live}>
-        <div className={banding || wiring.active ? 'studio-canvas gesture' : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}
+        <div className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}
           tabIndex={design ? 0 : undefined}
           onKeyDown={design ? onKeyDown : undefined}
           onPointerDownCapture={design ? (e) => { e.currentTarget.focus({ preventScroll: true }); drag.notePress(e.target as Element); onPointerDownCapture(e); } : undefined}>
