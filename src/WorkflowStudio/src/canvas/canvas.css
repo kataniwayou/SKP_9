@@ -44,3 +44,7 @@
 .design-overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .design-band { fill: rgba(125, 211, 252, .08); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; }
 .design-guide { stroke: #fff; stroke-width: 1; filter: drop-shadow(0 0 2px rgba(125, 211, 252, .9)); }
+.design-handle { pointer-events: all; cursor: pointer; }
+.design-handle.end { fill: #34D399; stroke: #04111F; stroke-width: 1.5; }
+.design-handle.seg { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; }
+.design-handle.bend { fill: var(--accent); pointer-events: none; }

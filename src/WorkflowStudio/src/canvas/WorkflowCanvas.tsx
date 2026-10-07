@@ -5,14 +5,18 @@ import { applyDraft } from '../design/apply';
 import { DesignContext } from '../design/DesignContext';
 import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
-import type { Draft } from '../design/draft';
+import { resetRoute, type Draft } from '../design/draft';
 import type { GuideLine } from '../design/guides';
 import { useBlockDrag } from '../design/useBlockDrag';
 import { useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
+import { useWireGestures } from '../design/useWireGestures';
+import { Menu, anchorAt, type Anchor } from '../dock/Menu';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { GRID } from '../layout/geometry';
+import { shapeFromPoints } from '../layout/shape';
+import type { WireRoute } from '../layout/wires';
 import { CableEdge } from './edges/CableEdge';
 import { TetherEdge } from './edges/TetherEdge';
 import { FIT_VIEW_OPTIONS } from './fitOptions';
@@ -112,6 +116,15 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const { band, banding, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
   const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick);
   const onKeyDown = useDesignKeys(doc, shownRef, design);
+  const wiring = useWireGestures(shownRef, design, setPreview);
+  // picks naming wires that are gone (after an undo) draw nothing
+  const pickedWires = useMemo(
+    () => (design ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)) : []),
+    [shownDoc, design?.picks],
+  );
+  const bendsOf = (w: WireRoute) => design?.draft.routes[w.id]?.bends ?? shapeFromPoints(w.points);
+  // the wire's right-click menu (spec §4.3)
+  const [menu, setMenu] = useState<{ anchor: Anchor; wireId: string } | null>(null);
 
   const onNodeClick: NodeMouseHandler = (event, node) => {
     if (!onSelect) return;
@@ -128,6 +141,13 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     const picks = event.ctrlKey ? togglePick(design.picks, pick) : [pick];
     onSelect(selectionForPicks(picks, null, shownDoc.graph), picks);
   };
+  const onEdgeContextMenu: EdgeMouseHandler = (event, edge) => {
+    if (!design || edge.type !== 'cable') return;
+    event.preventDefault();
+    const picks: Pick[] = [{ kind: 'wire', id: edge.id }];
+    onSelect?.(selectionForPicks(picks, null, shownDoc.graph), picks);
+    setMenu({ anchor: anchorAt(event), wireId: edge.id });
+  };
   const onPaneClick = () => {
     if (!onSelect) return;
     if (suppressPaneClick.current) { suppressPaneClick.current = false; return; }
@@ -139,11 +159,11 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   return (
     <FollowFitContext.Provider value={followFit}>
       <LiveArtContext.Provider value={live}>
-        <div className={banding ? 'studio-canvas gesture' : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}
+        <div className={banding || wiring.active ? 'studio-canvas gesture' : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}
           tabIndex={design ? 0 : undefined}
           onKeyDown={design ? onKeyDown : undefined}
           onPointerDownCapture={design ? (e) => { e.currentTarget.focus({ preventScroll: true }); drag.notePress(e.target as Element); onPointerDownCapture(e); } : undefined}>
-          <DesignContext.Provider value={null}>
+          <DesignContext.Provider value={design ? wiring.gestures : null}>
             <ReactFlow
               nodes={shown}
               edges={marked.edges}
@@ -180,12 +200,13 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               {...(design ? DESIGN_KEYS : {})}
               onNodeClick={onSelect ? onNodeClick : undefined}
               onEdgeClick={design ? onEdgeClick : undefined}
+              onEdgeContextMenu={design ? onEdgeContextMenu : undefined}
               onPaneClick={onSelect ? onPaneClick : undefined}
               onMoveStart={(event) => { if (event) followFit.current = false; }}
               onMoveEnd={onViewChange ? (_event, v) => onViewChange({ x: v.x, y: v.y, zoom: v.zoom, followFit: followFit.current }) : undefined}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={() => { /* Task 8 */ }} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize />
@@ -193,6 +214,15 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
           <Legend />
           {children}
         </div>
+        {/* outside the canvas, so the menu's keys and presses never reach the canvas's own (React bubbles through portals) */}
+        {menu && design && (
+          <Menu label="Wire" anchor={menu.anchor} onClose={() => setMenu(null)} entries={[{
+            id: 'reset', label: 'Reset route',
+            disabled: !design.draft.routes[menu.wireId],
+            tip: design.draft.routes[menu.wireId] ? 'Let the router shape this wire again' : 'Only a wire shaped by hand has a route to reset',
+            onSelect: () => design.onCommit(resetRoute(design.draft, menu.wireId)),
+          }]} />
+        )}
       </LiveArtContext.Provider>
     </FollowFitContext.Provider>
   );

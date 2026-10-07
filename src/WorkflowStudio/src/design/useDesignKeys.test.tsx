@@ -58,4 +58,20 @@ describe('design keys', () => {
     fireEvent.keyDown(view.getAllByTestId('c')[1]!, { key: 'Delete' });
     expect(blocks.onCommit).not.toHaveBeenCalled();
   });
+
+  it('Delete removes the picked wires and keeps the picked blocks', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }, { kind: 'node', id: 's2' }] });
+    const { getByTestId } = render(<Probe design={design} saved={saved} />);
+    fireEvent.keyDown(getByTestId('c'), { key: 'Delete' });
+    expect(design.onCommit).toHaveBeenCalledWith(expect.objectContaining({ next: { s1: [] } }), { picks: [{ kind: 'node', id: 's2' }] });
+  });
+
+  it('Delete with no wire picked changes nothing (review focus 4)', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
+    const design = designOf({ picks: [{ kind: 'node', id: 's1' }] });
+    const { getByTestId } = render(<Probe design={design} saved={saved} />);
+    fireEvent.keyDown(getByTestId('c'), { key: 'Delete' });
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
 });

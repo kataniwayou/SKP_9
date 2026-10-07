@@ -10,9 +10,9 @@ import { itemsInRect, rectOf, type FlowRect } from './hit';
 /** Below this many screen pixels a press on empty canvas is a click, not a rectangle. */
 const BAND_START = 4;
 
-/** Blocks and wires are drawn inside React Flow's pane (v12), so empty canvas is the pane less them. */
+/** Blocks, wires and a picked wire's handles are drawn inside React Flow's pane (v12), so empty canvas is the pane less them. */
 const onEmptyCanvas = (target: Element) =>
-  target.closest('.react-flow__pane') !== null && target.closest('.react-flow__node, .react-flow__edge, .react-flow__handle') === null;
+  target.closest('.react-flow__pane') !== null && target.closest('.react-flow__node, .react-flow__edge, .react-flow__handle, .design-handle') === null;
 
 /**
  * The rectangle on empty canvas (spec §3.2): a left-button drag that does not start on a block or a wire
