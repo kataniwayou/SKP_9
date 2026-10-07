@@ -15,7 +15,8 @@
 - Drawing only: no junction gesture changes `draft.next` or `draft.entries`. No BaseApi writes (the e2e read-only guard in `e2e/studio.ts` must keep passing).
 - Marks, one meaning each: hollow ring `.nx-src` = leaves a step; open arrow head `.nx-head` = enters a step; filled dot `.nx-joint` (radius 4.5, wire colour) = on a line. Contact and split use the same dot.
 - Allowed join: same colour (`WireRoute.condition` equal), not the same wire, no loop through hosts.
-- Labels (exact text): "join here", "other colour", "same wire", "would make a loop", "start stays on a block", "drop on a step".
+- Labels (exact text): "join here", "other colour", "same wire", "would make a loop", "start stays on a block", "drop on a step", "starts here".
+- One drop reach (user, 2026-10-07): a step, the hub and a wire line count as under a dragged end from `DROP_REACH = 8` screen px outside their border; every dragged end (head, tail, contact, arrow, new wire) gets the same feedback: green outline/halo + label when the drop is allowed, red + reason when not.
 - Contact kept ≥ 16 px from the host's start and arrow tip (`CONTACT_MARGIN = 16`); `at` snapped to 8 px.
 - Cursors: contact square `move` (four-way), kept while dragged; start and arrow squares `ew-resize`.
 - Every user-visible behaviour is verified with Playwright using real mouse drags, on the dev server and on the deployed studio (user rule, memory `verify-studio-ui-with-playwright`).
@@ -907,7 +908,7 @@ Expected: the three new tests FAIL (no label over a line).
 - [ ] **Step 3: Implement**
 
 `useWireGestures.ts`:
-1. Imports: `canJoin, type JoinVerdict, type Refusal` from `./rules`; `wireAt` from `./hit`; `getZoom` from the existing `useReactFlow()` call (`const { screenToFlowPosition, getZoom } = useReactFlow();`).
+1. Add `const DROP_REACH = 8;` next to `MOVE_START`, doc line: "How far outside a block's border or a line (screen px) a dragged end already counts as over it." Imports: `canJoin, type JoinVerdict, type Refusal` from `./rules`; `wireAt` from `./hit`; `getZoom` from the existing `useReactFlow()` call (`const { screenToFlowPosition, getZoom } = useReactFlow();`).
 2. `DropHint`:
 
 ```ts
@@ -953,7 +954,7 @@ Every existing `setHint({ ... })` call gains `line: false`.
     run(e, (p) => {
       at = p;
       over = blockAt(shown.current, p);
-      onLine = over === null ? wireAt(shown.current, p, 6 / getZoom(), o.wire) : null;
+      onLine = over === null ? wireAt(shown.current, p, DROP_REACH / getZoom(), o.wire) : null;
       if (onLine && typeof o.line !== 'string') {
         const why = o.line.verdict(onLine.id);
         setHint({ id: onLine.id, line: true, ok: why === 'ok', why, newWire, at: p });
@@ -1018,6 +1019,155 @@ Expected: PASS (all earlier gesture tests too).
 ```bash
 git add src/WorkflowStudio/src/design src/WorkflowStudio/src/canvas/WorkflowCanvas.tsx
 git commit -m "feat(studio): drop a wire's arrow on a same-colour line to join it; refusals say why (plan 7)"
+```
+
+---
+
+### Task 6b: The same drop feedback for head, tail and junction (user, 2026-10-07)
+
+The user: "when the dragged wire reaches a potential contact point, from the head or tail direction, to a step it
+should notify, so the designer knows he can drop. This happens only to the head; it should be consistent for
+tail, head and junction." A Playwright probe on the deployed studio (2026-10-07) showed: the tail over its own
+source step gets no outline and no label (the head over its own step gets green "move contact here"); and a
+block counts only once the pointer is inside its rectangle, while a line counts from a few px away.
+
+**Files:**
+- Modify: `src/design/hit.ts` (`blockAt` reach)
+- Modify: `src/design/useWireGestures.ts` (`freeEnd` reach, `dropGesture` self label, `startEnd` source)
+- Modify: `src/design/rules.ts` (label "starts here")
+- Modify: `e2e/designer.spec.ts` (one Playwright test, run in Task 8)
+- Test: `src/design/hit.test.ts`, `src/design/useWireGestures.test.tsx`, `src/design/rules.test.ts`
+
+**Interfaces:**
+- Consumes: Task 6 `dropGesture(e, options)`, `DROP_REACH`.
+- Produces: `blockAt(doc, p, reach = 0)` (each step box grown by `reach` on every side; the hub's radius + `reach`); `freeEnd(p, end, boxes, reach = 0)`; `dropGesture` option `selfWhy?: 'move' | 'here'` (default 'move'); `DropHint.why` gains `'here'`; `dropLabel('here', ...)` returns "starts here".
+
+- [ ] **Step 1: Write the failing tests**
+
+`src/design/hit.test.ts` (append; import `SPHERE_R` from `../layout/geometry` and the fixtures if missing):
+
+```ts
+describe('blockAt reach (plan 7, one drop reach)', () => {
+  it('counts a point just outside a step or the hub only with a reach', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1'), stepDto('s2')] }));
+    const s1 = doc.placement.steps.get('s1')!;
+    const left = { x: s1.x - 5, y: s1.y + 40 };
+    expect(blockAt(doc, left)).toBeNull();
+    expect(blockAt(doc, left, 8)).toBe('s1');
+    const { cx, cy } = doc.placement.sphere;
+    expect(blockAt(doc, { x: cx + SPHERE_R + 5, y: cy })).toBeNull();
+    expect(blockAt(doc, { x: cx + SPHERE_R + 5, y: cy }, 8)).toBe('wf');
+  });
+});
+```
+
+`src/design/rules.test.ts` (append inside `describe('canJoin (plan 7)', ...)`):
+
+```ts
+  it('labels the tail on its own step', () => expect(dropLabel('here', false)).toBe('starts here'));
+```
+
+`src/design/useWireGestures.test.tsx` (append inside `describe('wire gestures', ...)`):
+
+```ts
+  it('the tail over its own step says "starts here" in green, and dropping there changes nothing', async () => {
+    const doc = await three();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="source"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('starts here');
+    expect(nodeClass(container, 's1')).toContain('drop-ok');
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('an end reaching a step border from outside is already over it: the head 5 px left of a step re-attaches there', async () => {
+    const doc = await three();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const s3 = doc.placement.steps.get('s3')!;
+    const near = { x: s3.x - 5, y: s3.y + 96 };
+    fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, near), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('re-attach here');
+    expect(nodeClass(container, 's3')).toContain('drop-ok');
+    fireEvent.pointerUp(document, { ...screenOf(container, near), pointerId: 1 });
+    expect(vi.mocked(design.onCommit).mock.calls[0]![1]).toEqual({ picks: [{ kind: 'wire', id: 's1->s3' }] });
+  });
+```
+
+`e2e/designer.spec.ts` (append; it runs in Task 8):
+
+```ts
+test('a dragged tail over its own step is told "starts here"; a head 5 px short of a step border is already over it', async ({ page }) => {
+  const panel = await open(page);
+  const { a, b, c } = chain!;
+  const id = `${a}->${b}`;
+  await zoomInOn(page, panel, id);
+  let p = await pointOnWire(panel, id);
+  await page.mouse.click(p.x, p.y);
+  const tail = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="source"]`));
+  const own = await centreOf(node(panel, a).locator('.nx-sn'));
+  await page.mouse.move(tail.x, tail.y);
+  await page.mouse.down();
+  await page.mouse.move(own.x, own.y, { steps: 8 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('starts here');
+  await expect(node(panel, a)).toHaveClass(/drop-ok/);
+  await page.mouse.up();
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+  p = await pointOnWire(panel, id);
+  await page.mouse.click(p.x, p.y);
+  const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+  const cb = (await node(panel, c).boundingBox())!;
+  await page.mouse.move(head.x, head.y);
+  await page.mouse.down();
+  await page.mouse.move(cb.x - 5, cb.y + cb.height / 2, { steps: 8 });
+  await expect(node(panel, c)).toHaveClass(/drop-(ok|no)/);
+  await expect(panel.locator('.design-drop-label')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+});
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `npx vitest run src/design`
+Expected: the four new unit tests FAIL.
+
+- [ ] **Step 3: Implement**
+
+`hit.ts`, `blockAt`:
+
+```ts
+/** The step or the hub under a point (a wire end may be dropped on them), or null; `reach` grows each block on every side. */
+export function blockAt(doc: StudioDocument, p: Point, reach = 0): string | null {
+  for (const [id, at] of doc.placement.steps) {
+    if (p.x >= at.x - reach && p.x <= at.x + STEP_W + reach && p.y >= at.y - reach && p.y <= at.y + STEP_H + reach) return id;
+  }
+  const { cx, cy } = doc.placement.sphere;
+  return Math.hypot(p.x - cx, p.y - cy) <= SPHERE_R + reach ? SPHERE_NODE_ID : null;
+}
+```
+
+`useWireGestures.ts`:
+- `freeEnd(p, end, boxes, reach = 0)`: its box test becomes `p.x >= x.x - reach && p.x <= x.x + x.w + reach && p.y >= x.y - reach && p.y <= x.y + x.h + reach`.
+- In `dropGesture`: `over = blockAt(shown.current, p, DROP_REACH / getZoom());`. Every `path` given by `startEnd`, `startNew` (and in Task 7 `startArrow`) calls `freeEnd(p, ..., boxes, DROP_REACH / getZoom())`.
+- `dropGesture` option `selfWhy?: 'move' | 'here'`; the own-block hint becomes `setHint({ id: over, line: false, ok: true, why: o.selfWhy ?? 'move', newWire, at: p })`.
+- `startEnd` for the source end passes `onSelf: () => {}` and `selfWhy: 'here'` (the start is fixed to its step's output port, so dropping it back changes nothing).
+
+`rules.ts`: `dropLabel` accepts `'here'` (`case 'here': return 'starts here';`); its parameter type and `DropHint.why` become `DropVerdict | 'move' | 'here' | JoinVerdict | Refusal`.
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `npx vitest run src/design src/canvas`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/WorkflowStudio/src/design src/WorkflowStudio/e2e/designer.spec.ts
+git commit -m "feat(studio): every dragged end is told where it may drop, from 8 px out; the tail on its own step says starts here (plan 7)"
 ```
 
 ---
@@ -1297,7 +1447,7 @@ Add `openWorkflow`, `workflowsWithSteps`, `type LiveWorkflow` to the `./studio` 
 - [ ] **Step 2: Run on the dev server**
 
 Run (PowerShell, `src/WorkflowStudio`; BaseApi port-forward `localhost:18080` must be up): `npx playwright test e2e/designer.spec.ts`
-Expected: all designer tests PASS (13).
+Expected: all designer tests PASS (14).
 
 - [ ] **Step 3: Fix any failure at its root (systematic-debugging), then run the whole suite**
 

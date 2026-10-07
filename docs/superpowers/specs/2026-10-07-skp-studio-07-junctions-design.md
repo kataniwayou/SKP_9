@@ -107,7 +107,7 @@ its own line and branch.
 Drag a picked wire's **arrow end square** (or a joined wire's contact square, §6.2) over another wire's line.
 
 - **What the pointer is over**: a block under the pointer wins (the end drag rules of plan 4 apply). Otherwise a
-  wire line within 6 screen px is the drop target; the nearest line wins.
+  wire line within 8 screen px is the drop target; the nearest line wins.
 - **While dragging**: the line under the pointer gets a halo, green when the drop is allowed and red when not, and
   the label next to the pointer says "join here", or why not: "other colour", "same wire", "would make a loop".
   The dragged wire previews live: its own line to a dot on the line, the split dot and its branch.
@@ -117,6 +117,15 @@ Drag a picked wire's **arrow end square** (or a joined wire's contact square, §
 - **Only an arrow end joins.** A start square over a line shows "start stays on a block" in red and snaps back.
 - **A new wire** drawn from a connection point must still end on a step; over a line its label says "drop on a
   step" (red). It can be joined afterwards by dragging its arrow end.
+
+### 6.1a The same feedback for every dragged end (user, 2026-10-07)
+
+Every dragged end (a plain wire's head or tail, a joined wire's contact or arrow, a new wire) is told where it
+may drop, the same way: over an allowed place a green outline (block) or halo (line) and a label saying what the
+drop does; over a refused place red, with the reason. A step, the hub and a line already count as under the
+pointer from **8 screen px outside** their border (one reach for all), so the notice comes as the end reaches the
+contact point. A tail over its own step shows green "starts here" (its start is fixed to the step's output port,
+so the drop changes nothing); a head over its own step keeps green "move contact here".
 
 ### 6.2 Handles of a picked joined wire
 
