@@ -43,13 +43,13 @@ export function itemsInRect(doc: StudioDocument, r: FlowRect): Pick[] {
   return picks;
 }
 
-/** The step or the hub under a point (a wire end may be dropped on them), or null. */
-export function blockAt(doc: StudioDocument, p: Point): string | null {
+/** The step or the hub under a point (a wire end may be dropped on them), or null; `reach` grows each block on every side. */
+export function blockAt(doc: StudioDocument, p: Point, reach = 0): string | null {
   for (const [id, at] of doc.placement.steps) {
-    if (p.x >= at.x && p.x <= at.x + STEP_W && p.y >= at.y && p.y <= at.y + STEP_H) return id;
+    if (p.x >= at.x - reach && p.x <= at.x + STEP_W + reach && p.y >= at.y - reach && p.y <= at.y + STEP_H + reach) return id;
   }
   const { cx, cy } = doc.placement.sphere;
-  return Math.hypot(p.x - cx, p.y - cy) <= SPHERE_R ? SPHERE_NODE_ID : null;
+  return Math.hypot(p.x - cx, p.y - cy) <= SPHERE_R + reach ? SPHERE_NODE_ID : null;
 }
 
 /** The wire line nearest `p` within `tolerance` (flow units), and how far along its drawn line (own line, then branch); plan 7. */

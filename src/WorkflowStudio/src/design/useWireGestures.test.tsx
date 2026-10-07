@@ -474,4 +474,30 @@ describe('wire gestures', () => {
     fireEvent.pointerUp(document, { ...screenOf(container, target), pointerId: 1 });
     expect(design.onCommit).not.toHaveBeenCalled();
   });
+
+  it('the tail over its own step says "starts here" in green, and dropping there changes nothing', async () => {
+    const doc = await three();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="source"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('starts here');
+    expect(nodeClass(container, 's1')).toContain('drop-ok');
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('an end reaching a step border from outside is already over it: the head 5 px left of a step re-attaches there', async () => {
+    const doc = await three();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const s3 = doc.placement.steps.get('s3')!;
+    const near = { x: s3.x - 5, y: s3.y + 96 };
+    fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, near), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('re-attach here');
+    expect(nodeClass(container, 's3')).toContain('drop-ok');
+    fireEvent.pointerUp(document, { ...screenOf(container, near), pointerId: 1 });
+    expect(vi.mocked(design.onCommit).mock.calls[0]![1]).toEqual({ picks: [{ kind: 'wire', id: 's1->s3' }] });
+  });
 });

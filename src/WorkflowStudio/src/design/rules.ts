@@ -54,10 +54,11 @@ export function canJoin(shown: StudioDocument, wire: string, host: string): Join
 }
 
 /** What the pointer's label says over a block while a wire end or a new wire is dragged (plan 4 trial). */
-export function dropLabel(verdict: DropVerdict | 'move' | JoinVerdict | Refusal, newWire: boolean, line = false): string {
+export function dropLabel(verdict: DropVerdict | 'move' | 'here' | JoinVerdict | Refusal, newWire: boolean, line = false): string {
   switch (verdict) {
     case 'ok': return line ? 'join here' : newWire ? 'connect here' : 're-attach here';
     case 'move': return 'move contact here';
+    case 'here': return 'starts here';
     case 'cycle': return 'would make a loop';
     case 'loop': return 'would make a loop';
     case 'duplicate': return 'already wired';

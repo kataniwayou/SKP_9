@@ -73,4 +73,6 @@ describe('canJoin (plan 7)', () => {
     expect(dropLabel('needStep', true, true)).toBe('drop on a step');
     expect(dropLabel('ok', false)).toBe('re-attach here');
   });
+
+  it('labels the tail on its own step', () => expect(dropLabel('here', false)).toBe('starts here'));
 });

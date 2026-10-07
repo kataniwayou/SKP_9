@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
+import { SPHERE_R } from '../layout/geometry';
 import { blockAt, itemsInRect, rectOf, topLeftOf, wireAt } from './hit';
 
 const two = () => loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
@@ -34,5 +35,18 @@ describe('wireAt (plan 7)', () => {
     expect(wireAt(doc, mid, 6)).toEqual({ id: 's1->s2', at: (bx - ax) / 2 });
     expect(wireAt(doc, { x: mid.x, y: ay + 40 }, 6)).toBeNull();
     expect(wireAt(doc, mid, 6, 's1->s2')).toBeNull();
+  });
+});
+
+describe('blockAt reach (plan 7, one drop reach)', () => {
+  it('counts a point just outside a step or the hub only with a reach', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1'), stepDto('s2')] }));
+    const s1 = doc.placement.steps.get('s1')!;
+    const left = { x: s1.x - 5, y: s1.y + 40 };
+    expect(blockAt(doc, left)).toBeNull();
+    expect(blockAt(doc, left, 8)).toBe('s1');
+    const { cx, cy } = doc.placement.sphere;
+    expect(blockAt(doc, { x: cx + SPHERE_R + 5, y: cy })).toBeNull();
+    expect(blockAt(doc, { x: cx + SPHERE_R + 5, y: cy }, 8)).toBe('wf');
   });
 });

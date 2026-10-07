@@ -349,3 +349,32 @@ test('a dragged wire end lands on a step\'s border, never inside; on its own ste
   expect(await blocksCrossed(panel, id)).toEqual([]);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
+
+test('a dragged tail over its own step is told "starts here"; a head 5 px short of a step border is already over it', async ({ page }) => {
+  const panel = await open(page);
+  const { a, b, c } = chain!;
+  const id = `${a}->${b}`;
+  await zoomInOn(page, panel, id);
+  let p = await pointOnWire(panel, id);
+  await page.mouse.click(p.x, p.y);
+  const tail = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="source"]`));
+  const own = await centreOf(node(panel, a).locator('.nx-sn'));
+  await page.mouse.move(tail.x, tail.y);
+  await page.mouse.down();
+  await page.mouse.move(own.x, own.y, { steps: 8 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('starts here');
+  await expect(node(panel, a)).toHaveClass(/drop-ok/);
+  await page.mouse.up();
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+  p = await pointOnWire(panel, id);
+  await page.mouse.click(p.x, p.y);
+  const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+  const cb = (await node(panel, c).boundingBox())!;
+  await page.mouse.move(head.x, head.y);
+  await page.mouse.down();
+  await page.mouse.move(cb.x - 5, cb.y + cb.height / 2, { steps: 8 });
+  await expect(node(panel, c)).toHaveClass(/drop-(ok|no)/);
+  await expect(panel.locator('.design-drop-label')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+});
