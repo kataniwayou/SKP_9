@@ -210,7 +210,8 @@ export function useWireGestures(
     }, (cancelled, moved) => {
       setPreview(null);
       if (cancelled || !moved) return;
-      const ty = latest.landing !== null ? targetY + latest.landing : ends.ty;
+      // a joined wire's own line ends at its contact: its landing is the branch's, not this line's
+      const ty = wire.joint ? ends.ty : latest.landing !== null ? targetY + latest.landing : ends.ty;
       const tidy = latest.bends ? normalize({ ...ends, ty }, latest.bends) : null;
       const next = setShape(base, wire.id, { bends: tidy, landing: latest.landing, contact });
       // dragged back where it was: no step

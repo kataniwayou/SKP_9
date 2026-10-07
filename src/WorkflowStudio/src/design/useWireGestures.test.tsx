@@ -9,6 +9,7 @@ import { clampLanding, LANDING_MAX, LANDING_MIN, STEP_H, STEP_W, type Point } fr
 import { EMPTY_DRAFT, addWire, reattach, resetRoute, setShape } from './draft';
 import { endsOf, pointsOfShape } from '../layout/shape';
 import type { DesignProps } from './designProps';
+import { applyDraft } from './apply';
 
 const fitter = createTextFitter((t) => t.length * 7);
 const designOf = (over: Partial<DesignProps> = {}): DesignProps => ({ draft: EMPTY_DRAFT, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), ...over });
@@ -568,6 +569,27 @@ describe('wire gestures', () => {
     const [next, picks] = vi.mocked(design.onCommit).mock.calls[0]!;
     expect(picks).toEqual({ picks: [{ kind: 'wire', id: 's3->s2' }] });
     expect(next.routes['s3->s2']!.contact).toEqual({ host: 's1->s2', at: 40 });
+  });
+
+  it('a run drag on a joined wire with a slid landing is committed against its contact, not its landing height', async () => {
+    const doc = await joinable();
+    const draft = setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: 40, contact: { host: 's1->s2', at: 40 } });
+    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const joint = applyDraft(doc, draft).wires.find((w) => w.id === 's3->s4')!.joint!;
+    // the own line's one vertical run, from its start's height up to the contact
+    const climb = joint.own[1]![0];
+    // the first run dragged level with the target's slid landing: a jog, then the climb to the contact stays
+    const level = doc.placement.steps.get('s4')!.y + 40;
+    fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s3->s4"] .design-handle.seg[data-k="0"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: joint.ownEnds.sx + 8, y: level }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: joint.ownEnds.sx + 8, y: level }), pointerId: 1 });
+    const shape = vi.mocked(design.onCommit).mock.calls[0]![0].routes['s3->s4']!;
+    expect(shape.bends!.ys).toEqual([level]);
+    expect(shape.bends!.xs).toHaveLength(2);
+    expect(shape.bends!.xs[1]).toBe(climb);
+    expect(shape.contact).toEqual({ host: 's1->s2', at: 40 });
+    expect(shape.landing).toBe(40);
   });
 
   it('Reset route removes the junction', async () => {
