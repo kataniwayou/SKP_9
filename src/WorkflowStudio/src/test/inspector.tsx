@@ -7,6 +7,7 @@ import { loadedDocument } from '../app/fixtures';
 import { createInspectorService } from '../app/inspectorService';
 import { StudioActionsProvider, type StudioActions } from '../app/studioActions';
 import { Inspector } from '../panels/Inspector';
+import type { Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { createStudioStore, StudioStoreProvider } from '../store/studioStore';
 
@@ -18,11 +19,11 @@ export const inspectorGraph = graphDto({
 } as never);
 
 /** Tests only: the Inspector over a loaded document, a real service on `api`, and a guard that records. */
-export async function renderInspector(api: Partial<StudioApi>, { selection, graph = inspectorGraph }: { selection: Selection; graph?: WorkflowGraphDto }) {
+export async function renderInspector(api: Partial<StudioApi>, { selection, picks, graph = inspectorGraph }: { selection: Selection | null; picks?: Pick[]; graph?: WorkflowGraphDto }) {
   const store = createStudioStore();
   store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
   store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graph) });
-  store.dispatch({ type: 'select', workflowId: 'wf1', selection });
+  store.dispatch({ type: 'select', workflowId: 'wf1', selection, picks });
   const full = {
     getEntity: vi.fn().mockResolvedValue(notFound), putEntity: vi.fn().mockResolvedValue(notFound),
     createAssignment: vi.fn().mockResolvedValue(notFound),

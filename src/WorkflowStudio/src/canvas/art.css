@@ -104,3 +104,9 @@
   .nx-spin, .nx-wait, .wf.nx-idlewf .hub-inner { animation: none; }
   .nx-pulse { display: none; }
 }
+
+/* plan 4: picked blocks drawn like the selection; a picked wire gets a halo */
+.studio-pick:not(.studio-die-sel) .blk.nx .nx-frame { stroke: var(--accent); stroke-width: 2; }
+.studio-pick .wf.nx .sphere { filter: url(#glow); }
+.studio-pick .cachetag.nx .nx-brk { stroke: var(--accent); stroke-width: 1.8; }
+.wire.picked .w { stroke-width: 2.6; filter: drop-shadow(0 0 3px var(--accent)); }

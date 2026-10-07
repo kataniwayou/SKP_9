@@ -389,7 +389,7 @@ describe('DocumentPanel', () => {
 
     fireEvent.click((await screen.findByText('fetch')).closest('.react-flow__node')!);
 
-    expect(onSelect).toHaveBeenCalledWith({ kind: 'step', stepId: 's1' }, document);
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'step', stepId: 's1' }, document, [{ kind: 'node', id: 's1' }]);
     expect(store.getState().docs[0]!.selection).toBeNull();
     await screen.findByText('■ stopped');
   });

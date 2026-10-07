@@ -32,3 +32,14 @@
 .zoom button:hover { background: var(--line); }
 .zoom button.fit { width: 38px; font-size: 11px; font-family: var(--sans); }
 .zoom output { font-family: var(--mono); font-size: 12px; width: 52px; text-align: center; color: var(--muted); }
+
+/* plan 4 (spec §3.1): an arrow off the blocks and on the scroll bars, a hand on blocks and wires, a closed hand while dragging */
+.studio-canvas .react-flow__pane, .studio-canvas .react-flow__pane.draggable, .studio-canvas .react-flow__pane.selection { cursor: default; }
+.studio-canvas .react-flow__pane.dragging { cursor: grabbing; }
+.studio-canvas .react-flow__node, .studio-canvas .react-flow__node.draggable { cursor: pointer; }
+.studio-canvas .react-flow__node.draggable.dragging, .studio-canvas.gesture, .studio-canvas.gesture * { cursor: grabbing !important; }
+.sb .th { cursor: default; }
+.studio-canvas .nx-hit { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
+.studio-canvas:focus { outline: none; }
+.design-overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.design-band { fill: rgba(125, 211, 252, .08); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; }

@@ -19,6 +19,7 @@ import { Inspector } from './panels/Inspector';
 import { Output, Toolbox } from './panels/PaneNote';
 import { Problems } from './panels/Problems';
 import { hasEdits } from './store/inspector';
+import type { Pick } from './store/picks';
 import { selectionKey, type Selection } from './store/selection';
 import { inspectorKey, shownTargetOf } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
@@ -227,11 +228,15 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
           <DocumentPanel api={api} workflowId={id} panel={panel}
             initialView={views.current.get(id) ?? null}
             onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }}
-            onSelect={(selection: Selection | null, doc: Document) => {
+            onSelect={(selection: Selection | null, doc: Document, picks?: Pick[]) => {
               store.dispatch({ type: 'activate', workflowId: id });
               const open = store.getState().docs.find((d) => d.workflowId === id);
-              if (open && selectionKey(open.selection) === selectionKey(selection)) return;
-              actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection }), doc);
+              // the same entity: only the picks change, and the Inspector has nothing to ask
+              if (open && selectionKey(open.selection) === selectionKey(selection)) {
+                if (picks) store.dispatch({ type: 'pick', workflowId: id, picks });
+                return;
+              }
+              actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection, picks }), doc);
             }}
             onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }}
             onSave={() => void service.save(id)} />

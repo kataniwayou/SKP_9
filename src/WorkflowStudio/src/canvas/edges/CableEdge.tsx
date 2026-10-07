@@ -1,5 +1,6 @@
-import { useId, type CSSProperties } from 'react';
+import { useContext, useId, type CSSProperties } from 'react';
 import type { Edge, EdgeProps } from '@xyflow/react';
+import { DesignContext } from '../../design/DesignContext';
 import type { Pt } from '../../layout/router';
 import { useLiveArt } from '../liveArt';
 import { longestSegmentMiddle, pathOf } from '../svgPath';
@@ -10,6 +11,8 @@ export type CableEdgeData = {
   broken: boolean;
   /** The pulse's animation delay in seconds (≤ 0), so the wires do not pulse in step. */
   delay: number;
+  /** Picked in design mode (plan 4): drawn with a halo. */
+  picked?: boolean;
 };
 export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
 
@@ -19,7 +22,7 @@ export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
  * Broken: dashed, with a soft transparent gap cut at the middle of the longest segment and ⚠ in it.
  * While `flowing` (the workflow is started) an intact wire carries a pulse toward its target.
  */
-export function CableEdgeView({ points, colour, broken, delay, flowing }: CableEdgeData & { flowing: boolean }) {
+export function CableEdgeView({ points, colour, broken, delay, picked, flowing }: CableEdgeData & { flowing: boolean }) {
   const gap = `nxgap${useId().replace(/[^\w-]/g, '')}`;
   const d = pathOf(points);
   const [sx, sy] = points[0]!;
@@ -35,7 +38,7 @@ export function CableEdgeView({ points, colour, broken, delay, flowing }: CableE
   );
 
   return (
-    <g className={broken ? 'wire broken' : 'wire'} style={{ '--nc': colour } as CSSProperties}>
+    <g className={`${broken ? 'wire broken' : 'wire'}${picked ? ' picked' : ''}`} style={{ '--nc': colour } as CSSProperties}>
       {mark ? (
         <>
           <defs>
@@ -54,7 +57,15 @@ export function CableEdgeView({ points, colour, broken, delay, flowing }: CableE
   );
 }
 
-export function CableEdge({ data }: EdgeProps<CableEdgeType>) {
+export function CableEdge({ id, data }: EdgeProps<CableEdgeType>) {
   const { started } = useLiveArt();
-  return data ? <CableEdgeView {...data} flowing={started} /> : null;
+  const gestures = useContext(DesignContext);
+  if (!data) return null;
+  return (
+    <>
+      <CableEdgeView {...data} flowing={started} />
+      {/* an invisible band about 8 px wide, so the hand cursor and clicks need no pixel precision (spec §4.1) */}
+      <path className="nx-hit" d={pathOf(data.points)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e) : undefined} />
+    </>
+  );
 }

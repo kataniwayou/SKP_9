@@ -3,8 +3,11 @@ import type { EntityReadDto } from '../api/entities';
 import type { AssignmentReadDto, ProcessorReadDto, StepReadDto } from '../api/types';
 import type { StudioDocument } from '../app/document';
 import { useStudioActions } from '../app/studioActions';
+import { wireEnds } from '../design/draft';
+import { WORKFLOW_SOURCE } from '../layout/ports';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { entityName } from '../model/entityNames';
+import type { Graph } from '../model/graph';
 import { FIELDS, missingRequired, savedText, shownText, type FieldSpec } from '../store/entityForms';
 import { hasEdits } from '../store/inspector';
 import { crumbLabel, entityKindOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
@@ -38,8 +41,23 @@ export function Inspector() {
   if (active === null) return <PaneNote pane="inspector">Open a workflow to inspect it.</PaneNote>;
   if (active.status.kind === 'loading') return <PaneNote pane="inspector">Loading…</PaneNote>;
   if (active.status.kind === 'failed') return <PaneNote pane="inspector">{active.status.message}</PaneNote>;
+  // several picks, or one wire, have no entity to edit (spec §3.3)
+  if (active.picks.length > 1) return <PaneNote pane="inspector">{`${active.picks.length} items selected`}</PaneNote>;
+  const onlyWire = active.picks.length === 1 && active.picks[0]!.kind === 'wire' ? active.picks[0]!.id : null;
+  if (onlyWire !== null) return <PaneNote pane="inspector">{wireNote(active.status.doc.graph, onlyWire)}</PaneNote>;
   if (target === null) return <PaneNote pane="inspector">Nothing selected. Click a step, a processor, a cache or the workflow.</PaneNote>;
   return <EntityPane open={active} doc={active.status.doc} target={target} />;
+}
+
+/** "Wire: {source} → {target}" by unique names (spec §3.3); an id no longer in the graph shows as itself. */
+function wireNote(graph: Graph, id: string): string {
+  const { source, target } = wireEnds(id);
+  const name = (stepId: string) => {
+    if (stepId === WORKFLOW_SOURCE) return entityName(graph.workflow.name, graph.workflow.version, graph.workflow.id);
+    const s = graph.steps.get(stepId);
+    return s ? entityName(s.name, s.version, s.id) : stepId;
+  };
+  return `Wire: ${name(source)} → ${name(target)}`;
 }
 
 function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocument; target: InspectorTarget }) {

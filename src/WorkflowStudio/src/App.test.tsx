@@ -312,6 +312,15 @@ describe('unsaved Inspector edits (slice 3b)', () => {
     expect(document.querySelector('.doctab.dirty')).not.toBeNull();
   });
 
+  it('a click with unsaved Inspector edits asks before the picks move (review focus 5)', async () => {
+    render(<App api={withEntities({ getEntity: vi.fn().mockResolvedValue({ ok: true, value: stepDto('s1') }) })} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
+    expect(await screen.findByText('● unsaved changes', { selector: '.inspector *, [data-pane="inspector"] *' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByText('WORKFLOW'));
+    expect(await dialog()).toBeInTheDocument();
+    expect(document.querySelector('.react-flow__node[data-id="wf"]')!.className).not.toContain('studio-pick');
+    expect(document.querySelector('.react-flow__node[data-id="s1"]')!.className).toContain('studio-pick');
+  });
+
   it('asks before Escape drops a selection with unsaved edits: Cancel keeps, Discard drops', async () => {
     render(<App api={withEntities()} storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
     await screen.findByLabelText('Description');

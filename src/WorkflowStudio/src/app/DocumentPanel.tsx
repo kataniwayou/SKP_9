@@ -8,6 +8,7 @@ import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import { missingRequired } from '../store/entityForms';
 import { hasEdits } from '../store/inspector';
 import { entityKindOf, targetKey } from '../store/inspectorTarget';
+import type { Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
@@ -29,9 +30,9 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   onViewChange?: (view: SavedView) => void;
   /**
    * A click on the canvas, with the window the panel is drawn in (where a dialog opens); the page's
-   * guard. Default: this document is activated and selects it.
+   * guard; in design mode also the picks it made. Default: this document is activated and selects it.
    */
-  onSelect?: (selection: Selection | null, doc: Document) => void;
+  onSelect?: (selection: Selection | null, doc: Document, picks?: Pick[]) => void;
   /** Reads a failed document again; a Retry button shows when given. */
   onRetry?: () => void;
   /** Saves the Inspector's edits (the capsule's Save). */
@@ -63,9 +64,17 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
         live={live}
         initialView={initialView}
         onViewChange={onViewChange}
-        onSelect={onSelect ? (selection) => onSelect(selection, ownerDocument) : (selection) => {
+        design={{
+          draft: open.design.draft,
+          picks: open.picks,
+          onPick: (picks) => store.dispatch({ type: 'pick', workflowId, picks }),
+          onCommit: (draft, o) => store.dispatch({ type: 'design', workflowId, draft, merge: o?.merge, picks: o?.picks }),
+          onUndo: () => store.dispatch({ type: 'undo', workflowId }),
+          onRedo: () => store.dispatch({ type: 'redo', workflowId }),
+        }}
+        onSelect={onSelect ? (selection, picks) => onSelect(selection, ownerDocument, picks) : (selection, picks) => {
           store.dispatch({ type: 'activate', workflowId });
-          store.dispatch({ type: 'select', workflowId, selection });
+          store.dispatch({ type: 'select', workflowId, selection, picks });
         }}
       >
         <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status} dirty={hasEdits(open.inspector)} busy={open.inspector.busy} blocked={blank} onSave={onSave} />

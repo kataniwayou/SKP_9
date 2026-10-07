@@ -3,7 +3,10 @@ import { useStore } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { loadedDocument } from '../app/fixtures';
 import { loadDocument } from '../app/loadDocument';
+import type { DesignProps } from '../design/designProps';
+import { EMPTY_DRAFT } from '../design/draft';
 import { createTextFitter } from './fitText';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { ZoomControls } from './ZoomControls';
@@ -95,6 +98,8 @@ describe('WorkflowCanvas', () => {
         { kind: 'workflow' },
         null,
       ]);
+      // read-only: exactly one argument, as in slice 3a (no picks)
+      expect(onSelect.mock.calls.every((c) => c.length === 1)).toBe(true);
     });
 
     it('marks the selected step, and a selected processor on its own step only', async () => {
@@ -182,6 +187,87 @@ describe('WorkflowCanvas', () => {
         </WorkflowCanvas>,
       );
       await waitFor(() => expect(screen.getByLabelText('Zoom level')).not.toHaveTextContent('150%'));
+    });
+  });
+
+  describe('design mode (plan 4)', () => {
+    const designOf = (over: Partial<DesignProps> = {}): DesignProps => ({ draft: EMPTY_DRAFT, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), ...over });
+    const two = () => loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2', { name: 'store' })] }));
+
+    it('draws the draft over the saved document', async () => {
+      const doc = await two();
+      const s2 = doc.placement.steps.get('s2')!;
+      const draft = { ...EMPTY_DRAFT, steps: { s2: { x: s2.x, y: s2.y + 320 } } };
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ draft })} />);
+      const node = container.querySelector('.react-flow__node[data-id="s2"]') as HTMLElement;
+      expect(node.style.transform).toContain(`${s2.y + 320}px`);
+    });
+
+    it('a click picks one block, Ctrl+click adds, a wire click picks the wire, the pane clears', async () => {
+      const doc = await two();
+      const onSelect = vi.fn();
+      const { container, rerender } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={onSelect} />);
+      fireEvent.click(screen.getByText('fetch'));
+      expect(onSelect).toHaveBeenLastCalledWith({ kind: 'step', stepId: 's1' }, [{ kind: 'node', id: 's1' }]);
+      rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ picks: [{ kind: 'node', id: 's1' }] })} onSelect={onSelect} />);
+      fireEvent.click(screen.getByText('store'), { ctrlKey: true });
+      expect(onSelect).toHaveBeenLastCalledWith(null, [{ kind: 'node', id: 's1' }, { kind: 'node', id: 's2' }]);
+      fireEvent.click(container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!);
+      expect(onSelect).toHaveBeenLastCalledWith(null, [{ kind: 'wire', id: 's1->s2' }]);
+      fireEvent.click(container.querySelector('.react-flow__pane')!);
+      expect(onSelect).toHaveBeenLastCalledWith(null, []);
+    });
+
+    it('marks picked blocks and wires', async () => {
+      const doc = await two();
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ picks: [{ kind: 'node', id: 's2' }, { kind: 'wire', id: 's1->s2' }] })} />);
+      expect(container.querySelector('.react-flow__node[data-id="s2"]')!.className).toContain('studio-pick');
+      expect(container.querySelector('.react-flow__edge[data-id="s1->s2"] .wire')!.getAttribute('class')).toContain('picked');
+    });
+
+    it('a rectangle on empty canvas picks what lies inside; its closing click does not clear them', async () => {
+      const doc = await two();
+      const onSelect = vi.fn();
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={onSelect} />);
+      const pane = container.querySelector('.react-flow__pane')!;
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
+      expect(container.ownerDocument.querySelector('.design-band')).not.toBeNull();
+      fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5 });
+      fireEvent.click(pane);
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      const [selection, picks] = onSelect.mock.calls[0]!;
+      expect(selection).toBeNull();
+      expect(picks).toEqual(expect.arrayContaining([{ kind: 'node', id: 'wf' }, { kind: 'node', id: 's1' }, { kind: 'node', id: 's2' }, { kind: 'wire', id: 's1->s2' }]));
+      expect(container.ownerDocument.querySelector('.design-band')).toBeNull();
+    });
+
+    it('a press on a block or a wire starts no rectangle (both lie inside React Flow\'s pane)', async () => {
+      const doc = await two();
+      const onSelect = vi.fn();
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={onSelect} />);
+      for (const el of [screen.getByText('fetch'), container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!]) {
+        fireEvent.pointerDown(el, { button: 0, clientX: 0, clientY: 0 });
+        fireEvent.pointerMove(document, { clientX: 300, clientY: 300 });
+        expect(container.ownerDocument.querySelector('.design-band')).toBeNull();
+        fireEvent.pointerUp(document, { clientX: 300, clientY: 300 });
+      }
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('a rectangle with Ctrl adds to the picks; a press that does not move is a click', async () => {
+      const doc = await two();
+      const onSelect = vi.fn();
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ picks: [{ kind: 'wire', id: 'gone' }] })} onSelect={onSelect} />);
+      const pane = container.querySelector('.react-flow__pane')!;
+      fireEvent.pointerDown(pane, { button: 0, clientX: 5, clientY: 5 });
+      fireEvent.pointerUp(document, { clientX: 6, clientY: 6 });
+      expect(onSelect).not.toHaveBeenCalled();
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerMove(document, { clientX: 1e5, clientY: 1e5 });
+      fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5, ctrlKey: true });
+      expect(onSelect.mock.calls[0]![1][0]).toEqual({ kind: 'wire', id: 'gone' });
+      expect(onSelect.mock.calls[0]![1]).toContainEqual({ kind: 'node', id: 's2' });
     });
   });
 });

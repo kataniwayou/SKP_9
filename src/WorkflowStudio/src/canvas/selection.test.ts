@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cacheDto, graphDto, processorDto, stepDto } from '../api/fixtures';
 import { graphFromDto } from '../api/toModel';
-import { DIE_SELECTED_CLASS, SELECTED_CLASS, selectionFromClick, withSelection } from './selection';
+import { DIE_SELECTED_CLASS, PICK_CLASS, SELECTED_CLASS, selectionForPicks, selectionFromClick, withPicks, withSelection } from './selection';
 import type { StudioNode } from './toFlow';
 
 const nodes = [{ id: 'wf' }, { id: 's1' }, { id: 's2' }, { id: 'cache:c1' }] as StudioNode[];
@@ -60,5 +60,31 @@ describe('selectionFromClick', () => {
   it('selects nothing for an unknown step or node type', () => {
     expect(selectionFromClick({ id: 'zz', type: 'step' }, outside, graph)).toBeNull();
     expect(selectionFromClick({ id: 'x', type: 'other' }, null, graph)).toBeNull();
+  });
+
+  it('marks picked blocks and wires (plan 4)', () => {
+    const nodes = [{ id: 's1', type: 'step', position: { x: 0, y: 0 }, data: {} }, { id: 's2', type: 'step', position: { x: 0, y: 0 }, data: {} }] as never;
+    const edges = [{ id: 's1->s2', type: 'cable', source: 's1', target: 's2', data: { points: [], colour: '', broken: false, delay: 0 } }] as never;
+    const out = withPicks(nodes, edges, [{ kind: 'node', id: 's2' }, { kind: 'wire', id: 's1->s2' }]);
+    expect(out.nodes.map((n) => [n.selected, n.className])).toEqual([[false, undefined], [true, PICK_CLASS]]);
+    expect(out.edges[0]!.data).toMatchObject({ picked: true });
+  });
+
+  it('ignores picks naming blocks or wires that no longer exist (undo, redo)', () => {
+    const nodes = [{ id: 's1', type: 'step', position: { x: 0, y: 0 }, data: {} }] as never;
+    const out = withPicks(nodes, [], [{ kind: 'node', id: 'gone' }, { kind: 'wire', id: 'gone->s1' }]);
+    expect(out.nodes.map((n) => [n.selected, n.className])).toEqual([[false, undefined]]);
+  });
+
+  it('one picked block stands for its entity; a wire, several or none for nothing (plan 4)', () => {
+    expect(selectionForPicks([{ kind: 'node', id: 'wf' }], null, graph)).toEqual({ kind: 'workflow' });
+    expect(selectionForPicks([{ kind: 'node', id: 'cache:c1' }], null, graph)).toEqual({ kind: 'cache', cacheId: 'c1' });
+    expect(selectionForPicks([{ kind: 'node', id: 's1' }], null, graph)).toEqual({ kind: 'step', stepId: 's1' });
+    const die = { kind: 'processor', processorId: 'p1', stepId: 's1' } as const;
+    expect(selectionForPicks([{ kind: 'node', id: 's1' }], { id: 's1', selection: die }, graph)).toEqual(die);
+    expect(selectionForPicks([{ kind: 'node', id: 'gone' }], null, graph)).toBeNull();
+    expect(selectionForPicks([{ kind: 'wire', id: 's1->s2' }], null, graph)).toBeNull();
+    expect(selectionForPicks([{ kind: 'node', id: 's1' }, { kind: 'node', id: 's2' }], null, graph)).toBeNull();
+    expect(selectionForPicks([], null, graph)).toBeNull();
   });
 });
