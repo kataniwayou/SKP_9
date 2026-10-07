@@ -121,3 +121,18 @@ export async function selectProcessor(page: Page, panel: Locator): Promise<boole
   }
   return false;
 }
+
+/**
+ * Waits until a canvas's view stops moving (a wheel zoom eases in; a resized canvas keeps its centre) and
+ * returns its transform: re-read every 150 ms until two reads in a row match, at most 20 tries.
+ */
+export async function settledView(page: Page, viewport: Locator): Promise<string | null> {
+  let last = await viewport.getAttribute('style');
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(150);
+    const now = await viewport.getAttribute('style');
+    if (now === last) return now;
+    last = now;
+  }
+  throw new Error('the view did not settle: its transform still changed after 20 reads 150 ms apart');
+}

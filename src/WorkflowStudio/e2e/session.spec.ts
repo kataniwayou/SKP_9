@@ -1,4 +1,4 @@
-import { documentPanel, esc, expect, groupOf, inspector, liveWorkflows, openWorkflow, tab, test, type LiveWorkflow } from './studio';
+import { documentPanel, esc, expect, groupOf, inspector, liveWorkflows, openWorkflow, settledView, tab, test, type LiveWorkflow } from './studio';
 
 // Spec §6.1 (amended 2026-10-06): a refresh keeps the documents, the dock and each drawing's view. Read-only.
 let workflows: LiveWorkflow[];
@@ -24,10 +24,7 @@ test('a refresh brings back the open workflows, the active tab, each selection a
   await expect(page.locator('[data-rt="problems"]')).toBeVisible();
   // the canvas grows when Problems hides (then gives back its strip's height) and keeps its centre: the view
   // as left is the one it settles at
-  const viewport = panelB.locator('.react-flow__viewport');
-  let transform: string | null;
-  let now = await viewport.getAttribute('style');
-  do { transform = now; await page.waitForTimeout(150); now = await viewport.getAttribute('style'); } while (now !== transform);
+  const transform = await settledView(page, panelB.locator('.react-flow__viewport'));
 
   await page.reload();
 

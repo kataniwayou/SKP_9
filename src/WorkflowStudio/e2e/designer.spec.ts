@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { documentPanel, expect, inspector, openWorkflow, tab, test, workflowsWithSteps, type LiveWorkflow } from './studio';
+import { documentPanel, expect, inspector, openWorkflow, settledView, tab, test, workflowsWithSteps, type LiveWorkflow } from './studio';
 
 // Plan 4: the designer is a trial; nothing it does may write (studio.ts's read-only guard checks every
 // request). Each test starts from an empty session and works on a live workflow with a chain a -> b -> c
@@ -106,9 +106,7 @@ async function zoomInOn(page: Page, panel: Locator, id: string | { x: number; y:
   await page.keyboard.up('Control');
   await expect.poll(async () => Number((await page.getByRole('status', { name: 'Zoom level' }).first().textContent())?.replace('%', ''))).toBeGreaterThan(70);
   // the wheel zoom eases in: wait until the view stops moving, or a handle's position is read mid-move
-  const transform = () => panel.locator('.react-flow__viewport').getAttribute('style');
-  let last = await transform();
-  await expect.poll(async () => { const now = await transform(); const still = now === last; last = now; return still; }, { intervals: [150] }).toBe(true);
+  await settledView(page, panel.locator('.react-flow__viewport'));
 }
 
 async function open(page: Page): Promise<Locator> {
