@@ -171,10 +171,11 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         return { ...i, edits, busy: false, failure: null, readError: null, saved: { key: action.key, dto: action.dto } };
       });
     case 'created':
-      // keeps the token: the link that follows may still fail, and says so on the new assignment
+      // stays busy under the same token: the link that follows is still part of this write. It ends with its own
+      // busy false, or a saveFailed that says on the new assignment why it is not linked. Typing goes on meanwhile.
       return inspect(state, action.workflowId, (i) => (i.write !== action.write ? i : {
         ...EMPTY_INSPECTOR, trail: [...i.trail.slice(0, -1), action.target], saved: { key: targetKey(action.target), dto: action.dto },
-        edits: without(i.edits, (key, text) => action.sent[key] === text), write: action.write,
+        edits: without(i.edits, (key, text) => action.sent[key] === text), busy: true, write: action.write,
       }));
     case 'refreshed':
       return update(state, action.workflowId, (d) => (d.status.kind !== 'ready' ? d : {

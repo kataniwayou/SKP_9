@@ -220,6 +220,40 @@ describe('InspectorService', () => {
     expect(afterWrite).toHaveBeenCalledTimes(1);
   });
 
+  it('after created, Save is refused until the link settles; a failed link still says so and keeps the typed text', async () => {
+    let answer!: (r: ApiResult<unknown>) => void;
+    const getEntity = vi.fn().mockReturnValue(new Promise((r) => { answer = r; }));
+    const putEntity = vi.fn();
+    const { store, service, afterWrite, inspector } = await setup({
+      createAssignment: vi.fn().mockResolvedValue(ok(assignmentDto('a9', { stepId: 's1' }))), getEntity, putEntity,
+    });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'step-s1' } });
+    service.read('wf1');
+    const creating = service.create('wf1');
+    await flush();
+    expect(inspector()).toMatchObject({ trail: [{ kind: 'assignment', id: 'a9', stepId: 's1' }], busy: true });
+    store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
+    expect(await service.save('wf1')).toBe(false);
+    expect(await service.unlink('wf1')).toBe(false);
+    expect(getEntity).toHaveBeenCalledTimes(1);
+    answer({ ok: false, error: { kind: 'network', message: 'down' } });
+    expect(await creating).toBe(false);
+    expect(putEntity).not.toHaveBeenCalled();
+    expect(inspector()).toMatchObject({ busy: false, edits: { description: 'typed' }, failure: { banner: 'Created but not linked to this workflow: Network error: down' } });
+    expect(afterWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it('a create that links clears busy once the link is done', async () => {
+    const { store, service, inspector } = await setup({
+      createAssignment: vi.fn().mockResolvedValue(ok(assignmentDto('a9'))),
+      getEntity: vi.fn().mockResolvedValue(ok(workflowDto())), putEntity: vi.fn().mockResolvedValue(ok(workflowDto({ assignmentIds: ['a9'] }))),
+    });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'step-s1' } });
+    service.read('wf1');
+    expect(await service.create('wf1')).toBe(true);
+    expect(inspector()).toMatchObject({ busy: false, failure: null });
+  });
+
   it('an assignment answer without an id is a failure and links nothing', async () => {
     const putEntity = vi.fn();
     const { store, service, inspector } = await setup({

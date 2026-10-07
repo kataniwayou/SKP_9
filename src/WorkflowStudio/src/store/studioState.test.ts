@@ -177,7 +177,7 @@ describe('the Inspector (slice 3b)', () => {
     s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed meanwhile', saved: '' });
     s = reduce(s, { type: 'created', workflowId: 'wf1', write: 1, target: { kind: 'assignment', id: 'a9', stepId: 's1' },
       sent: { payload: '{"k":1}' }, dto: { id: 'a9', stepId: 's1', payload: '{"k":1}' } as never });
-    expect(insp(s)).toMatchObject({ trail: [{ kind: 'assignment', id: 'a9', stepId: 's1' }], edits: { description: 'typed meanwhile' }, busy: false });
+    expect(insp(s)).toMatchObject({ trail: [{ kind: 'assignment', id: 'a9', stepId: 's1' }], edits: { description: 'typed meanwhile' }, busy: true });
   });
 
   it('a back carrying a write token applies only while that write is current; a back from the user always applies', () => {
@@ -209,6 +209,18 @@ describe('the Inspector (slice 3b)', () => {
     s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
     s = reduce(s, { type: 'created', workflowId: 'wf1', write: 2, target: { kind: 'assignment', id: 'a9', stepId: 's1' }, sent: {}, dto: { id: 'a9' } as never });
     expect(insp(s)).toMatchObject({ busy: false, write: null, trail: [{ kind: 'processor', id: 'p1' }] });
+  });
+
+  it('after created the Inspector stays busy until the link settles; only its own busy false clears it', () => {
+    let s = opened();
+    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'fetch' } });
+    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
+    s = reduce(s, { type: 'created', workflowId: 'wf1', write: 1, target: { kind: 'assignment', id: 'a9', stepId: 's1' }, sent: {}, dto: { id: 'a9' } as never });
+    expect(insp(s)).toMatchObject({ busy: true, write: 1 });
+    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: false, write: 2 });
+    expect(insp(s).busy).toBe(true);
+    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: false, write: 1 });
+    expect(insp(s).busy).toBe(false);
   });
 
   it('a link that fails after created still shows its failure on the new assignment', () => {

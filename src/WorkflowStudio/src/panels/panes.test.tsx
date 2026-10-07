@@ -217,6 +217,26 @@ describe('Inspector editing (slice 3b)', () => {
     expect(await screen.findByText('ASSIGNMENT')).toBeInTheDocument();
   });
 
+  it('a created assignment keeps Save and Unlink disabled until it is linked; a failed link says so and keeps the typed text', async () => {
+    const created = assignmentDto('a9', { name: 'fetch-assignment', stepId: 's1' });
+    let answer!: (r: unknown) => void;
+    const linking = new Promise((r) => { answer = r; });
+    const getEntity = vi.fn(async (kind: string) => (kind === 'workflow' ? linking : ok(kind === 'step' ? step : created)));
+    const putEntity = vi.fn();
+    await renderInspector({ getEntity, putEntity, createAssignment: vi.fn().mockResolvedValue(ok(created)) } as never, { selection: { kind: 'step', stepId: 's1' } });
+    fireEvent.click(await screen.findByRole('button', { name: '＋ Add assignment' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create' }));
+    expect(await screen.findByText('ASSIGNMENT')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'typed' } });
+    expect(screen.getByRole('button', { name: 'Unlink from this workflow' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+    await act(async () => answer({ ok: false, error: { kind: 'network', message: 'down' } }));
+    expect(await screen.findByText('Created but not linked to this workflow: Network error: down')).toBeInTheDocument();
+    expect(screen.getByLabelText('Description')).toHaveValue('typed');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(putEntity).not.toHaveBeenCalled();
+  });
+
   it('the new-assignment form cancels back to its step', async () => {
     await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
     fireEvent.click(await screen.findByRole('button', { name: '＋ Add assignment' }));
