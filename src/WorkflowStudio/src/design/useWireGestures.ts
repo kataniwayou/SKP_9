@@ -10,15 +10,18 @@ import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WireRoute } from '../layout/
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
 import { addWire, reattach, setShape, wireId, type Draft } from './draft';
-import { blockAt } from './hit';
-import { canWire, type DropVerdict } from './rules';
+import { blockAt, wireAt } from './hit';
+import { canJoin, canWire, type DropVerdict, type JoinVerdict, type Refusal } from './rules';
 
-/** The block under a dragged wire end: its outline (ok), why (the drop rule's verdict) and where the pointer is, for the label. */
+/** The block or line under a dragged wire end: its outline or halo (ok), why (the drop rule's verdict) and where the pointer is, for the label. */
 export interface DropHint {
+  /** The block (node id) or, when `line`, the wire under the pointer. */
   id: string;
+  /** Over a wire's line, not a block (plan 7). */
+  line: boolean;
   ok: boolean;
   /** 'move': a wire end back on its own step slides its contact point there. */
-  why: DropVerdict | 'move';
+  why: DropVerdict | 'move' | JoinVerdict | Refusal;
   /** A new wire, not a re-attached end: an allowed drop says "connect here". */
   newWire: boolean;
   /** The pointer, in flow coordinates. */
@@ -55,6 +58,9 @@ function draggedRun(n: number, k: number): { vertical: boolean; index: number } 
 
 /** Below this many screen pixels a press is a click, not a drag. */
 const MOVE_START = 3;
+
+/** How far outside a block's border or a line (screen px) a dragged end already counts as over it. */
+const DROP_REACH = 8;
 
 export interface Gesture {
   run: (e: ReactPointerEvent, onMove: (p: Point) => void, onEnd: (cancelled: boolean, moved: boolean) => void) => void;
@@ -153,7 +159,7 @@ export function useWireGestures(
 ) {
   const [active, setActive] = useState(false);
   const { run, abort, running } = useGesture(setActive);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getZoom } = useReactFlow();
   // the dragged end's line, and the outline of the block under it (spec §4.4)
   const [ghost, setGhost] = useState<WireGhost | null>(null);
   const [hint, setHint] = useState<DropHint | null>(null);
@@ -204,31 +210,60 @@ export function useWireGestures(
     });
   };
 
+  /** What a line under a dragged arrow end does (plan 7 §6.1): joins it when the rule allows. */
+  interface LineDrop {
+    /** May the wire join this host? */
+    verdict: (host: string) => JoinVerdict;
+    /** The draft while hovering an allowed line: the wire drawn joined there. */
+    preview: (host: string, at: number) => Draft;
+    done: (host: string, at: number) => void;
+  }
+
   /**
    * Drags a wire end (spec §4.4, option "a"), drawn as `path` to the pointer: the block under it is outlined green
-   * when `verdict` allows the drop and red when not; `current` (the end's own block) is not outlined.
-   * Dropped on an allowed block, `done` commits; anywhere else, refused, or back on `current`, nothing
-   * changes and no step is made.
+   * when `verdict` allows the drop and red when not; `current` (the end's own block) is not outlined. With no
+   * block under it, a wire line within the drop reach gets a halo the same way (plan 7 §6.1): `line` joins it,
+   * the wire previewed joined there, or names why it may not.
+   * Dropped on an allowed block, `done` commits; on an allowed line, `line.done`; anywhere else, refused, or
+   * back on `current`, nothing changes and no step is made.
    */
-  const dropGesture = (e: ReactPointerEvent, wire: string | null, path: (p: Point) => Pt[], current: string | null, verdict: (over: string) => DropVerdict,
-    done: (over: string, p: Point) => void, onSelf?: (p: Point) => void) => {
+  const dropGesture = (e: ReactPointerEvent, o: {
+    wire: string | null; path: (p: Point) => Pt[]; current: string | null; verdict: (over: string) => DropVerdict;
+    done: (over: string, p: Point) => void; onSelf?: (p: Point) => void;
+    /** What a line under the pointer does: joins (`LineDrop`) or refuses with a reason. */
+    line: LineDrop | Refusal;
+  }) => {
     let over: string | null = null;
+    let onLine: { id: string; at: number } | null = null;
     let at: Point = { x: 0, y: 0 };
-    const newWire = wire === null;
+    const newWire = o.wire === null;
+    const ghost = (p: Point) => setGhost({ wire: o.wire, points: o.path({ x: snap(p.x), y: snap(p.y) }) });
     run(e, (p) => {
       at = p;
-      setGhost({ wire, points: path({ x: snap(p.x), y: snap(p.y) }) });
       over = blockAt(shown.current, p);
-      if (over === null || (over === current && !onSelf)) setHint(null);
-      else if (over === current) setHint({ id: over, ok: true, why: 'move', newWire, at: p });
-      else { const why = verdict(over); setHint({ id: over, ok: why === 'ok', why, newWire, at: p }); }
+      // a block wins over a line; the dragged wire itself is never the drop target
+      onLine = over === null ? wireAt(shown.current, p, DROP_REACH / getZoom(), o.wire) : null;
+      if (onLine && typeof o.line !== 'string') {
+        const why = o.line.verdict(onLine.id);
+        setHint({ id: onLine.id, line: true, ok: why === 'ok', why, newWire, at: p });
+        // an allowed line: the wire is drawn joined there (the preview) instead of the ghost
+        if (why === 'ok') { setGhost(null); setPreview(o.line.preview(onLine.id, onLine.at)); return; }
+      } else if (onLine) setHint({ id: onLine.id, line: true, ok: false, why: o.line as Refusal, newWire, at: p });
+      else if (over === null || (over === o.current && !o.onSelf)) setHint(null);
+      else if (over === o.current) setHint({ id: over, line: false, ok: true, why: 'move', newWire, at: p });
+      else { const why = o.verdict(over); setHint({ id: over, line: false, ok: why === 'ok', why, newWire, at: p }); }
+      setPreview(null);
+      ghost(p);
     }, (cancelled) => {
       setGhost(null);
       setHint(null);
-      if (cancelled || over === null) return;
-      if (over === current) { onSelf?.(at); return; }
-      if (verdict(over) !== 'ok') return;
-      done(over, at);
+      setPreview(null);
+      if (cancelled) return;
+      if (onLine && typeof o.line !== 'string') { if (o.line.verdict(onLine.id) === 'ok') o.line.done(onLine.id, onLine.at); return; }
+      if (over === null) return;
+      if (over === o.current) { o.onSelf?.(at); return; }
+      if (o.verdict(over) !== 'ok') return;
+      o.done(over, at);
     });
   };
 
@@ -240,6 +275,7 @@ export function useWireGestures(
   const startEnd = (wire: WireRoute, end: 'source' | 'target', e: ReactPointerEvent) => {
     const d = designRef.current;
     if (!d || e.button !== 0) return;
+    const base = d.draft;
     const ends = endsOf(wire.points);
     const boxes = blockBoxes(shown.current.placement);
     // the wire itself follows the pointer, right-angled from the end that stays: it leaves a source and lands heading right
@@ -248,21 +284,31 @@ export function useWireGestures(
       : (p: Point) => { const f = freeEnd(p, 'source', boxes); return clearPath(route(f.x, f.y, ends.tx, ends.ty, f.box, stepBoxId(wire.target), 0, boxes), boxes); };
     const landingAt = (step: string, p: Point) => clampLanding(p.y - (shown.current.placement.steps.get(step)?.y ?? 0));
     const current = end === 'target' ? wire.target : wire.source;
+    // joined on a line (plan 7 §6.1): its own line automatic, its landing kept
+    const joined = (host: string, at: number) => setShape(base, wire.id, { bends: null, landing: base.routes[wire.id]?.landing ?? null, contact: { host, at: snap(at) } });
     setResize('ew');
-    dropGesture(e, wire.id, path, current,
-      (over) => (end === 'target' ? canWire(shown.current, wire.source, over, wire.id) : canWire(shown.current, over, wire.target, wire.id)),
-      (over, p) => {
+    dropGesture(e, {
+      wire: wire.id, path, current,
+      verdict: (over) => (end === 'target' ? canWire(shown.current, wire.source, over, wire.id) : canWire(shown.current, over, wire.target, wire.id)),
+      done: (over, p) => {
         const id = end === 'target' ? wireId(wire.source, over) : wireId(over, wire.target);
         const next = reattach(d.draft, saved, wire.id, end, over);
         d.onCommit(end === 'target' ? setShape(next, id, { bends: null, landing: landingAt(over, p) }) : next, { picks: [{ kind: 'wire', id }] });
       },
-      end === 'target' ? (p) => {
+      onSelf: end === 'target' ? (p) => {
         // its own step: the contact point slides along the landing band; the shape it had stays
         const landing = landingAt(wire.target, p);
         const step = shown.current.placement.steps.get(wire.target);
         if (!step || step.y + landing === ends.ty) return;
         d.onCommit(setShape(d.draft, wire.id, { bends: d.draft.routes[wire.id]?.bends ?? null, landing }), { picks: [{ kind: 'wire', id: wire.id }] });
-      } : undefined);
+      } : undefined,
+      // only an arrow end joins a line; a start stays on a block
+      line: end === 'target' ? {
+        verdict: (host) => canJoin(shown.current, wire.id, host),
+        preview: joined,
+        done: (host, at) => d.onCommit(joined(host, at), { picks: [{ kind: 'wire', id: wire.id }] }),
+      } : 'start',
+    });
   };
 
   /** Draws a new wire from a step's output side or the hub (spec §4.5); it is automatic and becomes the pick. */
@@ -277,8 +323,12 @@ export function useWireGestures(
     const boxes = blockBoxes(placement);
     setResize(null);
     const path = (p: Point) => { const f = freeEnd(p, 'target', boxes); return clearPath(route(from.x, from.y, f.x, f.y, boxOf(source), f.box, 0, boxes), boxes); };
-    dropGesture(e, null, path, null, (over) => canWire(shown.current, source, over), (over) => {
-      d.onCommit(addWire(d.draft, saved, source, over), { picks: [{ kind: 'wire', id: wireId(source, over) }] });
+    dropGesture(e, {
+      wire: null, path, current: null,
+      verdict: (over) => canWire(shown.current, source, over),
+      done: (over) => d.onCommit(addWire(d.draft, saved, source, over), { picks: [{ kind: 'wire', id: wireId(source, over) }] }),
+      // a new wire must end on a step; it can be joined afterwards by its arrow
+      line: 'needStep',
     });
   };
 

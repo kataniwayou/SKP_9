@@ -413,4 +413,65 @@ describe('wire gestures', () => {
     expect(centre('x', 'width')).toBeCloseTo(544);
     fireEvent.keyDown(document.body, { key: 'Escape' });
   });
+
+  const joinable = () => loadedDocument(graphDto({
+    workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+    steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { entryCondition: 2 }), stepDto('s3', { nextStepIds: ['s4', 's5'] }), stepDto('s4', { entryCondition: 2 }), stepDto('s5', { entryCondition: 1 })],
+  }));
+  /** A point on a wire's first long horizontal run, in flow coordinates. */
+  const onLine = (doc: StudioDocument, id: string): Point => {
+    const pts = doc.wires.find((w) => w.id === id)!.points;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [ax, ay] = pts[i]!, [bx, by] = pts[i + 1]!;
+      if (ay === by && Math.abs(bx - ax) >= 48) return { x: (ax + bx) / 2, y: ay };
+    }
+    throw new Error(`no horizontal run on ${id}`);
+  };
+
+  it('dropping an arrow on a same-colour line joins it: green halo, "join here", one step, the contact written', async () => {
+    const doc = await joinable();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const target = onLine(doc, 's1->s2');
+    fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s3->s4"] .design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, target), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('join here');
+    expect(container.querySelector('[data-testid="rf__edge-s1->s2"] .wire')!.getAttribute('class')).toContain('halo-ok');
+    fireEvent.pointerUp(document, { ...screenOf(container, target), pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    const shape = vi.mocked(design.onCommit).mock.calls[0]![0].routes['s3->s4']!;
+    expect(shape.contact!.host).toBe('s1->s2');
+    expect(shape.bends).toBeNull();
+    // drawing only: the wiring is untouched
+    expect(vi.mocked(design.onCommit).mock.calls[0]![0].next).toEqual({});
+  });
+
+  it('another colour is refused with a red halo and snaps back', async () => {
+    const doc = await joinable();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's3->s5' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const target = onLine(doc, 's1->s2');
+    fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s3->s5"] .design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, target), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('other colour');
+    expect(container.querySelector('[data-testid="rf__edge-s1->s2"] .wire')!.getAttribute('class')).toContain('halo-no');
+    fireEvent.pointerUp(document, { ...screenOf(container, target), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('a start square over a line says "start stays on a block"; a new wire says "drop on a step"', async () => {
+    const doc = await joinable();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's3->s4' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const target = onLine(doc, 's1->s2');
+    fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s3->s4"] .design-handle.end[data-end="source"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, target), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('start stays on a block');
+    fireEvent.pointerUp(document, { ...screenOf(container, target), pointerId: 1 });
+    fireEvent.pointerDown(container.querySelector('.react-flow__node[data-id="s3"] .nx-port')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, target), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('drop on a step');
+    fireEvent.pointerUp(document, { ...screenOf(container, target), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
 });

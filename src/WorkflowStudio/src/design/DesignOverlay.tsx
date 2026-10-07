@@ -45,7 +45,7 @@ function clearOfEnds(h: { x: number; y: number }, ends: Ends, k: number): boolea
 export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hint = null }: DesignOverlayProps) {
   // one screen pixel in flow units
   const k = 1 / useStore((s) => s.transform[2]);
-  const label = hint ? dropLabel(hint.why, hint.newWire) : null;
+  const label = hint ? dropLabel(hint.why, hint.newWire, hint.line) : null;
   return (
     <ViewportPortal>
       <svg className="design-overlay" width={1} height={1}>

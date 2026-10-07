@@ -120,14 +120,18 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const zoom = useStore((s) => s.transform[2]);
   // a key while a gesture runs would be overwritten by its drop: the canvas's keys wait for it (Escape is the gesture's)
   const onKeyDown = useDesignKeys(doc, shownRef, design, () => pressing() || wiring.running() || drag.dragging());
-  // the block under a dragged wire end, outlined green or red (spec §4.4)
-  const shown = useMemo(() => withHint(selected, wiring.hint), [selected, wiring.hint]);
+  // the block under a dragged wire end, outlined green or red (spec §4.4); a line gets a halo instead (plan 7)
+  const shown = useMemo(() => withHint(selected, wiring.hint && !wiring.hint.line ? wiring.hint : null), [selected, wiring.hint]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
   const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
-  const edges = useMemo(
-    () => (dragged ? marked.edges.map((e) => (e.id === dragged.id && e.type === 'cable' && e.data ? { ...e, data: { ...e.data, points: dragged.points } } : e)) : marked.edges),
-    [marked.edges, wiring.ghost],
-  );
+  const edges = useMemo(() => marked.edges.map((e) => {
+    if (e.type !== 'cable' || !e.data) return e;
+    let data = e.data;
+    if (dragged && e.id === dragged.id) data = { ...data, points: dragged.points };
+    // the line under a dragged arrow end: green when it may be joined, red when not (plan 7 §6.1)
+    if (wiring.hint?.line && e.id === wiring.hint.id) data = { ...data, halo: wiring.hint.ok ? 'ok' : 'no' };
+    return data === e.data ? e : { ...e, data };
+  }), [marked.edges, wiring.ghost, wiring.hint]);
   // picks naming wires that are gone (after an undo) draw nothing
   const pickedWires = useMemo(
     () => (design
