@@ -41,7 +41,36 @@ describe('clearPath', () => {
   });
 });
 
+describe('clearPath, own blocks', () => {
+  it('a first run that heads back through its own source step leaves it heading right and goes around it', () => {
+    const src = box('s', -224, 0), tgt = box('t', 800, 304);
+    const out = clearPath([[0, 96], [-264, 96], [-264, 400], [800, 400]], [src, tgt]);
+    expect(crosses(out, src)).toBe(false);
+    expect(out[1]![1]).toBe(96);
+    expect(out[1]![0]).toBeGreaterThan(0);
+    expect(rightAngled(out)).toBe(true);
+  });
+
+  it('a last run that runs through its own target step goes around it and lands heading right', () => {
+    const src = box('s', -224, 0), tgt = box('t', 288, 0);
+    // comes down inside the target, then "lands" leftward
+    const out = clearPath([[0, 96], [400, 96], [400, 128], [288, 128]], [src, tgt]);
+    expect(crosses(out, tgt)).toBe(false);
+    const [px, py] = out[out.length - 2]!;
+    expect(py).toBe(128);
+    expect(px).toBeLessThan(288);
+  });
+});
+
 describe('clearRun', () => {
+  it('a vertical run dragged into its own source step goes to the side that makes the shorter clear wire', () => {
+    const src = box('s', -224, 0), tgt = box('t', 800, 0);
+    const ends = { sx: 0, sy: 96, tx: 800, ty: 128 };
+    const xs = clearRun({ xs: [-112], ys: [] }, ends, { vertical: true, index: 0 }, [src, tgt]).xs;
+    expect(xs).toEqual([24]);
+  });
+
+
   it('a vertical run dragged into a step is pushed to the nearer side of it', () => {
     const ends = { sx: 0, sy: 96, tx: 800, ty: 96 };
     const mid = box('m', 288, 0);

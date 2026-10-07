@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
-import { clearBends, clearRun } from '../layout/detour';
+import { clearBends, clearPath, clearRun } from '../layout/detour';
 import { clampLanding, PMID, snap, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
-import { route, type Pt } from '../layout/router';
+import { route, type Box, type Pt } from '../layout/router';
 import { dragSegment, endsOf, nearestSegment, normalize, shapeFromPoints, type Bends } from '../layout/shape';
 import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
@@ -17,7 +17,8 @@ import { canWire, type DropVerdict } from './rules';
 export interface DropHint {
   id: string;
   ok: boolean;
-  why: DropVerdict;
+  /** 'move': a wire end back on its own step slides its contact point there. */
+  why: DropVerdict | 'move';
   /** A new wire, not a re-attached end: an allowed drop says "connect here". */
   newWire: boolean;
   /** The pointer, in flow coordinates. */
@@ -31,6 +32,20 @@ export interface WireGhost {
 }
 
 const boxOf = (source: SourceId) => (source === WORKFLOW_SOURCE ? SPHERE_BOX_ID : stepBoxId(source));
+
+/**
+ * Where a dragged wire's free end is drawn (spec §4.4): at the pointer on empty canvas; over a block, on
+ * its border, never inside it. A wire lands on a block's left side (a step's landing band) and leaves a
+ * block's right side (a step's port, the hub's middle). `box` is the block's id, or '' on empty canvas.
+ */
+export function freeEnd(p: Point, end: 'source' | 'target', boxes: Box[]): { x: number; y: number; box: string } {
+  const b = boxes.find((x) => p.x >= x.x && p.x <= x.x + x.w && p.y >= x.y && p.y <= x.y + x.h);
+  if (!b) return { x: p.x, y: p.y, box: '' };
+  const isStep = b.id.startsWith('step:');
+  const along = (v: number) => b.y + Math.min(Math.max(snap(v - b.y), 16), b.h - 16);
+  if (end === 'target') return { x: b.x, y: isStep ? b.y + clampLanding(p.y - b.y) : along(p.y), box: b.id };
+  return { x: b.x + b.w, y: isStep ? b.y + PMID : b.id === SPHERE_BOX_ID ? b.y + b.h / 2 : along(p.y), box: b.id };
+}
 
 /** Which run of the dragged shape is the one under the pointer (`dragSegment`'s run k of a shape with n verticals). */
 function draggedRun(n: number, k: number): { vertical: boolean; index: number } {
@@ -195,23 +210,33 @@ export function useWireGestures(
    * Dropped on an allowed block, `done` commits; anywhere else, refused, or back on `current`, nothing
    * changes and no step is made.
    */
-  const dropGesture = (e: ReactPointerEvent, wire: string | null, path: (p: Point) => Pt[], current: string | null, verdict: (over: string) => DropVerdict, done: (over: string) => void) => {
+  const dropGesture = (e: ReactPointerEvent, wire: string | null, path: (p: Point) => Pt[], current: string | null, verdict: (over: string) => DropVerdict,
+    done: (over: string, p: Point) => void, onSelf?: (p: Point) => void) => {
     let over: string | null = null;
+    let at: Point = { x: 0, y: 0 };
     const newWire = wire === null;
     run(e, (p) => {
+      at = p;
       setGhost({ wire, points: path({ x: snap(p.x), y: snap(p.y) }) });
       over = blockAt(shown.current, p);
-      if (over === null || over === current) setHint(null);
+      if (over === null || (over === current && !onSelf)) setHint(null);
+      else if (over === current) setHint({ id: over, ok: true, why: 'move', newWire, at: p });
       else { const why = verdict(over); setHint({ id: over, ok: why === 'ok', why, newWire, at: p }); }
     }, (cancelled) => {
       setGhost(null);
       setHint(null);
-      if (cancelled || over === null || over === current || verdict(over) !== 'ok') return;
-      done(over);
+      if (cancelled || over === null) return;
+      if (over === current) { onSelf?.(at); return; }
+      if (verdict(over) !== 'ok') return;
+      done(over, at);
     });
   };
 
-  /** Drags a picked wire's end square onto another block; the wire becomes automatic (spec §4.4). */
+  /**
+   * Drags a picked wire's end square (spec §4.4). Onto another block: the wire re-attaches there, automatic,
+   * its arrow landing where it was dropped. Back onto its own step: the arrow's contact point moves there.
+   * Anywhere else it snaps back: a wire always joins two blocks.
+   */
   const startEnd = (wire: WireRoute, end: 'source' | 'target', e: ReactPointerEvent) => {
     const d = designRef.current;
     if (!d || e.button !== 0) return;
@@ -219,16 +244,25 @@ export function useWireGestures(
     const boxes = blockBoxes(shown.current.placement);
     // the wire itself follows the pointer, right-angled from the end that stays: it leaves a source and lands heading right
     const path = end === 'target'
-      ? (p: Point) => route(ends.sx, ends.sy, p.x, p.y, boxOf(wire.source), '', 0, boxes)
-      : (p: Point) => route(p.x, p.y, ends.tx, ends.ty, '', stepBoxId(wire.target), 0, boxes);
+      ? (p: Point) => { const f = freeEnd(p, 'target', boxes); return clearPath(route(ends.sx, ends.sy, f.x, f.y, boxOf(wire.source), f.box, 0, boxes), boxes); }
+      : (p: Point) => { const f = freeEnd(p, 'source', boxes); return clearPath(route(f.x, f.y, ends.tx, ends.ty, f.box, stepBoxId(wire.target), 0, boxes), boxes); };
+    const landingAt = (step: string, p: Point) => clampLanding(p.y - (shown.current.placement.steps.get(step)?.y ?? 0));
     const current = end === 'target' ? wire.target : wire.source;
     setResize('ew');
     dropGesture(e, wire.id, path, current,
       (over) => (end === 'target' ? canWire(shown.current, wire.source, over, wire.id) : canWire(shown.current, over, wire.target, wire.id)),
-      (over) => {
+      (over, p) => {
         const id = end === 'target' ? wireId(wire.source, over) : wireId(over, wire.target);
-        d.onCommit(reattach(d.draft, saved, wire.id, end, over), { picks: [{ kind: 'wire', id }] });
-      });
+        const next = reattach(d.draft, saved, wire.id, end, over);
+        d.onCommit(end === 'target' ? setShape(next, id, { bends: null, landing: landingAt(over, p) }) : next, { picks: [{ kind: 'wire', id }] });
+      },
+      end === 'target' ? (p) => {
+        // its own step: the contact point slides along the landing band; the shape it had stays
+        const landing = landingAt(wire.target, p);
+        const step = shown.current.placement.steps.get(wire.target);
+        if (!step || step.y + landing === ends.ty) return;
+        d.onCommit(setShape(d.draft, wire.id, { bends: d.draft.routes[wire.id]?.bends ?? null, landing }), { picks: [{ kind: 'wire', id: wire.id }] });
+      } : undefined);
   };
 
   /** Draws a new wire from a step's output side or the hub (spec §4.5); it is automatic and becomes the pick. */
@@ -242,7 +276,8 @@ export function useWireGestures(
       : { x: (at?.x ?? 0) + STEP_W, y: (at?.y ?? 0) + PMID };
     const boxes = blockBoxes(placement);
     setResize(null);
-    dropGesture(e, null, (p) => route(from.x, from.y, p.x, p.y, boxOf(source), '', 0, boxes), null, (over) => canWire(shown.current, source, over), (over) => {
+    const path = (p: Point) => { const f = freeEnd(p, 'target', boxes); return clearPath(route(from.x, from.y, f.x, f.y, boxOf(source), f.box, 0, boxes), boxes); };
+    dropGesture(e, null, path, null, (over) => canWire(shown.current, source, over), (over) => {
       d.onCommit(addWire(d.draft, saved, source, over), { picks: [{ kind: 'wire', id: wireId(source, over) }] });
     });
   };

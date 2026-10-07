@@ -34,8 +34,9 @@ export function canWire(shown: StudioDocument, source: SourceId, target: string,
 }
 
 /** What the pointer's label says over a block while a wire end or a new wire is dragged (plan 4 trial). */
-export function dropLabel(verdict: DropVerdict, newWire: boolean): string {
+export function dropLabel(verdict: DropVerdict | 'move', newWire: boolean): string {
   switch (verdict) {
+    case 'move': return 'move contact here';
     case 'ok': return newWire ? 'connect here' : 're-attach here';
     case 'cycle': return 'would make a loop';
     case 'duplicate': return 'already wired';

@@ -5,7 +5,7 @@ import { loadedDocument } from '../app/fixtures';
 import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { StudioDocument } from '../app/document';
-import { STEP_H, STEP_W, type Point } from '../layout/geometry';
+import { clampLanding, LANDING_MAX, LANDING_MIN, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { EMPTY_DRAFT, addWire, reattach, setShape } from './draft';
 import { endsOf, pointsOfShape } from '../layout/shape';
 import type { DesignProps } from './designProps';
@@ -261,17 +261,20 @@ describe('wire gestures', () => {
     const moving = wirePath(container, 's1->s2');
     expect(moving).not.toEqual(before);
     expect(rightAngled(moving)).toBe(true);
-    const m = middleOf(doc, 's3');
-    expect(moving[moving.length - 1]).toEqual([Math.round(m.x / 8) * 8, Math.round(m.y / 8) * 8]);
+    // over a step, the arrow lands on its border (its landing band), never inside it
+    const s3 = doc.placement.steps.get('s3')!;
+    const landing = clampLanding(middleOf(doc, 's3').y - s3.y);
+    expect(moving[moving.length - 1]).toEqual([s3.x, s3.y + landing]);
     fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
     expect(design.onCommit).toHaveBeenCalledTimes(1);
-    expect(design.onCommit).toHaveBeenCalledWith(reattach(EMPTY_DRAFT, doc, 's1->s2', 'target', 's3'), { picks: [{ kind: 'wire', id: 's1->s3' }] });
+    // the arrow stays where it was dropped
+    expect(design.onCommit).toHaveBeenCalledWith(setShape(reattach(EMPTY_DRAFT, doc, 's1->s2', 'target', 's3'), 's1->s3', { bends: null, landing }), { picks: [{ kind: 'wire', id: 's1->s3' }] });
     expect(container.querySelector('.design-ghost')).toBeNull();
     expect(nodeClass(container, 's3')).not.toContain('drop-');
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('a refused drop (a cycle) outlines red and snaps back; so do its own block and empty canvas', async () => {
+  it('a refused drop (a cycle) outlines red and snaps back; so does empty canvas', async () => {
     const doc = await three();
     const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
@@ -284,16 +287,32 @@ describe('wire gestures', () => {
     expect(container.querySelector('.design-drop-label')!.textContent).toBe('would make a loop');
     fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
     expect(container.querySelector('.design-drop-label')).toBeNull();
-    // back on its own block: no outline, no step
-    fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
-    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
-    expect(nodeClass(container, 's3')).not.toContain('drop-');
-    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
     // empty canvas
     fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
     fireEvent.pointerUp(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
     expect(design.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('an arrow dropped back on its own step moves its contact point there; at the same height, no step', async () => {
+    const doc = await three();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const head = () => container.querySelector('.design-handle.end[data-end="target"]')!;
+    const s3 = doc.placement.steps.get('s3')!;
+    const now = endsOf(wirePath(container, 's2->s3')).ty - s3.y;
+    // the same height: nothing changes
+    fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: s3.x + 40, y: s3.y + now }), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('move contact here');
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: s3.x + 40, y: s3.y + now }), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+    // another height in the landing band
+    const to = now === LANDING_MIN ? LANDING_MAX : LANDING_MIN;
+    fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: s3.x + 40, y: s3.y + to }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: s3.x + 40, y: s3.y + to }), pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledWith(setShape(EMPTY_DRAFT, 's2->s3', { bends: null, landing: to }), { picks: [{ kind: 'wire', id: 's2->s3' }] });
   });
 
   it('dragging the start dot onto the hub makes the wire an entry wire', async () => {

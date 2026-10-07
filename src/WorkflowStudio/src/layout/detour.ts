@@ -93,46 +93,78 @@ function search(s: Pt, e: Pt, din: number, dout: number | null, notOut: number |
  * goes around a step, never through it). A run whose detour cannot be found stays as it is.
  */
 export function clearPath(points: readonly Pt[], boxes: Box[]): Pt[] {
-  const pts = simplify([...points]);
+  // a bend inside a block cannot be kept: its neighbours are joined around the block instead
+  const all = simplify([...points]);
+  const pts = all.filter((p, i) => i === 0 || i === all.length - 1 || !boxes.some((box) => inside(p, box)));
   const out: Pt[] = [pts[0]!];
   for (let i = 0; i < pts.length - 1; i++) {
     const a = out[out.length - 1]!, b = pts[i + 1]!;
     const last = i === pts.length - 2;
-    const blocked = boxes.some((box) => hits(a, b, box) && !(i === 0 && inside(a, box)) && !(last && inside(b, box)));
-    if (!blocked || (a[0] !== b[0] && a[1] !== b[1])) { out.push(b); continue; }
+    // a wire leaves its source's port and enters its target's landing straight, heading right: only that
+    // crossing of the border is allowed, never a run back through either block
+    const right = dirOf(a, b) === 0;
+    const blocked = boxes.some((box) => hits(a, b, box) && !(i === 0 && right && inside(a, box)) && !(last && right && inside(b, box)));
+    const square = a[0] === b[0] || a[1] === b[1];
+    if (!blocked && square) { out.push(b); continue; }
     // the heading into this run: the run before it, or +x from the source port
     const din = out.length > 1 ? dirOf(out[out.length - 2]!, a) : 0;
-    const notOut = last ? null : (dirOf(b, pts[i + 2]!) + 2) % 4;
+    const next = pts[i + 2];
+    const notOut = last || !next || (next[0] !== b[0] && next[1] !== b[1]) ? null : (dirOf(b, next) + 2) % 4;
     const way = search(a, b, i === 0 ? 0 : din, last ? 0 : null, notOut, boxes);
     if (way) out.push(...way.slice(1));
-    else out.push(b);
+    else if (square) out.push(b);
+    else {
+      // no way around: still right-angled, with its elbow halfway
+      const mx = snap((a[0] + b[0]) / 2, GRID);
+      out.push([mx, a[1]], [mx, b[1]], b);
+    }
   }
   return simplify(out);
 }
 
-/**
- * Run `k`'s new position pushed off the blocks it would lie on (spec §4.2): a vertical run moves left or
- * right, a horizontal one up or down, to whichever side of the block is nearer. The source's and the
- * target's own blocks count too: a run never lies inside a step.
- */
-export function clearRun(bends: Bends, ends: Ends, run: { vertical: boolean; index: number }, boxes: Box[]): Bends {
-  const xs = [...bends.xs], ys = [...bends.ys];
-  for (let pass = 0; pass < 4; pass++) {
-    const pts = pointsOfShape(ends, { xs, ys });
-    // run of xs[i] is points 2i+1 → 2i+2; run of ys[i] is points 2i+2 → 2i+3
-    const a = run.vertical ? pts[2 * run.index + 1]! : pts[2 * run.index + 2]!;
-    const b = run.vertical ? pts[2 * run.index + 2]! : pts[2 * run.index + 3]!;
-    const box = boxes.find((bx) => hits(a, b, bx));
-    if (!box) break;
-    if (run.vertical) {
-      const x = xs[run.index]!, l = snap(box.x - DETOUR_CLEARANCE, GRID), r = snap(box.x + box.w + DETOUR_CLEARANCE, GRID);
-      xs[run.index] = x - l <= r - x ? l : r;
-    } else {
-      const y = ys[run.index]!, t = snap(box.y - DETOUR_CLEARANCE, GRID), u = snap(box.y + box.h + DETOUR_CLEARANCE, GRID);
-      ys[run.index] = y - t <= u - y ? t : u;
+/** Length + 24 a bend, + a block's worth for every run still through a block (the source and target only straight in and out). */
+function costOf(pts: Pt[], boxes: Box[]): number {
+  let c = (pts.length - 2) * BEND_COST;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i]!, b = pts[i + 1]!, right = dirOf(a, b) === 0;
+    c += Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+    const last = i === pts.length - 2;
+    for (const box of boxes) {
+      if (hits(a, b, box) && !(i === 0 && right && inside(a, box)) && !(last && right && inside(b, box))) c += 5000;
     }
   }
-  return { xs, ys };
+  return c;
+}
+
+/** The run under the pointer: points 2i+1 → 2i+2 for xs[i], 2i+2 → 2i+3 for ys[i]. */
+function runPoints(ends: Ends, b: Bends, run: { vertical: boolean; index: number }): [Pt, Pt] {
+  const pts = pointsOfShape(ends, b);
+  return run.vertical ? [pts[2 * run.index + 1]!, pts[2 * run.index + 2]!] : [pts[2 * run.index + 2]!, pts[2 * run.index + 3]!];
+}
+
+/**
+ * Run `k`'s new position pushed off the blocks it would lie on (spec §4.2): a vertical run moves left or
+ * right, a horizontal one up or down, to the side of the block that makes the shorter clear wire. The
+ * source's and the target's own blocks count too: a run never lies inside a step.
+ */
+export function clearRun(bends: Bends, ends: Ends, run: { vertical: boolean; index: number }, boxes: Box[]): Bends {
+  let cur: Bends = { xs: [...bends.xs], ys: [...bends.ys] };
+  for (let pass = 0; pass < 4; pass++) {
+    const [a, b] = runPoints(ends, cur, run);
+    const box = boxes.find((bx) => hits(a, b, bx));
+    if (!box) break;
+    const sides = run.vertical
+      ? [snap(box.x - DETOUR_CLEARANCE, GRID), snap(box.x + box.w + DETOUR_CLEARANCE, GRID)]
+      : [snap(box.y - DETOUR_CLEARANCE, GRID), snap(box.y + box.h + DETOUR_CLEARANCE, GRID)];
+    const options = sides.map((v): Bends => (run.vertical
+      ? { xs: cur.xs.map((x, i) => (i === run.index ? v : x)), ys: [...cur.ys] }
+      : { xs: [...cur.xs], ys: cur.ys.map((y, i) => (i === run.index ? v : y)) }));
+    // the side nearer where the run was dragged wins, unless the other makes a much clearer wire
+    const was = run.vertical ? cur.xs[run.index]! : cur.ys[run.index]!;
+    const costs = options.map((o, j) => costOf(clearPath(pointsOfShape(ends, o), boxes), boxes) + 10 * Math.abs(sides[j]! - was));
+    cur = costs[0]! <= costs[1]! ? options[0]! : options[1]!;
+  }
+  return cur;
 }
 
 /** A manual shape kept clear of the blocks: its runs detour around any block they would cross. */

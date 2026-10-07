@@ -265,3 +265,84 @@ test('the arrow head of a picked wire dropped on an allowed step re-attaches it 
   await expect(wire(panel, `${a}->${b}`)).toHaveCount(0);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
+
+/** The blocks a wire passes through on screen (sampled every 2 px; touching a border, 6 px in, does not count). */
+async function blocksCrossed(panel: Locator, id: string): Promise<string[]> {
+  return panel.evaluate((root, wid) => {
+    const p = root.querySelector(`.react-flow__edge[data-id="${wid}"] path.w`) as SVGPathElement | null;
+    if (!p) return ['<no wire>'];
+    const m = p.getScreenCTM()!;
+    const len = p.getTotalLength();
+    const boxes = [...root.querySelectorAll('.react-flow__node')].map((n) => ({ id: n.getAttribute('data-id')!, r: n.getBoundingClientRect() }));
+    const hits = new Set<string>();
+    for (let s = 0; s <= len; s += 2) {
+      const pt = p.getPointAtLength(s);
+      const x = pt.x * m.a + pt.y * m.c + m.e, y = pt.x * m.b + pt.y * m.d + m.f;
+      for (const b of boxes) if (x > b.r.left + 6 && x < b.r.right - 6 && y > b.r.top + 6 && y < b.r.bottom - 6) hits.add(b.id);
+    }
+    return [...hits];
+  }, id);
+}
+
+test('a run dragged onto a block goes around it, while dragged and after the drop', async ({ page }) => {
+  test.setTimeout(180_000);
+  const panel = await open(page);
+  const { a, b, c } = chain!;
+  const id = `${a}->${b}`;
+  const runs = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`);
+  for (const target of [a, b, c, 'wf']) {
+    const p = await pointOnWire(panel, id);
+    await page.mouse.click(p.x, p.y);
+    const n = await runs.count();
+    expect(n, 'the picked wire shows run squares').toBeGreaterThan(0);
+    for (let i = 0; i < n; i++) {
+      const p2 = await pointOnWire(panel, id);
+      await page.mouse.click(p2.x, p2.y);
+      const run = runs.nth(i);
+      const at = await centreOf(run);
+      const to = await centreOf(node(panel, target));
+      const across = /\bh\b/.test((await run.getAttribute('class')) ?? '');
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await page.mouse.move(across ? at.x : to.x, across ? to.y : at.y, { steps: 8 });
+      expect(await blocksCrossed(panel, id), `run ${i} dragged onto ${target}`).toEqual([]);
+      await page.mouse.up();
+      expect(await blocksCrossed(panel, id), `run ${i} dropped onto ${target}`).toEqual([]);
+      await page.keyboard.press('Control+z');
+    }
+  }
+});
+
+test('a dragged wire end lands on a step\'s border, never inside; on its own step it moves its contact point; on empty canvas it snaps back', async ({ page }) => {
+  const panel = await open(page);
+  const { a, b } = chain!;
+  const id = `${a}->${b}`;
+  const grab = async () => {
+    const p = await pointOnWire(panel, id);
+    await page.mouse.click(p.x, p.y);
+    const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+    await page.mouse.move(head.x, head.y);
+    await page.mouse.down();
+    return head;
+  };
+  const before = await pathOf(panel, id);
+
+  // empty canvas: snaps back
+  const head = await grab();
+  await page.mouse.move(head.x - 40, head.y + 220, { steps: 8 });
+  expect(await blocksCrossed(panel, id)).toEqual([]);
+  await page.mouse.up();
+  expect(await pathOf(panel, id)).toBe(before);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+
+  // its own step, higher up: the wire stays outside it, and the contact point moves there
+  await grab();
+  const bb = (await node(panel, b).boundingBox())!;
+  await page.mouse.move(bb.x + 6, bb.y + bb.height * 0.3, { steps: 8 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('move contact here');
+  expect(await blocksCrossed(panel, id)).toEqual([]);
+  await page.mouse.up();
+  await expect.poll(() => pathOf(panel, id)).not.toBe(before);
+  expect(await blocksCrossed(panel, id)).toEqual([]);
+  await expect(page.getByText('● design draft')).toBeVisible();
+});
