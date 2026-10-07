@@ -55,24 +55,28 @@ const arrowEndOf = async (panel: Locator, id: string) => ((await pathOf(panel, i
 /**
  * A point on a wire, in page coordinates, where that wire is the topmost thing under the pointer: wires
  * into a shared step run together near its input, so this is the point nearest `f` (a fraction of the
- * length) that no other wire or block covers. Throws when the whole wire is covered.
+ * length) that no other wire or block covers. With `clear`, the point also lies that many screen px outside
+ * every block: a block within 8 screen px of the pointer is what a dragged end is over (plan 7 §6.1a), so a
+ * line is only the drop target farther out. Throws when no such point exists.
  */
-async function pointOnWire(panel: Locator, id: string, f = 0.5): Promise<{ x: number; y: number }> {
-  const found = await wire(panel, id).locator('path.w').evaluate((el, [at, wid]) => {
+async function pointOnWire(panel: Locator, id: string, f = 0.5, clear = 0): Promise<{ x: number; y: number }> {
+  const found = await wire(panel, id).locator('path.w').first().evaluate((el, [at, wid, gap]) => {
     const p = el as SVGPathElement;
     const m = p.getScreenCTM()!;
     const len = p.getTotalLength();
+    const boxes = [...(el.closest('.react-flow')?.querySelectorAll('.react-flow__node') ?? [])].map((n) => n.getBoundingClientRect());
+    const away = (q: { x: number; y: number }) => boxes.every((r) => q.x < r.left - gap || q.x > r.right + gap || q.y < r.top - gap || q.y > r.bottom + gap);
     // every 2 px of the wire (at least 50 samples), nearest `at` first, ends excluded
     const n = Math.max(50, Math.ceil(len / 2));
     const tries = Array.from({ length: n - 1 }, (_, i) => (i + 1) / n).sort((x, y) => Math.abs(x - at) - Math.abs(y - at));
     for (const t of tries) {
       const pt = p.getPointAtLength(len * t);
       const q = { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
-      if (el.ownerDocument.elementFromPoint(q.x, q.y)?.closest('.react-flow__edge')?.getAttribute('data-id') === wid) return q;
+      if (away(q) && el.ownerDocument.elementFromPoint(q.x, q.y)?.closest('.react-flow__edge')?.getAttribute('data-id') === wid) return q;
     }
     return null;
-  }, [f, id] as const);
-  if (!found) throw new Error(`no point on wire ${id} is uncovered: another wire or a block lies over all of it`);
+  }, [f, id, clear] as const);
+  if (!found) throw new Error(`no point on wire ${id} is uncovered${clear ? ` and ${clear} px clear of every block` : ''}: another wire or a block lies over all of it`);
   return found;
 }
 
@@ -91,10 +95,11 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 
 /**
  * Zooms in on a wire with Ctrl+wheel at its middle (zoom follows the pointer, spec §5.4), as a person
- * does before editing it: at the fitted zoom a short run's square hides under the end dots.
+ * does before editing it: at the fitted zoom a short run's square hides under the end dots. Given a point,
+ * zooms in there.
  */
-async function zoomInOn(page: Page, panel: Locator, id: string): Promise<void> {
-  const p = await pointOnWire(panel, id);
+async function zoomInOn(page: Page, panel: Locator, id: string | { x: number; y: number }): Promise<void> {
+  const p = typeof id === 'string' ? await pointOnWire(panel, id) : id;
   await page.mouse.move(p.x, p.y);
   await page.keyboard.down('Control');
   for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -240);
@@ -269,16 +274,19 @@ test('the arrow head of a picked wire dropped on an allowed step re-attaches it 
 /** The blocks a wire passes through on screen (sampled every 2 px; touching a border, 6 px in, does not count). */
 async function blocksCrossed(panel: Locator, id: string): Promise<string[]> {
   return panel.evaluate((root, wid) => {
-    const p = root.querySelector(`.react-flow__edge[data-id="${wid}"] path.w`) as SVGPathElement | null;
-    if (!p) return ['<no wire>'];
-    const m = p.getScreenCTM()!;
-    const len = p.getTotalLength();
+    // every drawn part: a joined wire's own line and its branch (plan 7)
+    const parts = [...root.querySelectorAll(`.react-flow__edge[data-id="${wid}"] path.w`)] as SVGPathElement[];
+    if (parts.length === 0) return ['<no wire>'];
     const boxes = [...root.querySelectorAll('.react-flow__node')].map((n) => ({ id: n.getAttribute('data-id')!, r: n.getBoundingClientRect() }));
     const hits = new Set<string>();
-    for (let s = 0; s <= len; s += 2) {
-      const pt = p.getPointAtLength(s);
-      const x = pt.x * m.a + pt.y * m.c + m.e, y = pt.x * m.b + pt.y * m.d + m.f;
-      for (const b of boxes) if (x > b.r.left + 6 && x < b.r.right - 6 && y > b.r.top + 6 && y < b.r.bottom - 6) hits.add(b.id);
+    for (const p of parts) {
+      const m = p.getScreenCTM()!;
+      const len = p.getTotalLength();
+      for (let s = 0; s <= len; s += 2) {
+        const pt = p.getPointAtLength(s);
+        const x = pt.x * m.a + pt.y * m.c + m.e, y = pt.x * m.b + pt.y * m.d + m.f;
+        for (const b of boxes) if (x > b.r.left + 6 && x < b.r.right - 6 && y > b.r.top + 6 && y < b.r.bottom - 6) hits.add(b.id);
+      }
     }
     return [...hits];
   }, id);
@@ -373,8 +381,171 @@ test('a dragged tail over its own step is told "starts here"; a head 5 px short 
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
   await page.mouse.move(cb.x - 5, cb.y + cb.height / 2, { steps: 8 });
-  await expect(node(panel, c)).toHaveClass(/drop-(ok|no)/);
-  await expect(panel.locator('.design-drop-label')).toHaveCount(1);
+  if (chain!.reattachable) {
+    await expect(node(panel, c)).toHaveClass(/drop-ok/);
+    await expect(panel.locator('.design-drop-label')).toHaveText('re-attach here');
+  } else {
+    await expect(node(panel, c)).toHaveClass(/drop-no/);
+    await expect(panel.locator('.design-drop-label')).toHaveCount(1);
+    await expect(panel.locator('.design-drop-label')).toBeVisible();
+  }
   await page.keyboard.press('Escape');
   await page.mouse.up();
+});
+
+interface LiveWire { id: string; target: string; colour: number }
+
+/** A live workflow with two wires whose targets share an entry condition and differ (one may join the other), and all its wires. */
+async function findJoin(request: APIRequestContext): Promise<{ workflow: LiveWorkflow; wires: LiveWire[] } | null> {
+  for (const workflow of await workflowsWithSteps(request)) {
+    const g = (await (await request.get(`/api/v1/workflows/${workflow.id}/graph`)).json()) as { steps: { id: string; nextStepIds: string[]; entryCondition: number }[] };
+    const cond = new Map(g.steps.map((s) => [s.id, s.entryCondition]));
+    const wires = g.steps.flatMap((s) => s.nextStepIds.filter((t) => cond.has(t)).map((t) => ({ id: `${s.id}->${t}`, target: t, colour: cond.get(t)! })));
+    if (wires.some((a) => wires.some((b) => mayJoin(a, b)))) return { workflow, wires };
+  }
+  return null;
+}
+const mayJoin = (a: LiveWire, b: LiveWire) => a.id !== b.id && a.colour === b.colour && a.target !== b.target;
+const otherColour = (a: LiveWire, b: LiveWire) => a.colour !== b.colour;
+
+/**
+ * Of the pairs (mover, line) that `ok` allows, the one whose mover's arrow (its target's left side) lies
+ * nearest the middle of the line on screen, and the point halfway between them: zoomed in there, both the
+ * mover's arrow and the line are still in view.
+ */
+async function nearestPair(panel: Locator, wires: LiveWire[], ok: (a: LiveWire, b: LiveWire) => boolean): Promise<{ a: string; b: string; between: { x: number; y: number } } | null> {
+  const heads = new Map<string, { x: number; y: number }>();
+  const mids = new Map<string, { x: number; y: number }>();
+  for (const w of wires) {
+    const t = (await node(panel, w.target).boundingBox())!;
+    heads.set(w.id, { x: t.x, y: t.y + t.height / 2 });
+    mids.set(w.id, await wire(panel, w.id).locator('path.w').first().evaluate((el) => {
+      const p = el as SVGPathElement; const m = p.getScreenCTM()!; const pt = p.getPointAtLength(p.getTotalLength() / 2);
+      return { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
+    }));
+  }
+  let best: { a: string; b: string; between: { x: number; y: number } } | null = null, d = Infinity;
+  for (const a of wires) for (const b of wires) {
+    if (!ok(a, b)) continue;
+    const h = heads.get(a.id)!, m = mids.get(b.id)!;
+    const e = Math.hypot(h.x - m.x, h.y - m.y);
+    if (e < d) { d = e; best = { a: a.id, b: b.id, between: { x: (h.x + m.x) / 2, y: (h.y + m.y) / 2 } }; }
+  }
+  return best;
+}
+
+/** Picks wire `a` and drags its arrow end to a point on `b`'s line clear of every block; the pointer stays down. */
+async function dragArrowOnto(page: Page, panel: Locator, a: string, b: string): Promise<void> {
+  const p = await pointOnWire(panel, a);
+  await page.mouse.click(p.x, p.y);
+  const head = await centreOf(panel.locator(`.design-wire[data-wire="${a}"] .design-handle.end[data-end="target"]`));
+  const on = await pointOnWire(panel, b, 0.5, 12);
+  await page.mouse.move(head.x, head.y);
+  await page.mouse.down();
+  await page.mouse.move(on.x, on.y, { steps: 10 });
+}
+
+/** The cursor the page shows over a point, and the classes of the element there. */
+const cursorAt = (page: Page, q: { x: number; y: number }) => page.evaluate(({ x, y }) => {
+  const el = document.elementFromPoint(x, y)!;
+  return { cursor: getComputedStyle(el).cursor, cls: el.getAttribute('class') ?? '' };
+}, q);
+
+test('a wire\'s arrow dropped on a same-colour line joins it: a dot on the line, its branch lands on its own step, nothing inside a block; refresh keeps it; undo removes it', async ({ page, request }) => {
+  const j = await findJoin(request);
+  test.skip(j === null, 'no two same-colour wires into different steps');
+  await openWorkflow(page, j!.workflow);
+  const panel = documentPanel(page, j!.workflow);
+  const { a, b, between } = (await nearestPair(panel, j!.wires, mayJoin))!;
+  await zoomInOn(page, panel, between);
+  await dragArrowOnto(page, panel, a, b);
+  await expect(panel.locator('.design-drop-label')).toHaveText('join here');
+  await expect(wire(panel, b).locator('.wire.halo-ok')).toHaveCount(1);
+  await page.mouse.up();
+  const edge = wire(panel, a);
+  await expect(edge.locator('circle.nx-joint').first()).toBeVisible();
+  // the contact dot lies on the host's line
+  const dot = await centreOf(edge.locator('circle.nx-joint').first());
+  const near = await wire(panel, b).locator('path.w').first().evaluate((el, q) => {
+    const path = el as SVGPathElement; const m = path.getScreenCTM()!; const len = path.getTotalLength();
+    let best = Infinity;
+    for (let s = 0; s <= len; s += 1) { const pt = path.getPointAtLength(s); best = Math.min(best, Math.hypot(pt.x * m.a + pt.y * m.c + m.e - q.x, pt.x * m.b + pt.y * m.d + m.f - q.y)); }
+    return best;
+  }, dot);
+  expect(near).toBeLessThan(3);
+  // its arrow head lands on its own step's left side
+  const target = a.split('->')[1]!;
+  const tb = (await node(panel, target).boundingBox())!;
+  const tip = await edge.locator('.nx-head').boundingBox();
+  expect(tip).not.toBeNull();
+  expect(Math.abs(tip!.x + tip!.width - tb.x)).toBeLessThan(6);
+  expect(await blocksCrossed(panel, a)).toEqual([]);
+  expect(await blocksCrossed(panel, b)).toEqual([]);
+  await expect(page.getByText('● design draft')).toBeVisible();
+  await page.screenshot({ path: 'test-results/plan7-joined.png' });
+  // undo removes it, redo brings it back (one history step); the history is not kept across a refresh (plan 4 spec)
+  await panel.locator('.studio-canvas').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press('Control+z');
+  await expect(edge.locator('circle.nx-joint')).toHaveCount(0);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+  await page.keyboard.press('Control+y');
+  await expect(edge.locator('circle.nx-joint').first()).toBeVisible();
+  // a refresh keeps the junction
+  await page.reload();
+  const again = documentPanel(page, j!.workflow);
+  await expect(wire(again, a).locator('circle.nx-joint').first()).toBeVisible();
+  expect(await blocksCrossed(again, a)).toEqual([]);
+});
+
+test('a wire\'s arrow over a line of another colour is refused and snaps back', async ({ page, request }) => {
+  const j = await findJoin(request);
+  test.skip(j === null || !j.wires.some((x) => j.wires.some((y) => otherColour(x, y))), 'no wire of another colour');
+  await openWorkflow(page, j!.workflow);
+  const panel = documentPanel(page, j!.workflow);
+  const { a: c, b, between } = (await nearestPair(panel, j!.wires, otherColour))!;
+  await zoomInOn(page, panel, between);
+  const before = await pathOf(panel, c);
+  await dragArrowOnto(page, panel, c, b);
+  await expect(panel.locator('.design-drop-label')).toHaveText('other colour');
+  await expect(wire(panel, b).locator('.wire.halo-no')).toHaveCount(1);
+  await page.mouse.up();
+  expect(await pathOf(panel, c)).toBe(before);
+  await expect(wire(panel, c).locator('circle.nx-joint')).toHaveCount(0);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+});
+
+test('a joined wire\'s contact square has the four-way move cursor, a plain end square ew-resize; the contact dropped on its own step makes it plain', async ({ page, request }) => {
+  const j = await findJoin(request);
+  test.skip(j === null, 'no two same-colour wires into different steps');
+  await openWorkflow(page, j!.workflow);
+  const panel = documentPanel(page, j!.workflow);
+  const { a, b, between } = (await nearestPair(panel, j!.wires, mayJoin))!;
+  await zoomInOn(page, panel, between);
+  // a plain wire's end square: ew-resize under the real pointer
+  const p = await pointOnWire(panel, b);
+  await page.mouse.click(p.x, p.y);
+  const plainEnd = panel.locator(`.design-wire[data-wire="${b}"] .design-handle.end[data-end="target"]`);
+  await expect(plainEnd).not.toHaveClass(/contact/);
+  let q = await centreOf(plainEnd);
+  await page.mouse.move(q.x, q.y);
+  expect(await cursorAt(page, q)).toEqual({ cursor: 'ew-resize', cls: expect.stringMatching(/design-handle end/) });
+  // join a onto b; a stays picked: its contact square is the four-way move
+  await dragArrowOnto(page, panel, a, b);
+  await expect(panel.locator('.design-drop-label')).toHaveText('join here');
+  await page.mouse.up();
+  await expect(wire(panel, a).locator('circle.nx-joint').first()).toBeVisible();
+  const contact = panel.locator(`.design-wire[data-wire="${a}"] .design-handle.end.contact[data-end="target"]`);
+  await expect(contact).toHaveCount(1);
+  q = await centreOf(contact);
+  await page.mouse.move(q.x, q.y);
+  expect(await cursorAt(page, q)).toEqual({ cursor: 'move', cls: expect.stringMatching(/contact/) });
+  // the contact square dropped on its own step: the wire is plain again
+  const own = node(panel, a.split('->')[1]!);
+  const o = await centreOf(own);
+  await page.mouse.down();
+  await page.mouse.move(o.x, o.y, { steps: 10 });
+  await expect(own).toHaveClass(/drop-ok/);
+  await page.mouse.up();
+  await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(0);
+  await expect(wire(panel, a).locator('path.w')).toHaveCount(1);
 });
