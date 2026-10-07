@@ -242,6 +242,43 @@ describe('WorkflowCanvas', () => {
       expect(container.ownerDocument.querySelector('.design-band')).toBeNull();
     });
 
+    it('Escape during a rectangle cancels it: the picks stay, the release picks nothing, the Escape goes no further', async () => {
+      const doc = await two();
+      const onSelect = vi.fn();
+      const { container, unmount } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ picks: [{ kind: 'node', id: 's1' }] })} onSelect={onSelect} />);
+      const pane = container.querySelector('.react-flow__pane')!;
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
+      expect(container.ownerDocument.querySelector('.design-band')).not.toBeNull();
+      const outside = vi.fn();
+      window.addEventListener('keydown', outside);
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      window.removeEventListener('keydown', outside);
+      expect(outside).not.toHaveBeenCalled();
+      expect(container.ownerDocument.querySelector('.design-band')).toBeNull();
+      // the button is still down; moving on draws no rectangle, and the release and its click pick nothing
+      fireEvent.pointerMove(document, { clientX: 1e5, clientY: 1e5 });
+      expect(container.ownerDocument.querySelector('.design-band')).toBeNull();
+      fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5 });
+      fireEvent.click(pane);
+      expect(onSelect).not.toHaveBeenCalled();
+      // the next Escape is the studio's again
+      const later = vi.fn();
+      window.addEventListener('keydown', later);
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      window.removeEventListener('keydown', later);
+      expect(later).toHaveBeenCalled();
+      // and a rectangle cut short by an unmount leaves no Escape listener behind
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
+      unmount();
+      const after = vi.fn();
+      window.addEventListener('keydown', after);
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      window.removeEventListener('keydown', after);
+      expect(after).toHaveBeenCalled();
+    });
+
     it('a press on a block or a wire starts no rectangle (both lie inside React Flow\'s pane)', async () => {
       const doc = await two();
       const onSelect = vi.fn();

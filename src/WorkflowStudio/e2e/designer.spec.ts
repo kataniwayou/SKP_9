@@ -36,25 +36,26 @@ const pathOf = (panel: Locator, id: string) => wire(panel, id).locator('path.w')
 
 /**
  * A point on a wire, in page coordinates, where that wire is the topmost thing under the pointer: wires
- * into a shared step run together near its input, so the point nearest `f` (as a fraction of the length)
- * that no other wire or block covers.
+ * into a shared step run together near its input, so this is the point nearest `f` (a fraction of the
+ * length) that no other wire or block covers. Throws when the whole wire is covered.
  */
 async function pointOnWire(panel: Locator, id: string, f = 0.5): Promise<{ x: number; y: number }> {
-  return wire(panel, id).locator('path.w').evaluate((el, [at, wid]) => {
+  const found = await wire(panel, id).locator('path.w').evaluate((el, [at, wid]) => {
     const p = el as SVGPathElement;
     const m = p.getScreenCTM()!;
     const len = p.getTotalLength();
-    const toPage = (t: number) => {
-      const pt = p.getPointAtLength(len * t);
-      return { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
-    };
-    const tries = [at, ...Array.from({ length: 40 }, (_, i) => [at + (i + 1) / 50, at - (i + 1) / 50]).flat()].filter((t) => t > 0.02 && t < 0.98);
+    // every 2 px of the wire (at least 50 samples), nearest `at` first, ends excluded
+    const n = Math.max(50, Math.ceil(len / 2));
+    const tries = Array.from({ length: n - 1 }, (_, i) => (i + 1) / n).sort((x, y) => Math.abs(x - at) - Math.abs(y - at));
     for (const t of tries) {
-      const q = toPage(t);
+      const pt = p.getPointAtLength(len * t);
+      const q = { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
       if (el.ownerDocument.elementFromPoint(q.x, q.y)?.closest('.react-flow__edge')?.getAttribute('data-id') === wid) return q;
     }
-    return toPage(at);
+    return null;
   }, [f, id] as const);
+  if (!found) throw new Error(`no point on wire ${id} is uncovered: another wire or a block lies over all of it`);
+  return found;
 }
 
 async function centreOf(l: Locator): Promise<{ x: number; y: number }> {
@@ -128,12 +129,10 @@ test('a run drags and Reset route restores the automatic shape', async ({ page }
   await expect.poll(() => pathOf(panel, id)).toBe(before);
 });
 
-// FIXME (finding F1, .superpowers/sdd/2026-10-07-skp-studio-04-canvas-designer/task-10-report.md): a picked wire is lifted (zIndex 1, canvas/selection.ts), so its
-// own hit band lies over the design overlay and covers its end dots: a press on the arrow head starts a run
-// drag instead of re-attaching the end. Un-fixme once the end dots sit above the picked wire.
-test.fixme('a wire end re-attaches; a cycle outlines red and snaps back', async ({ page }) => {
+test('a wire end re-attaches; a cycle outlines red and snaps back', async ({ page }) => {
   const panel = await open(page);
   const { a, b, c } = chain!;
+  const before = await pathOf(panel, `${b}->${c}`);
   const p = await pointOnWire(panel, `${b}->${c}`);
   await page.mouse.click(p.x, p.y);
   const head = await centreOf(panel.locator('.design-handle.end[data-end="target"]'));
@@ -144,6 +143,7 @@ test.fixme('a wire end re-attaches; a cycle outlines red and snaps back', async 
   await expect(node(panel, a)).toHaveClass(/drop-no/);
   await page.mouse.up();
   await expect(wire(panel, `${b}->${c}`)).toHaveCount(1);
+  expect(await pathOf(panel, `${b}->${c}`)).toBe(before);
   await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 

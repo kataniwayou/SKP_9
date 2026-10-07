@@ -41,6 +41,10 @@
 .sb .th { cursor: default; }
 .studio-canvas .nx-hit { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
 .studio-canvas:focus { outline: none; }
+/* the design overlay's layer stacks above every lifted block and wire, so neither a picked wire's own hit band
+   nor a picked block covers a picked wire's handles (spec §4.1); the layer takes no pointer events itself, only
+   the handles do */
+.studio-canvas .react-flow__viewport-portal { z-index: var(--z-canvas-design); pointer-events: none; }
 .design-overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .design-band { fill: rgba(125, 211, 252, .08); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; }
 .design-guide { stroke: #fff; stroke-width: 1; filter: drop-shadow(0 0 2px rgba(125, 211, 252, .9)); }

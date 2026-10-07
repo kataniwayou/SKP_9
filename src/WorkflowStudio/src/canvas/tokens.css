@@ -1,6 +1,9 @@
 /* Colour tokens of the blueprint theme (mockup v49, the :root tokens). */
 :root {
   --z-fly: 1000; --z-menu: 1010; --z-toast: 1020; --z-modal: 1030; --z-switcher: 1040; --z-tip: 1050;
+  /* not an overlay layer: inside React Flow's viewport (its own stacking context, z-index 2), the design
+     overlay sits above picked blocks (1000), picked wires (1) and the connection line (1001) */
+  --z-canvas-design: 1002;
   --ground: #0A1220; --ground-2: #0C1628;
   --panel: #0E1828; --panel-2: #122036; --line: #1E3050; --line-2: #2A4166;
   --ink: #E6EEF8; --muted: #8193AE; --faint: #5A6B86;

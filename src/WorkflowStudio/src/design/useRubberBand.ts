@@ -31,6 +31,9 @@ export function useRubberBand(
   // the window the canvas is drawn in (a pop-out has its own); a press from another one rebinds the keys
   const [owner, setOwner] = useState<Document | null>(null);
   const keysOn = owner ?? domNode?.ownerDocument ?? null;
+  // the running rectangle's teardown, so an unmount never leaves its listeners behind (they would swallow Escape)
+  const running = useRef<(() => void) | null>(null);
+  useEffect(() => () => { running.current?.(); running.current = null; }, []);
 
   useEffect(() => {
     if (keysOn === null) return;
@@ -50,11 +53,20 @@ export function useRubberBand(
     const start = { x: e.clientX, y: e.clientY };
     const a = screenToFlowPosition(start);
     let moved = false;
+    running.current?.();
     const stop = () => {
       doc.removeEventListener('pointermove', move);
       doc.removeEventListener('pointerup', up);
       doc.removeEventListener('pointercancel', cancel);
+      doc.removeEventListener('keydown', key, true);
+      running.current = null;
       setBand(null);
+    };
+    // the click that ends the drag must not clear the picks; a release off the pane fires no pane click,
+    // so the flag is dropped once this input's events are done
+    const swallowPaneClick = () => {
+      suppressPaneClick.current = true;
+      (doc.defaultView ?? window).setTimeout(() => { suppressPaneClick.current = false; }, 0);
     };
     const move = (ev: PointerEvent) => {
       if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < BAND_START) return;
@@ -62,13 +74,27 @@ export function useRubberBand(
       setBand(rectOf(a, screenToFlowPosition({ x: ev.clientX, y: ev.clientY })));
     };
     const cancel = () => stop();
+    // Escape cancels the rectangle and keeps the picks (spec §3.2, §5.3); it goes no further, so the
+    // studio's Escape does not clear the selection. The button is still down: its release picks nothing
+    // and its closing click is swallowed. A press that has not moved yet is a click, not a drag: its Escape
+    // is the studio's as usual
+    const key = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape' || !moved) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      stop();
+      const released = () => {
+        doc.removeEventListener('pointerup', released, true);
+        doc.removeEventListener('pointercancel', released, true);
+        swallowPaneClick();
+      };
+      doc.addEventListener('pointerup', released, true);
+      doc.addEventListener('pointercancel', released, true);
+    };
     const up = (ev: PointerEvent) => {
       stop();
       if (!moved) return;
-      // the click that ends the drag must not clear what it picked; a release off the pane fires no pane
-      // click, so the flag is dropped once this input's events are done
-      suppressPaneClick.current = true;
-      (doc.defaultView ?? window).setTimeout(() => { suppressPaneClick.current = false; }, 0);
+      swallowPaneClick();
       const inside = itemsInRect(shown.current, rectOf(a, screenToFlowPosition({ x: ev.clientX, y: ev.clientY })));
       const picks = ev.ctrlKey ? [...picked, ...inside.filter((p) => !picked.some((q) => pickKey(q) === pickKey(p)))] : inside;
       onSelect(selectionForPicks(picks, null, shown.current.graph), picks);
@@ -76,6 +102,8 @@ export function useRubberBand(
     doc.addEventListener('pointermove', move);
     doc.addEventListener('pointerup', up);
     doc.addEventListener('pointercancel', cancel);
+    doc.addEventListener('keydown', key, true);
+    running.current = stop;
   };
 
   // a rectangle is a drag: the canvas shows the closed hand once it has moved (spec §3.1)
