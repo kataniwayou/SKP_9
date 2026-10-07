@@ -1,7 +1,7 @@
 # Handover 2026-10-07: SKP Studio plan 4 (canvas designer trial)
 
 Branch `feature/path-importer` (not pushed, not merged). Studio deployed to the dev cluster as
-`workflow-studio:local` in ns `skp`; bundle `index-Cr4hgH3r.js`. Port-forward studio `localhost:18081`,
+`workflow-studio:local` in ns `skp`; bundle `index-DqyGNXBe.js`. Port-forward studio `localhost:18081`,
 BaseApi `localhost:18080` (restart after every redeploy: `kubectl port-forward -n skp svc/workflow-studio 18081:8080`).
 
 ## Where we are
@@ -26,6 +26,14 @@ BaseApi `localhost:18080` (restart after every redeploy: `kubectl port-forward -
 A selected wire's ends are squares (`<rect class="design-handle end" data-end=…>`, accent fill) replacing the
 green end dots; cursor `move`, kept while an end is dragged (`gesture-move`). Run squares unchanged. Awaiting the
 user's trial verdict.
+
+## Built: user trial round 2 (`b645a82`, deployed)
+
+User: squares perfect; end cursor two-headed (now `ew-resize`, kept while dragged); dragging an end moves the
+wire itself, right-angled from its fixed end to the pointer (`route()`), no sloped dashed ghost (option b,
+re-attach on drop kept); a run dragged onto a step is pushed off it (`clearRun`) and every other run detours
+around steps (`clearPath`, a small Dijkstra on the clearance lines, `layout/detour.ts`); the detour is saved
+with the shape. A new wire's ghost is right-angled and solid too.
 
 ## Junctions (plan 7) — wait until the user approves the designer
 
