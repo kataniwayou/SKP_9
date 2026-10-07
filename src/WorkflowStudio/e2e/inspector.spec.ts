@@ -59,7 +59,8 @@ test('each entity kind saves its metadata', async ({ page, request }) => {
     const before = await get<{ nextStepIds: string[] }>(request, `steps/${t.stepId}`);
     await selectStep(page, panel);
     await field(page, 'Description').fill(`step ${stamp}`);
-    await field(page, 'Entry condition').selectOption('4');
+    await field(page, 'Entry condition').click();
+    await inspector(page).getByRole('option', { name: /Always/ }).click();
     await save(page);
     const after = await get<{ description: string; entryCondition: number; nextStepIds: string[] }>(request, `steps/${t.stepId}`);
     expect(after.description).toBe(`step ${stamp}`);

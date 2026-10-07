@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { CONDITIONS, conditionInfo } from '../model/entryConditions';
+import { ConditionPicker } from './ConditionPicker';
 import { jsonProblem, type FieldSpec } from '../store/entityForms';
 
 /**
@@ -32,16 +32,9 @@ export function FieldEditor({ spec, value, saved, errors, onChange }: {
     case 'json':
       control = <textarea {...common} rows={6} value={value} onChange={(e) => onChange(e.target.value)} />;
       break;
-    case 'condition': {
-      const known = CONDITIONS.some((c) => String(c.value) === value);
-      control = (
-        <select {...common} value={value} onChange={(e) => onChange(e.target.value)}>
-          {!known && <option value={value} disabled>{`${conditionInfo(Number(value)).letter} · Invalid (${value})`}</option>}
-          {CONDITIONS.map((c) => <option key={c.value} value={String(c.value)}>{`${c.letter} · ${c.name}`}</option>)}
-        </select>
-      );
+    case 'condition':
+      control = <ConditionPicker id={id} value={value} invalid={common['aria-invalid']} onChange={onChange} />;
       break;
-    }
   }
   return (
     <div className={spec.kind === 'json' || spec.kind === 'multiline' ? 'field tall' : 'field'}>

@@ -23,7 +23,8 @@
 .sb.v .th { left: 2px; right: 2px; }
 .legend { position: absolute; left: 16px; bottom: 22px; z-index: 5; display: flex; gap: 14px; align-items: center; padding: 8px 12px;
   background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--muted); }
-.legend .pill { font-family: var(--mono); font-size: 10px; border-radius: 3px; padding: 0 4px; color: #04111F; margin-right: 4px; font-weight: 600; }
+.cmark { white-space: nowrap; }
+.cmark .pill { font-family: var(--mono); font-size: 10px; border-radius: 3px; padding: 0 4px; color: #04111F; margin-right: 4px; font-weight: 600; }
 
 /* a document's zoom (mockup v49 .zoom, .docbar .zoom) */
 .zoom { display: flex; align-items: center; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); }

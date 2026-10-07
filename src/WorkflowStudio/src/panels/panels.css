@@ -42,7 +42,16 @@
 .input[aria-invalid="true"] { border-color: var(--f); }
 textarea.input { resize: vertical; line-height: 1.45; font-family: var(--mono); }
 textarea.input.json { white-space: pre; overflow: auto; }
-select.input { appearance: auto; }
+/* the entry-condition dropdown: each condition drawn as the legend draws it */
+.cpick { position: relative; }
+.cp-btn { display: flex; align-items: center; gap: 2px; text-align: left; cursor: pointer; font-family: var(--sans); font-size: 12.5px; }
+.cp-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.cp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-chev { color: var(--muted); font-size: 11px; }
+.cp-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; padding: 4px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px; box-shadow: 0 16px 40px -12px rgba(0, 0, 0, .8); }
+.cp-opt { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 12.5px; color: var(--ink); }
+.cp-opt.hi { background: rgba(125, 211, 252, .10); }
+.cp-tick { color: var(--accent); font-size: 12px; }
 .field.tall { align-items: start; }
 .field.tall > label { padding-top: 7px; }
 .fval { min-width: 0; }

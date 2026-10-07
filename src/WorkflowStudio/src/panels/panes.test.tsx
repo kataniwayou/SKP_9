@@ -67,7 +67,7 @@ describe('Inspector editing (slice 3b)', () => {
     const { api } = await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
     expect(await screen.findByLabelText('Name')).toHaveValue('fetch');
     expect(screen.getByLabelText('Version')).toHaveValue('1.0.0');
-    expect(screen.getByLabelText('Entry condition')).toHaveValue('1');
+    expect(screen.getByLabelText('Entry condition')).toHaveAttribute('data-value', '1');
     expect(api.getEntity).toHaveBeenCalledWith('step', 's1');
   });
 
@@ -88,10 +88,10 @@ describe('Inspector editing (slice 3b)', () => {
     await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(step)) }, { selection: { kind: 'step', stepId: 's1' } });
     const save = await screen.findByRole('button', { name: 'Save' });
     expect(save).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Entry condition'), { target: { value: '4' } });
+    fireEvent.keyDown(screen.getByLabelText('Entry condition'), { key: 'a' });
     expect(save).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
-    expect(screen.getByLabelText('Entry condition')).toHaveValue('1');
+    expect(screen.getByLabelText('Entry condition')).toHaveAttribute('data-value', '1');
     expect(save).toBeDisabled();
   });
 

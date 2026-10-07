@@ -1,5 +1,5 @@
-import type { CSSProperties } from 'react';
 import { CONDITIONS } from '../model/entryConditions';
+import { ConditionMark } from './ConditionMark';
 
 /** The colour key (spec §5.1, §5.3): icons drawn like the canvas. Junctions join it with plan 7. */
 export function Legend() {
@@ -7,12 +7,7 @@ export function Legend() {
     <div className="legend">
       {CONDITIONS.map((c) => (
         <span key={c.value} className="lg-item">
-          <span className="pill" style={{ background: c.colour }}>{c.letter}</span>
-          <svg width="26" height="12" viewBox="0 0 26 12" className="lg-icon" style={{ '--nc': c.colour } as CSSProperties} aria-hidden="true">
-            <circle className="lg-src" cx="3" cy="6" r="2" />
-            <path className="lg-w" d="M5 6H23" stroke={c.colour} />
-            <path className="lg-head" d="M18 2.5L23 6L18 9.5" stroke={c.colour} />
-          </svg>
+          <ConditionMark info={c} />
           {c.name}
         </span>
       ))}
