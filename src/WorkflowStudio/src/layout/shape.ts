@@ -12,12 +12,20 @@ export interface Bends {
   ys: number[];
 }
 
+/** A junction (plan 7): the wire ends on `host`'s line, `at` px along its drawn line from its start. */
+export interface Contact {
+  host: string;
+  at: number;
+}
+
 /** What the user did to one wire's shape. */
 export interface WireShape {
-  /** A manual route; null: the router decides. */
+  /** A manual route; null: the router decides. For a joined wire: its own line's bends. */
   bends: Bends | null;
   /** Step-local landing height on the target, when slid; null: the landing rule decides. */
   landing: number | null;
+  /** On another wire's line (plan 7); absent or null: a plain wire. */
+  contact?: Contact | null;
 }
 
 /** A wire's two ends: the source port and the landing. */

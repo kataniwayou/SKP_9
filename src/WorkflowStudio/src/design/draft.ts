@@ -106,16 +106,24 @@ export function removeWires(draft: Draft, saved: StudioDocument, ids: readonly s
   return d;
 }
 
-/** Moves one end of a wire to another block; the wire becomes automatic (spec §4.4). */
+/** Moves one end of a wire to another block; the wire becomes automatic (spec §4.4). Wires joined onto it follow its new id (plan 7). */
 export function reattach(draft: Draft, saved: StudioDocument, id: string, end: 'source' | 'target', to: SourceId): Draft {
   const { source, target } = wireEnds(id);
   const d = removeWires(draft, saved, [id]);
-  return end === 'target' ? addWire(d, saved, source, to) : addWire(d, saved, to, target);
+  const moved = end === 'target' ? addWire(d, saved, source, to) : addWire(d, saved, to, target);
+  return renameHost(moved, id, end === 'target' ? wireId(source, to) : wireId(to, target));
+}
+
+function renameHost(draft: Draft, from: string, to: string): Draft {
+  if (from === to) return draft;
+  const routes = copy(draft.routes);
+  for (const [k, s] of Object.entries(routes)) if (s.contact?.host === from) routes[k] = { ...s, contact: { ...s.contact, host: to } };
+  return { ...draft, routes };
 }
 
 export function setShape(draft: Draft, id: string, shape: WireShape | null): Draft {
   const routes = copy(draft.routes);
-  if (shape === null || (shape.bends === null && shape.landing === null)) delete routes[id];
+  if (shape === null || (shape.bends === null && shape.landing === null && (shape.contact ?? null) === null)) delete routes[id];
   else routes[id] = shape;
   return { ...draft, routes };
 }
@@ -150,8 +158,10 @@ export function parseDraft(value: unknown): Draft | null {
   if (!isRecord(value)) return null;
   const routes = records(value.routes, (raw) => {
     if (!isRecord(raw)) return null;
-    const shape: WireShape = { bends: toBends(raw.bends), landing: isNum(raw.landing) ? raw.landing : null };
-    return shape.bends === null && shape.landing === null ? null : shape;
+    const c = raw.contact;
+    const contact = isRecord(c) && typeof c.host === 'string' && c.host !== '' && isNum(c.at) ? { host: c.host, at: c.at } : null;
+    const shape: WireShape = { bends: toBends(raw.bends), landing: isNum(raw.landing) ? raw.landing : null, contact };
+    return shape.bends === null && shape.landing === null && contact === null ? null : shape;
   });
   return {
     sphere: toPoint(value.sphere),

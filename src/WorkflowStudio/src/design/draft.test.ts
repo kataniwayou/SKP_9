@@ -61,10 +61,32 @@ describe('draft', () => {
   });
 
   it('parses its own JSON and drops what is not its shape', () => {
-    const d = setShape(addWire(EMPTY_DRAFT, { graph: { workflow: { entryStepIds: [] }, steps: new Map() } } as never, 'wf', 's1'), 'wf->s1', { bends: { xs: [8, 16], ys: [40] }, landing: null });
+    const d = setShape(addWire(EMPTY_DRAFT, { graph: { workflow: { entryStepIds: [] }, steps: new Map() } } as never, 'wf', 's1'), 'wf->s1', { bends: { xs: [8, 16], ys: [40] }, landing: null, contact: null });
     expect(parseDraft(JSON.parse(JSON.stringify(d)))).toEqual(d);
     expect(parseDraft('nope')).toBeNull();
-    expect(parseDraft({ sphere: { x: 'a' }, steps: { s1: { x: 1, y: 2 }, s2: 5 }, next: { s1: ['s2', 3] }, routes: { 'a->b': { bends: { xs: [1], ys: [1] }, landing: null } } }))
+    expect(parseDraft({ sphere: { x: 'a' }, steps: { s1: { x: 1, y: 2 }, s2: 5 }, next: { s1: ['s2', 3] }, routes: { 'a->b': { bends: { xs: [1], ys: [1] }, landing: null, contact: null } } }))
       .toEqual({ ...EMPTY_DRAFT, steps: { s1: { x: 1, y: 2 } }, next: { s1: ['s2'] } });
+  });
+});
+
+describe('junction contacts in the draft', () => {
+  it('keeps a shape that has only a contact, and drops one with nothing', () => {
+    const d = setShape(EMPTY_DRAFT, 'a->b', { bends: null, landing: null, contact: { host: 'c->d', at: 40 } });
+    expect(d.routes['a->b']).toEqual({ bends: null, landing: null, contact: { host: 'c->d', at: 40 } });
+    expect(setShape(d, 'a->b', { bends: null, landing: null, contact: null }).routes['a->b']).toBeUndefined();
+  });
+
+  it('reads a contact back from the session and drops a malformed one', () => {
+    const ok = parseDraft({ routes: { 'a->b': { bends: null, landing: null, contact: { host: 'c->d', at: 40 } } } })!;
+    expect(ok.routes['a->b']!.contact).toEqual({ host: 'c->d', at: 40 });
+    const bad = parseDraft({ routes: { 'a->b': { contact: { host: 7, at: 'x' } } } })!;
+    expect(bad.routes['a->b']).toBeUndefined();
+  });
+
+  it('re-attaching a host moves the wires joined onto it to its new id', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')] }));
+    const joined = setShape(EMPTY_DRAFT, 'wf->s3', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
+    const d = reattach(joined, doc, 's1->s2', 'target', 's3');
+    expect(d.routes['wf->s3']!.contact).toEqual({ host: 's1->s3', at: 40 });
   });
 });
