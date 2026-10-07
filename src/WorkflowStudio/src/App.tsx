@@ -227,7 +227,8 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
             views.current.delete(id); // reopened later, it fits afresh
             store.dispatch({ type: 'close', workflowId: id });
           }, doc);
-          // a design draft cannot be saved by the trial: ask first, then the Inspector's own guard
+          // a design draft cannot be saved by the trial: ask first, then the Inspector's own guard. Discard only
+          // proceeds: closing drops the draft with the document, and a Cancel in the Inspector's guard keeps both
           const open = store.getState().docs.find((d) => d.workflowId === id);
           if (open && designDirty(open) && asking.current === null) setPrompt({ kind: 'closeDesign', workflowId: id, doc: doc ?? document, proceed: close });
           else close();
@@ -287,7 +288,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
       {prompt?.kind === 'closeDesign' && (
         <ConfirmDialog doc={prompt.doc} title="Discard design changes?" onCancel={() => setPrompt(null)}
           message="This workflow has design changes that are not saved. The trial cannot save them."
-          buttons={[{ label: 'Discard', primary: true, onClick: () => { setPrompt(null); store.dispatch({ type: 'discardDesign', workflowId: prompt.workflowId }); prompt.proceed(); } }]} />
+          buttons={[{ label: 'Discard', primary: true, onClick: () => { setPrompt(null); prompt.proceed(); } }]} />
       )}
     </StudioActionsProvider>
   );

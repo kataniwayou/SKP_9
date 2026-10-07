@@ -542,4 +542,21 @@ describe('the design draft (plan 4)', () => {
     fireEvent.click(within(box).getByRole('button', { name: 'Discard' }));
     await waitFor(() => expect(screen.queryAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(0));
   });
+
+  it('Discard on close, then Cancel in the Inspector question: the document stays open with its design draft', async () => {
+    const both = memoryStorage({ [SESSION_KEY]: JSON.stringify({
+      version: 1, activeId: ALPHA, showDetails: false, dock: null,
+      docs: [{ workflowId: ALPHA, name: 'alpha', version: '1.0.0', selection: { kind: 'step', stepId: 's1' }, view: null,
+        draft: { trail: [], edits: { description: 'typed' } }, design: { steps: { s1: { x: 800, y: 800 } } } }],
+    }) });
+    render(<App api={api()} storage={memoryStorage()} tabStorage={both} />);
+    expect(await screen.findByText('● design draft')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Description')).toHaveValue('typed');
+    fireEvent.click(screen.getByRole('button', { name: 'Close alpha' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Discard design changes?' })).getByRole('button', { name: 'Discard' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Unsaved changes' })).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getAllByText('alpha', { selector: '.doctab .nm' })).toHaveLength(1);
+    expect(screen.getByText('● design draft')).toBeInTheDocument();
+    expect(screen.getByLabelText('Description')).toHaveValue('typed');
+  });
 });
