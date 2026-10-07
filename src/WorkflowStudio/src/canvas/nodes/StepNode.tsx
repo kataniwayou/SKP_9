@@ -1,6 +1,7 @@
-import { Fragment } from 'react';
+import { Fragment, useContext } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { Health } from '../../api/liveness';
+import { DesignContext } from '../../design/DesignContext';
 import { CHIP, PMID, STEP_H, STEP_W } from '../../layout/geometry';
 import type { FittedText } from '../fitText';
 import { useLiveArt } from '../liveArt';
@@ -89,8 +90,12 @@ export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
   );
 }
 
-export function StepNode({ data }: NodeProps<StepNodeType>) {
+/** Where a new wire is drawn from (spec §4.5): the step's output side, at its processor middle; design mode only. */
+const PORT = { left: W - 6, top: PMID - 6 } as const;
+
+export function StepNode({ id, data }: NodeProps<StepNodeType>) {
   const { health } = useLiveArt();
+  const gestures = useContext(DesignContext);
   return (
     <>
       <Handle id="in" type="target" position={Position.Left} isConnectable={false} style={{ top: PMID }} />
@@ -98,6 +103,7 @@ export function StepNode({ data }: NodeProps<StepNodeType>) {
         <StepView {...data} health={health(data.processor.processorId)} />
       </svg>
       <Handle id="out" type="source" position={Position.Right} isConnectable={false} style={{ top: PMID }} />
+      {gestures && <div className="nx-port nodrag nopan" style={PORT} onPointerDown={(e) => gestures.portPointerDown(id, e)} />}
     </>
   );
 }

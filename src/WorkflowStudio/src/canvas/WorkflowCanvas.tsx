@@ -30,7 +30,7 @@ import { ScrollBars } from './ScrollBars';
 import { CacheNode } from './nodes/CacheNode';
 import { StepNode } from './nodes/StepNode';
 import { WorkflowNode } from './nodes/WorkflowNode';
-import { selectionForPicks, selectionFromClick, withPicks, withSelection } from './selection';
+import { selectionForPicks, selectionFromClick, withHint, withPicks, withSelection } from './selection';
 import { toFlow } from './toFlow';
 
 // Defined outside the component, as React Flow requires, so they are not re-created per render.
@@ -110,19 +110,22 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   shownRef.current = shownDoc;
   const flow = useMemo(() => toFlow(shownDoc, fitter), [shownDoc, fitter]);
   const marked = useMemo(() => (design ? withPicks(flow.nodes, flow.edges, design.picks) : flow), [flow, design?.picks]);
-  const shown = useMemo(() => withSelection(marked.nodes, selection), [marked.nodes, selection]);
+  const selected = useMemo(() => withSelection(marked.nodes, selection), [marked.nodes, selection]);
   const suppressPaneClick = useRef(false);
   const suppressNodeClick = useRef(false);
   const { band, banding, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
   const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick);
   const onKeyDown = useDesignKeys(doc, shownRef, design);
-  const wiring = useWireGestures(shownRef, design, setPreview);
+  const wiring = useWireGestures(doc, shownRef, design, setPreview);
+  // the block under a dragged wire end, outlined green or red (spec §4.4)
+  const shown = useMemo(() => withHint(selected, wiring.hint), [selected, wiring.hint]);
   // picks naming wires that are gone (after an undo) draw nothing
   const pickedWires = useMemo(
     () => (design ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)) : []),
     [shownDoc, design?.picks],
   );
-  const bendsOf = (w: WireRoute) => design?.draft.routes[w.id]?.bends ?? shapeFromPoints(w.points);
+  // the run squares follow a drag's preview, not only the committed draft
+  const bendsOf = (w: WireRoute) => (preview ?? design?.draft)?.routes[w.id]?.bends ?? shapeFromPoints(w.points);
   // the wire's right-click menu (spec §4.3)
   const [menu, setMenu] = useState<{ anchor: Anchor; wireId: string } | null>(null);
 
@@ -206,7 +209,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={onViewChange ? (_event, v) => onViewChange({ x: v.x, y: v.y, zoom: v.zoom, followFit: followFit.current }) : undefined}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={() => { /* Task 8 */ }} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize />

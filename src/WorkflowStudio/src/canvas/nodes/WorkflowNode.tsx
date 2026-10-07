@@ -1,7 +1,9 @@
-import { useId } from 'react';
+import { useContext, useId } from 'react';
 import type { LiveStatus } from '../../api/liveStatus';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
+import { DesignContext } from '../../design/DesignContext';
 import { SPHERE_R } from '../../layout/geometry';
+import { WORKFLOW_SOURCE } from '../../layout/ports';
 import type { FittedText } from '../fitText';
 import { useLiveArt } from '../liveArt';
 import { Tip } from './Label';
@@ -75,6 +77,7 @@ export const PILL_STATE = Object.values(PILL_STATES).reduce((a, b) => (b.length 
 
 export function WorkflowNode({ data }: NodeProps<WorkflowNodeType>) {
   const { started, status } = useLiveArt();
+  const gestures = useContext(DesignContext);
   return (
     <>
       <svg width={2 * R} height={2 * R} overflow="visible" style={{ display: 'block' }}>
@@ -82,6 +85,8 @@ export function WorkflowNode({ data }: NodeProps<WorkflowNodeType>) {
       </svg>
       <Handle id="out" type="source" position={Position.Right} isConnectable={false} style={{ top: R }} />
       <Handle id="down" type="source" position={Position.Bottom} isConnectable={false} />
+      {/* where entry wires are drawn from (spec §4.5): the dial's right side at its centre height; design mode only */}
+      {gestures && <div className="nx-port nodrag nopan" style={{ left: 2 * R - 6, top: R - 6 }} onPointerDown={(e) => gestures.portPointerDown(WORKFLOW_SOURCE, e)} />}
     </>
   );
 }

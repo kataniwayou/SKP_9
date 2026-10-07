@@ -12,7 +12,7 @@ const BAND_START = 4;
 
 /** Blocks, wires and a picked wire's handles are drawn inside React Flow's pane (v12), so empty canvas is the pane less them. */
 const onEmptyCanvas = (target: Element) =>
-  target.closest('.react-flow__pane') !== null && target.closest('.react-flow__node, .react-flow__edge, .react-flow__handle, .design-handle') === null;
+  target.closest('.react-flow__pane') !== null && target.closest('.react-flow__node, .react-flow__edge, .react-flow__handle, .design-handle, .nx-port') === null;
 
 /**
  * The rectangle on empty canvas (spec §3.2): a left-button drag that does not start on a block or a wire

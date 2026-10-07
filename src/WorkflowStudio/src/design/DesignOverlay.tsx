@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { ViewportPortal } from '@xyflow/react';
 import { endsOf, segmentHandles, type Bends } from '../layout/shape';
 import type { WireRoute } from '../layout/wires';
+import type { Point } from '../layout/geometry';
 import type { GuideLine } from './guides';
 import type { FlowRect } from './hit';
 
@@ -15,14 +16,16 @@ export interface DesignOverlayProps {
   bendsOf: (wire: WireRoute) => Bends;
   onSegment: (wire: WireRoute, k: number, e: ReactPointerEvent) => void;
   onEnd: (wire: WireRoute, end: 'source' | 'target', e: ReactPointerEvent) => void;
+  /** The line from a dragged wire end's fixed side to the pointer (spec §4.4-§4.5). */
+  ghost: { from: Point; to: Point } | null;
 }
 
 /**
  * Drawn above the blocks in flow coordinates: the rubber band (spec §3.2), the alignment guides (§3.4),
  * and a picked wire's handles (§4.2, Visio): a green dot on each end, a square in the middle of each run,
- * a diamond on each bend. From Task 8 also the ghost wire.
+ * a diamond on each bend; and the ghost wire while an end or a new wire is dragged (§4.4-§4.5).
  */
-export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd }: DesignOverlayProps) {
+export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost }: DesignOverlayProps) {
   return (
     <ViewportPortal>
       <svg className="design-overlay" width={1} height={1}>
@@ -43,6 +46,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd }
             </g>
           );
         })}
+        {ghost && <path className="design-ghost" d={`M${ghost.from.x} ${ghost.from.y}L${ghost.to.x} ${ghost.to.y}`} />}
       </svg>
     </ViewportPortal>
   );

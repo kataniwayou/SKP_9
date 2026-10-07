@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
-import { clampLanding, type Point } from '../layout/geometry';
+import { clampLanding, PMID, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
+import { WORKFLOW_SOURCE } from '../layout/ports';
 import { dragSegment, endsOf, nearestSegment, normalize, shapeFromPoints, type Bends } from '../layout/shape';
 import type { WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
-import { setShape, type Draft } from './draft';
+import { addWire, reattach, setShape, wireId, type Draft } from './draft';
+import { blockAt } from './hit';
+import { canWire, type DropVerdict } from './rules';
 
 /** Below this many screen pixels a press is a click, not a drag. */
 const MOVE_START = 3;
@@ -53,21 +56,34 @@ export function useGesture(setActive: (on: boolean) => void): Gesture {
     const finish = (cancelled: boolean) => {
       detach();
       setActive(false);
-      if (moved) {
+      if (moved || buttonDown) {
         // the click that ends a drag lands on whatever is under the pointer (the pane clears the picks, a
-        // wire re-picks): swallowed once, and dropped once this input's events are done
+        // wire re-picks): swallowed once, and dropped once this input's events are done. After an Escape
+        // the button is still down: the swallow waits for its release, so the picks stay (spec §5.3)
         const swallow = (ev: MouseEvent) => { ev.stopPropagation(); doc.removeEventListener('click', swallow, true); };
         doc.addEventListener('click', swallow, true);
-        view.setTimeout(() => doc.removeEventListener('click', swallow, true), 0);
+        const drop = () => view.setTimeout(() => doc.removeEventListener('click', swallow, true), 0);
+        if (buttonDown) {
+          const released = () => {
+            doc.removeEventListener('pointerup', released, true);
+            doc.removeEventListener('pointercancel', released, true);
+            drop();
+          };
+          doc.addEventListener('pointerup', released, true);
+          doc.addEventListener('pointercancel', released, true);
+        } else drop();
       }
       onEnd(cancelled, moved);
     };
+    // only Escape ends a gesture with the button still down
+    let buttonDown = false;
     const up = () => finish(false);
     const cancel = () => finish(true);
     const key = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       ev.preventDefault();
       ev.stopPropagation(); // the dock's Escape must not also run
+      buttonDown = true;
       finish(true);
     };
     doc.addEventListener('pointermove', move);
@@ -80,11 +96,13 @@ export function useGesture(setActive: (on: boolean) => void): Gesture {
 }
 
 /**
- * Editing a picked wire (spec §4.2-§4.3): dragging a run's square, or the wire's body, moves that run;
- * the first drag makes the wire manual, the last run slides the landing. Each finished drag is one
- * history step; Escape cancels it (spec §5.3). Task 8 adds end drags and new wires.
+ * Editing wires (spec §4.2-§4.5): dragging a picked wire's run square, or its body, moves that run (the
+ * first drag makes the wire manual, the last run slides the landing); dragging an end dot re-attaches
+ * that end; dragging from a block's connection point draws a new wire. Each finished drag is one history
+ * step; Escape cancels it (spec §5.3).
  */
 export function useWireGestures(
+  saved: StudioDocument,
   shown: MutableRefObject<StudioDocument>,
   design: DesignProps | undefined,
   setPreview: (d: Draft | null) => void,
@@ -92,13 +110,16 @@ export function useWireGestures(
   const [active, setActive] = useState(false);
   const { run, abort } = useGesture(setActive);
   const { screenToFlowPosition } = useReactFlow();
+  // the dragged end's line, and the outline of the block under it (spec §4.4)
+  const [ghost, setGhost] = useState<{ from: Point; to: Point } | null>(null);
+  const [hint, setHint] = useState<{ id: string; ok: boolean } | null>(null);
   const designRef = useRef(design);
   designRef.current = design;
 
   // design mode ending mid-drag drops the drag and its preview
   const designOff = design === undefined;
   useEffect(() => {
-    if (designOff) { abort(); setPreview(null); }
+    if (designOff) { abort(); setPreview(null); setGhost(null); setHint(null); }
   }, [designOff]); // abort and setPreview read refs and React state setters: no need to re-run for them
 
   /** Drags run k of a wire (spec §4.2): the first drag makes the wire manual; the last run slides the landing. */
@@ -129,10 +150,60 @@ export function useWireGestures(
     });
   };
 
+  /**
+   * Drags a wire end from `from` (spec §4.4, option "a"): the block under the pointer is outlined green
+   * when `verdict` allows the drop and red when not; `current` (the end's own block) is not outlined.
+   * Dropped on an allowed block, `done` commits; anywhere else, refused, or back on `current`, nothing
+   * changes and no step is made.
+   */
+  const dropGesture = (e: ReactPointerEvent, from: Point, current: string | null, verdict: (over: string) => DropVerdict, done: (over: string) => void) => {
+    let over: string | null = null;
+    run(e, (p) => {
+      setGhost({ from, to: p });
+      over = blockAt(shown.current, p);
+      setHint(over === null || over === current ? null : { id: over, ok: verdict(over) === 'ok' });
+    }, (cancelled) => {
+      setGhost(null);
+      setHint(null);
+      if (cancelled || over === null || over === current || verdict(over) !== 'ok') return;
+      done(over);
+    });
+  };
+
+  /** Drags a picked wire's arrow head or start dot onto another block; the wire becomes automatic (spec §4.4). */
+  const startEnd = (wire: WireRoute, end: 'source' | 'target', e: ReactPointerEvent) => {
+    const d = designRef.current;
+    if (!d || e.button !== 0) return;
+    const ends = endsOf(wire.points);
+    // the ghost runs from the end that stays
+    const from = end === 'target' ? { x: ends.sx, y: ends.sy } : { x: ends.tx, y: ends.ty };
+    const current = end === 'target' ? wire.target : wire.source;
+    dropGesture(e, from, current,
+      (over) => (end === 'target' ? canWire(shown.current, wire.source, over, wire.id) : canWire(shown.current, over, wire.target, wire.id)),
+      (over) => {
+        const id = end === 'target' ? wireId(wire.source, over) : wireId(over, wire.target);
+        d.onCommit(reattach(d.draft, saved, wire.id, end, over), { picks: [{ kind: 'wire', id }] });
+      });
+  };
+
+  /** Draws a new wire from a step's output side or the hub (spec §4.5); it is automatic and becomes the pick. */
+  const startNew = (source: string, e: ReactPointerEvent) => {
+    const d = designRef.current;
+    if (!d || e.button !== 0) return;
+    const { placement } = shown.current;
+    const at = placement.steps.get(source);
+    const from = source === WORKFLOW_SOURCE
+      ? { x: placement.sphere.cx + SPHERE_R, y: placement.sphere.cy }
+      : { x: (at?.x ?? 0) + STEP_W, y: (at?.y ?? 0) + PMID };
+    dropGesture(e, from, null, (over) => canWire(shown.current, source, over), (over) => {
+      d.onCommit(addWire(d.draft, saved, source, over), { picks: [{ kind: 'wire', id: wireId(source, over) }] });
+    });
+  };
+
   /** The press point in flow coordinates (React Flow's own transform, so a pop-out's window works too). */
   const flowPointOf = (e: ReactPointerEvent): Point => screenToFlowPosition({ x: e.clientX, y: e.clientY }, { snapToGrid: false });
-  const latestRef = useRef({ startSegment, flowPointOf });
-  latestRef.current = { startSegment, flowPointOf };
+  const latestRef = useRef({ startSegment, startNew, flowPointOf });
+  latestRef.current = { startSegment, startNew, flowPointOf };
 
   // stable, so every wire does not re-render with each canvas render
   const gestures = useMemo<DesignGestures>(() => ({
@@ -146,8 +217,10 @@ export function useWireGestures(
       const { startSegment: start, flowPointOf } = latestRef.current;
       start(wire, nearestSegment(endsOf(wire.points), bends, flowPointOf(e)), e);
     },
-    portPointerDown() { /* Task 8 */ },
+    portPointerDown(source, e) {
+      latestRef.current.startNew(source, e);
+    },
   }), [shown]);
 
-  return { gestures, startSegment, active };
+  return { gestures, startSegment, startEnd, ghost, hint, active };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cacheDto, graphDto, processorDto, stepDto } from '../api/fixtures';
 import { graphFromDto } from '../api/toModel';
-import { DIE_SELECTED_CLASS, PICK_CLASS, SELECTED_CLASS, selectionForPicks, selectionFromClick, withPicks, withSelection } from './selection';
+import { DIE_SELECTED_CLASS, DROP_NO_CLASS, DROP_OK_CLASS, PICK_CLASS, SELECTED_CLASS, selectionForPicks, selectionFromClick, withHint, withPicks, withSelection } from './selection';
 import type { StudioNode } from './toFlow';
 
 const nodes = [{ id: 'wf' }, { id: 's1' }, { id: 's2' }, { id: 'cache:c1' }] as StudioNode[];
@@ -29,6 +29,13 @@ describe('withSelection', () => {
   ])('marks exactly one node for %o', (selection, id, className) => {
     const marked = withSelection(nodes, selection).filter((n) => n.className);
     expect(marked.map((n) => [n.id, n.className])).toEqual([[id, className]]);
+  });
+
+  it('outlines the block under a dragged wire end green or red (plan 4)', () => {
+    const nodes = [{ id: 's1', type: 'step', position: { x: 0, y: 0 }, data: {} }] as never;
+    expect(withHint(nodes, { id: 's1', ok: true })[0]!.className).toBe(DROP_OK_CLASS);
+    expect(withHint(nodes, { id: 's1', ok: false })[0]!.className).toBe(DROP_NO_CLASS);
+    expect(withHint(nodes, null)).toBe(nodes);
   });
 
   it('marks nothing for a selection whose entity is not drawn', () => {

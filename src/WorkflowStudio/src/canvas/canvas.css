@@ -48,3 +48,10 @@
 .design-handle.end { fill: #34D399; stroke: #04111F; stroke-width: 1.5; }
 .design-handle.seg { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; }
 .design-handle.bend { fill: var(--accent); pointer-events: none; }
+
+/* plan 4: the block under a dragged wire end (green: the drop is allowed; red: refused), the ghost wire, and the connection points */
+.studio-canvas .react-flow__node.drop-ok { outline: 2px solid #34D399; outline-offset: 4px; border-radius: 8px; }
+.studio-canvas .react-flow__node.drop-no { outline: 2px solid #F87171; outline-offset: 4px; border-radius: 8px; }
+.design-ghost { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 5 4; }
+.nx-port { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent); background: var(--panel); box-sizing: border-box; opacity: 0; cursor: pointer; transition: opacity .12s; }
+.react-flow__node:hover .nx-port, .studio-canvas.gesture .nx-port { opacity: 1; }

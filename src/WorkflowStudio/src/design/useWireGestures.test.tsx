@@ -4,12 +4,28 @@ import { graphDto, stepDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
-import { EMPTY_DRAFT, setShape } from './draft';
+import type { StudioDocument } from '../app/document';
+import { STEP_H, STEP_W, type Point } from '../layout/geometry';
+import { EMPTY_DRAFT, addWire, reattach, setShape } from './draft';
 import type { DesignProps } from './designProps';
 
 const fitter = createTextFitter((t) => t.length * 7);
 const designOf = (over: Partial<DesignProps> = {}): DesignProps => ({ draft: EMPTY_DRAFT, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), ...over });
 const two = () => loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+const three = () => loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { nextStepIds: ['s3'] }), stepDto('s3')] }));
+
+/** A flow point on screen, through React Flow's viewport transform (jsdom has no layout: the pane sits at 0, 0). */
+function screenOf(container: HTMLElement, p: Point): { clientX: number; clientY: number } {
+  const t = (container.querySelector('.react-flow__viewport') as HTMLElement).style.transform;
+  const [, x, y, z] = /translate\(([-\d.e]+)px, ?([-\d.e]+)px\) scale\(([-\d.e]+)\)/.exec(t)!;
+  return { clientX: p.x * Number(z) + Number(x), clientY: p.y * Number(z) + Number(y) };
+}
+const middleOf = (doc: StudioDocument, id: string): Point => {
+  const at = doc.placement.steps.get(id)!;
+  return { x: at.x + STEP_W / 2, y: at.y + STEP_H / 2 };
+};
+const nodeClass = (container: HTMLElement, id: string) => container.querySelector(`.react-flow__node[data-id="${id}"]`)!.getAttribute('class') ?? '';
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe('wire gestures', () => {
   it('a picked wire shows its end dots and run handles', async () => {
@@ -136,5 +152,122 @@ describe('wire gestures', () => {
     fireEvent.contextMenu(other.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!, { clientX: 50, clientY: 50 });
     const item = other.getByRole('menuitem', { name: /Reset route/ });
     expect(item).toHaveAttribute('aria-disabled', 'true');
+  });
+  it('a step offers a connection point only in design mode', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
+    const { container, rerender } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} />);
+    expect(container.querySelector('.nx-port')).toBeNull();
+    rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={vi.fn()} />);
+    expect(container.querySelectorAll('.nx-port').length).toBe(2); // the hub's and the step's
+  });
+
+  it('dragging the arrow head onto another step re-targets the wire: green outline, a ghost, one step, the new wire picked', async () => {
+    const doc = await three();
+    const onSelect = vi.fn();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={onSelect} />);
+    const head = container.querySelector('.design-handle.end[data-end="target"]')!;
+    fireEvent.pointerDown(head, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+    expect(nodeClass(container, 's3')).toContain('drop-ok');
+    expect(container.querySelector('.design-ghost')).not.toBeNull();
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    expect(design.onCommit).toHaveBeenCalledWith(reattach(EMPTY_DRAFT, doc, 's1->s2', 'target', 's3'), { picks: [{ kind: 'wire', id: 's1->s3' }] });
+    expect(container.querySelector('.design-ghost')).toBeNull();
+    expect(nodeClass(container, 's3')).not.toContain('drop-');
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('a refused drop (a cycle) outlines red and snaps back; so do its own block and empty canvas', async () => {
+    const doc = await three();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const head = () => container.querySelector('.design-handle.end[data-end="target"]')!;
+    // the head of s2->s3 on s1 would make s1 -> s2 -> s1
+    fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    expect(nodeClass(container, 's1')).toContain('drop-no');
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    // back on its own block: no outline, no step
+    fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+    expect(nodeClass(container, 's3')).not.toContain('drop-');
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+    // empty canvas
+    fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('dragging the start dot onto the hub makes the wire an entry wire', async () => {
+    const doc = await three();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const dot = container.querySelector('.design-handle.end[data-end="source"]')!;
+    const hub = { x: doc.placement.sphere.cx, y: doc.placement.sphere.cy };
+    fireEvent.pointerDown(dot, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, hub), pointerId: 1 });
+    expect(nodeClass(container, 'wf')).toContain('drop-ok');
+    fireEvent.pointerUp(document, { ...screenOf(container, hub), pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledWith(reattach(EMPTY_DRAFT, doc, 's2->s3', 'source', 'wf'), { picks: [{ kind: 'wire', id: 'wf->s3' }] });
+  });
+
+  it('dragging from a step\'s connection point to a step adds a wire; onto nothing adds none', async () => {
+    const doc = await three();
+    const onSelect = vi.fn();
+    const design = designOf();
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={onSelect} />);
+    const port = container.querySelector('.react-flow__node[data-id="s1"] .nx-port')!;
+    fireEvent.pointerDown(port, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    expect(container.querySelector('.studio-canvas')!.classList.contains('gesture')).toBe(true);
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
+    expect(container.ownerDocument.querySelector('.design-band')).toBeNull();
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+    fireEvent.pointerDown(port, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+    expect(nodeClass(container, 's3')).toContain('drop-ok');
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledWith(addWire(EMPTY_DRAFT, doc, 's1', 's3'), { picks: [{ kind: 'wire', id: 's1->s3' }] });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('Escape during an end drag puts everything back, and the release that follows keeps the picks', async () => {
+    const doc = await three();
+    const onSelect = vi.fn();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={onSelect} />);
+    fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(container.querySelector('.design-ghost')).toBeNull();
+    expect(nodeClass(container, 's3')).not.toContain('drop-');
+    // the button is still down a while after the Escape; its release ends on the pane
+    await tick();
+    fireEvent.pointerUp(document, { clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.click(container.querySelector('.react-flow__pane')!);
+    expect(design.onCommit).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    // and the next click is an ordinary one again
+    await tick();
+    fireEvent.click(container.querySelector('.react-flow__pane')!);
+    expect(onSelect).toHaveBeenCalledWith(null, []);
+  });
+
+  it('the run squares of a manual wire follow the drag', async () => {
+    const doc = await two();
+    const shaped = setShape(EMPTY_DRAFT, 's1->s2', { bends: { xs: [528, 560], ys: [400] }, landing: null });
+    const design = designOf({ draft: shaped, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
+    const run = () => container.querySelector('.design-handle.seg[data-k="1"]')!;
+    expect(run().getAttribute('x')).toBe('524');
+    const y = Number(run().getAttribute('y')) + 4;
+    // the zoom is small in jsdom: the press is far off so the move counts as a drag
+    fireEvent.pointerDown(run(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: 544, y }), pointerId: 1 });
+    expect(run().getAttribute('x')).toBe('540');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
   });
 });
