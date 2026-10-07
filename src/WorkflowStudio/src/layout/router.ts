@@ -13,7 +13,7 @@ export interface Box {
 const BEND_COST = 24;
 const HIT_COST = 5000;
 const HIT_MARGIN = 3;
-const CLEARANCE = 24;
+export const CLEARANCE = 24;
 
 function segmentHits(a: Pt, b: Pt, box: Box): boolean {
   const x1 = Math.min(a[0], b[0]), x2 = Math.max(a[0], b[0]);

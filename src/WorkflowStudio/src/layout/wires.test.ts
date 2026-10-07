@@ -187,4 +187,42 @@ describe('junctions (plan 7)', () => {
     const wires = setup(steps(), at, new Set<string>(), join('t->c', 's->b', 0));
     expect(wires.find((x) => x.id === 't->c')!.joint!.contact).toEqual([528, 128]);
   });
+
+  it('a host passing over the target column: the branch still heads right into its step', () => {
+    // s -> z runs along y 128 far past c (864,288); t->c joins it
+    const st = [step('s', ['z']), step('t', ['c']), step('z', [], { entryCondition: 2 }), step('c', [], { entryCondition: 2 })];
+    const pos = { s: [288, 32], t: [288, 288], z: [1440, 32], c: [864, 288] } as Record<string, [number, number]>;
+    const wires = setup(st, pos, new Set<string>(), join('t->c', 's->z', 176));
+    const w = wires.find((x) => x.id === 't->c')!;
+    const br = w.joint!.branch, landing = br[br.length - 1]!;
+    expect(w.joint!.split).not.toBeNull();
+    expect(square(br)).toBe(true);
+    expect(br[br.length - 2]![0]).toBeLessThan(landing[0]);
+    expect(br[br.length - 2]![1]).toBe(landing[1]);
+    expect(br.every((p) => p[0] <= 864)).toBe(true);
+    expect(landing[0] - w.joint!.split![0]).toBeGreaterThanOrEqual(24);
+  });
+
+  it('a contact on the branch of a joined host lies on that branch', () => {
+    const len = (pts: readonly (readonly [number, number])[]) => pts.reduce((a, p, i) => (i === 0 ? 0 : a + Math.abs(p[0] - pts[i - 1]![0]) + Math.abs(p[1] - pts[i - 1]![1])), 0);
+    const first = setup(steps(), at, new Set<string>(), join('t->c', 's->b', 176)).find((x) => x.id === 't->c')!;
+    const d = len(first.points) + 16;
+    // the host's drawn line is its own line, then its branch
+    const wires = setup(steps(), at, new Set<string>(), { ...join('t->c', 's->b', 176), ...join('u->b', 't->c', d) });
+    const t = wires.find((x) => x.id === 't->c')!, u = wires.find((x) => x.id === 'u->b')!;
+    expect(u.joint).toBeDefined();
+    const [cx, cy] = u.joint!.contact;
+    const br = t.joint!.branch;
+    expect(br.some((a, i) => {
+      const b = br[i + 1];
+      return b !== undefined && cx >= Math.min(a[0], b[0]) && cx <= Math.max(a[0], b[0]) && cy >= Math.min(a[1], b[1]) && cy <= Math.max(a[1], b[1]);
+    })).toBe(true);
+  });
+
+  it('a host line too short to hold a contact leaves the wire plain', () => {
+    const st = [step('s', ['k']), step('t', ['c']), step('k', [], { entryCondition: 2 }), step('c', [], { entryCondition: 2 })];
+    const pos = { s: [288, 32], k: [528, 32], t: [288, 288], c: [864, 288] } as Record<string, [number, number]>;
+    const wires = setup(st, pos, new Set<string>(), join('t->c', 's->k', 8));
+    expect(wires.find((x) => x.id === 't->c')!.joint).toBeUndefined();
+  });
 });

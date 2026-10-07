@@ -4,7 +4,7 @@ import { CACHE_H, CACHE_W, GRID, PORT_GAP, clampLanding, SPHERE_R, STEP_H, STEP_
 import { CONTACT_MARGIN, inLoop, lengthOf, nearestOn, ownEnds, pointAt, slice } from './junctions';
 import type { Placement, Sphere } from './placement';
 import { computeDepartures, computeLandings, departureX, WORKFLOW_SOURCE, type SourceId, type WireEnd } from './ports';
-import { route, simplify, type Box, type Pt } from './router';
+import { CLEARANCE, route, simplify, type Box, type Pt } from './router';
 import { pointsOfShape, type Ends, type WireShape } from './shape';
 
 export interface WireRoute {
@@ -146,7 +146,9 @@ function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, sh
     const joint: Joint = { host: host.id, contact, split: null, branch: [], own, ownEnds: ends };
     return { route: { ...r, points, joint }, travel: [...points, ...slice(hostTravel, onTravel, travelLen).slice(1)] };
   }
-  const s = nearestOn([hostTravel], landing, onTravel, travelLen - CONTACT_MARGIN);
+  // aim a router clearance left of the landing so the branch can head right into its step; never on the contact itself (window end if the line is short)
+  const end = travelLen - CONTACT_MARGIN;
+  const s = nearestOn([hostTravel], [landing[0] - CLEARANCE, landing[1]], Math.min(onTravel + GRID, end), end);
   const split: Pt = [snap(s.p[0], GRID), snap(s.p[1], GRID)];
   const branch = clearPath(route(split[0], split[1], landing[0], landing[1], '', stepBoxId(r.target), 0, boxes), boxes);
   const joint: Joint = { host: host.id, contact, split, branch, own, ownEnds: ends };
