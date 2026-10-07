@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { blockAt, itemsInRect, rectOf, topLeftOf } from './hit';
+import { blockAt, itemsInRect, rectOf, topLeftOf, wireAt } from './hit';
 
 const two = () => loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
 
@@ -21,5 +21,18 @@ describe('hit', () => {
     expect(blockAt(doc, { x: doc.placement.sphere.cx, y: doc.placement.sphere.cy })).toBe('wf');
     expect(blockAt(doc, { x: -500, y: -500 })).toBeNull();
     expect(topLeftOf(doc, 'wf')).toEqual({ x: doc.placement.sphere.cx - 96, y: doc.placement.sphere.cy - 96 });
+  });
+});
+
+describe('wireAt (plan 7)', () => {
+  it('finds the wire line under a point within the tolerance, with the distance along it', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const w = doc.wires.find((x) => x.id === 's1->s2')!;
+    const [ax, ay] = w.points[0]!;
+    const [bx] = w.points[1]!;
+    const mid = { x: (ax + bx) / 2, y: ay + 3 };
+    expect(wireAt(doc, mid, 6)).toEqual({ id: 's1->s2', at: (bx - ax) / 2 });
+    expect(wireAt(doc, { x: mid.x, y: ay + 40 }, 6)).toBeNull();
+    expect(wireAt(doc, mid, 6, 's1->s2')).toBeNull();
   });
 });

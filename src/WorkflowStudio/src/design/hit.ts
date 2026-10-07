@@ -1,6 +1,7 @@
 import type { StudioDocument } from '../app/document';
 import { CACHE_H, CACHE_W, SPHERE_R, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
+import { nearestOn } from '../layout/junctions';
 import type { Pick } from '../store/picks';
 
 /** A rectangle in flow coordinates, x0 ≤ x1 and y0 ≤ y1. */
@@ -49,4 +50,16 @@ export function blockAt(doc: StudioDocument, p: Point): string | null {
   }
   const { cx, cy } = doc.placement.sphere;
   return Math.hypot(p.x - cx, p.y - cy) <= SPHERE_R ? SPHERE_NODE_ID : null;
+}
+
+/** The wire line nearest `p` within `tolerance` (flow units), and how far along its drawn line (own line, then branch); plan 7. */
+export function wireAt(doc: StudioDocument, p: Point, tolerance: number, exclude: string | null = null): { id: string; at: number } | null {
+  let best: { id: string; at: number; gap: number } | null = null;
+  for (const w of doc.wires) {
+    if (w.id === exclude) continue;
+    const drawn = w.joint && w.joint.branch.length > 1 ? [w.points, w.joint.branch] : [w.points];
+    const n = nearestOn(drawn, [p.x, p.y]);
+    if (n.gap <= tolerance && (best === null || n.gap < best.gap)) best = { id: w.id, at: n.at, gap: n.gap };
+  }
+  return best && { id: best.id, at: best.at };
 }
