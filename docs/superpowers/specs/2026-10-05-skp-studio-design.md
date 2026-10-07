@@ -208,6 +208,9 @@ The original v49 drawings, kept for history:
   target's entry condition (`layout/wires.ts`), so wires into one step always qualify, and wires into different
   steps qualify when those steps share an entry condition: then the shared line branches again to each target.
   Junctions wait until the user approves the plan 4 designer.
+- **Plan 7 (2026-10-07):** `2026-10-07-skp-studio-07-junctions-design.md` decides junctions and wins where it
+  differs from this section and §5.5: hand-made only (no automatic bus/trunk), option (a) (a joined wire keeps its
+  own target and splits off at the point nearest it), chains with a loop check, drawing only.
 - **A junction is positioned state, like a block.** Its node position (the bus height and the trunk's
   lane) is seeded once and stored in `Layout`; it never follows blocks. Moving a source step stretches
   **only that step's own line, up to its contact point**; the bus, the trunk and the other lines stay.
