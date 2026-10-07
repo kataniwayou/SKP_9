@@ -28,7 +28,7 @@
 
 /* a document's zoom (mockup v49 .zoom, .docbar .zoom) */
 .zoom { display: flex; align-items: center; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); }
-.zoom button { background: var(--panel-2); border: 0; color: var(--ink); width: 30px; height: 28px; cursor: pointer; font-size: 15px; }
+.zoom button { background: var(--panel-2); border: 0; color: var(--ink); width: 30px; height: 28px; cursor: default; font-size: 15px; }
 .zoom button:hover { background: var(--line); }
 .zoom button.fit { width: 38px; font-size: 11px; font-family: var(--sans); }
 .zoom output { font-family: var(--mono); font-size: 12px; width: 52px; text-align: center; color: var(--muted); }
@@ -43,3 +43,4 @@
 .studio-canvas:focus { outline: none; }
 .design-overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .design-band { fill: rgba(125, 211, 252, .08); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; }
+.design-guide { stroke: #fff; stroke-width: 1; filter: drop-shadow(0 0 2px rgba(125, 211, 252, .9)); }

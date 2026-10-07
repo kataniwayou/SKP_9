@@ -61,7 +61,8 @@ export function withPicks(nodes: StudioNode[], edges: StudioEdge[], picks: reado
   const ids = new Set(picks.filter((p) => p.kind === 'node').map((p) => p.id));
   const wires = new Set(picks.filter((p) => p.kind === 'wire').map((p) => p.id));
   return {
-    nodes: nodes.map((n) => ({ ...n, draggable: true, selected: ids.has(n.id), className: ids.has(n.id) ? withClass(n.className, PICK_CLASS) : n.className })) as StudioNode[],
+    // `measured` too: React Flow's drag needs it, and the canvas never applies React Flow's own changes
+    nodes: nodes.map((n) => ({ ...n, draggable: true, measured: { width: n.width, height: n.height }, selected: ids.has(n.id), className: ids.has(n.id) ? withClass(n.className, PICK_CLASS) : n.className })) as StudioNode[],
     edges: edges.map((e) => (e.type === 'cable' && e.data
       ? { ...e, zIndex: wires.has(e.id) ? 1 : 0, data: { ...e.data, picked: wires.has(e.id) } }
       : e)) as StudioEdge[],

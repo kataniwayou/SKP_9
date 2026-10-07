@@ -255,6 +255,40 @@ describe('WorkflowCanvas', () => {
       expect(onSelect).not.toHaveBeenCalled();
     });
 
+    it('the canvas shows the closed hand while a rectangle is drawn, not for a press that has not moved', async () => {
+      const doc = await two();
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={vi.fn()} />);
+      const canvas = container.querySelector('.studio-canvas')!;
+      const pane = container.querySelector('.react-flow__pane')!;
+      fireEvent.pointerDown(pane, { button: 0, clientX: 5, clientY: 5 });
+      fireEvent.pointerMove(document, { clientX: 6, clientY: 6 });
+      expect(canvas.classList.contains('gesture')).toBe(false);
+      fireEvent.pointerMove(document, { clientX: 300, clientY: 300 });
+      expect(canvas.classList.contains('gesture')).toBe(true);
+      fireEvent.pointerUp(document, { clientX: 300, clientY: 300 });
+      expect(canvas.classList.contains('gesture')).toBe(false);
+    });
+
+    it('blocks can be dragged in design mode only', async () => {
+      const doc = await two();
+      const { container, rerender } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} />);
+      expect(container.querySelector('.react-flow__node[data-id="s1"]')!.classList.contains('draggable')).toBe(true);
+      rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} />);
+      expect(container.querySelector('.react-flow__node[data-id="s1"]')!.classList.contains('draggable')).toBe(false);
+    });
+
+    it('arrow keys on the focused canvas nudge the picked blocks; Ctrl+Z undoes', async () => {
+      const doc = await two();
+      const design = designOf({ picks: [{ kind: 'node', id: 's2' }] });
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} />);
+      const canvas = container.querySelector('.studio-canvas')!;
+      fireEvent.keyDown(canvas, { key: 'ArrowUp' });
+      const s2 = doc.placement.steps.get('s2')!;
+      expect(design.onCommit).toHaveBeenCalledWith(expect.objectContaining({ steps: { s2: { x: s2.x, y: s2.y - 8 } } }), { merge: 'nudge' });
+      fireEvent.keyDown(canvas, { key: 'z', ctrlKey: true });
+      expect(design.onUndo).toHaveBeenCalledTimes(1);
+    });
+
     it('a rectangle with Ctrl adds to the picks; a press that does not move is a click', async () => {
       const doc = await two();
       const onSelect = vi.fn();

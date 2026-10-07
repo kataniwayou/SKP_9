@@ -23,7 +23,7 @@ export function useRubberBand(
   design: DesignProps | undefined,
   onSelect: ((selection: Selection | null, picks?: Pick[]) => void) | undefined,
   suppressPaneClick: MutableRefObject<boolean>,
-): { band: FlowRect | null; onPointerDownCapture: (e: ReactPointerEvent) => void } {
+): { band: FlowRect | null; banding: boolean; onPointerDownCapture: (e: ReactPointerEvent) => void } {
   const { screenToFlowPosition } = useReactFlow();
   const domNode = useStore((s) => s.domNode);
   const [band, setBand] = useState<FlowRect | null>(null);
@@ -78,5 +78,6 @@ export function useRubberBand(
     doc.addEventListener('pointercancel', cancel);
   };
 
-  return { band, onPointerDownCapture };
+  // a rectangle is a drag: the canvas shows the closed hand once it has moved (spec §3.1)
+  return { band, banding: band !== null, onPointerDownCapture };
 }

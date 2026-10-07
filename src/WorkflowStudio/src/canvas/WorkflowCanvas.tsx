@@ -6,9 +6,13 @@ import { DesignContext } from '../design/DesignContext';
 import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
 import type { Draft } from '../design/draft';
+import type { GuideLine } from '../design/guides';
+import { useBlockDrag } from '../design/useBlockDrag';
+import { useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
+import { GRID } from '../layout/geometry';
 import { CableEdge } from './edges/CableEdge';
 import { TetherEdge } from './edges/TetherEdge';
 import { FIT_VIEW_OPTIONS } from './fitOptions';
@@ -59,6 +63,14 @@ interface Props {
 /** React Flow's attribution badge is hidden (MIT licence): it would sit on the horizontal scroll bar. */
 const PRO_OPTIONS = { hideAttribution: true } as const;
 
+/** Every block's top-left corner lands on the 8 px grid while it is dragged (spec §3.4). */
+const SNAP_GRID: [number, number] = [GRID, GRID];
+/**
+ * A press on a block that moves this many screen pixels or fewer is a click, more is a drag. Both are
+ * set: React Flow's drag swallows the click after any movement beyond its click distance (0 by default).
+ */
+const DRAG_START = 2;
+
 /** Design mode turns off React Flow's own selection keys and keyboard moves: picks live in the store. */
 const DESIGN_KEYS = { multiSelectionKeyCode: null, selectionKeyCode: null, disableKeyboardA11y: true } as const;
 
@@ -86,8 +98,9 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const [restored] = useState(() => (initialView && !initialView.followFit ? initialView : null));
   const followFit = useRef(restored === null);
 
-  // a gesture's draft while it runs (Tasks 6-8 set it); null: the committed draft is shown
-  const [preview] = useState<Draft | null>(null);
+  // a gesture's draft while it runs; null: the committed draft is shown
+  const [preview, setPreview] = useState<Draft | null>(null);
+  const [guides, setGuides] = useState<GuideLine[]>([]);
   const shownDoc = useMemo(() => (design ? applyDraft(doc, preview ?? design.draft) : doc), [doc, design?.draft, preview]);
   const shownRef = useRef(shownDoc);
   shownRef.current = shownDoc;
@@ -96,7 +109,9 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const shown = useMemo(() => withSelection(marked.nodes, selection), [marked.nodes, selection]);
   const suppressPaneClick = useRef(false);
   const suppressNodeClick = useRef(false);
-  const { band, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
+  const { band, banding, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
+  const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick);
+  const onKeyDown = useDesignKeys(doc, shownRef, design);
 
   const onNodeClick: NodeMouseHandler = (event, node) => {
     if (!onSelect) return;
@@ -124,9 +139,10 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   return (
     <FollowFitContext.Provider value={followFit}>
       <LiveArtContext.Provider value={live}>
-        <div className="studio-canvas" style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}
+        <div className={banding ? 'studio-canvas gesture' : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%' }}
           tabIndex={design ? 0 : undefined}
-          onPointerDownCapture={design ? (e) => { e.currentTarget.focus({ preventScroll: true }); onPointerDownCapture(e); } : undefined}>
+          onKeyDown={design ? onKeyDown : undefined}
+          onPointerDownCapture={design ? (e) => { e.currentTarget.focus({ preventScroll: true }); drag.notePress(e.target as Element); onPointerDownCapture(e); } : undefined}>
           <DesignContext.Provider value={null}>
             <ReactFlow
               nodes={shown}
@@ -142,7 +158,14 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               proOptions={PRO_OPTIONS}
               minZoom={0.1}
               maxZoom={4}
-              nodesDraggable={false}
+              nodesDraggable={design !== undefined}
+              snapToGrid={design !== undefined}
+              snapGrid={SNAP_GRID}
+              nodeDragThreshold={DRAG_START}
+              nodeClickDistance={DRAG_START}
+              onNodeDragStart={drag.onNodeDragStart}
+              onNodesChange={drag.onNodesChange}
+              onNodeDragStop={drag.onNodeDragStop}
               nodesConnectable={false}
               elementsSelectable={false}
               edgesFocusable={false}
@@ -162,7 +185,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={onViewChange ? (_event, v) => onViewChange({ x: v.x, y: v.y, zoom: v.zoom, followFit: followFit.current }) : undefined}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} />}
+              {design && <DesignOverlay band={band} guides={guides} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize />
