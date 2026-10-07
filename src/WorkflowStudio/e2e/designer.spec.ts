@@ -5,20 +5,36 @@ import { documentPanel, expect, inspector, openWorkflow, tab, test, workflowsWit
 // request). Each test starts from an empty session and works on a live workflow with a chain a -> b -> c
 // where b has no other way in.
 
-interface Chain { workflow: LiveWorkflow; a: string; b: string; c: string }
+/** `reattachable`: a -> c may be drawn (a does not already go to c, and c does not reach a). */
+interface Chain { workflow: LiveWorkflow; a: string; b: string; c: string; reattachable: boolean }
 
 async function findChain(request: APIRequestContext): Promise<Chain | null> {
+  let first: Chain | null = null;
   for (const workflow of await workflowsWithSteps(request)) {
     const g = (await (await request.get(`/api/v1/workflows/${workflow.id}/graph`)).json()) as { workflow: { entryStepIds: string[] }; steps: { id: string; nextStepIds: string[] }[] };
+    const next = (id: string) => g.steps.find((s) => s.id === id)?.nextStepIds ?? [];
+    const reaches = (from: string, to: string) => {
+      const seen = new Set<string>();
+      const stack = [from];
+      while (stack.length > 0) {
+        const id = stack.pop()!;
+        if (id === to) return true;
+        if (!seen.has(id)) { seen.add(id); stack.push(...next(id)); }
+      }
+      return false;
+    };
     const into = (id: string) => g.steps.filter((s) => s.nextStepIds.includes(id)).length + (g.workflow.entryStepIds.includes(id) ? 1 : 0);
     for (const a of g.steps) for (const b of a.nextStepIds) {
       const sb = g.steps.find((s) => s.id === b);
       if (!sb || into(b) !== 1) continue;
       const c = sb.nextStepIds[0];
-      if (c && c !== a.id) return { workflow, a: a.id, b, c };
+      if (!c || c === a.id) continue;
+      const found = { workflow, a: a.id, b, c, reattachable: !a.nextStepIds.includes(c) && !reaches(c, a.id) };
+      if (found.reattachable) return found;
+      first ??= found;
     }
   }
-  return null;
+  return first;
 }
 
 let chain: Chain | null;
@@ -33,6 +49,8 @@ test.beforeEach(async ({ page }) => {
 const node = (panel: Locator, id: string) => panel.locator(`.react-flow__node[data-id="${id}"]`);
 const wire = (panel: Locator, id: string) => panel.locator(`.react-flow__edge[data-id="${id}"]`);
 const pathOf = (panel: Locator, id: string) => wire(panel, id).locator('path.w').getAttribute('d');
+/** The last point of a wire's path: where its arrow lands. */
+const arrowEndOf = async (panel: Locator, id: string) => ((await pathOf(panel, id)) ?? '').match(/-?\d+(?:\.\d+)?/g)?.slice(-2).join(',');
 
 /**
  * A point on a wire, in page coordinates, where that wire is the topmost thing under the pointer: wires
@@ -129,7 +147,7 @@ test('a run drags and Reset route restores the automatic shape', async ({ page }
   await expect.poll(() => pathOf(panel, id)).toBe(before);
 });
 
-test('a wire end re-attaches; a cycle outlines red and snaps back', async ({ page }) => {
+test('a wire end dropped where it would close a cycle outlines red and snaps back', async ({ page }) => {
   const panel = await open(page);
   const { a, b, c } = chain!;
   const before = await pathOf(panel, `${b}->${c}`);
@@ -176,4 +194,53 @@ test('closing a designed workflow asks; Cancel keeps it', async ({ page }) => {
   await tab(page, chain!.workflow.name).getByRole('button', { name: `Close ${chain!.workflow.name}` }).click();
   await page.getByRole('alertdialog', { name: 'Discard design changes?' }).getByRole('button', { name: 'Cancel' }).click();
   await expect(tab(page, chain!.workflow.name)).toHaveCount(1);
+});
+
+test('arrow keys nudge the picked step on the focused canvas; Ctrl+Z puts it back', async ({ page }) => {
+  const panel = await open(page);
+  const { a, b } = chain!;
+  const id = `${a}->${b}`;
+  const before = await pathOf(panel, id);
+  // the press on the step picks it and gives the canvas focus
+  await node(panel, b).locator('.nx-sn').click();
+  await expect(panel.locator('.studio-canvas')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(() => pathOf(panel, id)).not.toBe(before);
+  await expect(page.getByText('● design draft')).toBeVisible();
+  // the two nudges are one step
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => pathOf(panel, id)).toBe(before);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+});
+
+test('dragging the last run of a picked wire up and down slides where its arrow lands', async ({ page }) => {
+  const panel = await open(page);
+  const id = `${chain!.a}->${chain!.b}`;
+  const p = await pointOnWire(panel, id);
+  await page.mouse.click(p.x, p.y);
+  const before = await arrowEndOf(panel, id);
+  const last = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`).last();
+  const at = await centreOf(last);
+  await drag(page, at, { x: at.x, y: at.y - 24 });
+  await expect.poll(() => arrowEndOf(panel, id)).not.toBe(before);
+  await expect(page.getByText('● design draft')).toBeVisible();
+});
+
+test('the arrow head of a picked wire dropped on an allowed step re-attaches it there', async ({ page }) => {
+  test.skip(!chain!.reattachable, 'no chain where a -> c may be drawn');
+  const panel = await open(page);
+  const { a, b, c } = chain!;
+  const p = await pointOnWire(panel, `${a}->${b}`);
+  await page.mouse.click(p.x, p.y);
+  const head = await centreOf(panel.locator(`.design-wire[data-wire="${a}->${b}"] .design-handle.end[data-end="target"]`));
+  const target = await centreOf(node(panel, c).locator('.nx-sn'));
+  await page.mouse.move(head.x, head.y);
+  await page.mouse.down();
+  await page.mouse.move(target.x, target.y, { steps: 6 });
+  await expect(node(panel, c)).toHaveClass(/drop-ok/);
+  await page.mouse.up();
+  await expect(wire(panel, `${a}->${c}`)).toHaveCount(1);
+  await expect(wire(panel, `${a}->${b}`)).toHaveCount(0);
+  await expect(page.getByText('● design draft')).toBeVisible();
 });
