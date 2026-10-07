@@ -1,8 +1,10 @@
 import type { StudioDocument } from '../app/document';
 import type { EntityReadDto } from '../api/entities';
 import type { Id } from '../model/graph';
-import { isEmptyDraft, type Draft } from '../design/draft';
+import { entriesOf, isEmptyDraft, nextOf, wireEnds, type Draft } from '../design/draft';
 import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
+import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
+import { WORKFLOW_SOURCE } from '../layout/ports';
 import { savedText } from './entityForms';
 import { EMPTY_INSPECTOR, type InspectorState, type SaveFailure } from './inspector';
 import { currentTarget, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
@@ -108,6 +110,34 @@ const inspect = (state: StudioState, id: Id, change: (i: InspectorState, d: Open
     return next === d.inspector ? d : { ...d, inspector: next };
   });
 
+/** New picks end a run of nudges (spec §5.3): the next nudge is a step of its own. */
+const withPicks = (d: OpenDocument, picks: Pick[]): OpenDocument =>
+  ({ ...d, picks, design: d.design.merge === null ? d.design : { ...d.design, merge: null } });
+
+/**
+ * After undo, redo or Discard design: the picks naming what the saved workflow with `draft` over it has.
+ * A wire pick stays only while its source still lists its target. A document not ready keeps its picks.
+ */
+function prunedPicks(d: OpenDocument, draft: Draft): Pick[] {
+  if (d.status.kind !== 'ready') return d.picks;
+  const saved = d.status.doc;
+  const exists = (p: Pick): boolean => {
+    if (p.kind === 'node') {
+      if (p.id === SPHERE_NODE_ID) return true;
+      if (p.id.startsWith(CACHE_NODE_PREFIX)) return saved.placement.caches.has(p.id.slice(CACHE_NODE_PREFIX.length));
+      return saved.placement.steps.has(p.id);
+    }
+    const { source, target } = wireEnds(p.id);
+    if (!saved.graph.steps.has(target)) return false;
+    return (source === WORKFLOW_SOURCE ? entriesOf(saved, draft) : nextOf(saved, draft, source)).includes(target);
+  };
+  const kept = d.picks.filter(exists);
+  return kept.length === d.picks.length ? d.picks : kept;
+}
+
+const redesign = (d: OpenDocument, design: DesignHistory): OpenDocument =>
+  design === d.design ? d : { ...d, design, picks: prunedPicks(d, design.draft) };
+
 const without = (edits: Record<string, string>, drop: (key: string, text: string) => boolean): Record<string, string> =>
   Object.fromEntries(Object.entries(edits).filter(([key, text]) => !drop(key, text)));
 
@@ -145,21 +175,23 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       return update(state, action.workflowId, (d) => {
         const picks = action.picks ?? picksOf(action.selection);
         const same = selectionKey(d.selection) === selectionKey(action.selection);
-        if (same && samePicks(d.picks, picks)) return d;
-        return same ? { ...d, picks } : { ...d, selection: action.selection, picks, inspector: EMPTY_INSPECTOR };
+        const picked = samePicks(d.picks, picks);
+        if (same && picked) return d;
+        const next = picked ? d : withPicks(d, picks);
+        return same ? next : { ...next, selection: action.selection, inspector: EMPTY_INSPECTOR };
       });
     case 'pick':
-      return update(state, action.workflowId, (d) => (samePicks(d.picks, action.picks) ? d : { ...d, picks: action.picks }));
+      return update(state, action.workflowId, (d) => (samePicks(d.picks, action.picks) ? d : withPicks(d, action.picks)));
     case 'design':
       return update(state, action.workflowId, (d) => ({
         ...d, design: commit(d.design, action.draft, action.merge ?? null), picks: action.picks ?? d.picks,
       }));
     case 'undo':
-      return update(state, action.workflowId, (d) => ({ ...d, design: undo(d.design) }));
+      return update(state, action.workflowId, (d) => redesign(d, undo(d.design)));
     case 'redo':
-      return update(state, action.workflowId, (d) => ({ ...d, design: redo(d.design) }));
+      return update(state, action.workflowId, (d) => redesign(d, redo(d.design)));
     case 'discardDesign':
-      return update(state, action.workflowId, (d) => ({ ...d, design: historyOf() }));
+      return update(state, action.workflowId, (d) => redesign(d, historyOf()));
     case 'toggleDetails':
       return { ...state, showDetails: !state.showDetails };
     case 'drill':

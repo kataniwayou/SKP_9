@@ -3,7 +3,7 @@ import type { StudioDocument } from '../app/document';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { EMPTY_INSPECTOR } from './inspector';
-import { EMPTY_DRAFT } from '../design/draft';
+import { addWire, EMPTY_DRAFT, reattach } from '../design/draft';
 import { activeDocument, designDirty, INITIAL_STATE, inspectorKey, reduce, shownTargetOf, type StudioAction, type StudioState } from './studioState';
 
 const doc = { graph: { workflow: { name: 'wf', version: '1.0.0' } } } as StudioDocument;
@@ -309,5 +309,68 @@ describe('designing (plan 4)', () => {
     s = reduce(s, { type: 'discardDesign', workflowId: 'wf1' });
     expect(designDirty(s.docs[0]!)).toBe(false);
     expect(s.docs[0]!.design.past).toEqual([]);
+  });
+
+  it('a pick between nudges ends the run: the next nudge is a step of its own (spec §5.3)', () => {
+    const nudgeA1 = { ...EMPTY_DRAFT, steps: { s1: { x: 8, y: 0 } } };
+    const nudgeA2 = { ...EMPTY_DRAFT, steps: { s1: { x: 16, y: 0 } } };
+    const nudgeB = { ...nudgeA2, steps: { ...nudgeA2.steps, s2: { x: 8, y: 0 } } };
+    let s = reduce(opened(), { type: 'design', workflowId: 'wf1', draft: nudgeA1, merge: 'nudge' });
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: nudgeA2, merge: 'nudge' });
+    expect(s.docs[0]!.design.past).toHaveLength(1);
+    s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's2' } });
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: nudgeB, merge: 'nudge' });
+    expect(s.docs[0]!.design.past).toHaveLength(2);
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(s.docs[0]!.design.draft).toEqual(nudgeA2);
+
+    // a pick alone (no Inspector change) ends the run too; an unchanged pick does not
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: nudgeB, merge: 'nudge' });
+    expect(reduce(s, { type: 'pick', workflowId: 'wf1', picks: s.docs[0]!.picks })).toBe(s);
+    s = reduce(s, { type: 'pick', workflowId: 'wf1', picks: [{ kind: 'node', id: 's1' }] });
+    expect(s.docs[0]!.design.merge).toBeNull();
+  });
+});
+
+describe('undo, redo and Discard design drop picks the document no longer has', () => {
+  const ready = async () => {
+    const graph = graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3')] });
+    return reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }),
+      { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graph) });
+  };
+  const savedOf = (s: StudioState) => (s.docs[0]!.status as { kind: 'ready'; doc: StudioDocument }).doc;
+
+  it('a new wire picked, then undone: its pick is gone; redo does not bring the pick back, the wire stays pickable', async () => {
+    let s = await ready();
+    const draft = addWire(EMPTY_DRAFT, savedOf(s), 's2', 's3');
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'wire', id: 's2->s3' }, { kind: 'node', id: 's1' }] });
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
+    s = reduce(s, { type: 'redo', workflowId: 'wf1' });
+    expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
+  });
+
+  it('a re-attached wire picked, then undone: its pick is gone and the saved wire is not picked', async () => {
+    let s = await ready();
+    const draft = reattach(EMPTY_DRAFT, savedOf(s), 's1->s3', 'source', 's2');
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'wire', id: 's2->s3' }] });
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(s.docs[0]!.picks).toEqual([]);
+  });
+
+  it('Discard design keeps picks that still exist (saved wires, blocks, the hub)', async () => {
+    let s = await ready();
+    const picks = [{ kind: 'wire', id: 'wf->s1' }, { kind: 'wire', id: 's1->s2' }, { kind: 'node', id: 'wf' }, { kind: 'node', id: 's3' }] as const;
+    const draft = addWire(EMPTY_DRAFT, savedOf(s), 's2', 's3');
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft, picks: [...picks, { kind: 'wire', id: 's2->s3' }] });
+    s = reduce(s, { type: 'discardDesign', workflowId: 'wf1' });
+    expect(s.docs[0]!.picks).toEqual(picks);
+  });
+
+  it('a document that is not ready keeps its picks', () => {
+    let s = reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' });
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, next: { s9: [] } }, picks: [{ kind: 'wire', id: 's9->s8' }] });
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(s.docs[0]!.picks).toEqual([{ kind: 'wire', id: 's9->s8' }]);
   });
 });
