@@ -1,9 +1,12 @@
 import type { StudioDocument } from '../app/document';
 import type { EntityReadDto } from '../api/entities';
 import type { Id } from '../model/graph';
+import { isEmptyDraft, type Draft } from '../design/draft';
+import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
 import { savedText } from './entityForms';
 import { EMPTY_INSPECTOR, type InspectorState, type SaveFailure } from './inspector';
 import { currentTarget, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
+import { picksOf, samePicks, type Pick } from './picks';
 import { selectionKey, type Selection } from './selection';
 
 /** Where one open document is in its life: being read, ready to draw, or failed with a message. */
@@ -22,6 +25,10 @@ export interface OpenDocument {
   selection: Selection | null;
   /** This document's Inspector (slice 3b): its trail and edits are the draft the session keeps. */
   inspector: InspectorState;
+  /** What is picked on the canvas (plan 4); the Inspector's `selection` is the one entity it shows. */
+  picks: Pick[];
+  /** The design draft and its history (plan 4). The draft is kept in the session; the history is not. */
+  design: DesignHistory;
 }
 
 /**
@@ -43,7 +50,15 @@ export type StudioAction =
   | { type: 'failed'; workflowId: Id; message: string }
   | { type: 'close'; workflowId: Id }
   | { type: 'activate'; workflowId: Id }
-  | { type: 'select'; workflowId: Id; selection: Selection | null }
+  /** `picks`: what the canvas picked with it; absent, the selection's own block (or nothing). */
+  | { type: 'select'; workflowId: Id; selection: Selection | null; picks?: Pick[] }
+  /** Picks only (a drag of a block that was not picked): the Inspector is untouched. */
+  | { type: 'pick'; workflowId: Id; picks: Pick[] }
+  /** A finished design gesture (spec §5.3); `merge` joins a run of the same kind into one step. */
+  | { type: 'design'; workflowId: Id; draft: Draft; merge?: string; picks?: Pick[] }
+  | { type: 'undo'; workflowId: Id }
+  | { type: 'redo'; workflowId: Id }
+  | { type: 'discardDesign'; workflowId: Id }
   | { type: 'toggleDetails' }
   | { type: 'drill'; workflowId: Id; target: InspectorTarget }
   /**
@@ -103,6 +118,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       if (state.docs.some((d) => d.workflowId === action.workflowId)) return { ...state, activeId: action.workflowId };
       const doc: OpenDocument = {
         workflowId: action.workflowId, name: action.name, version: action.version, status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR,
+        picks: [], design: historyOf(),
       };
       return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
     }
@@ -126,8 +142,24 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         ? { ...state, activeId: action.workflowId }
         : state;
     case 'select':
-      return update(state, action.workflowId, (d) =>
-        selectionKey(d.selection) === selectionKey(action.selection) ? d : { ...d, selection: action.selection, inspector: EMPTY_INSPECTOR });
+      return update(state, action.workflowId, (d) => {
+        const picks = action.picks ?? picksOf(action.selection);
+        const same = selectionKey(d.selection) === selectionKey(action.selection);
+        if (same && samePicks(d.picks, picks)) return d;
+        return same ? { ...d, picks } : { ...d, selection: action.selection, picks, inspector: EMPTY_INSPECTOR };
+      });
+    case 'pick':
+      return update(state, action.workflowId, (d) => (samePicks(d.picks, action.picks) ? d : { ...d, picks: action.picks }));
+    case 'design':
+      return update(state, action.workflowId, (d) => ({
+        ...d, design: commit(d.design, action.draft, action.merge ?? null), picks: action.picks ?? d.picks,
+      }));
+    case 'undo':
+      return update(state, action.workflowId, (d) => ({ ...d, design: undo(d.design) }));
+    case 'redo':
+      return update(state, action.workflowId, (d) => ({ ...d, design: redo(d.design) }));
+    case 'discardDesign':
+      return update(state, action.workflowId, (d) => ({ ...d, design: historyOf() }));
     case 'toggleDetails':
       return { ...state, showDetails: !state.showDetails };
     case 'drill':
@@ -185,6 +217,9 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       return update(state, action.workflowId, (d) => (d.status.kind !== 'failed' ? d : { ...d, status: { kind: 'loading' } }));
   }
 }
+
+/** The document has a design draft (spec §5.4): its tab is marked and closing it asks. */
+export const designDirty = (doc: OpenDocument): boolean => !isEmptyDraft(doc.design.draft);
 
 export function activeDocument(state: StudioState): OpenDocument | null {
   return state.docs.find((d) => d.workflowId === state.activeId) ?? null;

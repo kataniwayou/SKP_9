@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memoryStorage } from '../test/memoryStorage';
 import { EMPTY_INSPECTOR } from '../store/inspector';
-import { INITIAL_STATE, type StudioState } from '../store/studioState';
+import { EMPTY_DRAFT } from '../design/draft';
+import { historyOf } from '../design/history';
+import { INITIAL_STATE, reduce, type StudioState } from '../store/studioState';
 import { createSaver, readSession, readTabSession, restoredState, SESSION_KEY, sessionOf, writeSession, writeTabSession, type Session } from './session';
 
 const dock = { version: 1, dock: { grid: { root: { type: 'branch', data: [] }, width: 1200, height: 700, orientation: 'HORIZONTAL' }, panels: {} }, documentGroupId: null, hidden: [], sides: {}, homes: {}, popped: [] };
@@ -100,7 +102,7 @@ describe('sessionOf / restoredState', () => {
   it('keeps each open document with its selection and view, and drops views of closed documents', () => {
     const state: StudioState = {
       ...INITIAL_STATE,
-      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR }],
+      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf() }],
       activeId: 'a',
       showDetails: true,
     };
@@ -165,8 +167,8 @@ describe('the draft (slice 3b, spec §6.1)', () => {
     const state: StudioState = {
       ...INITIAL_STATE,
       docs: [
-        { workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'step', stepId: 's1' }, inspector: { ...EMPTY_INSPECTOR, ...draft, trail: draft.trail as never } },
-        { workflowId: 'b', name: 'billing', version: '1.0.0', status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR },
+        { workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'step', stepId: 's1' }, inspector: { ...EMPTY_INSPECTOR, ...draft, trail: draft.trail as never }, picks: [], design: historyOf() },
+        { workflowId: 'b', name: 'billing', version: '1.0.0', status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf() },
       ],
       activeId: 'a',
     };
@@ -183,5 +185,31 @@ describe('the draft (slice 3b, spec §6.1)', () => {
     const stale = memoryStorage({ [SESSION_KEY]: JSON.stringify(good) });
     const staleRefusing = { getItem: (k: string) => stale.getItem(k), setItem: () => { throw new Error('full'); } } as unknown as Storage;
     expect(writeTabSession(staleRefusing, memoryStorage(), good)).toBe(false);       // a refresh would read the tab's old entry
+  });
+});
+
+describe('the design draft (plan 4)', () => {
+  const draft = { ...EMPTY_DRAFT, steps: { s1: { x: 8, y: 16 } } };
+
+  it('keeps a document draft across a write and a read, with an empty history', () => {
+    let state = reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' });
+    state = reduce(state, { type: 'design', workflowId: 'wf1', draft });
+    const storage = memoryStorage();
+    writeSession(storage, sessionOf(state, new Map(), null));
+    const back = restoredState(readSession(storage));
+    expect(back.docs[0]!.design.draft).toEqual(draft);
+    expect(back.docs[0]!.design.past).toEqual([]);
+  });
+
+  it('drops a malformed design draft (review focus 2)', () => {
+    const storage = memoryStorage();
+    storage.setItem(SESSION_KEY, JSON.stringify({ version: 1, docs: [{ workflowId: 'wf1', name: 'a', version: '1', selection: null, view: null, design: 'junk' }], activeId: 'wf1', showDetails: false, dock: null }));
+    const back = restoredState(readSession(storage));
+    expect(back.docs[0]!.design.draft).toEqual(EMPTY_DRAFT);
+  });
+
+  it('writes no design field while there is no draft', () => {
+    const state = reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' });
+    expect(sessionOf(state, new Map(), null).docs[0]).not.toHaveProperty('design');
   });
 });

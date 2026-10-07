@@ -1,7 +1,10 @@
 import type { SavedView } from '../canvas/savedView';
+import { isEmptyDraft, parseDraft, type Draft } from '../design/draft';
+import { historyOf } from '../design/history';
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
 import { EMPTY_INSPECTOR, hasEdits, type InspectorDraft } from '../store/inspector';
 import { isTarget } from '../store/inspectorTarget';
+import { picksOf } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { INITIAL_STATE, type StudioState } from '../store/studioState';
 
@@ -24,6 +27,8 @@ export interface SessionDoc {
   view: SavedView | null;
   /** The document's unsaved Inspector work (slice 3b): absent when there is none. Optional, so the version stays 1. */
   draft?: InspectorDraft;
+  /** The document's design draft (plan 4): absent when there is none. Optional, so the version stays 1. */
+  design?: Draft;
 }
 
 export interface Session {
@@ -59,6 +64,7 @@ export function readSession(storage: Storage | null): Session | null {
       selection: isSelection(d.selection) ? d.selection : null,
       view: isView(d.view) ? d.view : null,
       ...(isDraft(d.draft) ? { draft: { trail: d.draft.trail, edits: d.draft.edits } } : {}),
+      ...designOf(d.design),
     });
   }
   const activeId = typeof value.activeId === 'string' && docs.some((d) => d.workflowId === value.activeId)
@@ -121,6 +127,7 @@ export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedVi
     docs: state.docs.map((d) => ({
       workflowId: d.workflowId, name: d.name, version: d.version, selection: d.selection, view: views.get(d.workflowId) ?? null,
       ...(d.inspector.trail.length > 0 || hasEdits(d.inspector) ? { draft: { trail: d.inspector.trail, edits: d.inspector.edits } } : {}),
+      ...(isEmptyDraft(d.design.draft) ? {} : { design: d.design.draft }),
     })),
     activeId: state.activeId,
     showDetails: state.showDetails,
@@ -134,6 +141,8 @@ export function restoredState(session: Session | null): StudioState {
   return {
     docs: session.docs.map((d) => ({ workflowId: d.workflowId, name: d.name, version: d.version, status: { kind: 'loading' }, selection: d.selection,
       inspector: { ...EMPTY_INSPECTOR, ...(d.draft ?? {}) },
+      picks: picksOf(d.selection),
+      design: historyOf(d.design),
     })),
     activeId: session.activeId,
     showDetails: session.showDetails,
@@ -169,6 +178,11 @@ function isSelection(value: unknown): value is Selection {
 function isDraft(value: unknown): value is InspectorDraft {
   return isRecord(value) && Array.isArray(value.trail) && value.trail.every(isTarget)
     && isRecord(value.edits) && Object.values(value.edits).every((text) => typeof text === 'string');
+}
+
+function designOf(value: unknown): { design?: Draft } {
+  const draft = parseDraft(value);
+  return draft !== null && !isEmptyDraft(draft) ? { design: draft } : {};
 }
 
 function isView(value: unknown): value is SavedView {

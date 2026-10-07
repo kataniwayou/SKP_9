@@ -3,7 +3,8 @@ import type { StudioDocument } from '../app/document';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { EMPTY_INSPECTOR } from './inspector';
-import { activeDocument, INITIAL_STATE, inspectorKey, reduce, shownTargetOf, type StudioAction, type StudioState } from './studioState';
+import { EMPTY_DRAFT } from '../design/draft';
+import { activeDocument, designDirty, INITIAL_STATE, inspectorKey, reduce, shownTargetOf, type StudioAction, type StudioState } from './studioState';
 
 const doc = { graph: { workflow: { name: 'wf', version: '1.0.0' } } } as StudioDocument;
 const run = (...actions: StudioAction[]): StudioState => actions.reduce(reduce, INITIAL_STATE);
@@ -281,5 +282,32 @@ describe('the Inspector (slice 3b)', () => {
     const s = opened();
     const before = inspectorKey(s);
     expect(inspectorKey(reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } }))).not.toBe(before);
+  });
+});
+
+describe('designing (plan 4)', () => {
+  const opened = () => reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' });
+  const draft = { ...EMPTY_DRAFT, steps: { s1: { x: 8, y: 8 } } };
+
+  it('a selection carries its picks; picks alone keep the Inspector', () => {
+    let s = reduce(opened(), { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
+    expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
+    s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' }, picks: [{ kind: 'node', id: 's1' }, { kind: 'node', id: 's2' }] });
+    expect(s.docs[0]!.picks).toHaveLength(2);
+    s = reduce(s, { type: 'pick', workflowId: 'wf1', picks: [] });
+    expect(s.docs[0]!.selection).toEqual({ kind: 'step', stepId: 's1' });
+  });
+
+  it('a design step is undone, redone and discarded; the document is marked while it has a draft', () => {
+    let s = reduce(opened(), { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'node', id: 's1' }] });
+    expect(designDirty(s.docs[0]!)).toBe(true);
+    expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(designDirty(s.docs[0]!)).toBe(false);
+    s = reduce(s, { type: 'redo', workflowId: 'wf1' });
+    expect(s.docs[0]!.design.draft).toEqual(draft);
+    s = reduce(s, { type: 'discardDesign', workflowId: 'wf1' });
+    expect(designDirty(s.docs[0]!)).toBe(false);
+    expect(s.docs[0]!.design.past).toEqual([]);
   });
 });
