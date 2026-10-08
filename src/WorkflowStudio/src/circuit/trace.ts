@@ -106,6 +106,27 @@ export function trace(circuit: Readonly<Circuit>, skip: ReadonlySet<string> = ne
   return { links, loop: hasCycle(adj) };
 }
 
+/** The wires on a closed loop of wires (spec §2.2-3): a point of theirs that current can leave and come back to. */
+export function loopWires(circuit: Readonly<Circuit>): Set<string> {
+  const adj = pointGraph(circuit, new Set());
+  const out = new Set<string>();
+  for (const from of adj.keys()) {
+    if (!from.startsWith('p:')) continue;
+    const id = from.slice(2, from.lastIndexOf(':'));
+    if (out.has(id)) continue;
+    const seen = new Set<string>();
+    const stack = [...(adj.get(from) ?? [])];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (n === from) { out.add(id); break; }
+      if (seen.has(n)) continue;
+      seen.add(n);
+      stack.push(...(adj.get(n) ?? []));
+    }
+  }
+  return out;
+}
+
 /** The links as `source->target` keys. */
 export const linkKeys = (links: ReadonlyMap<SourceId, readonly Id[]>): Set<string> =>
   new Set([...links].flatMap(([s, ts]) => ts.map((t) => `${s}->${t}`)));

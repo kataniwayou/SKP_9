@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Circuit, CircuitWire, End } from './circuit';
-import { linkKeys, trace, wiresBetween } from './trace';
+import { linkKeys, loopWires, trace, wiresBetween } from './trace';
 
 const at = (step: string): End => ({ on: 'step', step, y: null });
 const hub: End = { on: 'hub', angle: null };
@@ -53,6 +53,12 @@ describe('trace (plan 9 §7)', () => {
   it('finds a closed loop of wires only (spec §2.2-3), never a loop through a step', () => {
     expect(trace({ h: w(at('s1'), on('x', 40)), x: w(at('s2'), on('h', 40)) }).loop).toBe(true);
     expect(trace({ a: w(at('s1'), at('s2')), b: w(at('s2'), at('s1')) }).loop).toBe(false);
+  });
+
+  it('names the wires on a closed loop of wires, not the wires feeding it or leaving it, nor a loop through a step', () => {
+    const c = { a: w(at('s1'), on('l1', 20)), l1: w(open, on('l2', 50)), l2: w(open, on('l1', 50)), t: w(on('l2', 70), at('s2')), b: w(at('s2'), at('s1')) };
+    expect([...loopWires(c)].sort()).toEqual(['l1', 'l2']);
+    expect([...loopWires({ a: w(at('s1'), at('s2')), b: w(at('s2'), at('s1')) })]).toEqual([]);
   });
 
   it('a host open at both ends still carries what is poured into it on to the tail junctions further along', () => {
