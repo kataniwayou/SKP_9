@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { assignmentDto, cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
 import type { WorkflowGraphDto } from '../api/types';
-import { applyDesign } from '../design/apply';
+import { applyDesign, applyEdits } from '../design/apply';
 import { EMPTY_EDITS, removeAssignment, setField } from '../design/design';
-import { setEnd } from '../circuit/circuit';
-import { circuitOf, EMPTY_DRAFT, withCircuit } from '../design/draft';
-import { designDirty } from '../store/studioState';
+import { addCircuitWire, setEnd } from '../circuit/circuit';
+import { circuitOf, EMPTY_DRAFT, removeWires, withCircuit } from '../design/draft';
+import { designDirty, designOf } from '../store/studioState';
 import { createStudioStore } from '../store/studioStore';
 import { loadedDocument } from './fixtures';
-import { buildDesignRequest, saveDesign } from './saveDesign';
+import { buildDesignRequest, saveDesign, type DesignRequest } from './saveDesign';
 
 const notFound = { ok: false, error: { kind: 'notFound', status: 404 } } as const;
 
@@ -26,7 +26,7 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
     edits = setField(edits, { kind: 'schema', processorId: 'p1', slot: 'config' }, schemaDto('sc1'), 'definition', '{"type":"string"}', () => 'copy1');
     edits = setField(edits, { kind: 'cache', id: 'c1' }, cacheDto('c1'), 'root', 'r2', () => 'x');
     edits = removeAssignment(edits, 's2', { id: 'a2', updatedAt: 'ta' });
-    const draft = { ...EMPTY_DRAFT, next: { s1: [] } };
+    const draft = removeWires(EMPTY_DRAFT, applyEdits(base, edits), ['s1->s2'], () => null);
 
     const body = buildDesignRequest(base, applyDesign(base, draft, edits), { draft, edits });
 
@@ -68,6 +68,38 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
     expect(body.workflow.entryStepIds).toEqual(['s1']);
     expect(body.layout.wires['s1->s2']!.tail).toEqual({ on: 'open', x: 304, y: 600 });
     expect(body.layout.wires['wf->s3']!.tail).toEqual({ on: 'open', x: 64, y: 704 });
+  });
+
+  it("sends the lists the circuit's current gives: a tail junction fans out; a link made twice is sent once (Review Focus 3)", async () => {
+    const base = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { nextStepIds: ['s3'] }), stepDto('s3')],
+    }));
+    let c = setEnd(circuitOf(base, EMPTY_DRAFT), 's2->s3', 'tail', { on: 'wire', host: 's1->s2', at: 40 });
+    c = addCircuitWire(c, 'w:d', { tail: { on: 'step', step: 's1', y: null }, head: { on: 'step', step: 's3', y: null } });
+    const draft = withCircuit(EMPTY_DRAFT, base, c);
+
+    const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
+
+    expect(body.steps.map((s) => [s.id, s.nextStepIds])).toEqual([['s1', ['s2', 's3']], ['s2', []]]);
+    expect(body.workflow.entryStepIds).toBeNull();
+  });
+
+  it('never sends a step as its own next step: a hidden self-loop or one wire on both its sides writes nothing (§2.2-4)', async () => {
+    const base = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')],
+    }));
+    // s1's output back into s1 through a junction on s1 -> s2, and s3 wired onto itself
+    let c = addCircuitWire(circuitOf(base, EMPTY_DRAFT), 'w:a', { tail: { on: 'wire', host: 's1->s2', at: 40 }, head: { on: 'step', step: 's1', y: null } });
+    c = addCircuitWire(c, 'w:b', { tail: { on: 'step', step: 's3', y: null }, head: { on: 'step', step: 's3', y: null } });
+    const draft = withCircuit(EMPTY_DRAFT, base, c);
+
+    const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
+
+    for (const s of body.steps) expect(s.nextStepIds ?? []).not.toContain(s.id);
+    expect(body.steps).toEqual([]);
+    expect(Object.keys(body.layout.wires)).toEqual(expect.arrayContaining(['w:a', 'w:b']));
   });
 });
 
@@ -134,5 +166,60 @@ describe('saveDesign (plan 8 §4.1)', () => {
     await saveDesign(api, store, 'wf1', NOW);
 
     expect(api.saveDesign).not.toHaveBeenCalled();
+  });
+
+  it("a design with a short circuit is not saved: nothing is sent, so BaseApi's links through the net stay; Output says so, the design stays (plan 9 §7)", async () => {
+    const graph = graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3')],
+    });
+    const base = await loadedDocument(graph);
+    const drawn = createStudioStore();
+    drawn.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    drawn.dispatch({ type: 'loaded', workflowId: 'wf1', doc: base });
+    // s1 -> s3 taps s1 -> s2 (one Completed net), then the Inspector makes s3 Failed: the net is short-circuited
+    const draft = withCircuit(EMPTY_DRAFT, base, setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s3', 'tail', { on: 'wire', host: 's1->s2', at: 40 }));
+    drawn.dispatch({ type: 'design', workflowId: 'wf1', draft });
+    const edits = setField(EMPTY_EDITS, { kind: 'step', id: 's3' }, stepDto('s3'), 'entryCondition', 2, () => 'x');
+    const store = createStudioStore({ ...drawn.getState(), docs: drawn.getState().docs.map((d) => ({ ...d, edits })) });
+    // what the request would carry: the net's links left out, so s1 would lose s2 and s3 if it were applied
+    const d0 = store.getState().docs[0]!;
+    const shown = applyDesign(base, d0.design.draft, d0.edits);
+    expect(buildDesignRequest(base, shown, designOf(d0)).steps.find((s) => s.id === 's1')!.nextStepIds).toEqual([]);
+    const api = apiWith({ ok: true, value: { applied: true, errors: [] } }, graph);
+
+    await saveDesign(api, store, 'wf1', NOW);
+
+    expect(api.saveDesign).not.toHaveBeenCalled();
+    expect(api.getGraph).not.toHaveBeenCalled();
+    const d = store.getState().docs[0]!;
+    expect([d.saving, designDirty(d)]).toEqual([false, true]);
+    expect(d.status.kind === 'ready' && d.status.doc.graph.steps.get('s1')!.nextStepIds).toEqual(['s2', 's3']);
+    expect(store.getState().output.at(-1)!.text).toBe('Not saved: 1 short circuit (see Problems)');
+  });
+
+  it('a short circuit drawn into the design is not saved either; once it is undone the Save goes', async () => {
+    const graph = graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3', { entryCondition: 2 })],
+    });
+    const base = await loadedDocument(graph);
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: base });
+    store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s3', 'tail', { on: 'wire', host: 's1->s2', at: 40 })) });
+    const api = apiWith({ ok: true, value: { applied: true, errors: [] } }, graph);
+
+    await saveDesign(api, store, 'wf1', NOW);
+    expect(api.saveDesign).not.toHaveBeenCalled();
+    expect(store.getState().output.at(-1)!.text).toBe('Not saved: 1 short circuit (see Problems)');
+
+    // the tail back on s1: the net agrees again, only the hub moved
+    store.dispatch({ type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, sphere: { x: 400, y: 400 } } });
+    await saveDesign(api, store, 'wf1', NOW);
+    expect(api.saveDesign).toHaveBeenCalledTimes(1);
+    const sent = vi.mocked(api.saveDesign).mock.calls[0]![1] as unknown as DesignRequest;
+    expect(sent.steps).toEqual([]);
+    expect(store.getState().output.at(-1)!.text).toBe('Saved and applied');
   });
 });

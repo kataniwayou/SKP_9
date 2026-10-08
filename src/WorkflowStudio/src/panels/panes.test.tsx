@@ -13,6 +13,8 @@ import { Problems } from './Problems';
 import { buildDesignRequest } from '../app/saveDesign';
 import { applyDesign } from '../design/apply';
 import { designOf } from '../store/studioState';
+import { setEnd } from '../circuit/circuit';
+import { circuitOf, EMPTY_DRAFT, withCircuit } from '../design/draft';
 
 const graph = graphDto({
   steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'], processorId: 'p1' }), stepDto('s2', { name: 'store', processorId: 'p1' })],
@@ -302,6 +304,40 @@ describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
     expect(unnamed).not.toHaveAttribute('tabindex');
     fireEvent.keyDown(named!, { key: 'Enter' });
     expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's2' });
+  });
+
+  async function shorted(errors: DesignError[] | null = null): Promise<StudioStore> {
+    const base = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3', { entryCondition: 2 })],
+    }));
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: base });
+    store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s3', 'tail', { on: 'wire', host: 's1->s2', at: 40 })) });
+    const state = store.getState();
+    return createStudioStore({ ...state, docs: state.docs.map((d) => ({ ...d, errors })) });
+  }
+
+  it('lists a short circuit of the design while it lasts, not only after a Save; its row selects the step (plan 9 §2.2-7)', async () => {
+    const store = await shorted();
+    wrap(store, <Problems />);
+    const rows = screen.getAllByRole('listitem');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent('short circuit: Completed meets Failed');
+    fireEvent.click(rows[0]!);
+    expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's3' });
+  });
+
+  it('lists a short circuit once: a stored copy is superseded by the live one, other errors stay; undone, it goes', async () => {
+    const copy: DesignError = { kind: 'step', id: 's3', stage: 'wires', field: null, message: 'short circuit: Completed meets Failed' };
+    const other: DesignError = { kind: 'step', id: 's2', stage: 'steps', field: 'version', message: 'bad' };
+    const store = await shorted([copy, other]);
+    wrap(store, <Problems />);
+    expect(screen.getAllByRole('listitem').map((r) => r.querySelector('.pd')!.textContent)).toEqual(['short circuit: Completed meets Failed', 'bad']);
+
+    act(() => store.dispatch({ type: 'undo', workflowId: 'wf1' }));
+    expect(screen.getAllByRole('listitem').map((r) => r.querySelector('.pd')!.textContent)).toEqual(['bad']);
   });
 });
 

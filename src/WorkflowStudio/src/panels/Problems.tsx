@@ -1,4 +1,7 @@
+import { useMemo } from 'react';
 import { useGuard } from '../app/studioActions';
+import { applyDesign } from '../design/apply';
+import { isShortCircuitError, shortCircuitErrors } from '../design/shortCircuits';
 import { entityName } from '../model/entityNames';
 import type { DesignError, Graph } from '../model/graph';
 import { errorTarget } from '../store/errorTarget';
@@ -24,19 +27,24 @@ function entityLabel(e: DesignError, graph: Graph): string {
 }
 
 /**
- * Problems (plan 8 §4.1): the errors of the active document's last Save, one row each: the entity, the
- * field and the message. Clicking a row selects its entity. Opening a workflow shows none: it runs no
- * dry run, and errors are never stored.
+ * Problems (plan 8 §4.1; plan 9 §2.2-7): the design's short circuits while they last, then the errors of the
+ * active document's last Save, one row each: the entity, the field and the message. Clicking a row selects its
+ * entity. Opening a workflow runs no dry run and errors are never stored, so only a short circuit shows then.
  */
 export function Problems() {
   const active = useStudio(activeDocument);
   const store = useStudioStore();
   const guard = useGuard();
+  // short circuits are the design's own (plan 9 §2.2-7): listed while they last, not only after a Save
+  const live = useMemo(
+    () => (active?.status.kind === 'ready' ? shortCircuitErrors(applyDesign(active.status.doc, active.design.draft, active.edits), active.design.draft) : []),
+    [active?.status, active?.design.draft, active?.edits],
+  );
 
   if (active === null) return <PaneNote pane="problems">Open a workflow to see its problems.</PaneNote>;
   if (active.status.kind === 'loading') return <PaneNote pane="problems">Loading…</PaneNote>;
   if (active.status.kind === 'failed') return <PaneNote pane="problems">Problems unavailable.</PaneNote>;
-  const errors = active.errors ?? [];
+  const errors = [...live, ...(active.errors ?? []).filter((e) => !isShortCircuitError(e))];
   if (errors.length === 0) return <PaneNote pane="problems">No problems</PaneNote>;
   const { graph } = active.status.doc;
 
