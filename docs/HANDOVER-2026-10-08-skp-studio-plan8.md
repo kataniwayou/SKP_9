@@ -1,56 +1,144 @@
 # Handover 2026-10-08: SKP Studio plan 8 (virtual design, store + dry run + align)
 
-Branch `feature/path-importer` (not pushed, not merged; the user has not chosen merge / PR / keep). Studio deployed
-to the dev cluster as `workflow-studio:local` in ns `skp`, bundle `index-ByuqKojD.js` (plan 7 + its fixes). Port
-forwards run as detached kubectl processes: studio `localhost:18081` (`svc/workflow-studio 18081:8080`), BaseApi
-`localhost:18080` (`svc/baseapi-service 18080:8080`). Restart the studio forward after every studio redeploy.
+Branch `feature/path-importer` (not pushed, not merged; the user has not chosen merge / PR / keep). Both plan 8
+halves are deployed to the dev cluster (ns `skp`): BaseApi with the `AddWorkflowDesign` migration, and the studio
+as `workflow-studio:local`, bundle `index-CnCnpIDq.js`. Port forwards are supervised by
+`./k8s/port-forward-realstack.ps1` (`-Status` to check, run it again to restart): studio `localhost:18081`,
+BaseApi `localhost:18080`. Do not stop them by hand.
 
 ## Where we are
 
-- **Plan 7 (junctions) is DONE and deployed**: `30996e5..a2a8c96` (+ handover `e38a2a3`). A wire's arrow dropped on a
-  same-colour line joins it (filled dot, split dot, branch with the only arrow head); one 8 px drop reach and the
-  same green/red feedback for every dragged end (head, tail, contact, arrow, new wire, caches, hub). Also fixed: a
-  refresh right after a zoom kept the old view (`60eed9f`). Vitest 774, Playwright 53 + 2 skips; designer e2e
-  16/16 on the deployed studio. Spec `docs/superpowers/specs/2026-10-07-skp-studio-07-junctions-design.md`.
-- **Plan 8 spec APPROVED by the user**: `docs/superpowers/specs/2026-10-07-skp-studio-08-virtual-design-design.md`
-  (commits `876c56d`, `0975404`, `efa87a0`).
-- **Plan 8 implementation plan WRITTEN, awaiting the user's review + execution choice**:
-  `docs/superpowers/plans/2026-10-07-skp-studio-08-virtual-design.md` (`8cd794e`, 16 tasks, ~6300 lines; drafted by
-  an agent, scanned for placeholders). I recommended **subagent-driven** (tasks are tightly coupled through the
-  request shape of Tasks 2/8 → 13; a mistake in the backend dry run / rollback would write half a design to the
-  live DB). Nothing of plan 8 is implemented yet.
+- **Plan 7 (junctions) is done and deployed** (`30996e5..a2a8c96`, handover `e38a2a3`). Spec
+  `docs/superpowers/specs/2026-10-07-skp-studio-07-junctions-design.md`.
+- **Plan 8 (virtual design) is BUILT and DEPLOYED.** Spec
+  `docs/superpowers/specs/2026-10-07-skp-studio-08-virtual-design-design.md`; plan
+  `docs/superpowers/plans/2026-10-07-skp-studio-08-virtual-design.md`. Executed subagent-driven (16 tasks, each
+  reviewed). The SDD ledger is `.superpowers/sdd/2026-10-07-skp-studio-08-virtual-design/progress.md` (git-ignored).
 
-## Plan 8 in one paragraph (the user's decisions, all confirmed)
+## Built: plan 8 virtual design
 
-The designer works offline on **virtual entities** (copies with the same ids, loaded with GETs only; no
-`POST /validate`; the live-light polls stay). Edits: update the workflow, steps (fields + wiring), processors,
-caches; create / update / delete assignments; a schema edit is a **background copy** (new id, same name **and
-version**) re-pointed to its processor on save. Steps and assignments are never shared (new ids); processors,
-schemas, caches are shared, **last write wins**. No create/delete of steps, processors, caches, schemas for now.
-**Save** = `PUT /workflows/{id}/design` (new): (1) store the design on the workflow row (new jsonb `Design` column;
-layout in `Layout`) **regardless of validity**, own commit, last write wins; (2) **dry run** all stages in one
-transaction (schemas → processors → caches → step fields → wires → assignments → workflow), collecting every error
-(savepoints); (3) no errors → commit (align the real entities) and empty the stored design; errors → roll back,
-real entities untouched, errors to **Problems / Output**. Errors are never stored; opening runs no dry run. The
-browser session keeps unsaved edits since the last Save. Wires drop anywhere: cycles allowed, self refused,
-otherwise a **loose wire** (grey dashed, open end, kept in the layout, re-attachable). Legend gains the loose wire,
-loses "parked"; unwired steps look normal. Start checks (BaseApi validators) are not this phase.
+**Commits.** Docs (spec, plan, handovers) `876c56d..HEAD`; code `e7db275..HEAD`. The first code commit is `e7db275`,
+the nullable jsonb `Design` column. The last is `2ce5b40`, the view-restore fix below.
 
-## Open questions for the user (asked, not answered)
+**What it does.**
+- The designer opens a workflow with GETs only. There is no `POST /validate` anywhere in the studio; the live
+  polls stay.
+- Every edit is virtual: canvas edits go to the draft, Inspector edits to the entity edits. Edits to assignments
+  (create, update, delete) are virtual too, and so are schema copies (same name and version, re-pointed on Save).
+- The session keeps unsaved edits across a refresh.
+- **Save** is `PUT /workflows/{id}/design`. It always stores the design on the workflow row (`Design`; the layout
+  goes to `Layout`). It then dry-runs seven stages in one transaction (schemas, processors, caches, steps, wires,
+  assignments, workflow), collecting every error with one savepoint per entity.
+  - No errors: it commits, which aligns the real entities, and empties the stored design.
+  - Errors: it rolls back and returns them. Problems lists them and Output logs one line per answer.
+  - After every answer the document reloads with GETs.
+- Owned entities (workflow, steps, assignments) are checked for conflicts ("changed by someone else since you
+  opened it"). Shared entities (processors, caches) are last write wins, with a retry on xmin.
+- Wires drop anywhere. Cycles are allowed and self is refused. Anything else becomes a grey dashed **loose wire**
+  with an open end: it is kept in the layout and re-attaches when its end is dropped on a step. The hub draws its
+  own loose wires.
+- The legend shows the loose wire and has neither "broken" nor "parked"; an unwired step looks like any other.
+- Closing a dirty document asks Save / Discard / Cancel.
 
-1. Review the plan; choose **subagent-driven** or **native** execution.
-2. Rulings the plan made where the spec was unclear (user may override):
-   - a dragged **tail** cannot become loose (a loose wire needs its source): it snaps back with "cannot start here";
-   - **conflict recovery**: if someone else changed an owned entity, every Save fails on it until that entity is
-     **Reverted in the Inspector** (Discard design only drops unsaved edits; the stored design keeps the old stamp);
-   - **"broken" in the legend**: nothing is drawn broken any more (no validate); the plan keeps the legend item, I
-     proposed removing it — ask;
-   - **Save enabled** = unsaved edits, or a stored design not yet applied.
-3. Task 7 deploys BaseApi: ask the user before deploying.
-4. Plan 7 follow-ups (not built): re-sourcing a joined wire drops its junction (should it survive?); `canJoin` vs
-   routing on ignored contacts; contacts on a deleted host revive if the id is redrawn; contact exactly on a host
-   corner; the preview re-routes on every pointer move.
-5. Branch: merge to main / push + PR / keep.
+**BaseApi.** Migration `AddWorkflowDesign`; deployed with fix `4275f3c`. Root cause of that fix: an
+`x ?? new Dictionary<,>()` in a deconstructing `foreach` header crashed the IDE0028 collection-initializer analyzer
+(AD0001) in SDK 8.0.4xx. Only the docker Release build hit it; the fallback is now hoisted to a local.
+
+**Studio.** Bundle `index-CnCnpIDq.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
+exposed:
+- A restored canvas lays out 26 px taller for one frame before the dock settles. `FollowSize` measured from that
+  frame, so after a refresh the view came back 13 px off.
+- Each saved view now carries the canvas size it was taken at, and a restore starts from that size.
+- `session.spec.ts:12` failed 6 of 8 runs on the old deployed bundle and passes 8 of 8 now.
+
+**Tests.**
+- BaseApi hermetic: 2016/2016.
+- BaseApi live, on the deployed BaseApi: `WorkflowDesignLiveTests` 13/13, `WorkflowGraphLiveTests` 6/6,
+  `WorkflowValidationLiveTests` 5/5.
+- Vitest: 738 passed.
+- Playwright on the dev server: 58 passed, 2 skipped (the expected `art.spec.ts` skips).
+- Playwright on the deployed studio (`index-CnCnpIDq.js`):
+  - save + inspector + designer: 26/26.
+  - whole suite: 58 passed, 2 skipped.
+  - `session.spec.ts:12 --repeat-each=8`: 8/8.
+- `e2e/save.spec.ts` writes only to a throwaway `e2e-8-…` workflow that it creates and deletes through BaseApi's
+  CRUD. After every run, BaseApi lists no `e2e-8-…` entities.
+- Every other spec fails on any request that is not a GET.
+
+### Rulings made along the way
+
+User:
+- Subagent-driven execution.
+- The legend loses "broken" (nothing is drawn broken without validate) as well as "parked".
+- BaseApi and studio deploys approved.
+- The plan's other rulings stand.
+
+Controller (from the ledger):
+- **F1:** the `Design` column test asserts `Relational:ColumnType` (InMemory throws on `GetColumnType()`).
+- **F2-F5:** plan-mandated test updates to `inspectorTarget.test.ts` and `inspectorView.test.ts`. The DocumentPanel
+  "● design draft" assertion was dropped (the App test covers it). The existing `SLOTS` is kept.
+- **F6:** the legend test asserts "broken" and "parked" absent and the loose wire present.
+- **F7-F9 (DRY):** one shared `portOf(placement, source)`, a `parseSlotKey` next to `slotKey`, and one
+  `Describe(DesignOutcomeDto)` in `DesignBody`.
+- **F10:** no-throw shape tests use `Assert.Null(Record.Exception(...))`.
+- **F11:** this section is here, not in the plan 4 handover.
+- **F12:** the dead client writes and the broken-wire plumbing stay (see follow-ups).
+- Shared units (processors, caches) carry Postgres `xmin`. On a race they roll back to the savepoint and retry on a
+  fresh load up to 3 times, then report "The database refused this change." If this is wrong, a shared save under
+  heavy contention fails with a vague message.
+- `isEmptyEdits` ignores stamp-only edits (they send nothing and cannot conflict).
+- Tasks 11 and 12 were done as one commit and one review (Task 11 alone does not type-check). The Inspector
+  coverage the plan dropped was added back.
+- `canWire` checks `source === target` ("same step") before the not-a-step checks, so a hub wire or loose end
+  dropped back on the hub snaps back.
+
+### Follow-ups (deferred minors worth knowing)
+
+- **F12, dead code:**
+  - `putEntity`, `createAssignment` and `deleteAssignment` in `src/api/client.ts` are unused.
+  - The broken-wire drawing plumbing is dead (`apply.ts` still copies `brokenEdges` from `saved.wires`).
+- Commit `5bc0d63` has a "Claude Sonnet 5.5" co-author trailer instead of "Claude Opus 5.5". The branch is
+  unpushed, so this can be fixed before merging, if wanted.
+- BaseApi design save:
+  - A wrong-typed non-nullable field (`"name": 7`) can give both the applier error and a second "required" error.
+  - A JSON `null` element inside an entity list gives a 500 in `DesignShape` instead of a 400.
+  - The exhausted-retry message is the same as the one for an unknown database failure.
+  - `WireStage` re-validates all step fields, so a step whose stored fields are already invalid fails its wires.
+  - Missing tests: a wiring-only step with a stale stamp; the `Apply` of processor and assignment updates; stale
+    assignment and workflow stamps.
+- Studio:
+  - A schema edited back to its original value still makes a copy.
+  - `apply.ts` repeats the `{ name, version, description }` spread per kind.
+  - `applyEdits` re-routes on any edit.
+  - The `body as unknown as DesignSaveRequest` cast in `saveDesign` can hide drift.
+  - The close dialog's Save on a restored document that is not ready yet does nothing visible.
+  - Sessions written before plan 8 lose their Inspector text on the first refresh after the deploy (one time only).
+- e2e:
+  - The hub snap-back check relies on a fixed 300 ms wait.
+  - The "5 px short" test's loose branch depends on the live data.
+- Plan 7 follow-ups (still not built):
+  - Re-sourcing a joined wire drops its junction (should it survive?).
+  - `canJoin` and routing disagree on ignored contacts.
+  - Contacts on a deleted host revive if the id is redrawn.
+  - A contact exactly on a host corner.
+  - The preview re-routes on every pointer move.
+
+### Open spec gaps (decided in the plan; the user may still override)
+
+1. **A released tail cannot become a loose wire** (a loose wire needs its source). It snaps back with "cannot start
+   here".
+2. **A stale stamp in a stored design repeats its conflict.** Discard returns to the last saved design, which still
+   has the old `updatedAt`, so every Save fails the same way. The user clears it with the Inspector's **Revert** on
+   that entity.
+3. **Broken-wire marks are gone.** They came from validate; the user ruled the legend item removed. The dead
+   plumbing is a follow-up.
+4. **"Save enabled when the design differs from the base"** is read as: unsaved edits, or a stored design not yet
+   applied.
+5. Cosmetic: the spec's decision numbers in §1 run 1-6, 9, 8, 7, and its edge cases in §6 run 1-4, 8, 5-7.
+
+## Open question for the user
+
+- Branch: merge to main / push + PR / keep.
 
 ## How we work (user rules, also in memory)
 
@@ -67,8 +155,14 @@ loses "parked"; unwired steps look normal. Start checks (BaseApi validators) are
 - Studio deploy: `docker build -f src/WorkflowStudio/Dockerfile -t workflow-studio:local .` →
   `kind load docker-image workflow-studio:local --name desktop` → `kubectl -n skp rollout restart deploy/workflow-studio`.
 - E2E against the deployed studio: a temporary Playwright config (not committed) with `use.baseURL:
-  'http://localhost:18081'` and no `webServer`.
-- Source files are a mix of CRLF and LF; subagents' text replacements silently missed once — make them check
-  `git diff`. Long bash heredocs with quotes broke twice: write Python edit scripts to the scratchpad instead.
-- SDD workspaces live under `.superpowers/sdd/<plan>/` (git-ignored); plan 7's was deleted after completion.
+  'http://localhost:18081'` and no `webServer`. Timing bugs can show only there. To reproduce one without a
+  redeploy, `vite build` plus `vite preview` on a free port (it proxies `/api` to 18080).
+- The docker Release build compiles non-incrementally, so an analyzer crash (AD0001) that passes a local
+  incremental build fails there. Check with `dotnet build -c Release --no-incremental` before deploying BaseApi.
+- BaseApi tests: never `dotnet test`. Run the built `BaseApi.Tests.exe` with `--filter-class` (fully qualified).
+  Live tests need `$env:SKP_REALSTACK='1'` and the forwards.
+- Source files are a mix of CRLF and LF; subagents' text replacements silently missed once, so make them check
+  `git diff`. Long bash heredocs with quotes broke several times: write Python edit scripts to the scratchpad
+  instead.
+- SDD workspaces live under `.superpowers/sdd/<plan>/` (git-ignored).
 - Untracked, not ours: `.playwright-mcp/`, `.wf-restore.json`, `tools/simulate-*.py`.
