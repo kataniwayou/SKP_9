@@ -9,15 +9,16 @@ export type Refusal = 'start';
 
 /**
  * May a wire from `source` to `target` exist in the shown document (plan 8 §5)? `moving` is the wire whose
- * end is dragged: it is judged as if gone. A step wired to itself is refused (`self`, it snaps back); a
- * target that is not a step (a cache, the hub) or a wire that already exists makes the wire loose. Cycles
+ * end is dragged: it is judged as if gone. A block wired to itself is refused (`self`, it snaps back; the hub
+ * too, decision 11); a target that is not a step (a cache, the hub) or a wire that already exists makes the wire loose. Cycles
  * are allowed: a design may be anything, and starting is when cycles are judged.
  */
 export function canWire(shown: StudioDocument, source: SourceId, target: string, moving?: string): DropVerdict {
   const { graph } = shown;
+  // first: back on its own source (a step or the hub) a wire snaps back, never loose (decision 11)
+  if (source === target) return 'self';
   if (target === WORKFLOW_SOURCE || !graph.steps.has(target)) return 'loose';
   if (source !== WORKFLOW_SOURCE && !graph.steps.has(source)) return 'loose';
-  if (source === target) return 'self';
   const list = source === WORKFLOW_SOURCE ? graph.workflow.entryStepIds : graph.steps.get(source)?.nextStepIds ?? [];
   if (list.some((t) => t === target && `${source}->${t}` !== moving)) return 'loose';
   return 'ok';

@@ -48,8 +48,9 @@ export function useDesignKeys(
     if (e.key === 'Delete' || e.key === 'Backspace') {
       const picked = wirePickIds(design.picks);
       const wires = picked.filter((id) => shown.current.wires.some((w) => w.id === id));
-      // a loose wire is picked by its edge id `loose:{id}` (plan 8)
-      const loose = picked.filter((id) => id.startsWith(LOOSE_PREFIX)).map((id) => id.slice(LOOSE_PREFIX.length));
+      // a loose wire is picked by its edge id `loose:{id}` (plan 8); one gone after an undo is skipped
+      const loose = picked.filter((id) => id.startsWith(LOOSE_PREFIX)).map((id) => id.slice(LOOSE_PREFIX.length))
+        .filter((id) => Object.hasOwn(design.draft.loose, id));
       if (wires.length === 0 && loose.length === 0) return; // blocks are never removed (spec §2)
       e.preventDefault();
       design.onCommit(removeLoose(removeWires(design.draft, saved, wires), loose), { picks: design.picks.filter((p) => p.kind !== 'wire') });

@@ -730,6 +730,23 @@ describe('wire gestures', () => {
 
     expect(drag(middleOf(doc, 's1'))).toBe('same step');
     expect(commits(design)).toHaveLength(2);
+
+    // released where its end already is: no step
+    drag(EMPTY_AT);
+    expect(commits(design)).toHaveLength(2);
+  });
+
+  it('a loose wire from the hub dropped back on the hub says "same step" and snaps back (decision 11)', async () => {
+    const doc = await twoAndOne();
+    const design = designOf({ draft: addLoose(EMPTY_DRAFT, 'l1', 'wf', EMPTY_AT) });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const hub = { x: doc.placement.sphere.cx, y: doc.placement.sphere.cy };
+    fireEvent.pointerDown(container.querySelector('[data-testid="rf__edge-loose:l1"] .nx-open-hit')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, hub), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('same step');
+    expect(nodeClass(container, 'wf')).toContain('drop-no');
+    fireEvent.pointerUp(document, { ...screenOf(container, hub), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
   });
 
   it('Delete removes a picked loose wire', async () => {
@@ -738,5 +755,13 @@ describe('wire gestures', () => {
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     fireEvent.keyDown(container.querySelector('.studio-canvas')!, { key: 'Delete' });
     expect(commits(design)[0]![0].loose).toEqual({});
+  });
+
+  it('Delete on a loose pick that is gone (after an undo) makes no step', async () => {
+    const doc = await twoAndOne();
+    const design = designOf({ picks: [{ kind: 'wire', id: 'loose:gone' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    fireEvent.keyDown(container.querySelector('.studio-canvas')!, { key: 'Delete' });
+    expect(design.onCommit).not.toHaveBeenCalled();
   });
 });

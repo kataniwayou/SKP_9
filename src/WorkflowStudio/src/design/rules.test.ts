@@ -81,6 +81,8 @@ describe('wires dropped anywhere (plan 8 §5)', () => {
     expect(canWire(doc, 's1', 's2')).toBe('loose');
     expect(canWire(doc, 's1', 'cache:c1')).toBe('loose');
     expect(canWire(doc, 's1', 'wf')).toBe('loose');
+    // the hub back on itself snaps back too (decision 11)
+    expect(canWire(doc, 'wf', 'wf')).toBe('self');
     expect(dropLabel('loose', false)).toBe('loose wire');
     expect(dropLabel('cannotStart', false)).toBe('cannot start here');
   });

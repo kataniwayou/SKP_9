@@ -443,7 +443,11 @@ export function useWireGestures(
       wire: null, path: fromPort(l.source, from, boxes), current: null,
       verdict: (over) => canWire(shown.current, l.source, over),
       done: (over) => d.onCommit(attachLoose(base, saved, looseId, over), { picks: [{ kind: 'wire', id: wireId(l.source, over) }] }),
-      loose: (p) => d.onCommit(moveLoose(base, looseId, p), { picks: [{ kind: 'wire', id: `${LOOSE_PREFIX}${looseId}` }] }),
+      // released where its end already is: no step
+      loose: (p) => {
+        if (p.x === l.end.x && p.y === l.end.y) return;
+        d.onCommit(moveLoose(base, looseId, p), { picks: [{ kind: 'wire', id: `${LOOSE_PREFIX}${looseId}` }] });
+      },
     });
   };
 

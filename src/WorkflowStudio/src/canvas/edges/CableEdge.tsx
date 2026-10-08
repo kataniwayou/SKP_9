@@ -93,7 +93,8 @@ export function CableEdge({ id, data }: EdgeProps<CableEdgeType>) {
   return (
     <>
       <CableEdgeView {...data} flowing={started} />
-      {/* an invisible band about 8 px wide, so the hand cursor and clicks need no pixel precision (spec §4.1) */}
+      {/* an invisible band about 8 px wide, so the hand cursor and clicks need no pixel precision (spec §4.1);
+          a loose wire keeps it too: it is what makes a click pick the wire */}
       <path className="nx-hit" d={pathOf(data.points)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'own') : undefined} />
       {data.branch && data.branch.length > 1 && (
         <path className="nx-hit branch" d={pathOf(data.branch)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'branch') : undefined} />

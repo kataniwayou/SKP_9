@@ -85,6 +85,8 @@ export function WorkflowNode({ data }: NodeProps<WorkflowNodeType>) {
       </svg>
       <Handle id="out" type="source" position={Position.Right} isConnectable={false} style={{ top: R }} />
       <Handle id="down" type="source" position={Position.Bottom} isConnectable={false} />
+      {/* a loose wire from the hub ends on the hub itself: React Flow needs a target handle to draw it (plan 8 §5) */}
+      <Handle id="loose" type="target" position={Position.Right} isConnectable={false} style={{ top: R }} />
       {/* where entry wires are drawn from (spec §4.5): the dial's right side at its centre height; design mode only */}
       {gestures && <div className="nx-port nodrag nopan" style={{ left: 2 * R, top: R }} onPointerDown={(e) => gestures.portPointerDown(WORKFLOW_SOURCE, e)} />}
     </>
