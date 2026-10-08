@@ -32,8 +32,6 @@ export interface WireRoute {
   headOn: EndKind;
   /** In a net whose families disagree (§2.2-7): its junctions are marked red. */
   short: boolean;
-  /** Named broken by validate (plan 2); nothing sets it since plan 8. */
-  broken: boolean;
 }
 
 export interface RouteContext {
@@ -206,7 +204,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     const r: WireRoute = {
       id, source, target: headOn === 'terminal' && w.head.on === 'step' ? w.head.step : null,
       points, core: { ends, points: core }, condition, solid: tailOn !== 'open' && headOn !== 'open' && condition !== null,
-      tailOn, headOn, short, broken: false,
+      tailOn, headOn, short,
     };
     busy.delete(id);
     out.set(id, r);
@@ -228,15 +226,9 @@ export function endPointOf(routes: readonly WireRoute[]): (id: string, side: Sid
 
 /**
  * The workflow's own wiring, routed (plan 2 §5.2): an automatic wire per entry step and next step whose two ends are
- * on the canvas; `shapes` (plan 4) give a wire bends and a slid landing by its id; `brokenEdges` mark step wires.
+ * on the canvas.
  */
 export function routeWires(input: WiringInput, placement: Placement): WireRoute[] {
   const c = plainCircuit(input.entryStepIds, input.steps, (id) => placement.steps.has(id));
-  for (const [id, s] of Object.entries(input.shapes ?? {})) {
-    const w = Object.hasOwn(c, id) ? c[id] : undefined;
-    if (!w || w.head.on !== 'step') continue;
-    c[id] = s.bends && s.bends.xs.length > 0 ? { tail: w.tail, head: { ...w.head, y: s.landing }, bends: s.bends } : { tail: w.tail, head: { ...w.head, y: s.landing } };
-  }
-  return routeCircuit(c, { placement, steps: input.steps })
-    .map((r) => (r.source !== null && r.source !== WORKFLOW_SOURCE && input.brokenEdges.has(r.id) ? { ...r, broken: true } : r));
+  return routeCircuit(c, { placement, steps: input.steps });
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { offset, PMID, PORT_GAP, STEP_W } from './geometry';
 import type { Placement } from './placement';
-import { computeDepartures, computeLandings, landingsOf, WORKFLOW_SOURCE, type WireEnd } from './ports';
+import { landingsOf } from './ports';
 
 const placement = (steps: Record<string, [number, number]>): Placement => ({
   sphere: { cx: 128, cy: 128 },
@@ -8,25 +9,32 @@ const placement = (steps: Record<string, [number, number]>): Placement => ({
   caches: new Map(),
 });
 
-describe('computeDepartures', () => {
-  it('centres a fan-out group 16 apart on the source processor middle, ordered by target height', () => {
-    const p = placement({ a: [288, 32], low: [576, 320], high: [576, 32] });
-    const wires: WireEnd[] = [{ source: 'a', target: 'low' }, { source: 'a', target: 'high' }];
+type WireEnd = { source: string; target: string };
 
-    const out = computeDepartures(wires, p).get('a')!;
+/** Where each step wire leaves (the plan 2 fan-out the landing rule was written against): 16 apart on the processor middle, by target height. */
+function departures(wires: WireEnd[], p: Placement): Map<string, Map<string, number>> {
+  const bySource = new Map<string, string[]>();
+  for (const w of wires) bySource.set(w.source, [...(bySource.get(w.source) ?? []), w.target]);
+  const out = new Map<string, Map<string, number>>();
+  for (const [source, targets] of bySource) {
+    const at = (id: string) => p.steps.get(id)!;
+    const ordered = [...targets].sort((a, b) => at(a).y - at(b).y || at(a).x - at(b).x);
+    out.set(source, new Map(ordered.map((t, k) => [t, at(source).y + PMID + offset(k, ordered.length, PORT_GAP)])));
+  }
+  return out;
+}
 
-    expect(out.get('high')).toBe(32 + 96 - 8);
-    expect(out.get('low')).toBe(32 + 96 + 8);
-  });
+/** The landing of each wire, by target then source, through `landingsOf`. */
+function landed(wires: WireEnd[], p: Placement, deps: Map<string, Map<string, number>>): Map<string, Map<string, number>> {
+  const key = (w: WireEnd) => `${w.source}->${w.target}`;
+  const ys = landingsOf(wires.map((w) => ({ key: key(w), target: w.target, y: deps.get(w.source)!.get(w.target)!, x: p.steps.get(w.source)!.x + STEP_W })), p);
+  const out = new Map<string, Map<string, number>>();
+  for (const w of wires) out.set(w.target, (out.get(w.target) ?? new Map()).set(w.source, ys.get(key(w))!));
+  return out;
+}
 
-  it('starts entry wires at the sphere centre height', () => {
-    const p = placement({ a: [288, 32] });
-    expect(computeDepartures([{ source: WORKFLOW_SOURCE, target: 'a' }], p).get(WORKFLOW_SOURCE)!.get('a')).toBe(128);
-  });
-});
-
-describe('computeLandings', () => {
-  const land = (p: Placement, wires: WireEnd[]) => computeLandings(wires, p, computeDepartures(wires, p));
+describe('landingsOf: the landing rule (spec §5.2)', () => {
+  const land = (p: Placement, wires: WireEnd[]) => landed(wires, p, departures(wires, p));
 
   it('keeps the departure height when it falls in the target band and the source is to the left', () => {
     const p = placement({ a: [288, 32], b: [576, 64] });
@@ -119,14 +127,14 @@ describe('computeLandings', () => {
         for (let e = 0; e < extra; e++) { steps[`z${k}_${e}`] = [2000, 1000 + 200 * (k * 3 + e)]; wires.push({ source: `s${k}`, target: `z${k}_${e}` }); }
       }
       const p = placement(steps);
-      const deps = computeDepartures(wires, p);
-      const landed = computeLandings(wires, p, deps).get('t')!;
-      const ys = [...landed.values()].sort((a, b) => a - b);
+      const deps = departures(wires, p);
+      const into = landed(wires, p, deps).get('t')!;
+      const ys = [...into.values()].sort((a, b) => a - b);
 
       spaced(ys);
       for (const y of ys) expect(y % 8).toBe(0);
 
-      const straight = [...landed].filter(([s, y]) => y === deps.get(s)!.get('t')).map(([, y]) => y);
+      const straight = [...into].filter(([s, y]) => y === deps.get(s)!.get('t')).map(([, y]) => y);
       let packed = 0, last = -Infinity;
       for (let y = 320 + 40; y <= 320 + 160; y += 8) {
         if (straight.some((u) => Math.abs(u - y) < 16)) continue;

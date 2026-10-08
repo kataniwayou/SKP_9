@@ -1,4 +1,4 @@
-/** A new v4 GUID for a virtual entity, a schema copy or a loose wire (plan 8: every new one gets a new id). */
+/** A new v4 GUID for a virtual entity, a schema copy or a drawn wire (plan 8: every new one gets a new id). */
 export function newId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   const b = crypto.getRandomValues(new Uint8Array(16));

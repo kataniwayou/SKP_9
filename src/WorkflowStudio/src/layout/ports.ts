@@ -1,37 +1,17 @@
 import type { Id } from '../model/graph';
-import { GRID, BAND_BOTTOM, BAND_TOP, CAP_H, PMID, PORT_GAP, SPHERE_R, STEP_H, STEP_W, STRAIGHT_MIN_GAP, offset } from './geometry';
+import { GRID, BAND_BOTTOM, BAND_TOP, CAP_H, PMID, PORT_GAP, STEP_H, STRAIGHT_MIN_GAP } from './geometry';
 import type { Placement } from './placement';
 
 /** The sphere as a wire source. */
 export const WORKFLOW_SOURCE = 'wf';
 export type SourceId = string;
 
-export interface WireEnd {
-  source: SourceId;
+/** One wire arriving on a step's input (plan 9): by its own key, from where it leaves (`y`, and `x`: Infinity when it cannot run straight). */
+export interface Arrival {
+  key: string;
   target: Id;
-}
-
-export function departureX(source: SourceId, placement: Placement): number {
-  return source === WORKFLOW_SOURCE ? placement.sphere.cx + SPHERE_R : placement.steps.get(source)!.x + STEP_W;
-}
-
-/**
- * Fan-out (spec §5.2): a source's wires leave as one group 16 apart, centred on its processor
- * middle (the sphere's centre for entry wires), ordered by where their targets sit so neighbouring
- * wires never cross on the way out.
- */
-export function computeDepartures(wires: WireEnd[], placement: Placement): Map<SourceId, Map<Id, number>> {
-  const bySource = new Map<SourceId, Id[]>();
-  for (const w of wires) bySource.set(w.source, [...(bySource.get(w.source) ?? []), w.target]);
-
-  const out = new Map<SourceId, Map<Id, number>>();
-  for (const [source, targets] of bySource) {
-    const at = (id: Id) => placement.steps.get(id)!;
-    const ordered = [...targets].sort((a, b) => at(a).y - at(b).y || at(a).x - at(b).x);
-    const base = source === WORKFLOW_SOURCE ? placement.sphere.cy : placement.steps.get(source)!.y + PMID;
-    out.set(source, new Map(ordered.map((t, k) => [t, base + offset(k, ordered.length, PORT_GAP)])));
-  }
-  return out;
+  y: number;
+  x: number;
 }
 
 /**
@@ -45,32 +25,9 @@ export function computeDepartures(wires: WireEnd[], placement: Placement): Map<S
  * Landing extent: step-local 40 (just below the title cap) to 160 inclusive; the bottom edge
  * (step-local 160, the bottom corner) counts as on the step. It holds 8 slots 16 apart; a larger
  * fan-in spills past the extent rather than break the spacing.
+ *
+ * Arrival by arrival (plan 9): two wires from one source into one step each land.
  */
-export function computeLandings(
-  wires: WireEnd[],
-  placement: Placement,
-  departures: Map<SourceId, Map<Id, number>>,
-): Map<Id, Map<SourceId, number>> {
-  const keyOf = (w: WireEnd) => `${w.source}->${w.target}`;
-  const landed = landingsOf(wires.map((w) => ({ key: keyOf(w), target: w.target, y: departures.get(w.source)!.get(w.target)!, x: departureX(w.source, placement) })), placement);
-  const result = new Map<Id, Map<SourceId, number>>();
-  for (const w of wires) {
-    const m = result.get(w.target) ?? new Map<SourceId, number>();
-    m.set(w.source, landed.get(keyOf(w))!);
-    result.set(w.target, m);
-  }
-  return result;
-}
-
-/** One wire arriving on a step's input (plan 9): by its own key, from where it leaves (`y`, and `x`: Infinity when it cannot run straight). */
-export interface Arrival {
-  key: string;
-  target: Id;
-  y: number;
-  x: number;
-}
-
-/** The landing rule above (spec §5.2), arrival by arrival: two wires from one source into one step each land. */
 export function landingsOf(arrivals: readonly Arrival[], placement: Placement): Map<string, number> {
   const byTarget = new Map<Id, Arrival[]>();
   for (const a of arrivals) byTarget.set(a.target, [...(byTarget.get(a.target) ?? []), a]);

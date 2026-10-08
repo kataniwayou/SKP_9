@@ -1,35 +1,18 @@
 import type { Id, Step } from '../model/graph';
 import { CACHE_H, CACHE_W, PMID, SPHERE_R, STEP_H, STEP_W, type Point } from './geometry';
 import type { Placement, Sphere } from './placement';
-import { WORKFLOW_SOURCE, type WireEnd } from './ports';
+import { WORKFLOW_SOURCE } from './ports';
 import type { Box, Pt } from './router';
-import type { WireShape } from './shape';
 
 export interface WiringInput {
   entryStepIds: Id[];
   /** Every step on the canvas, parked ones included. */
   steps: ReadonlyMap<Id, Step>;
-  /** `${parentStepId}->${childStepId}` for every wire BaseApi's validate reported as a schemaEdge problem. */
-  brokenEdges: ReadonlySet<string>;
-  /** The draft's wire shapes by wire id (plan 4); absent: every wire is automatic. */
-  shapes?: Readonly<Record<string, WireShape>>;
 }
 
 export const SPHERE_BOX_ID = 'wf';
 export const stepBoxId = (id: Id) => `step:${id}`;
 export const cacheBoxId = (id: Id) => `cache:${id}`;
-
-/** Every wire whose two ends are on the canvas: entry wires from the sphere, then step wires. */
-export function collectWires(input: WiringInput, placement: Placement): WireEnd[] {
-  const placed = (id: Id) => placement.steps.has(id) && input.steps.has(id);
-  const wires: WireEnd[] = [];
-  for (const id of new Set(input.entryStepIds)) if (placed(id)) wires.push({ source: WORKFLOW_SOURCE, target: id });
-  for (const [id, step] of input.steps) {
-    if (!placed(id)) continue;
-    for (const next of step.nextStepIds) if (placed(next)) wires.push({ source: id, target: next });
-  }
-  return wires;
-}
 
 /** Where a wire from `source` leaves: a step's output port or the hub's right edge; null for a step not on the canvas. */
 export function portOf(placement: Placement, source: Id): Point | null {

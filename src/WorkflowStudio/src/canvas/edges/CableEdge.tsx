@@ -1,15 +1,14 @@
-import { useContext, useId, type CSSProperties } from 'react';
+import { useContext, type CSSProperties } from 'react';
 import type { Edge, EdgeProps } from '@xyflow/react';
 import { DesignContext } from '../../design/DesignContext';
 import type { EndKind } from '../../layout/circuitRoute';
 import type { Pt } from '../../layout/router';
 import { useLiveArt } from '../liveArt';
-import { longestSegmentMiddle, pathOf } from '../svgPath';
+import { pathOf } from '../svgPath';
 
 export type CableEdgeData = {
   points: Pt[];
   colour: string;
-  broken: boolean;
   /** The pulse's animation delay in seconds (≤ 0), so the wires do not pulse in step. */
   delay: number;
   /** Picked in design mode (plan 4): drawn with a halo. */
@@ -42,42 +41,21 @@ export function arrowHead(prev: Pt, tip: Pt): string {
  * One wire as a circuit trace (spec §5.1; plan 9 §5): right-angled, in its family's colour (grey while undecided),
  * dashed unless both its ends are connected and its family decided. Its tail has a small ring and its head an open
  * chevron, on a terminal or open alike; an end on another wire is a filled circle instead (red in a short circuit).
- * Broken: dashed, with a soft gap cut at the middle of the longest segment and ⚠ in it. While `flowing` (the workflow
- * is started) a solid wire carries a pulse toward its head.
+ * While `flowing` (the workflow is started) a solid wire carries a pulse toward its head.
  */
-export function CableEdgeView({ points, colour, broken, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short }: CableEdgeData & { flowing: boolean }) {
-  const gap = `nxgap${useId().replace(/[^\w-]/g, '')}`;
+export function CableEdgeView({ points, colour, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short }: CableEdgeData & { flowing: boolean }) {
   const d = pathOf(points);
   const first = points[0]!, tip = points[points.length - 1]!;
-  const mark = broken ? longestSegmentMiddle(points) : null;
   const dot = (p: Pt) => <circle className={short ? 'nx-joint short' : 'nx-joint'} cx={p[0]} cy={p[1]} r={4.5} />;
 
-  const trace = (
-    <>
+  return (
+    <g className={`wire${dashed ? ' dashed' : ''}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}`} style={{ '--nc': colour } as CSSProperties}>
       {tailOn !== 'junction' && <circle className="nx-src" cx={first[0]} cy={first[1]} r={2.6} />}
       <path className="w" d={d} stroke={colour} />
       {headOn !== 'junction' && <path className="nx-head" d={arrowHead(points[points.length - 2] ?? tip, tip)} stroke={colour} />}
       {tailOn === 'junction' && dot(first)}
       {headOn === 'junction' && dot(tip)}
-    </>
-  );
-
-  return (
-    <g className={`${broken ? 'wire broken' : 'wire'}${dashed ? ' dashed' : ''}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}`} style={{ '--nc': colour } as CSSProperties}>
-      {mark ? (
-        <>
-          <defs>
-            <filter id={`${gap}s`} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={3} /></filter>
-            <mask id={gap} maskUnits="userSpaceOnUse" x={-1e5} y={-1e5} width={2e5} height={2e5}>
-              <rect x={-1e5} y={-1e5} width={2e5} height={2e5} fill="#fff" />
-              <rect x={mark[0] - 10} y={mark[1] - 7} width={20} height={14} rx={5} fill="#000" filter={`url(#${gap}s)`} />
-            </mask>
-          </defs>
-          <g mask={`url(#${gap})`}>{trace}</g>
-          <text className="nx-warn" x={mark[0]} y={mark[1] + 5} textAnchor="middle">⚠</text>
-        </>
-      ) : trace}
-      {flowing && !broken && !dashed && <path className="nx-pulse" d={d} style={{ animationDelay: `${delay}s` }} />}
+      {flowing && !dashed && <path className="nx-pulse" d={d} style={{ animationDelay: `${delay}s` }} />}
     </g>
   );
 }

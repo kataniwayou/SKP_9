@@ -73,7 +73,7 @@ describe('selectionFromClick', () => {
 
   it('marks picked blocks and wires (plan 4)', () => {
     const nodes = [{ id: 's1', type: 'step', position: { x: 0, y: 0 }, data: {} }, { id: 's2', type: 'step', position: { x: 0, y: 0 }, data: {} }] as never;
-    const edges = [{ id: 's1->s2', type: 'cable', source: 's1', target: 's2', data: { points: [], colour: '', broken: false, delay: 0 } }] as never;
+    const edges = [{ id: 's1->s2', type: 'cable', source: 's1', target: 's2', data: { points: [], colour: '', delay: 0 } }] as never;
     const out = withPicks(nodes, edges, [{ kind: 'node', id: 's2' }, { kind: 'wire', id: 's1->s2' }]);
     expect(out.nodes.map((n) => [n.selected, n.className])).toEqual([[false, undefined], [true, PICK_CLASS]]);
     expect(out.edges[0]!.data).toMatchObject({ picked: true });

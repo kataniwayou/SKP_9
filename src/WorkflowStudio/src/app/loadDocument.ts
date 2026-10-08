@@ -71,7 +71,7 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
     return { ok: false, error: { kind: 'http', status: 0, detail: `Layout failed: ${e instanceof Error ? e.message : String(e)}` } };
   }
   // routeWires only wires ends that are both placed and known, so every wire end has a position.
-  const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps, brokenEdges: new Set<string>() }, placement);
+  const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps }, placement);
 
   return { ok: true, value: { graph, parkedIds, placement, wires } };
 }

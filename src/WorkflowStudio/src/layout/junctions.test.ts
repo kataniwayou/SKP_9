@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inLoop, lengthOf, nearestOn, ownEnds, pointAt, slice } from './junctions';
+import { lengthOf, nearestOn, ownEnds, pointAt, slice } from './junctions';
 import type { Pt } from './router';
 
 const L: Pt[] = [[0, 0], [100, 0], [100, 50]];
@@ -34,13 +34,5 @@ describe('polyline geometry', () => {
     expect(ownEnds(0, 200, [96, 128], false)).toEqual({ ends: { sx: 0, sy: 200, tx: 96, ty: 144 }, tail: [[96, 128]] });
     expect(ownEnds(0, 40, [96, 128], false)).toEqual({ ends: { sx: 0, sy: 40, tx: 96, ty: 112 }, tail: [[96, 128]] });
     expect(ownEnds(0, 40, [96, 128], true)).toEqual({ ends: { sx: 0, sy: 40, tx: 96, ty: 128 }, tail: [] });
-  });
-
-  it('finds a loop through hosts', () => {
-    const hosts: Record<string, string> = { a: 'b', b: 'a', c: 'a', d: 'e' };
-    const hostOf = (id: string) => hosts[id];
-    expect(inLoop('a', hostOf)).toBe(true);
-    expect(inLoop('c', hostOf)).toBe(false);
-    expect(inLoop('d', hostOf)).toBe(false);
   });
 });

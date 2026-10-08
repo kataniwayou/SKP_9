@@ -49,8 +49,8 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
     width: 2 * SPHERE_R, height: 2 * SPHERE_R, draggable: false, selectable: false,
     handles: [
       handle('out', 'source', Position.Right, 2 * SPHERE_R, SPHERE_R), handle('down', 'source', Position.Bottom, SPHERE_R, 2 * SPHERE_R),
-      // a wire on no terminal hangs on the hub: React Flow needs a target handle (plan 9)
-      handle('loose', 'target', Position.Right, 2 * SPHERE_R, SPHERE_R),
+      // a wire on no terminal hangs on the hub's ring: React Flow needs a target handle (plan 9)
+      handle('ring', 'target', Position.Right, 2 * SPHERE_R, SPHERE_R),
     ],
     data: hubData(graph.workflow),
   });
@@ -92,16 +92,16 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
   }
 
   // every wire of the circuit (plan 9 §5): React Flow needs a node at each end, so a wire hangs on its tail's
-  // terminal, else its head's step, else the hub (whose `loose` target handle takes it)
+  // terminal, else its head's step, else the hub (whose `ring` target handle takes it)
   const edges: StudioEdge[] = wires.map((w, i) => {
     const tailNode = w.source === null ? null : w.source === WORKFLOW_SOURCE ? SPHERE_NODE_ID : w.source;
     const node = tailNode ?? w.target ?? SPHERE_NODE_ID;
     return {
       id: w.id, type: 'cable', source: node, target: w.target ?? node,
-      sourceHandle: 'out', targetHandle: w.target === null && node === SPHERE_NODE_ID ? 'loose' : 'in', selectable: false, focusable: false,
+      sourceHandle: 'out', targetHandle: w.target === null && node === SPHERE_NODE_ID ? 'ring' : 'in', selectable: false, focusable: false,
       // the gallery staggers its pulses by 0.41 s a wire; `|| 0` keeps the first one at +0, not -0
       data: {
-        points: w.points, colour: w.condition === null ? UNDECIDED_COLOUR : conditionInfo(w.condition).colour, broken: w.broken,
+        points: w.points, colour: w.condition === null ? UNDECIDED_COLOUR : conditionInfo(w.condition).colour,
         delay: -Math.round(i * 41) / 100 || 0, dashed: !w.solid, tailOn: w.tailOn, headOn: w.headOn, short: w.short,
       },
     };

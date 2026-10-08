@@ -61,12 +61,12 @@ test('a running workflow is started and its intact wires pulse', async ({ page, 
   const panel = await open(page, running!);
 
   await expect(panel.locator('.wf')).toHaveAttribute('data-started', 'true');
-  const intact = panel.locator('.react-flow__edge .wire:not(.broken)');
+  const intact = panel.locator('.react-flow__edge .wire:not(.dashed)');
   await expect.poll(() => intact.count()).toBeGreaterThan(0);
   for (const wire of await intact.all()) {
     await expect(wire.locator('.nx-pulse')).toHaveCount(1);
   }
-  await expect(panel.locator('.react-flow__edge .wire.broken .nx-pulse')).toHaveCount(0);
+  await expect(panel.locator('.react-flow__edge .wire.dashed .nx-pulse')).toHaveCount(0);
 });
 
 test('an idle workflow is still', async ({ page, request }) => {

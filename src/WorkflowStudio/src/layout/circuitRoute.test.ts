@@ -21,7 +21,7 @@ describe('routeCircuit (plan 9 §5)', () => {
       workflow: workflowDto({ entryStepIds: ['s1'] }),
       steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2', { nextStepIds: ['s3'] }), stepDto('s3', { entryCondition: 3 })],
     }));
-    const routes = routeWires({ entryStepIds: ['s1'], steps: doc.graph.steps, brokenEdges: new Set() }, doc.placement);
+    const routes = routeWires({ entryStepIds: ['s1'], steps: doc.graph.steps }, doc.placement);
     expect(routes.map((r) => [r.id, r.points, r.condition])).toEqual(doc.wires.map((x) => [x.id, x.points, x.condition]));
     expect(routes.every((r) => r.solid && r.tailOn === 'terminal' && r.headOn === 'terminal' && !r.short)).toBe(true);
     expect(routes.find((r) => r.id === 'wf->s1')).toMatchObject({ source: 'wf', target: 's1' });

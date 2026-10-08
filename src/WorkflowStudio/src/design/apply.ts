@@ -115,7 +115,7 @@ export function applyEdits(base: StudioDocument, edits: EntityEdits): StudioDocu
   }
 
   const graph: Graph = { ...g, workflow, steps, processors, schemas, caches, assignments };
-  const wires = routeWires({ entryStepIds: workflow.entryStepIds, steps, brokenEdges: new Set<string>() }, base.placement);
+  const wires = routeWires({ entryStepIds: workflow.entryStepIds, steps }, base.placement);
   return { ...base, graph, wires };
 }
 

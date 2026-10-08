@@ -9,12 +9,10 @@ import { portOf, tetherPoints, type WiringInput } from './wires';
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
   id, name: id, version: '1.0.0', description: null, processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
 });
-function setup(steps: Step[], positions: Record<string, [number, number]>, brokenEdges: ReadonlySet<string>, shapes?: WiringInput['shapes']) {
+function setup(steps: Step[], positions: Record<string, [number, number]>) {
   const input: WiringInput = {
     entryStepIds: ['a'],
     steps: new Map(steps.map((s) => [s.id, s])),
-    brokenEdges,
-    shapes,
   };
   const placement: Placement = {
     sphere: { cx: 128, cy: 128 },
@@ -26,34 +24,24 @@ function setup(steps: Step[], positions: Record<string, [number, number]>, broke
 
 describe('routeWires', () => {
   it('draws the entry wire and a step wire straight when they line up', () => {
-    const wires = setup([step('a', ['b']), step('b', [])], { a: [288, 32], b: [576, 32] }, new Set<string>());
+    const wires = setup([step('a', ['b']), step('b', [])], { a: [288, 32], b: [576, 32] });
 
     expect(wires.find((w) => w.id === 'wf->a')!.points).toEqual([[224, 128], [288, 128]]);
     expect(wires.find((w) => w.id === 'a->b')!.points).toEqual([[512, 128], [576, 128]]);
   });
 
   it('colours a wire by its target step entry condition', () => {
-    const wires = setup([step('a', ['b']), step('b', [], { entryCondition: 2 })], { a: [288, 32], b: [576, 32] }, new Set<string>());
+    const wires = setup([step('a', ['b']), step('b', [], { entryCondition: 2 })], { a: [288, 32], b: [576, 32] });
     expect(wires.find((w) => w.id === 'a->b')!.condition).toBe(2);
   });
 
-  it('marks a wire broken only when validate named it (the studio never compares schemas itself)', () => {
-    const wires = setup(
-      [step('a', ['b']), step('b', [])],
-      { a: [288, 32], b: [576, 32] },
-      new Set(['a->b']),
-    );
-    expect(wires.find((w) => w.id === 'a->b')!.broken).toBe(true);
-    expect(wires.find((w) => w.id === 'wf->a')!.broken).toBe(false);
-  });
-
   it('does not draw a wire to a step that is not on the canvas (a dangling next-step id)', () => {
-    const wires = setup([step('a', ['ghost'])], { a: [288, 32] }, new Set<string>());
+    const wires = setup([step('a', ['ghost'])], { a: [288, 32] });
     expect(wires.map((w) => w.id)).toEqual(['wf->a']);
   });
 
   it('routes a back edge and a self-loop orthogonally, every point on the 8 px grid', () => {
-    const wires = setup([step('a', ['b', 'a']), step('b', ['a'])], { a: [288, 32], b: [576, 32] }, new Set<string>());
+    const wires = setup([step('a', ['b', 'a']), step('b', ['a'])], { a: [288, 32], b: [576, 32] });
 
     for (const w of wires) {
       for (let i = 1; i < w.points.length; i++) {
@@ -66,7 +54,7 @@ describe('routeWires', () => {
   });
 
   it('ends every wire on the target step left edge at its landing height', () => {
-    const wires = setup([step('a', ['b']), step('b', [])], { a: [288, 32], b: [576, 320] }, new Set<string>());
+    const wires = setup([step('a', ['b']), step('b', [])], { a: [288, 32], b: [576, 320] });
     expect(wires.find((w) => w.id === 'a->b')!.points.at(-1)).toEqual([576, 416]);
   });
 });
@@ -79,7 +67,7 @@ describe('routeWires: fan-out of 5 with a back edge', () => {
     };
     const wires = setup(
       [step('a', ['b']), step('b', next), step('c', []), step('d', []), step('e', []), step('f', [])],
-      positions, new Set<string>(),
+      positions,
     );
     const boxes = [...Object.entries(positions)].map(([id, [x, y]]) => ({ id: `step:${id}`, x, y, w: 224, h: 160 }));
     boxes.push({ id: 'wf', x: 32, y: 32, w: 192, h: 192 });
@@ -111,17 +99,6 @@ describe('tetherPoints', () => {
     expect(tetherPoints({ cx: 128, cy: 128 }, { x: 320, y: 400 })).toEqual([[128, 224], [128, 312], [400, 312], [400, 400]]);
   });
 
-  it('draws a manual shape with its bends kept, and a slid landing (plan 4)', () => {
-    const placement: Placement = { sphere: { cx: 128, cy: 128 }, steps: new Map([['a', { x: 288, y: 32 }], ['b', { x: 576, y: 160 }]]), caches: new Map() };
-    const input: WiringInput = {
-      entryStepIds: ['a'],
-      steps: new Map([['a', step('a', ['b'])], ['b', step('b', [])]]),
-      brokenEdges: new Set<string>(),
-      shapes: { 'a->b': { bends: { xs: [560], ys: [] }, landing: 72 } },
-    };
-    const ab = routeWires(input, placement).find((w) => w.id === 'a->b')!;
-    expect(ab.points).toEqual([[512, 128], [560, 128], [560, 232], [576, 232]]);
-  });
 });
 
 describe('portOf', () => {

@@ -34,8 +34,8 @@ function doc(over: Partial<Graph> = {}, parkedIds: string[] = []): StudioDocumen
       caches: new Map([['c1', { x: 32, y: 288 }]]),
     },
     wires: [
-      { id: 'wf->a', source: 'wf', target: 'a', points: [[224, 128], [288, 128]], core: { ends: { sx: 224, sy: 128, tx: 288, ty: 128 }, points: [[224, 128], [288, 128]] }, condition: 1, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false, broken: false },
-      { id: 'a->b', source: 'a', target: 'b', points: [[512, 128], [576, 128]], core: { ends: { sx: 512, sy: 128, tx: 576, ty: 128 }, points: [[512, 128], [576, 128]] }, condition: 2, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false, broken: true },
+      { id: 'wf->a', source: 'wf', target: 'a', points: [[224, 128], [288, 128]], core: { ends: { sx: 224, sy: 128, tx: 288, ty: 128 }, points: [[224, 128], [288, 128]] }, condition: 1, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false },
+      { id: 'a->b', source: 'a', target: 'b', points: [[512, 128], [576, 128]], core: { ends: { sx: 512, sy: 128, tx: 576, ty: 128 }, points: [[512, 128], [576, 128]] }, condition: 2, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false },
     ],
   };
 }
@@ -58,12 +58,12 @@ describe('toFlow', () => {
     expect([cache.width, cache.height]).toEqual([160, 160]);
   });
 
-  it('turns wires into cable edges carrying their points, colour and broken flag', () => {
+  it('turns wires into cable edges carrying their points and colour', () => {
     const { edges } = toFlow(doc(), fitter);
     const ab = edges.find((e) => e.id === 'a->b')!;
 
     expect([ab.source, ab.target, ab.type]).toEqual(['a', 'b', 'cable']);
-    expect(ab.data).toEqual({ points: [[512, 128], [576, 128]], colour: '#FF7A66', broken: true, delay: -0.41, dashed: false, tailOn: 'terminal', headOn: 'terminal', short: false });
+    expect(ab.data).toEqual({ points: [[512, 128], [576, 128]], colour: '#FF7A66', delay: -0.41, dashed: false, tailOn: 'terminal', headOn: 'terminal', short: false });
     expect(edges.find((e) => e.id === 'wf->a')!.data).toMatchObject({ delay: 0 });
     expect(edges.find((e) => e.id === 'wf->a')!.source).toBe(SPHERE_NODE_ID);
   });
@@ -151,7 +151,7 @@ describe('toFlow', () => {
   it('draws every wire of the circuit as a cable edge with its family, dash and end kinds; a wire on no terminal hangs on the hub (plan 9 §5)', () => {
     const route = (over: Partial<WireRoute>): WireRoute => ({
       id: 'x', source: null, target: null, points: [[0, 0], [64, 0]], core: { ends: { sx: 0, sy: 0, tx: 64, ty: 0 }, points: [[0, 0], [64, 0]] },
-      condition: null, solid: false, tailOn: 'open', headOn: 'open', short: false, broken: false, ...over,
+      condition: null, solid: false, tailOn: 'open', headOn: 'open', short: false, ...over,
     });
     const d: StudioDocument = { ...doc(), wires: [
       route({ id: 'w:1' }),
@@ -160,7 +160,7 @@ describe('toFlow', () => {
     ] };
     const { edges } = toFlow(d, fitter);
     const e = (id: string) => edges.find((x) => x.id === id)!;
-    expect([e('w:1').source, e('w:1').target, e('w:1').targetHandle]).toEqual([SPHERE_NODE_ID, SPHERE_NODE_ID, 'loose']);
+    expect([e('w:1').source, e('w:1').target, e('w:1').targetHandle]).toEqual([SPHERE_NODE_ID, SPHERE_NODE_ID, 'ring']);
     expect(e('w:1').data).toMatchObject({ colour: UNDECIDED_COLOUR, dashed: true, tailOn: 'open', headOn: 'open' });
     expect([e('w:2').source, e('w:2').target, e('w:2').targetHandle]).toEqual(['a', 'a', 'in']);
     expect(e('w:2').data).toMatchObject({ colour: '#FF7A66', short: true, headOn: 'junction', dashed: true });

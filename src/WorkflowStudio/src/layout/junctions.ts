@@ -83,14 +83,3 @@ export function ownEnds(sx: number, sy: number, contact: Pt, hostVertical: boole
   const ty = snap(sy <= cy ? cy - JOG : cy + JOG, GRID);
   return { ends: { sx, sy, tx: cx, ty }, tail: [contact] };
 }
-
-/** Following hosts from `id` comes back to `id`. */
-export function inLoop(id: string, hostOf: (id: string) => string | undefined): boolean {
-  const seen = new Set<string>();
-  for (let h = hostOf(id); h !== undefined; h = hostOf(h)) {
-    if (h === id) return true;
-    if (seen.has(h)) return false;
-    seen.add(h);
-  }
-  return false;
-}
