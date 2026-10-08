@@ -31,11 +31,16 @@ internal static class DesignShape
 
         var copies = (r.Schemas ?? []).Select(s => s.Id).ToHashSet();
         foreach (var p in r.Processors ?? [])
-            foreach (var (slot, schemaId) in p.Slots ?? new Dictionary<string, Guid>())
+        {
+            // Hoisted out of the foreach header: `x ?? new Dictionary<,>()` directly in a deconstructing
+            // foreach crashes the IDE0028 analyzer in SDK 8.0.4xx (AD0001), which fails the Release build.
+            var slots = p.Slots ?? new Dictionary<string, Guid>();
+            foreach (var (slot, schemaId) in slots)
             {
                 if (!Slots.Contains(slot)) Fail($"Processors[{p.Id}].Slots", $"'{slot}' is not input, output or config.");
                 else if (!copies.Contains(schemaId)) Fail($"Processors[{p.Id}].Slots", $"The {slot} slot names a schema this design does not carry.");
             }
+        }
 
         foreach (var a in r.Assignments ?? [])
             if (!Ops.Contains(a.Op)) Fail($"Assignments[{a.Id}].Op", "Op must be create, update or delete.");
