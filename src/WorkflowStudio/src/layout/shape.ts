@@ -130,3 +130,14 @@ export function nearestSegment(e: Ends, b: Bends, p: { x: number; y: number }): 
   }
   return best;
 }
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** Bends read back from a session or a stored layout; null when the value is not of their shape. */
+export function parseBends(v: unknown): Bends | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
+  const r = v as Record<string, unknown>;
+  if (!Array.isArray(r.xs) || !Array.isArray(r.ys)) return null;
+  if (!r.xs.every(isNum) || !r.ys.every(isNum) || r.xs.length === 0 || r.ys.length !== r.xs.length - 1) return null;
+  return { xs: [...r.xs], ys: [...r.ys] };
+}
