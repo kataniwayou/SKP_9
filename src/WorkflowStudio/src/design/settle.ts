@@ -56,7 +56,10 @@ function plainEnds(c: Circuit, saved: StudioDocument, pick: (id: string, side: S
   for (const [id, w] of Object.entries(c)) {
     for (const side of ['tail', 'head'] as const) {
       if (w[side].on !== 'wire' || !pick(id, side)) continue;
-      const own = side === 'head' ? ownTarget(id, saved) : null;
+      // back into its own step only when that is not where its tail is (a wire turned round keeps its `s->t` id,
+      // its tail perhaps on t now): never a wire from a step into itself
+      const target = side === 'head' ? ownTarget(id, saved) : null;
+      const own = target !== null && !(w.tail.on === 'step' && w.tail.step === target) ? target : null;
       const p = point(id, side) ?? { x: 0, y: 0 };
       out = setEnd(out, id, side, own !== null ? { on: 'step', step: own, y: null } : { on: 'open', x: p.x, y: p.y });
     }

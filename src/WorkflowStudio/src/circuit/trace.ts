@@ -1,6 +1,6 @@
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import type { Id } from '../model/graph';
-import type { Circuit } from './circuit';
+import { isFree, type Circuit } from './circuit';
 
 /** What the current does (plan 9 §7): which step inputs each source reaches, and whether wires alone close a loop (§2.2-3). */
 export interface Trace {
@@ -17,10 +17,11 @@ type Graph = Map<string, string[]>;
  * input), and along each wire `p:{id}:{i}`: its tail (0), the junctions on it in order of `at`, its head (last).
  * A head junction pours into its host at its point; a tail junction leaves from its host's point. At equal `at`
  * a tail junction comes first, so they never meet (decision 8). An end on its own wire, or on a wire that is not in
- * the circuit, is no connection.
+ * the circuit, is no connection; nor is a direction-less wire (no end on a step or the hub), or an end joined on one.
  */
 function pointGraph(circuit: Readonly<Circuit>, skip: ReadonlySet<string>): Graph {
-  const ids = Object.keys(circuit).filter((id) => !skip.has(id));
+  // a direction-less wire (rule D) carries nothing: no current through it, nor through the junctions on it
+  const ids = Object.keys(circuit).filter((id) => !skip.has(id) && !isFree(circuit[id]!));
   const live = new Set(ids);
   const events = new Map<string, { at: number; order: 0 | 1; key: string }[]>(ids.map((id) => [id, []]));
   for (const id of ids) {

@@ -1,7 +1,9 @@
 import type { StudioDocument } from '../app/document';
 import { moveWire, type Circuit, type Side } from '../circuit/circuit';
-import { GRID, SPHERE_R, type Point } from '../layout/geometry';
+import { hubStart } from '../layout/circuitRoute';
+import { GRID, snap, SPHERE_R, type Point } from '../layout/geometry';
 import type { Pt } from '../layout/router';
+import { shapeFromPoints } from '../layout/shape';
 import { translatePoints } from '../layout/wireMove';
 import { applyDrop, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
@@ -39,11 +41,14 @@ const other = (s: Side): Side => (s === 'tail' ? 'head' : 'tail');
 /**
  * How far the drawn end at `e` is from where `t` would put it, and whether a wire moved whole (its shape frozen)
  * still takes `t` without moving: a step side must be met exactly (its height on the 8 px grid), a line within half a
- * grid step (a junction's point along its host is snapped), the hub's ring within half its 15 degree spacing (its tails
- * start every 15 degrees; the ring's lead takes the difference).
+ * grid step (a junction's point along its host is snapped), the hub within half its ring's 15 degree spacing (its
+ * tails start every 15 degrees). On the hub the end goes where a tail with a shape of its own starts (`hubStart`:
+ * the ring point on the grid, `aim` the x of the shape's first vertical run from this end), so what is stored stays
+ * on the grid and the short lead from the ring takes the rest.
  */
-function gap(shown: StudioDocument, t: DropTarget, e: Point): { x: number; y: number; fits: boolean } {
-  const c = pointOfTarget(shown, t);
+function gap(shown: StudioDocument, t: DropTarget, e: Point, aim: number | null): { x: number; y: number; fits: boolean } {
+  const { cx, cy } = shown.placement.sphere;
+  const c = t.on === 'hub' ? hubStart(cx, cy, t.angle, aim).start : pointOfTarget(shown, t);
   const x = c.x - e.x, y = c.y - e.y;
   const fits = t.on === 'step' ? Math.abs(x) < 0.5 && Math.abs(y) <= GRID / 2
     : t.on === 'wire' ? Math.hypot(x, y) <= GRID / 2
@@ -79,6 +84,14 @@ export function landBody(
     const line = over === null ? wireAt(shown, at, reach, null, id) : null;
     return { target: targetOf(shown, c, at, over, line), id: line ? line.id : over, line: line !== null };
   };
+  // the x of the frozen shape's first vertical run from each end (what a tail on the hub starts towards)
+  const firstRun = (side: Side): number | null => {
+    const from = side === 'tail' ? points : [...points].reverse();
+    const s = shapeFromPoints(from);
+    // a straight wire heads for its other end
+    return s.xs.length > 0 ? s.xs[0]! : from.length > 1 ? from[from.length - 1]![0] : null;
+  };
+  const aimOf = (side: Side, sx: number): number | null => { const x = firstRun(side); return x === null ? null : x + sx; };
   const raw = placed(dx, dy);
   const sides: Side[] = ['tail', 'head'];
   const alone = sides.map((side) => {
@@ -95,8 +108,9 @@ export function landBody(
   /** The wire shifted onto end `a`'s contact, `a` connected there, and the other end judged and connected if it fits. */
   const onto = (a: Side) => {
     const A = alone[a === 'tail' ? 0 : 1]!;
-    const g = gap(shown, A.target, A.at);
-    const sx = dx + g.x, sy = dy + g.y;
+    const g = gap(shown, A.target, A.at, aimOf(a, dx));
+    // onto the hub the shift stays on the grid, so the moved shape does too
+    const sx = A.target.on === 'hub' ? snap(dx + g.x) : dx + g.x, sy = A.target.on === 'hub' ? snap(dy + g.y) : dy + g.y;
     const moved = placed(sx, sy);
     const one = applyDrop(moved.c, id, a, A.target, moved.c[id]?.bends ?? null);
     const b = other(a);
@@ -106,7 +120,7 @@ export function landBody(
     let result = one.circuit;
     let fits = false;
     if (toneOf(verdict) === 'ok') {
-      fits = gap(shown, l.target, bAt).fits;
+      fits = gap(shown, l.target, bAt, aimOf(b, sx)).fits;
       if (fits) result = applyDrop(one.circuit, id, other(one.side), l.target, one.circuit[id]?.bends ?? null).circuit;
       else verdict = 'move';
     }

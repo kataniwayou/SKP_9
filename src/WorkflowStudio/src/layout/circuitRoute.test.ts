@@ -119,3 +119,20 @@ describe('endPointOf', () => {
     expect(point('nope', 'tail')).toBeNull();
   });
 });
+
+describe('a hub tail with a shape of its own (review 2026-10-09)', () => {
+  it('starts at its ring point snapped to the grid, after a short lead from the ring; heading right from the left half it still leaves the hub\'s square', async () => {
+    const doc = await four();
+    const { cx, cy } = doc.placement.sphere;
+    const left = routeCircuit({ x: { tail: { on: 'hub', angle: 165 }, head: { on: 'open', x: -400, y: 300 }, bends: { xs: [-200], ys: [] } } }, ctxOf(doc))[0]!;
+    const r = (165 * Math.PI) / 180;
+    const ring: [number, number] = [Math.round((cx + SPHERE_R * Math.cos(r)) * 10) / 10, Math.round((cy + SPHERE_R * Math.sin(r)) * 10) / 10];
+    const snapped: [number, number] = [Math.round(ring[0] / 8) * 8, Math.round(ring[1] / 8) * 8];
+    expect(left.points).toEqual([ring, [ring[0], snapped[1]], [-200, snapped[1]], [-200, 300], [-400, 300]]);
+    expect(left.core.ends).toMatchObject({ sx: snapped[0], sy: snapped[1] });
+    // a left-half tail whose shape heads right: as the router draws it, out of the hub's square
+    const right = routeCircuit({ x: { tail: { on: 'hub', angle: 165 }, head: { on: 'open', x: 900, y: 300 }, bends: { xs: [600], ys: [] } } }, ctxOf(doc))[0]!;
+    expect(right.points[1]![0]).toBe(right.points[0]![0]);
+    expect(right.points[1]![1]).toBeGreaterThan(cy + SPHERE_R);
+  });
+});

@@ -65,6 +65,20 @@ export function hubLead(cx: number, cy: number, angle: number): { start: Point; 
   return { start: { x: right, y }, lead: [ring, [ring[0], y]] };
 }
 
+/**
+ * Where a tail on the hub at `angle` starts its core, and the lead before it (review 2026-10-09). A wire with a shape of
+ * its own (`aim`: the x of its first vertical run) starts at its ring point snapped to the grid, after a short lead
+ * from the ring (one jog onto the grid), so a shape moved onto the hub keeps every run where it was put; a tail on the
+ * hub's left half whose shape heads right, and an automatic wire (`aim` null), leave as `hubLead` draws them.
+ */
+export function hubStart(cx: number, cy: number, angle: number, aim: number | null): { start: Point; lead: Pt[] } {
+  const h = hubLead(cx, cy, angle);
+  if (aim === null || (Math.cos((angle * Math.PI) / 180) < -1e-9 && aim > cx)) return h;
+  const ring = h.lead[0]!;
+  const start = { x: snap(ring[0]), y: snap(ring[1]) };
+  return { start, lead: [ring, [ring[0], start.y]] };
+}
+
 /** One end as routed: where it is, the router box it is on ('' for none), the points before it, and a junction's contact. */
 interface Placed { at: Point; box: string; lead: Pt[]; contact: Pt | null; vertical: boolean }
 const placedAt = (at: Point, box = '', lead: Pt[] = []): Placed => ({ at, box, lead, contact: null, vertical: false });
@@ -123,7 +137,8 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     }
     if (t.on === 'hub') {
       if (t.angle === null) return placedAt({ x: cx + SPHERE_R, y: departY.get(id)! }, SPHERE_BOX_ID);
-      const h = hubLead(cx, cy, t.angle);
+      const own = wire(id).bends;
+      const h = hubStart(cx, cy, t.angle, own && own.xs.length > 0 ? own.xs[0]! : null);
       return placedAt(h.start, '', h.lead);
     }
     return t.on === 'open' ? placedAt({ x: t.x, y: t.y }) : null;

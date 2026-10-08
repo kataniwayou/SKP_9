@@ -4,13 +4,14 @@ import type { StudioDocument } from '../app/document';
 import { selectionForPicks } from '../canvas/selection';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
-import { addCircuitWire, holdEnd, isFree, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
-import { endPointOf, hubLead, type WireRoute } from '../layout/circuitRoute';
+import { addCircuitWire, freeWithout, holdEnd, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
+import { endPointOf, hubStart, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearPath, clearRun } from '../layout/detour';
 import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { route, simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, normalize, shapeFromPoints, type Bends } from '../layout/shape';
+import { lengthOf } from '../layout/junctions';
 import { coreFrom, legsPath, moveLegs, startLegs, type Legs } from '../layout/wireMove';
 import { blockBoxes, portOf } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
@@ -282,11 +283,13 @@ export function useWireGestures(
     /** The path into target `t` from the end that stays (a hub's lead at the dragged end apart), and that lead. */
     const into = (t: DropTarget): { core: Pt[]; lead: Pt[] } => {
       // the end this one is once dropped: a direction-less wire's end takes the role the side or the hub gives it
-      const role: Side = isFree(rec) ? roleOf(t) ?? side : side;
+      const role: Side = freeWithout(rec, side) ? roleOf(t) ?? side : side;
+      const a = legs.path[legs.path.length - 1]!;
       let start = pointOfTarget(shown.current, t), lead: Pt[] = [];
       if (t.on === 'hub') {
+        // as the wire will be drawn there: a shape kept starts at the ring point on the grid (`hubStart`)
         const { cx, cy } = shown.current.placement.sphere;
-        const h = hubLead(cx, cy, t.angle);
+        const h = hubStart(cx, cy, t.angle, keepShape() ? a[0] : null);
         start = h.start;
         lead = [...h.lead].reverse();
       }
@@ -297,7 +300,6 @@ export function useWireGestures(
       // the last leg: on along the anchor's way when it is vertical, then square into the contact from the side a wire
       // takes it (a head from the left, a tail to the right), so the corner drawn there stays; otherwise routed as a
       // wire leaves its tail (from the anchor to a head, from a tail to the anchor)
-      const a = legs.path[legs.path.length - 1]!;
       const square = legs.axis === 'v' && (t.on === 'wire' || (role === 'head' ? a[0] <= start.x : a[0] >= start.x));
       const leg = ghostPath({ x: a[0], y: a[1] }, start, role, boxes);
       const fromAnchor: Pt[] = square ? [[a[0], start.y], [start.x, start.y]] : role === 'head' ? leg : [...leg].reverse();
@@ -336,7 +338,7 @@ export function useWireGestures(
           // the corners drawn are kept and only the last leg routed in (rule C); a direction-less wire the drop turns
           // round turns its bends with it (rule D)
           const keep = keepShape() ? bendsOf(into(t).core) : undefined;
-          next = applyDrop(circuit, wire.id, side, t, keep === undefined ? undefined : keep.xs.length > 0 ? keep : null).circuit;
+          next = applyDrop(circuit, wire.id, side, t, keep === undefined ? undefined : keep.xs.length > 0 ? keep : null, lengthOf([wire.points])).circuit;
         }
         // a host detached (an end dropped open): the ends joined on it open where they are drawn (spec §2.2-6)
         if (was.on !== 'open' && end.on === 'open') next = openJoinedOn(next, [wire.id], endPointOf(shown.current.wires));

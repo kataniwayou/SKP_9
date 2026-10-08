@@ -38,6 +38,15 @@ describe('reconcile (plan 9 §7, §8; decision 6)', () => {
     expect(out['w:l1']).toEqual(loose);
   });
 
+  it('a wire turned round that keeps a plain id `s->t` (its tail now on t) is never put back on t: its junction head opens (review 2026-10-09)', async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const c: Circuit = { ...plainOf(d), 's1->s2#2': { tail: at('s2'), head: on('w:gone', 40) } };
+    const out = reconcile(c, expectedLinks(d, {}, null), d);
+    const w = out['s1->s2#2'];
+    expect(w === undefined || !(w.head.on === 'step' && w.tail.on === 'step' && w.head.step === w.tail.step)).toBe(true);
+    expect(trace(out).links.get('s2') ?? []).not.toContain('s2');
+  });
+
   it('a missing link gets a new automatic wire; an unexpected plain wire goes', async () => {
     const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
     const c: Circuit = { 'wf->s1': plainOf(d)['wf->s1']!, 'w:9': { tail: at('s2'), head: at('s1') } };

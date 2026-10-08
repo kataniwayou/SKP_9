@@ -4,8 +4,8 @@ import { loadedDocument } from '../app/fixtures';
 import { addCircuitWire, plainCircuit, type Circuit } from '../circuit/circuit';
 import { trace } from '../circuit/trace';
 import { endPointOf, routeCircuit } from '../layout/circuitRoute';
-import { STEP_W } from '../layout/geometry';
-import type { Pt } from '../layout/router';
+import { GRID, SPHERE_R, STEP_W } from '../layout/geometry';
+import { simplify, type Pt } from '../layout/router';
 import { translatePoints } from '../layout/wireMove';
 import { landBody } from './bodyDrop';
 
@@ -118,5 +118,48 @@ describe('a wire moved whole (the user\'s rule B, 2026-10-09)', () => {
     expect(l.ends.map((e) => e.verdict)).toEqual(['join', 'needsStep']);
     expect(l.result['w:f']!.tail).toMatchObject({ on: 'wire', host: 's1->s2' });
     expect(l.result['w:f']!.head.on).toBe('open');
+  });
+});
+
+describe('a wire moved whole onto the hub (review 2026-10-09)', () => {
+  const one = () => loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['a'] }), steps: [stepDto('a')] }));
+  const onGrid = (v: number) => Math.abs(v / GRID - Math.round(v / GRID)) < 1e-9;
+
+  it('its tail lands at the ring point snapped to the grid: everything stored stays on the grid and it is drawn as moved after a short lead from the ring', async () => {
+    const d = await one();
+    const { cx, cy } = d.placement.sphere;
+    const ang = (165 * Math.PI) / 180;
+    const tx = Math.round((cx + SPHERE_R * Math.cos(ang)) / 8) * 8, ty = Math.round((cy + SPHERE_R * Math.sin(ang)) / 8) * 8 + 400;
+    const c = addCircuitWire(plain(d), 'w:f', { tail: { on: 'open', x: tx, y: ty }, head: { on: 'open', x: tx - 240, y: ty + 80 }, bends: { xs: [tx - 160], ys: [] } });
+    const shown = { ...d, wires: routeCircuit(c, { placement: d.placement, steps: d.graph.steps }) };
+    const before = drawn(shown, c, 'w:f');
+    const l = landBody(shown, c, 'w:f', before, endPointOf(shown.wires), 0, -400, null, 8);
+    expect(l.ends[0]!.verdict).toBe('connect');
+    expect([onGrid(l.dx), onGrid(l.dy)]).toEqual([true, true]);
+    const w = l.result['w:f']!;
+    expect(w.tail).toEqual({ on: 'hub', angle: 165 });
+    expect(w.head.on === 'open' && onGrid(w.head.x) && onGrid(w.head.y)).toBe(true);
+    expect(w.bends!.xs.every(onGrid) && w.bends!.ys.every(onGrid)).toBe(true);
+    const routed = drawn(d, l.result, 'w:f');
+    const moved = translatePoints(before, l.dx, l.dy);
+    // the ring point, one short jog onto the grid, then the shape exactly as moved
+    const ring = routed[0]!;
+    expect(routed).toEqual(simplify([ring, [ring[0], moved[0]![1]], ...moved]));
+    expect(Math.hypot(ring[0] - cx, ring[1] - cy)).toBeCloseTo(SPHERE_R, 0);
+    expect(Math.hypot(ring[0] - moved[0]![0], ring[1] - moved[0]![1])).toBeLessThanOrEqual(GRID);
+  });
+
+  it('after a hub landing the other end still connects: an entry wire moved down a little lands on the ring and on its step again', async () => {
+    const d = await one();
+    const c = plain(d);
+    const before = drawn(d, c, 'wf->a');
+    const l = land(d, c, 'wf->a', before, 0, 24);
+    expect(l.ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
+    const w = l.result['wf->a']!;
+    expect(w.tail.on).toBe('hub');
+    expect(w.head).toMatchObject({ on: 'step', step: 'a' });
+    const moved = translatePoints(before, l.dx, l.dy);
+    const routed = drawn(d, l.result, 'wf->a');
+    expect(routed).toEqual(simplify([routed[0]!, [routed[0]![0], moved[0]![1]], ...moved]));
   });
 });

@@ -142,6 +142,19 @@ describe('direction-less wires (the user\'s rule D, 2026-10-09)', () => {
     expect(reverseWire(reverseWire(c, 'w:f'), 'w:f')['w:f']).toEqual(c['w:f']);
     expect(reverseWire(c, 'gone')).toBe(c);
   });
+
+  it('turned round with its drawn length, the ends joined on it keep their point: measured from its new tail', () => {
+    const c: Circuit = {
+      'w:f': { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 300, y: 0 } },
+      'w:g': { tail: { on: 'step', step: 's1', y: null }, head: { on: 'wire', host: 'w:f', at: 40 } },
+      'w:h': { tail: { on: 'wire', host: 'w:f', at: 280 }, head: { on: 'open', x: 9, y: 9 } },
+    };
+    const out = reverseWire(c, 'w:f', 300);
+    expect(out['w:g']!.head).toEqual({ on: 'wire', host: 'w:f', at: 260 });
+    expect(out['w:h']!.tail).toEqual({ on: 'wire', host: 'w:f', at: 20 });
+    // with no length the joined ends are left as they are
+    expect(reverseWire(c, 'w:f')['w:g']).toBe(c['w:g']);
+  });
 });
 
 describe('reading a circuit back', () => {

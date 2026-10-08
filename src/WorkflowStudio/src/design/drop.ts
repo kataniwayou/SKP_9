@@ -1,8 +1,9 @@
 import type { StudioDocument } from '../app/document';
-import { isFree, reverseBends, reverseWire, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
+import { freeWithout, reverseBends, reverseWire, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
 import { loopWires, trace } from '../circuit/trace';
 import { contactOn } from '../layout/circuitRoute';
+import { lengthOf } from '../layout/junctions';
 import { clampLanding, snap, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import type { Bends } from '../layout/shape';
@@ -71,21 +72,28 @@ export function beforeDrop(shown: StudioDocument, circuit: Readonly<Circuit>): B
  * brought into a net that then holds two or more ('short'). A loop, a
  * self-feed or a short circuit already there before the drop does not refuse it: in a net already shorted (an
  * Inspector edit) an end may still slide along its side or its host, as long as no wire of the net gains a family.
- * A direction-less wire (rule D, 2026-10-09) is never told the wrong side or "only a tail": the step side or the hub
- * makes this end its head or its tail, and the drop is judged on the wire turned that way; joined on one line, its
- * other end onto another line is "needs a step first".
+ * A wire that is direction-less once lifted by this end (rule D, 2026-10-09; its other end on no step or hub) is never
+ * told the wrong side or "only a tail": the step side or the hub makes this end its head or its tail, and the drop is
+ * judged on the wire turned that way, against the circuit as it is; its other end joined on one line, this end onto
+ * another line is "needs a step first".
  */
 export function judgeDrop(shown: StudioDocument, circuit: Readonly<Circuit>, id: string, side: Side, t: DropTarget): Verdict {
   if (!Object.hasOwn(circuit, id) || t.on === 'open') return 'move';
   const w = circuit[id]!;
   const other = side === 'tail' ? w.head : w.tail;
-  // a direction-less wire (rule D): the step side or the hub decides which end this is, and the rest is judged on the
-  // wire turned that way; a second line to join it on needs a step first
-  if (isFree(w)) {
+  if (freeWithout(w, side)) {
     if (t.on === 'wire' && other.on === 'wire' && other.host !== t.host && t.host !== id) return 'needsStep';
     const role = roleOf(t);
-    if (role !== null && role !== side) return judgeDrop(shown, reversed(circuit, id), id, role, t);
+    if (role !== null && role !== side) return judged(shown, circuit, reversed(shown, circuit, id), id, role, t);
   }
+  return judged(shown, circuit, circuit, id, side, t);
+}
+
+/** `judgeDrop` on `circuit` (the wire perhaps turned round), the state before the drop being `was`. */
+function judged(shown: StudioDocument, was: Readonly<Circuit>, circuit: Readonly<Circuit>, id: string, side: Side, t: DropTarget): Verdict {
+  if (t.on === 'open') return 'move';
+  const w = circuit[id]!;
+  const other = side === 'tail' ? w.head : w.tail;
   if (t.on === 'hub') {
     if (side === 'head') return 'hubTail';
   } else if (t.on === 'step') {
@@ -96,7 +104,7 @@ export function judgeDrop(shown: StudioDocument, circuit: Readonly<Circuit>, id:
     if (!Object.hasOwn(circuit, t.host)) return 'move';
   }
   const after = setEnd(circuit, id, side, endOf(t));
-  const before = beforeDrop(shown, circuit);
+  const before = beforeDrop(shown, was);
   for (const x of loopWires(after)) if (!before.looped.has(x)) return 'short';
   for (const [s, ts] of trace(after).links) if (ts.includes(s) && !before.links.get(s)?.includes(s)) return 'sameStep';
   const net = netsOf(after, (s: Id) => shown.graph.steps.get(s)?.entryCondition).find((n) => n.wires.includes(id));
@@ -116,26 +124,33 @@ export function roleOf(t: DropTarget): Side | null {
   return t.on === 'hub' ? 'tail' : null;
 }
 
+/** A wire's drawn length on the canvas shown, to keep the ends joined on it in place when it is turned round. */
+const drawnLength = (shown: StudioDocument, id: string): number | undefined => {
+  const r = shown.wires.find((x) => x.id === id);
+  return r ? lengthOf([r.points]) : undefined;
+};
+
 const turned = new WeakMap<Readonly<Circuit>, Map<string, Circuit>>();
-/** `reverseWire`, the same circuit object for the same circuit and wire, so a drag's judging reuses `beforeDrop`. */
-function reversed(circuit: Readonly<Circuit>, id: string): Circuit {
+/** `reverseWire` (the joined ends kept in place), the same object for the same circuit and wire for a whole drag. */
+function reversed(shown: StudioDocument, circuit: Readonly<Circuit>, id: string): Circuit {
   let byId = turned.get(circuit);
   if (!byId) { byId = new Map(); turned.set(circuit, byId); }
   let c = byId.get(id);
-  if (!c) { c = reverseWire(circuit, id); byId.set(id, c); }
+  if (!c) { c = reverseWire(circuit, id, drawnLength(shown, id)); byId.set(id, c); }
   return c;
 }
 
 /**
- * The circuit with wire `id`'s `side` end dropped on `t` (any verdict but a refusal), and which end it is now: a
- * direction-less wire is turned round first when the drop makes this end the other one (rule D; `side` the new name).
- * `keep`: the shape drawn from the tail before the drop, kept (turned with the wire); undefined: `setEnd`'s rule.
+ * The circuit with wire `id`'s `side` end dropped on `t` (any verdict but a refusal), and which end it is now: a wire
+ * direction-less once lifted by this end is turned round first when the drop makes this end the other one (rule D;
+ * `side` the new name; `length`, its drawn length, keeps the ends joined on it in place). `keep`: the shape drawn
+ * from the tail before the drop, kept (turned with the wire); undefined: `setEnd`'s rule.
  */
-export function applyDrop(circuit: Readonly<Circuit>, id: string, side: Side, t: DropTarget, keep?: Bends | null): { circuit: Circuit; side: Side } {
+export function applyDrop(circuit: Readonly<Circuit>, id: string, side: Side, t: DropTarget, keep?: Bends | null, length?: number): { circuit: Circuit; side: Side } {
   if (!Object.hasOwn(circuit, id)) return { circuit: circuit as Circuit, side };
-  const role = isFree(circuit[id]!) ? roleOf(t) : null;
+  const role = freeWithout(circuit[id]!, side) ? roleOf(t) : null;
   const turn = role !== null && role !== side;
-  const c = turn ? reverseWire(circuit, id) : (circuit as Circuit);
+  const c = turn ? reverseWire(circuit, id, length) : (circuit as Circuit);
   const s: Side = turn ? role : side;
   let next = setEnd(c, id, s, endOf(t));
   if (keep !== undefined) next = setBends(next, id, keep && turn ? reverseBends(keep) : keep);
