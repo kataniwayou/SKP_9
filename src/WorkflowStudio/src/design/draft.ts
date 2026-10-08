@@ -3,6 +3,7 @@ import { SPHERE_R, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import type { Bends, WireShape } from '../layout/shape';
+import type { LooseWire } from '../layout/wires';
 import type { Id } from '../model/graph';
 
 export type { Bends, WireShape } from '../layout/shape';
@@ -24,14 +25,16 @@ export interface Draft {
   entries: Id[] | null;
   /** By wire id (`source->target`). */
   routes: Record<string, WireShape>;
+  /** Loose wires by id (plan 8 §5): from a source to an open end; never part of the wiring. */
+  loose: Record<string, LooseWire>;
 }
 
-export const EMPTY_DRAFT: Draft = { sphere: null, steps: {}, caches: {}, next: {}, entries: null, routes: {} };
+export const EMPTY_DRAFT: Draft = { sphere: null, steps: {}, caches: {}, next: {}, entries: null, routes: {}, loose: {} };
 
 const empty = (r: Record<string, unknown>) => Object.keys(r).length === 0;
 
 export function isEmptyDraft(d: Draft): boolean {
-  return d.sphere === null && d.entries === null && empty(d.steps) && empty(d.caches) && empty(d.next) && empty(d.routes);
+  return d.sphere === null && d.entries === null && empty(d.steps) && empty(d.caches) && empty(d.next) && empty(d.routes) && empty(d.loose);
 }
 
 export const wireId = (source: SourceId, target: Id): string => `${source}->${target}`;
@@ -130,6 +133,36 @@ export function setShape(draft: Draft, id: string, shape: WireShape | null): Dra
 
 export const resetRoute = (draft: Draft, id: string): Draft => setShape(draft, id, null);
 
+/** A pick of a loose wire is `loose:{id}` (plan 8): it never collides with a wire id `source->target`. */
+export const LOOSE_PREFIX = 'loose:';
+
+export function addLoose(draft: Draft, id: string, source: SourceId, end: Point): Draft {
+  const loose = copy(draft.loose);
+  loose[id] = { source, end: { x: end.x, y: end.y } };
+  return { ...draft, loose };
+}
+
+export function moveLoose(draft: Draft, id: string, end: Point): Draft {
+  return Object.hasOwn(draft.loose, id) ? addLoose(draft, id, draft.loose[id]!.source, end) : draft;
+}
+
+export function removeLoose(draft: Draft, ids: readonly string[]): Draft {
+  const loose = copy(draft.loose);
+  for (const id of ids) delete loose[id];
+  return { ...draft, loose };
+}
+
+/** A loose wire's open end dropped on a step it may wire to: it becomes an ordinary wire (spec §5). */
+export function attachLoose(draft: Draft, saved: StudioDocument, id: string, target: Id): Draft {
+  if (!Object.hasOwn(draft.loose, id)) return draft;
+  return addWire(removeLoose(draft, [id]), saved, draft.loose[id]!.source, target);
+}
+
+/** A wire's head released where it attaches to nothing: it leaves the wiring and stays drawn, loose from its source (spec §5). */
+export function loosen(draft: Draft, saved: StudioDocument, id: string, looseId: string, end: Point): Draft {
+  return addLoose(removeWires(draft, saved, [id]), looseId, wireEnds(id).source, end);
+}
+
 // ---- session parsing: anything not of the draft's shape is dropped, never an error ----
 
 const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -170,5 +203,9 @@ export function parseDraft(value: unknown): Draft | null {
     next: records(value.next, toIds),
     entries: toIds(value.entries),
     routes,
+    loose: records(value.loose, (raw) => {
+      const end = isRecord(raw) ? toPoint(raw.end) : null;
+      return isRecord(raw) && typeof raw.source === 'string' && raw.source !== '' && end ? { source: raw.source, end } : null;
+    }),
   };
 }

@@ -33,6 +33,20 @@ export interface Joint {
   ownEnds: Ends;
 }
 
+/** A loose wire (plan 8 §5): from a source to an open end where it was dropped; never part of the wiring. */
+export interface LooseWire {
+  source: SourceId;
+  /** The open end, in flow coordinates. */
+  end: Point;
+}
+
+/** A loose wire as drawn: right-angled from its source's port to its open end. */
+export interface LooseRoute {
+  id: string;
+  source: SourceId;
+  points: Pt[];
+}
+
 export interface WiringInput {
   entryStepIds: Id[];
   /** Every step on the canvas, parked ones included. */

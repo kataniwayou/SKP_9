@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import {
-  addWire, EMPTY_DRAFT, isEmptyDraft, moveBlocks, nextOf, entriesOf, parseDraft, reattach, removeWires, resetRoute, setShape, wireEnds, wireId,
+  addLoose, addWire, attachLoose, EMPTY_DRAFT, isEmptyDraft, loosen, moveBlocks, moveLoose, removeLoose, nextOf, entriesOf, parseDraft, reattach, removeWires, resetRoute, setShape, wireEnds, wireId,
 } from './draft';
 
 const chain = () => loadedDocument(graphDto({
@@ -88,5 +88,27 @@ describe('junction contacts in the draft', () => {
     const joined = setShape(EMPTY_DRAFT, 'wf->s3', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
     const d = reattach(joined, doc, 's1->s2', 'target', 's3');
     expect(d.routes['wf->s3']!.contact).toEqual({ host: 's1->s3', at: 40 });
+  });
+});
+
+describe('loose wires (plan 8 §5)', () => {
+  it('adds, moves, removes and reads back a loose wire; a malformed one is dropped', () => {
+    let d = addLoose(EMPTY_DRAFT, 'l1', 's1', { x: 600, y: 80 });
+    expect(d.loose['l1']).toEqual({ source: 's1', end: { x: 600, y: 80 } });
+    expect(isEmptyDraft(d)).toBe(false);
+    d = moveLoose(d, 'l1', { x: 640, y: 96 });
+    expect(parseDraft(JSON.parse(JSON.stringify(d)))!.loose['l1']).toEqual({ source: 's1', end: { x: 640, y: 96 } });
+    expect(parseDraft({ loose: { bad: { source: 7 }, worse: { source: 's1', end: { x: 'a', y: 1 } } } })!.loose).toEqual({});
+    expect(removeLoose(d, ['l1']).loose).toEqual({});
+  });
+
+  it('a released head takes the wire out of the wiring, loose from its source; attached again it is an ordinary wire', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')] }));
+    const loose = loosen(EMPTY_DRAFT, doc, 's1->s2', 'l1', { x: 900, y: 400 });
+    expect(loose.next['s1']).toEqual([]);
+    expect(loose.loose['l1']).toEqual({ source: 's1', end: { x: 900, y: 400 } });
+    const wired = attachLoose(loose, doc, 'l1', 's3');
+    expect(wired.next['s1']).toEqual(['s3']);
+    expect(wired.loose).toEqual({});
   });
 });
