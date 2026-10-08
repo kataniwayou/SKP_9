@@ -2,7 +2,7 @@
 
 Branch `feature/path-importer` (not pushed, not merged; the user has not chosen merge / PR / keep). Both plan 8
 halves are deployed to the dev cluster (ns `skp`): BaseApi with the `AddWorkflowDesign` migration, and the studio
-as `workflow-studio:local`, bundle `index-CnvlygjW.js`. Port forwards are supervised by
+as `workflow-studio:local`, bundle `index-DkYMqlx1.js`. Port forwards are supervised by
 `./k8s/port-forward-realstack.ps1` (`-Status` to check, run it again to restart): studio `localhost:18081`,
 BaseApi `localhost:18080`. Do not stop them by hand.
 
@@ -44,7 +44,7 @@ the nullable jsonb `Design` column. The last is `2ce5b40`, the view-restore fix 
 `x ?? new Dictionary<,>()` in a deconstructing `foreach` header crashed the IDE0028 collection-initializer analyzer
 (AD0001) in SDK 8.0.4xx. Only the docker Release build hit it; the fallback is now hoisted to a local.
 
-**Studio.** Bundle `index-CnvlygjW.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
+**Studio.** Bundle `index-DkYMqlx1.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
 exposed:
 - A restored canvas lays out 26 px taller for one frame before the dock settles. `FollowSize` measured from that
   frame, so after a refresh the view came back 13 px off.
@@ -56,6 +56,15 @@ squares as a connected wire. Open-end square = the open circle (attach / move, b
 start onto another step or the hub (anywhere else snaps back); mid squares drag runs and the shape is kept
 (`LooseWire.bends`, in the layout and the session); right-click Reset route clears it. Vitest 753; Playwright 59 + 2
 skips on dev and on the deployed studio.
+
+**More user requests (2026-10-08):** `988581e` no circle on hover at a connection point (the grab spot stays,
+invisible) and the hub's pill shows only its state (no cron); `2b30b76` the Inspector's Description opens sized to
+its text (cap 40vh); `f38cc40` + `e5f9001` a wire's tail (entry wires from the hub too) can be detached: the wire is
+loose at its start, keeps its colour while its head is on a step or a junction, leaves nextStepIds / entryStepIds
+until re-attached; a head dropped on nothing when the tail is already open is refused ("needs one end"); joined wires
+follow a host re-attached to a new source (`was`). Follow-ups: wires joined on a detached host are drawn plain while
+it is detached; a start-loose wire joined on a renamed host is not renamed (renameHost only rewrites routes).
+Vitest 775; Playwright 65 + 2 skips on dev and on the deployed studio.
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
@@ -73,7 +82,7 @@ live 13/6/5 green):
   `WorkflowValidationLiveTests` 5/5.
 - Vitest: 742 passed.
 - Playwright on the dev server: 58 passed, 2 skipped (the expected `art.spec.ts` skips).
-- Playwright on the deployed studio (`index-CnvlygjW.js`):
+- Playwright on the deployed studio (`index-DkYMqlx1.js`):
   - save + inspector + designer: 26/26.
   - whole suite: 58 passed, 2 skipped.
   - `session.spec.ts:12 --repeat-each=8`: 8/8.
