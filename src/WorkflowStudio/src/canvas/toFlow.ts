@@ -8,7 +8,8 @@ import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { conditionInfo } from '../model/entryConditions';
 import { entityName } from '../model/entityNames';
 import type { Cache, Graph, Id, Processor, Step } from '../model/graph';
-import type { CableEdgeType } from './edges/CableEdge';
+import { LOOSE_PREFIX } from '../design/draft';
+import { LOOSE_COLOUR, type CableEdgeType } from './edges/CableEdge';
 import type { TetherEdgeType } from './edges/TetherEdge';
 import { createTextFitter, FONT, type FittedText, type TextFitter } from './fitText';
 import type { CacheNodeData, CacheNodeType } from './nodes/CacheNode';
@@ -32,7 +33,6 @@ const handle = (id: string, type: 'source' | 'target', position: Position, x: nu
  */
 export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: StudioNode[]; edges: StudioEdge[] } {
   const { graph, placement, wires } = doc;
-  const parked = new Set(doc.parkedIds);
   const assignments = assignmentByStep(graph.assignments);
 
   const ins = new Map<Id, number[]>(), outs = new Map<Id, number[]>();
@@ -51,7 +51,11 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
   nodes.push({
     id: SPHERE_NODE_ID, type: 'workflow', position: { x: cx - SPHERE_R, y: cy - SPHERE_R },
     width: 2 * SPHERE_R, height: 2 * SPHERE_R, draggable: false, selectable: false,
-    handles: [handle('out', 'source', Position.Right, 2 * SPHERE_R, SPHERE_R), handle('down', 'source', Position.Bottom, SPHERE_R, 2 * SPHERE_R)],
+    handles: [
+      handle('out', 'source', Position.Right, 2 * SPHERE_R, SPHERE_R), handle('down', 'source', Position.Bottom, SPHERE_R, 2 * SPHERE_R),
+      // a loose wire from the hub ends on the hub itself: React Flow needs a target handle (plan 8 §5)
+      handle('loose', 'target', Position.Right, 2 * SPHERE_R, SPHERE_R),
+    ],
     data: hubData(graph.workflow, fitter),
   });
 
@@ -64,7 +68,7 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
       id, type: 'step', position, width: STEP_W, height: STEP_H, draggable: false, selectable: false,
       handles: [handle('in', 'target', Position.Left, 0, PMID), handle('out', 'source', Position.Right, STEP_W, PMID)],
       data: {
-        ...stepLabels(step, parked.has(id), fitter),
+        ...stepLabels(step, fitter),
         letter: condition.letter,
         colour: condition.colour,
         assignment,
@@ -72,7 +76,6 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
           entityName(step.name, step.version, step.id),
           `entry ${condition.letter} · ${condition.name}`,
           assignment === null ? 'no assignment' : `assignment ${assignment}`,
-          ...(parked.has(id) ? ['parked: placed but not wired into this workflow'] : []),
         ].join('\n'),
         fanIn: ins.get(id)?.length ?? 0,
         ins: ins.get(id) ?? [],
@@ -111,6 +114,16 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
     });
   }
 
+  // loose wires (plan 8 §5): drawn by the cable edge from their source; never part of the wiring
+  for (const l of doc.loose) {
+    const node = l.source === WORKFLOW_SOURCE ? SPHERE_NODE_ID : l.source;
+    edges.push({
+      id: `${LOOSE_PREFIX}${l.id}`, type: 'cable', source: node, target: node,
+      sourceHandle: 'out', targetHandle: l.source === WORKFLOW_SOURCE ? 'loose' : 'in', selectable: false, focusable: false,
+      data: { points: l.points, colour: LOOSE_COLOUR, broken: false, delay: 0, loose: true },
+    });
+  }
+
   return { nodes, edges };
 }
 
@@ -121,12 +134,11 @@ function badge(payload: string | undefined): string | null {
   return n === 0 ? '◇ {}' : `◆ ${n} key${n > 1 ? 's' : ''}`;
 }
 
-function stepLabels(step: Step, parked: boolean, fitter: TextFitter): { name: FittedText; version: FittedText; parked: boolean } {
-  const versionX = parked ? 56 : 42;
+function stepLabels(step: Step, fitter: TextFitter): { name: FittedText; version: FittedText } {
+  const versionX = 42;
   return {
     name: fitter.fit(step.name, STEP_W - 12 - 34, FONT.stepName),
     version: fitter.fit(`v${step.version}`, STEP_W - versionX - 74, FONT.stepVersion),
-    parked,
   };
 }
 

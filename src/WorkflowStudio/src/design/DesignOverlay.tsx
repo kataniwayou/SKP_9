@@ -76,7 +76,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
         {ghost && <path className="design-ghost" d={pathOf(ghost)} strokeWidth={GHOST * k} />}
         {hint && label && (
           // drawn in screen pixels: the group undoes the zoom, offset below-right of the pointer
-          <g className={hint.ok ? 'design-drop-label ok' : 'design-drop-label no'} transform={`translate(${hint.at.x + 14 * k} ${hint.at.y + 14 * k}) scale(${k})`}>
+          <g className={`design-drop-label ${hint.tone}`} transform={`translate(${hint.at.x + 14 * k} ${hint.at.y + 14 * k}) scale(${k})`}>
             <rect x={0} y={0} rx={4} height={LABEL_H} width={label.length * LABEL_FONT * 0.56 + 2 * LABEL_PAD} />
             <text x={LABEL_PAD} y={LABEL_H / 2 + LABEL_FONT * 0.36} fontSize={LABEL_FONT}>{label}</text>
           </g>

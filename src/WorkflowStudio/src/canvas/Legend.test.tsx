@@ -13,14 +13,15 @@ describe('Legend', () => {
       expect(item.querySelector('.lg-w')!.getAttribute('stroke')).toBe(c.colour);
       expect(item.querySelector('.lg-head')).not.toBeNull();
     }
-    expect(container.querySelectorAll('.lg-item')).toHaveLength(CONDITIONS.length + 2);
+    expect(container.querySelectorAll('.lg-item')).toHaveLength(CONDITIONS.length + 1);
   });
 
-  it('shows broken as grey dashes around the amber warning, and parked as a dashed notched frame', () => {
-    const { getByText } = render(<Legend />);
-    const broken = getByText('broken').closest('.lg-item')!;
-    expect(broken.querySelector('.lg-dash')).not.toBeNull();
-    expect(broken.querySelector('.lg-warn')!.textContent).toBe('⚠');
-    expect(getByText('parked').closest('.lg-item')!.querySelector('.lg-parked')).not.toBeNull();
+  it('shows a loose wire as a grey dashed line with an open end; no broken, no parked (plan 8)', () => {
+    const { getByText, queryByText } = render(<Legend />);
+    const loose = getByText('loose wire').closest('.lg-item')!;
+    expect(loose.querySelector('.lg-loose')).not.toBeNull();
+    expect(loose.querySelector('.lg-open')).not.toBeNull();
+    expect(queryByText('broken')).toBeNull();
+    expect(queryByText('parked')).toBeNull();
   });
 });

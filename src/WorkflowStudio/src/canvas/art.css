@@ -28,8 +28,6 @@
 .blk .nx-skv { font: 400 9.5px var(--mono); fill: rgba(4, 17, 31, .75); }
 .blk .nx-asg { fill: #04111F; }
 .blk .nx-socket .nx-nd { stroke-width: 1; }
-.blk.parked { opacity: .6; }
-.blk.parked .nx-frame { stroke-dasharray: 6 4; }
 .blk.nx:hover .nx-frame { stroke-width: 1.6; }
 .studio-sel .blk.nx .nx-frame { stroke: var(--accent); stroke-width: 2; }
 
@@ -101,9 +99,14 @@
 .cmark .lg-src { fill: #060c17; stroke: var(--nc); stroke-width: 1.2; }
 .cmark .lg-w { fill: none; stroke-width: 1.8; filter: drop-shadow(0 0 2px var(--nc)); }
 .cmark .lg-head { fill: none; stroke-width: 1.8; stroke-linejoin: miter; }
-.legend .lg-dash { fill: none; stroke: #9FB0C8; stroke-width: 1.8; stroke-dasharray: 3 2; }
-.legend .lg-warn { font: 600 11px var(--sans); fill: var(--warn); }
-.legend .lg-parked { fill: none; stroke: #6B7A90; stroke-width: 1.2; stroke-dasharray: 2.5 1.5; }
+.legend .lg-loose { fill: none; stroke: #8A97A8; stroke-width: 1.4; stroke-dasharray: 4 3; }
+.legend .lg-open { fill: none; stroke: #8A97A8; stroke-width: 1.4; }
+
+/* plan 8: a loose wire, grey and dashed, with an open circle where it was dropped; never pulses */
+.wire.loose path.w { stroke-dasharray: 6 4; filter: none; }
+.wire.loose .nx-open { fill: #060c17; stroke: #8A97A8; stroke-width: 1.6; pointer-events: none; }
+.nx-open-hit { fill: transparent; stroke: none; pointer-events: all; cursor: grab; }
+.wire.halo-loose path.w { stroke-width: 3; filter: drop-shadow(0 0 4px #9AA7B8) drop-shadow(0 0 8px #9AA7B8); }
 
 @media (prefers-reduced-motion: reduce) {
   .nx-spin, .nx-wait, .wf.nx-idlewf .hub-inner { animation: none; }

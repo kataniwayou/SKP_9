@@ -14,12 +14,11 @@ export type { ProcessorView } from './Chip';
 export type StepNodeData = {
   name: FittedText;
   version: FittedText;
-  parked: boolean;
   letter: string;
   colour: string;
   /** `◆ 3 keys`, `◇ {}`, or null when the step has no assignment in this workflow. */
   assignment: string | null;
-  /** The step's tooltip (unique name, entry condition, assignment, parked); the processor panel has its own. */
+  /** The step's tooltip (unique name, entry condition, assignment); the processor panel has its own. */
   tip: string;
   fanIn: number;
   /** Step-local heights where wires land (left edge) and leave (right edge). */
@@ -49,11 +48,11 @@ function Socket({ x, y, lit }: { x: number; y: number; lit: boolean }) {
 export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
   const ins = d.ins.length > 0 ? d.ins : [PMID];
   const outs = d.outs.length > 0 ? d.outs : [PMID];
-  const versionX = d.parked ? 56 : 42;
+  const versionX = 42;
   const p = d.processor;
 
   return (
-    <g className={d.parked ? 'blk nx parked' : 'blk nx'}>
+    <g className="blk nx">
       <title>{d.tip}</title>
       <path className="nx-bd" d={STEP_FRAME} />
       <g className="nx-g"><path className="nx-hl nx-frame" d={STEP_FRAME} /></g>
@@ -70,7 +69,7 @@ export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
       <path d={STEP_GLOSS} fill="#fff" opacity={0.22} />
       <path className="nx-hl nx-d1" d="M4 40H220" />
       <Label className="nx-sn" x={12} y={24} fitted={d.name} />
-      <text className="nx-sk" x={12} y={36}>{d.parked ? 'PARKED' : 'STEP'}</text>
+      <text className="nx-sk" x={12} y={36}>STEP</text>
       <Label className="nx-skv" x={versionX} y={36} fitted={d.version} />
       <rect x={W - 26} y={10} width={14} height={13} rx={2} fill={d.colour} stroke="rgba(3,12,28,.4)" />
       <text className="badge" x={W - 19} y={20} textAnchor="middle" fill="#04111F" fontWeight={600}>{d.letter}</text>

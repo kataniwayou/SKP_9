@@ -1,6 +1,7 @@
 import { useContext, useId, type CSSProperties } from 'react';
 import type { Edge, EdgeProps } from '@xyflow/react';
 import { DesignContext } from '../../design/DesignContext';
+import { LOOSE_PREFIX } from '../../design/draft';
 import type { Pt } from '../../layout/router';
 import { useLiveArt } from '../liveArt';
 import { longestSegmentMiddle, pathOf } from '../svgPath';
@@ -17,19 +18,36 @@ export type CableEdgeData = {
   branch?: Pt[];
   /** A joined wire's filled dots: its contact, then its split. */
   joints?: Pt[];
-  /** The line under a dragged wire end: green when it may be joined, red when not (plan 7). */
-  halo?: 'ok' | 'no';
+  /** The line under a dragged wire end: green when it may be joined, grey when the wire would be loose there (plan 7, plan 8 §5). */
+  halo?: 'ok' | 'no' | 'loose';
+  /** A loose wire (plan 8 §5): grey, dashed, an open circle at its end, no arrow head. */
+  loose?: boolean;
 };
 export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
+
+/** A loose wire's colour: grey, of no entry condition (plan 8 §5). */
+export const LOOSE_COLOUR = '#8A97A8';
 
 /**
  * One wire as a circuit trace (spec §5.1; gallery trace90, mockup v50 cable): right-angled, a ring at
  * the source, an open chevron whose tip is the landing point, in the target's entry-condition colour.
  * Broken: dashed, with a soft transparent gap cut at the middle of the longest segment and ⚠ in it.
  * While `flowing` (the workflow is started) an intact wire carries a pulse toward its target.
+ * Loose (plan 8 §5): grey and dashed, a ring at its source and an open circle where it was dropped; never pulses.
  */
-export function CableEdgeView({ points, colour, broken, delay, picked, flowing, branch, joints, halo }: CableEdgeData & { flowing: boolean }) {
+export function CableEdgeView({ points, colour, broken, delay, picked, flowing, branch, joints, halo, loose }: CableEdgeData & { flowing: boolean }) {
   const gap = `nxgap${useId().replace(/[^\w-]/g, '')}`;
+  if (loose) {
+    const [sx0, sy0] = points[0]!;
+    const [ex, ey] = points[points.length - 1]!;
+    return (
+      <g className={`wire loose${picked ? ' picked' : ''}`} style={{ '--nc': LOOSE_COLOUR } as CSSProperties}>
+        <circle className="nx-src" cx={sx0} cy={sy0} r={2.6} />
+        <path className="w" d={pathOf(points)} stroke={LOOSE_COLOUR} />
+        <circle className="nx-open" cx={ex} cy={ey} r={4.5} />
+      </g>
+    );
+  }
   const d = pathOf(points);
   const [sx, sy] = points[0]!;
   // the arrow head goes on the line that enters a step: a plain wire's end, or a joined wire's branch end (spec §3)
@@ -80,6 +98,11 @@ export function CableEdge({ id, data }: EdgeProps<CableEdgeType>) {
       {data.branch && data.branch.length > 1 && (
         <path className="nx-hit branch" d={pathOf(data.branch)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'branch') : undefined} />
       )}
+      {/* a loose wire's open end is always draggable in design mode (plan 8 §5) */}
+      {data.loose && gestures && (() => {
+        const [ex, ey] = data.points[data.points.length - 1]!;
+        return <circle className="nx-open-hit" cx={ex} cy={ey} r={9} onPointerDown={(e) => gestures.looseEndPointerDown(id.slice(LOOSE_PREFIX.length), e)} />;
+      })()}
     </>
   );
 }

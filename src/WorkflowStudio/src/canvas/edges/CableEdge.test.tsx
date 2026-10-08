@@ -1,6 +1,6 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { CableEdgeView } from './CableEdge';
+import { CableEdgeView, LOOSE_COLOUR } from './CableEdge';
 
 describe('CableEdgeView', () => {
   it('draws the trace, a ring at the source and an open chevron whose tip is the landing', () => {
@@ -49,5 +49,14 @@ describe('CableEdgeView', () => {
     const ids = [...container.querySelectorAll('mask')].map((m) => m.id);
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(2);
+  });
+
+  it('draws a loose wire grey and dashed, a ring at its source and an open circle at its end, with no arrow head or pulse (plan 8 §5)', () => {
+    const { container } = render(<svg><CableEdgeView points={[[0, 0], [40, 0], [40, 30]]} colour={LOOSE_COLOUR} broken={false} delay={0} loose flowing /></svg>);
+    const g = container.querySelector('g.wire.loose')!;
+    expect(g.querySelector('circle.nx-src')).not.toBeNull();
+    expect([g.querySelector('circle.nx-open')!.getAttribute('cx'), g.querySelector('circle.nx-open')!.getAttribute('cy')]).toEqual(['40', '30']);
+    expect(g.querySelector('.nx-head')).toBeNull();
+    expect(g.querySelector('.nx-pulse')).toBeNull();
   });
 });

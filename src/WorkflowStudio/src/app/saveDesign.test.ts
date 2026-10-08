@@ -12,7 +12,7 @@ import { buildDesignRequest, saveDesign } from './saveDesign';
 
 const notFound = { ok: false, error: { kind: 'notFound', status: 404 } } as const;
 
-describe('buildDesignRequest (plan 8 ง4.2)', () => {
+describe('buildDesignRequest (plan 8 ยง4.2)', () => {
   it('sends only the changes: loaded stamps, wiring, a schema copy with its re-point, cache fields, assignment operations, the layout', async () => {
     const base = await loadedDocument(graphDto({
       workflow: workflowDto({ updatedAt: 'w0' }),
@@ -53,7 +53,7 @@ describe('buildDesignRequest (plan 8 ง4.2)', () => {
   });
 });
 
-describe('saveDesign (plan 8 ง4.1)', () => {
+describe('saveDesign (plan 8 ยง4.1)', () => {
   const NOW = () => new Date('2026-10-07T12:00:00Z');
   async function storeWithChange() {
     const store = createStudioStore();

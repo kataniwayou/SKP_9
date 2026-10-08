@@ -7,7 +7,6 @@ import { StepView, type StepNodeData } from './StepNode';
 const data: StepNodeData = {
   name: { text: 'fetch…', full: 'fetch-orders-from-the-api', cut: true },
   version: { text: 'v1.0.0', full: 'v1.0.0', cut: false },
-  parked: false,
   letter: 'C',
   colour: '#2DD4BF',
   assignment: '◆ 2 keys',
@@ -88,12 +87,6 @@ describe('StepView', () => {
     expect(container.querySelector('.nx-pv')!.textContent).toBe(' 2.1.0');
     expect(getByText('orders-in')).toBeInTheDocument();
     expect(getAllByText('∅')).toHaveLength(2);
-  });
-
-  it('marks a parked step with the PARKED label and the parked class', () => {
-    const { container, getByText } = view({ parked: true });
-    expect(getByText('PARKED')).toBeInTheDocument();
-    expect(container.querySelector('.blk')!.classList.contains('parked')).toBe(true);
   });
 
   it('shows the step tooltip on the step, and keeps the processor its own', () => {

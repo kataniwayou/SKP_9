@@ -140,11 +140,22 @@ describe('toFlow', () => {
     expect(short.versionLine).toEqual({ text: 'CACHE · v1.0.0', full: 'CACHE · v1.0.0', cut: false });
   });
 
-  it('labels a parked step PARKED', () => {
-    const graph = doc({}, ['p']);
-    graph.graph.steps.set('p', step('p'));
-    const p = toFlow(graph, fitter).nodes.find((n) => n.id === 'p')!.data as import('./nodes/StepNode').StepNodeData;
-    expect(p.parked).toBe(true);
+  it('draws an unwired step like every other step (plan 8: no parked look)', () => {
+    const { nodes } = toFlow(doc({ steps: new Map([['a', step('a')], ['b', step('b')], ['p', step('p')]]) }, ['p']), fitter);
+    const p = nodes.find((n) => n.id === 'p')!;
+    expect('parked' in (p.data as object)).toBe(false);
+    expect((p.data as { tip: string }).tip).not.toContain('parked');
+  });
+
+  it('draws each loose wire as a loose cable edge on its source node; the hub can hold one (plan 8 §5)', () => {
+    const d: StudioDocument = { ...doc(), loose: [{ id: 'l1', source: 'a', points: [[512, 128], [704, 400]] }, { id: 'l2', source: 'wf', points: [[224, 128], [304, 304]] }] };
+    const { nodes, edges } = toFlow(d, fitter);
+    const l1 = edges.find((e) => e.id === 'loose:l1')!;
+    expect([l1.source, l1.target, l1.targetHandle]).toEqual(['a', 'a', 'in']);
+    expect(l1.data).toMatchObject({ loose: true, points: [[512, 128], [704, 400]] });
+    const l2 = edges.find((e) => e.id === 'loose:l2')!;
+    expect([l2.source, l2.target, l2.targetHandle]).toEqual(['wf', 'wf', 'loose']);
+    expect(nodes.find((n) => n.id === 'wf')!.handles!.some((h) => h.id === 'loose' && h.type === 'target')).toBe(true);
   });
 
   it('cuts long names to fit and keeps the full text for the tooltip (review focus 5)', () => {
@@ -205,7 +216,7 @@ describe('toFlow', () => {
     expect([...used].sort()).toEqual([...MEASURED_FONTS].sort());
   });
 
-  it('gives each step a tooltip: unique name, entry condition, assignment, and parked when it is', () => {
+  it('gives each step a tooltip: unique name, entry condition and assignment', () => {
     const graph = doc({}, ['p']);
     graph.graph.steps.set('p', step('p', { entryCondition: 4 }));
     const nodes = toFlow(graph, fitter).nodes;
@@ -213,6 +224,6 @@ describe('toFlow', () => {
 
     expect(tip('a')).toBe('a_1.0.0-a\nentry C · Completed\nassignment ◆ 2 keys');
     expect(tip('b')).toBe('b_1.0.0-b\nentry F · Failed\nno assignment');
-    expect(tip('p')).toBe('p_1.0.0-p\nentry A · Always\nno assignment\nparked: placed but not wired into this workflow');
+    expect(tip('p')).toBe('p_1.0.0-p\nentry A · Always\nno assignment');
   });
 });

@@ -6,7 +6,7 @@ import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { StudioDocument } from '../app/document';
 import { CACHE_H, CACHE_W, clampLanding, LANDING_MAX, LANDING_MIN, STEP_H, STEP_W, type Point } from '../layout/geometry';
-import { EMPTY_DRAFT, addWire, moveBlocks, reattach, resetRoute, setShape } from './draft';
+import { EMPTY_DRAFT, addLoose, addWire, moveBlocks, reattach, resetRoute, setShape } from './draft';
 import { endsOf, pointsOfShape } from '../layout/shape';
 import type { DesignProps } from './designProps';
 import { applyDraft } from './apply';
@@ -301,24 +301,28 @@ describe('wire gestures', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('a refused drop (a cycle) outlines red and snaps back; so does empty canvas', async () => {
+  it('a drop that closes a loop outlines green and re-attaches; empty canvas makes the wire loose (plan 8 §5)', async () => {
     const doc = await three();
     const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const head = () => container.querySelector('.design-handle.end[data-end="target"]')!;
-    // the head of s2->s3 on s1 would make s1 -> s2 -> s1
+    // the head of s2->s3 on s1 makes s1 -> s2 -> s1: cycles are allowed
     fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
-    expect(nodeClass(container, 's1')).toContain('drop-no');
-    // the reason is said next to the pointer, at a size that does not shrink with the zoom
-    expect(container.querySelector('.design-drop-label')!.textContent).toBe('would make a loop');
+    expect(nodeClass(container, 's1')).toContain('drop-ok');
+    // the label is said next to the pointer, at a size that does not shrink with the zoom
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('re-attach here');
     fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
     expect(container.querySelector('.design-drop-label')).toBeNull();
     // empty canvas
     fireEvent.pointerDown(head(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('loose wire');
     fireEvent.pointerUp(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
-    expect(design.onCommit).not.toHaveBeenCalled();
+    expect(design.onCommit).toHaveBeenCalledTimes(2);
+    const loose = vi.mocked(design.onCommit).mock.calls[1]![0];
+    expect(loose.next['s2']).toEqual([]);
+    expect(Object.values(loose.loose)).toEqual([{ source: 's2', end: { x: -4000, y: -4000 } }]);
   });
 
   it('an arrow dropped back on its own step moves its contact point there; at the same height, no step', async () => {
@@ -355,7 +359,7 @@ describe('wire gestures', () => {
     expect(design.onCommit).toHaveBeenCalledWith(reattach(EMPTY_DRAFT, doc, 's2->s3', 'source', 'wf'), { picks: [{ kind: 'wire', id: 'wf->s3' }] });
   });
 
-  it('dragging from a step\'s connection point to a step adds a wire; onto nothing adds none', async () => {
+  it('dragging from a step\'s connection point to a step adds a wire; onto nothing adds a loose wire', async () => {
     const doc = await three();
     const onSelect = vi.fn();
     const design = designOf();
@@ -366,13 +370,14 @@ describe('wire gestures', () => {
     fireEvent.pointerMove(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
     expect(container.ownerDocument.querySelector('.design-band')).toBeNull();
     fireEvent.pointerUp(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
-    expect(design.onCommit).not.toHaveBeenCalled();
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    expect(Object.values(vi.mocked(design.onCommit).mock.calls[0]![0].loose)).toEqual([{ source: 's1', end: { x: -4000, y: -4000 } }]);
     fireEvent.pointerDown(port, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
     expect(nodeClass(container, 's3')).toContain('drop-ok');
     expect(rightAngled(pointsOfD(container.querySelector('.design-ghost')!.getAttribute('d')!))).toBe(true);
     fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
-    expect(design.onCommit).toHaveBeenCalledWith(addWire(EMPTY_DRAFT, doc, 's1', 's3'), { picks: [{ kind: 'wire', id: 's1->s3' }] });
+    expect(design.onCommit).toHaveBeenLastCalledWith(addWire(EMPTY_DRAFT, doc, 's1', 's3'), { picks: [{ kind: 'wire', id: 's1->s3' }] });
     expect(onSelect).not.toHaveBeenCalled();
   });
 
@@ -447,20 +452,23 @@ describe('wire gestures', () => {
     expect(vi.mocked(design.onCommit).mock.calls[0]![0].next).toEqual({});
   });
 
-  it('another colour is refused with a red halo and snaps back', async () => {
+  it('another colour says "loose wire" with a grey halo, and the release leaves the wire loose there (plan 8 §5)', async () => {
     const doc = await joinable();
     const design = designOf({ picks: [{ kind: 'wire', id: 's3->s5' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const target = onLine(doc, 's1->s2');
     fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s3->s5"] .design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, target), pointerId: 1 });
-    expect(container.querySelector('.design-drop-label')!.textContent).toBe('other colour');
-    expect(container.querySelector('[data-testid="rf__edge-s1->s2"] .wire')!.getAttribute('class')).toContain('halo-no');
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('loose wire');
+    expect(container.querySelector('[data-testid="rf__edge-s1->s2"] .wire')!.getAttribute('class')).toContain('halo-loose');
     fireEvent.pointerUp(document, { ...screenOf(container, target), pointerId: 1 });
-    expect(design.onCommit).not.toHaveBeenCalled();
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    const draft = vi.mocked(design.onCommit).mock.calls[0]![0];
+    expect(draft.next['s3']).toEqual(['s4']);
+    expect(Object.values(draft.loose).map((l) => l.source)).toEqual(['s3']);
   });
 
-  it('a start square over a line says "start stays on a block"; a new wire says "drop on a step"', async () => {
+  it('a start square over a line says "start stays on a block"; a new wire ignores lines and says "loose wire"', async () => {
     const doc = await joinable();
     const design = designOf({ picks: [{ kind: 'wire', id: 's3->s4' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
@@ -469,11 +477,13 @@ describe('wire gestures', () => {
     fireEvent.pointerMove(document, { ...screenOf(container, target), pointerId: 1 });
     expect(container.querySelector('.design-drop-label')!.textContent).toBe('start stays on a block');
     fireEvent.pointerUp(document, { ...screenOf(container, target), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
     fireEvent.pointerDown(container.querySelector('.react-flow__node[data-id="s3"] .nx-port')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, target), pointerId: 1 });
-    expect(container.querySelector('.design-drop-label')!.textContent).toBe('drop on a step');
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('loose wire');
+    expect(container.querySelector('[data-testid="rf__edge-s1->s2"] .wire')!.getAttribute('class')).not.toContain('halo-');
     fireEvent.pointerUp(document, { ...screenOf(container, target), pointerId: 1 });
-    expect(design.onCommit).not.toHaveBeenCalled();
+    expect(Object.values(vi.mocked(design.onCommit).mock.calls[0]![0].loose).map((l) => l.source)).toEqual(['s3']);
   });
 
   it('the tail over its own step says "starts here" in green, and dropping there changes nothing', async () => {
@@ -502,7 +512,7 @@ describe('wire gestures', () => {
     expect(vi.mocked(design.onCommit).mock.calls[0]![1]).toEqual({ picks: [{ kind: 'wire', id: 's1->s3' }] });
   });
 
-  it('a head dragged over a cache is refused out loud: red "not a step", the cache outlined red, no step on release', async () => {
+  it('a head dragged over a cache says "loose wire": the cache outlined grey, the release leaves the wire loose there (plan 8 §5)', async () => {
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')], caches: [cacheDto('c1')] }));
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
@@ -510,10 +520,12 @@ describe('wire gestures', () => {
     const over = { x: c.x + CACHE_W / 2, y: c.y + CACHE_H / 2 };
     fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, over), pointerId: 1 });
-    expect(container.querySelector('.design-drop-label')!.textContent).toBe('not a step');
-    expect(nodeClass(container, 'cache:c1')).toContain('drop-no');
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('loose wire');
+    expect(nodeClass(container, 'cache:c1')).toContain('drop-loose');
     fireEvent.pointerUp(document, { ...screenOf(container, over), pointerId: 1 });
-    expect(design.onCommit).not.toHaveBeenCalled();
+    const draft = vi.mocked(design.onCommit).mock.calls[0]![0];
+    expect(draft.next['s1']).toEqual([]);
+    expect(Object.values(draft.loose).map((l) => l.source)).toEqual(['s1']);
   });
 
   const joined = () => setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
@@ -561,7 +573,7 @@ describe('wire gestures', () => {
     expect(vi.mocked(design.onCommit).mock.calls[0]![0].routes['s3->s4']!.contact).toEqual({ host: 's1->s2', at: 40 });
   });
 
-  it('a dragged contact square draws the wire plain to the pointer; the arrow square drags the branch only, its runs staying, and re-attaches keeping the contact', async () => {
+  it('a dragged contact square draws the wire plain to the pointer (loose on empty canvas); the arrow square drags the branch only, its runs staying, and re-attaches keeping the contact', async () => {
     const doc = await joinable();
     // s2 and s4 spread right: the split lies well past the contact, two dots
     const draft = moveBlocks(joined(), doc, new Map([['s2', { x: 1152, y: 32 }], ['s4', { x: 864, y: 480 }]]));
@@ -575,7 +587,8 @@ describe('wire gestures', () => {
     expect(edge().querySelectorAll('circle.nx-joint')).toHaveLength(0);
     expect(edge().querySelector('path.w.branch')).toBeNull();
     fireEvent.pointerUp(document, { ...screenOf(container, { x: -4000, y: -4000 }), pointerId: 1 });
-    expect(design.onCommit).not.toHaveBeenCalled();
+    // released on empty canvas the wire is loose there (plan 8 §5)
+    expect(Object.values(vi.mocked(design.onCommit).mock.calls[0]![0].loose)).toEqual([{ source: 's3', end: { x: -4000, y: -4000 } }]);
     const runs = () => [...g().querySelectorAll('.design-handle.seg')].map((r) => `${r.getAttribute('x')},${r.getAttribute('y')}`);
     const before = runs();
     fireEvent.pointerDown(g().querySelector('.design-handle.end[data-end="arrow"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
@@ -583,7 +596,7 @@ describe('wire gestures', () => {
     expect(runs()).toEqual(before);
     expect(edge().querySelectorAll('circle.nx-joint')).toHaveLength(2);
     fireEvent.pointerUp(document, { ...screenOf(container, middleOf(shownDoc, 's2')), pointerId: 1 });
-    const [next, picks] = vi.mocked(design.onCommit).mock.calls[0]!;
+    const [next, picks] = vi.mocked(design.onCommit).mock.calls[1]!;
     expect(picks).toEqual({ picks: [{ kind: 'wire', id: 's3->s2' }] });
     expect(next.routes['s3->s2']!.contact).toEqual({ host: 's1->s2', at: 40 });
   });
@@ -636,5 +649,94 @@ describe('wire gestures', () => {
     const design = designOf({ draft: joined(), picks: [{ kind: 'wire', id: 's3->s4' }] });
     render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     expect(resetRoute(joined(), 's3->s4').routes['s3->s4']).toBeUndefined();
+  });
+
+  const twoAndOne = () => loadedDocument(
+    graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')], layout: { parked: ['s3'] } }),
+    [stepDto('s3')],
+  );
+  const EMPTY_AT = { x: 1104, y: 704 };
+  const commits = (design: ReturnType<typeof designOf>) => vi.mocked(design.onCommit).mock.calls;
+
+  it('a new wire released on empty canvas becomes a loose wire from its source, told "loose wire" in grey (plan 8 §5)', async () => {
+    const doc = await twoAndOne();
+    const design = designOf();
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    fireEvent.pointerDown(container.querySelector('.react-flow__node[data-id="s2"] .nx-port')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, EMPTY_AT), pointerId: 1 });
+    const label = container.querySelector('.design-drop-label')!;
+    expect(label.textContent).toBe('loose wire');
+    expect(label.getAttribute('class')).toContain('loose');
+    fireEvent.pointerUp(document, { ...screenOf(container, EMPTY_AT), pointerId: 1 });
+    const [draft, options] = commits(design)[0]!;
+    const [id, loose] = Object.entries(draft.loose)[0]!;
+    expect(loose).toEqual({ source: 's2', end: EMPTY_AT });
+    expect(draft.next).toEqual({});
+    expect(options).toEqual({ picks: [{ kind: 'wire', id: `loose:${id}` }] });
+  });
+
+  it('a picked wire\'s head released on empty canvas leaves the wiring and stays drawn as a loose wire', async () => {
+    const doc = await twoAndOne();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s1->s2"] .design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, EMPTY_AT), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, EMPTY_AT), pointerId: 1 });
+    const [draft] = commits(design)[0]!;
+    expect(draft.next['s1']).toEqual([]);
+    expect(Object.values(draft.loose)).toEqual([{ source: 's1', end: EMPTY_AT }]);
+  });
+
+  it('a head dropped where it closes a loop re-attaches the wire: cycles are allowed (plan 8 §5)', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { nextStepIds: ['s3'] }), stepDto('s3')] }));
+    const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s2->s3"] .design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('re-attach here');
+    fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's1')), pointerId: 1 });
+    expect(commits(design)[0]![0].next['s2']).toEqual(['s1']);
+  });
+
+  it('a tail released on empty canvas snaps back: a loose wire always keeps its source', async () => {
+    const doc = await twoAndOne();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s1->s2"] .design-handle.end[data-end="source"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, EMPTY_AT), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')).toBeNull();
+    fireEvent.pointerUp(document, { ...screenOf(container, EMPTY_AT), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('a loose wire\'s open end: onto a step it wires, elsewhere it moves, on its own source it snaps back', async () => {
+    const doc = await twoAndOne();
+    const design = designOf({ draft: addLoose(EMPTY_DRAFT, 'l1', 's1', EMPTY_AT) });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const openEnd = () => container.querySelector('[data-testid="rf__edge-loose:l1"] .nx-open-hit')!;
+    const drag = (to: { x: number; y: number }) => {
+      fireEvent.pointerDown(openEnd(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+      fireEvent.pointerMove(document, { ...screenOf(container, to), pointerId: 1 });
+      const label = container.querySelector('.design-drop-label')?.textContent ?? null;
+      fireEvent.pointerUp(document, { ...screenOf(container, to), pointerId: 1 });
+      return label;
+    };
+    expect(drag(middleOf(doc, 's3'))).toBe('connect here');
+    expect(commits(design)[0]![0].next['s1']).toEqual(['s2', 's3']);
+    expect(commits(design)[0]![0].loose).toEqual({});
+
+    expect(drag({ x: 1200, y: 760 })).toBe('loose wire');
+    expect(commits(design)[1]![0].loose['l1']).toEqual({ source: 's1', end: { x: 1200, y: 760 } });
+
+    expect(drag(middleOf(doc, 's1'))).toBe('same step');
+    expect(commits(design)).toHaveLength(2);
+  });
+
+  it('Delete removes a picked loose wire', async () => {
+    const doc = await twoAndOne();
+    const design = designOf({ draft: addLoose(EMPTY_DRAFT, 'l1', 's1', EMPTY_AT), picks: [{ kind: 'wire', id: 'loose:l1' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    fireEvent.keyDown(container.querySelector('.studio-canvas')!, { key: 'Delete' });
+    expect(commits(design)[0]![0].loose).toEqual({});
   });
 });

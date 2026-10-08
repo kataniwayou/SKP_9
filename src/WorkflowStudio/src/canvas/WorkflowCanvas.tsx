@@ -5,7 +5,7 @@ import { applyDraft } from '../design/apply';
 import { DesignContext } from '../design/DesignContext';
 import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
-import { resetRoute, type Draft } from '../design/draft';
+import { LOOSE_PREFIX, resetRoute, type Draft } from '../design/draft';
 import type { GuideLine } from '../design/guides';
 import { useBlockDrag } from '../design/useBlockDrag';
 import { useDesignKeys } from '../design/useDesignKeys';
@@ -133,8 +133,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     let data = e.data;
     // a joined wire's dragged contact: drawn plain to the pointer, its old branch and dots gone (plan 7 §6.2)
     if (dragged && e.id === dragged.id) data = dragged.part === 'branch' ? { ...data, branch: dragged.points } : { ...data, points: dragged.points, branch: undefined, joints: undefined };
-    // the line under a dragged arrow end: green when it may be joined, red when not (plan 7 §6.1)
-    if (wiring.hint?.line && e.id === wiring.hint.id) data = { ...data, halo: wiring.hint.ok ? 'ok' : 'no' };
+    // the line under a dragged arrow end: green when it may be joined, grey when the wire becomes loose there (plan 7 §6.1, plan 8 §5)
+    if (wiring.hint?.line && e.id === wiring.hint.id) data = { ...data, halo: wiring.hint.tone };
     return data === e.data ? e : { ...e, data };
   }), [marked.edges, wiring.ghost, wiring.hint]);
   // picks naming wires that are gone (after an undo) draw nothing
@@ -170,7 +170,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     onSelect(selectionForPicks(picks, null, shownDoc.graph), picks);
   };
   const onEdgeContextMenu: EdgeMouseHandler = (event, edge) => {
-    if (!design || edge.type !== 'cable') return;
+    // a loose wire has no route to reset (plan 8)
+    if (!design || edge.type !== 'cable' || edge.id.startsWith(LOOSE_PREFIX)) return;
     event.preventDefault();
     const picks: Pick[] = [{ kind: 'wire', id: edge.id }];
     onSelect?.(selectionForPicks(picks, null, shownDoc.graph), picks);

@@ -10,17 +10,19 @@ import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { blockBoxes, portOf, SPHERE_BOX_ID, stepBoxId, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
-import { addWire, reattach, setShape, wireId, type Draft } from './draft';
+import { addLoose, addWire, attachLoose, LOOSE_PREFIX, loosen, moveLoose, reattach, setShape, wireId, type Draft } from './draft';
 import { blockAt, wireAt } from './hit';
+import { newId } from './ids';
 import { canJoin, canWire, type DropVerdict, type JoinVerdict, type Refusal } from './rules';
 
-/** The block or line under a dragged wire end: its outline or halo (ok), why (the drop rule's verdict) and where the pointer is, for the label. */
+/** The block or line under a dragged wire end: its outline or halo (tone), why (the drop rule's verdict) and where the pointer is, for the label. */
 export interface DropHint {
-  /** The block (node id) or, when `line`, the wire under the pointer. */
-  id: string;
+  /** The block (node id) or, when `line`, the wire under the pointer; null over empty canvas. */
+  id: string | null;
   /** Over a wire's line, not a block (plan 7). */
   line: boolean;
-  ok: boolean;
+  /** green: the drop attaches; grey: the wire becomes loose there (plan 8 §5); red: it snaps back. */
+  tone: 'ok' | 'loose' | 'no';
   /** 'move': a wire end back on its own step slides its contact point there; 'here': a tail back on its own step stays. */
   why: DropVerdict | 'move' | 'here' | JoinVerdict | Refusal;
   /** A new wire, not a re-attached end: an allowed drop says "connect here". */
@@ -233,13 +235,11 @@ export function useWireGestures(
   }
 
   /**
-   * Drags a wire end (spec §4.4, option "a"), drawn as `path` to the pointer: the block under it is outlined green
-   * when `verdict` allows the drop and red when not; `current` (the end's own block) is outlined green with the
-   * `selfWhy` label, and dropping there runs `onSelf` (a new wire has no `current`). With no
-   * block under it, a wire line within the drop reach gets a halo the same way (plan 7 §6.1): `line` joins it,
-   * the wire previewed joined there, or names why it may not.
-   * Dropped on an allowed block, `done` commits; on an allowed line, `line.done`; back on `current`, `onSelf`
-   * (which makes no step when nothing would change); anywhere else or refused, nothing changes and no step is made.
+   * Drags a wire end, drawn as `path` to the pointer (plan 8 §5). Over a block `verdict` decides: green when the
+   * drop attaches, grey "loose wire" when it would make the wire loose (only when `loose` is given), red when it
+   * snaps back; `current` (the end's own block) is green with the `selfWhy` label and runs `onSelf`. With no
+   * block, a wire's line within the drop reach is judged by `line` (absent: lines are no drop target), and empty
+   * canvas makes the wire loose. On release: `done`, `line.done`, `onSelf`, `loose`, or nothing (it snaps back).
    */
   const dropGesture = (e: ReactPointerEvent, o: {
     wire: string | null; path: (p: Point, over: string | null) => Pt[]; current: string | null; verdict: (over: string) => DropVerdict;
@@ -248,8 +248,10 @@ export function useWireGestures(
     onSelf?: (p: Point) => void;
     /** The label over `current`: 'move' (a head slides its contact) or 'here' (a tail stays where it starts). */
     selfWhy?: 'move' | 'here';
-    /** What a line under the pointer does: joins (`LineDrop`) or refuses with a reason. */
-    line: LineDrop | Refusal;
+    /** What a wire's line under the pointer does: joins (`LineDrop`) or refuses (a start); absent, lines are not drop targets. */
+    line?: LineDrop | Refusal;
+    /** Released where it attaches to nothing: the wire becomes loose there (plan 8 §5); absent, it snaps back. */
+    loose?: (p: Point) => void;
     /** A joined wire's arrow: the ghost is its branch (plan 7 §6.2). */
     part?: 'branch';
   }) => {
@@ -259,21 +261,26 @@ export function useWireGestures(
     const newWire = o.wire === null;
     // the drawn end snaps to the very block the drop is judged over: one hit test (plan 7 §6.1a)
     const ghost = (p: Point) => setGhost({ wire: o.wire, part: o.part, points: o.path({ x: snap(p.x), y: snap(p.y) }, over) });
+    const hintFor = (id: string | null, line: boolean, why: DropHint['why'], p: Point): DropHint | null => {
+      if (why === 'ok' || why === 'move' || why === 'here') return { id, line, tone: 'ok', why, newWire, at: p };
+      if (why === 'loose') return o.loose ? { id, line, tone: 'loose', why, newWire, at: p } : id === null ? null : { id, line, tone: 'no', why, newWire, at: p };
+      return id === null ? null : { id, line, tone: 'no', why, newWire, at: p };
+    };
     run(e, (p) => {
       at = p;
       // a block counts from the drop reach outside its border, like a line (plan 7 §6.1a)
       over = blockAt(shown.current, p, DROP_REACH / getZoom());
       // a block wins over a line; the dragged wire itself is never the drop target
-      onLine = over === null ? wireAt(shown.current, p, DROP_REACH / getZoom(), o.wire) : null;
-      if (onLine && typeof o.line !== 'string') {
+      onLine = over === null && o.line !== undefined ? wireAt(shown.current, p, DROP_REACH / getZoom(), o.wire) : null;
+      if (onLine && typeof o.line === 'object') {
         const why = o.line.verdict(onLine.id);
-        setHint({ id: onLine.id, line: true, ok: why === 'ok', why, newWire, at: p });
+        setHint(hintFor(onLine.id, true, why, p));
         // an allowed line: the wire is drawn joined there (the preview) instead of the ghost
         if (why === 'ok') { setGhost(null); setPreview(o.line.preview(onLine.id, onLine.at)); return; }
-      } else if (onLine) setHint({ id: onLine.id, line: true, ok: false, why: o.line as Refusal, newWire, at: p });
-      else if (over === null) setHint(null);
-      else if (over === o.current) setHint({ id: over, line: false, ok: true, why: o.selfWhy ?? 'move', newWire, at: p });
-      else { const why = o.verdict(over); setHint({ id: over, line: false, ok: why === 'ok', why, newWire, at: p }); }
+      } else if (onLine) setHint(hintFor(onLine.id, true, o.line as Refusal, p));
+      else if (over === null) setHint(hintFor(null, false, 'loose', p));
+      else if (over === o.current) setHint(hintFor(over, false, o.selfWhy ?? 'move', p));
+      else setHint(hintFor(over, false, o.verdict(over), p));
       setPreview(null);
       ghost(p);
     }, (cancelled) => {
@@ -281,18 +288,39 @@ export function useWireGestures(
       setHint(null);
       setPreview(null);
       if (cancelled) return;
-      if (onLine && typeof o.line !== 'string') { if (o.line.verdict(onLine.id) === 'ok') o.line.done(onLine.id, onLine.at); return; }
-      if (over === null) return;
+      const end = { x: snap(at.x), y: snap(at.y) };
+      if (onLine && typeof o.line === 'object') {
+        const why = o.line.verdict(onLine.id);
+        if (why === 'ok') o.line.done(onLine.id, onLine.at);
+        else if (why === 'loose') o.loose?.(end);
+        return;
+      }
+      if (onLine) return; // a start over a line snaps back
+      if (over === null) { o.loose?.(end); return; }
       if (over === o.current) { o.onSelf?.(at); return; }
-      if (o.verdict(over) !== 'ok') return;
-      o.done(over, at);
+      const why = o.verdict(over);
+      if (why === 'ok') o.done(over, at);
+      else if (why === 'loose') o.loose?.(end);
     });
+  };
+
+  /** A head released where it attaches to nothing: the wire leaves the wiring, loose from its source there (plan 8 §5). */
+  const loosenAt = (d: DesignProps, base: Draft, wire: WireRoute) => (p: Point) => {
+    const id = newId();
+    d.onCommit(loosen(base, saved, wire.id, id, p), { picks: [{ kind: 'wire', id: `${LOOSE_PREFIX}${id}` }] });
+  };
+
+  /** A new wire from `from` (its source's port) to the pointer, right-angled around the blocks: the ghost of a new or a loose wire. */
+  const fromPort = (source: SourceId, from: Point, boxes: Box[]) => (p: Point, over: string | null) => {
+    const f = freeEnd(p, 'target', boxes, over);
+    return clearPath(route(from.x, from.y, f.x, f.y, boxOf(source), f.box, 0, boxes), boxes);
   };
 
   /**
    * Drags a picked wire's end square (spec §4.4). Onto another block: the wire re-attaches there, automatic,
    * its arrow landing where it was dropped. Back onto its own step: the arrow's contact point moves there.
-   * Anywhere else it snaps back: a wire always joins two blocks.
+   * A head released where it attaches to nothing makes the wire loose there (plan 8 §5); a tail never does:
+   * it snaps back, a loose wire always keeps its source.
    */
   const startEnd = (wire: WireRoute, end: 'source' | 'target', e: ReactPointerEvent) => {
     const d = designRef.current;
@@ -310,9 +338,11 @@ export function useWireGestures(
     const joined = (host: string, at: number) => setShape(base, wire.id, { bends: null, landing: base.routes[wire.id]?.landing ?? null, contact: { host, at: snap(at) } });
     // a joined wire's contact square: the four-way cursor (plan 7 §6.2)
     setResize(wire.joint && end === 'target' ? 'move' : 'ew');
+    // a loose wire keeps its source, so a tail never makes one: where a head would be loose, a tail cannot start
+    const startOnly = (v: DropVerdict): DropVerdict => (v === 'loose' ? 'cannotStart' : v);
     dropGesture(e, {
       wire: wire.id, path, current,
-      verdict: (over) => (end === 'target' ? canWire(shown.current, wire.source, over, wire.id) : canWire(shown.current, over, wire.target, wire.id)),
+      verdict: (over) => (end === 'target' ? canWire(shown.current, wire.source, over, wire.id) : startOnly(canWire(shown.current, over, wire.target, wire.id))),
       done: (over, p) => {
         const id = end === 'target' ? wireId(wire.source, over) : wireId(over, wire.target);
         const next = reattach(d.draft, saved, wire.id, end, over);
@@ -328,6 +358,7 @@ export function useWireGestures(
         d.onCommit(setShape(d.draft, wire.id, { bends: d.draft.routes[wire.id]?.bends ?? null, landing }), { picks: [{ kind: 'wire', id: wire.id }] });
       } : () => {}, // a tail back on its own step: its start is fixed to the step's output port, so nothing changes
       selfWhy: end === 'target' ? 'move' : 'here',
+      loose: end === 'target' ? loosenAt(d, base, wire) : undefined,
       // only an arrow end joins a line; a start stays on a block
       line: end === 'target' ? {
         verdict: (host) => canJoin(shown.current, wire.id, host),
@@ -367,8 +398,8 @@ export function useWireGestures(
         if (!step || (tip && step.y + landing === tip[1])) return;
         d.onCommit(setShape(base, wire.id, { bends: shape?.bends ?? null, landing, contact: shape?.contact ?? null }), { picks: [{ kind: 'wire', id: wire.id }] });
       },
-      // the arrow ends on a step: only the contact square joins a line
-      line: 'needStep',
+      // the arrow ignores lines (only the contact square joins one); released where it attaches to nothing, the wire is loose
+      loose: loosenAt(d, base, wire),
       part: 'branch',
     });
   };
@@ -381,20 +412,45 @@ export function useWireGestures(
     const from = portOf(placement, source) ?? { x: STEP_W, y: PMID };
     const boxes = blockBoxes(placement);
     setResize(null);
-    const path = (p: Point, over: string | null) => { const f = freeEnd(p, 'target', boxes, over); return clearPath(route(from.x, from.y, f.x, f.y, boxOf(source), f.box, 0, boxes), boxes); };
     dropGesture(e, {
-      wire: null, path, current: null,
+      wire: null, path: fromPort(source, from, boxes), current: null,
       verdict: (over) => canWire(shown.current, source, over),
       done: (over) => d.onCommit(addWire(d.draft, saved, source, over), { picks: [{ kind: 'wire', id: wireId(source, over) }] }),
-      // a new wire must end on a step; it can be joined afterwards by its arrow
-      line: 'needStep',
+      // a new wire ignores lines (it can be joined afterwards by its arrow); released where it attaches to nothing,
+      // it is kept as a loose wire from its source (plan 8 §5)
+      loose: (p) => {
+        const id = newId();
+        d.onCommit(addLoose(d.draft, id, source, p), { picks: [{ kind: 'wire', id: `${LOOSE_PREFIX}${id}` }] });
+      },
+    });
+  };
+
+  /**
+   * Drags a loose wire's open end (plan 8 §5): onto a step it may wire to, it becomes an ordinary wire; anywhere
+   * else its end moves there; back on its own source it snaps back ("same step").
+   */
+  const startLoose = (looseId: string, e: ReactPointerEvent) => {
+    const d = designRef.current;
+    if (!d || e.button !== 0) return;
+    const base = d.draft;
+    const l = base.loose[looseId];
+    if (!l) return;
+    const { placement } = shown.current;
+    const from = portOf(placement, l.source) ?? { x: STEP_W, y: PMID };
+    const boxes = blockBoxes(placement);
+    setResize(null);
+    dropGesture(e, {
+      wire: null, path: fromPort(l.source, from, boxes), current: null,
+      verdict: (over) => canWire(shown.current, l.source, over),
+      done: (over) => d.onCommit(attachLoose(base, saved, looseId, over), { picks: [{ kind: 'wire', id: wireId(l.source, over) }] }),
+      loose: (p) => d.onCommit(moveLoose(base, looseId, p), { picks: [{ kind: 'wire', id: `${LOOSE_PREFIX}${looseId}` }] }),
     });
   };
 
   /** The press point in flow coordinates (React Flow's own transform, so a pop-out's window works too). */
   const flowPointOf = (e: ReactPointerEvent): Point => screenToFlowPosition({ x: e.clientX, y: e.clientY }, { snapToGrid: false });
-  const latestRef = useRef({ startSegment, startNew, flowPointOf });
-  latestRef.current = { startSegment, startNew, flowPointOf };
+  const latestRef = useRef({ startSegment, startNew, startLoose, flowPointOf });
+  latestRef.current = { startSegment, startNew, startLoose, flowPointOf };
 
   // stable, so every wire does not re-render with each canvas render
   const gestures = useMemo<DesignGestures>(() => ({
@@ -412,6 +468,9 @@ export function useWireGestures(
     },
     portPointerDown(source, e) {
       latestRef.current.startNew(source, e);
+    },
+    looseEndPointerDown(looseId, e) {
+      latestRef.current.startLoose(looseId, e);
     },
   }), [shown]);
 
