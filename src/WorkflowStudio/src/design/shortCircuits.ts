@@ -1,5 +1,7 @@
 import type { StudioDocument } from '../app/document';
-import { netsOf, shortedWires } from '../circuit/families';
+import { heldSources, netsOf } from '../circuit/families';
+import { trace } from '../circuit/trace';
+import { WORKFLOW_SOURCE } from '../layout/ports';
 import { conditionInfo } from '../model/entryConditions';
 import type { DesignError, Id } from '../model/graph';
 import { circuitOf, type Draft } from './draft';
@@ -26,21 +28,27 @@ export function shortCircuitErrors(shown: StudioDocument, draft: Draft): DesignE
 /** A short circuit's error (the live list in Problems supersedes any copy a document carries). */
 export const isShortCircuitError = (e: DesignError): boolean => e.stage === 'wires' && e.message.startsWith(SHORT_CIRCUIT);
 
-/**
- * The sources whose wires run into a short-circuited net (plan 9 §7, controller ruling): the step of every tail on a
- * step, and the hub when a tail is on it. Save sends these sources' lists as the loaded workflow has them, so no
- * link is dropped or added through the net; every wire joined into a net is in it, so its tails on terminals are
- * all the current that can enter it.
- */
+/** The sources held back by short circuits (`heldSources`): their steps, and whether the hub (the entry list) is one. */
 export function shortedSources(shown: StudioDocument, draft: Draft): { steps: Set<Id>; hub: boolean } {
   const circuit = circuitOf(shown, draft);
-  const shorted = shortedWires(netsOf(circuit, (id) => shown.graph.steps.get(id)?.entryCondition));
-  const steps = new Set<Id>();
-  let hub = false;
-  for (const id of shorted) {
-    const t = circuit[id]!.tail;
-    if (t.on === 'step') steps.add(t.step);
-    else if (t.on === 'hub') hub = true;
+  const held = heldSources(circuit, netsOf(circuit, (id) => shown.graph.steps.get(id)?.entryCondition));
+  const hub = held.delete(WORKFLOW_SOURCE);
+  return { steps: held, hub };
+}
+
+/**
+ * How many links of the held-back sources wait for the short circuit to be fixed (plan 9 §7): the clean links the
+ * design adds or removes on those sources, which Save does not write. A link the loaded workflow has only through the
+ * shorted net is not counted: it is the short circuit's own.
+ */
+export function heldLinkCount(base: StudioDocument, shown: StudioDocument, draft: Draft): number {
+  const { steps, hub } = shortedSources(shown, draft);
+  const all = trace(circuitOf(shown, draft)).links;
+  const listOf = (doc: StudioDocument, s: Id) => (s === WORKFLOW_SOURCE ? doc.graph.workflow.entryStepIds : doc.graph.steps.get(s)?.nextStepIds ?? []);
+  let n = 0;
+  for (const s of [...steps, ...(hub ? [WORKFLOW_SOURCE] : [])]) {
+    const saved = listOf(base, s), now = listOf(shown, s), drawn = all.get(s) ?? [];
+    n += now.filter((t) => !saved.includes(t)).length + saved.filter((t) => !now.includes(t) && !drawn.includes(t)).length;
   }
-  return { steps, hub };
+  return n;
 }

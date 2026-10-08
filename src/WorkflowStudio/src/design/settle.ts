@@ -1,6 +1,6 @@
 import type { StudioDocument } from '../app/document';
 import { plainWireId, removeCircuitWires, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
-import { circuitTrace, shortedWires } from '../circuit/families';
+import { circuitTrace, heldSources, shortedWires } from '../circuit/families';
 import { linkKeys, trace, wiresBetween } from '../circuit/trace';
 import { endPointOf, routeCircuit } from '../layout/circuitRoute';
 import type { Point } from '../layout/geometry';
@@ -82,7 +82,9 @@ function addPlain(c: Circuit, links: readonly string[]): Circuit {
  * not on the canvas go and ends on a wire that is gone open where they are drawn; then, round by round, a missing
  * link is made by a plan 7 wire `s->t` with its head on a junction (back into `t`), an unexpected link has every
  * junction on its way drawn plain, a plain wire still making one goes, and what is still missing gets a new
- * automatic wire. Links through a short-circuited net count as made and are never unexpected; "written" is what Save
+ * automatic wire. Links through a short-circuited net count as made and are never unexpected, and so are all links of
+ * a source with a wire in such a net (`heldSources`: Save keeps those sources' loaded lists, so their drawing waits for
+ * the short circuit to be fixed); "written" is what Save
  * writes (`circuitTrace`: shorted nets and a step fed its own input left out). Of the junctions on an unexpected
  * link's way, those also on the way of a written expected link are kept (they carry a link the workflow has); only
  * when that leaves none are they all drawn plain. Every round takes away a junction end or a wire, or adds the missing
@@ -100,8 +102,10 @@ export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string
     const shorted = shortedWires(current.nets);
     const made = linkKeys(trace(c).links);
     const written = linkKeys(current.links);
-    const missing = [...expected].filter((k) => !made.has(k));
-    const extra = [...written].filter((k) => !expected.has(k));
+    const held = heldSources(c, current.nets);
+    const free = (k: string) => !held.has(k.slice(0, k.indexOf('->')));
+    const missing = [...expected].filter((k) => !made.has(k) && free(k));
+    const extra = [...written].filter((k) => !expected.has(k) && free(k));
     if (missing.length === 0 && extra.length === 0) return c;
     const lost = new Set(missing);
     const own = new Set(Object.keys(c).filter((id) => { const k = linkOfId(id); return k !== null && lost.has(k) && c[id]!.head.on === 'wire'; }));
@@ -113,8 +117,8 @@ export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string
       const onWay = wiresOfLinks(c, extra, shorted);
       const joined = [...onWay].filter((id) => c[id]!.tail.on === 'wire' || c[id]!.head.on === 'wire');
       const needed = wiresOfLinks(c, [...written].filter((k) => expected.has(k)), shorted);
-      const free = joined.filter((id) => !needed.has(id));
-      const open = new Set(free.length > 0 ? free : joined);
+      const loose = joined.filter((id) => !needed.has(id));
+      const open = new Set(loose.length > 0 ? loose : joined);
       c = open.size > 0 ? plainEnds(c, saved, (id) => open.has(id)) : removeCircuitWires(c, [...onWay], drawnEnds(c, saved));
       continue;
     }

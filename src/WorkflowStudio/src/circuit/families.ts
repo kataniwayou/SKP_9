@@ -1,4 +1,4 @@
-import type { SourceId } from '../layout/ports';
+import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import type { Id } from '../model/graph';
 import type { Circuit } from './circuit';
 import { trace, type Trace } from './trace';
@@ -59,4 +59,20 @@ export function circuitTrace(
     if (kept.length > 0) links.set(s, kept);
   }
   return { links, loop: t.loop, nets, selfFed };
+}
+
+/**
+ * The sources held back by short circuits (plan 9 §7, controller ruling): the step of every tail on a step, and the hub
+ * (`wf`) for a tail on it, among the wires of nets whose families disagree. Every wire joined into a net is in it, so
+ * these tails are all the current that can enter it. Save sends these sources' lists as the workflow has them, and
+ * settling neither expects nor removes their links, so the drawing waits until the short circuit is fixed.
+ */
+export function heldSources(circuit: Readonly<Circuit>, nets: readonly Net[]): Set<SourceId> {
+  const out = new Set<SourceId>();
+  for (const id of shortedWires(nets)) {
+    const t = circuit[id]!.tail;
+    if (t.on === 'step') out.add(t.step);
+    else if (t.on === 'hub') out.add(WORKFLOW_SOURCE);
+  }
+  return out;
 }

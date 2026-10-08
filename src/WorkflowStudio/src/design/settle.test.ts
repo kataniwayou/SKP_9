@@ -160,6 +160,17 @@ describe('reconcile (plan 9 §7, §8; decision 6)', () => {
     expect(Object.keys(out)).toEqual(['wf->s1', 's1->s3', 's1->s2#2']);
     expect(out['s1->s2#2']).toEqual({ tail: at('s1'), head: at('s2') });
   });
+
+  it('a source a short circuit holds back keeps its whole drawing: no link of it is unexpected or missing (plan 9 §7)', async () => {
+    const d = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's4'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2', 's3', 's5'] }), stepDto('s2'), stepDto('s3', { entryCondition: 2 }), stepDto('s4'), stepDto('s5')],
+    }));
+    const c: Circuit = { ...plainOf(d), 's1->s3': { tail: on('s1->s2', 40), head: at('s3') }, 'w:n': { tail: at('s1'), head: at('s4') } };
+    delete c['s1->s5'];
+    const expected = expectedLinks(d, {}, null);
+    expect(reconcile(c, expected, d)).toEqual(c);
+  });
 });
 
 describe('settleDraft and settleDesign', () => {

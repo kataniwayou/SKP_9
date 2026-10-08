@@ -8,6 +8,7 @@ import {
 import { circuitOf, EMPTY_DRAFT, type Draft } from '../design/draft';
 import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
 import { settleDesign } from '../design/settle';
+import { isShortCircuitError } from '../design/shortCircuits';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { EMPTY_INSPECTOR, type InspectorState } from './inspector';
 import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
@@ -99,7 +100,8 @@ export type StudioAction =
   | { type: 'removeAssignment'; workflowId: Id; stepId: Id }
   | { type: 'saving'; workflowId: Id }
   /** BaseApi's answer to a Save, with the document read again (null: the re-read failed). */
-  | { type: 'saveAnswered'; workflowId: Id; at: string; applied: boolean; errors: DesignError[]; doc: StudioDocument | null }
+  /** `held`: links of sources a short circuit holds back, which Save did not write (plan 9 §7). */
+  | { type: 'saveAnswered'; workflowId: Id; at: string; applied: boolean; errors: DesignError[]; doc: StudioDocument | null; held?: number }
   /** A Save that never got an answer (400, network): nothing was stored. */
   | { type: 'saveFailed'; workflowId: Id; at: string; message: string }
   /** A failed document goes back to loading. */
@@ -265,9 +267,12 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const doc = state.docs.find((d) => d.workflowId === action.workflowId);
       if (!doc) return state;
       const n = action.errors.length;
-      // applied by BaseApi, the only errors left are the design's short circuits (plan 9 §7), whose links were not written
+      // applied by BaseApi, the errors left are the design's short circuits (plan 9 §7), whose links were not written
+      const shorts = action.errors.filter(isShortCircuitError).length;
+      const held = action.held ?? 0;
+      const waits = held === 0 ? '' : `; ${held} link${held === 1 ? '' : 's'} held back until fixed`;
       const text = !action.applied ? `Saved; not applied: ${n} error${n === 1 ? '' : 's'}`
-        : n === 0 ? 'Saved and applied' : `Saved and applied; ${n} short circuit${n === 1 ? '' : 's'} not written`;
+        : shorts === 0 ? 'Saved and applied' : `Saved and applied; ${shorts} short circuit${shorts === 1 ? '' : 's'} not written${waits}`;
       const next = update(state, action.workflowId, (d) => {
         // either way the design is now stored on the workflow and the session's edits are cleared (spec §4.1)
         const stored = action.doc ? settleDesign(storedDesignOf(action.doc.graph.design, action.doc.graph.layout), action.doc) : designOf(d);
