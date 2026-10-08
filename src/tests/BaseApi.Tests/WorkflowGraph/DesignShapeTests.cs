@@ -64,4 +64,25 @@ public sealed class DesignShapeTests
             Schemas = schemas, Processors = [new DesignProcessorDto(Guid.NewGuid(), null, new() { ["config"] = copy })],
         })));
     }
+
+    [Fact]
+    public void ANullElementInAnyListIsMalformedAndNamedByItsList()
+    {
+        // what `[{…}, null]` deserializes to: the 400 names the list and the index instead of a 500
+        var cases = new (DesignSaveRequest Body, string Property)[]
+        {
+            (Empty() with { Steps = [new DesignStepDto(Guid.NewGuid(), null, null, null), null!] }, "Steps[1]"),
+            (Empty() with { Processors = [null!] }, "Processors[0]"),
+            (Empty() with { Caches = [null!] }, "Caches[0]"),
+            (Empty() with { Schemas = [null!] }, "Schemas[0]"),
+            (Empty() with { Assignments = [null!] }, "Assignments[0]"),
+        };
+        foreach (var (body, property) in cases)
+        {
+            var e = Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), body));
+            var failure = Assert.Single(e.Errors);
+            Assert.Equal(property, failure.PropertyName);
+            Assert.Equal($"{property} must not be null.", failure.ErrorMessage);
+        }
+    }
 }

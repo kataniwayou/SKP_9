@@ -22,6 +22,14 @@ internal static class DesignShape
         if (r.Layout is not { } layout) Fail(nameof(DesignSaveRequest.Layout), "Layout is required.");
         else if (WorkflowLayout.Validate(layout) is { } error) Fail(nameof(DesignSaveRequest.Layout), error);
 
+        // a JSON null inside a list: every check below reads the elements, so it stops here
+        NoNulls(r.Steps, nameof(DesignSaveRequest.Steps), Fail);
+        NoNulls(r.Processors, nameof(DesignSaveRequest.Processors), Fail);
+        NoNulls(r.Caches, nameof(DesignSaveRequest.Caches), Fail);
+        NoNulls(r.Schemas, nameof(DesignSaveRequest.Schemas), Fail);
+        NoNulls(r.Assignments, nameof(DesignSaveRequest.Assignments), Fail);
+        if (failures.Count > 0) throw new ValidationException(failures);
+
         Unique(r.Steps?.Select(s => s.Id), nameof(DesignSaveRequest.Steps), Fail);
         Unique(r.Processors?.Select(p => p.Id), nameof(DesignSaveRequest.Processors), Fail);
         Unique(r.Caches?.Select(c => c.Id), nameof(DesignSaveRequest.Caches), Fail);
@@ -46,6 +54,13 @@ internal static class DesignShape
             if (!Ops.Contains(a.Op)) Fail($"Assignments[{a.Id}].Op", "Op must be create, update or delete.");
 
         if (failures.Count > 0) throw new ValidationException(failures);
+    }
+
+    private static void NoNulls<T>(List<T>? items, string property, Action<string, string> fail) where T : class
+    {
+        if (items is null) return;
+        for (var i = 0; i < items.Count; i++)
+            if (items[i] is null) fail($"{property}[{i}]", $"{property}[{i}] must not be null.");
     }
 
     private static void Unique(IEnumerable<Guid>? ids, string property, Action<string, string> fail)
