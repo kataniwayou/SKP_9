@@ -4,8 +4,8 @@ import type { StudioDocument } from '../app/document';
 import { clearBends, clearPath, clearRun } from '../layout/detour';
 import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
-import { route, type Box, type Pt } from '../layout/router';
-import { dragSegment, endsOf, nearestSegment, normalize, shapeFromPoints, type Bends, type WireShape } from '../layout/shape';
+import { route, simplify, type Box, type Pt } from '../layout/router';
+import { dragSegment, endsOf, nearestSegment, normalize, pointsOfShape, shapeFromPoints, type Bends, type WireShape } from '../layout/shape';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { blockBoxes, portOf, SPHERE_BOX_ID, stepBoxId, type LooseRoute, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
@@ -473,11 +473,18 @@ export function useWireGestures(
     const { placement } = shown.current;
     const from = portOf(placement, l.source) ?? { x: STEP_W, y: PMID };
     const boxes = blockBoxes(placement);
+    const verdict = (over: string) => canWire(shown.current, l.source, over);
+    const automatic = fromPort(l.source, from, boxes);
+    // what the release commits: over a step it may wire to, the automatic wire it becomes; anywhere else its own
+    // bends to the pointer (a moved open end keeps them), drawn as routeLoose draws them
+    const path = (p: Point, over: string | null): Pt[] => (l.bends && (over === null || verdict(over) !== 'ok')
+      ? simplify(pointsOfShape({ sx: from.x, sy: from.y, tx: p.x, ty: p.y }, l.bends))
+      : automatic(p, over));
     setResize(null);
     dropGesture(e, {
       // the loose wire itself follows the pointer, and its squares with it, as a dragged end's wire does; labelled as a new wire
-      wire: `${LOOSE_PREFIX}${looseId}`, newWire: true, path: fromPort(l.source, from, boxes), current: null,
-      verdict: (over) => canWire(shown.current, l.source, over),
+      wire: `${LOOSE_PREFIX}${looseId}`, newWire: true, path, current: null,
+      verdict,
       done: (over) => d.onCommit(attachLoose(base, saved, looseId, over), { picks: [{ kind: 'wire', id: wireId(l.source, over) }] }),
       // released where its end already is: no step
       loose: (p) => {
@@ -506,7 +513,8 @@ export function useWireGestures(
       // from where it would start to its open end, which stays
       path: (p, over) => { const f = freeEnd(p, 'source', boxes, over); return clearPath(route(f.x, f.y, l.end.x, l.end.y, f.box, '', 0, boxes), boxes); },
       // a wire may start at any step on the canvas or at the hub; a cache is no source
-      verdict: (over) => (over === SPHERE_NODE_ID || shown.current.placement.steps.has(over) ? 'ok' : 'cannotStart'),
+      // canWire's own test of a step: `over` is a node on the canvas, so a step of the graph there is placed (parked ones too) and has a port
+      verdict: (over) => (over === SPHERE_NODE_ID || shown.current.graph.steps.has(over) ? 'ok' : 'cannotStart'),
       done: (over) => d.onCommit(resourceLoose(base, looseId, over === SPHERE_NODE_ID ? WORKFLOW_SOURCE : over), { picks: [{ kind: 'wire', id: pick }] }),
       // back on its own source: its start is fixed to that port, so nothing changes
       onSelf: () => {}, selfWhy: 'here',

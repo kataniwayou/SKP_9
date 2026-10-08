@@ -142,9 +142,19 @@ export function addLoose(draft: Draft, id: string, source: SourceId, end: Point)
   return { ...draft, loose };
 }
 
-/** Its open end moved elsewhere: automatic again, as a connected wire's end re-attached elsewhere is (spec §4.4). */
+/** Its open end moved: its bends stay, as a connected wire's do when an end moves but stays on the same block (spec §4.3). */
 export function moveLoose(draft: Draft, id: string, end: Point): Draft {
-  return Object.hasOwn(draft.loose, id) ? addLoose(draft, id, draft.loose[id]!.source, end) : draft;
+  if (!Object.hasOwn(draft.loose, id)) return draft;
+  const loose = copy(draft.loose);
+  loose[id] = { ...draft.loose[id]!, end: { x: end.x, y: end.y } };
+  return { ...draft, loose };
+}
+
+/** Reset route (spec §4.3) by pick id: a connected wire's shape goes; a loose wire (`loose:{id}`) loses its bends, keeping its source and end. */
+export function resetShape(draft: Draft, wireId: string): Draft {
+  if (!wireId.startsWith(LOOSE_PREFIX)) return resetRoute(draft, wireId);
+  const id = wireId.slice(LOOSE_PREFIX.length);
+  return Object.hasOwn(draft.loose, id) ? shapeLoose(draft, id, null, draft.loose[id]!.end) : draft;
 }
 
 /** Its start moved to another source: automatic again, as a connected wire's re-attached tail is (spec §4.4). */

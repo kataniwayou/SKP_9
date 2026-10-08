@@ -875,15 +875,42 @@ describe('wire gestures', () => {
       expect(commits(design)[0]).toEqual([attachLoose(design.draft, doc, 'l1', 's3'), { picks: [{ kind: 'wire', id: 's1->s3' }] }]);
     });
 
-    it('a shaped loose wire whose open end is moved is automatic again, as a re-attached end is', async () => {
+    it('a shaped loose wire whose open end is moved keeps its bends, drawn by them while dragged; onto a step it is an automatic wire', async () => {
       const doc = await twoAndOne();
-      const design = picked({ ...EMPTY_DRAFT, loose: { l1: { source: 's1', end: EMPTY_AT, bends: { xs: [800, 1000], ys: [760] } } } });
+      const bends = { xs: [800, 1000], ys: [760] };
+      const design = picked({ ...EMPTY_DRAFT, loose: { l1: { source: 's1', end: EMPTY_AT, bends } } });
       const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+      const port = wirePath(container, 'loose:l1')[0]!;
       fireEvent.pointerDown(squares(container)!.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
       fireEvent.pointerMove(document, { ...screenOf(container, { x: 1150, y: 600 }), pointerId: 1 });
       expect(container.querySelector('.design-drop-label')!.textContent).toBe('loose wire');
+      // the drag shows what the release commits: the same bends, to the pointer
+      expect(wirePath(container, 'loose:l1')).toEqual(simplify(pointsOfShape({ sx: port[0], sy: port[1], tx: 1152, ty: 600 }, bends)));
       fireEvent.pointerUp(document, { ...screenOf(container, { x: 1150, y: 600 }), pointerId: 1 });
-      expect(commits(design)[0]![0].loose['l1']).toEqual({ source: 's1', end: { x: 1152, y: 600 } });
+      expect(commits(design)[0]![0].loose['l1']).toEqual({ source: 's1', end: { x: 1152, y: 600 }, bends });
+
+      // over a step it may wire to, it is drawn as the automatic wire it becomes
+      fireEvent.pointerDown(squares(container)!.querySelector('.design-handle.end[data-end="target"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+      fireEvent.pointerMove(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+      expect(wirePath(container, 'loose:l1').at(-1)![0]).toBe(doc.placement.steps.get('s3')!.x);
+      fireEvent.pointerUp(document, { ...screenOf(container, middleOf(doc, 's3')), pointerId: 1 });
+      expect(commits(design)[1]![0].routes).toEqual({});
+    });
+
+    it('right-click → Reset route on a shaped loose wire clears its bends (its source and end stay); without bends it is disabled', async () => {
+      const doc = await twoAndOne();
+      const onSelect = vi.fn();
+      const design = designOf({ draft: { ...EMPTY_DRAFT, loose: { l1: { source: 's1', end: EMPTY_AT, bends: { xs: [800, 1000], ys: [760] } } } } });
+      const view = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={onSelect} />);
+      fireEvent.contextMenu(view.container.querySelector('.react-flow__edge[data-id="loose:l1"] .nx-hit')!, { clientX: 50, clientY: 50 });
+      expect(onSelect).toHaveBeenCalledWith(null, [{ kind: 'wire', id: 'loose:l1' }]);
+      fireEvent.click(view.getByRole('menuitem', { name: /Reset route/ }));
+      expect(commits(design)[0]![0].loose).toEqual({ l1: { source: 's1', end: EMPTY_AT } });
+      view.unmount();
+
+      const plain = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={picked()} onSelect={vi.fn()} />);
+      fireEvent.contextMenu(plain.container.querySelector('.react-flow__edge[data-id="loose:l1"] .nx-hit')!, { clientX: 50, clientY: 50 });
+      expect(plain.getByRole('menuitem', { name: /Reset route/ })).toHaveAttribute('aria-disabled', 'true');
     });
   });
 });

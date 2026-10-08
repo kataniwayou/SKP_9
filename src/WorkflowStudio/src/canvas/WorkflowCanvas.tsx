@@ -5,7 +5,7 @@ import { applyDraft } from '../design/apply';
 import { DesignContext } from '../design/DesignContext';
 import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
-import { EMPTY_DRAFT, LOOSE_PREFIX, resetRoute, storedBends, type Draft } from '../design/draft';
+import { EMPTY_DRAFT, LOOSE_PREFIX, resetShape, storedBends, type Draft } from '../design/draft';
 import type { GuideLine } from '../design/guides';
 import { useBlockDrag } from '../design/useBlockDrag';
 import { useDesignKeys } from '../design/useDesignKeys';
@@ -63,6 +63,10 @@ interface Props {
   /** Design mode (plan 4); omitted: read-only, as before. */
   design?: DesignProps;
 }
+
+/** Has the wire (a pick id) a shape of its own to reset: a connected wire's route, a loose wire's bends (plan 8 §5)? */
+const shapedByHand = (draft: Draft, wireId: string): boolean =>
+  (wireId.startsWith(LOOSE_PREFIX) ? storedBends(draft, wireId) !== undefined : Object.hasOwn(draft.routes, wireId));
 
 /** React Flow's attribution badge is hidden (MIT licence): it would sit on the horizontal scroll bar. */
 const PRO_OPTIONS = { hideAttribution: true } as const;
@@ -177,8 +181,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     onSelect(selectionForPicks(picks, null, shownDoc.graph), picks);
   };
   const onEdgeContextMenu: EdgeMouseHandler = (event, edge) => {
-    // a loose wire has no route to reset (plan 8)
-    if (!design || edge.type !== 'cable' || edge.id.startsWith(LOOSE_PREFIX)) return;
+    // a loose wire's menu too: Reset route clears its bends (plan 8 §5)
+    if (!design || edge.type !== 'cable') return;
     event.preventDefault();
     const picks: Pick[] = [{ kind: 'wire', id: edge.id }];
     onSelect?.(selectionForPicks(picks, null, shownDoc.graph), picks);
@@ -255,9 +259,9 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
         {menu && design && (
           <Menu label="Wire" anchor={menu.anchor} onClose={() => setMenu(null)} entries={[{
             id: 'reset', label: 'Reset route',
-            disabled: !design.draft.routes[menu.wireId],
-            tip: design.draft.routes[menu.wireId] ? 'Let the router shape this wire again' : 'Only a wire shaped by hand has a route to reset',
-            onSelect: () => design.onCommit(resetRoute(design.draft, menu.wireId)),
+            disabled: !shapedByHand(design.draft, menu.wireId),
+            tip: shapedByHand(design.draft, menu.wireId) ? 'Let the router shape this wire again' : 'Only a wire shaped by hand has a route to reset',
+            onSelect: () => design.onCommit(resetShape(design.draft, menu.wireId)),
           }]} />
         )}
       </LiveArtContext.Provider>

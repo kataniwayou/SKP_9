@@ -636,7 +636,7 @@ async function emptySpot(panel: Locator, avoid: { x: number; y: number }[] = [])
   }, avoid);
 }
 
-test('a picked loose wire has the squares of a wire: a run square reshapes it and a refresh keeps the shape; its start square re-sources it or snaps back; its open-end square wires it', async ({ page }) => {
+test('a picked loose wire has the squares of a wire: a run square reshapes it, a refresh keeps the shape, Reset route undoes it; its start square re-sources it or snaps back; its open-end square wires it', async ({ page }) => {
   const { a, c, reattachable } = chain!;
   // re-sourced onto a, its open end then goes to c: a must not already go to c
   test.skip(!reattachable, 'a already goes to c: the open end dropped on c would stay loose');
@@ -689,10 +689,26 @@ test('a picked loose wire has the squares of a wire: a run square reshapes it an
   const s0 = await centreOf(start);
   const empty = await emptySpot(again, [s0, await centreOf(sq.locator('.design-handle.end[data-end="target"]'))]);
   expect(empty, 'no empty spot on the canvas').not.toBeNull();
-  await drag(page, s0, empty!);
+  await page.mouse.move(s0.x, s0.y);
+  await page.mouse.down();
+  await page.mouse.move(empty!.x, empty!.y, { steps: 10 });
+  // held there: the wire follows the pointer, and no label offers a start (as a connected wire's tail on empty canvas)
+  await expect.poll(() => kept.locator('path.w').getAttribute('d')).not.toBe(shaped);
   await expect(again.locator('.design-drop-label')).toHaveCount(0);
+  await page.mouse.up();
   await page.waitForTimeout(300);
   await expect.poll(() => kept.locator('path.w').getAttribute('d')).toBe(shaped);
+
+  // right-click → Reset route: the router draws it again, from the same source to the same end; Ctrl+Z brings the shape back
+  const onLine = await pointOnWire(again, id);
+  await page.mouse.click(onLine.x, onLine.y, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Reset route' }).click();
+  await expect.poll(() => kept.locator('path.w').getAttribute('d')).toBe(before);
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => kept.locator('path.w').getAttribute('d')).toBe(shaped);
+  // the undo keeps the pick, or a click picks it again
+  if (await start.count() === 0) { const p = await pointOnWire(again, id); await page.mouse.click(p.x, p.y); }
+  await expect(start).toHaveCount(1);
 
   // its start square onto step a: the loose wire now starts at a's output port
   const onA = await centreOf(node(again, a).locator('.nx-sn'));
