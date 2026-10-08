@@ -55,6 +55,27 @@ describe('trace (plan 9 §7)', () => {
     expect(trace({ a: w(at('s1'), at('s2')), b: w(at('s2'), at('s1')) }).loop).toBe(false);
   });
 
+  it('a host open at both ends still carries what is poured into it on to the tail junctions further along', () => {
+    expect(links({ h: w(open, open), x: w(at('s1'), on('h', 40)), t: w(on('h', 60), at('s2')) })).toEqual(['s1->s2']);
+  });
+
+  it('current running into a closed loop of wires ends: no throw, the loop is found, what leaves it is linked', () => {
+    const c = { a: w(at('s1'), on('l1', 20)), l1: w(open, on('l2', 50)), l2: w(open, on('l1', 50)), t: w(on('l2', 70), at('s2')) };
+    const t = trace(c);
+    expect(t.loop).toBe(true);
+    expect([...linkKeys(t.links)]).toEqual(['s1->s2']);
+  });
+
+  it('fans out from a tail-junction wire: chained tail junctions take the first host\'s current', () => {
+    const c = { h: w(at('s1'), at('s2')), t1: w(on('h', 40), open), t2: w(on('t1', 30), at('s3')), t3: w(on('t2', 20), at('s4')) };
+    expect(links(c)).toEqual(['s1->s2', 's1->s3', 's1->s4']);
+  });
+
+  it('fan-in onto an entry wire: the joined step is its own source downstream, not the workflow', () => {
+    const c = { e: w(hub, at('s1')), x: w(at('s2'), on('e', 30)), t: w(on('e', 60), at('s3')) };
+    expect(links(c)).toEqual(['s2->s1', 's2->s3', 'wf->s1', 'wf->s3']);
+  });
+
   it('names the wires current passes through from a source into a step', () => {
     const c = { h: w(at('s1'), at('s2')), x: w(on('h', 40), at('s3')), y: w(at('s4'), at('s3')) };
     expect([...wiresBetween(c, 's1', 's3')].sort()).toEqual(['h', 'x']);
