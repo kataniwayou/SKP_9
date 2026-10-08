@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { addCircuitWire, plainCircuit, setEnd, type Circuit } from '../circuit/circuit';
 import { contactOn } from '../layout/circuitRoute';
 import { SPHERE_R, STEP_W } from '../layout/geometry';
-import { dropLabel, endOf, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
+import { beforeDrop, dropLabel, endOf, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 
 // s1 -> s2 -> s3 (Completed) and s4 -> s5 (Failed); entries s1, s4
 const doc = () => loadedDocument(graphDto({
@@ -15,6 +15,18 @@ const doc = () => loadedDocument(graphDto({
 const circuitOfDoc = (d: Awaited<ReturnType<typeof doc>>): Circuit => plainCircuit(d.graph.workflow.entryStepIds, d.graph.steps, (id) => d.placement.steps.has(id));
 const step = (id: string, side: 'in' | 'out', y = 96): DropTarget => ({ on: 'step', step: id, side, y });
 const wire = (host: string, at = 40): DropTarget => ({ on: 'wire', host, at });
+
+describe('beforeDrop (final review M2)', () => {
+  it('works the state before the drop out once per circuit and document: every move of one drag reuses it', async () => {
+    const d = await doc(), c = circuitOfDoc(d);
+    const first = beforeDrop(d, c);
+    expect(beforeDrop(d, c)).toBe(first);
+    expect(beforeDrop(d, setEnd(c, 's1->s2', 'head', { on: 'open', x: 0, y: 0 }))).not.toBe(first);
+    expect(beforeDrop(await doc(), c)).not.toBe(first);
+    expect(first.looped.size).toBe(0);
+    expect(first.links.get('s1')).toEqual(['s2']);
+  });
+});
 
 describe('judgeDrop (plan 9 §3, §4, §6)', () => {
   it('connects a head to a step\'s input and a tail to a step\'s output or the hub; anywhere else the end is open', async () => {

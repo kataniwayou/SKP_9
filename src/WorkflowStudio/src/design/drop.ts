@@ -28,6 +28,38 @@ export function endOf(t: DropTarget): End {
   }
 }
 
+/** The circuit as it is before a drop: its loop wires, its links, and each wire's families (on first use). */
+export interface BeforeDrop {
+  looped: ReadonlySet<string>;
+  links: ReadonlyMap<string, readonly string[]>;
+  families: () => ReadonlyMap<string, readonly number[]>;
+}
+
+const befores = new WeakMap<Readonly<Circuit>, { shown: StudioDocument; before: BeforeDrop }>();
+
+/**
+ * The state before the drop (final review M2): the dragged wire's circuit stays the same for the whole drag, so it is
+ * worked out once per circuit and document and every pointer move of the drag reuses it.
+ */
+export function beforeDrop(shown: StudioDocument, circuit: Readonly<Circuit>): BeforeDrop {
+  const hit = befores.get(circuit);
+  if (hit && hit.shown === shown) return hit.before;
+  let had: Map<string, readonly number[]> | null = null;
+  const before: BeforeDrop = {
+    looped: loopWires(circuit),
+    links: trace(circuit).links,
+    families: () => {
+      if (had === null) {
+        had = new Map();
+        for (const n of netsOf(circuit, (s: Id) => shown.graph.steps.get(s)?.entryCondition)) for (const x of n.wires) had.set(x, n.families);
+      }
+      return had;
+    },
+  };
+  befores.set(circuit, { shown, before });
+  return before;
+}
+
 /**
  * What dropping wire `id`'s `side` end on `t` does (plan 9 §3, §4, §6; decision 7). Open anywhere ('move'); a step
  * side or the hub ('connect'); a wire ('join'). Refused: a head on a step's output or a tail on its input
@@ -52,15 +84,12 @@ export function judgeDrop(shown: StudioDocument, circuit: Readonly<Circuit>, id:
     if (!Object.hasOwn(circuit, t.host)) return 'move';
   }
   const after = setEnd(circuit, id, side, endOf(t));
-  const looped = loopWires(circuit);
-  for (const x of loopWires(after)) if (!looped.has(x)) return 'short';
-  const before = trace(circuit).links;
-  for (const [s, ts] of trace(after).links) if (ts.includes(s) && !before.get(s)?.includes(s)) return 'sameStep';
-  const conditionOf = (s: Id) => shown.graph.steps.get(s)?.entryCondition;
-  const net = netsOf(after, conditionOf).find((n) => n.wires.includes(id));
+  const before = beforeDrop(shown, circuit);
+  for (const x of loopWires(after)) if (!before.looped.has(x)) return 'short';
+  for (const [s, ts] of trace(after).links) if (ts.includes(s) && !before.links.get(s)?.includes(s)) return 'sameStep';
+  const net = netsOf(after, (s: Id) => shown.graph.steps.get(s)?.entryCondition).find((n) => n.wires.includes(id));
   if (net && net.families.length > 1) {
-    const had = new Map<string, readonly number[]>();
-    for (const n of netsOf(circuit, conditionOf)) for (const x of n.wires) had.set(x, n.families);
+    const had = before.families();
     if (net.wires.some((x) => net.families.some((f) => !(had.get(x) ?? []).includes(f)))) return 'short';
   }
   return t.on === 'wire' ? 'join' : 'connect';
