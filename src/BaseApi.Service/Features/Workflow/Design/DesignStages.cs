@@ -10,5 +10,7 @@ internal static class DesignStages
         sp.GetRequiredService<SchemaStage>(),
         sp.GetRequiredService<ProcessorStage>(),
         sp.GetRequiredService<CacheStage>(),
+        sp.GetRequiredService<StepStage>(),
+        sp.GetRequiredService<WireStage>(),
     ];
 }
