@@ -56,6 +56,8 @@ export interface LooseStart {
   /** Its head on another wire's line (plan 7); null: on its target. */
   contact: Contact | null;
   bends?: Bends;
+  /** The id it had as a connected wire: wires joined on it follow it to the id it gets when re-attached. */
+  was?: string;
 }
 
 /** A loose wire: open at its head (the only kind stored before tails could be detached) or at its start. */
@@ -66,19 +68,25 @@ export const isLooseStart = (l: LooseWire): l is LooseStart => 'open' in l && l.
 /** Where a loose wire is open: its end, or its start. */
 export const openPointOf = (l: LooseWire): Point => (isLooseStart(l) ? l.start : l.end);
 
-/**
- * A loose wire as drawn: right-angled from its source's port to its open end; or, open at its start (`open`), from
- * that start to its target (`source` is '' then), in its target's colour, joined as a connected wire is.
- */
-export interface LooseRoute {
+/** A loose wire open at its head as drawn: right-angled from its source's port to its open end. */
+export interface LooseEndRoute {
+  open?: undefined;
   id: string;
   source: SourceId;
   points: Pt[];
-  open?: 'start';
-  target?: Id;
-  condition?: number;
+}
+
+/** A loose wire open at its start as drawn: from that start to its target, in its target's colour, joined as a connected wire is. */
+export interface LooseStartRoute {
+  open: 'start';
+  id: string;
+  target: Id;
+  condition: number;
+  points: Pt[];
   joint?: Joint;
 }
+
+export type LooseRoute = LooseEndRoute | LooseStartRoute;
 
 export interface WiringInput {
   entryStepIds: Id[];
@@ -258,7 +266,7 @@ export function routeLoose(loose: Readonly<Record<string, LooseWire>>, placement
   return out;
 }
 
-function routeLooseStart(id: string, l: LooseStart, placement: Placement, ctx: LooseContext, boxes: Box[]): LooseRoute | null {
+function routeLooseStart(id: string, l: LooseStart, placement: Placement, ctx: LooseContext, boxes: Box[]): LooseStartRoute | null {
   const at = placement.steps.get(l.target), step = ctx.steps.get(l.target);
   if (!at || !step) return null;
   const sx = l.start.x, sy = l.start.y, tx = at.x, ty = at.y + clampLanding(l.landing ?? PMID);
@@ -276,7 +284,7 @@ function routeLooseStart(id: string, l: LooseStart, placement: Placement, ctx: L
     ? joinOne(plain, host, travel, c.at, { bends: l.bends ?? null, landing: l.landing, contact: c }, boxes, '')
     : null;
   const r = joined?.route ?? plain;
-  return { id, source: '', open: 'start', target: l.target, condition: r.condition, points: r.points, ...(r.joint ? { joint: r.joint } : {}) };
+  return { open: 'start', id, target: l.target, condition: r.condition, points: r.points, ...(r.joint ? { joint: r.joint } : {}) };
 }
 
 /** The dashed tether from the sphere's bottom to a cache's top centre, right-angled. */

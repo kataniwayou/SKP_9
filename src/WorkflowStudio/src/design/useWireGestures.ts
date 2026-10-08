@@ -7,10 +7,10 @@ import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { route, simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, endsOf, nearestSegment, normalize, pointsOfShape, shapeFromPoints, type Bends, type WireShape } from '../layout/shape';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
-import { blockBoxes, isLooseStart, portOf, SPHERE_BOX_ID, stepBoxId, type LooseRoute, type LooseStart, type WireRoute } from '../layout/wires';
+import { blockBoxes, isLooseStart, portOf, SPHERE_BOX_ID, stepBoxId, type LooseRoute, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
-import { addLoose, addWire, attachLoose, attachLooseStart, LOOSE_PREFIX, loosen, loosenStart, moveLoose, reattach, resourceLoose, retargetLooseStart, setShape, shapeLoose, shapeLooseStart, storedBends, wireId, type Draft } from './draft';
+import { addLoose, addWire, attachLoose, attachLooseStart, LOOSE_PREFIX, looseStartOf, loosen, loosenStart, moveLoose, reattach, resourceLoose, retargetLooseStart, setShape, shapeLoose, shapeLooseStart, storedBends, wireId, type Draft } from './draft';
 import { blockAt, wireAt } from './hit';
 import { newId } from './ids';
 import { canJoin, canWire, type DropVerdict, type JoinVerdict, type Refusal } from './rules';
@@ -46,16 +46,11 @@ export interface WireGhost {
  */
 export function looseAsWire(l: LooseRoute): WireRoute {
   if (l.open === 'start') {
-    return { id: `${LOOSE_PREFIX}${l.id}`, source: '', target: l.target ?? '', points: l.points, condition: l.condition ?? 0, broken: false, ...(l.joint ? { joint: l.joint } : {}) };
+    return { id: `${LOOSE_PREFIX}${l.id}`, source: '', target: l.target, points: l.points, condition: l.condition, broken: false, ...(l.joint ? { joint: l.joint } : {}) };
   }
   return { id: `${LOOSE_PREFIX}${l.id}`, source: l.source, target: '', points: l.points, condition: 0, broken: false };
 }
 
-/** The draft's start-loose wire of this id, if it is one. */
-const looseStartOf = (draft: Draft, id: string): LooseStart | null => {
-  const l = Object.hasOwn(draft.loose, id) ? draft.loose[id]! : null;
-  return l && isLooseStart(l) ? l : null;
-};
 
 /** The loose wire's id of a pick (`loose:{id}`); null for a connected wire. */
 const looseIdOf = (wire: string): string | null => (wire.startsWith(LOOSE_PREFIX) ? wire.slice(LOOSE_PREFIX.length) : null);
@@ -529,7 +524,7 @@ export function useWireGestures(
   /**
    * Drags a picked loose wire's start square (plan 8 §5), as a connected wire's tail: onto another step or the hub
    * it starts there (automatic again, as a re-attached tail is); anywhere else (a cache: "cannot start here", a
-   * line, empty canvas) or back on its own source it snaps back, since a loose wire always keeps a source.
+   * line, empty canvas: "needs one end") or back on its own source it snaps back, since a loose wire always keeps a source.
    */
   const startLooseSource = (looseId: string, e: ReactPointerEvent) => {
     const d = designRef.current;
@@ -551,6 +546,8 @@ export function useWireGestures(
       // back on its own source: its start is fixed to that port, so nothing changes
       onSelf: () => {}, selfWhy: 'here',
       line: 'start',
+      // released on nothing it would be open at both ends: refused, as a start-loose wire's head is
+      nothing: 'oneEnd',
     });
   };
 
@@ -565,7 +562,7 @@ export function useWireGestures(
     const base = d.draft;
     const l = looseStartOf(base, looseId);
     const drawn = shown.current.loose.find((x) => x.id === looseId);
-    if (!l || !drawn) return;
+    if (!l || drawn?.open !== 'start') return;
     const boxes = blockBoxes(shown.current.placement);
     const pick = `${LOOSE_PREFIX}${looseId}`;
     // where its own line ends: its contact on its host, or its landing

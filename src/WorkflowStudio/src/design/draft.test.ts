@@ -143,10 +143,10 @@ describe('loose wires (plan 8 §5)', () => {
       expect(d.next['s1']).toEqual([]);
       expect(d.routes).toEqual({});
       // like a released head, the wire is automatic again: its bends go, its head stays
-      expect(d.loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 80, contact: { host: 'wf->s1', at: 40 } });
+      expect(d.loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 80, contact: { host: 'wf->s1', at: 40 }, was: 's1->s2' });
       const entry = loosenStart(EMPTY_DRAFT, doc, 'wf->s1', 'l2', { x: 40, y: 400 }, 96);
       expect(entry.entries).toEqual([]);
-      expect(entry.loose['l2']).toEqual({ open: 'start', target: 's1', start: { x: 40, y: 400 }, landing: 96, contact: null });
+      expect(entry.loose['l2']).toEqual({ open: 'start', target: 's1', start: { x: 40, y: 400 }, landing: 96, contact: null, was: 'wf->s1' });
     });
 
     it('reads back from a session or a stored layout; an old head-open record still reads as one; a malformed one is dropped', () => {
@@ -177,6 +177,21 @@ describe('loose wires (plan 8 §5)', () => {
       expect(attachLooseStart(d, doc, 'gone', 's3')).toBe(d);
     });
 
+    it('wires joined on it follow it to its new id when its open start goes to a new source, as a one-step re-attach does', async () => {
+      const doc = await chain();
+      const joined = setShape(EMPTY_DRAFT, 's2->s3', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
+      const detached = loosenStart(joined, doc, 's1->s2', 'l1', { x: 300, y: 500 }, null);
+      const two = attachLooseStart(detached, doc, 'l1', 's3');
+      expect(two.routes['s2->s3']!.contact).toEqual({ host: 's3->s2', at: 40 });
+      expect(two).toEqual(reattach(joined, doc, 's1->s2', 'source', 's3'));
+      // read back from a session it still knows its old id; a re-targeted head keeps it
+      const parsed = parseDraft(JSON.parse(JSON.stringify(detached)))!;
+      expect(attachLooseStart(parsed, doc, 'l1', 'wf').routes['s2->s3']!.contact!.host).toBe('wf->s2');
+      expect(retargetLooseStart(parsed, 'l1', 's3', 64).loose['l1']).toMatchObject({ was: 's1->s2' });
+      // a record without it (or with something that is no wire id) still reads, and renames nothing
+      expect(parseDraft({ loose: { l1: { open: 'start', target: 's2', start: { x: 1, y: 2 }, was: 7 } } })!.loose['l1']).not.toHaveProperty('was');
+    });
+
     it('its open start moves keeping its bends; its head re-targets (automatic, no junction); Reset route clears only its bends', async () => {
       const doc = await chain();
       const bends = { xs: [400, 520], ys: [200] };
@@ -185,10 +200,10 @@ describe('loose wires (plan 8 §5)', () => {
       expect(d.loose['l1']).toMatchObject({ bends, landing: 72 });
       expect(storedBends(d, 'loose:l1')).toEqual(bends);
       expect(moveLoose(d, 'l1', { x: 320, y: 520 }).loose['l1']).toMatchObject({ open: 'start', start: { x: 320, y: 520 }, bends });
-      expect(resetShape(d, 'loose:l1').loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 72, contact: { host: 'wf->s1', at: 40 } });
-      expect(retargetLooseStart(d, 'l1', 's3', 64).loose['l1']).toEqual({ open: 'start', target: 's3', start: { x: 300, y: 500 }, landing: 64, contact: null });
+      expect(resetShape(d, 'loose:l1').loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 72, contact: { host: 'wf->s1', at: 40 }, was: 's1->s2' });
+      expect(retargetLooseStart(d, 'l1', 's3', 64).loose['l1']).toEqual({ open: 'start', target: 's3', start: { x: 300, y: 500 }, landing: 64, contact: null, was: 's1->s2' });
       // a straight shape is no shape
-      expect(shapeLooseStart(d, 'l1', { bends: null, landing: 72, contact: null }).loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 72, contact: null });
+      expect(shapeLooseStart(d, 'l1', { bends: null, landing: 72, contact: null }).loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 72, contact: null, was: 's1->s2' });
     });
   });
 });

@@ -692,9 +692,9 @@ test('a picked loose wire has the squares of a wire: a run square reshapes it, a
   await page.mouse.move(s0.x, s0.y);
   await page.mouse.down();
   await page.mouse.move(empty!.x, empty!.y, { steps: 10 });
-  // held there: the wire follows the pointer, and no label offers a start (as a connected wire's tail on empty canvas)
+  // held there: the wire follows the pointer, and the label says why it may not go there (open at both ends)
   await expect.poll(() => kept.locator('path.w').getAttribute('d')).not.toBe(shaped);
-  await expect(again.locator('.design-drop-label')).toHaveCount(0);
+  await expect(again.locator('.design-drop-label')).toHaveText('needs one end');
   await page.mouse.up();
   await page.waitForTimeout(300);
   await expect.poll(() => kept.locator('path.w').getAttribute('d')).toBe(shaped);
@@ -875,4 +875,54 @@ test('a joined wire\'s tail detached keeps its junction and its host\'s colour',
   await page.reload();
   const again = documentPanel(page, j!.workflow);
   await expect(again.locator('.react-flow__edge[data-id^="loose:"] circle.nx-joint').first()).toBeVisible();
+});
+
+test('a host wire detached at its tail and re-attached to a new source keeps the wires joined on it joined (on its new id)', async ({ page, request }) => {
+  const j = await findJoin(request);
+  test.skip(j === null, 'no two same-colour wires into different steps: no junction can be made');
+  await openWorkflow(page, j!.workflow);
+  const panel = documentPanel(page, j!.workflow);
+  const { a, b, between } = (await nearestPair(panel, j!.wires, mayJoin))!;
+  await zoomInOn(page, panel, between);
+  await dragArrowOnto(page, panel, a, b);
+  await expect(panel.locator('.design-drop-label')).toHaveText('join here');
+  await page.mouse.up();
+  await expect(wire(panel, a).locator('circle.nx-joint').first()).toBeVisible();
+
+  // the host b's tail off its step: b is loose at its start, a (joined on b's old id) is drawn plain meanwhile
+  const [bSource, bTarget] = b.split('->') as [string, string];
+  const tail = await tailSquare(page, panel, b);
+  const empty = await emptySpot(panel, [tail, between]);
+  expect(empty, 'no empty spot on the canvas').not.toBeNull();
+  expect(await dragReading(page, panel, tail, empty!)).toBe('loose wire');
+  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
+  await expect(loose).toHaveCount(1);
+  await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(0);
+
+  // zoomed out again (Ctrl+wheel at the canvas's middle), so other steps are on screen
+  const mid = await centreOf(panel.locator('.studio-canvas'));
+  await page.mouse.move(mid.x, mid.y);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 240);
+  await page.keyboard.up('Control');
+  await settledView(page, panel.locator('.react-flow__viewport'));
+  // a new source for b, on screen: a step that is neither end of b and does not already wire to b's target
+  const area = (await panel.locator('.studio-canvas').boundingBox())!;
+  const steps = [...new Set(j!.wires.flatMap((w) => w.id.split('->')))];
+  let source: string | null = null;
+  for (const s of steps) {
+    if (s === bSource || s === bTarget || j!.wires.some((w) => w.id === `${s}->${bTarget}`)) continue;
+    const r = await node(panel, s).boundingBox();
+    if (r && r.x > area.x + 20 && r.y > area.y + 40 && r.x + r.width < area.x + area.width - 20 && r.y + r.height < area.y + area.height - 60) { source = s; break; }
+  }
+  test.skip(source === null, 'no other step on screen that may start b');
+  const start = await centreOf(loose.locator('.nx-open-hit'));
+  expect(await dragReading(page, panel, start, await centreOf(node(panel, source!).locator('.nx-sn')))).toBe('connect here');
+  await expect(wire(panel, `${source!}->${bTarget}`)).toHaveCount(1);
+  await expect(loose).toHaveCount(0);
+  // a is joined again, on b's new id: its dot lies on the new wire's line
+  await expect(wire(panel, a).locator('circle.nx-joint').first()).toBeVisible();
+  await page.reload();
+  const again = documentPanel(page, j!.workflow);
+  await expect(wire(again, a).locator('circle.nx-joint').first()).toBeVisible();
 });

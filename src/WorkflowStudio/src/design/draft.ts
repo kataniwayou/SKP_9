@@ -148,7 +148,7 @@ const looseEnd = (draft: Draft, id: string): LooseEnd | null => {
   return l && !isLooseStart(l) ? l : null;
 };
 /** The loose wire open at its start with this id, if any. */
-const looseStart = (draft: Draft, id: string): LooseStart | null => {
+export const looseStartOf = (draft: Draft, id: string): LooseStart | null => {
   const l = Object.hasOwn(draft.loose, id) ? draft.loose[id]! : null;
   return l && isLooseStart(l) ? l : null;
 };
@@ -171,7 +171,7 @@ export function moveLoose(draft: Draft, id: string, to: Point): Draft {
 export function resetShape(draft: Draft, wireId: string): Draft {
   if (!wireId.startsWith(LOOSE_PREFIX)) return resetRoute(draft, wireId);
   const id = wireId.slice(LOOSE_PREFIX.length);
-  const s = looseStart(draft, id);
+  const s = looseStartOf(draft, id);
   if (s) return shapeLooseStart(draft, id, { bends: null, landing: s.landing, contact: s.contact });
   const e = looseEnd(draft, id);
   return e ? shapeLoose(draft, id, null, e.end) : draft;
@@ -197,9 +197,9 @@ export function shapeLoose(draft: Draft, id: string, bends: Bends | null, end: P
 
 /** A start-loose wire's own shape, as a connected wire's in `routes`: its bends (null: the router draws it), its landing and junction. Its start and target stay. */
 export function shapeLooseStart(draft: Draft, id: string, shape: WireShape): Draft {
-  const s = looseStart(draft, id);
+  const s = looseStartOf(draft, id);
   if (!s) return draft;
-  const l: LooseStart = { open: 'start', target: s.target, start: s.start, landing: shape.landing, contact: shape.contact ?? null };
+  const l: LooseStart = { open: 'start', target: s.target, start: s.start, landing: shape.landing, contact: shape.contact ?? null, ...(s.was ? { was: s.was } : {}) };
   return putLoose(draft, id, shape.bends && shape.bends.xs.length > 0 ? { ...l, bends: shape.bends } : l);
 }
 
@@ -236,16 +236,18 @@ export function loosen(draft: Draft, saved: StudioDocument, id: string, looseId:
  */
 export function loosenStart(draft: Draft, saved: StudioDocument, id: string, looseId: string, start: Point, landing: number | null): Draft {
   const contact = Object.hasOwn(draft.routes, id) ? draft.routes[id]!.contact ?? null : null;
-  const l: LooseStart = { open: 'start', target: wireEnds(id).target, start: { x: start.x, y: start.y }, landing, contact };
+  const l: LooseStart = { open: 'start', target: wireEnds(id).target, start: { x: start.x, y: start.y }, landing, contact, was: id };
   return putLoose(removeWires(draft, saved, [id]), looseId, l);
 }
 
 /** A start-loose wire's open start dropped on a step or the hub it may start from: an ordinary wire again, its head (landing, junction) unchanged. */
 export function attachLooseStart(draft: Draft, saved: StudioDocument, id: string, source: SourceId): Draft {
-  const s = looseStart(draft, id);
+  const s = looseStartOf(draft, id);
   if (!s) return draft;
-  const wired = addWire(removeLoose(draft, [id]), saved, source, s.target);
-  return setShape(wired, wireId(source, s.target), { bends: null, landing: s.landing, contact: s.contact });
+  const to = wireId(source, s.target);
+  const wired = setShape(addWire(removeLoose(draft, [id]), saved, source, s.target), to, { bends: null, landing: s.landing, contact: s.contact });
+  // wires joined on it follow it to its new id, as a one-step re-attach does (plan 7)
+  return s.was ? renameHost(wired, s.was, to) : wired;
 }
 
 /**
@@ -253,9 +255,9 @@ export function attachLooseStart(draft: Draft, saved: StudioDocument, id: string
  * head, spec §4.4); `keepJunction` (a joined wire's arrow re-attached, plan 7 §6.2): its junction and bends stay.
  */
 export function retargetLooseStart(draft: Draft, id: string, target: Id, landing: number | null, keepJunction = false): Draft {
-  const s = looseStart(draft, id);
+  const s = looseStartOf(draft, id);
   if (!s) return draft;
-  return putLoose(draft, id, keepJunction ? { ...s, target, landing } : { open: 'start', target, start: s.start, landing, contact: null });
+  return putLoose(draft, id, keepJunction ? { ...s, target, landing } : { open: 'start', target, start: s.start, landing, contact: null, ...(s.was ? { was: s.was } : {}) });
 }
 
 // ---- session parsing: anything not of the draft's shape is dropped, never an error ----
@@ -307,6 +309,8 @@ export function parseDraft(value: unknown): Draft | null {
         const start = toPoint(raw.start);
         if (typeof raw.target !== 'string' || raw.target === '' || !start) return null;
         const l: LooseStart = { open: 'start', target: raw.target, start, landing: isNum(raw.landing) ? raw.landing : null, contact: toContact(raw.contact) };
+        // the id it had when connected; absent (or not a wire id) in a record written before it was kept
+        if (typeof raw.was === 'string' && raw.was.includes('->')) l.was = raw.was;
         return bends ? { ...l, bends } : l;
       }
       const end = toPoint(raw.end);

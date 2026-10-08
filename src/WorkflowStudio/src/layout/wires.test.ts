@@ -3,7 +3,7 @@ import { AUDIT } from '../model/fixtures';
 import type { Step } from '../model/graph';
 import type { Placement } from './placement';
 import { PMID, SPHERE_R, STEP_W } from './geometry';
-import { drawnLine, portOf, routeLoose, routeWires, routeWiring, tetherPoints, type WiringInput } from './wires';
+import { drawnLine, portOf, routeLoose, routeWires, routeWiring, tetherPoints, type LooseStartRoute, type WiringInput } from './wires';
 
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
   id, name: id, version: '1.0.0', description: null, processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
@@ -292,10 +292,11 @@ describe('routeLoose: a wire loose at its start', () => {
   const steps = new Map(st.map((x) => [x.id, x]));
   const wiring = routeWiring({ entryStepIds: ['s'], steps, brokenEdges: new Set<string>() }, placement);
   const ctx = { steps, ...wiring };
+  const startRoutes = (loose: Parameters<typeof routeLoose>[0], p: Placement, c: typeof ctx) => routeLoose(loose, p, c) as LooseStartRoute[];
   const square = (pts: readonly (readonly [number, number])[]) => pts.every((p, i) => i === 0 || p[0] === pts[i - 1]![0] || p[1] === pts[i - 1]![1]);
 
   it('is drawn from its open start to its landing on its target, in its target\'s colour', () => {
-    const [r] = routeLoose({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: null } }, placement, ctx);
+    const [r] = startRoutes({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: null } }, placement, ctx);
     expect(r!.open).toBe('start');
     expect(r!.target).toBe('c');
     expect(r!.condition).toBe(2);
@@ -307,12 +308,12 @@ describe('routeLoose: a wire loose at its start', () => {
 
   it('by its own bends when it has them', () => {
     const bends = { xs: [600, 700], ys: [500] };
-    const [r] = routeLoose({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: null, bends } }, placement, ctx);
+    const [r] = startRoutes({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: null, bends } }, placement, ctx);
     expect(r!.points).toEqual([[400, 600], [600, 600], [600, 500], [700, 500], [700, 368], [864, 368]]);
   });
 
   it('joined on a same-colour host: its own line ends on the host, a branch goes into its target', () => {
-    const [r] = routeLoose({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: null, contact: { host: 's->b', at: 176 } } }, placement, ctx);
+    const [r] = startRoutes({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: null, contact: { host: 's->b', at: 176 } } }, placement, ctx);
     expect(r!.joint).toBeDefined();
     expect(r!.joint!.host).toBe('s->b');
     expect(r!.points[0]).toEqual([400, 600]);
@@ -326,10 +327,10 @@ describe('routeLoose: a wire loose at its start', () => {
   });
 
   it('a host of another colour, or one gone, leaves it plain; a target not on the canvas leaves it out', () => {
-    const other = routeLoose({ l1: { open: 'start', target: 'x', start: { x: 400, y: 600 }, landing: 80, contact: { host: 's->b', at: 176 } } }, placement, ctx);
+    const other = startRoutes({ l1: { open: 'start', target: 'x', start: { x: 400, y: 600 }, landing: 80, contact: { host: 's->b', at: 176 } } }, placement, ctx);
     expect(other[0]!.joint).toBeUndefined();
     expect(other[0]!.condition).toBe(1);
-    expect(routeLoose({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: { host: 'gone', at: 176 } } }, placement, ctx)[0]!.joint).toBeUndefined();
-    expect(routeLoose({ l1: { open: 'start', target: 'nowhere', start: { x: 400, y: 600 }, landing: 80, contact: null } }, placement, ctx)).toEqual([]);
+    expect(startRoutes({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: { host: 'gone', at: 176 } } }, placement, ctx)[0]!.joint).toBeUndefined();
+    expect(startRoutes({ l1: { open: 'start', target: 'nowhere', start: { x: 400, y: 600 }, landing: 80, contact: null } }, placement, ctx)).toEqual([]);
   });
 });

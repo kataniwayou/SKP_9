@@ -161,8 +161,8 @@ describe('toFlow', () => {
   it('draws a wire loose at its start in its target colour, on its target node, with its junction marks; a head-open one stays grey', () => {
     const joint = { host: 'wf->a', contact: [256, 128] as [number, number], split: [256, 128] as [number, number], branch: [[256, 128], [576, 112]] as [number, number][], own: [], ownEnds: { sx: 0, sy: 0, tx: 0, ty: 0 } };
     const d: StudioDocument = { ...doc(), loose: [
-      { id: 't1', source: '', open: 'start', target: 'b', condition: 2, points: [[400, 400], [576, 112]] },
-      { id: 't2', source: '', open: 'start', target: 'b', condition: 2, points: [[400, 400], [256, 128]], joint },
+      { id: 't1', open: 'start', target: 'b', condition: 2, points: [[400, 400], [576, 112]] },
+      { id: 't2', open: 'start', target: 'b', condition: 2, points: [[400, 400], [256, 128]], joint },
       { id: 'l1', source: 'a', points: [[512, 128], [704, 400]] },
     ] };
     const { edges } = toFlow(d, fitter);

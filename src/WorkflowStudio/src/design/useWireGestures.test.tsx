@@ -718,7 +718,7 @@ describe('wire gestures', () => {
       const [draft, options] = commits(design)[0]!;
       expect(draft.next['s1']).toEqual([]);
       const [id, rec] = Object.entries(draft.loose)[0]!;
-      expect(rec).toEqual({ open: 'start', target: 's2', start: EMPTY_AT, landing: null, contact: null });
+      expect(rec).toEqual({ open: 'start', target: 's2', start: EMPTY_AT, landing: null, contact: null, was: 's1->s2' });
       expect(options).toEqual({ picks: [{ kind: 'wire', id: `loose:${id}` }] });
       rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={{ ...design, draft, picks: [{ kind: 'wire', id: `loose:${id}` }] }} onSelect={vi.fn()} />);
       expect(container.querySelector('[data-testid="rf__edge-s1->s2"]')).toBeNull();
@@ -745,7 +745,7 @@ describe('wire gestures', () => {
       expect(dragFrom(container, tailOf(container, 'wf->s1'), { x: 64, y: 704 }).label).toBe('loose wire');
       const [draft] = commits(design)[0]!;
       expect(draft.entries).toEqual([]);
-      expect(Object.values(draft.loose)).toEqual([{ open: 'start', target: 's1', start: { x: 64, y: 704 }, landing: null, contact: null }]);
+      expect(Object.values(draft.loose)).toEqual([{ open: 'start', target: 's1', start: { x: 64, y: 704 }, landing: null, contact: null, was: 'wf->s1' }]);
     });
 
     it('a tail over a line attaches to nothing: the wire is loose at its start there', async () => {
@@ -814,11 +814,52 @@ describe('wire gestures', () => {
       expect(design.onCommit).not.toHaveBeenCalled();
       const s3 = doc.placement.steps.get('s3')!;
       expect(dragFrom(container, headOf(container, 'loose:t1'), { x: s3.x + 20, y: s3.y + 72 }).label).toBe('re-attach here');
-      expect(commits(design)[0]![0].loose['t1']).toEqual({ open: 'start', target: 's3', start: EMPTY_AT, landing: 72, contact: null });
+      expect(commits(design)[0]![0].loose['t1']).toEqual({ open: 'start', target: 's3', start: EMPTY_AT, landing: 72, contact: null, was: 's1->s2' });
       const s2 = doc.placement.steps.get('s2')!;
       expect(dragFrom(container, headOf(container, 'loose:t1'), { x: s2.x + 20, y: s2.y + 120 }).label).toBe('move contact here');
       expect(commits(design)[1]![0].loose['t1']).toMatchObject({ target: 's2', landing: clampLanding(120) });
       expect(commits(design)[1]![0].next).toEqual({ s1: [] });
+    });
+
+    const joinedLoose = async () => {
+      const doc = await joinable();
+      const joined = setShape(EMPTY_DRAFT, 's3->s4', { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } });
+      const draft = loosenStart(joined, doc, 's3->s4', 't1', EMPTY_AT, null);
+      return { doc, draft, design: designOf({ draft, picks: [{ kind: 'wire', id: 'loose:t1' }] }) };
+    };
+
+    it("a joined one's arrow square re-targets it, keeping its junction", async () => {
+      const { doc, design } = await joinedLoose();
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+      const arrow = container.querySelector('.design-wire[data-wire="loose:t1"] .design-handle.end[data-end="arrow"]');
+      expect(arrow).not.toBeNull();
+      expect(dragFrom(container, arrow!, middleOf(doc, 's5')).label).toBe('re-attach here');
+      expect(commits(design)[0]![0].loose['t1']).toMatchObject({ open: 'start', target: 's5', contact: { host: 's1->s2', at: 40 } });
+    });
+
+    it('its head square joins a same-colour line ("join here"); over a line of another colour it is refused ("needs one end")', async () => {
+      const doc = await joinable();
+      const draft = loosenStart(EMPTY_DRAFT, doc, 's3->s4', 't1', EMPTY_AT, null);
+      const shown = applyDraft(doc, draft);
+      const design = designOf({ draft, picks: [{ kind: 'wire', id: 'loose:t1' }] });
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+      expect(dragFrom(container, headOf(container, 'loose:t1'), onLine(shown, 's1->s2')).label).toBe('join here');
+      expect(commits(design)[0]![0].loose['t1']).toMatchObject({ open: 'start', target: 's4', contact: { host: 's1->s2' } });
+      expect(commits(design)[0]![0].next).toEqual(draft.next);
+      const other = dragFrom(container, headOf(container, 'loose:t1'), onLine(shown, 's3->s5'));
+      expect(other.label).toBe('needs one end');
+      expect(other.tone).toContain('no');
+      expect(commits(design)).toHaveLength(1);
+    });
+
+    it("a joined one's open start onto a step wires it with its junction; elsewhere it moves, the junction kept", async () => {
+      const { doc, draft, design } = await joinedLoose();
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+      expect(dragFrom(container, tailOf(container, 'loose:t1'), middleOf(doc, 's1')).label).toBe('connect here');
+      expect(commits(design)[0]).toEqual([attachLooseStart(draft, doc, 't1', 's1'), { picks: [{ kind: 'wire', id: 's1->s4' }] }]);
+      expect(commits(design)[0]![0].routes['s1->s4']!.contact).toEqual({ host: 's1->s2', at: 40 });
+      expect(dragFrom(container, tailOf(container, 'loose:t1'), { x: 1150, y: 760 }).label).toBe('loose wire');
+      expect(commits(design)[1]![0].loose['t1']).toMatchObject({ start: { x: 1152, y: 760 }, contact: { host: 's1->s2', at: 40 } });
     });
 
     it('a run square shapes it, keeping its head; Reset route clears the bends; Delete removes it', async () => {
@@ -976,7 +1017,8 @@ describe('wire gestures', () => {
       expect(drag({ x: doc.placement.sphere.cx, y: doc.placement.sphere.cy }).label).toBe('re-attach here');
       expect(commits(design)[1]![0].loose['l1']).toMatchObject({ source: 'wf' });
 
-      expect(drag({ x: 1150, y: 40 }).label).toBeNull();
+      // on empty canvas it would be open at both ends: refused
+      expect(drag({ x: 1150, y: 40 }).label).toBe('needs one end');
       expect(drag(middleOf(doc, 's1')).label).toBe('starts here');
       expect(commits(design)).toHaveLength(2);
     });

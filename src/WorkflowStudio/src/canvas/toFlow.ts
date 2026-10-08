@@ -120,9 +120,9 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
     // open at its start: on its target, in its colour, its head and junction as a connected wire's
     if (l.open === 'start') {
       edges.push({
-        id: `${LOOSE_PREFIX}${l.id}`, type: 'cable', source: l.target!, target: l.target!,
+        id: `${LOOSE_PREFIX}${l.id}`, type: 'cable', source: l.target, target: l.target,
         sourceHandle: 'out', targetHandle: 'in', selectable: false, focusable: false,
-        data: { points: l.points, colour: conditionInfo(l.condition ?? 0).colour, broken: false, delay: 0, loose: true, openStart: true, ...(l.joint ? jointMarks(l.joint) : {}) },
+        data: { points: l.points, colour: conditionInfo(l.condition).colour, broken: false, delay: 0, loose: true, openStart: true, ...(l.joint ? jointMarks(l.joint) : {}) },
       });
       continue;
     }

@@ -66,8 +66,8 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
     expect(body.workflow.entryStepIds).toEqual(['s1']);
     expect(JSON.stringify(body.steps)).not.toContain('s2');
     expect(body.layout.loose).toEqual({
-      t1: { open: 'start', target: 's2', start: { x: 304, y: 600 }, landing: 96, contact: null },
-      t2: { open: 'start', target: 's3', start: { x: 40, y: 600 }, landing: 80, contact: null },
+      t1: { open: 'start', target: 's2', start: { x: 304, y: 600 }, landing: 96, contact: null, was: 's1->s2' },
+      t2: { open: 'start', target: 's3', start: { x: 40, y: 600 }, landing: 80, contact: null, was: 'wf->s3' },
     });
   });
 });
