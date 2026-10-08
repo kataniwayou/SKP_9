@@ -241,3 +241,32 @@ export async function newWire(page: Page, panel: Locator, from: string, to: Pt):
   await expect(newWires(panel)).toHaveCount(before + 1);
   return (await newWires(panel).last().getAttribute('data-id'))!;
 }
+
+// ---- BaseApi reads and the Save/Inspector steps shared by the specs ----
+
+/** A GET on BaseApi through the test runner (never the browser), expected to succeed. */
+export async function get<T>(request: APIRequestContext, path: string): Promise<T> {
+  const r = await request.get(`/api/v1/${path}`);
+  expect(r.ok(), `GET ${path}`).toBe(true);
+  return (await r.json()) as T;
+}
+
+/** The capsule's Save, then wait for the answer (the button leaves "Saving…"). */
+export async function save(page: Page): Promise<void> {
+  await page.getByRole('button', { name: '⤓ Save' }).click();
+  await expect(page.getByRole('button', { name: '⤓ Saving…' })).toHaveCount(0, { timeout: 20_000 });
+}
+
+/** Opens a tool pane by its tab and returns its body. */
+export async function pane(page: Page, name: 'Problems' | 'Output'): Promise<Locator> {
+  await tab(page, name).click();
+  return page.locator(`[data-pane="${name.toLowerCase()}"]`);
+}
+
+/** Picks step `id` and chooses an entry condition in the Inspector, with the real mouse. */
+export async function setEntryCondition(page: Page, panel: Locator, id: string, name: RegExp): Promise<void> {
+  await node(panel, id).click({ position: { x: 20, y: 12 } });
+  await expect(inspector(page).locator('.kindpill')).toHaveText('STEP');
+  await inspector(page).getByLabel('Entry condition', { exact: true }).click();
+  await inspector(page).getByRole('option', { name }).click();
+}

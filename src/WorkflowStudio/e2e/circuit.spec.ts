@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import {
-  box, centreOf, documentPanel, dragEnd, edge, emptySpot, endSquare, expect, inspector, newWire, node, openWorkflow,
-  pickWire, pointOnWire, tab, test, type Pt,
+  box, centreOf, documentPanel, dragEnd, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
+  pickWire, pointOnWire, setEntryCondition, tab, test, type Pt,
 } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
 
@@ -92,7 +92,10 @@ test('rule 2: a step takes ends on its left and right sides only, anywhere short
   expect((await pointsOf(panel, `${t.a}->${t.b}`)).at(-1)).toEqual([b.x, b.y + 16]);
   expect(await dragEnd(page, panel, `${t.b}->${t.c}`, 'tail', await onSide(panel, t.b, 'out', 0.95))).toBe('connect here');
   expect((await pointsOf(panel, `${t.b}->${t.c}`))[0]).toEqual([b.x + b.w, b.y + 144]);
-  // neither the top nor the bottom of a step takes an end: dropped there it lands on a side
+  // neither the top nor the bottom of a step takes an end: dropped there it lands on a side (each end first slid to 144,
+  // so the drop on the top edge has to move it)
+  expect(await dragEnd(page, panel, `${t.a}->${t.b}`, 'head', await onSide(panel, t.b, 'in', 0.95))).toBe('connect here');
+  expect((await pointsOf(panel, `${t.a}->${t.b}`)).at(-1)).toEqual([b.x, b.y + 144]);
   for (const [id, side] of [[`${t.a}->${t.b}`, 'head'], [`${t.b}->${t.c}`, 'tail']] as const) {
     const bb = await box(node(panel, t.b));
     expect(await dragEnd(page, panel, id, side, { x: bb.x + bb.width * (side === 'head' ? 0.3 : 0.7), y: bb.y + 2 })).toBe('connect here');
@@ -176,7 +179,16 @@ test('rule 6: a head over the hub is refused: "only a tail on the workflow"', as
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   const before = await pointsOf(panel, ab);
-  expect(await dragEnd(page, panel, ab, 'head', await onHub(panel, 0))).toBe('only a tail on the workflow');
+  await pickWire(page, panel, ab);
+  const head = await centreOf(endSquare(panel, ab, 'head'));
+  const over = await onHub(panel, 0);
+  await page.mouse.move(head.x, head.y);
+  await page.mouse.down();
+  await page.mouse.move(over.x, over.y, { steps: 10 });
+  // while held over the hub: the red refusal, and the hub outlined as a refused drop
+  await expect(panel.locator('.design-drop-label')).toHaveText('only a tail on the workflow');
+  await expect(node(panel, 'wf')).toHaveClass(/drop-no/);
+  await page.mouse.up();
   await expect(node(panel, 'wf')).not.toHaveClass(/drop-/);
   expect(await pointsOf(panel, ab)).toEqual(before);
 });
@@ -307,6 +319,7 @@ test('base circuit: current flows one way, from the hub to the steps: a tail nev
   expect(await pointsOf(panel, ab)).toEqual(before);
   // the hub is all output: b -> c's tail goes on it; current from the hub into c, teal and solid
   expect(await dragEnd(page, panel, bc, 'tail', await onHub(panel, 45))).toBe('connect here');
+  near((await pointsOf(panel, bc))[0], await ringAt(panel, 45));
   expect(await colourOf(panel, bc)).toBe(TEAL);
   expect(await dashOf(panel, bc)).toBe('none');
   // a wire from the hub's port into d's input: red, solid
@@ -453,10 +466,7 @@ test('a tail at a hub angle, a slid head and an open head: Undo and Redo step th
 test('an entry-condition edit that makes a short circuit marks the junction red and lists it in Problems', async ({ page }) => {
   const panel = await open(page);
   expect(await dragEnd(page, panel, `${t.b}->${t.c}`, 'tail', await pointOnWire(panel, `${t.a}->${t.b}`, 0.5, 12))).toBe('join here');
-  await node(panel, t.c).click({ position: { x: 20, y: 12 } });
-  await expect(inspector(page).locator('.kindpill')).toHaveText('STEP');
-  await inspector(page).getByLabel('Entry condition', { exact: true }).click();
-  await inspector(page).getByRole('option', { name: /Failed/ }).click();
+  await setEntryCondition(page, panel, t.c, /Failed/);
   await expect(edge(panel, `${t.b}->${t.c}`).locator('circle.nx-joint.short')).toHaveCount(1);
   await tab(page, 'Problems').click();
   await expect(page.locator('[data-pane="problems"]')).toContainText('short circuit: Completed meets Failed');

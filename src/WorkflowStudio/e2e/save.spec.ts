@@ -1,5 +1,5 @@
-import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { centreOf, documentPanel, inspector, newWires, node, openWorkflow, pointOnWire, tab } from './studio';
+import type { Locator, Page } from '@playwright/test';
+import { centreOf, documentPanel, get, inspector, newWires, node, openWorkflow, pane, pointOnWire, save, tab } from './studio';
 import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
 // Plan 8 §8: Save is the studio's only write, and these tests write only to their own throwaway workflow
@@ -18,12 +18,6 @@ test.beforeEach(async ({ page }) => {
 const field = (page: Page, label: string): Locator => inspector(page).getByLabel(label, { exact: true });
 const pill = (page: Page): Locator => inspector(page).locator('.kindpill');
 
-async function get<T>(request: APIRequestContext, path: string): Promise<T> {
-  const r = await request.get(`/api/v1/${path}`);
-  expect(r.ok(), `GET ${path}`).toBe(true);
-  return (await r.json()) as T;
-}
-
 /** Replaces a field's text with the real keyboard: click, select all, type. */
 async function typeInto(page: Page, label: string, text: string): Promise<void> {
   await field(page, label).click();
@@ -34,17 +28,6 @@ async function typeInto(page: Page, label: string, text: string): Promise<void> 
 async function selectStep(page: Page, panel: Locator, id: string): Promise<void> {
   await node(panel, id).click({ position: { x: 20, y: 12 } });
   await expect(pill(page)).toHaveText('STEP');
-}
-
-/** The capsule's Save, then wait for the answer (the button leaves "Saving…"). */
-async function save(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '⤓ Save' }).click();
-  await expect(page.getByRole('button', { name: '⤓ Saving…' })).toHaveCount(0, { timeout: 20_000 });
-}
-
-async function pane(page: Page, name: 'Problems' | 'Output'): Promise<Locator> {
-  await tab(page, name).click();
-  return page.locator(`[data-pane="${name.toLowerCase()}"]`);
 }
 
 test('an invalid design is stored but not applied: Problems and Output say why, BaseApi is unchanged, a fresh page shows the stored design', async ({ page, request, context }) => {

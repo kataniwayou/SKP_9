@@ -1,5 +1,5 @@
-import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { documentPanel, inspector, openWorkflow, tab } from './studio';
+import type { Locator, Page } from '@playwright/test';
+import { documentPanel, get, inspector, openWorkflow, tab } from './studio';
 import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
 // Plan 8 §3.3: the Inspector edits the design, never BaseApi. These tests never press Save. The write guard
@@ -23,12 +23,6 @@ test.afterEach(() => { expect(writes, 'the Inspector writes nothing: no PUT, not
 
 const field = (page: Page, label: string): Locator => inspector(page).getByLabel(label, { exact: true });
 const pill = (page: Page): Locator => inspector(page).locator('.kindpill');
-
-async function get<T>(request: APIRequestContext, path: string): Promise<T> {
-  const r = await request.get(`/api/v1/${path}`);
-  expect(r.ok(), `GET ${path}`).toBe(true);
-  return (await r.json()) as T;
-}
 
 async function typeInto(page: Page, label: string, text: string): Promise<void> {
   await field(page, label).click();

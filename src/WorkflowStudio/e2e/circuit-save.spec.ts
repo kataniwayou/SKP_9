@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { centreOf, documentPanel, dragEnd, dragReading, edge, inspector, newWires, node, openWorkflow, pointOnWire, tab } from './studio';
+import { centreOf, documentPanel, dragEnd, dragReading, edge, get, newWires, node, openWorkflow, pane, pointOnWire, save, setEntryCondition } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
 
 // Plan 9 §7: Save derives nextStepIds and entryStepIds by tracing the current. These tests save only their own throwaway
@@ -17,35 +17,12 @@ test.beforeEach(async ({ page }) => {
 
 const sorted = (ids: readonly string[]) => [...ids].sort();
 
-async function get<T>(request: APIRequestContext, path: string): Promise<T> {
-  const r = await request.get(`/api/v1/${path}`);
-  expect(r.ok(), `GET ${path}`).toBe(true);
-  return (await r.json()) as T;
-}
 const nextOf = async (request: APIRequestContext, id: string) => (await get<{ nextStepIds: string[] }>(request, `steps/${id}`)).nextStepIds;
 const entriesOf = async (request: APIRequestContext) => (await get<{ entryStepIds: string[] }>(request, `workflows/${t.workflow.id}`)).entryStepIds;
 
 async function open(page: Page): Promise<Locator> {
   await openWorkflow(page, t.workflow);
   return documentPanel(page, t.workflow);
-}
-
-/** The capsule's Save, then wait for the answer (the button leaves "Saving…"). */
-async function save(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '⤓ Save' }).click();
-  await expect(page.getByRole('button', { name: '⤓ Saving…' })).toHaveCount(0, { timeout: 20_000 });
-}
-
-async function pane(page: Page, name: 'Problems' | 'Output'): Promise<Locator> {
-  await tab(page, name).click();
-  return page.locator(`[data-pane="${name.toLowerCase()}"]`);
-}
-
-async function setEntryCondition(page: Page, panel: Locator, id: string, name: RegExp): Promise<void> {
-  await node(panel, id).click({ position: { x: 20, y: 12 } });
-  await expect(inspector(page).locator('.kindpill')).toHaveText('STEP');
-  await inspector(page).getByLabel('Entry condition', { exact: true }).click();
-  await inspector(page).getByRole('option', { name }).click();
 }
 
 test('a tail joined on a wire fans out: Save writes the tapped step\'s current into both steps; a fresh read draws the junction again', async ({ page, request }) => {
@@ -87,7 +64,14 @@ test('an entry-condition edit that makes a short circuit: listed in Problems; Sa
   await setEntryCondition(page, panel, t.c, /Failed/);
   await expect(panel.locator('circle.nx-joint.short').first()).toBeVisible();
   await expect(await pane(page, 'Problems')).toContainText('short circuit: Completed meets Failed');
+  const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/workflows/${t.workflow.id}/design`));
   await save(page);
+  // the request writes no list for the held-back sources (a and d: their wires are in the shorted net), and no entries
+  const body = (await sent).postDataJSON() as { workflow: { entryStepIds: string[] | null }; steps: { id: string; nextStepIds: string[] | null }[] };
+  for (const id of [t.a, t.d]) expect(body.steps.find((s) => s.id === id)?.nextStepIds ?? null, `nextStepIds sent for ${id}`).toBeNull();
+  expect(body.workflow.entryStepIds).toBeNull();
+  // c's edit is in it
+  expect(body.steps.some((s) => s.id === t.c)).toBe(true);
   await expect(await pane(page, 'Output')).toContainText('Saved and applied; 1 short circuit not written');
   await expect(await pane(page, 'Problems')).toContainText('short circuit: Completed meets Failed');
   // the rest applied: c's entry condition; the sources whose wires are in the shorted net keep their saved lists
