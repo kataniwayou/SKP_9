@@ -47,6 +47,8 @@ questions (§2.1) and the recommendations accepted for every gap (§2.2).
 - **Cursor:** the four-way move cursor on every end square, as today on the contact square; run squares keep theirs.
 - **Open ends** (studio's call): an unconnected head keeps its arrow head, an unconnected tail keeps its small ring —
   a wire always reads as an arrow. No open circles.
+  *Superseded (2026-10-09, rule D, §2.3): a wire with no end on a step or the hub has no direction and draws neither
+  the ring nor the arrow head; an open end of a wire that has a direction still keeps them.*
 - **Creating new wires** is deferred (today's drag from the hidden spot on a step's right side or the hub stays).
 
 ### 2.2 Gaps closed (recommendations the user accepted)
@@ -71,6 +73,35 @@ questions (§2.1) and the recommendations accepted for every gap (§2.2).
    the hub makes the head's step an entry step; a stored junction that disagrees with the workflow loaded from BaseApi
    is drawn as a plain wire on load (BaseApi is the truth for the graph).
 
+### 2.3 The user's drag rules of 2026-10-09 (A-D)
+
+Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 where they differ.
+
+- **A. Cursors.** The open hand only over a wire's body, never over a square; end squares the four-way arrow; run
+  squares the two-way arrow; the closed hand while the body is dragged.
+- **B. Body drag.** The closed hand always moves the whole wire rigidly, its shape frozen, detached from every contact
+  point, also when an end is connected: it never stretches or shrinks a leg (stretching is the end square's). While
+  dragged, each end is judged over what is under it exactly as an end square's drag is (the same reach, outline and
+  label). An end over a contact it may take (a step side, as a vertical line of contact points whose height is the
+  end's height clamped to the landing range; the hub's ring; a wire's line) shifts the whole wire by the small offset
+  that puts that end exactly on it; the end that got there first decides the shift. Released, every end over a
+  contact it may take connects; the others stay open. When the frozen shape cannot meet both contacts, the first end
+  connects and the other stays open. A refused end moves with the wire and stays open. Dragged away and dropped back
+  where it was, both ends connect again. Ends joined on the moved wire open where they are drawn; a sub-grid wobble
+  is a click.
+- **C. End square.** The end draws its wire like a pen: each 90 degree turn of the pointer fixes the current leg and
+  starts a new one (a right-angle corner); back along the current leg shortens it; back past a corner fixed in the
+  drag removes it. Over a contact, the drawn corners are kept and only the last leg goes into the contact point.
+  Released it connects, or stays open over nothing, or snaps back when refused.
+- **D. Direction-less wires.** A wire with no end on a step or the hub has no head or tail: no arrow head, no tail
+  ring (also when its only connection is a join on a wire's line). The first end that lands on a step or the hub
+  decides: a step's input makes it the head, a step's output or the hub the tail; the other end takes the other role
+  (the wire is turned round, same id). Its first connection is therefore never "wrong side" or "only a tail on the
+  workflow"; the checks that need a direction (short circuit, same step, family) are made on the wire turned that
+  way. Both ends arriving at once (a body drag) decide together: two inputs or two outputs make the second "wrong
+  side". Joined on one line, its other end onto another line is refused: "needs a step first". It writes nothing to
+  BaseApi, and stays as it is through Save, reload and refresh. Once it has a direction, drops are judged as before.
+
 ## 3. The model
 
 **Terminals.**
@@ -84,6 +115,8 @@ questions (§2.1) and the recommendations accepted for every gap (§2.2).
 - on a **terminal** (a step side or the hub ring), at a point along it;
 - on a **junction**: at a point along another wire (rule 4) — a filled circle, no arrow head at that end;
 - **open**: not connected — a head keeps its arrow head, a tail its small ring (§2.1).
+  *Superseded in part (2026-10-09, rule D): a wire with neither end on a step or the hub has no direction, so neither
+  ring nor arrow head; its ends are only stored as `tail` and `head` until one lands on a step or the hub.*
 
 **Junctions.**
 - A **head junction** on wire W at point p (fan-in): the wire's current joins W at p and flows on downstream.
@@ -115,7 +148,7 @@ questions (§2.1) and the recommendations accepted for every gap (§2.2).
 | in a short circuit (§2.2-7 only) | as above, the junction marked red | the family |
 
 - Ends: an arrow head at a head on a step or open; a filled circle at a junction end; the small ring at a tail on a
-  terminal or open.
+  terminal or open. *A direction-less wire (rule D, §2.3) has no arrow head and no ring, only its junction circle.*
 - Picked (clicked) wires show squares: one on each end, one in the middle of each run (rule 14). End squares show the
   four-way move cursor, also while dragged. Squares keep their fixed screen size at any zoom.
 - The legend shows the families, the grey dashed undecided wire and the short-circuit mark; no "loose wire" item
@@ -125,8 +158,9 @@ questions (§2.1) and the recommendations accepted for every gap (§2.2).
 
 - **Any end square** (tail or head, connected or open) drags that end. While dragging, the label says what the drop
   would do: "connect here" / "join here" (green), "move here" (grey: the end becomes or stays open there), or a red
-  refusal: "wrong side", "same step", "same wire", "short circuit", "only a tail on the workflow". Released: the drop
-  is applied or the end snaps back.
+  refusal: "wrong side", "same step", "same wire", "short circuit", "only a tail on the workflow", "needs a step
+  first" (rule D, 2026-10-09). Released: the drop is applied or the end snaps back. A direction-less wire's end takes
+  the role the side or the hub gives it (rule D, §2.3).
 - Dropped on empty canvas, a cache, or anywhere it attaches to nothing: the end becomes open there (allowed for
   either end and for both; no "needs one end").
 - **Run squares** drag runs; the shape is kept (stored bends), as today. Right-click Reset route; Delete removes the
@@ -138,12 +172,21 @@ questions (§2.1) and the recommendations accepted for every gap (§2.2).
   the wire keeps that shape (its bends). An automatic other end on a step or the hub is held where it is drawn
   (`held`; the hub at the nearest 15°) and goes back to automatic when the open end connects again. Over a step side,
   the hub or a wire the drop is judged as above and the router draws the way in.
+  *Superseded (2026-10-09, rule C, §2.3): the end draws around corners, one per 90 degree turn of the pointer (back
+  past a corner fixed in the drag removes it); over a contact the drawn corners are kept and only the last leg goes
+  in (a vertical last leg goes on to the contact's height, then square in). A wire that was automatic, with no corner
+  fixed in the drag, is still routed in by the router.*
 - **Wire body** (the user's rule, 2026-10-08; supersedes "a body drag drags the nearest run and never detaches"): in
   design mode the body shows the open hand; pressed and dragged (the closed hand), any wire, picked or not, moves
   whole. Its drawn path is frozen and shifted by the pointer's movement snapped to 8 px; both its ends open there
   (its own junction ends break too), its shape is kept as its bends (a straight wire as a one-run shape), and the
   ends joined on it open where they are drawn (§2.2-6). A press that moves less than a grid step only picks it, as a
   click (Ctrl toggles). One Undo step.
+  *Superseded in part (2026-10-09, rule B, §2.3): each end is judged as it moves, with its own label and outline; an
+  end over a contact it may take shifts the wire exactly onto it, and on release every such end connects (the moved
+  wire has no direction: the sides decide it, rule D). Dropped back where it was, it is as it was. Judgement calls:
+  the second end meets its contact when the shape fits it to within a step side's line (x exact, y within 4 px), a
+  line's 4 px, or the hub ring's 12.5 px (half its 15 degree spacing); otherwise it stays open ("move here").*
 - New wires: unchanged (deferred, §2.1).
 
 ## 7. Save: from the circuit to the workflow

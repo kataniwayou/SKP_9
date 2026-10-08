@@ -104,7 +104,8 @@ step's processor band. This section follows the main spec's §5.5, without junct
 - The **last segment** slides the landing along the target's processor band (the landing offset).
 - **Dragging the wire's body** anywhere counts as a segment drag and **never detaches** the wire.
   *Superseded (2026-10-08): dragging the body moves the whole wire and detaches it; an end square adds one corner
-  (plan 9 spec §6).*
+  (plan 9 spec §6). Superseded again (2026-10-09): the moved wire's ends connect where they land on a contact, and
+  an end square draws around corners (plan 9 spec §2.3, rules B and C).*
 
 ### 4.3 Manual and automatic routes
 

@@ -108,6 +108,47 @@ is held at its drawn height (`held`, stored in the layout) and goes automatic ag
 Moved wires and L legs are not routed around blocks (as asked). Vitest 821; Playwright 96 + 2 skips on dev and
 deployed. Spec §6 of plan 9 and the older specs carry superseded notes.
 
+**Wire rules A-D (user request, 2026-10-09) — BUILT, NOT DEPLOYED.** Code `d275f13`, `4cd3cd7`; tests `2e895eb`,
+`71fb8c2`; docs in the commit that adds this paragraph. Spec: plan 9 §2.3 (new), superseded notes in plan 9 §2.1, §3, §5, §6 and in the plan 4
+and studio specs. The deployed bundle is still `index-BC19MgmE.js` (without these rules).
+- **A. Cursors** (already true): open hand on the body only, four-way on end squares, two-way on run squares, closed
+  hand while the body is dragged. New e2e test.
+- **B. Body drag** (`design/bodyDrop.ts` `landBody`): the wire moves rigidly, shape frozen, detached from everything,
+  connected ends too. Each end is judged as an end-square drop (same `targetOf`/`judgeDrop`/reach), one label and
+  outline per end (`hints: DropHint[]`). An end over a contact it may take shifts the wire exactly onto it (the end
+  that got there first decides, kept across moves); released, every such end connects with the frozen shape as its
+  bends, the others stay open. Back exactly where it was (net shift 0 after the snap): nothing is committed, the wire
+  is as it was (the drag-away-and-back case). Rulings: the second end "fits" when the shifted shape meets its contact
+  within a step side's line (x exact, y within 4 px: heights are snapped to 8), a line's 4 px, or the hub ring's
+  12.5 px (half its 15 degree spacing); if not, and shifting onto the second end's contact instead meets both, that is
+  used; otherwise the first end connects and the second is "move here". A hub contact stores the snapped angle, so a
+  hub tail moved back a few px off its automatic place comes back as an angled tail.
+- **C. End square** (`layout/wireMove.ts` `startLegs`/`moveLegs`/`legsPath`): an L to the pointer; a 90 degree turn
+  (16 px of travel at least 2:1 along the anchor's axis while the L's other leg is at least 16 px) fixes the corner
+  where the pointer turned; back at or past a fixed corner removes it. Rulings: only corners fixed in this drag can
+  be removed (the wire's own corners stay; removing them walked a dragged tail back to its head in the old tests); a
+  slanting drag turns no corner; on a contact the drawn corners are kept and the last leg goes in (a vertical last
+  leg goes on to the contact's height and square in, so the user's corner stays; otherwise routed from the anchor);
+  an automatic wire with no corner fixed in the drag is still routed by the router (so a plain re-target stays
+  automatic). `endMoved`/`movedEndShape` are gone.
+- **D. Direction-less wires** (`isFree`, `reverseWire`, `roleOf`, `applyDrop`, verdict `needsStep`): derived from the
+  ends (no new stored field), so Save, reload and refresh keep it as the circuit does. No ring and no arrow head
+  (`WireRoute.free` → `CableEdgeData.free`). The first end on a step or the hub decides (input → head; output or hub
+  → tail), the wire turned round when needed (same id, bends reversed, `held` swapped). Judged on the wire turned that
+  way, so short circuit / same step / family still refuse. A moved wire (rule B) is direction-less while moved.
+  Joined on one line, another line is "needs a step first". Writes nothing (no terminal, no current).
+- Tests: Vitest 838 (75 files); tsc clean; Playwright on the dev server 107 passed + 2 skipped (the usual art.spec skips). New e2e (real mouse, circuit.spec):
+  cursors; drag away and back (exact, and 16 lower, shape exact); one-end-connected moves whole; two ends over one
+  input ("wrong side"); 3 corners in one drag; corners kept on connect; first output/input decides; join then
+  output/input; "needs a step first"; refresh keeps direction-less wires; circuit-save: a direction-less wire writes
+  nothing and survives Save + a fresh read. Each new test was checked to fail with its behaviour broken (seven
+  source mutations). Older tests that asserted a ring/arrow on wires with no step end, or moved a body onto a step by
+  accident, were updated (circuit rules 11, 12, the body-drag test; designer tests at 820 and 882; two jsdom gesture
+  tests).
+- Follow-ups: a hub tail as the *second* end of a
+  body drag connects at the nearest 15 degrees (a few px off the frozen shape, the ring lead absorbs it); not yet run
+  against the deployed studio (no deploy asked).
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
