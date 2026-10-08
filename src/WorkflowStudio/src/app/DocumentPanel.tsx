@@ -12,6 +12,7 @@ import type { Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { designDirty, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
+import { applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
 import { CapsuleToolbar } from './CapsuleToolbar';
 import { useStudioActionsOrNull } from './studioActions';
@@ -52,6 +53,10 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   const live = useMemo<LiveArt>(() => ({ started: status === 'running', status, health: healthOf(liveness) }), [status, liveness]);
   // a background tab's canvas stays mounted; .bg hides its nodes (document.css says why)
   const cls = usePanelShown(panel) ? 'docpanel' : 'docpanel bg';
+  // the canvas draws the design (plan 8 §3.1): the base with the entity edits; the canvas draft goes over it inside the canvas
+  const base = open?.status.kind === 'ready' ? open.status.doc : null;
+  const edits = open?.edits ?? null;
+  const edited = useMemo(() => (base && edits ? applyEdits(base, edits) : null), [base, edits]);
 
   if (open === null) return null;
   const blank = missingRequiredShown(open);
@@ -61,7 +66,7 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   return (
     <div className={cls}>
       <WorkflowCanvas
-        doc={open.status.doc}
+        doc={edited ?? open.status.doc}
         fitter={fitter}
         selection={open.selection}
         live={live}

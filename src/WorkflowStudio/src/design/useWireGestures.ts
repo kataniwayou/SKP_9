@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject, type Point
 import { useReactFlow } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { clearBends, clearPath, clearRun } from '../layout/detour';
-import { clampLanding, PMID, snap, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
+import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { route, type Box, type Pt } from '../layout/router';
 import { dragSegment, endsOf, nearestSegment, normalize, shapeFromPoints, type Bends, type WireShape } from '../layout/shape';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
-import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WireRoute } from '../layout/wires';
+import { blockBoxes, portOf, SPHERE_BOX_ID, stepBoxId, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
 import { addWire, reattach, setShape, wireId, type Draft } from './draft';
@@ -378,10 +378,7 @@ export function useWireGestures(
     const d = designRef.current;
     if (!d || e.button !== 0) return;
     const { placement } = shown.current;
-    const at = placement.steps.get(source);
-    const from = source === WORKFLOW_SOURCE
-      ? { x: placement.sphere.cx + SPHERE_R, y: placement.sphere.cy }
-      : { x: (at?.x ?? 0) + STEP_W, y: (at?.y ?? 0) + PMID };
+    const from = portOf(placement, source) ?? { x: STEP_W, y: PMID };
     const boxes = blockBoxes(placement);
     setResize(null);
     const path = (p: Point, over: string | null) => { const f = freeEnd(p, 'target', boxes, over); return clearPath(route(from.x, from.y, f.x, f.y, boxOf(source), f.box, 0, boxes), boxes); };

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { AUDIT } from '../model/fixtures';
 import type { Step } from '../model/graph';
 import type { Placement } from './placement';
-import { drawnLine, routeWires, tetherPoints, type WiringInput } from './wires';
+import { PMID, SPHERE_R, STEP_W } from './geometry';
+import { drawnLine, portOf, routeWires, tetherPoints, type WiringInput } from './wires';
 
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
   id, name: id, version: '1.0.0', description: null, processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
@@ -257,5 +258,14 @@ describe('junctions (plan 7)', () => {
     const pos = { s: [288, 32], k: [528, 32], t: [288, 288], c: [864, 288] } as Record<string, [number, number]>;
     const wires = setup(st, pos, new Set<string>(), join('t->c', 's->k', 8));
     expect(wires.find((x) => x.id === 't->c')!.joint).toBeUndefined();
+  });
+});
+
+describe('portOf', () => {
+  const placement: Placement = { sphere: { cx: 100, cy: 200 }, steps: new Map([['s1', { x: 400, y: 80 }]]), caches: new Map() };
+  it('is a step output port, the hub right edge, or null for a step not on the canvas', () => {
+    expect(portOf(placement, 's1')).toEqual({ x: 400 + STEP_W, y: 80 + PMID });
+    expect(portOf(placement, 'wf')).toEqual({ x: 100 + SPHERE_R, y: 200 });
+    expect(portOf(placement, 'gone')).toBeNull();
   });
 });

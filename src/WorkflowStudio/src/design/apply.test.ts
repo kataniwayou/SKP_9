@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { assignmentDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { addWire, EMPTY_DRAFT, moveBlocks, removeWires, setShape } from './draft';
-import { applyDraft } from './apply';
+import { PMID, STEP_W } from '../layout/geometry';
+import { addLoose, addWire, EMPTY_DRAFT, moveBlocks, removeWires, setShape } from './draft';
+import { applyDesign, applyDraft } from './apply';
+import { createAssignment, EMPTY_EDITS, removeAssignment, setField } from './design';
 
 const chain = () => loadedDocument(graphDto({
   workflow: workflowDto({ entryStepIds: ['s1'] }),
@@ -61,5 +63,49 @@ describe('applyDraft', () => {
     const shown = applyDraft(saved, setShape(EMPTY_DRAFT, 's1->s2', { bends: null, landing: 128 }));
     const p = shown.placement.steps.get('s2')!;
     expect(shown.wires.find((x) => x.id === 's1->s2')!.points.at(-1)).toEqual([w.points.at(-1)![0], p.y + 128]);
+  });
+});
+
+describe('applyDesign (plan 8 §3.1: what the canvas, the Inspector and the panels show)', () => {
+  it('lays the entity edits over the base: names, an entry condition and its wire colour, a schema copy, assignments', async () => {
+    const base = await loadedDocument(graphDto({
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { entryCondition: 1 })],
+      processors: [processorDto('p1', { configSchemaId: 'sc1' })],
+      schemas: [schemaDto('sc1')],
+      assignments: [assignmentDto('a1', { stepId: 's2' })],
+    }));
+    let edits = setField(EMPTY_EDITS, { kind: 'step', id: 's2' }, stepDto('s2'), 'entryCondition', 2, () => 'x');
+    edits = setField(edits, { kind: 'workflow' }, workflowDto(), 'name', 'renamed', () => 'x');
+    edits = setField(edits, { kind: 'schema', processorId: 'p1', slot: 'config' }, schemaDto('sc1'), 'definition', '{"type":"string"}', () => 'copy1');
+    edits = createAssignment(removeAssignment(edits, 's2', { id: 'a1', updatedAt: '' }), 's1', 'step-s1', 'n1');
+
+    const shown = applyDesign(base, EMPTY_DRAFT, edits);
+
+    expect(shown.graph.workflow.name).toBe('renamed');
+    expect(shown.graph.steps.get('s2')!.entryCondition).toBe(2);
+    expect(shown.wires.find((w) => w.id === 's1->s2')!.condition).toBe(2);
+    expect(shown.graph.processors.get('p1')!.configSchemaId).toBe('copy1');
+    expect(shown.graph.schemas.get('copy1')!.name).toBe('schema-sc1');
+    expect(shown.graph.assignments.map((a) => a.id)).toEqual(['n1']);
+    expect(base.graph.workflow.name).toBe('orders'); // the base is untouched
+  });
+
+  it('gives back the base itself when nothing is designed', async () => {
+    const base = await loadedDocument();
+    expect(applyDesign(base, EMPTY_DRAFT, EMPTY_EDITS)).toBe(base);
+  });
+
+  it('routes a loose wire from the port of its source to its open end, and drops one whose source is not on the canvas', async () => {
+    const base = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
+    const at = base.placement.steps.get('s1')!;
+    const draft = addLoose(addLoose(EMPTY_DRAFT, 'l1', 's1', { x: at.x + 600, y: at.y + 240 }), 'l2', 'gone', { x: 0, y: 0 });
+
+    const shown = applyDesign(base, draft, EMPTY_EDITS);
+
+    expect(shown.loose.map((l) => l.id)).toEqual(['l1']);
+    const pts = shown.loose[0]!.points;
+    expect(pts[0]).toEqual([at.x + STEP_W, at.y + PMID]);
+    expect(pts[pts.length - 1]).toEqual([at.x + 600, at.y + 240]);
+    expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual([]); // never part of the wiring
   });
 });

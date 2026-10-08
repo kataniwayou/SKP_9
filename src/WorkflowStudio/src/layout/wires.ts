@@ -1,6 +1,6 @@
 import type { Id, Step } from '../model/graph';
 import { clearPath } from './detour';
-import { CACHE_H, CACHE_W, GRID, PORT_GAP, clampLanding, SPHERE_R, STEP_H, STEP_W, offset, snap, type Point } from './geometry';
+import { CACHE_H, CACHE_W, GRID, PMID, PORT_GAP, clampLanding, SPHERE_R, STEP_H, STEP_W, offset, snap, type Point } from './geometry';
 import { CONTACT_MARGIN, inLoop, lengthOf, nearestOn, ownEnds, pointAt, slice } from './junctions';
 import type { Placement, Sphere } from './placement';
 import { computeDepartures, computeLandings, departureX, WORKFLOW_SOURCE, type SourceId, type WireEnd } from './ports';
@@ -72,6 +72,13 @@ export function collectWires(input: WiringInput, placement: Placement): WireEnd[
     for (const next of step.nextStepIds) if (placed(next)) wires.push({ source: id, target: next });
   }
   return wires;
+}
+
+/** Where a wire from `source` leaves: a step's output port or the hub's right edge; null for a step not on the canvas. */
+export function portOf(placement: Placement, source: Id): Point | null {
+  if (source === WORKFLOW_SOURCE) return { x: placement.sphere.cx + SPHERE_R, y: placement.sphere.cy };
+  const at = placement.steps.get(source);
+  return at ? { x: at.x + STEP_W, y: at.y + PMID } : null;
 }
 
 export function blockBoxes(placement: Placement): Box[] {
@@ -176,6 +183,18 @@ function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, sh
   const joint: Joint = { host: host.id, contact, split, branch, own, ownEnds: ends };
   const shared = atContact ? [] : slice(hostTravel, onTravel, s.at).slice(1);
   return { route: { ...r, points, joint }, travel: [...points, ...shared, ...branch.slice(1)] };
+}
+
+/** Loose wires (plan 8 §5), each from its source's port to its open end; one whose source is not on the canvas is left out. */
+export function routeLoose(loose: Readonly<Record<string, LooseWire>>, placement: Placement): LooseRoute[] {
+  const boxes = blockBoxes(placement);
+  const out: LooseRoute[] = [];
+  for (const [id, l] of Object.entries(loose)) {
+    const from = portOf(placement, l.source);
+    if (!from) continue;
+    out.push({ id, source: l.source, points: clearPath(route(from.x, from.y, l.end.x, l.end.y, boxIdOf(l.source), '', 0, boxes), boxes) });
+  }
+  return out;
 }
 
 /** The dashed tether from the sphere's bottom to a cache's top centre, right-angled. */
