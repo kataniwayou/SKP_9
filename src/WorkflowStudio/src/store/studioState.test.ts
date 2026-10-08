@@ -344,6 +344,19 @@ describe('opening a design (plan 9 §8)', () => {
     expect(canSave(d)).toBe(false);
   });
 
+  it('a stored version 2 design keeps a self-link the workflow has: no list changes, not dirty (final review I1)', async () => {
+    const at = (step: string) => ({ on: 'step', step, y: null });
+    const selfish = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s1', 's2'] }), stepDto('s2')],
+      layout: { v: 2, wires: { 'wf->s1': { tail: { on: 'hub', angle: 90 }, head: at('s1') }, 's1->s1': { tail: at('s1'), head: at('s1') }, 's1->s2': { tail: at('s1'), head: at('s2') } } },
+    } as never));
+    const d = run(open('wf1'), { type: 'loaded', workflowId: 'wf1', doc: selfish }).docs[0]!;
+    expect(Object.keys(d.design.draft.wires!).sort()).toEqual(['s1->s1', 's1->s2', 'wf->s1']);
+    expect(d.design.draft.next).toEqual({});
+    expect(designDirty(d)).toBe(false);
+  });
+
   it('a stored version 2 layout whose circuit is the plain wiring of the workflow is no design: not dirty, nothing to save', async () => {
     const at = (step: string) => ({ on: 'step', step, y: null });
     const plain = await loadedDocument(graphDto({

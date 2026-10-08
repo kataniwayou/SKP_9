@@ -5,7 +5,7 @@ import type { WorkflowGraphDto } from '../api/types';
 import { applyDesign, applyEdits } from '../design/apply';
 import { EMPTY_EDITS, removeAssignment, setField } from '../design/design';
 import { addCircuitWire, setEnd } from '../circuit/circuit';
-import { circuitOf, EMPTY_DRAFT, removeWires, setShape, withCircuit } from '../design/draft';
+import { circuitOf, EMPTY_DRAFT, moveBlocks, removeWires, setShape, withCircuit } from '../design/draft';
 import { designDirty } from '../store/studioState';
 import { createStudioStore } from '../store/studioStore';
 import { loadedDocument } from './fixtures';
@@ -101,6 +101,23 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
     for (const s of body.steps) expect(s.nextStepIds ?? []).not.toContain(s.id);
     expect(body.steps).toEqual([]);
     expect(Object.keys(body.layout.wires)).toEqual(expect.arrayContaining(['w:a', 'w:b']));
+  });
+
+  it('keeps a self-link the workflow already has: a block nudge sends no step change (final review I1)', async () => {
+    const base = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s1', 's2'] }), stepDto('s2')],
+    }));
+    const s2 = base.placement.steps.get('s2')!;
+    const draft = moveBlocks(EMPTY_DRAFT, base, new Map([['s2', { x: s2.x + 16, y: s2.y }]]));
+
+    const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
+    expect(body.steps).toEqual([]);
+
+    // a circuit of the draft's own (a tail moved round the hub) still keeps it
+    const angled = withCircuit(draft, base, setEnd(circuitOf(base, draft), 'wf->s1', 'tail', { on: 'hub', angle: 90 }));
+    expect(angled.next).toEqual({});
+    expect(buildDesignRequest(base, applyDesign(base, angled, EMPTY_EDITS), { draft: angled, edits: EMPTY_EDITS }).steps).toEqual([]);
   });
 
   it('a head junction fans in: a new wire from s3 poured into s1 -> s2 sends s3 -> s2', async () => {
