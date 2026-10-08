@@ -1,35 +1,24 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { documentPanel, expect, inspector, openWorkflow, settledView, tab, test, workflowsWithSteps, type LiveWorkflow } from './studio';
+import { centreOf, documentPanel, expect, inspector, openWorkflow, pointOnWire, settledView, tab, test, workflowsWithSteps, type LiveWorkflow } from './studio';
 
 // Plan 4: the designer is a trial; nothing it does may write (studio.ts's read-only guard checks every
 // request). Each test starts from an empty session and works on a live workflow with a chain a -> b -> c
 // where b has no other way in.
 
-/** `reattachable`: a -> c may be drawn (a does not already go to c, and c does not reach a). */
+/** `reattachable`: a -> c may be drawn (a does not already go to c; a loop is allowed, plan 8 §5). */
 interface Chain { workflow: LiveWorkflow; a: string; b: string; c: string; reattachable: boolean }
 
 async function findChain(request: APIRequestContext): Promise<Chain | null> {
   let first: Chain | null = null;
   for (const workflow of await workflowsWithSteps(request)) {
     const g = (await (await request.get(`/api/v1/workflows/${workflow.id}/graph`)).json()) as { workflow: { entryStepIds: string[] }; steps: { id: string; nextStepIds: string[] }[] };
-    const next = (id: string) => g.steps.find((s) => s.id === id)?.nextStepIds ?? [];
-    const reaches = (from: string, to: string) => {
-      const seen = new Set<string>();
-      const stack = [from];
-      while (stack.length > 0) {
-        const id = stack.pop()!;
-        if (id === to) return true;
-        if (!seen.has(id)) { seen.add(id); stack.push(...next(id)); }
-      }
-      return false;
-    };
     const into = (id: string) => g.steps.filter((s) => s.nextStepIds.includes(id)).length + (g.workflow.entryStepIds.includes(id) ? 1 : 0);
     for (const a of g.steps) for (const b of a.nextStepIds) {
       const sb = g.steps.find((s) => s.id === b);
       if (!sb || into(b) !== 1) continue;
       const c = sb.nextStepIds[0];
       if (!c || c === a.id) continue;
-      const found = { workflow, a: a.id, b, c, reattachable: !a.nextStepIds.includes(c) && !reaches(c, a.id) };
+      const found = { workflow, a: a.id, b, c, reattachable: !a.nextStepIds.includes(c) };
       if (found.reattachable) return found;
       first ??= found;
     }
@@ -51,39 +40,6 @@ const wire = (panel: Locator, id: string) => panel.locator(`.react-flow__edge[da
 const pathOf = (panel: Locator, id: string) => wire(panel, id).locator('path.w').getAttribute('d');
 /** The last point of a wire's path: where its arrow lands. */
 const arrowEndOf = async (panel: Locator, id: string) => ((await pathOf(panel, id)) ?? '').match(/-?\d+(?:\.\d+)?/g)?.slice(-2).join(',');
-
-/**
- * A point on a wire, in page coordinates, where that wire is the topmost thing under the pointer: wires
- * into a shared step run together near its input, so this is the point nearest `f` (a fraction of the
- * length) that no other wire or block covers. With `clear`, the point also lies that many screen px outside
- * every block: a block within 8 screen px of the pointer is what a dragged end is over (plan 7 §6.1a), so a
- * line is only the drop target farther out. Throws when no such point exists.
- */
-async function pointOnWire(panel: Locator, id: string, f = 0.5, clear = 0): Promise<{ x: number; y: number }> {
-  const found = await wire(panel, id).locator('path.w').first().evaluate((el, [at, wid, gap]) => {
-    const p = el as SVGPathElement;
-    const m = p.getScreenCTM()!;
-    const len = p.getTotalLength();
-    const boxes = [...(el.closest('.react-flow')?.querySelectorAll('.react-flow__node') ?? [])].map((n) => n.getBoundingClientRect());
-    const away = (q: { x: number; y: number }) => boxes.every((r) => q.x < r.left - gap || q.x > r.right + gap || q.y < r.top - gap || q.y > r.bottom + gap);
-    // every 2 px of the wire (at least 50 samples), nearest `at` first, ends excluded
-    const n = Math.max(50, Math.ceil(len / 2));
-    const tries = Array.from({ length: n - 1 }, (_, i) => (i + 1) / n).sort((x, y) => Math.abs(x - at) - Math.abs(y - at));
-    for (const t of tries) {
-      const pt = p.getPointAtLength(len * t);
-      const q = { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
-      if (away(q) && el.ownerDocument.elementFromPoint(q.x, q.y)?.closest('.react-flow__edge')?.getAttribute('data-id') === wid) return q;
-    }
-    return null;
-  }, [f, id, clear] as const);
-  if (!found) throw new Error(`no point on wire ${id} is uncovered${clear ? ` and ${clear} px clear of every block` : ''}: another wire or a block lies over all of it`);
-  return found;
-}
-
-async function centreOf(l: Locator): Promise<{ x: number; y: number }> {
-  const b = (await l.boundingBox())!;
-  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-}
 
 async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
   await page.mouse.move(from.x, from.y);
@@ -170,10 +126,9 @@ test('a run drags and Reset route restores the automatic shape', async ({ page }
   await expect.poll(() => pathOf(panel, id)).toBe(before);
 });
 
-test('a wire end dropped where it would close a cycle outlines red and snaps back', async ({ page }) => {
+test('a wire end dropped where it closes a loop is allowed: green, "re-attach here", and the loop is drawn (plan 8 §5)', async ({ page }) => {
   const panel = await open(page);
   const { a, b, c } = chain!;
-  const before = await pathOf(panel, `${b}->${c}`);
   const p = await pointOnWire(panel, `${b}->${c}`);
   await page.mouse.click(p.x, p.y);
   const head = await centreOf(panel.locator('.design-handle.end[data-end="target"]'));
@@ -181,14 +136,14 @@ test('a wire end dropped where it would close a cycle outlines red and snaps bac
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
   await page.mouse.move(target.x, target.y, { steps: 6 });
-  await expect(node(panel, a)).toHaveClass(/drop-no/);
+  await expect(node(panel, a)).toHaveClass(/drop-ok/);
+  await expect(panel.locator('.design-drop-label')).toHaveText('re-attach here');
   await page.mouse.up();
-  await expect(wire(panel, `${b}->${c}`)).toHaveCount(1);
-  expect(await pathOf(panel, `${b}->${c}`)).toBe(before);
-  await expect(page.getByText('● design draft')).toHaveCount(0);
+  await expect(wire(panel, `${b}->${a}`)).toHaveCount(1);
+  await expect(page.getByText('● design draft')).toBeVisible();
 });
 
-test('a new entry wire from the hub, Delete, and a step left unreached is parked; Undo and Redo', async ({ page }) => {
+test('a new entry wire from the hub, Delete, and a step left unreached looks like any step; Undo and Redo', async ({ page }) => {
   const panel = await open(page);
   const { a, b, c } = chain!;
   await node(panel, 'wf').hover();
@@ -201,7 +156,8 @@ test('a new entry wire from the hub, Delete, and a step left unreached is parked
   await page.mouse.click(p.x, p.y);
   await page.keyboard.press('Delete');
   await expect(wire(panel, `${a}->${b}`)).toHaveCount(0);
-  await expect(node(panel, b).getByText('PARKED', { exact: true })).toBeVisible();
+  await expect(node(panel, b).getByText('PARKED', { exact: true })).toHaveCount(0);
+  await expect(node(panel, b).locator('.blk.parked')).toHaveCount(0);
 
   await page.keyboard.press('Control+z');
   await expect(wire(panel, `${a}->${b}`)).toHaveCount(1);
@@ -215,7 +171,7 @@ test('closing a designed workflow asks; Cancel keeps it', async ({ page }) => {
   await drag(page, at, { x: at.x + 64, y: at.y });
   await expect(page.getByText('● design draft')).toBeVisible();
   await tab(page, chain!.workflow.name).getByRole('button', { name: `Close ${chain!.workflow.name}` }).click();
-  await page.getByRole('alertdialog', { name: 'Discard design changes?' }).getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('alertdialog', { name: 'Save design changes?' }).getByRole('button', { name: 'Cancel' }).click();
   await expect(tab(page, chain!.workflow.name)).toHaveCount(1);
 });
 
@@ -322,7 +278,7 @@ test('a run dragged onto a block goes around it, while dragged and after the dro
   }
 });
 
-test('a dragged wire end lands on a step\'s border, never inside; on its own step it moves its contact point; on empty canvas it snaps back', async ({ page }) => {
+test('a dragged wire end lands on a step\'s border, never inside; on its own step it moves its contact point; on empty canvas it becomes a loose wire', async ({ page }) => {
   const panel = await open(page);
   const { a, b } = chain!;
   const id = `${a}->${b}`;
@@ -336,14 +292,6 @@ test('a dragged wire end lands on a step\'s border, never inside; on its own ste
   };
   const before = await pathOf(panel, id);
 
-  // empty canvas: snaps back
-  const head = await grab();
-  await page.mouse.move(head.x - 40, head.y + 220, { steps: 8 });
-  expect(await blocksCrossed(panel, id)).toEqual([]);
-  await page.mouse.up();
-  expect(await pathOf(panel, id)).toBe(before);
-  await expect(page.getByText('● design draft')).toHaveCount(0);
-
   // its own step, higher up: the wire stays outside it, and the contact point moves there
   await grab();
   const bb = (await node(panel, b).boundingBox())!;
@@ -353,6 +301,14 @@ test('a dragged wire end lands on a step\'s border, never inside; on its own ste
   await page.mouse.up();
   await expect.poll(() => pathOf(panel, id)).not.toBe(before);
   expect(await blocksCrossed(panel, id)).toEqual([]);
+
+  // empty canvas: grey "loose wire"; released, the wire leaves the wiring and stays drawn with an open end
+  const head = await grab();
+  await page.mouse.move(head.x - 40, head.y + 220, { steps: 8 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await page.mouse.up();
+  await expect(wire(panel, id)).toHaveCount(0);
+  await expect(panel.locator('.react-flow__edge[data-id^="loose:"] circle.nx-open')).toHaveCount(1);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 
@@ -383,9 +339,9 @@ test('a dragged tail over its own step is told "starts here"; a head 5 px short 
     await expect(node(panel, c)).toHaveClass(/drop-ok/);
     await expect(panel.locator('.design-drop-label')).toHaveText('re-attach here');
   } else {
-    await expect(node(panel, c)).toHaveClass(/drop-no/);
-    await expect(panel.locator('.design-drop-label')).toHaveCount(1);
-    await expect(panel.locator('.design-drop-label')).toBeVisible();
+    // a already goes to c: a second a -> c is a loose-wire drop (plan 8 §5)
+    await expect(node(panel, c)).toHaveClass(/drop-loose/);
+    await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
   }
   await page.keyboard.press('Escape');
   await page.mouse.up();
@@ -495,21 +451,20 @@ test('a wire\'s arrow dropped on a same-colour line joins it: a dot on the line,
   expect(await blocksCrossed(again, a)).toEqual([]);
 });
 
-test('a wire\'s arrow over a line of another colour is refused and snaps back', async ({ page, request }) => {
+test('a wire\'s arrow over a line of another colour is a loose-wire drop: grey halo, "loose wire"; released there the wire becomes loose', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null || !j.wires.some((x) => j.wires.some((y) => otherColour(x, y))), 'no wire of another colour');
   await openWorkflow(page, j!.workflow);
   const panel = documentPanel(page, j!.workflow);
   const { a: c, b, between } = (await nearestPair(panel, j!.wires, otherColour))!;
   await zoomInOn(page, panel, between);
-  const before = await pathOf(panel, c);
   await dragArrowOnto(page, panel, c, b);
-  await expect(panel.locator('.design-drop-label')).toHaveText('other colour');
-  await expect(wire(panel, b).locator('.wire.halo-no')).toHaveCount(1);
+  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await expect(wire(panel, b).locator('.wire.halo-loose')).toHaveCount(1);
   await page.mouse.up();
-  expect(await pathOf(panel, c)).toBe(before);
-  await expect(wire(panel, c).locator('circle.nx-joint')).toHaveCount(0);
-  await expect(page.getByText('● design draft')).toHaveCount(0);
+  await expect(wire(panel, c)).toHaveCount(0);
+  await expect(panel.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(1);
+  await expect(page.getByText('● design draft')).toBeVisible();
 });
 
 test('a joined wire\'s contact square has the four-way move cursor, a plain end square ew-resize; the contact dropped on its own step makes it plain', async ({ page, request }) => {
@@ -559,7 +514,7 @@ async function findCache(request: APIRequestContext): Promise<{ workflow: LiveWo
   return null;
 }
 
-test('a wire\'s arrow dragged over a cache tag is refused out loud: red "not a step", the cache outlined red, and it snaps back', async ({ page, request }) => {
+test('a wire\'s arrow dragged over a cache tag is a loose-wire drop: grey "loose wire", the cache outlined grey; released there the wire becomes loose', async ({ page, request }) => {
   const k = await findCache(request);
   test.skip(k === null, 'BaseApi has no workflow with a cache and a step wire');
   await openWorkflow(page, k!.workflow);
@@ -572,18 +527,73 @@ test('a wire\'s arrow dragged over a cache tag is refused out loud: red "not a s
     try { p = await pointOnWire(panel, w); id = w; break; } catch { /* covered: try the next */ }
   }
   test.skip(id === null, 'every step wire is covered by another wire or a block');
-  const before = await pathOf(panel, id!);
   await page.mouse.click(p!.x, p!.y);
   const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
   const over = await centreOf(cache);
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
   await page.mouse.move(over.x, over.y, { steps: 10 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('not a step');
-  await expect(cache).toHaveClass(/drop-no/);
+  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await expect(cache).toHaveClass(/drop-loose/);
   await page.mouse.up();
-  await expect(panel.locator('.design-drop-label')).toHaveCount(0);
   await expect(cache).not.toHaveClass(/drop-/);
-  expect(await pathOf(panel, id!)).toBe(before);
-  await expect(page.getByText('● design draft')).toHaveCount(0);
+  await expect(wire(panel, id!)).toHaveCount(0);
+  await expect(panel.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(1);
+});
+
+test('a new wire dropped on empty canvas is a loose wire: grey, dashed, an open end; a refresh keeps it; its end dropped on a step wires it (plan 8 §5)', async ({ page }) => {
+  const panel = await open(page);
+  const { a, c } = chain!;
+  await node(panel, c).hover();
+  const port = await centreOf(node(panel, c).locator('.nx-port'));
+  const area = (await panel.locator('.studio-canvas').boundingBox())!;
+  const empty = { x: area.x + area.width - 80, y: area.y + area.height - 120 };
+  await drag(page, port, empty);
+  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
+  await expect(loose).toHaveCount(1);
+  const line = loose.locator('path.w');
+  expect(await line.evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toBe('none');
+  expect(await line.getAttribute('stroke')).toBe('#8A97A8');
+  await expect(loose.locator('circle.nx-open')).toHaveCount(1);
+  await expect(loose.locator('.nx-head')).toHaveCount(0);
+
+  await page.reload();
+  const again = documentPanel(page, chain!.workflow);
+  const kept = again.locator('.react-flow__edge[data-id^="loose:"]');
+  await expect(kept).toHaveCount(1);
+
+  // its open end onto a step it may wire to: an ordinary wire
+  const end = await centreOf(kept.locator('.nx-open-hit'));
+  const target = await centreOf(node(again, a).locator('.nx-sn'));
+  await page.mouse.move(end.x, end.y);
+  await page.mouse.down();
+  await page.mouse.move(target.x, target.y, { steps: 10 });
+  await expect(again.locator('.design-drop-label')).toHaveText('connect here');
+  await page.mouse.up();
+  await expect(wire(again, `${c}->${a}`)).toHaveCount(1);
+  await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
+  // the new wire is the pick: the click React Flow reports after the release does not take it away
+  await expect(again.locator(`.design-wire[data-wire="${c}->${a}"]`)).toHaveCount(1);
+  await expect(inspector(page).getByText(/^Wire: /)).toBeVisible();
+});
+
+test('a loose wire from the hub: its open end dropped back on the hub is told "same step" and snaps back', async ({ page }) => {
+  const panel = await open(page);
+  await node(panel, 'wf').hover();
+  const port = await centreOf(node(panel, 'wf').locator('.nx-port'));
+  const area = (await panel.locator('.studio-canvas').boundingBox())!;
+  await drag(page, port, { x: area.x + area.width - 80, y: area.y + area.height - 120 });
+  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
+  await expect(loose).toHaveCount(1);
+  const before = await loose.locator('path.w').getAttribute('d');
+
+  const end = await centreOf(loose.locator('.nx-open-hit'));
+  const hub = await centreOf(node(panel, 'wf'));
+  await page.mouse.move(end.x, end.y);
+  await page.mouse.down();
+  await page.mouse.move(hub.x, hub.y, { steps: 10 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('same step');
+  await page.mouse.up();
+  await expect(loose).toHaveCount(1);
+  expect(await loose.locator('path.w').getAttribute('d')).toBe(before);
 });

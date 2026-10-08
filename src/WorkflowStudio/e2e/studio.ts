@@ -7,16 +7,15 @@ export const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&
 
 /**
  * The page test with a read-only guard: every request the browser context makes (the main window
- * and any pop-out) is recorded, and the test fails if one is neither a GET nor the validate dry run.
+ * and any pop-out) is recorded, and the test fails if any request is not a GET (opening a workflow
+ * runs no validate, plan 8 §3.1).
  */
 export const test = base.extend<{ readOnly: void }>({
   readOnly: [async ({ context }, use) => {
     const writes: string[] = [];
     context.on('request', (r) => {
-      const url = new URL(r.url());
       if (r.method() === 'GET' || r.method() === 'HEAD') return;
-      if (r.method() === 'POST' && /^\/api\/v1\/workflows\/[^/]+\/validate$/.test(url.pathname)) return;
-      writes.push(`${r.method()} ${url.pathname}`);
+      writes.push(`${r.method()} ${new URL(r.url()).pathname}`);
     });
     await use();
     expect(writes, 'the e2e tests must only read from BaseApi').toEqual([]);
@@ -135,4 +134,37 @@ export async function settledView(page: Page, viewport: Locator): Promise<string
     last = now;
   }
   throw new Error('the view did not settle: its transform still changed after 20 reads 150 ms apart');
+}
+
+/**
+ * A point on a wire, in page coordinates, where that wire is the topmost thing under the pointer: wires
+ * into a shared step run together near its input, so this is the point nearest `f` (a fraction of the
+ * length) that no other wire or block covers. With `clear`, the point also lies that many screen px outside
+ * every block: a block within 8 screen px of the pointer is what a dragged end is over (plan 7 §6.1a), so a
+ * line is only the drop target farther out. Throws when no such point exists.
+ */
+export async function pointOnWire(panel: Locator, id: string, f = 0.5, clear = 0): Promise<{ x: number; y: number }> {
+  const found = await panel.locator(`.react-flow__edge[data-id="${id}"]`).locator('path.w').first().evaluate((el, [at, wid, gap]) => {
+    const p = el as SVGPathElement;
+    const m = p.getScreenCTM()!;
+    const len = p.getTotalLength();
+    const boxes = [...(el.closest('.react-flow')?.querySelectorAll('.react-flow__node') ?? [])].map((n) => n.getBoundingClientRect());
+    const away = (q: { x: number; y: number }) => boxes.every((r) => q.x < r.left - gap || q.x > r.right + gap || q.y < r.top - gap || q.y > r.bottom + gap);
+    // every 2 px of the wire (at least 50 samples), nearest `at` first, ends excluded
+    const n = Math.max(50, Math.ceil(len / 2));
+    const tries = Array.from({ length: n - 1 }, (_, i) => (i + 1) / n).sort((x, y) => Math.abs(x - at) - Math.abs(y - at));
+    for (const t of tries) {
+      const pt = p.getPointAtLength(len * t);
+      const q = { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
+      if (away(q) && el.ownerDocument.elementFromPoint(q.x, q.y)?.closest('.react-flow__edge')?.getAttribute('data-id') === wid) return q;
+    }
+    return null;
+  }, [f, id, clear] as const);
+  if (!found) throw new Error(`no point on wire ${id} is uncovered${clear ? ` and ${clear} px clear of every block` : ''}: another wire or a block lies over all of it`);
+  return found;
+}
+
+export async function centreOf(l: Locator): Promise<{ x: number; y: number }> {
+  const b = (await l.boundingBox())!;
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }

@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // End-to-end tests (spec §9) run against the Vite dev server, which proxies /api to the live
-// BaseApi on localhost:18080 (k8s/port-forward-realstack.ps1). They only read: GETs and the
-// validate dry run. Port 5179, so a dev server you already run on 5173 is left alone.
+// BaseApi on localhost:18080 (k8s/port-forward-realstack.ps1). They only read (GETs), except
+// save.spec.ts, which saves a throwaway workflow it creates and deletes (plan 8 §8). Port 5179, so a
+// dev server you already run on 5173 is left alone.
 const PORT = 5179;
 
 export default defineConfig({

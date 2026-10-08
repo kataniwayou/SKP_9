@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { box, documentPanel, esc, expect, floatOver, groupOf, inspector, liveWorkflows, openWorkflow, overlap, selectProcessor, tab, test, type LiveWorkflow } from './studio';
 
-// Spec §9, slice 3a. Read-only against the live BaseApi: GETs and the validate dry run only.
+// Spec §9, slice 3a. Read-only against the live BaseApi: GETs only.
 let workflows: LiveWorkflow[];
 
 test.beforeAll(async ({ request }) => { workflows = await liveWorkflows(request, 2); });

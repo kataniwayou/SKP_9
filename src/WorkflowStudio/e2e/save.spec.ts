@@ -1,0 +1,152 @@
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
+import { centreOf, documentPanel, inspector, openWorkflow, pointOnWire, tab } from './studio';
+import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
+
+// Plan 8 §8: Save is the studio's only write, and these tests write only to their own throwaway workflow
+// (e2e/throwaway.ts, `e2e-8-…`), created here through BaseApi's CRUD and deleted afterwards. They build on
+// each other's state, so they run in order, never retried.
+test.describe.configure({ mode: 'serial', retries: 0 });
+let t: Throwaway;
+test.beforeAll(async ({ request }) => { t = await createThrowaway(request); });
+test.afterAll(async ({ request }) => { await removeThrowaway(request); });
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+  await page.reload();
+});
+
+const field = (page: Page, label: string): Locator => inspector(page).getByLabel(label, { exact: true });
+const pill = (page: Page): Locator => inspector(page).locator('.kindpill');
+const node = (panel: Locator, id: string): Locator => panel.locator(`.react-flow__node[data-id="${id}"]`);
+const looseWires = (panel: Locator): Locator => panel.locator('.react-flow__edge[data-id^="loose:"]');
+
+async function get<T>(request: APIRequestContext, path: string): Promise<T> {
+  const r = await request.get(`/api/v1/${path}`);
+  expect(r.ok(), `GET ${path}`).toBe(true);
+  return (await r.json()) as T;
+}
+
+/** Replaces a field's text with the real keyboard: click, select all, type. */
+async function typeInto(page: Page, label: string, text: string): Promise<void> {
+  await field(page, label).click();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type(text);
+}
+
+async function selectStep(page: Page, panel: Locator, id: string): Promise<void> {
+  await node(panel, id).click({ position: { x: 20, y: 12 } });
+  await expect(pill(page)).toHaveText('STEP');
+}
+
+/** The capsule's Save, then wait for the answer (the button leaves "Saving…"). */
+async function save(page: Page): Promise<void> {
+  await page.getByRole('button', { name: '⤓ Save' }).click();
+  await expect(page.getByRole('button', { name: '⤓ Saving…' })).toHaveCount(0, { timeout: 20_000 });
+}
+
+async function pane(page: Page, name: 'Problems' | 'Output'): Promise<Locator> {
+  await tab(page, name).click();
+  return page.locator(`[data-pane="${name.toLowerCase()}"]`);
+}
+
+test('an invalid design is stored but not applied: Problems and Output say why, BaseApi is unchanged, a fresh page shows the stored design', async ({ page, request, context }) => {
+  await openWorkflow(page, t.workflow);
+  const panel = documentPanel(page, t.workflow);
+
+  // on the canvas: a new wire from B's port, released on empty canvas, is a loose wire
+  const b = node(panel, t.stepBId);
+  await b.hover();
+  const port = await centreOf(b.locator('.nx-port'));
+  const area = (await panel.locator('.studio-canvas').boundingBox())!;
+  const empty = { x: area.x + area.width - 80, y: area.y + area.height - 120 };
+  await page.mouse.move(port.x, port.y);
+  await page.mouse.down();
+  await page.mouse.move(empty.x, empty.y, { steps: 12 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await page.mouse.up();
+  await expect(looseWires(panel)).toHaveCount(1);
+
+  // in the Inspector: step A gets a description and a version BaseApi refuses
+  await selectStep(page, panel, t.stepId);
+  await typeInto(page, 'Description', 'designed');
+  await typeInto(page, 'Version', 'abc');
+  await expect(page.getByText('● design draft')).toBeVisible();
+  await save(page);
+
+  const problems = await pane(page, 'Problems');
+  await expect(problems.getByRole('listitem')).toHaveCount(1);
+  await expect(problems.getByRole('listitem').first()).toContainText('version');
+  await expect(await pane(page, 'Output')).toContainText('Saved; not applied: 1 error');
+  // the real step is unchanged, and the design is stored on the workflow
+  const step = await get<{ version: string; description: string | null }>(request, `steps/${t.stepId}`);
+  expect([step.version, step.description]).toEqual(['1.0.0', null]);
+  expect((await get<{ design: unknown }>(request, `workflows/${t.workflow.id}/graph`)).design).not.toBeNull();
+
+  // a fresh page, with no session, shows the stored design and no errors
+  const fresh = await context.newPage();
+  await fresh.goto('/');
+  await fresh.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+  await fresh.reload();
+  await openWorkflow(fresh, t.workflow);
+  const again = documentPanel(fresh, t.workflow);
+  await expect(looseWires(again)).toHaveCount(1);
+  await selectStep(fresh, again, t.stepId);
+  await expect(field(fresh, 'Version')).toHaveValue('abc');
+  await expect(field(fresh, 'Description')).toHaveValue('designed');
+  await tab(fresh, 'Problems').click();
+  await expect(fresh.locator('[data-pane="problems"]')).toContainText('No problems');
+  await fresh.close();
+});
+
+test('fixed and saved again, the design is applied: BaseApi holds it, the stored design is emptied, the loose wire stays in the layout', async ({ page, request }) => {
+  await openWorkflow(page, t.workflow);
+  const panel = documentPanel(page, t.workflow);
+  await selectStep(page, panel, t.stepId);
+  await expect(field(page, 'Version')).toHaveValue('abc');
+  await typeInto(page, 'Version', '1.0.1');
+  await save(page);
+
+  await expect(await pane(page, 'Output')).toContainText('Saved and applied');
+  await expect(await pane(page, 'Problems')).toContainText('No problems');
+  const step = await get<{ version: string; description: string | null }>(request, `steps/${t.stepId}`);
+  expect([step.version, step.description]).toEqual(['1.0.1', 'designed']);
+  expect((await get<{ design: unknown }>(request, `workflows/${t.workflow.id}/graph`)).design).toBeNull();
+
+  await page.reload();
+  const again = documentPanel(page, t.workflow);
+  await expect(looseWires(again)).toHaveCount(1);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+});
+
+test('one Save applies changes of every kind: a deleted wire, a removed assignment, a schema copy with its name and version', async ({ page, request }) => {
+  await openWorkflow(page, t.workflow);
+  const panel = documentPanel(page, t.workflow);
+  const wireId = `${t.stepId}->${t.stepBId}`;
+
+  // the canvas: pick A -> B and delete it; B stays on the canvas and looks like any step
+  const p = await pointOnWire(panel, wireId);
+  await page.mouse.click(p.x, p.y);
+  await page.keyboard.press('Delete');
+  await expect(panel.locator(`.react-flow__edge[data-id="${wireId}"]`)).toHaveCount(0);
+  await expect(node(panel, t.stepBId).locator('.blk.parked')).toHaveCount(0);
+
+  // the Inspector: A's assignment removed; its processor's Config schema edited (a background copy)
+  await selectStep(page, panel, t.stepId);
+  await inspector(page).getByRole('button', { name: '✕ Remove' }).click();
+  await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
+  await node(panel, t.stepId).locator('.chipg').click();
+  await expect(pill(page)).toHaveText('PROCESSOR');
+  await inspector(page).locator('.slot').filter({ hasText: 'Config' }).getByRole('button').first().click();
+  await expect(pill(page)).toHaveText('SCHEMA');
+  await typeInto(page, 'Definition', '{"type":"string"}');
+  await save(page);
+  await expect(await pane(page, 'Output')).toContainText('Saved and applied');
+
+  expect((await get<{ nextStepIds: string[] }>(request, `steps/${t.stepId}`)).nextStepIds).toEqual([]);
+  expect((await request.get(`/api/v1/assignments/${t.assignmentId}`)).status()).toBe(404);
+  const proc = await get<{ configSchemaId: string }>(request, `processors/${t.processorId}`);
+  expect(proc.configSchemaId).not.toBe(t.schemaId);
+  const copy = await get<{ name: string; version: string; definition: string }>(request, `schemas/${proc.configSchemaId}`);
+  expect([copy.name, copy.version]).toEqual([`${t.tag}-config`, '1.0.0']);
+  expect(JSON.parse(copy.definition)).toEqual({ type: 'string' });
+});
