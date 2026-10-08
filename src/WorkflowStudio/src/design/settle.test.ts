@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { plainCircuit, type Circuit, type End } from '../circuit/circuit';
+import { linkKeys, trace } from '../circuit/trace';
 import { expectedLinks, reconcile } from './settle';
 
 const at = (step: string): End => ({ on: 'step', step, y: null });
@@ -76,5 +77,85 @@ describe('reconcile (plan 9 §7, §8; decision 6)', () => {
     const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
     const c: Circuit = { ...plainOf(d), 'w:x': { tail: on('s1->s2', 40), head: at('s1') } };
     expect(reconcile(c, expectedLinks(d, {}, null), d)).toEqual(c);
+  });
+
+  it('a junction carrying an expected link stays when one joined downstream of it makes an unexpected link (chain)', async () => {
+    const d = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3')], layout: { parked: ['s4'] },
+    } as never), [stepDto('s4')]);
+    const p = plainOf(d);
+    const b = { tail: on('s1->s2', 40), head: at('s3') };
+    const c: Circuit = { 'wf->s1': p['wf->s1']!, 's1->s2': p['s1->s2']!, 'w:b': b, 'w:c': { tail: on('w:b', 40), head: at('s4') } };
+    const expected = expectedLinks(d, {}, null);
+    const out = reconcile(c, expected, d);
+    expect(out['w:b']).toEqual(b);
+    expect(Object.keys(out).sort()).toEqual(['s1->s2', 'w:b', 'w:c', 'wf->s1']);
+    expect(out['w:c']!.tail.on).toBe('open');
+    expect(out['w:c']!.head).toEqual(at('s4'));
+    expect([...linkKeys(trace(out).links)].sort()).toEqual([...expected].sort());
+  });
+
+  it('a junction carrying an expected link stays when a wire poured into it makes an unexpected link (fan-in)', async () => {
+    const d = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3')], layout: { parked: ['s4'] },
+    } as never), [stepDto('s4')]);
+    const p = plainOf(d);
+    const y = { tail: on('s1->s2', 40), head: at('s3') };
+    const c: Circuit = { 'wf->s1': p['wf->s1']!, 's1->s2': p['s1->s2']!, 'w:y': y, 'w:x': { tail: at('s4'), head: on('w:y', 40) } };
+    const expected = expectedLinks(d, {}, null);
+    const out = reconcile(c, expected, d);
+    expect(out['w:y']).toEqual(y);
+    expect(out['w:x']!.tail).toEqual(at('s4'));
+    expect(out['w:x']!.head.on).toBe('open');
+    expect(Object.keys(out).sort()).toEqual(['s1->s2', 'w:x', 'w:y', 'wf->s1']);
+    expect([...linkKeys(trace(out).links)].sort()).toEqual([...expected].sort());
+  });
+
+  it('settles once: settling a settled circuit changes nothing', async () => {
+    const d1 = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3', { nextStepIds: ['s4'] }), stepDto('s4')],
+    }));
+    const c1: Circuit = { ...plainOf(d1), 's3->s4': { tail: at('s3'), head: on('s1->s2', 40) }, 'w:l1': { tail: at('s1'), head: { on: 'open', x: 900, y: 64 } } };
+    const once1 = reconcile(c1, expectedLinks(d1, {}, null), d1);
+    expect(reconcile(once1, expectedLinks(d1, {}, null), d1)).toEqual(once1);
+    const d2 = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const c2: Circuit = { 'wf->s1': plainOf(d2)['wf->s1']!, 'w:9': { tail: at('s2'), head: at('s1') } };
+    const once2 = reconcile(c2, expectedLinks(d2, {}, null), d2);
+    expect(reconcile(once2, expectedLinks(d2, {}, null), d2)).toEqual(once2);
+  });
+
+  it('an entry link through a junction on a hub wire: kept when the workflow has it, opened when not', async () => {
+    const both = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1', 's2'] }), steps: [stepDto('s1'), stepDto('s2')] }));
+    const j = { tail: on('wf->s1', 40), head: at('s2') };
+    const made: Circuit = { 'wf->s1': plainOf(both)['wf->s1']!, 'w:j': j };
+    expect(reconcile(made, expectedLinks(both, {}, null), both)).toEqual(made);
+    const one = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1')], layout: { parked: ['s2'] } } as never), [stepDto('s2')]);
+    const broken: Circuit = { 'wf->s1': plainOf(one)['wf->s1']!, 'w:j': j };
+    const out = reconcile(broken, expectedLinks(one, {}, null), one);
+    expect(out['wf->s1']).toEqual(broken['wf->s1']);
+    expect(out['w:j']!.tail.on).toBe('open');
+    expect(out['w:j']!.head).toEqual(at('s2'));
+  });
+
+  it('a plan 7 head whose own link is unexpected too goes back into its step, then the plain wire goes', async () => {
+    const d = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')], layout: { parked: ['s4'] },
+    } as never), [stepDto('s4')]);
+    const c: Circuit = { ...plainOf(d), 's3->s4': { tail: at('s3'), head: on('s1->s2', 40) } };
+    const out = reconcile(c, expectedLinks(d, {}, null), d);
+    expect(out).toEqual(plainOf(d));
+  });
+
+  it('a wire addPlain named `s->t#n` goes back into its own step too', async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3')] }));
+    const p = plainOf(d);
+    const c: Circuit = { 'wf->s1': p['wf->s1']!, 's1->s3': p['s1->s3']!, 's1->s2#2': { tail: at('s1'), head: on('s1->s3', 40) } };
+    const out = reconcile(c, expectedLinks(d, {}, null), d);
+    expect(Object.keys(out)).toEqual(['wf->s1', 's1->s3', 's1->s2#2']);
+    expect(out['s1->s2#2']).toEqual({ tail: at('s1'), head: at('s2') });
   });
 });

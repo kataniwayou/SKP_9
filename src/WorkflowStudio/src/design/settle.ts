@@ -27,11 +27,23 @@ export function expectedLinks(saved: StudioDocument, next: Readonly<Record<Id, I
 const drawnEnds = (c: Readonly<Circuit>, saved: StudioDocument): ((id: string, side: Side) => Point | null) =>
   endPointOf(routeCircuit(c, { placement: saved.placement, steps: saved.graph.steps }));
 
-/** A plan 7 wire's own target: the step its id `s->t` names, when it is on the canvas. */
+/** The link a wire's id names: `s->t`, or `s->t#n` (one `addPlain` made while `s->t` was taken); null for `w:…`. */
+function linkOfId(id: string): string | null {
+  const base = id.replace(/#\d+$/, '');
+  const at = base.indexOf('->');
+  return at > 0 && at + 2 < base.length ? base : null;
+}
+
+/** A plan 7 wire's own target: the step its id `s->t` (or `s->t#n`) names, when it is on the canvas. */
 function ownTarget(id: string, saved: StudioDocument): Id | null {
-  const at = id.indexOf('->');
-  const t = at > 0 ? id.slice(at + 2) : '';
+  const k = linkOfId(id);
+  const t = k === null ? '' : k.slice(k.indexOf('->') + 2);
   return t !== '' && onCanvas(saved, t) ? t : null;
+}
+
+/** The wires current passes through for each link (`source->target`). */
+function wiresOfLinks(c: Readonly<Circuit>, links: readonly string[], skip: ReadonlySet<string>): Set<string> {
+  return new Set(links.flatMap((k) => { const at = k.indexOf('->'); return [...wiresBetween(c, k.slice(0, at), k.slice(at + 2), skip)]; }));
 }
 
 /** The chosen junction ends drawn plain: a plan 7 head back into its own step, any other end open where it is drawn. */
@@ -68,14 +80,19 @@ function addPlain(c: Circuit, links: readonly string[]): Circuit {
  * link is made by a plan 7 wire `s->t` with its head on a junction (back into `t`), an unexpected link has every
  * junction on its way drawn plain, a plain wire still making one goes, and what is still missing gets a new
  * automatic wire. Links through a short-circuited net count as made and are never unexpected; "written" is what Save
- * writes (`circuitTrace`: shorted nets and a step fed its own input left out).
+ * writes (`circuitTrace`: shorted nets and a step fed its own input left out). Of the junctions on an unexpected
+ * link's way, those also on the way of a written expected link are kept (they carry a link the workflow has); only
+ * when that leaves none are they all drawn plain. Every round takes away a junction end or a wire, or adds the missing
+ * wires, so it settles within the cap; should it not, the circuit is returned as it is, with a warning in dev.
  */
 export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string>, saved: StudioDocument): Circuit {
   const placed = (e: End) => e.on !== 'step' || onCanvas(saved, e.step);
   const kept = Object.assign(Object.create(null) as Circuit, Object.fromEntries(Object.entries(start).filter(([, w]) => placed(w.tail) && placed(w.head))));
   let c = plainEnds(kept, saved, (id, side) => { const e = kept[id]![side]; return e.on === 'wire' && !Object.hasOwn(kept, e.host); });
   const conditionOf = (id: Id) => saved.graph.steps.get(id)?.entryCondition;
-  for (let round = 0; round < 16; round++) {
+  // a round opens a junction end (two a wire at most), removes a wire, or adds missing wires
+  const cap = 3 * Object.keys(start).length + expected.size + 2;
+  for (let round = 0; round < cap; round++) {
     const current = circuitTrace(c, conditionOf);
     const shorted = shortedWires(current.nets);
     const made = linkKeys(trace(c).links);
@@ -83,18 +100,23 @@ export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string
     const missing = [...expected].filter((k) => !made.has(k));
     const extra = [...written].filter((k) => !expected.has(k));
     if (missing.length === 0 && extra.length === 0) return c;
-    const own = new Set(missing.filter((k) => Object.hasOwn(c, k) && c[k]!.head.on === 'wire'));
+    const lost = new Set(missing);
+    const own = new Set(Object.keys(c).filter((id) => { const k = linkOfId(id); return k !== null && lost.has(k) && c[id]!.head.on === 'wire'; }));
     if (own.size > 0) {
       c = plainEnds(c, saved, (id, side) => side === 'head' && own.has(id));
       continue;
     }
     if (extra.length > 0) {
-      const onWay = new Set(extra.flatMap((k) => { const at = k.indexOf('->'); return [...wiresBetween(c, k.slice(0, at), k.slice(at + 2), shorted)]; }));
-      const joined = new Set([...onWay].filter((id) => c[id]!.tail.on === 'wire' || c[id]!.head.on === 'wire'));
-      c = joined.size > 0 ? plainEnds(c, saved, (id) => joined.has(id)) : removeCircuitWires(c, [...onWay], drawnEnds(c, saved));
+      const onWay = wiresOfLinks(c, extra, shorted);
+      const joined = [...onWay].filter((id) => c[id]!.tail.on === 'wire' || c[id]!.head.on === 'wire');
+      const needed = wiresOfLinks(c, [...written].filter((k) => expected.has(k)), shorted);
+      const free = joined.filter((id) => !needed.has(id));
+      const open = new Set(free.length > 0 ? free : joined);
+      c = open.size > 0 ? plainEnds(c, saved, (id) => open.has(id)) : removeCircuitWires(c, [...onWay], drawnEnds(c, saved));
       continue;
     }
     c = addPlain(c, missing);
   }
+  if (import.meta.env.DEV) console.warn(`settle: the circuit did not agree with the workflow after ${cap} rounds`);
   return c;
 }
