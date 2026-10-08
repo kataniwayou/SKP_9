@@ -36,6 +36,8 @@ internal static class WorkflowServiceCollectionExtensions
         services.AddScoped<CacheStage>();
         services.AddScoped<StepStage>();
         services.AddScoped<WireStage>();
+        services.AddScoped<AssignmentStage>();
+        services.AddScoped<WorkflowStage>();
         services.AddScoped<IWorkflowDesignSyncer>(sp => new WorkflowDesignSyncer(
             sp.GetRequiredService<BaseDbContext>(), sp.GetRequiredService<IDesignStore>(),
             sp.GetRequiredService<IDesignTransactions>(), DesignStages.Ordered(sp)));

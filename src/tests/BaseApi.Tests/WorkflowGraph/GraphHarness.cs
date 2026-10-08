@@ -184,6 +184,8 @@ internal sealed class GraphHarness : IAsyncDisposable
         new CacheStage(Db, new CacheUpdateDtoValidator(), new CacheEntityMapper()),
         new StepStage(Db, new StepUpdateDtoValidator(), new StepEntityMapper()),
         new WireStage(Db, new StepUpdateDtoValidator()),
+        new AssignmentStage(Db, new AssignmentCreateDtoValidator(), new AssignmentUpdateDtoValidator(), new AssignmentEntityMapper()),
+        new WorkflowStage(Db, new WorkflowUpdateDtoValidator(), new WorkflowEntityMapper()),
     ];
 
     /// <summary>The store through a second context with no audit interceptor, as ExecuteUpdate bypasses it in production.</summary>
