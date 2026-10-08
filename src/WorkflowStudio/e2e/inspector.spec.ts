@@ -1,18 +1,25 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { documentPanel, inspector, openWorkflow } from './studio';
+import { documentPanel, inspector, openWorkflow, tab } from './studio';
 import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
-// Plan 8 §3.3: the Inspector edits the design, never BaseApi. These tests never press Save: the write guard
-// (e2e/throwaway.ts) fails them on any write, and each checks BaseApi still holds what it created.
+// Plan 8 §3.3: the Inspector edits the design, never BaseApi. These tests never press Save. The write guard
+// (e2e/throwaway.ts) aborts any write except Save of this run's workflow, so each test also records every
+// request that is not a GET and fails on any, Save included; and each checks BaseApi still holds what it created.
 test.describe.configure({ mode: 'serial', retries: 0 });
 let t: Throwaway;
+let writes: string[];
 test.beforeAll(async ({ request }) => { t = await createThrowaway(request); });
 test.afterAll(async ({ request }) => { await removeThrowaway(request); });
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, context }) => {
+  writes = [];
+  context.on('request', (r) => {
+    if (r.method() !== 'GET' && r.method() !== 'HEAD') writes.push(`${r.method()} ${new URL(r.url()).pathname}`);
+  });
   await page.goto('/');
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.reload();
 });
+test.afterEach(() => { expect(writes, 'the Inspector writes nothing: no PUT, not even Save').toEqual([]); });
 
 const field = (page: Page, label: string): Locator => inspector(page).getByLabel(label, { exact: true });
 const pill = (page: Page): Locator => inspector(page).locator('.kindpill');
@@ -64,6 +71,23 @@ test('every entity kind edits the design: marked unsaved, kept while the Inspect
   expect((await get<{ description: string | null; entryCondition: number }>(request, `steps/${t.stepId}`)).entryCondition).toBe(1);
   expect((await get<{ description: string | null }>(request, `processors/${t.processorId}`)).description).toBeNull();
   expect((await get<{ items: string }>(request, `caches/${t.cacheId}`)).items).toBe('{}');
+});
+
+test('a refresh keeps unsaved Inspector edits: the field, the Inspector on it, the dirty mark; nothing written', async ({ page, request }) => {
+  const panel = await open(page);
+  await panel.locator(`.react-flow__node[data-id="${t.stepId}"]`).click({ position: { x: 20, y: 12 } });
+  await expect(pill(page)).toHaveText('STEP');
+  await typeInto(page, 'Description', 'kept over a refresh');
+  await expect(page.getByText('● design draft')).toBeVisible();
+
+  await page.reload();
+  await expect(documentPanel(page, t.workflow).locator('.react-flow__node').first()).toBeVisible();
+  await expect(pill(page)).toHaveText('STEP');
+  await expect(field(page, 'Description')).toHaveValue('kept over a refresh');
+  await expect(inspector(page).getByText('● unsaved changes')).toBeVisible();
+  await expect(page.getByText('● design draft')).toBeVisible();
+  await expect(tab(page, t.workflow.name)).toHaveClass(/\bdirty\b/);
+  expect((await get<{ description: string | null }>(request, `steps/${t.stepId}`)).description).toBeNull();
 });
 
 test('Revert drops one entity\'s edits; the others stay', async ({ page }) => {

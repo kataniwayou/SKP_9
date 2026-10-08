@@ -5,20 +5,24 @@ import { centreOf, documentPanel, expect, inspector, openWorkflow, pointOnWire, 
 // request). Each test starts from an empty session and works on a live workflow with a chain a -> b -> c
 // where b has no other way in.
 
-/** `reattachable`: a -> c may be drawn (a does not already go to c; a loop is allowed, plan 8 §5). */
-interface Chain { workflow: LiveWorkflow; a: string; b: string; c: string; reattachable: boolean }
+/**
+ * `reattachable`: a -> c may be drawn (a does not already go to c; a loop is allowed, plan 8 §5). `wires`: every
+ * wire of the live graph (`source->target`), so a test can tell a new wire from a duplicate (a loose-wire drop).
+ */
+interface Chain { workflow: LiveWorkflow; a: string; b: string; c: string; reattachable: boolean; wires: Set<string> }
 
 async function findChain(request: APIRequestContext): Promise<Chain | null> {
   let first: Chain | null = null;
   for (const workflow of await workflowsWithSteps(request)) {
     const g = (await (await request.get(`/api/v1/workflows/${workflow.id}/graph`)).json()) as { workflow: { entryStepIds: string[] }; steps: { id: string; nextStepIds: string[] }[] };
+    const wires = new Set(g.steps.flatMap((s) => s.nextStepIds.map((t) => `${s.id}->${t}`)));
     const into = (id: string) => g.steps.filter((s) => s.nextStepIds.includes(id)).length + (g.workflow.entryStepIds.includes(id) ? 1 : 0);
     for (const a of g.steps) for (const b of a.nextStepIds) {
       const sb = g.steps.find((s) => s.id === b);
       if (!sb || into(b) !== 1) continue;
       const c = sb.nextStepIds[0];
       if (!c || c === a.id) continue;
-      const found = { workflow, a: a.id, b, c, reattachable: !a.nextStepIds.includes(c) };
+      const found = { workflow, a: a.id, b, c, reattachable: !a.nextStepIds.includes(c), wires };
       if (found.reattachable) return found;
       first ??= found;
     }
@@ -127,8 +131,9 @@ test('a run drags and Reset route restores the automatic shape', async ({ page }
 });
 
 test('a wire end dropped where it closes a loop is allowed: green, "re-attach here", and the loop is drawn (plan 8 §5)', async ({ page }) => {
-  const panel = await open(page);
   const { a, b, c } = chain!;
+  test.skip(chain!.wires.has(`${b}->${a}`), 'b -> a is already a wire: the drop would be a duplicate (a loose wire)');
+  const panel = await open(page);
   const p = await pointOnWire(panel, `${b}->${c}`);
   await page.mouse.click(p.x, p.y);
   const head = await centreOf(panel.locator('.design-handle.end[data-end="target"]'));
@@ -156,6 +161,7 @@ test('a new entry wire from the hub, Delete, and a step left unreached looks lik
   await page.mouse.click(p.x, p.y);
   await page.keyboard.press('Delete');
   await expect(wire(panel, `${a}->${b}`)).toHaveCount(0);
+  await expect(node(panel, b)).toBeVisible();
   await expect(node(panel, b).getByText('PARKED', { exact: true })).toHaveCount(0);
   await expect(node(panel, b).locator('.blk.parked')).toHaveCount(0);
 
@@ -542,8 +548,11 @@ test('a wire\'s arrow dragged over a cache tag is a loose-wire drop: grey "loose
 });
 
 test('a new wire dropped on empty canvas is a loose wire: grey, dashed, an open end; a refresh keeps it; its end dropped on a step wires it (plan 8 §5)', async ({ page }) => {
+  const { c } = chain!;
+  // the open end goes to a step c is not wired to yet (onto one it already goes to, it would stay loose)
+  const a = [chain!.a, chain!.b].find((s) => !chain!.wires.has(`${c}->${s}`));
+  test.skip(a === undefined, 'c already goes to both a and b: no step to wire its loose end to');
   const panel = await open(page);
-  const { a, c } = chain!;
   await node(panel, c).hover();
   const port = await centreOf(node(panel, c).locator('.nx-port'));
   const area = (await panel.locator('.studio-canvas').boundingBox())!;
@@ -564,16 +573,16 @@ test('a new wire dropped on empty canvas is a loose wire: grey, dashed, an open 
 
   // its open end onto a step it may wire to: an ordinary wire
   const end = await centreOf(kept.locator('.nx-open-hit'));
-  const target = await centreOf(node(again, a).locator('.nx-sn'));
+  const target = await centreOf(node(again, a!).locator('.nx-sn'));
   await page.mouse.move(end.x, end.y);
   await page.mouse.down();
   await page.mouse.move(target.x, target.y, { steps: 10 });
   await expect(again.locator('.design-drop-label')).toHaveText('connect here');
   await page.mouse.up();
-  await expect(wire(again, `${c}->${a}`)).toHaveCount(1);
+  await expect(wire(again, `${c}->${a!}`)).toHaveCount(1);
   await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
   // the new wire is the pick: the click React Flow reports after the release does not take it away
-  await expect(again.locator(`.design-wire[data-wire="${c}->${a}"]`)).toHaveCount(1);
+  await expect(again.locator(`.design-wire[data-wire="${c}->${a!}"]`)).toHaveCount(1);
   await expect(inspector(page).getByText(/^Wire: /)).toBeVisible();
 });
 
@@ -594,6 +603,17 @@ test('a loose wire from the hub: its open end dropped back on the hub is told "s
   await page.mouse.move(hub.x, hub.y, { steps: 10 });
   await expect(panel.locator('.design-drop-label')).toHaveText('same step');
   await page.mouse.up();
+  await expect(panel.locator('.design-drop-label')).toHaveCount(0);
   await expect(loose).toHaveCount(1);
-  expect(await loose.locator('path.w').getAttribute('d')).toBe(before);
+  // a stable read, not one a re-render could still change: an end moved onto the hub changes the path
+  await page.waitForTimeout(300);
+  await expect.poll(() => loose.locator('path.w').getAttribute('d')).toBe(before);
+});
+
+test('the legend shows the loose wire, and nothing broken or parked (plan 8 §5)', async ({ page }) => {
+  const panel = await open(page);
+  const items = panel.locator('.legend .lg-item');
+  await expect(items.filter({ hasText: /^loose wire$/ })).toHaveCount(1);
+  await expect(items.filter({ hasText: /broken/i })).toHaveCount(0);
+  await expect(items.filter({ hasText: /parked/i })).toHaveCount(0);
 });

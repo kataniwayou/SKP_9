@@ -128,6 +128,7 @@ test('one Save applies changes of every kind: a deleted wire, a removed assignme
   await page.mouse.click(p.x, p.y);
   await page.keyboard.press('Delete');
   await expect(panel.locator(`.react-flow__edge[data-id="${wireId}"]`)).toHaveCount(0);
+  await expect(node(panel, t.stepBId)).toBeVisible();
   await expect(node(panel, t.stepBId).locator('.blk.parked')).toHaveCount(0);
 
   // the Inspector: A's assignment removed; its processor's Config schema edited (a background copy)
