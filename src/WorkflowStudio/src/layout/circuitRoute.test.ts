@@ -3,7 +3,7 @@ import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { plainCircuit, type Circuit, type CircuitWire, type End } from '../circuit/circuit';
 import { SPHERE_R, STEP_W } from './geometry';
-import { contactOn, routeCircuit, routeWires } from './circuitRoute';
+import { contactOn, endPointOf, routeCircuit, routeWires } from './circuitRoute';
 
 const at = (step: string, y: number | null = null): End => ({ on: 'step', step, y });
 const w = (tail: End, head: End): CircuitWire => ({ tail, head });
@@ -93,5 +93,17 @@ describe('routeCircuit (plan 9 §5)', () => {
     expect(x.points.at(-1)).toEqual([x.points[0]![0] + 96, x.points[0]![1]]);
     expect(routes.get('y')).toMatchObject({ tailOn: 'open', source: null });
     expect(routes.get('y')!.points[0]).toEqual([404, 300]);
+  });
+});
+
+describe('endPointOf', () => {
+  it('is a drawn wire\'s first point for its tail, its last for its head; null for a wire not drawn', async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1')] }));
+    const routes = routeCircuit(plainCircuit(['s1'], d.graph.steps, () => true), { placement: d.placement, steps: d.graph.steps });
+    const pts = routes[0]!.points;
+    const point = endPointOf(routes);
+    expect(point('wf->s1', 'tail')).toEqual({ x: pts[0]![0], y: pts[0]![1] });
+    expect(point('wf->s1', 'head')).toEqual({ x: pts[pts.length - 1]![0], y: pts[pts.length - 1]![1] });
+    expect(point('nope', 'tail')).toBeNull();
   });
 });

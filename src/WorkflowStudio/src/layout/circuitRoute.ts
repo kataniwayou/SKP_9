@@ -1,4 +1,4 @@
-import { plainCircuit, type Circuit, type CircuitWire, type End } from '../circuit/circuit';
+import { plainCircuit, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
 import type { Id, Step } from '../model/graph';
 import { clearPath } from './detour';
@@ -214,6 +214,16 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   };
   for (const id of ids) routeOne(id);
   return ids.map((id) => out.get(id)!);
+}
+
+/** Where each drawn wire's ends are (its first point the tail, its last the head): to open an end where it is drawn. */
+export function endPointOf(routes: readonly WireRoute[]): (id: string, side: Side) => Point | null {
+  const drawn = new Map(routes.map((r) => [r.id, r.points]));
+  return (id, side) => {
+    const pts = drawn.get(id);
+    const p = pts ? pts[side === 'tail' ? 0 : pts.length - 1] : undefined;
+    return p ? { x: p[0], y: p[1] } : null;
+  };
 }
 
 /**
