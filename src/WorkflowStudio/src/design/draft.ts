@@ -101,7 +101,7 @@ export function listsOf(saved: StudioDocument, circuit: Readonly<Circuit>): { ne
   const next = new Map<Id, Id[]>();
   for (const [id, step] of saved.graph.steps) {
     // a step off the canvas has no wires: its list stays the saved one; a step's own id in its list is not drawn
-    // (the current never feeds a step itself, ง2.2-4), so a saved self-link stays where it was and is never added
+    // (the current never feeds a step itself, ยง2.2-4), so a saved self-link stays where it was and is never added
     next.set(id, drawable(id) ? ordered(step.nextStepIds, known(links.get(id) ?? []), (t) => t !== id && drawable(t)) : step.nextStepIds);
   }
   return { next, entries: ordered(saved.graph.workflow.entryStepIds, known(links.get(WORKFLOW_SOURCE) ?? []), drawable) };
