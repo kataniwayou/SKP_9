@@ -39,7 +39,11 @@ export interface StudioApi {
    * Typed `unknown` like listLive: api/liveness.ts reads it defensively.
    */
   listLiveness(): Promise<ApiResult<unknown>>;
-  /** Plan 1b's dry run of the stored workflow: POST, no body. Saves and starts nothing. */
+  /**
+   * Save (plan 8 §4): `PUT /workflows/{id}/design` with the whole design. BaseApi always stores it on the
+   * workflow, dry-runs it in one transaction and applies it to the real entities only when there are no
+   * errors. Answers `{ applied, errors }`.
+   */
   saveDesign(workflowId: string, body: DesignSaveRequest): Promise<ApiResult<DesignOutcomeDto>>;
 }
 

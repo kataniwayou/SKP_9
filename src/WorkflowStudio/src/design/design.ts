@@ -150,6 +150,22 @@ export function setField(edits: EntityEdits, t: EditTarget, base: EntityReadDto,
   }
 }
 
+/**
+ * Whether the design holds an edit entry for one entity: changed fields, or only a stamp (a wiring-only
+ * step, the workflow of a stored design, a field typed back to its saved value). Such a stamp is still
+ * sent on Save, so the Inspector marks it and Revert can drop it (spec §6.2).
+ */
+export function hasEdit(edits: EntityEdits, t: EditTarget): boolean {
+  switch (t.kind) {
+    case 'workflow': return edits.workflow !== null;
+    case 'step': return Object.hasOwn(edits.steps, t.id);
+    case 'processor': return Object.hasOwn(edits.processors, t.id);
+    case 'cache': return Object.hasOwn(edits.caches, t.id);
+    case 'assignment': return edits.assignments[t.stepId]?.id === t.id;
+    case 'schema': return Object.hasOwn(edits.schemas, slotKey(t.processorId, t.slot));
+  }
+}
+
 /** Drops everything the design holds for one entity (the Inspector's Revert). */
 export function revertEntity(edits: EntityEdits, t: EditTarget): EntityEdits {
   switch (t.kind) {

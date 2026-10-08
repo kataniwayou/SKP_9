@@ -4,7 +4,7 @@ import type { StepReadDto } from '../api/types';
 import type { StudioDocument } from '../app/document';
 import { useStudioActions } from '../app/studioActions';
 import { applyEdits } from '../design/apply';
-import { fieldsOf, slotKey, valueText } from '../design/design';
+import { fieldsOf, hasEdit, slotKey, valueText } from '../design/design';
 import { LOOSE_PREFIX, wireEnds } from '../design/draft';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
@@ -76,7 +76,8 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
   const crumbs = [rootTarget(open.selection, workflowId)!, ...inspector.trail];
   const saved = inspector.saved?.key === targetKey(target) ? inspector.saved.dto : null;
   const fields = fieldsOf(open.edits, editTargetOf(target));
-  const dirty = Object.keys(fields).length > 0;
+  // a stamp-only entry counts: it is sent on Save, and Revert is how a stale one is cleared (spec §6.2)
+  const dirty = hasEdit(open.edits, editTargetOf(target));
 
   return (
     <div className="paneBody" data-pane="inspector">

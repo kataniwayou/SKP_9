@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { assignmentDto, processorDto, schemaDto, stepDto } from '../api/fixtures';
 import {
-  createAssignment, EMPTY_DESIGN, EMPTY_EDITS, fieldsOf, hasGraphChanges, parseEdits, removeAssignment, revertEntity,
+  createAssignment, EMPTY_DESIGN, EMPTY_EDITS, fieldsOf, hasEdit, hasGraphChanges, parseEdits, removeAssignment, revertEntity,
   parseSlotKey, sameDesign, setField, slotKey, storedDesignOf,
 } from './design';
 import { EMPTY_DRAFT } from './draft';
@@ -27,6 +27,19 @@ describe('entity edits (plan 8 §3.2)', () => {
     const stored = { ...EMPTY_EDITS, steps: { s1: { updatedAt: '2026-10-01T00:00:00Z', fields: { name: 'x' } } } };
     const e = setField(stored, { kind: 'step', id: 's1' }, stepDto('s1', { name: 'step-s1' }), 'name', 'step-s1', ids());
     expect(e.steps['s1']).toEqual({ updatedAt: '2026-10-01T00:00:00Z', fields: {} });
+  });
+
+  it('counts a stamp-only entry as an edit of its entity, and Revert drops it (spec §6.2)', () => {
+    const stored = { ...EMPTY_EDITS, workflow: { updatedAt: 'w-old', fields: {} }, steps: { s1: { updatedAt: 't-old', fields: {} } } };
+    expect(hasEdit(stored, { kind: 'step', id: 's1' })).toBe(true);
+    expect(hasEdit(stored, { kind: 'step', id: 's2' })).toBe(false);
+    expect(hasEdit(stored, { kind: 'workflow' })).toBe(true);
+    expect(hasEdit(EMPTY_EDITS, { kind: 'workflow' })).toBe(false);
+    expect(hasEdit(revertEntity(stored, { kind: 'step', id: 's1' }), { kind: 'step', id: 's1' })).toBe(false);
+    expect(hasEdit(revertEntity(stored, { kind: 'workflow' }), { kind: 'workflow' })).toBe(false);
+    const op = { ...EMPTY_EDITS, assignments: { s1: { op: 'update', id: 'a1', updatedAt: 'ta-old', fields: {} } as const } };
+    expect(hasEdit(op, { kind: 'assignment', id: 'a1', stepId: 's1' })).toBe(true);
+    expect(hasEdit(op, { kind: 'assignment', id: 'a9', stepId: 's1' })).toBe(false);
   });
 
   it('edits a schema through a background copy: a new id, the original\'s name and version (spec §1.5)', () => {

@@ -10,6 +10,9 @@ import { Output } from './Output';
 import { Toolbox } from './PaneNote';
 import type { DesignError } from '../model/graph';
 import { Problems } from './Problems';
+import { buildDesignRequest } from '../app/saveDesign';
+import { applyDesign } from '../design/apply';
+import { designOf } from '../store/studioState';
 
 const graph = graphDto({
   steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'], processorId: 'p1' }), stepDto('s2', { name: 'store', processorId: 'p1' })],
@@ -147,6 +150,59 @@ describe('Inspector editing (plan 8 §3.3: the design, never BaseApi)', () => {
     expect(await screen.findByRole('button', { name: '＋ Create' })).toBeInTheDocument();
     expect(screen.queryByRole('alertdialog')).toBeNull();
     for (const write of [api.putEntity, api.createAssignment, api.deleteAssignment, api.saveDesign]) expect(write).not.toHaveBeenCalled();
+  });
+
+  describe('a stale stamp with no changed fields (spec §6.2: Revert clears it)', () => {
+    // a not-applied Save stored s1's wiring and the workflow with the stamps loaded then; both rows have moved since
+    const stale = graphDto({
+      ...inspectorGraph,
+      workflow: workflowDto({ updatedAt: 'w-fresh' }),
+      steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'], processorId: 'p1', updatedAt: 't-fresh' }), stepDto('s2', { name: 'store', processorId: 'p1' })],
+      design: {
+        workflow: { updatedAt: 'w-old', fields: {} },
+        steps: [{ id: 's1', updatedAt: 't-old', fields: {}, nextStepIds: [] }],
+      },
+    } as never);
+    const request = (store: StudioStore) => {
+      const open = store.getState().docs[0]!;
+      const base = open.status.kind === 'ready' ? open.status.doc : null;
+      const design = designOf(open);
+      return buildDesignRequest(base!, applyDesign(base!, design.draft, design.edits), design);
+    };
+
+    it('a wiring-only step: marked, Revert enabled, and Revert sends the freshly loaded stamp with the wiring kept', async () => {
+      const getEntity = vi.fn(async () => ok(stepDto('s1', { name: 'fetch', processorId: 'p1', updatedAt: 't-fresh' })));
+      const { store } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' }, graph: stale });
+      expect(request(store).steps).toEqual([{ id: 's1', updatedAt: 't-old', fields: {}, nextStepIds: [] }]);
+      await screen.findByLabelText('Description');
+      expect(screen.getByText('● unsaved changes')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+      expect(store.getState().docs[0]!.edits.steps['s1']).toBeUndefined();
+      expect(screen.getByRole('button', { name: 'Revert' })).toBeDisabled();
+      expect(request(store).steps).toEqual([{ id: 's1', updatedAt: 't-fresh', fields: {}, nextStepIds: [] }]);
+    });
+
+    it('the workflow: marked, Revert enabled, and Revert sends the freshly loaded stamp', async () => {
+      const getEntity = vi.fn(async () => ok(workflowDto({ updatedAt: 'w-fresh' })));
+      const { store } = await renderInspector({ getEntity }, { selection: { kind: 'workflow' }, graph: stale });
+      expect(request(store).workflow.updatedAt).toBe('w-old');
+      await screen.findByLabelText('Description');
+      expect(screen.getByText('● unsaved changes')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+      expect(store.getState().docs[0]!.edits.workflow).toBeNull();
+      expect(request(store).workflow.updatedAt).toBe('w-fresh');
+    });
+
+    it('a field typed back to its saved value keeps the old stamp until Revert drops it', async () => {
+      const getEntity = vi.fn(async () => ok(stepDto('s1', { name: 'fetch', processorId: 'p1', updatedAt: 't-fresh' })));
+      const { store } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' }, graph: stale });
+      fireEvent.change(await screen.findByLabelText('Description'), { target: { value: 'typed' } });
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: '' } });
+      expect(store.getState().docs[0]!.edits.steps['s1']).toEqual({ updatedAt: 't-old', fields: {} });
+      expect(screen.getByRole('button', { name: 'Revert' })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+      expect(request(store).steps[0]!.updatedAt).toBe('t-fresh');
+    });
   });
 
   it('drills step → processor → schema with a breadcrumb, and the crumbs go back', async () => {
