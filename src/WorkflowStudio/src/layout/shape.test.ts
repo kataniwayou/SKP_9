@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dragSegment, endsOf, nearestSegment, normalize, pointsOfShape, segmentHandles, shapeFromPoints } from './shape';
+import { dragSegment, endsOf, normalize, pointsOfShape, segmentHandles, shapeFromPoints } from './shape';
 
 const e = { sx: 0, sy: 96, tx: 288, ty: 160 };
 
@@ -40,14 +40,13 @@ describe('shape', () => {
     expect(normalize({ sx: 0, sy: 96, tx: 288, ty: 96 }, { xs: [144], ys: [] })).toBeNull();
   });
 
-  it('puts a handle on every run that has length, and finds the run nearest a point', () => {
+  it('puts a handle on every run that has length, and reads the ends of a path', () => {
     const b = { xs: [144], ys: [] };
     expect(segmentHandles(e, b)).toEqual([
       { k: 0, x: 72, y: 96, vertical: false },
       { k: 1, x: 144, y: 128, vertical: true },
       { k: 2, x: 216, y: 160, vertical: false },
     ]);
-    expect(nearestSegment(e, b, { x: 150, y: 120 })).toBe(1);
     expect(endsOf([[0, 96], [144, 96], [144, 160], [288, 160]])).toEqual(e);
   });
 });

@@ -101,20 +101,6 @@ export function segmentHandles(e: Ends, b: Bends): SegmentHandle[] {
   return out;
 }
 
-export function nearestSegment(e: Ends, b: Bends, p: { x: number; y: number }): number {
-  const pts = pointsOfShape(e, b);
-  let best = 0, bestD = Infinity;
-  for (let k = 0; k < pts.length - 1; k++) {
-    const [ax, ay] = pts[k]!, [bx, by] = pts[k + 1]!;
-    if (ax === bx && ay === by) continue;
-    const cx = Math.min(Math.max(p.x, Math.min(ax, bx)), Math.max(ax, bx));
-    const cy = Math.min(Math.max(p.y, Math.min(ay, by)), Math.max(ay, by));
-    const d = Math.hypot(p.x - cx, p.y - cy);
-    if (d < bestD) { bestD = d; best = k; }
-  }
-  return best;
-}
-
 /** A finite number (what the session and layout readers accept). */
 export const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 

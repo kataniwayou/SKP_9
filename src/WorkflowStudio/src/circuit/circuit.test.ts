@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Step } from '../model/graph';
 import {
-  addCircuitWire, legacyCircuit, moveWire, openJoinedOn, parseCircuit, plainCircuit, removeCircuitWires, sameEnd, setBends, setEnd, shapedByHand, snapAngle,
+  addCircuitWire, holdEnd, legacyCircuit, moveWire, openJoinedOn, parseCircuit, plainCircuit, removeCircuitWires, sameEnd, setBends, setEnd, shapedByHand, snapAngle,
   type Circuit, type CircuitWire, type Side,
 } from './circuit';
 
@@ -83,9 +83,35 @@ describe('editing a circuit', () => {
     expect(out.g).toBe(chain.g);
     expect(out.x).toEqual({ tail: chain.x!.tail, head: { on: 'open', x: 160, y: 80 }, bends });
     expect(out.y).toBe(chain.y);
-    // a straight wire has no bends to keep
-    expect(moveWire(chain, 'g', [[0, 40], [96, 40]], drawn).g).toEqual({ tail: { on: 'open', x: 0, y: 40 }, head: { on: 'open', x: 96, y: 40 } });
+    // a straight wire keeps a one-run shape (a vertical run of no length at its tail), so it is never re-routed
+    expect(moveWire(chain, 'g', [[0, 40], [96, 40]], drawn).g).toEqual({ tail: { on: 'open', x: 0, y: 40 }, head: { on: 'open', x: 96, y: 40 }, bends: { xs: [0], ys: [] } });
     expect(moveWire(chain, 'gone', [[0, 0], [8, 0]], drawn)).toBe(chain);
+  });
+
+  it('a wire already open at both ends, moved whole, just moves: its ends and its shape go with it, nothing else changes', () => {
+    const c: Circuit = { o: { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 96, y: 40 }, bends: { xs: [48], ys: [] } }, w: plain('s1', 's2') };
+    const out = moveWire(c, 'o', [[16, 24], [64, 24], [64, 64], [112, 64]], () => null);
+    expect(out.o).toEqual({ tail: { on: 'open', x: 16, y: 24 }, head: { on: 'open', x: 112, y: 64 }, bends: { xs: [64], ys: [] } });
+    expect(out.w).toBe(c.w);
+  });
+
+  it('an end held where it was drawn stays held while the other end is open, goes back to automatic when the other end connects, and is the user\'s once moved itself', () => {
+    const c: Circuit = { w: { tail: { on: 'step', step: 's1', y: null }, head: { on: 'open', x: 400, y: 200 }, bends } };
+    const held = holdEnd(c, 'w', 'tail', { on: 'step', step: 's1', y: 88 });
+    expect(held.w).toEqual({ tail: { on: 'step', step: 's1', y: 88 }, head: c.w!.head, bends, held: 'tail' });
+    // the open end moved on: still held, the bends too
+    expect(setEnd(held, 'w', 'head', { on: 'open', x: 440, y: 200 }).w).toEqual({ tail: { on: 'step', step: 's1', y: 88 }, head: { on: 'open', x: 440, y: 200 }, bends, held: 'tail' });
+    expect(setBends(held, 'w', null).w!.held).toBe('tail');
+    // connected again: the held end is automatic again, and no longer held
+    expect(setEnd(held, 'w', 'head', { on: 'step', step: 's2', y: 64 }).w).toEqual({ tail: { on: 'step', step: 's1', y: null }, head: { on: 'step', step: 's2', y: 64 } });
+    expect(setEnd(held, 'w', 'head', { on: 'wire', host: 'x', at: 40 }).w!.tail).toEqual({ on: 'step', step: 's1', y: null });
+    // the held end moved by the user: it stays where it is put, no longer held
+    expect(setEnd(held, 'w', 'tail', { on: 'step', step: 's1', y: 120 }).w).toEqual({ tail: { on: 'step', step: 's1', y: 120 }, head: c.w!.head, bends });
+    // a held hub tail goes back to its automatic place too
+    const hub = holdEnd({ h: { tail: { on: 'hub', angle: null }, head: { on: 'open', x: 400, y: 200 } } }, 'h', 'tail', { on: 'hub', angle: 15 });
+    expect(setEnd(hub, 'h', 'head', { on: 'step', step: 's2', y: null }).h).toEqual({ tail: { on: 'hub', angle: null }, head: { on: 'step', step: 's2', y: null } });
+    // it serializes
+    expect(parseCircuit(JSON.parse(JSON.stringify(held)))).toEqual(held);
   });
 
   it('compares ends, snaps hub angles to 15 degrees, and tells a shaped wire', () => {

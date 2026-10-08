@@ -132,6 +132,18 @@ questions (§2.1) and the recommendations accepted for every gap (§2.2).
 - **Run squares** drag runs; the shape is kept (stored bends), as today. Right-click Reset route; Delete removes the
   wire; Undo/Redo cover every change.
 - A head or tail moved along its own side slides its contact point.
+- **End square over nothing** (the user's rule, 2026-10-08): the end follows the pointer with exactly one corner (an
+  L). The run at that end keeps its axis up to the pointer's coordinate on that axis, then one perpendicular run goes
+  to the pointer; dragged along the run's own axis it only lengthens or shortens. Released there the end is open and
+  the wire keeps that shape (its bends). An automatic other end on a step or the hub is held where it is drawn
+  (`held`; the hub at the nearest 15°) and goes back to automatic when the open end connects again. Over a step side,
+  the hub or a wire the drop is judged as above and the router draws the way in.
+- **Wire body** (the user's rule, 2026-10-08; supersedes "a body drag drags the nearest run and never detaches"): in
+  design mode the body shows the open hand; pressed and dragged (the closed hand), any wire, picked or not, moves
+  whole. Its drawn path is frozen and shifted by the pointer's movement snapped to 8 px; both its ends open there
+  (its own junction ends break too), its shape is kept as its bends (a straight wire as a one-run shape), and the
+  ends joined on it open where they are drawn (§2.2-6). A press that moves less than a grid step only picks it, as a
+  click (Ctrl toggles). One Undo step.
 - New wires: unchanged (deferred, §2.1).
 
 ## 7. Save: from the circuit to the workflow

@@ -131,7 +131,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const suppressNodeClick = useRef(false);
   const { band, banding, pressing, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
   const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick);
-  const wiring = useWireGestures(doc, shownRef, design, setPreview);
+  const wiring = useWireGestures(doc, shownRef, design, setPreview, onSelect);
   // --inv (1 / zoom) lets canvas.css keep drop outlines and connection points one size on screen at any zoom
   const zoom = useStore((s) => s.transform[2]);
   // a key while a gesture runs would be overwritten by its drop: the canvas's keys wait for it (Escape is the gesture's)

@@ -260,6 +260,8 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
   the junction up or down; dragging the trunk's first leg moves it sideways (*ours*).
 - **Dragging the line body** behaves as a segment drag and **never detaches** the wire (*ours*: Visio
   detaches, which here would silently rewire the workflow).
+  *Superseded (2026-10-08): dragging the body moves the whole wire and detaches it; an end square adds one corner
+  (plan 9 spec §6).*
 - **End drag** (*Visio*): drop the arrow head (or a line's contact point) on another step to rewire the
   wire to it; drop the start dot on another step or the sphere to re-source it. The target outlines green
   when allowed, red when not (self-loop, duplicate). Dropped anywhere else it **snaps back** (*ours*: the

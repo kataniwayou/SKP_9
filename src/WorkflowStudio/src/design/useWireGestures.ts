@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
-import { addCircuitWire, moveWire, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
+import { selectionForPicks } from '../canvas/selection';
+import { togglePick, type Pick } from '../store/picks';
+import type { Selection } from '../store/selection';
+import { addCircuitWire, holdEnd, moveWire, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
 import { endPointOf, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearPath, clearRun } from '../layout/detour';
 import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
@@ -149,6 +152,8 @@ export function useWireGestures(
   shown: MutableRefObject<StudioDocument>,
   design: DesignProps | undefined,
   setPreview: (d: Draft | null) => void,
+  /** What a click on a wire selects (the canvas's own), for a body press that moved less than a grid step. */
+  onSelect?: (selection: Selection | null, picks?: Pick[]) => void,
 ) {
   const [active, setActive] = useState(false);
   const { run, abort, running } = useGesture(setActive);
@@ -272,12 +277,18 @@ export function useWireGestures(
         if (t.on === 'open') {
           const { bends } = lShape(t);
           next = setBends(next, wire.id, bends.xs.length > 0 ? bends : null);
-          // the other end stays where it is drawn: an automatic end on a step is held at its height there, or the
-          // fan-out or the landing rule would move it once this end has gone (the user's rule: the other points stay)
+          // the other end stays where it is drawn: an automatic end on a step or the hub is held there (`held`), or
+          // the fan-out or the landing rule would move it once this end has gone (the user's rule: the other points
+          // stay); it goes back to automatic when this end connects again
           const other: Side = side === 'head' ? 'tail' : 'head';
           const o = circuit[wire.id]![other];
           const at = o.on === 'step' && o.y === null ? shown.current.placement.steps.get(o.step) : undefined;
-          if (o.on === 'step' && at) next = setEnd(next, wire.id, other, { on: 'step', step: o.step, y: sy - at.y });
+          if (o.on === 'step' && at) next = holdEnd(next, wire.id, other, { on: 'step', step: o.step, y: sy - at.y });
+          else if (o.on === 'hub' && o.angle === null) {
+            // the hub takes a tail every 15 degrees: the nearest one to where it leaves the ring
+            const { cx, cy } = shown.current.placement.sphere;
+            next = holdEnd(next, wire.id, other, { on: 'hub', angle: snapAngle((Math.atan2(sy - cy, sx - cx) * 180) / Math.PI) });
+          }
         }
         // a host detached (an end dropped open): the ends joined on it open where they are drawn (spec §2.2-6)
         if (was.on !== 'open' && end.on === 'open') next = openJoinedOn(next, [wire.id], endPointOf(shown.current.wires));
@@ -291,7 +302,8 @@ export function useWireGestures(
    * wire moves rigidly, its drawn path frozen and shifted by the pointer's movement snapped to the grid. It detaches
    * from everything: both its ends open where the moved path starts and ends, its shape kept as its bends, and the
    * ends joined on it open where they are drawn (`moveWire`). A press that does not move is a click: it only picks
-   * the wire. Released, one history step, and the wire is the pick; Escape puts it back.
+   * the wire; so does one that moves less than a grid step (a wobbly click, whose click the gesture swallows), as a
+   * click would, Ctrl toggling it. Released, one history step, and the wire is the pick; Escape puts it back.
    */
   const startBody = (wire: WireRoute, e: ReactPointerEvent) => {
     const d = designRef.current;
@@ -304,6 +316,7 @@ export function useWireGestures(
     // the joined ends open where they are drawn now, not where the preview has moved their host to
     const drawnAt = endPointOf(shown.current.wires);
     let moved: { dx: number; dy: number; circuit: Circuit } | null = null;
+    const toggle = e.ctrlKey;
     setResize(null);
     run(e, (p) => {
       // `|| 0`: a snapped -0 is no move
@@ -311,9 +324,18 @@ export function useWireGestures(
       if (moved && moved.dx === dx && moved.dy === dy) return;
       moved = dx === 0 && dy === 0 ? null : { dx, dy, circuit: moveWire(circuit, wire.id, translatePoints(points, dx, dy), drawnAt) };
       setPreview(moved ? withCircuit(base, saved, moved.circuit) : null);
-    }, (cancelled) => {
+    }, (cancelled, pressMoved) => {
       setPreview(null);
-      if (cancelled || moved === null) return;
+      if (cancelled) return;
+      if (moved === null) {
+        // moved, but not a grid step: the click is swallowed, so this picks the wire as the click would have
+        if (pressMoved && onSelect) {
+          const pick: Pick = { kind: 'wire', id: wire.id };
+          const picks = toggle ? togglePick(d.picks, pick) : [pick];
+          onSelect(selectionForPicks(picks, null, shown.current.graph), picks);
+        }
+        return;
+      }
       d.onCommit(withCircuit(base, saved, moved.circuit), { picks: [{ kind: 'wire', id: wire.id }] });
     });
   };

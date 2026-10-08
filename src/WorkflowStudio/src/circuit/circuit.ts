@@ -18,11 +18,16 @@ export type End =
 
 export type Side = 'tail' | 'head';
 
-/** A one-way conductor from its tail to its head (plan 9 §3); `bends`: its own manual route (absent: automatic). */
+/**
+ * A one-way conductor from its tail to its head (plan 9 §3); `bends`: its own manual route (absent: automatic).
+ * `held`: that end (on a step or the hub) was automatic and is held where it was drawn because the other end was
+ * dropped open (the user's end drag, 2026-10-08); it goes back to automatic when the other end connects again.
+ */
 export interface CircuitWire {
   tail: End;
   head: End;
   bends?: Bends;
+  held?: Side;
 }
 
 /** Every wire on the canvas by its id; a wire keeps its id for its whole life. */
@@ -76,19 +81,43 @@ function sameFooting(a: End, b: End): boolean {
   return a.on === b.on;
 }
 
-const withBends = (tail: End, head: End, bends: Bends | null | undefined): CircuitWire =>
-  (bends && bends.xs.length > 0 ? { tail, head, bends } : { tail, head });
+const withBends = (tail: End, head: End, bends: Bends | null | undefined, held?: Side): CircuitWire => {
+  const w: CircuitWire = bends && bends.xs.length > 0 ? { tail, head, bends } : { tail, head };
+  if (held !== undefined) w.held = held;
+  return w;
+};
+
+/** An end on a step or the hub back to automatic (its height or angle chosen by the router). */
+const automatic = (e: End): End => (e.on === 'step' ? { on: 'step', step: e.step, y: null } : e.on === 'hub' ? { on: 'hub', angle: null } : e);
+const otherSide = (side: Side): Side => (side === 'tail' ? 'head' : 'tail');
 
 /**
  * One end moved (plan 9 §6). The bends stay while the end stays on what it was on (slid along its side, round the
- * hub, along its host, or an open end moved); onto anything else the wire is automatic again (plan 4 §4.4).
+ * hub, along its host, or an open end moved); onto anything else the wire is automatic again (plan 4 §4.4). A held
+ * other end (`held`) stays held while this end is open; once this end connects again it goes back to automatic. The
+ * held end moved itself is the user's from then on: no longer held.
  */
 export function setEnd(c: Readonly<Circuit>, id: string, side: Side, end: End): Circuit {
   if (!has(c, id)) return c as Circuit;
   const w = c[id]!;
   const out = copy(c);
   const keep = sameFooting(w[side], end) ? w.bends : undefined;
-  out[id] = side === 'tail' ? withBends(end, w.head, keep) : withBends(w.tail, end, keep);
+  const other = otherSide(side);
+  let far = w[other], held: Side | undefined;
+  if (w.held === other) {
+    if (end.on === 'open') held = other;
+    else far = automatic(far);
+  }
+  out[id] = side === 'tail' ? withBends(end, far, keep, held) : withBends(far, end, keep, held);
+  return out;
+}
+
+/** End `side` of wire `id` held where it is drawn (`end`: its step and height, or the hub and an angle), bends kept. */
+export function holdEnd(c: Readonly<Circuit>, id: string, side: Side, end: End): Circuit {
+  if (!has(c, id)) return c as Circuit;
+  const w = c[id]!;
+  const out = copy(c);
+  out[id] = side === 'tail' ? withBends(end, w.head, w.bends, side) : withBends(w.tail, end, w.bends, side);
   return out;
 }
 
@@ -97,7 +126,7 @@ export function setBends(c: Readonly<Circuit>, id: string, bends: Bends | null):
   if (!has(c, id)) return c as Circuit;
   const w = c[id]!;
   const out = copy(c);
-  out[id] = withBends(w.tail, w.head, bends);
+  out[id] = withBends(w.tail, w.head, bends, w.held);
   return out;
 }
 
@@ -126,7 +155,7 @@ function opening(
     };
     const tail = opened('tail'), head = opened('head');
     if (tail === w.tail && head === w.head) out[id] = w;
-    else { out[id] = withBends(tail, head, w.bends); changed = true; }
+    else { out[id] = withBends(tail, head, w.bends, w.held); changed = true; }
   }
   return changed ? out : (c as Circuit);
 }
@@ -161,7 +190,10 @@ export function moveWire(c: Readonly<Circuit>, id: string, points: readonly Pt[]
   if (!has(c, id) || points.length < 2) return c as Circuit;
   const [x0, y0] = points[0]!, [x1, y1] = points[points.length - 1]!;
   const out = copy(c);
-  out[id] = withBends({ on: 'open', x: x0, y: y0 }, { on: 'open', x: x1, y: y1 }, shapeFromPoints(points));
+  // a straight wire keeps a one-run shape too (one vertical run of no length at its tail), so it stays where it is
+  // put instead of being routed around a block
+  const shape = shapeFromPoints(points);
+  out[id] = withBends({ on: 'open', x: x0, y: y0 }, { on: 'open', x: x1, y: y1 }, shape.xs.length > 0 ? shape : { xs: [x0], ys: [] });
   return openJoinedOn(out, [id], pointOf);
 }
 
@@ -193,7 +225,8 @@ export function parseCircuit(v: unknown): Circuit | null {
     if (!isRecord(raw)) continue;
     const tail = toEnd(raw.tail), head = toEnd(raw.head);
     if (!tail || !head || head.on === 'hub') continue;
-    out[id] = withBends(tail, head, parseBends(raw.bends));
+    const held = raw.held === 'tail' || raw.held === 'head' ? raw.held : undefined;
+    out[id] = withBends(tail, head, parseBends(raw.bends), held);
   }
   return out;
 }
