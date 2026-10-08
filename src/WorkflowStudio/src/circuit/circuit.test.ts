@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Step } from '../model/graph';
 import {
-  addCircuitWire, legacyCircuit, openJoinedOn, parseCircuit, plainCircuit, removeCircuitWires, sameEnd, setBends, setEnd, shapedByHand, snapAngle,
+  addCircuitWire, legacyCircuit, moveWire, openJoinedOn, parseCircuit, plainCircuit, removeCircuitWires, sameEnd, setBends, setEnd, shapedByHand, snapAngle,
   type Circuit, type CircuitWire, type Side,
 } from './circuit';
 
@@ -68,6 +68,24 @@ describe('editing a circuit', () => {
     expect(out.y).toBe(chain.y);
     expect(openJoinedOn(chain, ['y'], drawn)).toBe(chain);
     expect(openJoinedOn(chain, ['gone'], drawn)).toBe(chain);
+  });
+
+  it('a wire moved whole is open at both ends where its moved path starts and ends, its shape kept as its bends; its junction ends break and the ends joined on it open where they are drawn', () => {
+    const chain: Circuit = {
+      h: { tail: { on: 'wire', host: 'g', at: 32 }, head: { on: 'step', step: 's2', y: null } },
+      g: plain('s0', 's9'),
+      x: { tail: { on: 'step', step: 's3', y: null }, head: { on: 'wire', host: 'h', at: 40 }, bends },
+      y: { tail: { on: 'wire', host: 'x', at: 24 }, head: { on: 'step', step: 's4', y: null } },
+    };
+    const drawn = (id: string, side: Side) => (id === 'x' && side === 'head' ? { x: 160, y: 80 } : null);
+    const out = moveWire(chain, 'h', [[64, 96], [64, 136], [200, 136], [200, 216], [288, 216]], drawn);
+    expect(out.h).toEqual({ tail: { on: 'open', x: 64, y: 96 }, head: { on: 'open', x: 288, y: 216 }, bends: { xs: [64, 200], ys: [136] } });
+    expect(out.g).toBe(chain.g);
+    expect(out.x).toEqual({ tail: chain.x!.tail, head: { on: 'open', x: 160, y: 80 }, bends });
+    expect(out.y).toBe(chain.y);
+    // a straight wire has no bends to keep
+    expect(moveWire(chain, 'g', [[0, 40], [96, 40]], drawn).g).toEqual({ tail: { on: 'open', x: 0, y: 40 }, head: { on: 'open', x: 96, y: 40 } });
+    expect(moveWire(chain, 'gone', [[0, 0], [8, 0]], drawn)).toBe(chain);
   });
 
   it('compares ends, snaps hub angles to 15 degrees, and tells a shaped wire', () => {

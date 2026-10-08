@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import {
-  box, centreOf, documentPanel, dragEnd, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
+  box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
   pickWire, pointOnWire, setEntryCondition, tab, test, type Pt,
 } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
@@ -470,4 +470,156 @@ test('an entry-condition edit that makes a short circuit marks the junction red 
   await expect(edge(panel, `${t.b}->${t.c}`).locator('circle.nx-joint.short')).toHaveCount(1);
   await tab(page, 'Problems').click();
   await expect(page.locator('[data-pane="problems"]')).toContainText('short circuit: Completed meets Failed');
+});
+
+// ---- the user's drag rules (2026-10-08): the body moves the whole wire; an end square adds one corner ----
+
+/** Every point of `after` is the point of `before` shifted by the same (dx, dy); that shift. */
+function shiftOf(before: [number, number][], after: [number, number][]): { dx: number; dy: number } {
+  expect(after.length, 'the same number of points: the same shape').toBe(before.length);
+  const dx = after[0]![0] - before[0]![0], dy = after[0]![1] - before[0]![1];
+  after.forEach((p, i) => near(p, [before[i]![0] + dx, before[i]![1] + dy]));
+  return { dx, dy };
+}
+
+test('drag rules: the open hand on a wire\'s body and the closed hand while it is dragged; two-headed arrows on run squares, the four-headed one on end squares', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  const before = await pointsOf(panel, ab);
+  // not picked: the open hand
+  let body = await pointOnWire(panel, ab, 0.3);
+  await page.mouse.move(body.x, body.y);
+  expect(await cursorAt(page, body)).toBe('grab');
+  await pickWire(page, panel, ab);
+  const runs = await panel.locator(`.design-wire[data-wire="${ab}"] .design-handle.seg`).all();
+  expect(runs.length).toBeGreaterThanOrEqual(1);
+  for (const run of runs) {
+    const c = await centreOf(run);
+    await page.mouse.move(c.x, c.y);
+    expect(await cursorAt(page, c)).toBe(/\bh\b/.test((await run.getAttribute('class')) ?? '') ? 'ns-resize' : 'ew-resize');
+  }
+  for (const side of ['tail', 'head'] as const) {
+    const c = await centreOf(endSquare(panel, ab, side));
+    await page.mouse.move(c.x, c.y);
+    expect(await cursorAt(page, c)).toBe('move');
+  }
+  // picked: still the open hand off the squares; pressed and dragged, the closed hand on the canvas the whole way
+  body = await pointOnWire(panel, ab, 0.3);
+  await page.mouse.move(body.x, body.y);
+  expect(await cursorAt(page, body)).toBe('grab');
+  await page.mouse.down();
+  for (const [dx, dy] of [[16, 24], [40, 64], [72, 96]] as const) {
+    await page.mouse.move(body.x + dx, body.y + dy, { steps: 3 });
+    await expect(panel.locator('.studio-canvas')).toHaveClass(/\bgesture\b/);
+    await expect(panel.locator('.studio-canvas')).not.toHaveClass(/gesture-(ns|ew|move)/);
+    expect(await cursorAt(page, { x: body.x + dx, y: body.y + dy })).toBe('grabbing');
+  }
+  // Escape puts it back
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, ab)).toEqual(before);
+});
+
+test('drag rules: a wire dragged by its body moves whole (every point shifted by one grid-snapped amount), opens at both ends (grey, dashed) and opens the end joined on it; one Undo step; a refresh keeps it', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`, bc = `${t.b}->${t.c}`;
+  expect(await dragEnd(page, panel, bc, 'tail', await pointOnWire(panel, ab, 0.5, 12))).toBe('join here');
+  const joinedAt = (await pointsOf(panel, bc))[0]!;
+  const before = await pointsOf(panel, ab);
+  expect(await colourOf(panel, ab)).toBe(TEAL);
+  expect(await dashOf(panel, ab)).toBe('none');
+  // not picked: a press on its body is enough
+  await focusCanvas(page, panel);
+  const from = await pointOnWire(panel, ab, 0.2);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 30, from.y + 60, { steps: 4 });
+  await page.mouse.move(from.x + 60, from.y + 130, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, ab)).not.toEqual(before);
+  const after = await pointsOf(panel, ab);
+  const { dx, dy } = shiftOf(before, after);
+  expect(dx % 8).toBe(0);
+  expect(dy % 8).toBe(0);
+  expect(dx).toBeGreaterThan(0);
+  expect(dy).toBeGreaterThan(dx);
+  // both ends open: no family, grey and dashed; the ends still drawn as a ring and an arrow head
+  expect(await colourOf(panel, ab)).toBe(GREY);
+  expect(await dashOf(panel, ab)).not.toBe('none');
+  await expect(edge(panel, ab).locator('circle.nx-src')).toHaveCount(1);
+  await expect(edge(panel, ab).locator('path.nx-head')).toHaveCount(1);
+  // the tail joined on it is open where it was drawn
+  await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(0);
+  await expect(edge(panel, bc).locator('circle.nx-src')).toHaveCount(1);
+  expect((await pointsOf(panel, bc))[0]).toEqual(joinedAt);
+  expect(await dashOf(panel, bc)).not.toBe('none');
+  // it is the pick: its squares show
+  await expect(endSquare(panel, ab, 'head')).toBeVisible();
+
+  // one step: Undo puts the wire back where it was, connected, and the junction with it; Redo moves it again
+  await focusCanvas(page, panel);
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => pointsOf(panel, ab)).toEqual(before);
+  await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(1);
+  expect(await dashOf(panel, ab)).toBe('none');
+  await page.keyboard.press('Control+y');
+  await expect.poll(() => pointsOf(panel, ab)).toEqual(after);
+  await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(0);
+
+  // a refresh keeps it (the draft is in the session; the history is not)
+  await page.reload();
+  const again = documentPanel(page, t.workflow);
+  await expect(edge(again, ab)).toHaveCount(1);
+  await expect.poll(() => pointsOf(again, ab)).toEqual(after);
+  expect(await dashOf(again, ab)).not.toBe('none');
+  await expect(edge(again, bc).locator('circle.nx-joint')).toHaveCount(0);
+  expect((await pointsOf(again, bc))[0]).toEqual(joinedAt);
+  await expect(page.getByText('● design draft')).toBeVisible();
+});
+
+test('drag rules: an end square dragged across its last run adds one corner (an L); the new leg dragged across adds one more; dropped on a step it connects again', async ({ page }) => {
+  const panel = await open(page);
+  const bc = `${t.b}->${t.c}`;
+  const straight = await pointsOf(panel, bc);
+  expect(straight.length, 'b -> c is straight').toBe(2);
+  expect(straight[0]![1]).toBe(straight[1]![1]);
+  // its head down, off c: one vertical leg; the horizontal run lengthened or shortened to the pointer's x, nothing else moved
+  await pickWire(page, panel, bc);
+  const head = await centreOf(endSquare(panel, bc, 'head'));
+  expect(await dragReading(page, panel, head, { x: head.x, y: head.y + 96 })).toBe('move here');
+  await expect.poll(async () => (await pointsOf(panel, bc)).length).toBe(3);
+  const l = await pointsOf(panel, bc);
+  expect(l[0]).toEqual(straight[0]);
+  expect(l[1]![1]).toBe(straight[0]![1]);
+  expect(l[2]![0]).toBe(l[1]![0]);
+  expect(l[2]![1]).toBeGreaterThan(l[1]![1]);
+  near(l[1], straight[1]!);
+  expect(await dashOf(panel, bc)).not.toBe('none');
+
+  // the vertical leg's end dragged sideways: one horizontal leg more, the L kept
+  const end = await centreOf(endSquare(panel, bc, 'head'));
+  expect(await dragReading(page, panel, end, { x: end.x + 96, y: end.y })).toBe('move here');
+  await expect.poll(async () => (await pointsOf(panel, bc)).length).toBe(4);
+  const z = await pointsOf(panel, bc);
+  expect(z.slice(0, 3)).toEqual(l);
+  expect(z[3]![1]).toBe(l[2]![1]);
+  expect(z[3]![0]).toBeGreaterThan(l[2]![0]);
+
+  // the tail of a -> d dragged down off a: one corner at the tail
+  const ad = `${t.a}->${t.d}`;
+  const adBefore = await pointsOf(panel, ad);
+  await pickWire(page, panel, ad);
+  const tail = await centreOf(endSquare(panel, ad, 'tail'));
+  const aBox = await box(node(panel, t.a));
+  expect(await dragReading(page, panel, tail, { x: tail.x, y: aBox.y + aBox.height + 48 })).toBe('move here');
+  await expect.poll(async () => (await pointsOf(panel, ad)).length).toBe(adBefore.length + 1);
+  const adL = await pointsOf(panel, ad);
+  expect(adL.slice(2)).toEqual(adBefore.slice(1));
+  expect(adL[1]).toEqual(adBefore[0]);
+  expect(adL[0]![0]).toBe(adBefore[0]![0]);
+
+  // b -> c's head back on c's input: connected again, solid
+  expect(await dragEnd(page, panel, bc, 'head', await onSide(panel, t.c, 'in'))).toBe('connect here');
+  expect(await dashOf(panel, bc)).toBe('none');
+  expect((await pointsOf(panel, bc)).at(-1)![0]).toBe((await flowBox(panel, t.c)).x);
 });

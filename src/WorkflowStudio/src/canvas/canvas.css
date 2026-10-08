@@ -40,6 +40,8 @@
 .studio-canvas .react-flow__node.draggable.dragging, .studio-canvas.gesture, .studio-canvas.gesture * { cursor: grabbing !important; }
 .sb .th { cursor: default; }
 .studio-canvas .nx-hit { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
+/* design mode: a wire's body takes the open hand (dragged, the whole wire moves; `.gesture` gives the closed hand) */
+.studio-canvas .nx-hit.grab { cursor: grab; }
 .studio-canvas:focus { outline: none; }
 /* the design overlay's layer stacks above every lifted block and wire, so neither a picked wire's own hit band
    nor a picked block covers a picked wire's handles (spec §4.1); the layer takes no pointer events itself, only
@@ -53,7 +55,7 @@
 .design-handle.end { fill: var(--accent); stroke: #04111F; cursor: move; }
 .design-handle.seg { fill: var(--panel); stroke: var(--accent); }
 /* a run square shows the way its run moves (Visio): a horizontal run goes up and down, a vertical one sideways;
-   an end square moves its end any way (plan 9 rule 14) */
+   an end square moves its end any way (plan 9 rule 14); a body drag keeps the closed hand (.gesture alone) */
 .design-handle.seg.h { cursor: ns-resize; }
 .design-handle.seg.v { cursor: ew-resize; }
 .studio-canvas.gesture.gesture-ns, .studio-canvas.gesture.gesture-ns * { cursor: ns-resize !important; }

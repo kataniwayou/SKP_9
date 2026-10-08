@@ -1,6 +1,7 @@
 import type { Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
-import { isNum, parseBends, type Bends } from '../layout/shape';
+import type { Pt } from '../layout/router';
+import { isNum, parseBends, shapeFromPoints, type Bends } from '../layout/shape';
 import type { Id, Step } from '../model/graph';
 
 /**
@@ -149,6 +150,19 @@ export function openJoinedOn(c: Readonly<Circuit>, hostIds: readonly string[], p
   const hosts = new Set(hostIds.filter((id) => has(c, id)));
   if (hosts.size === 0) return c as Circuit;
   return opening(c, hosts, new Set(), pointOf);
+}
+
+/**
+ * A wire moved whole (the user's body drag, 2026-10-08): `points` is its drawn path already moved. It detaches from
+ * everything: its tail and head open where that path starts and ends (a junction end of its own too), its shape kept
+ * as its bends; the ends joined on it open where they are drawn (`pointOf`, spec §2.2-6). `c` itself when it is gone.
+ */
+export function moveWire(c: Readonly<Circuit>, id: string, points: readonly Pt[], pointOf: (id: string, side: Side) => Point | null): Circuit {
+  if (!has(c, id) || points.length < 2) return c as Circuit;
+  const [x0, y0] = points[0]!, [x1, y1] = points[points.length - 1]!;
+  const out = copy(c);
+  out[id] = withBends({ on: 'open', x: x0, y: y0 }, { on: 'open', x: x1, y: y1 }, shapeFromPoints(points));
+  return openJoinedOn(out, [id], pointOf);
 }
 
 /** Shaped by hand: its own bends, or an end slid along a step's side (Reset route has something to undo). */

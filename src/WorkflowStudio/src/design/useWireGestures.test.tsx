@@ -6,10 +6,11 @@ import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { StudioDocument } from '../app/document';
 import { clampLanding, STEP_H, STEP_W, type Point } from '../layout/geometry';
-import { circuitOf, EMPTY_DRAFT, isEmptyDraft, setShape, withCircuit } from './draft';
+import { circuitOf, EMPTY_DRAFT, isEmptyDraft, setShape, withCircuit, type Draft } from './draft';
 import { setEnd } from '../circuit/circuit';
 import { lengthOf, pointAt } from '../layout/junctions';
 import { endsOf, pointsOfShape, shapeFromPoints } from '../layout/shape';
+import { translatePoints } from '../layout/wireMove';
 import type { DesignProps } from './designProps';
 import { applyDraft } from './apply';
 
@@ -202,26 +203,6 @@ describe('wire gestures', () => {
     expect(design.onCommit).not.toHaveBeenCalled();
   });
 
-  it('pressing a picked wire\'s body drags a run; an unpicked wire\'s body does nothing', async () => {
-    const doc = await two();
-    const picked = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const view = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={picked} onSelect={vi.fn()} />);
-    const hit = view.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!;
-    fireEvent.pointerDown(hit, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
-    fireEvent.pointerMove(document, { clientX: 100, clientY: 164, pointerId: 1 });
-    fireEvent.pointerUp(document, { clientX: 100, clientY: 164, pointerId: 1 });
-    expect(picked.onCommit).toHaveBeenCalledTimes(1);
-    view.unmount();
-
-    const none = designOf();
-    const other = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={none} onSelect={vi.fn()} />);
-    const hit2 = other.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!;
-    fireEvent.pointerDown(hit2, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
-    fireEvent.pointerMove(document, { clientX: 100, clientY: 164, pointerId: 1 });
-    fireEvent.pointerUp(document, { clientX: 100, clientY: 164, pointerId: 1 });
-    expect(none.onCommit).not.toHaveBeenCalled();
-  });
-
   it('right-click → Reset route makes a manual wire automatic again; an automatic wire has it disabled', async () => {
     const doc = await two();
     const shaped = setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [400], ys: [] }, landing: 96 });
@@ -347,8 +328,9 @@ describe('wire gestures', () => {
     view.unmount();
     const both = designOf({ draft: open, picks: [{ kind: 'wire', id: 's1->s2' }] });
     const again = canvasOf(doc, both);
-    expect(dragEnd(again.container, 's1->s2', 'tail', { x: 1104, y: 504 }).text).toBe('move here');
-    expect(commits(both)[0]![0].wires!['s1->s2']!.tail).toEqual({ on: 'open', x: 1104, y: 504 });
+    // away from its own line: the head's L now runs down x = 1104, and a tail dropped on it would be "same wire"
+    expect(dragEnd(again.container, 's1->s2', 'tail', { x: 1000, y: 504 }).text).toBe('move here');
+    expect(commits(both)[0]![0].wires!['s1->s2']!.tail).toEqual({ on: 'open', x: 1000, y: 504 });
   });
 
   it('a head on a wire of the same family joins it: "join here", a green halo; its current goes on into the host\'s step', async () => {
@@ -516,5 +498,160 @@ describe('wire gestures', () => {
     const head = commits(design)[0]![0].wires!['s1->s2']!.head;
     expect(head).toMatchObject({ on: 'open', x: 1104 });
     expect((head as { y: number }).y).not.toBe(400);
+  });
+
+  // ---- the user's drag rules (2026-10-08): the body moves the whole wire; an end square adds one corner ----
+  const pathNow = (doc: StudioDocument, draft: Draft, id: string) => applyDraft(doc, draft).wires.find((w) => w.id === id)!.points;
+  const pressBody = (container: HTMLElement, id: string, at: Point) =>
+    fireEvent.pointerDown(container.querySelector(`.react-flow__edge[data-id="${id}"] .nx-hit`)!, { button: 0, ...screenOf(container, at), pointerId: 1 });
+  const bent = (doc: StudioDocument) => {
+    const s1 = doc.placement.steps.get('s1')!;
+    return setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [s1.x + STEP_W + 32], ys: [] }, landing: 128 });
+  };
+
+  it('a wire\'s body has the open hand in design mode only', async () => {
+    const doc = await two();
+    const view = canvasOf(doc, designOf());
+    expect(view.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!.getAttribute('class')).toBe('nx-hit grab');
+    view.unmount();
+    const ro = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} />);
+    expect(ro.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!.getAttribute('class')).toBe('nx-hit');
+  });
+
+  it('dragging any wire\'s body moves the whole wire rigidly, snapped to the grid: every point shifted, both ends open, its shape kept as bends; one step, picked; the closed hand while dragged', async () => {
+    const doc = await three();
+    const draft = bent(doc);
+    const design = designOf({ draft });
+    const { container } = canvasOf(doc, design);
+    const before = pathNow(doc, draft, 's1->s2');
+    expect(before.length).toBe(4);
+    const from = onLine(applyDraft(doc, draft), 's1->s2', 0.3);
+    pressBody(container, 's1->s2', from);
+    const canvas = container.querySelector('.studio-canvas')!;
+    expect(canvas.getAttribute('class')).toBe('studio-canvas gesture');
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: from.x + 43, y: from.y + 213 }), pointerId: 1 });
+    // the preview: the whole wire, moved
+    const moved = translatePoints(before, 40, 216);
+    expect(wirePath(container, 's1->s2')).toEqual(moved);
+    expect(canvas.getAttribute('class')).toBe('studio-canvas gesture');
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: from.x + 43, y: from.y + 213 }), pointerId: 1 });
+    expect(commits(design)).toHaveLength(1);
+    const [next, options] = commits(design)[0]!;
+    const w = next.wires!['s1->s2']!;
+    expect(w.tail).toEqual({ on: 'open', x: moved[0]![0], y: moved[0]![1] });
+    expect(w.head).toEqual({ on: 'open', x: moved[3]![0], y: moved[3]![1] });
+    expect(w.bends).toEqual(shapeFromPoints(moved));
+    expect(pathNow(doc, next, 's1->s2')).toEqual(moved);
+    expect(next.next['s1']).toEqual([]);
+    expect(options).toEqual({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    expect(canvas.getAttribute('class')).toBe('studio-canvas');
+  });
+
+  it('a press on a wire\'s body that does not move is only a pick: no step; Escape mid-drag puts it back', async () => {
+    const doc = await two();
+    const design = designOf();
+    const { container } = canvasOf(doc, design);
+    const from = onLine(doc, 's1->s2');
+    pressBody(container, 's1->s2', from);
+    fireEvent.pointerUp(document, { ...screenOf(container, from), pointerId: 1 });
+    pressBody(container, 's1->s2', from);
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: from.x, y: from.y + 1 }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: from.x, y: from.y + 1 }), pointerId: 1 });
+    pressBody(container, 's1->s2', from);
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: from.x, y: from.y + 80 }), pointerId: 1 });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: from.x, y: from.y + 80 }), pointerId: 1 });
+    expect(design.onCommit).not.toHaveBeenCalled();
+    expect(wirePath(container, 's1->s2')).toEqual(doc.wires.find((w) => w.id === 's1->s2')!.points);
+  });
+
+  it('a host dragged by its body detaches: the end joined on it opens where it was drawn; a wire whose head is on a junction breaks it', async () => {
+    const doc = await four();
+    const draft = joinedHead(doc);
+    const shown = applyDraft(doc, draft);
+    const contact = shown.wires.find((w) => w.id === 's3->s4')!.points.at(-1)!;
+    const host = designOf({ draft });
+    const one = canvasOf(doc, host);
+    const from = onLine(shown, 's1->s2', 0.3);
+    pressBody(one.container, 's1->s2', from);
+    fireEvent.pointerMove(document, { ...screenOf(one.container, { x: from.x, y: from.y - 48 }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(one.container, { x: from.x, y: from.y - 48 }), pointerId: 1 });
+    const [next] = commits(host)[0]!;
+    expect(next.wires!['s1->s2']!.tail.on).toBe('open');
+    expect(next.wires!['s3->s4']!.head).toEqual({ on: 'open', x: contact[0], y: contact[1] });
+    one.unmount();
+
+    const joined = designOf({ draft });
+    const other = canvasOf(doc, joined);
+    const own = shown.wires.find((w) => w.id === 's3->s4')!.points;
+    const at = onLine(shown, 's3->s4', 0.2);
+    pressBody(other.container, 's3->s4', at);
+    fireEvent.pointerMove(document, { ...screenOf(other.container, { x: at.x + 16, y: at.y + 64 }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(other.container, { x: at.x + 16, y: at.y + 64 }), pointerId: 1 });
+    const [after] = commits(joined)[0]!;
+    const moved = translatePoints(own, 16, 64);
+    expect(after.wires!['s3->s4']).toMatchObject({ tail: { on: 'open', x: moved[0]![0], y: moved[0]![1] }, head: { on: 'open', x: moved.at(-1)![0], y: moved.at(-1)![1] } });
+    expect(pathNow(doc, after, 's3->s4')).toEqual(moved);
+    expect(after.wires!['s1->s2']).toEqual(draft.wires!['s1->s2']);
+  });
+
+  it('a head square dragged down off a straight wire adds one corner (an L); its vertical leg dragged sideways adds a horizontal one; dropped on a step it still connects', async () => {
+    const doc = await three();
+    const s2 = doc.placement.steps.get('s2')!;
+    const pts = doc.wires.find((w) => w.id === 's1->s2')!.points;
+    const [t0, h0] = [pts[0]!, pts.at(-1)!];
+    expect(t0[1]).toBe(h0[1]);
+    const first = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const one = canvasOf(doc, first);
+    const down = { x: h0[0], y: s2.y + STEP_H + 32 };
+    fireEvent.pointerDown(one.container.querySelector('.design-wire[data-wire="s1->s2"] .design-handle.end[data-end="head"]')!, { button: 0, ...screenOf(one.container, { x: h0[0], y: h0[1] }), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(one.container, down), pointerId: 1 });
+    // while dragged the wire is the L already
+    expect(wirePath(one.container, 's1->s2')).toEqual([[t0[0], t0[1]], [h0[0], h0[1]], [down.x, down.y]]);
+    expect(one.container.querySelector('.design-drop-label')!.textContent).toBe('move here');
+    fireEvent.pointerUp(document, { ...screenOf(one.container, down), pointerId: 1 });
+    const [l] = commits(first)[0]!;
+    expect(l.wires!['s1->s2']!.head).toEqual({ on: 'open', x: down.x, y: down.y });
+    // the other end stays where it is drawn: an automatic tail is held at its height, so no fan-out or landing moves it
+    expect(l.wires!['s1->s2']!.tail).toEqual({ on: 'step', step: 's1', y: t0[1] - doc.placement.steps.get('s1')!.y });
+    expect(pathNow(doc, l, 's1->s2')).toEqual([[t0[0], t0[1]], [h0[0], h0[1]], [down.x, down.y]]);
+    one.unmount();
+
+    const second = designOf({ draft: l, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const other = canvasOf(doc, second);
+    const aside = { x: down.x + 80, y: down.y };
+    expect(dragEnd(other.container, 's1->s2', 'head', aside).text).toBe('move here');
+    const [z] = commits(second)[0]!;
+    expect(pathNow(doc, z, 's1->s2')).toEqual([[t0[0], t0[1]], [h0[0], h0[1]], [down.x, down.y], [aside.x, aside.y]]);
+    other.unmount();
+
+    const third = designOf({ draft: z, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const last = canvasOf(doc, third);
+    const read = dragEnd(last.container, 's1->s2', 'head', inputOf(doc, 's3'));
+    expect(read.text).toBe('connect here');
+    expect(commits(third)[0]![0].wires!['s1->s2']!.head).toMatchObject({ on: 'step', step: 's3' });
+  });
+
+  it('a tail square dragged down adds one corner at the tail; dragged along its run only lengthens it', async () => {
+    const doc = await three();
+    const s1 = doc.placement.steps.get('s1')!;
+    const pts = doc.wires.find((w) => w.id === 's1->s2')!.points;
+    const [t0, h0] = [pts[0]!, pts.at(-1)!];
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const view = canvasOf(doc, design);
+    const down = { x: t0[0], y: s1.y + STEP_H + 32 };
+    expect(dragEnd(view.container, 's1->s2', 'tail', down).text).toBe('move here');
+    const [l] = commits(design)[0]!;
+    expect(l.wires!['s1->s2']!.tail).toEqual({ on: 'open', x: down.x, y: down.y });
+    expect(l.wires!['s1->s2']!.head).toEqual({ on: 'step', step: 's2', y: h0[1] - doc.placement.steps.get('s2')!.y });
+    expect(pathNow(doc, l, 's1->s2')).toEqual([[down.x, down.y], [t0[0], t0[1]], [h0[0], h0[1]]]);
+    view.unmount();
+
+    // an open tail moved along its (horizontal) run: no corner
+    const open = withCircuit(EMPTY_DRAFT, doc, setEnd(circuitOf(doc, EMPTY_DRAFT), 's1->s2', 'tail', { on: 'open', x: t0[0] + 40, y: t0[1] }));
+    const along = designOf({ draft: open, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const again = canvasOf(doc, along);
+    expect(dragEnd(again.container, 's1->s2', 'tail', { x: t0[0] + 16, y: t0[1] }).text).toBe('move here');
+    expect(pathNow(doc, commits(along)[0]![0], 's1->s2')).toEqual([[t0[0] + 16, t0[1]], [h0[0], h0[1]]]);
   });
 });
