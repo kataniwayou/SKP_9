@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { box, centreOf, documentPanel, dragEnd, dragReading, edge, get, newWires, node, openWorkflow, pane, pointOnWire, save, setEntryCondition, type Pt } from './studio';
+import { box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, get, newWire, newWires, node, openWorkflow, pane, pointOnWire, save, setEntryCondition, type Pt } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
 
 // Plan 9 §7: Save derives nextStepIds and entryStepIds by tracing the current. These tests save only their own throwaway
@@ -126,4 +126,35 @@ test('a tail joined on an entry wire makes the steps its current reaches entry s
   expect(await nextOf(request, t.a)).toEqual([t.d]);
   expect(await nextOf(request, t.d)).toEqual([t.b]);
   expect((await get<{ entryCondition: number }>(request, `steps/${t.c}`)).entryCondition).toBe(1);
+});
+
+test('a direction-less wire writes nothing: Save leaves every list as BaseApi had it; a fresh read draws it again with no direction (rule D, 2026-10-09)', async ({ page, request }) => {
+  const panel = await open(page);
+  const lists = async () => ({
+    entries: sorted(await entriesOf(request)),
+    next: await Promise.all([t.a, t.b, t.c, t.d].map(async (id) => sorted(await nextOf(request, id)))),
+  });
+  const before = await lists();
+  // one joined on a -> d's line and open at its other end, one open at both ends: neither has an end on a step
+  const spot = await emptySpot(panel);
+  const joined = await newWire(page, panel, t.c, spot);
+  expect(await dragEnd(page, panel, joined, 'tail', await pointOnWire(panel, `${t.a}->${t.d}`, 0.5, 12))).toBe('join here');
+  const spot2 = await emptySpot(panel, [spot]);
+  const loose = await newWire(page, panel, t.b, spot2);
+  expect(await dragEnd(page, panel, loose, 'tail', await emptySpot(panel, [spot, spot2]))).toBe('move here');
+  for (const id of [joined, loose]) {
+    await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(0);
+    await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
+  }
+  await save(page);
+  await expect(await pane(page, 'Output')).toContainText('Saved');
+  expect(await lists()).toEqual(before);
+  await page.reload();
+  const again = documentPanel(page, t.workflow);
+  for (const id of [joined, loose]) {
+    await expect(edge(again, id)).toHaveCount(1);
+    await expect(edge(again, id).locator('circle.nx-src')).toHaveCount(0);
+    await expect(edge(again, id).locator('path.nx-head')).toHaveCount(0);
+  }
+  await expect(edge(again, joined).locator('circle.nx-joint')).toHaveCount(1);
 });
