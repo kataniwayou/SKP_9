@@ -70,7 +70,7 @@ export interface Arrival {
   x: number;
 }
 
-/** The landing rule above (spec ง5.2), arrival by arrival: two wires from one source into one step each land. */
+/** The landing rule above (spec ยง5.2), arrival by arrival: two wires from one source into one step each land. */
 export function landingsOf(arrivals: readonly Arrival[], placement: Placement): Map<string, number> {
   const byTarget = new Map<Id, Arrival[]>();
   for (const a of arrivals) byTarget.set(a.target, [...(byTarget.get(a.target) ?? []), a]);
