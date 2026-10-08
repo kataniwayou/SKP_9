@@ -3,7 +3,7 @@ import { graphFromDto, processorFromDto, schemaFromDto, stepFromDto } from '../a
 import { parseLayout } from '../layout/layoutDoc';
 import { place, type Placement } from '../layout/placement';
 import { routeWires } from '../layout/wires';
-import type { Graph, Id, WorkflowProblem } from '../model/graph';
+import type { Graph, Id } from '../model/graph';
 import { reachableStepIds } from '../model/reachability';
 import type { StudioDocument } from './document';
 
@@ -16,9 +16,7 @@ import type { StudioDocument } from './document';
  * (the slot then shows its raw id).
  * Any malformed part of the layout is ignored by `parseLayout`; missing blocks get an elkjs position.
  *
- * Whether the workflow may start is BaseApi's answer, not ours: one `validate` call supplies the
- * problems, and the wires a `schemaEdge` problem names are drawn broken. Validate is advisory: in
- * every non-200 case (400, 409, 422, network) `problems` stays null and the graph still loads.
+ * Opening is GETs only (plan 8 §3.1): no validate, nothing marked broken.
  *
  * This never rejects: elkjs failures, a malformed body (a missing required field) or anything else
  * thrown becomes an error result (`http`, status 0).
@@ -36,13 +34,6 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
   if (!loaded.ok) return loaded;
 
   const graph: Graph = graphFromDto(loaded.value);
-  const verdict = await api.validate(workflowId);
-  const problems: WorkflowProblem[] | null = verdict.ok
-    ? (verdict.value.problems ?? []).map((p) => ({
-        gate: p.gate ?? '', title: p.title ?? '', detail: p.detail ?? '', offending: p.offending,
-      }))
-    : null;
-  const brokenEdges = brokenEdgeKeys(problems ?? []);
   const layout = parseLayout(graph.layout);
   const reachable = reachableStepIds(graph.workflow.entryStepIds, graph.steps);
   const reachableSet = new Set(reachable);
@@ -80,9 +71,9 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
     return { ok: false, error: { kind: 'http', status: 0, detail: `Layout failed: ${e instanceof Error ? e.message : String(e)}` } };
   }
   // routeWires only wires ends that are both placed and known, so every wire end has a position.
-  const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps, brokenEdges }, placement);
+  const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps, brokenEdges: new Set<string>() }, placement);
 
-  return { ok: true, value: { graph, parkedIds, placement, wires, problems } };
+  return { ok: true, value: { graph, parkedIds, placement, wires, loose: [] } };
 }
 
 /** GET /schemas/{id} for every processor slot the graph names but does not carry (parked steps only). */
@@ -99,15 +90,4 @@ async function loadMissingSchemas(api: StudioApi, graph: Graph): Promise<void> {
       try { graph.schemas.set(id, schemaFromDto(schema.value)); } catch { /* a body without an id is left out: the slot shows its raw id */ }
     }
   }
-}
-
-/** `${parentStepId}->${childStepId}` for each schemaEdge problem; offending is read defensively. */
-function brokenEdgeKeys(problems: WorkflowProblem[]): Set<string> {
-  const keys = new Set<string>();
-  for (const problem of problems) {
-    if (problem.gate !== 'schemaEdge' || typeof problem.offending !== 'object' || problem.offending === null) continue;
-    const { parentStepId, childStepId } = problem.offending as { parentStepId?: unknown; childStepId?: unknown };
-    if (typeof parentStepId === 'string' && typeof childStepId === 'string') keys.add(`${parentStepId}->${childStepId}`);
-  }
-  return keys;
 }

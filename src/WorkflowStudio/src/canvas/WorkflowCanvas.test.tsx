@@ -23,7 +23,6 @@ describe('WorkflowCanvas', () => {
       getStep: async () => ({ ok: false, error: { kind: 'notFound', status: 404 } }),
       getProcessor: async () => ({ ok: false, error: { kind: 'notFound', status: 404 } }),
       listWorkflows: async () => ({ ok: true, value: [] }),
-      validate: async () => ({ ok: true, value: { valid: true, problems: [] } }),
     } as unknown as StudioApi;
     const loaded = await loadDocument(api, 'wf1');
     if (!loaded.ok) throw new Error('load failed');
@@ -40,7 +39,6 @@ describe('WorkflowCanvas', () => {
     const load = async (id: string) => {
       const api = {
         getGraph: async () => ({ ok: true, value: graphDto({ workflow: workflowDto({ id }) }) }),
-        validate: async () => ({ ok: true, value: { valid: true, problems: [] } }),
       } as unknown as StudioApi;
       const r = await loadDocument(api, id);
       if (!r.ok) throw new Error('load failed');
@@ -60,7 +58,6 @@ describe('WorkflowCanvas', () => {
     async function twoSteps() {
       const api = {
         getGraph: async () => ({ ok: true, value: graphDto({ steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2', { name: 'store' })] }) }),
-        validate: async () => ({ ok: true, value: { valid: true, problems: [] } }),
       } as unknown as StudioApi;
       const r = await loadDocument(api, 'wf1');
       if (!r.ok) throw new Error('load failed');

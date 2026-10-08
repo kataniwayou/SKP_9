@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memoryStorage } from '../test/memoryStorage';
 import { EMPTY_INSPECTOR } from '../store/inspector';
 import { EMPTY_DRAFT } from '../design/draft';
+import { EMPTY_EDITS } from '../design/design';
 import { historyOf } from '../design/history';
 import { INITIAL_STATE, reduce, type StudioState } from '../store/studioState';
 import { createSaver, readSession, readTabSession, restoredState, SESSION_KEY, sessionOf, writeSession, writeTabSession, type Session } from './session';
@@ -102,7 +103,7 @@ describe('sessionOf / restoredState', () => {
   it('keeps each open document with its selection and view, and drops views of closed documents', () => {
     const state: StudioState = {
       ...INITIAL_STATE,
-      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf() }],
+      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null }],
       activeId: 'a',
       showDetails: true,
     };
@@ -167,8 +168,8 @@ describe('the draft (slice 3b, spec §6.1)', () => {
     const state: StudioState = {
       ...INITIAL_STATE,
       docs: [
-        { workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'step', stepId: 's1' }, inspector: { ...EMPTY_INSPECTOR, ...draft, trail: draft.trail as never }, picks: [], design: historyOf() },
-        { workflowId: 'b', name: 'billing', version: '1.0.0', status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf() },
+        { workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'step', stepId: 's1' }, inspector: { ...EMPTY_INSPECTOR, ...draft, trail: draft.trail as never }, picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null },
+        { workflowId: 'b', name: 'billing', version: '1.0.0', status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null },
       ],
       activeId: 'a',
     };

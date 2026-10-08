@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ApiResult, StudioApi } from '../api/client';
 import { graphDto, processorDto, schemaDto, stepDto } from '../api/fixtures';
+import { createApi } from '../api/client';
 import { loadDocument } from './loadDocument';
 
 const ok = <T,>(value: T): ApiResult<T> => ({ ok: true, value });
@@ -19,7 +20,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     deleteAssignment: vi.fn().mockResolvedValue(notFound),
     listLive: vi.fn(),
     listLiveness: vi.fn(),
-    validate: vi.fn().mockResolvedValue(ok({ valid: true, problems: [] })),
+    saveDesign: vi.fn().mockResolvedValue(notFound),
     ...over,
   };
 }
@@ -32,48 +33,6 @@ describe('loadDocument', () => {
     if (!result.ok) return;
     expect([...result.value.placement.steps.keys()]).toEqual(['s1']);
     expect(result.value.wires.map((w) => w.id)).toEqual(['wf->s1']);
-    expect(result.value.problems).toEqual([]);
-  });
-
-  it('marks the wire a schemaEdge problem names as broken, and keeps the problem', async () => {
-    const problem = { gate: 'schemaEdge', title: 'Schema mismatch', detail: 'a to b', offending: { parentStepId: 's1', childStepId: 's2' } };
-    const api = fakeApi({
-      getGraph: vi.fn().mockResolvedValue(ok(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }))),
-      validate: vi.fn().mockResolvedValue(ok({ valid: false, problems: [problem] })),
-    });
-
-    const result = await loadDocument(api, 'wf1');
-
-    expect(api.validate).toHaveBeenCalledWith('wf1');
-    expect(result.ok && result.value.problems).toEqual([problem]);
-    expect(result.ok && result.value.wires.map((w) => [w.id, w.broken])).toEqual([['wf->s1', false], ['s1->s2', true]]);
-  });
-
-  it('still loads when validate cannot be reached, with problems null and no broken wire', async () => {
-    const api = fakeApi({
-      getGraph: vi.fn().mockResolvedValue(ok(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }))),
-      validate: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } }),
-    });
-
-    const result = await loadDocument(api, 'wf1');
-
-    expect(result.ok).toBe(true);
-    expect(result.ok && result.value.problems).toBeNull();
-    expect(result.ok && result.value.wires.some((w) => w.broken)).toBe(false);
-  });
-
-  it.each([
-    ['400', { kind: 'badRequest', status: 400, detail: 'x', errors: {} }],
-    ['409', { kind: 'conflict', status: 409, detail: 'x', entity: null }],
-    ['422', { kind: 'unprocessable', status: 422, detail: 'x' }],
-    ['500', { kind: 'http', status: 500, detail: 'x' }],
-  ])('draws the graph with problems null when validate answers %s', async (_name, error) => {
-    const api = fakeApi({ validate: vi.fn().mockResolvedValue({ ok: false, error }) });
-
-    const result = await loadDocument(api, 'wf1');
-
-    expect(result.ok).toBe(true);
-    expect(result.ok && result.value.problems).toBeNull();
   });
 
   it('fetches parked steps the layout lists, and the processors they need', async () => {
@@ -202,5 +161,19 @@ describe('loadDocument', () => {
     const result = await loadDocument(api, 'wf1');
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error).toMatchObject({ kind: 'http', status: 0 });
+  });
+
+  it('opens with GETs only: no validate, no write (plan 8 §3.1)', async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      return new Response(JSON.stringify(graphDto({ design: { steps: [] } } as never)), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+
+    const result = await loadDocument(createApi('/api/v1', fetchImpl as unknown as typeof fetch), 'wf1');
+
+    expect(calls).toEqual(['GET /api/v1/workflows/wf1/graph']);
+    expect(result.ok && result.value.graph.design).toEqual({ steps: [] });
+    expect(result.ok && result.value.loose).toEqual([]);
   });
 });

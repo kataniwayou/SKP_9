@@ -6,6 +6,7 @@ import { loadedDocument } from '../app/fixtures';
 import { createStudioStore, StudioStoreProvider, type StudioStore } from '../store/studioStore';
 import { inspectorGraph, renderInspector } from '../test/inspector';
 import { Output, Toolbox } from './PaneNote';
+import type { DesignError } from '../model/graph';
 import { Problems } from './Problems';
 
 const graph = graphDto({
@@ -13,11 +14,12 @@ const graph = graphDto({
   processors: [processorDto('p1', { name: 'fetcher' })],
 } as never);
 
-async function storeWith(problems: Parameters<typeof loadedDocument>[1] = []): Promise<StudioStore> {
+async function storeWith(errors: DesignError[] | null = null): Promise<StudioStore> {
   const store = createStudioStore();
   store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
-  store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graph, problems) });
-  return store;
+  store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graph) });
+  const state = store.getState();
+  return createStudioStore({ ...state, docs: state.docs.map((d) => ({ ...d, errors })) });
 }
 const wrap = (store: StudioStore, ui: ReactNode) => render(<StudioStoreProvider value={store}>{ui}</StudioStoreProvider>);
 
@@ -281,23 +283,24 @@ describe('Inspector editing (slice 3b)', () => {
   });
 });
 
-describe('Problems', () => {
-  it('says when validate failed, and when there are none', async () => {
-    const { unmount } = wrap(await storeWith(null), <Problems />);
-    expect(screen.getByText('Problems unavailable.')).toBeInTheDocument();
-    unmount();
-    wrap(await storeWith([]), <Problems />);
+describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
+  const errors: DesignError[] = [
+    { kind: 'step', id: 's2', stage: 'steps', field: 'version', message: "'abc' is not a version" },
+    { kind: 'schema', id: 'nowhere', stage: 'schemas', field: 'definition', message: 'not JSON' },
+  ];
+
+  it('says "No problems" when no Save has reported any', async () => {
+    wrap(await storeWith(null), <Problems />);
     expect(screen.getByText('No problems')).toBeInTheDocument();
   });
 
-  it('lists gate, title and detail, and selects what a problem names when clicked', async () => {
-    const store = await storeWith([
-      { gate: 'schemaEdge', title: 'Schema-edge mismatch between steps', detail: "on edge 's1' -> 's2'", offending: { parentStepId: 's1', childStepId: 's2' } },
-      { gate: 'somethingNew', title: 'A gate this studio does not know', detail: 'd', offending: 42 },
-    ]);
+  it('lists entity, field and message, and selects the entity of a row when clicked', async () => {
+    const store = await storeWith(errors);
     wrap(store, <Problems />);
     const [named, unnamed] = screen.getAllByRole('listitem');
-    expect(named).toHaveTextContent('schemaEdgeSchema-edge mismatch between steps');
+    expect(named).toHaveTextContent('Step');
+    expect(named).toHaveTextContent('store_1.0.0-s2 · version');
+    expect(named).toHaveTextContent("'abc' is not a version");
 
     fireEvent.click(unnamed!);
     expect(store.getState().docs[0]!.selection).toBeNull();
@@ -305,16 +308,12 @@ describe('Problems', () => {
     expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's2' });
   });
 
-  it('selects a problem from the keyboard: it is focusable and Enter selects its target', async () => {
-    const store = await storeWith([
-      { gate: 'schemaEdge', title: 'Schema-edge mismatch between steps', detail: "on edge 's1' -> 's2'", offending: { parentStepId: 's1', childStepId: 's2' } },
-      { gate: 'somethingNew', title: 'A gate this studio does not know', detail: 'd', offending: 42 },
-    ]);
+  it('selects from the keyboard: a row with an entity is focusable and Enter selects it', async () => {
+    const store = await storeWith(errors);
     wrap(store, <Problems />);
     const [named, unnamed] = screen.getAllByRole('listitem');
     expect(named).toHaveAttribute('tabindex', '0');
     expect(unnamed).not.toHaveAttribute('tabindex');
-
     fireEvent.keyDown(named!, { key: 'Enter' });
     expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's2' });
   });

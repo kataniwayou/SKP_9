@@ -36,10 +36,10 @@ export function applyDraft(saved: StudioDocument, draft: Draft): StudioDocument 
     steps: overlay(saved.placement.steps, draft.steps),
     caches: overlay(saved.placement.caches, draft.caches),
   };
-  // broken marks come from validate on the saved workflow (§4.4): a wire the draft made is never marked
+  // nothing is drawn broken: opening runs no validate (plan 8)
   const brokenEdges = new Set(saved.wires.filter((w) => w.broken).map((w) => w.id));
   const wires = routeWires({ entryStepIds, steps, brokenEdges, shapes: draft.routes }, placement);
-  return { graph: shownGraph, parkedIds, placement, wires, problems: saved.problems };
+  return { graph: shownGraph, parkedIds, placement, wires, loose: saved.loose };
 }
 
 function overlay(base: ReadonlyMap<Id, Point>, moved: Readonly<Record<Id, Point>>): Map<Id, Point> {

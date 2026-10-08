@@ -1916,6 +1916,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/Workflows/{id}/design": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["DesignSaveRequest"];
+                    "text/json": components["schemas"]["DesignSaveRequest"];
+                    "application/*+json": components["schemas"]["DesignSaveRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["DesignOutcomeDto"];
+                        "application/json": components["schemas"]["DesignOutcomeDto"];
+                        "text/json": components["schemas"]["DesignOutcomeDto"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/Workflows/{id}/validate": {
         parameters: {
             query?: never;
@@ -2327,6 +2397,83 @@ export interface components {
             root?: string | null;
             items?: string | null;
         };
+        DesignAssignmentDto: {
+            op?: string | null;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            stepId?: string;
+            /** Format: date-time */
+            updatedAt?: string | null;
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        DesignCacheDto: {
+            /** Format: uuid */
+            id?: string;
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        DesignErrorDto: {
+            kind?: string | null;
+            /** Format: uuid */
+            id?: string;
+            stage?: string | null;
+            field?: string | null;
+            message?: string | null;
+        };
+        DesignOutcomeDto: {
+            applied?: boolean;
+            errors?: components["schemas"]["DesignErrorDto"][] | null;
+        };
+        DesignProcessorDto: {
+            /** Format: uuid */
+            id?: string;
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+            slots?: {
+                [key: string]: string;
+            } | null;
+        };
+        DesignSaveRequest: {
+            workflow?: components["schemas"]["DesignWorkflowDto"];
+            steps?: components["schemas"]["DesignStepDto"][] | null;
+            processors?: components["schemas"]["DesignProcessorDto"][] | null;
+            caches?: components["schemas"]["DesignCacheDto"][] | null;
+            schemas?: components["schemas"]["DesignSchemaDto"][] | null;
+            assignments?: components["schemas"]["DesignAssignmentDto"][] | null;
+            layout?: unknown;
+        };
+        DesignSchemaDto: {
+            /** Format: uuid */
+            id?: string;
+            name?: string | null;
+            version?: string | null;
+            description?: string | null;
+            definition?: string | null;
+        };
+        DesignStepDto: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: date-time */
+            updatedAt?: string | null;
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+            nextStepIds?: string[] | null;
+        };
+        DesignWorkflowDto: {
+            /** Format: date-time */
+            updatedAt?: string | null;
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+            entryStepIds?: string[] | null;
+            cacheIds?: string[] | null;
+        };
         GraphAssignmentIntent: {
             /** Format: uuid */
             stepId?: string;
@@ -2542,6 +2689,7 @@ export interface components {
             assignments?: components["schemas"]["AssignmentReadDto"][] | null;
             caches?: components["schemas"]["CacheReadDto"][] | null;
             layout?: unknown;
+            design?: unknown;
         };
         WorkflowProblemDto: {
             gate?: string | null;

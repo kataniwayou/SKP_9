@@ -1,5 +1,6 @@
 import type { SavedView } from '../canvas/savedView';
 import { isEmptyDraft, parseDraft, type Draft } from '../design/draft';
+import { EMPTY_EDITS } from '../design/design';
 import { historyOf } from '../design/history';
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
 import { EMPTY_INSPECTOR, hasEdits, type InspectorDraft } from '../store/inspector';
@@ -143,6 +144,7 @@ export function restoredState(session: Session | null): StudioState {
       inspector: { ...EMPTY_INSPECTOR, ...(d.draft ?? {}) },
       picks: picksOf(d.selection),
       design: historyOf(d.design),
+      edits: EMPTY_EDITS, errors: null,
     })),
     activeId: session.activeId,
     showDetails: session.showDetails,

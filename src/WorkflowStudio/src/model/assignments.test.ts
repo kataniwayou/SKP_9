@@ -4,9 +4,9 @@ import { assignmentByStep, payloadKeyCount } from './assignments';
 describe('assignmentByStep', () => {
   it('keeps one assignment per step: the smallest id, as the graph saver does', () => {
     const map = assignmentByStep([
-      { id: 'bbbb', stepId: 's1', payload: '{}' },
-      { id: 'aaaa', stepId: 's1', payload: '{"k":1}' },
-      { id: 'cccc', stepId: 's2', payload: '{}' },
+      { id: 'bbbb', stepId: 's1', payload: '{}', updatedAt: '' },
+      { id: 'aaaa', stepId: 's1', payload: '{"k":1}', updatedAt: '' },
+      { id: 'cccc', stepId: 's2', payload: '{}', updatedAt: '' },
     ]);
     expect(map.get('s1')!.id).toBe('aaaa');
     expect(map.get('s2')!.id).toBe('cccc');
@@ -14,8 +14,8 @@ describe('assignmentByStep', () => {
 
   it('compares ids case-insensitively, as Postgres compares uuids', () => {
     const map = assignmentByStep([
-      { id: 'B000', stepId: 's1', payload: '{}' },
-      { id: 'a000', stepId: 's1', payload: '{}' },
+      { id: 'B000', stepId: 's1', payload: '{}', updatedAt: '' },
+      { id: 'a000', stepId: 's1', payload: '{}', updatedAt: '' },
     ]);
     expect(map.get('s1')!.id).toBe('a000');
   });

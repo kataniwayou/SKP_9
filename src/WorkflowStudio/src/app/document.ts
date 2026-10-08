@@ -1,14 +1,16 @@
-import type { Id, Graph, WorkflowProblem } from '../model/graph';
+import type { Id, Graph } from '../model/graph';
 import type { Placement } from '../layout/placement';
-import type { WireRoute } from '../layout/wires';
+import type { LooseRoute, WireRoute } from '../layout/wires';
 
-/** One opened workflow, ready to draw: the graph (parked steps included), where every block sits,
- *  every wire's route, and the problems BaseApi's validate reported (null when it could not be reached). */
+/**
+ * One opened workflow, ready to draw: the graph (unwired steps included), where every block sits, every
+ * wire's route, and the loose wires (plan 8 §5). Opening reads with GETs only: nothing is judged on load.
+ */
 export interface StudioDocument {
   graph: Graph;
+  /** Steps on the canvas that the entry steps do not reach. They look like every other step (plan 8). */
   parkedIds: Id[];
   placement: Placement;
   wires: WireRoute[];
-  /** What `POST /workflows/{id}/validate` returned; null when that call failed. Advisory: the graph draws either way. */
-  problems: WorkflowProblem[] | null;
+  loose: LooseRoute[];
 }

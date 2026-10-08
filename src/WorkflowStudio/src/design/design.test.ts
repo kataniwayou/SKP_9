@@ -123,4 +123,10 @@ describe('slot keys', () => {
       expect(parseSlotKey(slotKey('3f2b8c1e-0000-4000-8000-000000000001', slot))).toEqual({ processorId: '3f2b8c1e-0000-4000-8000-000000000001', slot });
     }
   });
+
+  it('parseSlotKey is null for a key with no colon or a slot that is not input, output or config', () => {
+    expect(parseSlotKey('no-colon')).toBeNull();
+    expect(parseSlotKey('p1:bogus')).toBeNull();
+    expect(parseSlotKey('p1:')).toBeNull();
+  });
 });

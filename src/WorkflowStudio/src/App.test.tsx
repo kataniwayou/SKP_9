@@ -24,9 +24,9 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     putEntity: vi.fn().mockResolvedValue(notFound),
     createAssignment: vi.fn().mockResolvedValue(notFound),
     deleteAssignment: vi.fn().mockResolvedValue(notFound),
+    saveDesign: vi.fn().mockResolvedValue(notFound),
     listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }),
-    validate: vi.fn().mockResolvedValue({ ok: true, value: { valid: true, problems: [] } }),
     ...over,
   };
 }
@@ -418,7 +418,6 @@ describe('unsaved Inspector edits (slice 3b)', () => {
     await waitFor(() => expect(api.getGraph).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.getGraph).toHaveBeenCalledTimes(4));
-    expect(api.validate).toHaveBeenCalledTimes(4);
   });
 
   it('a failed document can be retried, and keeps its draft meanwhile', async () => {
@@ -429,24 +428,6 @@ describe('unsaved Inspector edits (slice 3b)', () => {
     render(<App api={withEntities({ getGraph })} storage={memoryStorage()} tabStorage={tab} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
     expect(await screen.findByLabelText('Description')).toHaveValue('typed');
-  });
-
-  it('asks before a Problems click selects another entity, and not for the one already selected', async () => {
-    const problems = [
-      { gate: 'schemaEdge', title: 'On the selected step', detail: 'd1', offending: { childStepId: 's1' } },
-      { gate: 'missingStep', title: 'On the workflow', detail: 'd2', offending: { parentStepId: '00000000-0000-0000-0000-000000000000', missingChildId: 'x' } },
-    ];
-    render(<App api={withEntities({ validate: vi.fn().mockResolvedValue({ ok: true, value: { valid: false, problems } }) })}
-      storage={memoryStorage()} tabStorage={draftSession({ description: 'typed' })} />);
-    await screen.findByLabelText('Description');
-
-    fireEvent.click(await screen.findByText('On the selected step'));
-    await new Promise((r) => setTimeout(r, 20));
-    expect(screen.queryByRole('alertdialog')).toBeNull();
-
-    fireEvent.click(screen.getByText('On the workflow'));
-    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByLabelText('Description')).toHaveValue('typed');
   });
 
   it('asks before closing a document whose draft names an entity that is gone (review focus 4)', async () => {

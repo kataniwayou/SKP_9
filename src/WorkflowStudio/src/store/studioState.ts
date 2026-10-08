@@ -1,6 +1,7 @@
 import type { StudioDocument } from '../app/document';
 import type { EntityReadDto } from '../api/entities';
-import type { Id } from '../model/graph';
+import type { DesignError, Id } from '../model/graph';
+import { EMPTY_EDITS, type EntityEdits } from '../design/design';
 import { entriesOf, isEmptyDraft, nextOf, wireEnds, type Draft } from '../design/draft';
 import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
@@ -31,6 +32,10 @@ export interface OpenDocument {
   picks: Pick[];
   /** The design draft and its history (plan 4). The draft is kept in the session; the history is not. */
   design: DesignHistory;
+  /** The Inspector's part of the design (plan 8): entity edits, assignment operations, schema copies. Not in the undo history. */
+  edits: EntityEdits;
+  /** The last Save's errors (plan 8 §4.1); null: no Save answered with errors since it was opened, saved or discarded. */
+  errors: DesignError[] | null;
 }
 
 /**
@@ -148,7 +153,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       if (state.docs.some((d) => d.workflowId === action.workflowId)) return { ...state, activeId: action.workflowId };
       const doc: OpenDocument = {
         workflowId: action.workflowId, name: action.name, version: action.version, status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR,
-        picks: [], design: historyOf(),
+        picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null,
       };
       return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
     }

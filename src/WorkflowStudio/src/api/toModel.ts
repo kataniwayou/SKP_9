@@ -1,5 +1,5 @@
-import type { Assignment, Audit, Cache, Graph, Processor, Schema, Step, Workflow } from '../model/graph';
-import type { CacheReadDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { Assignment, Audit, Cache, DesignError, Graph, Processor, Schema, Step, Workflow } from '../model/graph';
+import type { CacheReadDto, DesignOutcomeDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
 
 // The generated DTO types mark almost every field optional (see api/types.ts). These helpers state
 // once what the server actually guarantees, so the model never carries undefined.
@@ -81,7 +81,7 @@ export function graphFromDto(dto: WorkflowGraphDto): Graph {
   const byId = <T extends { id: string }>(items: T[]) => new Map(items.map((item) => [item.id, item]));
 
   const assignments: Assignment[] = (dto.assignments ?? []).map((a) => ({
-    id: required(a.id, 'assignment id'), stepId: text(a.stepId), payload: text(a.payload),
+    id: required(a.id, 'assignment id'), stepId: text(a.stepId), payload: text(a.payload), updatedAt: text(a.updatedAt),
   }));
 
   if (!dto.workflow) throw new Error('The server sent no workflow.');
@@ -94,5 +94,13 @@ export function graphFromDto(dto: WorkflowGraphDto): Graph {
     assignments,
     caches: byId((dto.caches ?? []).map(cacheFromDto)),
     layout: dto.layout ?? null,
+    design: dto.design ?? null,
   };
+}
+
+/** A Save's errors as the model carries them; every field read defensively. */
+export function designErrorsFromDto(dto: DesignOutcomeDto): DesignError[] {
+  return (dto.errors ?? []).map((e) => ({
+    kind: text(e.kind), id: text(e.id), stage: text(e.stage), field: optional(e.field), message: text(e.message),
+  }));
 }

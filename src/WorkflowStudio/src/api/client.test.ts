@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createApi } from './client';
+import type { DesignSaveRequest } from './types';
 
 function respond(status: number, body?: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
@@ -58,17 +59,19 @@ describe('createApi', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/v1/processors/a%2Fb', expect.anything());
   });
 
-  it('POSTs validate with no body and returns the verdict', async () => {
-    const verdict = { valid: false, problems: [{ gate: 'schemaEdge', title: 't', detail: 'd', offending: { parentStepId: 'a', childStepId: 'b' } }] };
-    const fetchImpl = vi.fn().mockResolvedValue(respond(200, verdict));
+  it('PUTs the design and returns the outcome (plan 8 §4.2)', async () => {
+    const outcome = { applied: false, errors: [{ kind: 'step', id: 's1', stage: 'steps', field: 'version', message: 'bad' }] };
+    const fetchImpl = vi.fn().mockResolvedValue(respond(200, outcome));
+    const body = { layout: { v: 1 } } as DesignSaveRequest;
 
-    const result = await createApi('/api/v1', fetchImpl).validate('wf1');
+    const result = await createApi('/api/v1', fetchImpl).saveDesign('wf1', body);
 
-    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/workflows/wf1/validate', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/workflows/wf1/design', {
+      method: 'PUT',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
-    expect(result).toEqual({ ok: true, value: verdict });
+    expect(result).toEqual({ ok: true, value: outcome });
   });
 
   it('GETs a schema by id', async () => {

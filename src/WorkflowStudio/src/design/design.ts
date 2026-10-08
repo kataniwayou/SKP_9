@@ -62,10 +62,12 @@ export type EditTarget =
 
 export const slotKey = (processorId: Id, slot: SchemaSlot): string => `${processorId}:${slot}`;
 
-/** The inverse of `slotKey`. Ids are uuids with no ':', and a slot name has none either: it splits on the last ':'. */
-export function parseSlotKey(key: string): { processorId: Id; slot: SchemaSlot } {
+/** The inverse of `slotKey`: splits on the last ':'; null when there is none or the slot is not input, output or config. */
+export function parseSlotKey(key: string): { processorId: Id; slot: SchemaSlot } | null {
   const at = key.lastIndexOf(':');
-  return { processorId: key.slice(0, at), slot: key.slice(at + 1) as SchemaSlot };
+  if (at < 0) return null;
+  const slot = key.slice(at + 1);
+  return slot === 'input' || slot === 'output' || slot === 'config' ? { processorId: key.slice(0, at), slot } : null;
 }
 
 /** A field value as form text: null reads as '', a number as its digits. */

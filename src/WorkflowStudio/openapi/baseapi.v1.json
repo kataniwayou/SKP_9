@@ -2952,6 +2952,114 @@
         }
       }
     },
+    "/api/v1/Workflows/{id}/design": {
+      "put": {
+        "tags": [
+          "Workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "description": "Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header.",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignSaveRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignSaveRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignSaveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignOutcomeDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignOutcomeDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignOutcomeDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/Workflows/{id}/validate": {
       "post": {
         "tags": [
@@ -3710,6 +3818,247 @@
         },
         "additionalProperties": false
       },
+      "DesignAssignmentDto": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stepId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignCacheDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignErrorDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stage": {
+            "type": "string",
+            "nullable": true
+          },
+          "field": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignErrorDto"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignProcessorDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true
+          },
+          "slots": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignSaveRequest": {
+        "type": "object",
+        "properties": {
+          "workflow": {
+            "$ref": "#/components/schemas/DesignWorkflowDto"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignStepDto"
+            },
+            "nullable": true
+          },
+          "processors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignProcessorDto"
+            },
+            "nullable": true
+          },
+          "caches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignCacheDto"
+            },
+            "nullable": true
+          },
+          "schemas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignSchemaDto"
+            },
+            "nullable": true
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignAssignmentDto"
+            },
+            "nullable": true
+          },
+          "layout": {
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignSchemaDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "version": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "definition": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignStepDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true
+          },
+          "nextStepIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignWorkflowDto": {
+        "type": "object",
+        "properties": {
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true
+          },
+          "entryStepIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          },
+          "cacheIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "GraphAssignmentIntent": {
         "type": "object",
         "properties": {
@@ -4419,6 +4768,9 @@
             "nullable": true
           },
           "layout": {
+            "nullable": true
+          },
+          "design": {
             "nullable": true
           }
         },

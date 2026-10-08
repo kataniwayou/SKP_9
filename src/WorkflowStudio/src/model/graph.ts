@@ -71,6 +71,8 @@ export interface Assignment {
   stepId: Id;
   /** JSON text. */
   payload: string;
+  /** The concurrency stamp a remove or an edit sends back (plan 8). */
+  updatedAt: string;
 }
 
 export interface Cache {
@@ -84,15 +86,13 @@ export interface Cache {
   audit: Audit;
 }
 
-/**
- * One problem BaseApi's validate reported (plan 1b). The studio never derives these: it only draws
- * them. `offending` is the gate's own object (for gate "schemaEdge": `{ parentStepId, childStepId }`).
- */
-export interface WorkflowProblem {
-  gate: string;
-  title: string;
-  detail: string;
-  offending: unknown;
+/** One error BaseApi's design dry run reported (plan 8 §4.3). Only ever the answer to a Save; never stored. */
+export interface DesignError {
+  kind: string;
+  id: Id;
+  stage: string;
+  field: string | null;
+  message: string;
 }
 
 export interface Graph {
@@ -104,4 +104,6 @@ export interface Graph {
   caches: Map<Id, Cache>;
   /** The stored canvas layout exactly as the server returned it (opaque JSON), or null. */
   layout: unknown;
+  /** The studio's stored design exactly as the server returned it (opaque JSON), or null (plan 8). */
+  design: unknown;
 }

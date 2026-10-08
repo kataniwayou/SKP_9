@@ -1,5 +1,5 @@
 import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
-import type { AssignmentCreateDto, AssignmentReadDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto, WorkflowValidationDto } from './types';
+import type { AssignmentCreateDto, AssignmentReadDto, DesignOutcomeDto, DesignSaveRequest, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -40,7 +40,7 @@ export interface StudioApi {
    */
   listLiveness(): Promise<ApiResult<unknown>>;
   /** Plan 1b's dry run of the stored workflow: POST, no body. Saves and starts nothing. */
-  validate(workflowId: string): Promise<ApiResult<WorkflowValidationDto>>;
+  saveDesign(workflowId: string, body: DesignSaveRequest): Promise<ApiResult<DesignOutcomeDto>>;
 }
 
 interface Problem {
@@ -129,6 +129,6 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     deleteAssignment: (assignmentId) => request<null>('DELETE', `/assignments/${id(assignmentId)}`),
     listLive: () => get<unknown>('/orchestration/live'),
     listLiveness: () => get<unknown>('/processors/liveness'),
-    validate: (workflowId) => request<WorkflowValidationDto>('POST', `/workflows/${id(workflowId)}/validate`),
+    saveDesign: (workflowId, body) => request<DesignOutcomeDto>('PUT', `/workflows/${id(workflowId)}/design`, body),
   };
 }

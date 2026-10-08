@@ -17,9 +17,10 @@ function doc(over: Partial<Graph> = {}, parkedIds: string[] = []): StudioDocumen
     steps: new Map([['a', step('a', { nextStepIds: ['b'] })], ['b', step('b', { entryCondition: 2 })]]),
     processors: new Map([['p1', { id: 'p1', name: 'fetcher', version: '2.1.0', description: null, sourceHash: '', instanceId: null, inputSchemaId: 'sIn', outputSchemaId: null, configSchemaId: null, audit: AUDIT }]]),
     schemas: new Map([['sIn', { id: 'sIn', name: 'orders-in', version: '1.0.0', description: null, audit: AUDIT }]]),
-    assignments: [{ id: 'x1', stepId: 'a', payload: '{"url":"u","retries":3}' }],
+    assignments: [{ id: 'x1', stepId: 'a', payload: '{"url":"u","retries":3}', updatedAt: '' }],
     caches: new Map([['c1', { id: 'c1', name: 'lookups', version: '1.0.0', description: null, root: 'lk', items: '{"k1":"v","k2":"v"}', audit: AUDIT }]]),
     layout: null,
+    design: null,
     ...over,
   };
   return {
@@ -34,7 +35,7 @@ function doc(over: Partial<Graph> = {}, parkedIds: string[] = []): StudioDocumen
       { id: 'wf->a', source: 'wf', target: 'a', points: [[224, 128], [288, 128]], condition: 1, broken: false },
       { id: 'a->b', source: 'a', target: 'b', points: [[512, 128], [576, 128]], condition: 2, broken: true },
     ],
-    problems: [],
+    loose: [],
   };
 }
 
