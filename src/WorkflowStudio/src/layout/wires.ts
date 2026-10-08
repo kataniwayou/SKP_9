@@ -5,7 +5,7 @@ import { CONTACT_MARGIN, inLoop, lengthOf, nearestOn, ownEnds, pointAt, slice } 
 import type { Placement, Sphere } from './placement';
 import { computeDepartures, computeLandings, departureX, WORKFLOW_SOURCE, type SourceId, type WireEnd } from './ports';
 import { CLEARANCE, route, simplify, type Box, type Pt } from './router';
-import { pointsOfShape, type Ends, type WireShape } from './shape';
+import { pointsOfShape, type Bends, type Ends, type WireShape } from './shape';
 
 export interface WireRoute {
   /** `${source}->${target}`; unique because a step's nextStepIds are unique. */
@@ -38,6 +38,8 @@ export interface LooseWire {
   source: SourceId;
   /** The open end, in flow coordinates. */
   end: Point;
+  /** Its own shape once a run was dragged (as a connected wire's in the draft's routes); absent: the router draws it. */
+  bends?: Bends;
 }
 
 /** A loose wire as drawn: right-angled from its source's port to its open end. */
@@ -185,14 +187,18 @@ function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, sh
   return { route: { ...r, points, joint }, travel: [...points, ...shared, ...branch.slice(1)] };
 }
 
-/** Loose wires (plan 8 §5), each from its source's port to its open end; one whose source is not on the canvas is left out. */
+/** Loose wires (plan 8 §5), each from its source's port to its open end, by its own bends when it has them; one whose source is not on the canvas is left out. */
 export function routeLoose(loose: Readonly<Record<string, LooseWire>>, placement: Placement): LooseRoute[] {
   const boxes = blockBoxes(placement);
   const out: LooseRoute[] = [];
   for (const [id, l] of Object.entries(loose)) {
     const from = portOf(placement, l.source);
     if (!from) continue;
-    out.push({ id, source: l.source, points: clearPath(route(from.x, from.y, l.end.x, l.end.y, boxIdOf(l.source), '', 0, boxes), boxes) });
+    // a loose wire's bends are kept as a connected wire's are: its first and last runs follow its source and its end
+    const points = l.bends && l.bends.xs.length > 0
+      ? simplify(pointsOfShape({ sx: from.x, sy: from.y, tx: l.end.x, ty: l.end.y }, l.bends))
+      : clearPath(route(from.x, from.y, l.end.x, l.end.y, boxIdOf(l.source), '', 0, boxes), boxes);
+    out.push({ id, source: l.source, points });
   }
   return out;
 }

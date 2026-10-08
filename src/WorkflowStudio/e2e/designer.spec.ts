@@ -617,3 +617,106 @@ test('the legend shows the loose wire, and nothing broken or parked (plan 8 §5)
   await expect(items.filter({ hasText: /broken/i })).toHaveCount(0);
   await expect(items.filter({ hasText: /parked/i })).toHaveCount(0);
 });
+
+/** A point on the canvas's empty pane (no block, wire, handle or overlay under it), in page coordinates; null when none is found. */
+async function emptySpot(panel: Locator, avoid: { x: number; y: number }[] = []): Promise<{ x: number; y: number } | null> {
+  return panel.locator('.react-flow').evaluate((el, far) => {
+    const r = el.getBoundingClientRect();
+    for (let fy = 0.15; fy < 0.9; fy += 0.07) for (let fx = 0.9; fx > 0.1; fx -= 0.07) {
+      const x = r.left + r.width * fx, y = r.top + r.height * fy;
+      if (far.some((p) => Math.hypot(p.x - x, p.y - y) < 120)) continue;
+      // clear of everything 40 px around, so the drop reach of no block or line counts
+      const clear = [[0, 0], [40, 0], [-40, 0], [0, 40], [0, -40]].every(([dx, dy]) => {
+        const hit = el.ownerDocument.elementFromPoint(x + dx!, y + dy!);
+        return hit !== null && hit.classList.contains('react-flow__pane');
+      });
+      if (clear) return { x, y };
+    }
+    return null;
+  }, avoid);
+}
+
+test('a picked loose wire has the squares of a wire: a run square reshapes it and a refresh keeps the shape; its start square re-sources it or snaps back; its open-end square wires it', async ({ page }) => {
+  const { a, c, reattachable } = chain!;
+  // re-sourced onto a, its open end then goes to c: a must not already go to c
+  test.skip(!reattachable, 'a already goes to c: the open end dropped on c would stay loose');
+  const panel = await open(page);
+  await node(panel, c).hover();
+  const port = await centreOf(node(panel, c).locator('.nx-port'));
+  const area = (await panel.locator('.studio-canvas').boundingBox())!;
+  await drag(page, port, { x: area.x + area.width - 80, y: area.y + area.height - 120 });
+  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
+  await expect(loose).toHaveCount(1);
+  const id = (await loose.getAttribute('data-id'))!;
+  const squares = panel.locator(`.design-wire[data-wire="${id}"]`);
+  const line = () => loose.locator('path.w').getAttribute('d');
+
+  // the new loose wire is the pick: a square on each end and one in the middle of each run, one size on screen
+  await expect(squares.locator('.design-handle.end[data-end="source"]')).toHaveCount(1);
+  await expect(squares.locator('.design-handle.end[data-end="target"]')).toHaveCount(1);
+  const runs = squares.locator('.design-handle.seg');
+  expect(await runs.count()).toBeGreaterThan(0);
+  const size = (await squares.locator('.design-handle.end[data-end="source"]').boundingBox())!;
+  expect(size.width).toBeGreaterThan(7);
+  expect(size.width).toBeLessThan(13);
+
+  // a run square moves its run, as a connected wire's does
+  const before = await line();
+  const handle = runs.first();
+  const at = await centreOf(handle);
+  const across = /\bh\b/.test((await handle.getAttribute('class')) ?? '');
+  await drag(page, at, across ? { x: at.x, y: at.y + 48 } : { x: at.x + 48, y: at.y });
+  await expect.poll(line).not.toBe(before);
+  const shaped = await line();
+  await expect(page.getByText('● design draft')).toBeVisible();
+
+  // a refresh keeps the shape
+  await page.reload();
+  const again = documentPanel(page, chain!.workflow);
+  const kept = again.locator(`.react-flow__edge[data-id="${id}"]`);
+  await expect(kept).toHaveCount(1);
+  await page.waitForTimeout(300);
+  await expect.poll(() => kept.locator('path.w').getAttribute('d')).toBe(shaped);
+
+  // picked again by a click on its line
+  const on = await pointOnWire(again, id);
+  await page.mouse.click(on.x, on.y);
+  const sq = again.locator(`.design-wire[data-wire="${id}"]`);
+  const start = sq.locator('.design-handle.end[data-end="source"]');
+  await expect(start).toHaveCount(1);
+
+  // its start square on empty canvas: it snaps back
+  const s0 = await centreOf(start);
+  const empty = await emptySpot(again, [s0, await centreOf(sq.locator('.design-handle.end[data-end="target"]'))]);
+  expect(empty, 'no empty spot on the canvas').not.toBeNull();
+  await drag(page, s0, empty!);
+  await expect(again.locator('.design-drop-label')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  await expect.poll(() => kept.locator('path.w').getAttribute('d')).toBe(shaped);
+
+  // its start square onto step a: the loose wire now starts at a's output port
+  const onA = await centreOf(node(again, a).locator('.nx-sn'));
+  await page.mouse.move(s0.x, s0.y);
+  await page.mouse.down();
+  await page.mouse.move(onA.x, onA.y, { steps: 10 });
+  await expect(again.locator('.design-drop-label')).toHaveText('re-attach here');
+  await page.mouse.up();
+  await expect(kept).toHaveCount(1);
+  const aBox = (await node(again, a).boundingBox())!;
+  await expect.poll(async () => {
+    const p = await centreOf(sq.locator('.design-handle.end[data-end="source"]'));
+    return Math.abs(p.x - (aBox.x + aBox.width)) < 8 && p.y > aBox.y && p.y < aBox.y + aBox.height;
+  }).toBe(true);
+
+  // its open-end square onto c: an ordinary wire a -> c, the pick
+  const end = await centreOf(sq.locator('.design-handle.end[data-end="target"]'));
+  const onC = await centreOf(node(again, c).locator('.nx-sn'));
+  await page.mouse.move(end.x, end.y);
+  await page.mouse.down();
+  await page.mouse.move(onC.x, onC.y, { steps: 10 });
+  await expect(again.locator('.design-drop-label')).toHaveText('connect here');
+  await page.mouse.up();
+  await expect(wire(again, `${a}->${c}`)).toHaveCount(1);
+  await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
+  await expect(again.locator(`.design-wire[data-wire="${a}->${c}"]`)).toHaveCount(1);
+});

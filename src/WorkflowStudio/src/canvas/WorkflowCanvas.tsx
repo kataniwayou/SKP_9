@@ -5,12 +5,12 @@ import { applyDraft } from '../design/apply';
 import { DesignContext } from '../design/DesignContext';
 import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
-import { LOOSE_PREFIX, resetRoute, type Draft } from '../design/draft';
+import { EMPTY_DRAFT, LOOSE_PREFIX, resetRoute, storedBends, type Draft } from '../design/draft';
 import type { GuideLine } from '../design/guides';
 import { useBlockDrag } from '../design/useBlockDrag';
 import { useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
-import { useWireGestures } from '../design/useWireGestures';
+import { looseAsWire, useWireGestures } from '../design/useWireGestures';
 import { Menu, anchorAt, type Anchor } from '../dock/Menu';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
@@ -144,9 +144,10 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     return data === e.data ? e : { ...e, data };
   }), [marked.edges, wiring.ghost, wiring.hint]);
   // picks naming wires that are gone (after an undo) draw nothing
+  // a picked loose wire has the same squares (plan 8 §5), its open end in the place of a target
   const pickedWires = useMemo(
     () => (design
-      ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)).map((w) => (dragged && w.id === dragged.id
+      ? [...shownDoc.wires, ...shownDoc.loose.map(looseAsWire)].filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)).map((w) => (dragged && w.id === dragged.id
         ? dragged.part === 'branch' && w.joint ? { ...w, joint: { ...w.joint, branch: dragged.points } } : { ...w, points: dragged.points, joint: undefined }
         : w))
       : []),
@@ -156,7 +157,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   // (a dragged branch leaves the own line, and its runs, where they are)
   const bendsOf = (w: WireRoute) => (dragged && w.id === dragged.id && dragged.part !== 'branch'
     ? shapeFromPoints(w.points)
-    : (preview ?? design?.draft)?.routes[w.id]?.bends ?? shapeFromPoints(w.joint?.own ?? w.points));
+    : storedBends(preview ?? design?.draft ?? EMPTY_DRAFT, w.id) ?? shapeFromPoints(w.joint?.own ?? w.points));
   // the wire's right-click menu (spec §4.3)
   const [menu, setMenu] = useState<{ anchor: Anchor; wireId: string } | null>(null);
 

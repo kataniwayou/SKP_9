@@ -3,7 +3,7 @@ import { AUDIT } from '../model/fixtures';
 import type { Step } from '../model/graph';
 import type { Placement } from './placement';
 import { PMID, SPHERE_R, STEP_W } from './geometry';
-import { drawnLine, portOf, routeWires, tetherPoints, type WiringInput } from './wires';
+import { drawnLine, portOf, routeLoose, routeWires, tetherPoints, type WiringInput } from './wires';
 
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
   id, name: id, version: '1.0.0', description: null, processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
@@ -267,5 +267,17 @@ describe('portOf', () => {
     expect(portOf(placement, 's1')).toEqual({ x: 400 + STEP_W, y: 80 + PMID });
     expect(portOf(placement, 'wf')).toEqual({ x: 100 + SPHERE_R, y: 200 });
     expect(portOf(placement, 'gone')).toBeNull();
+  });
+});
+
+describe('routeLoose (plan 8 §5)', () => {
+  const at = (a: [number, number]): Placement => ({ sphere: { cx: 128, cy: 128 }, steps: new Map([['a', { x: a[0], y: a[1] }]]), caches: new Map() });
+  it('a loose wire with bends of its own is drawn by them from its port to its open end; its source moved, the bends stay', () => {
+    const bends = { xs: [640, 720], ys: [400] };
+    const [r] = routeLoose({ l1: { source: 'a', end: { x: 900, y: 96 }, bends } }, at([288, 32]));
+    const sy = 32 + PMID;
+    expect(r!.points).toEqual([[288 + STEP_W, sy], [640, sy], [640, 400], [720, 400], [720, 96], [900, 96]]);
+    const [moved] = routeLoose({ l1: { source: 'a', end: { x: 900, y: 96 }, bends } }, at([288, 64]));
+    expect(moved!.points).toEqual([[288 + STEP_W, 64 + PMID], [640, 64 + PMID], [640, 400], [720, 400], [720, 96], [900, 96]]);
   });
 });

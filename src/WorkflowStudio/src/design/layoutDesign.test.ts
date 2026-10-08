@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { parseLayout } from '../layout/layoutDoc';
 import { applyDraft } from './apply';
 import { storedDesignOf } from './design';
-import { addLoose, EMPTY_DRAFT, setShape } from './draft';
+import { addLoose, EMPTY_DRAFT, setShape, shapeLoose } from './draft';
 import { layoutOf } from './layoutDesign';
 
 describe('layoutOf (plan 8 §4.2)', () => {
@@ -24,5 +24,14 @@ describe('layoutOf (plan 8 §4.2)', () => {
     // what it writes reads back: positions through the loader's parser, shapes through the stored design
     expect(parseLayout(JSON.parse(JSON.stringify(layout))).steps['s1']).toEqual(shown.placement.steps.get('s1'));
     expect(storedDesignOf(null, JSON.parse(JSON.stringify(layout))).draft.routes['s1->s2']).toEqual({ bends: null, landing: 40, contact: null });
+  });
+
+  it("writes a loose wire's own bends, and the stored design reads them back", async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1'), stepDto('s2')] }));
+    const bends = { xs: [640, 720], ys: [400] };
+    const draft = shapeLoose(addLoose(EMPTY_DRAFT, 'l1', 's1', { x: 900, y: 64 }), 'l1', bends, { x: 900, y: 64 });
+    const layout = layoutOf(applyDraft(doc, draft), draft);
+    expect(layout.loose).toEqual({ l1: { source: 's1', end: { x: 900, y: 64 }, bends } });
+    expect(storedDesignOf(null, JSON.parse(JSON.stringify(layout))).draft.loose['l1']).toEqual({ source: 's1', end: { x: 900, y: 64 }, bends });
   });
 });

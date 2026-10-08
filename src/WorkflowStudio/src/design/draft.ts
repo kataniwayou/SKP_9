@@ -142,8 +142,34 @@ export function addLoose(draft: Draft, id: string, source: SourceId, end: Point)
   return { ...draft, loose };
 }
 
+/** Its open end moved elsewhere: automatic again, as a connected wire's end re-attached elsewhere is (spec §4.4). */
 export function moveLoose(draft: Draft, id: string, end: Point): Draft {
   return Object.hasOwn(draft.loose, id) ? addLoose(draft, id, draft.loose[id]!.source, end) : draft;
+}
+
+/** Its start moved to another source: automatic again, as a connected wire's re-attached tail is (spec §4.4). */
+export function resourceLoose(draft: Draft, id: string, source: SourceId): Draft {
+  return Object.hasOwn(draft.loose, id) ? addLoose(draft, id, source, draft.loose[id]!.end) : draft;
+}
+
+/**
+ * A loose wire's own shape (a run dragged): its bends, as a connected wire's in `routes`, and its open end (its
+ * last run slid moves the end up or down). Null bends: the router draws it again. Its source stays.
+ */
+export function shapeLoose(draft: Draft, id: string, bends: Bends | null, end: Point): Draft {
+  if (!Object.hasOwn(draft.loose, id)) return draft;
+  const d = addLoose(draft, id, draft.loose[id]!.source, end);
+  if (bends && bends.xs.length > 0) d.loose[id] = { ...d.loose[id]!, bends };
+  return d;
+}
+
+/** The bends a wire keeps in the draft, by its pick id: a connected wire's in `routes`, a loose one's (`loose:{id}`) its own. */
+export function storedBends(draft: Draft, wireId: string): Bends | undefined {
+  if (wireId.startsWith(LOOSE_PREFIX)) {
+    const id = wireId.slice(LOOSE_PREFIX.length);
+    return Object.hasOwn(draft.loose, id) ? draft.loose[id]!.bends : undefined;
+  }
+  return Object.hasOwn(draft.routes, wireId) ? draft.routes[wireId]!.bends ?? undefined : undefined;
 }
 
 export function removeLoose(draft: Draft, ids: readonly string[]): Draft {
@@ -203,9 +229,11 @@ export function parseDraft(value: unknown): Draft | null {
     next: records(value.next, toIds),
     entries: toIds(value.entries),
     routes,
-    loose: records(value.loose, (raw) => {
+    loose: records(value.loose, (raw): LooseWire | null => {
       const end = isRecord(raw) ? toPoint(raw.end) : null;
-      return isRecord(raw) && typeof raw.source === 'string' && raw.source !== '' && end ? { source: raw.source, end } : null;
+      if (!isRecord(raw) || typeof raw.source !== 'string' || raw.source === '' || !end) return null;
+      const bends = toBends(raw.bends);
+      return bends ? { source: raw.source, end, bends } : { source: raw.source, end };
     }),
   };
 }

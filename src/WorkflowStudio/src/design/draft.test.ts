@@ -3,6 +3,7 @@ import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import {
   addLoose, addWire, attachLoose, EMPTY_DRAFT, isEmptyDraft, loosen, moveBlocks, moveLoose, removeLoose, nextOf, entriesOf, parseDraft, reattach, removeWires, resetRoute, setShape, wireEnds, wireId,
+  resourceLoose, shapeLoose, storedBends,
 } from './draft';
 
 const chain = () => loadedDocument(graphDto({
@@ -110,5 +111,23 @@ describe('loose wires (plan 8 §5)', () => {
     const wired = attachLoose(loose, doc, 'l1', 's3');
     expect(wired.next['s1']).toEqual(['s3']);
     expect(wired.loose).toEqual({});
+  });
+
+  it('keeps a shape of its own (bends and end), read back from a session; a moved open end or a new source drops it (an end re-attached is automatic)', () => {
+    const bends = { xs: [400, 520], ys: [200] };
+    let d = shapeLoose(addLoose(EMPTY_DRAFT, 'l1', 's1', { x: 600, y: 80 }), 'l1', bends, { x: 600, y: 96 });
+    expect(d.loose['l1']).toEqual({ source: 's1', end: { x: 600, y: 96 }, bends });
+    expect(storedBends(d, 'loose:l1')).toEqual(bends);
+    expect(parseDraft(JSON.parse(JSON.stringify(d)))!.loose['l1']).toEqual({ source: 's1', end: { x: 600, y: 96 }, bends });
+    // malformed bends are dropped, the loose wire stays
+    expect(parseDraft({ loose: { l1: { source: 's1', end: { x: 1, y: 2 }, bends: { xs: [1, 2], ys: [] } } } })!.loose['l1']).toEqual({ source: 's1', end: { x: 1, y: 2 } });
+    expect(moveLoose(d, 'l1', { x: 640, y: 120 }).loose['l1']).toEqual({ source: 's1', end: { x: 640, y: 120 } });
+    expect(resourceLoose(d, 'l1', 's2').loose['l1']).toEqual({ source: 's2', end: { x: 600, y: 96 } });
+    expect(resourceLoose(d, 'gone', 's2')).toBe(d);
+    // a straight shape is no shape
+    d = shapeLoose(d, 'l1', null, { x: 600, y: 96 });
+    expect(d.loose['l1']).toEqual({ source: 's1', end: { x: 600, y: 96 } });
+    expect(storedBends(d, 'loose:l1')).toBeUndefined();
+    expect(storedBends(setShape(EMPTY_DRAFT, 's1->s2', { bends, landing: null }), 's1->s2')).toEqual(bends);
   });
 });
