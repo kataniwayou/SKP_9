@@ -114,3 +114,19 @@ test('Create and Remove assignment change the design only', async ({ page, reque
   const all = await get<{ stepId: string }[]>(request, 'assignments');
   expect(all.filter((a) => a.stepId === t.stepBId)).toEqual([]);
 });
+
+test('a Description opens sized to its whole text, with no inner scroll bar', async ({ page }) => {
+  const panel = await open(page);
+  await panel.locator(`.react-flow__node[data-id="${t.stepId}"]`).click({ position: { x: 20, y: 12 } });
+  await expect(pill(page)).toHaveText('STEP');
+  await field(page, 'Description').click();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('line one');
+  for (const n of ['two', 'three', 'four', 'five', 'six']) { await page.keyboard.press('Enter'); await page.keyboard.type(`line ${n}`); }
+  await page.reload(); // reopens from the kept draft: the textarea mounts with its whole text
+  await expect(field(page, 'Description')).toHaveValue(/line six/);
+  const size = await field(page, 'Description').evaluate((e) => ({ client: e.clientHeight, scroll: e.scrollHeight }));
+  expect(size.client).toBeGreaterThanOrEqual(size.scroll);
+  expect(size.client).toBeGreaterThan(80); // six lines, not the two-row default
+  await inspector(page).screenshot({ path: 'C:/Users/UserL/AppData/Local/Temp/claude/C--Users-UserL-source-repos-SK-P10/cf954b91-a84b-487f-9613-5ccf0e8dee60/scratchpad/inspector-description.png' });
+});
