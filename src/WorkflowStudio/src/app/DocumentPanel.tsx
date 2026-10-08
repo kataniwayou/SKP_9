@@ -7,9 +7,9 @@ import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
-import { designDirty } from '../store/studioState';
+import { canSave, designDirty } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
-import { applyEdits } from '../design/apply';
+import { applyDraft, applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
 import { CapsuleToolbar } from './CapsuleToolbar';
 import { useStudioActionsOrNull } from './studioActions';
@@ -20,7 +20,7 @@ import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVi
  * `renderer: 'always'`, so both survive tab switches), its toolbar and its run status. Labels
  * are measured in the document the panel is drawn in, so a pop-out keeps its fonts (spec §6.3).
  */
-export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange, onSelect, onRetry }: {
+export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange, onSelect, onRetry, onSave }: {
   api: StudioApi;
   workflowId: string;
   panel: PanelLike;
@@ -35,6 +35,8 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   onSelect?: (selection: Selection | null, doc: Document, picks?: Pick[]) => void;
   /** Reads a failed document again; a Retry button shows when given. */
   onRetry?: () => void;
+  /** Saves the design (plan 8 §4.1); the toolbar's Save shows when given. */
+  onSave?: () => void;
 }) {
   const open = useStudio((s) => s.docs.find((d) => d.workflowId === workflowId) ?? null);
   const store = useStudioStore();
@@ -53,6 +55,9 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   const edits = open?.edits ?? null;
   const edited = useMemo(() => (base && edits ? applyEdits(base, edits) : null), [base, edits]);
 
+  // while a Save runs the design is read-only (spec §4.1): the canvas draws it whole, with no design mode
+  const frozen = useMemo(() => (edited && open?.saving ? applyDraft(edited, open.design.draft) : null), [edited, open?.saving, open?.design.draft]);
+
   if (open === null) return null;
   if (open.status.kind === 'failed') return <div className={cls}><div className="doc-msg error" role="alert">{open.status.message}{onRetry && <button type="button" className="btn" onClick={onRetry}>Retry</button>}</div></div>;
   if (open.status.kind === 'loading' || fitter === null) return <div className={cls}><div className="doc-msg">Loading…</div></div>;
@@ -60,13 +65,13 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   return (
     <div className={cls}>
       <WorkflowCanvas
-        doc={edited ?? open.status.doc}
+        doc={frozen ?? edited ?? open.status.doc}
         fitter={fitter}
         selection={open.selection}
         live={live}
         initialView={initialView}
         onViewChange={onViewChange}
-        design={{
+        design={open.saving ? undefined : {
           draft: open.design.draft,
           picks: open.picks,
           onPick: (picks) => store.dispatch({ type: 'pick', workflowId, picks }),
@@ -80,8 +85,9 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
         }}
       >
         <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status}
+          save={onSave ? { enabled: canSave(open), saving: open.saving, onSave } : undefined}
           design={actions ? {
-            dirty: designDirty(open), canUndo: canUndo(open.design), canRedo: canRedo(open.design),
+            dirty: designDirty(open), locked: open.saving, canUndo: canUndo(open.design), canRedo: canRedo(open.design),
             onUndo: () => store.dispatch({ type: 'undo', workflowId }),
             onRedo: () => store.dispatch({ type: 'redo', workflowId }),
             onDiscard: () => actions.confirmDiscardDesign(workflowId, ownerDocument),

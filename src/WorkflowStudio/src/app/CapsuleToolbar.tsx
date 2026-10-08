@@ -24,7 +24,7 @@ export function CapsuleToolbar({ workflow, status, save, design }: {
   /** The design's Save (plan 8 §4.1): enabled when the design differs from the base; read-only while it runs. */
   save?: { enabled: boolean; saving: boolean; onSave: () => void };
   /** The design draft (plan 4): its mark, Undo, Redo and Discard. */
-  design?: { dirty: boolean; canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void; onDiscard: () => void };
+  design?: { dirty: boolean; /** A Save is in flight. */ locked: boolean; canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void; onDiscard: () => void };
 }) {
   return (
     <div className="docbar" role="toolbar" aria-label="Workflow">
@@ -38,9 +38,9 @@ export function CapsuleToolbar({ workflow, status, save, design }: {
       <div className="docact">
         {design && (
           <>
-            <button type="button" className="qb" disabled={!design.canUndo} onClick={design.onUndo} data-tip="Undo (Ctrl+Z)">↶ Undo</button>
-            <button type="button" className="qb" disabled={!design.canRedo} onClick={design.onRedo} data-tip="Redo (Ctrl+Y)">↷ Redo</button>
-            <button type="button" className="qb" disabled={!design.dirty} onClick={design.onDiscard} data-tip="Drop every design change in this workflow">Discard design</button>
+            <button type="button" className="qb" disabled={design.locked || !design.canUndo} onClick={design.onUndo} data-tip="Undo (Ctrl+Z)">↶ Undo</button>
+            <button type="button" className="qb" disabled={design.locked || !design.canRedo} onClick={design.onRedo} data-tip="Redo (Ctrl+Y)">↷ Redo</button>
+            <button type="button" className="qb" disabled={design.locked || !design.dirty} onClick={design.onDiscard} data-tip="Drop every design change in this workflow">Discard design</button>
             <span className="qsep" />
           </>
         )}

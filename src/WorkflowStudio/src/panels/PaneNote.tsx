@@ -12,11 +12,6 @@ export function PaneNote({ pane, children }: { pane: string; children: ReactNode
   );
 }
 
-/** Output, a real pane with nothing to show yet (spec §10, slice 3a). */
-export function Output() {
-  return <PaneNote pane="output">Output will show save and orchestration messages in a later version.</PaneNote>;
-}
-
 /** Toolbox, a real pane with nothing to show yet (spec §10, slice 3a). */
 export function Toolbox() {
   return <PaneNote pane="toolbox">The toolbox arrives in a later version.</PaneNote>;

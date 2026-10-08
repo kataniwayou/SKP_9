@@ -6,6 +6,7 @@ import { ConfirmDialog } from './app/ConfirmDialog';
 import { DocumentPanel } from './app/DocumentPanel';
 import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
+import { saveDesign } from './app/saveDesign';
 import { browserTabStorage, createSaver, readTabSession, restoredState, sessionOf, writeTabSession, type Session } from './app/session';
 import { StudioActionsProvider, type StudioActions } from './app/studioActions';
 import { SvgDefs } from './canvas/SvgDefs';
@@ -16,7 +17,8 @@ import type { ToolId } from './dock/ids';
 import { browserStorage, type SavedLayout } from './dock/layoutPersistence';
 import { entityName } from './model/entityNames';
 import { Inspector } from './panels/Inspector';
-import { Output, Toolbox } from './panels/PaneNote';
+import { Output } from './panels/Output';
+import { Toolbox } from './panels/PaneNote';
 import { Problems } from './panels/Problems';
 import type { Pick } from './store/picks';
 import { selectionKey, type Selection } from './store/selection';
@@ -200,6 +202,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
               }
               actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection, picks }), doc);
             }}
+            onSave={() => void saveDesign(api, store, id)}
             onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }} />
         )}
         renderTool={renderTool}
@@ -215,13 +218,26 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
       />
       {prompt?.kind === 'design' && (
         <ConfirmDialog doc={prompt.doc} title="Discard design" onCancel={() => setPrompt(null)}
-          message="Every design change in this workflow is dropped, and the canvas shows the saved workflow again."
+          message="Every unsaved design change in this workflow is dropped; the canvas shows the last saved design again."
           buttons={[{ label: 'Discard', primary: true, onClick: () => { setPrompt(null); store.dispatch({ type: 'discardDesign', workflowId: prompt.workflowId }); } }]} />
       )}
       {prompt?.kind === 'closeDesign' && (
-        <ConfirmDialog doc={prompt.doc} title="Discard design changes?" onCancel={() => setPrompt(null)}
-          message="This workflow has design changes that are not saved. The trial cannot save them."
-          buttons={[{ label: 'Discard', primary: true, onClick: () => { setPrompt(null); prompt.proceed(); } }]} />
+        <ConfirmDialog doc={prompt.doc} title="Save design changes?" onCancel={() => setPrompt(null)}
+          message="This workflow has design changes that are not saved. Save stores them on the workflow (BaseApi applies them when it finds no errors); Discard drops them."
+          buttons={[
+            { label: 'Discard', onClick: () => { setPrompt(null); prompt.proceed(); } },
+            {
+              label: 'Save', primary: true,
+              onClick: () => {
+                setPrompt(null);
+                // closed once the design is stored; a Save that got no answer keeps the document open with its edits
+                void saveDesign(api, store, prompt.workflowId).then(() => {
+                  const still = store.getState().docs.find((d) => d.workflowId === prompt.workflowId);
+                  if (still && !designDirty(still)) prompt.proceed();
+                });
+              },
+            },
+          ]} />
       )}
     </StudioActionsProvider>
   );

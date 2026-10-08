@@ -2,6 +2,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@te
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { EMPTY_DRAFT } from '../design/draft';
 import { createStudioStore, StudioStoreProvider } from '../store/studioStore';
 import { DocumentPanel } from './DocumentPanel';
 import { loadedDocument } from './fixtures';
@@ -362,5 +363,30 @@ describe('DocumentPanel', () => {
       store.dispatch({ type: 'editField', workflowId: 'wf1', key: 'name', value: 'gather', copyId: 'x' });
     });
     expect(await screen.findByText('gather')).toBeInTheDocument();
+  });
+});
+
+describe('DocumentPanel Save', () => {
+  it('offers Save once the design differs from the base, and is read-only while it runs (plan 8 §4.1)', async () => {
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
+    const api = { listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }), listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as unknown as StudioApi;
+    const onSave = vi.fn();
+    render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}>
+      <DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} onSave={onSave} />
+    </div></StudioStoreProvider>);
+
+    expect(await screen.findByRole('button', { name: '⤓ Save' })).toBeDisabled();
+    act(() => store.dispatch({ type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, sphere: { x: 400, y: 400 } } }));
+    fireEvent.click(screen.getByRole('button', { name: '⤓ Save' }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.studio-canvas')!.getAttribute('tabindex')).toBe('0');
+
+    act(() => store.dispatch({ type: 'saving', workflowId: 'wf1' }));
+    expect(screen.getByRole('button', { name: '⤓ Saving…' })).toBeDisabled();
+    // read-only: the canvas is not in design mode while the answer is awaited
+    expect(document.querySelector('.studio-canvas')!.getAttribute('tabindex')).toBeNull();
+    await screen.findByText('■ stopped');
   });
 });

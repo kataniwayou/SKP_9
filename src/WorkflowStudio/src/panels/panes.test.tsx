@@ -6,7 +6,8 @@ import { loadedDocument } from '../app/fixtures';
 import { entityName } from '../model/entityNames';
 import { createStudioStore, StudioStoreProvider, type StudioStore } from '../store/studioStore';
 import { inspectorGraph, renderInspector } from '../test/inspector';
-import { Output, Toolbox } from './PaneNote';
+import { Output } from './Output';
+import { Toolbox } from './PaneNote';
 import type { DesignError } from '../model/graph';
 import { Problems } from './Problems';
 
@@ -249,9 +250,18 @@ describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
 });
 
 describe('Output and Toolbox', () => {
-  it('are real panes with one line each', () => {
-    render(<><Output /><Toolbox /></>);
-    expect(screen.getByText('Output will show save and orchestration messages in a later version.')).toBeInTheDocument();
+  it('Output says nothing happened yet, then logs each Save answer with its workflow (plan 8 §4.1)', async () => {
+    const store = await storeWith();
+    const { unmount } = wrap(store, <Output />);
+    expect(screen.getByText('Nothing yet. Each Save says here what happened.')).toBeInTheDocument();
+    unmount();
+    act(() => store.dispatch({ type: 'saveFailed', workflowId: 'wf1', at: '2026-10-07T12:00:00Z', message: 'Network error: down' }));
+    wrap(store, <Output />);
+    expect(screen.getByRole('log', { name: 'Output' })).toHaveTextContent('orders Not saved: Network error: down');
+  });
+
+  it('Toolbox is a real pane with one line', () => {
+    render(<Toolbox />);
     expect(screen.getByText('The toolbox arrives in a later version.')).toBeInTheDocument();
   });
 });
