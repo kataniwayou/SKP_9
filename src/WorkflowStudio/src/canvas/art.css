@@ -102,9 +102,9 @@
 .legend .lg-loose { fill: none; stroke: #8A97A8; stroke-width: 1.4; stroke-dasharray: 4 3; }
 .legend .lg-open { fill: none; stroke: #8A97A8; stroke-width: 1.4; }
 
-/* plan 8: a loose wire, grey and dashed, with an open circle where it was dropped; never pulses */
+/* plan 8: a loose wire, grey and dashed, with an open circle where it was dropped; never pulses (open at its start: in its own colour) */
 .wire.loose path.w { stroke-dasharray: 6 4; filter: none; }
-.wire.loose .nx-open { fill: #060c17; stroke: #8A97A8; stroke-width: 1.6; pointer-events: none; }
+.wire.loose .nx-open { fill: #060c17; stroke: var(--nc, #8A97A8); stroke-width: 1.6; pointer-events: none; }
 .nx-open-hit { fill: transparent; stroke: none; pointer-events: all; cursor: grab; }
 .wire.halo-loose path.w { stroke-width: 3; filter: drop-shadow(0 0 4px #9AA7B8) drop-shadow(0 0 8px #9AA7B8); }
 

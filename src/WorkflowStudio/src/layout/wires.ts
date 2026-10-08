@@ -5,7 +5,7 @@ import { CONTACT_MARGIN, inLoop, lengthOf, nearestOn, ownEnds, pointAt, slice } 
 import type { Placement, Sphere } from './placement';
 import { computeDepartures, computeLandings, departureX, WORKFLOW_SOURCE, type SourceId, type WireEnd } from './ports';
 import { CLEARANCE, route, simplify, type Box, type Pt } from './router';
-import { pointsOfShape, type Bends, type Ends, type WireShape } from './shape';
+import { pointsOfShape, type Bends, type Contact, type Ends, type WireShape } from './shape';
 
 export interface WireRoute {
   /** `${source}->${target}`; unique because a step's nextStepIds are unique. */
@@ -33,8 +33,8 @@ export interface Joint {
   ownEnds: Ends;
 }
 
-/** A loose wire (plan 8 §5): from a source to an open end where it was dropped; never part of the wiring. */
-export interface LooseWire {
+/** A wire loose at its head (plan 8 §5): from a source to an open end where it was dropped; never part of the wiring. */
+export interface LooseEnd {
   source: SourceId;
   /** The open end, in flow coordinates. */
   end: Point;
@@ -42,11 +42,42 @@ export interface LooseWire {
   bends?: Bends;
 }
 
-/** A loose wire as drawn: right-angled from its source's port to its open end. */
+/**
+ * A wire loose at its start (its tail detached): from an open start where it was dropped to its head, which stays
+ * connected (its target step, or a junction on its host's line), so it keeps its colour; never part of the wiring.
+ */
+export interface LooseStart {
+  open: 'start';
+  target: Id;
+  /** The open start, in flow coordinates. */
+  start: Point;
+  /** Step-local landing height on the target, as a connected wire's shape has it; null: the port's height. */
+  landing: number | null;
+  /** Its head on another wire's line (plan 7); null: on its target. */
+  contact: Contact | null;
+  bends?: Bends;
+}
+
+/** A loose wire: open at its head (the only kind stored before tails could be detached) or at its start. */
+export type LooseWire = LooseEnd | LooseStart;
+
+export const isLooseStart = (l: LooseWire): l is LooseStart => 'open' in l && l.open === 'start';
+
+/** Where a loose wire is open: its end, or its start. */
+export const openPointOf = (l: LooseWire): Point => (isLooseStart(l) ? l.start : l.end);
+
+/**
+ * A loose wire as drawn: right-angled from its source's port to its open end; or, open at its start (`open`), from
+ * that start to its target (`source` is '' then), in its target's colour, joined as a connected wire is.
+ */
 export interface LooseRoute {
   id: string;
   source: SourceId;
   points: Pt[];
+  open?: 'start';
+  target?: Id;
+  condition?: number;
+  joint?: Joint;
 }
 
 export interface WiringInput {
@@ -93,6 +124,16 @@ export function blockBoxes(placement: Placement): Box[] {
 }
 
 export function routeWires(input: WiringInput, placement: Placement): WireRoute[] {
+  return routeWiring(input, placement).wires;
+}
+
+/** The routed wires, and each one's travelled line (what a wire joined on it continues along, plan 7). */
+export interface Wiring {
+  wires: WireRoute[];
+  travel: ReadonlyMap<string, Pt[]>;
+}
+
+export function routeWiring(input: WiringInput, placement: Placement): Wiring {
   const wires = collectWires(input, placement);
   const departures = computeDepartures(wires, placement);
   const landings = computeLandings(wires, placement, departures);
@@ -125,9 +166,9 @@ export function routeWires(input: WiringInput, placement: Placement): WireRoute[
 }
 
 /** Second pass (spec §5.2): each joined wire after its host; a contact that is not valid leaves the wire plain. */
-function joinWires(routed: WireRoute[], input: WiringInput, boxes: Box[]): WireRoute[] {
+function joinWires(routed: WireRoute[], input: WiringInput, boxes: Box[]): Wiring {
   const shapes = input.shapes;
-  if (!shapes) return routed;
+  if (!shapes) return { wires: routed, travel: new Map(routed.map((r) => [r.id, r.points])) };
   const byId = new Map(routed.map((r) => [r.id, r]));
   const hostOf = (id: string) => (Object.hasOwn(shapes, id) ? shapes[id]!.contact?.host ?? undefined : undefined);
   const travel = new Map<string, Pt[]>();
@@ -140,13 +181,13 @@ function joinWires(routed: WireRoute[], input: WiringInput, boxes: Box[]): WireR
     const host = c ? byId.get(c.host) : undefined;
     if (c && host && host.id !== id && host.condition === r.condition && !inLoop(id, hostOf)) {
       resolve(host.id);
-      const joined = joinOne(byId.get(id)!, byId.get(host.id)!, travel.get(host.id)!, c.at, shapes[id]!, boxes);
+      const joined = joinOne(byId.get(id)!, byId.get(host.id)!, travel.get(host.id)!, c.at, shapes[id]!, boxes, boxIdOf(r.source));
       if (joined) { byId.set(id, joined.route); travel.set(id, joined.travel); return; }
     }
     travel.set(id, r.points);
   };
   for (const r of routed) resolve(r.id);
-  return routed.map((r) => byId.get(r.id)!);
+  return { wires: routed.map((r) => byId.get(r.id)!), travel };
 }
 
 /** A wire's drawn line: its own line, then its branch when the branch has a run; what a contact's distance is measured on (plan 7). */
@@ -155,7 +196,7 @@ export function drawnLine(w: WireRoute): Pt[][] {
 }
 
 /** A on host B (spec §5.3); null when B's line is too short to hold a contact. */
-function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, shape: WireShape, boxes: Box[]): { route: WireRoute; travel: Pt[] } | null {
+function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, shape: WireShape, boxes: Box[], fromBox: string): { route: WireRoute; travel: Pt[] } | null {
   const drawn = drawnLine(host);
   const total = lengthOf(drawn);
   if (total < 2 * CONTACT_MARGIN) return null;
@@ -165,7 +206,7 @@ function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, sh
   const { ends, tail } = ownEnds(sx, sy, contact, vertical);
   const own = shape.bends && shape.bends.xs.length > 0
     ? simplify(pointsOfShape(ends, shape.bends))
-    : clearPath(route(ends.sx, ends.sy, ends.tx, ends.ty, boxIdOf(r.source), '', 0, boxes), boxes);
+    : clearPath(route(ends.sx, ends.sy, ends.tx, ends.ty, fromBox, '', 0, boxes), boxes);
   const points = simplify([...own, ...tail]);
   // the contact's place on the host's travelled line: on the host's own line it is the same distance; on its branch, from the end
   const ownLen = lengthOf([host.points]), travelLen = lengthOf([hostTravel]);
@@ -187,11 +228,25 @@ function joinOne(r: WireRoute, host: WireRoute, hostTravel: Pt[], at: number, sh
   return { route: { ...r, points, joint }, travel: [...points, ...shared, ...branch.slice(1)] };
 }
 
-/** Loose wires (plan 8 §5), each from its source's port to its open end, by its own bends when it has them; one whose source is not on the canvas is left out. */
-export function routeLoose(loose: Readonly<Record<string, LooseWire>>, placement: Placement): LooseRoute[] {
+/** What a wire loose at its start is drawn against: the steps (its colour) and the routed wires (its host). */
+export interface LooseContext extends Wiring {
+  steps: ReadonlyMap<Id, Step>;
+}
+
+/**
+ * Loose wires (plan 8 §5), each from its source's port to its open end, by its own bends when it has them; one whose
+ * source is not on the canvas is left out. One open at its start is drawn from that start to its target as a
+ * connected wire is (its landing, its junction on a same-colour host); left out without `ctx` or off the canvas.
+ */
+export function routeLoose(loose: Readonly<Record<string, LooseWire>>, placement: Placement, ctx?: LooseContext): LooseRoute[] {
   const boxes = blockBoxes(placement);
   const out: LooseRoute[] = [];
   for (const [id, l] of Object.entries(loose)) {
+    if (isLooseStart(l)) {
+      const r = ctx ? routeLooseStart(id, l, placement, ctx, boxes) : null;
+      if (r) out.push(r);
+      continue;
+    }
     const from = portOf(placement, l.source);
     if (!from) continue;
     // a loose wire's bends are kept as a connected wire's are: its first and last runs follow its source and its end
@@ -201,6 +256,27 @@ export function routeLoose(loose: Readonly<Record<string, LooseWire>>, placement
     out.push({ id, source: l.source, points });
   }
   return out;
+}
+
+function routeLooseStart(id: string, l: LooseStart, placement: Placement, ctx: LooseContext, boxes: Box[]): LooseRoute | null {
+  const at = placement.steps.get(l.target), step = ctx.steps.get(l.target);
+  if (!at || !step) return null;
+  const sx = l.start.x, sy = l.start.y, tx = at.x, ty = at.y + clampLanding(l.landing ?? PMID);
+  // as a connected wire's: its bends draw it unless it has a contact (a contact that is not valid leaves it plain)
+  const plain: WireRoute = {
+    id, source: '', target: l.target, condition: step.entryCondition, broken: false,
+    points: l.bends && l.bends.xs.length > 0 && !l.contact
+      ? simplify(pointsOfShape({ sx, sy, tx, ty }, l.bends))
+      : clearPath(route(sx, sy, tx, ty, '', stepBoxId(l.target), 0, boxes), boxes),
+  };
+  const c = l.contact;
+  const host = c ? ctx.wires.find((w) => w.id === c.host) : undefined;
+  const travel = host ? ctx.travel.get(host.id) : undefined;
+  const joined = c && host && travel && host.condition === plain.condition
+    ? joinOne(plain, host, travel, c.at, { bends: l.bends ?? null, landing: l.landing, contact: c }, boxes, '')
+    : null;
+  const r = joined?.route ?? plain;
+  return { id, source: '', open: 'start', target: l.target, condition: r.condition, points: r.points, ...(r.joint ? { joint: r.joint } : {}) };
 }
 
 /** The dashed tether from the sphere's bottom to a cache's top centre, right-angled. */

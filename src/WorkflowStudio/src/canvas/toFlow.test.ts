@@ -158,6 +158,23 @@ describe('toFlow', () => {
     expect(nodes.find((n) => n.id === 'wf')!.handles!.some((h) => h.id === 'loose' && h.type === 'target')).toBe(true);
   });
 
+  it('draws a wire loose at its start in its target colour, on its target node, with its junction marks; a head-open one stays grey', () => {
+    const joint = { host: 'wf->a', contact: [256, 128] as [number, number], split: [256, 128] as [number, number], branch: [[256, 128], [576, 112]] as [number, number][], own: [], ownEnds: { sx: 0, sy: 0, tx: 0, ty: 0 } };
+    const d: StudioDocument = { ...doc(), loose: [
+      { id: 't1', source: '', open: 'start', target: 'b', condition: 2, points: [[400, 400], [576, 112]] },
+      { id: 't2', source: '', open: 'start', target: 'b', condition: 2, points: [[400, 400], [256, 128]], joint },
+      { id: 'l1', source: 'a', points: [[512, 128], [704, 400]] },
+    ] };
+    const { edges } = toFlow(d, fitter);
+    const colourOf = (id: string) => (edges.find((e) => e.id === id)!.data as { colour: string }).colour;
+    const t1 = edges.find((e) => e.id === 'loose:t1')!;
+    expect([t1.source, t1.target, t1.sourceHandle, t1.targetHandle]).toEqual(['b', 'b', 'out', 'in']);
+    expect(t1.data).toMatchObject({ loose: true, openStart: true, points: [[400, 400], [576, 112]] });
+    expect(colourOf('loose:t1')).toBe(colourOf('a->b'));
+    expect(colourOf('loose:l1')).not.toBe(colourOf('a->b'));
+    expect(edges.find((e) => e.id === 'loose:t2')!.data).toMatchObject({ branch: joint.branch, joints: [joint.contact] });
+  });
+
   it('cuts long names to fit and keeps the full text for the tooltip (review focus 5)', () => {
     const long = 'a-step-name-that-goes-on-and-on-and-on-forever';
     const graph = doc({ steps: new Map([['a', step('a', { name: long })], ['b', step('b')]]) });

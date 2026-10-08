@@ -67,6 +67,7 @@ describe('canJoin (plan 7)', () => {
     expect(dropLabel('loose', false, true)).toBe('loose wire');
     expect(dropLabel('sameWire', false, true)).toBe('same wire');
     expect(dropLabel('start', false, true)).toBe('start stays on a block');
+    expect(dropLabel('oneEnd', false)).toBe('needs one end');
     expect(dropLabel('ok', false)).toBe('re-attach here');
   });
 

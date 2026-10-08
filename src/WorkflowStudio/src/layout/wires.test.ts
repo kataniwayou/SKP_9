@@ -3,7 +3,7 @@ import { AUDIT } from '../model/fixtures';
 import type { Step } from '../model/graph';
 import type { Placement } from './placement';
 import { PMID, SPHERE_R, STEP_W } from './geometry';
-import { drawnLine, portOf, routeLoose, routeWires, tetherPoints, type WiringInput } from './wires';
+import { drawnLine, portOf, routeLoose, routeWires, routeWiring, tetherPoints, type WiringInput } from './wires';
 
 const step = (id: string, next: string[], over: Partial<Step> = {}): Step => ({
   id, name: id, version: '1.0.0', description: null, processorId: 'p', nextStepIds: next, entryCondition: 1, updatedAt: '', audit: AUDIT, ...over,
@@ -279,5 +279,57 @@ describe('routeLoose (plan 8 §5)', () => {
     expect(r!.points).toEqual([[288 + STEP_W, sy], [640, sy], [640, 400], [720, 400], [720, 96], [900, 96]]);
     const [moved] = routeLoose({ l1: { source: 'a', end: { x: 900, y: 96 }, bends } }, at([288, 64]));
     expect(moved!.points).toEqual([[288 + STEP_W, 64 + PMID], [640, 64 + PMID], [640, 400], [720, 400], [720, 96], [900, 96]]);
+  });
+});
+
+describe('routeLoose: a wire loose at its start', () => {
+  const st = [step('s', ['b']), step('b', [], { entryCondition: 2 }), step('c', [], { entryCondition: 2 }), step('x', [])];
+  const placement: Placement = {
+    sphere: { cx: 128, cy: 128 },
+    steps: new Map([['s', { x: 288, y: 32 }], ['b', { x: 864, y: 32 }], ['c', { x: 864, y: 288 }], ['x', { x: 864, y: 544 }]]),
+    caches: new Map(),
+  };
+  const steps = new Map(st.map((x) => [x.id, x]));
+  const wiring = routeWiring({ entryStepIds: ['s'], steps, brokenEdges: new Set<string>() }, placement);
+  const ctx = { steps, ...wiring };
+  const square = (pts: readonly (readonly [number, number])[]) => pts.every((p, i) => i === 0 || p[0] === pts[i - 1]![0] || p[1] === pts[i - 1]![1]);
+
+  it('is drawn from its open start to its landing on its target, in its target\'s colour', () => {
+    const [r] = routeLoose({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: null } }, placement, ctx);
+    expect(r!.open).toBe('start');
+    expect(r!.target).toBe('c');
+    expect(r!.condition).toBe(2);
+    expect(r!.points[0]).toEqual([400, 600]);
+    expect(r!.points[r!.points.length - 1]).toEqual([864, 288 + 80]);
+    expect(square(r!.points)).toBe(true);
+    expect(r!.joint).toBeUndefined();
+  });
+
+  it('by its own bends when it has them', () => {
+    const bends = { xs: [600, 700], ys: [500] };
+    const [r] = routeLoose({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: null, bends } }, placement, ctx);
+    expect(r!.points).toEqual([[400, 600], [600, 600], [600, 500], [700, 500], [700, 368], [864, 368]]);
+  });
+
+  it('joined on a same-colour host: its own line ends on the host, a branch goes into its target', () => {
+    const [r] = routeLoose({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: null, contact: { host: 's->b', at: 176 } } }, placement, ctx);
+    expect(r!.joint).toBeDefined();
+    expect(r!.joint!.host).toBe('s->b');
+    expect(r!.points[0]).toEqual([400, 600]);
+    const host = wiring.wires.find((w) => w.id === 's->b')!;
+    const [cx, cy] = r!.joint!.contact;
+    expect(host.points.some((a, i) => {
+      const b = host.points[i + 1];
+      return b !== undefined && cx >= Math.min(a[0], b[0]) && cx <= Math.max(a[0], b[0]) && cy >= Math.min(a[1], b[1]) && cy <= Math.max(a[1], b[1]);
+    })).toBe(true);
+    expect(r!.joint!.branch[r!.joint!.branch.length - 1]![0]).toBe(864);
+  });
+
+  it('a host of another colour, or one gone, leaves it plain; a target not on the canvas leaves it out', () => {
+    const other = routeLoose({ l1: { open: 'start', target: 'x', start: { x: 400, y: 600 }, landing: 80, contact: { host: 's->b', at: 176 } } }, placement, ctx);
+    expect(other[0]!.joint).toBeUndefined();
+    expect(other[0]!.condition).toBe(1);
+    expect(routeLoose({ l1: { open: 'start', target: 'c', start: { x: 400, y: 600 }, landing: 80, contact: { host: 'gone', at: 176 } } }, placement, ctx)[0]!.joint).toBeUndefined();
+    expect(routeLoose({ l1: { open: 'start', target: 'nowhere', start: { x: 400, y: 600 }, landing: 80, contact: null } }, placement, ctx)).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import type { StudioDocument } from '../app/document';
 import { snap, type Point } from '../layout/geometry';
 import type { Placement } from '../layout/placement';
-import { routeLoose, routeWires } from '../layout/wires';
+import { routeLoose, routeWires, routeWiring } from '../layout/wires';
 import type { Assignment, Cache, Graph, Id, Processor, Schema, Step } from '../model/graph';
 import { reachableStepIds } from '../model/reachability';
 import { isEmptyDraft, type Draft } from './draft';
@@ -39,8 +39,8 @@ export function applyDraft(saved: StudioDocument, draft: Draft): StudioDocument 
   };
   // nothing is drawn broken: opening runs no validate (plan 8)
   const brokenEdges = new Set(saved.wires.filter((w) => w.broken).map((w) => w.id));
-  const wires = routeWires({ entryStepIds, steps, brokenEdges, shapes: draft.routes }, placement);
-  return { graph: shownGraph, parkedIds, placement, wires, loose: routeLoose(draft.loose, placement) };
+  const wiring = routeWiring({ entryStepIds, steps, brokenEdges, shapes: draft.routes }, placement);
+  return { graph: shownGraph, parkedIds, placement, wires: wiring.wires, loose: routeLoose(draft.loose, placement, { ...wiring, steps }) };
 }
 
 function overlay(base: ReadonlyMap<Id, Point>, moved: Readonly<Record<Id, Point>>): Map<Id, Point> {

@@ -11,7 +11,7 @@ export function Legend() {
           {c.name}
         </span>
       ))}
-      <span className="lg-item" title={'Loose wire: dropped where it attaches to nothing.\nNot part of the workflow until its open end is dropped on a step.'}>
+      <span className="lg-item" title={'Loose wire: dropped where it attaches to nothing.\nNot part of the workflow until its open end is attached; one with a detached start keeps its colour.'}>
         <svg width="30" height="14" viewBox="0 0 30 14" className="lg-icon" aria-hidden="true">
           <path className="lg-loose" d="M1 7H21" />
           <circle className="lg-open" cx="25" cy="7" r="3.5" />

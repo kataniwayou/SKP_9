@@ -52,7 +52,7 @@ export function Inspector() {
 
 /** "Wire: {source} → {target}" by unique names (spec §3.3); an id no longer in the graph shows as itself; a loose wire says what it is (plan 8). */
 function wireNote(graph: Graph, id: string): string {
-  if (id.startsWith(LOOSE_PREFIX)) return 'Loose wire: not part of the workflow until its open end is dropped on a step';
+  if (id.startsWith(LOOSE_PREFIX)) return 'Loose wire: not part of the workflow until its open end is attached';
   const { source, target } = wireEnds(id);
   const name = (stepId: string) => {
     if (stepId === WORKFLOW_SOURCE) return entityName(graph.workflow.name, graph.workflow.version, graph.workflow.id);

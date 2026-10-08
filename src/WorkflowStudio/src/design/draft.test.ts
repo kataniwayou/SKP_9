@@ -3,7 +3,7 @@ import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import {
   addLoose, addWire, attachLoose, EMPTY_DRAFT, isEmptyDraft, loosen, moveBlocks, moveLoose, removeLoose, nextOf, entriesOf, parseDraft, reattach, removeWires, resetRoute, setShape, wireEnds, wireId,
-  resetShape, resourceLoose, shapeLoose, storedBends,
+  resetShape, resourceLoose, shapeLoose, storedBends, loosenStart, attachLooseStart, retargetLooseStart, shapeLooseStart,
 } from './draft';
 
 const chain = () => loadedDocument(graphDto({
@@ -133,5 +133,62 @@ describe('loose wires (plan 8 §5)', () => {
     expect(d.loose['l1']).toEqual({ source: 's1', end: { x: 600, y: 96 } });
     expect(storedBends(d, 'loose:l1')).toBeUndefined();
     expect(storedBends(setShape(EMPTY_DRAFT, 's1->s2', { bends, landing: null }), 's1->s2')).toEqual(bends);
+  });
+
+  describe('a wire loose at its start (its tail detached)', () => {
+    it('leaves the wiring keeping its head: its target, landing and junction; an entry wire leaves the entry list', async () => {
+      const doc = await chain();
+      const joined = setShape(EMPTY_DRAFT, 's1->s2', { bends: { xs: [400, 520], ys: [200] }, landing: 80, contact: { host: 'wf->s1', at: 40 } });
+      const d = loosenStart(joined, doc, 's1->s2', 'l1', { x: 300, y: 500 }, 80);
+      expect(d.next['s1']).toEqual([]);
+      expect(d.routes).toEqual({});
+      // like a released head, the wire is automatic again: its bends go, its head stays
+      expect(d.loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 80, contact: { host: 'wf->s1', at: 40 } });
+      const entry = loosenStart(EMPTY_DRAFT, doc, 'wf->s1', 'l2', { x: 40, y: 400 }, 96);
+      expect(entry.entries).toEqual([]);
+      expect(entry.loose['l2']).toEqual({ open: 'start', target: 's1', start: { x: 40, y: 400 }, landing: 96, contact: null });
+    });
+
+    it('reads back from a session or a stored layout; an old head-open record still reads as one; a malformed one is dropped', () => {
+      const bends = { xs: [400, 520], ys: [200] };
+      const rec = { open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 80, contact: { host: 's1->s3', at: 40 }, bends };
+      expect(parseDraft(JSON.parse(JSON.stringify({ loose: { l1: rec } })))!.loose['l1']).toEqual(rec);
+      expect(parseDraft({ loose: { l1: { open: 'start', target: 's2', start: { x: 1, y: 2 } } } })!.loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 1, y: 2 }, landing: null, contact: null });
+      expect(parseDraft({ loose: { l1: { source: 's1', end: { x: 1, y: 2 } } } })!.loose['l1']).toEqual({ source: 's1', end: { x: 1, y: 2 } });
+      expect(parseDraft({ loose: { a: { open: 'start', start: { x: 1, y: 2 } }, b: { open: 'start', target: 's2' }, c: { open: 'start', target: '', start: { x: 1, y: 2 } } } })!.loose).toEqual({});
+    });
+
+    it('its open start onto a step or the hub makes it an ordinary wire, its head unchanged', async () => {
+      const doc = await chain();
+      const d = loosenStart(setShape(EMPTY_DRAFT, 's1->s2', { bends: null, landing: 80, contact: { host: 'wf->s1', at: 40 } }), doc, 's1->s2', 'l1', { x: 300, y: 500 }, 80);
+      const wired = attachLooseStart(d, doc, 'l1', 's3');
+      expect(wired.loose).toEqual({});
+      expect(wired.next['s3']).toEqual(['s2']);
+      expect(wired.routes['s3->s2']).toEqual({ bends: null, landing: 80, contact: { host: 'wf->s1', at: 40 } });
+      // back where it came from: the saved wiring again
+      const back = attachLooseStart(d, doc, 'l1', 's1');
+      expect(back.next).toEqual({});
+      // an automatic wire detached and put back is the saved workflow again: nothing to save
+      expect(isEmptyDraft(attachLooseStart(loosenStart(EMPTY_DRAFT, doc, 's1->s2', 'l1', { x: 300, y: 500 }, null), doc, 'l1', 's1'))).toBe(true);
+      expect(isEmptyDraft(attachLooseStart(loosenStart(EMPTY_DRAFT, doc, 'wf->s1', 'l1', { x: 40, y: 400 }, null), doc, 'l1', 'wf'))).toBe(true);
+      const hub = attachLooseStart(loosenStart(EMPTY_DRAFT, doc, 'wf->s1', 'l2', { x: 40, y: 400 }, 96), doc, 'l2', 'wf');
+      expect(hub.entries).toBeNull();
+      expect(hub.loose).toEqual({});
+      expect(attachLooseStart(d, doc, 'gone', 's3')).toBe(d);
+    });
+
+    it('its open start moves keeping its bends; its head re-targets (automatic, no junction); Reset route clears only its bends', async () => {
+      const doc = await chain();
+      const bends = { xs: [400, 520], ys: [200] };
+      let d = loosenStart(setShape(EMPTY_DRAFT, 's1->s2', { bends: null, landing: 80, contact: { host: 'wf->s1', at: 40 } }), doc, 's1->s2', 'l1', { x: 300, y: 500 }, 80);
+      d = shapeLooseStart(d, 'l1', { bends, landing: 72, contact: { host: 'wf->s1', at: 40 } });
+      expect(d.loose['l1']).toMatchObject({ bends, landing: 72 });
+      expect(storedBends(d, 'loose:l1')).toEqual(bends);
+      expect(moveLoose(d, 'l1', { x: 320, y: 520 }).loose['l1']).toMatchObject({ open: 'start', start: { x: 320, y: 520 }, bends });
+      expect(resetShape(d, 'loose:l1').loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 72, contact: { host: 'wf->s1', at: 40 } });
+      expect(retargetLooseStart(d, 'l1', 's3', 64).loose['l1']).toEqual({ open: 'start', target: 's3', start: { x: 300, y: 500 }, landing: 64, contact: null });
+      // a straight shape is no shape
+      expect(shapeLooseStart(d, 'l1', { bends: null, landing: 72, contact: null }).loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 72, contact: null });
+    });
   });
 });

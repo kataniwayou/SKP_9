@@ -4,7 +4,7 @@ import { assignmentDto, cacheDto, graphDto, processorDto, schemaDto, stepDto, wo
 import type { WorkflowGraphDto } from '../api/types';
 import { applyDesign } from '../design/apply';
 import { EMPTY_EDITS, removeAssignment, setField } from '../design/design';
-import { EMPTY_DRAFT, loosen } from '../design/draft';
+import { EMPTY_DRAFT, loosen, loosenStart } from '../design/draft';
 import { designDirty } from '../store/studioState';
 import { createStudioStore } from '../store/studioStore';
 import { loadedDocument } from './fixtures';
@@ -50,6 +50,25 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
     expect(body.steps).toEqual([{ id: 's1', updatedAt: expect.any(String), fields: {}, nextStepIds: [] }]);
     expect(body.workflow.entryStepIds).toBeNull();
     expect(body.layout.loose).toEqual({ l1: { source: 's1', end: { x: 904, y: 400 } } });
+  });
+
+  it('never sends a wire loose at its start: its target loses it, an entry wire leaves the entry list; the layout keeps it', async () => {
+    const base = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')],
+    }));
+    let draft = loosenStart(EMPTY_DRAFT, base, 's1->s2', 't1', { x: 304, y: 600 }, 96);
+    draft = loosenStart(draft, base, 'wf->s3', 't2', { x: 40, y: 600 }, 80);
+
+    const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
+
+    expect(body.steps).toEqual([{ id: 's1', updatedAt: expect.any(String), fields: {}, nextStepIds: [] }]);
+    expect(body.workflow.entryStepIds).toEqual(['s1']);
+    expect(JSON.stringify(body.steps)).not.toContain('s2');
+    expect(body.layout.loose).toEqual({
+      t1: { open: 'start', target: 's2', start: { x: 304, y: 600 }, landing: 96, contact: null },
+      t2: { open: 'start', target: 's3', start: { x: 40, y: 600 }, landing: 80, contact: null },
+    });
   });
 });
 

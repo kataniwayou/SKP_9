@@ -151,3 +151,33 @@ test('one Save applies changes of every kind: a deleted wire, a removed assignme
   expect([copy.name, copy.version]).toEqual([`${t.tag}-config`, '1.0.0']);
   expect(JSON.parse(copy.definition)).toEqual({ type: 'string' });
 });
+
+test('an entry wire whose tail was dragged off the hub is never sent as an entry: Save sends an empty entry list, and the layout keeps the wire loose at its start', async ({ page }) => {
+  await openWorkflow(page, t.workflow);
+  const panel = documentPanel(page, t.workflow);
+  const wireId = `wf->${t.stepId}`;
+  const p = await pointOnWire(panel, wireId);
+  await page.mouse.click(p.x, p.y);
+  const tail = await centreOf(panel.locator(`.design-wire[data-wire="${wireId}"] .design-handle.end[data-end="source"]`));
+  const area = (await panel.locator('.studio-canvas').boundingBox())!;
+  const empty = { x: area.x + area.width - 80, y: area.y + area.height - 120 };
+  await page.mouse.move(tail.x, tail.y);
+  await page.mouse.down();
+  await page.mouse.move(empty.x, empty.y, { steps: 12 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await page.mouse.up();
+  await expect(panel.locator(`.react-flow__edge[data-id="${wireId}"]`)).toHaveCount(0);
+
+  const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/workflows/${t.workflow.id}/design`));
+  await save(page);
+  const body = (await sent).postDataJSON() as { workflow: { entryStepIds: string[] | null }; steps: { nextStepIds: string[] | null }[]; layout: { loose: Record<string, { open?: string; target?: string }> } };
+  expect(body.workflow.entryStepIds).toEqual([]);
+  expect(body.steps.flatMap((s) => s.nextStepIds ?? [])).not.toContain(t.stepId);
+  expect(Object.values(body.layout.loose)).toContainEqual(expect.objectContaining({ open: 'start', target: t.stepId }));
+
+  // a fresh read keeps the wire loose at its start
+  await page.reload();
+  const again = documentPanel(page, t.workflow);
+  await expect(again.locator(`.react-flow__edge[data-id="${wireId}"]`)).toHaveCount(0);
+  await expect(looseWires(again).locator('.nx-head')).toHaveCount(1);
+});

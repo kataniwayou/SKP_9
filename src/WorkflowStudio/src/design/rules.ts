@@ -4,8 +4,8 @@ import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 /** `loose`: the drop attaches to nothing and the wire becomes loose there (plan 8 §5); `cannotStart`: a tail over such a place (it snaps back). */
 export type DropVerdict = 'ok' | 'self' | 'loose' | 'cannotStart';
 export type JoinVerdict = 'ok' | 'sameWire' | 'loose';
-/** A wire's start never joins a line. */
-export type Refusal = 'start';
+/** A wire's start never joins a line; `oneEnd`: a drop that would leave a wire open at both ends (a start-loose wire's head on nothing). */
+export type Refusal = 'start' | 'oneEnd';
 
 /**
  * May a wire from `source` to `target` exist in the shown document (plan 8 §5)? `moving` is the wire whose
@@ -52,5 +52,6 @@ export function dropLabel(verdict: DropVerdict | 'move' | 'here' | JoinVerdict |
     case 'loose': return 'loose wire';
     case 'cannotStart': return 'cannot start here';
     case 'start': return 'start stays on a block';
+    case 'oneEnd': return 'needs one end';
   }
 }

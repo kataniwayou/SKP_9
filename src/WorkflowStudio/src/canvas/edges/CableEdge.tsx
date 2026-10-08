@@ -22,6 +22,8 @@ export type CableEdgeData = {
   halo?: 'ok' | 'no' | 'loose';
   /** A loose wire (plan 8 §5): grey, dashed, an open circle at its end, no arrow head. */
   loose?: boolean;
+  /** Loose at its start (its tail detached): dashed in its own colour, an open circle at its start, its head and junction as drawn when connected. */
+  openStart?: boolean;
 };
 export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
 
@@ -34,10 +36,11 @@ export const LOOSE_COLOUR = '#8A97A8';
  * Broken: dashed, with a soft transparent gap cut at the middle of the longest segment and ⚠ in it.
  * While `flowing` (the workflow is started) an intact wire carries a pulse toward its target.
  * Loose (plan 8 §5): grey and dashed, a ring at its source and an open circle where it was dropped; never pulses.
+ * Loose at its start: dashed in its colour, an open circle where its tail was dropped, its arrow head kept; never pulses.
  */
-export function CableEdgeView({ points, colour, broken, delay, picked, flowing, branch, joints, halo, loose }: CableEdgeData & { flowing: boolean }) {
+export function CableEdgeView({ points, colour, broken, delay, picked, flowing, branch, joints, halo, loose, openStart }: CableEdgeData & { flowing: boolean }) {
   const gap = `nxgap${useId().replace(/[^\w-]/g, '')}`;
-  if (loose) {
+  if (loose && !openStart) {
     const [sx0, sy0] = points[0]!;
     const [ex, ey] = points[points.length - 1]!;
     return (
@@ -57,16 +60,17 @@ export function CableEdgeView({ points, colour, broken, delay, picked, flowing, 
 
   const trace = (
     <>
-      <circle className="nx-src" cx={sx} cy={sy} r={2.6} />
+      {!openStart && <circle className="nx-src" cx={sx} cy={sy} r={2.6} />}
       <path className="w" d={d} stroke={colour} />
       {branch && branch.length > 1 && <path className="w branch" d={pathOf(branch)} stroke={colour} />}
       {tip && <path className="nx-head" d={`M${tip[0] - 9} ${tip[1] - 6}L${tip[0]} ${tip[1]}L${tip[0] - 9} ${tip[1] + 6}`} stroke={colour} />}
       {joints?.map(([x, y], i) => <circle key={i} className="nx-joint" cx={x} cy={y} r={4.5} />)}
+      {openStart && <circle className="nx-open" cx={sx} cy={sy} r={4.5} />}
     </>
   );
 
   return (
-    <g className={`${broken ? 'wire broken' : 'wire'}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}`} style={{ '--nc': colour } as CSSProperties}>
+    <g className={`${broken ? 'wire broken' : 'wire'}${openStart ? ' loose' : ''}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}`} style={{ '--nc': colour } as CSSProperties}>
       {mark ? (
         <>
           <defs>
@@ -80,8 +84,8 @@ export function CableEdgeView({ points, colour, broken, delay, picked, flowing, 
           <text className="nx-warn" x={mark[0]} y={mark[1] + 5} textAnchor="middle">⚠</text>
         </>
       ) : trace}
-      {flowing && !broken && <path className="nx-pulse" d={d} style={{ animationDelay: `${delay}s` }} />}
-      {flowing && !broken && branch && branch.length > 1 && <path className="nx-pulse" d={pathOf(branch)} style={{ animationDelay: `${delay}s` }} />}
+      {flowing && !broken && !openStart && <path className="nx-pulse" d={d} style={{ animationDelay: `${delay}s` }} />}
+      {flowing && !broken && !openStart && branch && branch.length > 1 && <path className="nx-pulse" d={pathOf(branch)} style={{ animationDelay: `${delay}s` }} />}
     </g>
   );
 }
@@ -99,9 +103,9 @@ export function CableEdge({ id, data }: EdgeProps<CableEdgeType>) {
       {data.branch && data.branch.length > 1 && (
         <path className="nx-hit branch" d={pathOf(data.branch)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'branch') : undefined} />
       )}
-      {/* a loose wire's open end is always draggable in design mode (plan 8 §5) */}
+      {/* a loose wire's open end (or open start) is always draggable in design mode (plan 8 §5) */}
       {data.loose && gestures && (() => {
-        const [ex, ey] = data.points[data.points.length - 1]!;
+        const [ex, ey] = data.openStart ? data.points[0]! : data.points[data.points.length - 1]!;
         return <circle className="nx-open-hit" cx={ex} cy={ey} r={9} onPointerDown={(e) => gestures.looseEndPointerDown(id.slice(LOOSE_PREFIX.length), e)} />;
       })()}
     </>
