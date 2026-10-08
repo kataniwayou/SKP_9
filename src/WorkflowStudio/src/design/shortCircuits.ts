@@ -29,7 +29,7 @@ export function shortCircuitErrors(shown: StudioDocument, draft: Draft): DesignE
 export const isShortCircuitError = (e: DesignError): boolean => e.stage === 'wires' && e.message.startsWith(SHORT_CIRCUIT);
 
 /** The sources held back by short circuits (`heldSources`): their steps, and whether the hub (the entry list) is one. */
-export function shortedSources(shown: StudioDocument, draft: Draft): { steps: Set<Id>; hub: boolean } {
+export function heldSourcesOf(shown: StudioDocument, draft: Draft): { steps: Set<Id>; hub: boolean } {
   const circuit = circuitOf(shown, draft);
   const held = heldSources(circuit, netsOf(circuit, (id) => shown.graph.steps.get(id)?.entryCondition));
   const hub = held.delete(WORKFLOW_SOURCE);
@@ -42,7 +42,7 @@ export function shortedSources(shown: StudioDocument, draft: Draft): { steps: Se
  * shorted net is not counted: it is the short circuit's own.
  */
 export function heldLinkCount(base: StudioDocument, shown: StudioDocument, draft: Draft): number {
-  const { steps, hub } = shortedSources(shown, draft);
+  const { steps, hub } = heldSourcesOf(shown, draft);
   const all = trace(circuitOf(shown, draft)).links;
   const listOf = (doc: StudioDocument, s: Id) => (s === WORKFLOW_SOURCE ? doc.graph.workflow.entryStepIds : doc.graph.steps.get(s)?.nextStepIds ?? []);
   let n = 0;
