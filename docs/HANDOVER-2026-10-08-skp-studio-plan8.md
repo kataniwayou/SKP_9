@@ -2,7 +2,7 @@
 
 Branch `feature/path-importer` (not pushed, not merged; the user has not chosen merge / PR / keep). Both plan 8
 halves are deployed to the dev cluster (ns `skp`): BaseApi with the `AddWorkflowDesign` migration, and the studio
-as `workflow-studio:local`, bundle `index-CnCnpIDq.js`. Port forwards are supervised by
+as `workflow-studio:local`, bundle `index-BlbJqTah.js`. Port forwards are supervised by
 `./k8s/port-forward-realstack.ps1` (`-Status` to check, run it again to restart): studio `localhost:18081`,
 BaseApi `localhost:18080`. Do not stop them by hand.
 
@@ -44,20 +44,30 @@ the nullable jsonb `Design` column. The last is `2ce5b40`, the view-restore fix 
 `x ?? new Dictionary<,>()` in a deconstructing `foreach` header crashed the IDE0028 collection-initializer analyzer
 (AD0001) in SDK 8.0.4xx. Only the docker Release build hit it; the fallback is now hoisted to a local.
 
-**Studio.** Bundle `index-CnCnpIDq.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
+**Studio.** Bundle `index-BlbJqTah.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
 exposed:
 - A restored canvas lays out 26 px taller for one frame before the dock settles. `FollowSize` measured from that
   frame, so after a refresh the view came back 13 px off.
 - Each saved view now carries the canvas size it was taken at, and a restore starts from that size.
 - `session.spec.ts:12` failed 6 of 8 runs on the old deployed bundle and passes 8 of 8 now.
 
+**Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
+live 13/6/5 green):
+- `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
+  fields (a wiring-only step, the workflow, a field typed back) can be cleared. Reverses the Task 8 ruling that
+  stamp-only edits do not matter. Side effect: after a not-applied Save the workflow and wiring-only stored steps
+  show "● unsaved changes" with Revert enabled (wording is a UX follow-up). A stored assignment delete with a stale
+  stamp can only be cleared via ＋ Create → Revert → Remove (follow-up).
+- `0aa4641`: a null element in a design's lists is a 400 naming list and index, not a 500 (nested nulls such as a
+  null slot value are not yet guarded: follow-up).
+
 **Tests.**
-- BaseApi hermetic: 2016/2016.
+- BaseApi hermetic: 2017/2017.
 - BaseApi live, on the deployed BaseApi: `WorkflowDesignLiveTests` 13/13, `WorkflowGraphLiveTests` 6/6,
   `WorkflowValidationLiveTests` 5/5.
-- Vitest: 738 passed.
+- Vitest: 742 passed.
 - Playwright on the dev server: 58 passed, 2 skipped (the expected `art.spec.ts` skips).
-- Playwright on the deployed studio (`index-CnCnpIDq.js`):
+- Playwright on the deployed studio (`index-BlbJqTah.js`):
   - save + inspector + designer: 26/26.
   - whole suite: 58 passed, 2 skipped.
   - `session.spec.ts:12 --repeat-each=8`: 8/8.
