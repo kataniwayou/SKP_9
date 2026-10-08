@@ -128,7 +128,7 @@ test('a tail joined on an entry wire makes the steps its current reaches entry s
   expect((await get<{ entryCondition: number }>(request, `steps/${t.c}`)).entryCondition).toBe(1);
 });
 
-test('a direction-less wire writes nothing: Save leaves every list as BaseApi had it; a fresh read draws it again with no direction (rule D, 2026-10-09)', async ({ page, request }) => {
+test('a direction-less wire writes nothing, nor does a wire joined on one: Save leaves every list as BaseApi had it; a fresh read draws it again with no direction (rule D, 2026-10-09)', async ({ page, request }) => {
   const panel = await open(page);
   const lists = async () => ({
     entries: sorted(await entriesOf(request)),
@@ -146,6 +146,9 @@ test('a direction-less wire writes nothing: Save leaves every list as BaseApi ha
     await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(0);
     await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
   }
+  // and a wire from d poured into the direction-less one: it carries nothing, so d gains no link
+  const fed = await newWire(page, panel, t.d, await emptySpot(panel, [spot, spot2]));
+  expect(await dragEnd(page, panel, fed, 'head', await pointOnWire(panel, loose, 0.5, 12))).toBe('join here');
   await save(page);
   await expect(await pane(page, 'Output')).toContainText('Saved');
   expect(await lists()).toEqual(before);

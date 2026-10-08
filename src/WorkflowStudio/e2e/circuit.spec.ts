@@ -933,3 +933,59 @@ test('rule D: a refresh keeps direction-less wires as they are: no ring, no arro
   await expect(edge(again, joined).locator('circle.nx-joint')).toHaveCount(1);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
+
+// ---- review fixes (2026-10-09) ----
+
+test('rule D, lifted: a wire whose only step end is dragged has no direction while lifted: onto an input it is the head; joined on a line, that end onto a second line is "needs a step first"', async ({ page }) => {
+  const panel = await open(page);
+  // a new wire from c, open at its head: its tail onto d's input is not "wrong side" but makes that end its head
+  const spot = await emptySpot(panel);
+  const id = await newWire(page, panel, t.c, spot);
+  expect(await dragEnd(page, panel, id, 'tail', await onSide(panel, t.d, 'in'))).toBe('connect here');
+  const d = await flowBox(panel, t.d);
+  await expect.poll(async () => (await pointsOf(panel, id)).at(-1)![0]).toBe(d.x);
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(1);
+  // another from c, its head joined on a -> b: its tail (its only step end) onto b -> c's line is refused
+  const other = await newWire(page, panel, t.c, await emptySpot(panel, [spot]));
+  expect(await dragEnd(page, panel, other, 'head', await pointOnWire(panel, `${t.a}->${t.b}`, 0.5, 12))).toBe('join here');
+  const before = await pointsOf(panel, other);
+  expect(await dragEnd(page, panel, other, 'tail', await pointOnWire(panel, `${t.a}->${t.d}`, 0.5, 12))).toBe('needs a step first');
+  expect(await pointsOf(panel, other)).toEqual(before);
+});
+
+test('rule D, turned: the ends joined on a direction-less wire stay where they are when it gets its direction', async ({ page }) => {
+  const panel = await open(page);
+  const k = await freeWire(page, panel, t.c);
+  // a wire from a, its head joined on k near k's stored head
+  const g = await newWire(page, panel, t.a, await emptySpot(panel));
+  expect(await dragEnd(page, panel, g, 'head', await pointOnWire(panel, k, 0.8, 12))).toBe('join here');
+  const dot = await centreOf(edge(panel, g).locator('circle.nx-joint'));
+  // k's stored tail onto c's input: k is turned round (that end its head)
+  expect(await dragEnd(page, panel, k, 'tail', await onSide(panel, t.c, 'in'))).toBe('connect here');
+  await expect(edge(panel, k).locator('path.nx-head')).toHaveCount(1);
+  const now = await centreOf(edge(panel, g).locator('circle.nx-joint'));
+  expect(Math.hypot(now.x - dot.x, now.y - dot.y)).toBeLessThan(12);
+});
+
+test('rule B on the hub: an entry wire moved down a little lands on the ring and on its step again, everything stored on the grid', async ({ page }) => {
+  const panel = await open(page);
+  const id = `wf->${t.a}`;
+  const before = await pointsOf(panel, id);
+  const z = await zoomOf(panel);
+  const from = await pointOnWire(panel, id, 0.5);
+  const away = await clearMove(panel, id);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + away.x, from.y + away.y, { steps: 6 });
+  await page.mouse.move(from.x, from.y + 24 * z, { steps: 6 });
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['connect here', 'connect here']);
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, id)).not.toEqual(before);
+  const after = await pointsOf(panel, id);
+  // after the ring point and its short jog, every point is on the grid; the head on a's input
+  const a = await flowBox(panel, t.a);
+  expect(after.at(-1)![0]).toBe(a.x);
+  for (const p of after.slice(2)) expect([p[0] % 8, p[1] % 8].map(Math.abs)).toEqual([0, 0]);
+  expect(await dashOf(panel, id)).toBe('none');
+});
