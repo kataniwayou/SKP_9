@@ -197,5 +197,7 @@ function designParts(design: unknown, edits: unknown): { design?: Draft; edits?:
 
 function isView(value: unknown): value is SavedView {
   const finite = (n: unknown) => typeof n === 'number' && Number.isFinite(n);
-  return isRecord(value) && finite(value.x) && finite(value.y) && finite(value.zoom) && (value.zoom as number) > 0 && typeof value.followFit === 'boolean';
+  const size = (n: unknown) => n === undefined || (finite(n) && (n as number) > 0);
+  return isRecord(value) && finite(value.x) && finite(value.y) && finite(value.zoom) && (value.zoom as number) > 0 && typeof value.followFit === 'boolean'
+    && size(value.width) && size(value.height);
 }

@@ -54,6 +54,14 @@ describe('readSession / writeSession', () => {
     expect(read.dock).toBeNull();
   });
 
+  it('keeps the canvas size a view was taken at, and drops a view whose size is not a positive number', () => {
+    const sized = { ...good.docs[0]!, view: { x: -40, y: 12, zoom: 0.8, followFit: false, width: 1200, height: 806 } };
+    const bad = { ...good.docs[1]!, view: { x: 1, y: 2, zoom: 1, followFit: false, width: 0, height: 806 } };
+    const read = readSession(memoryStorage({ [SESSION_KEY]: JSON.stringify({ ...good, docs: [sized, bad] }) }))!;
+    expect(read.docs[0]!.view).toEqual(sized.view);
+    expect(read.docs[1]!.view).toBeNull();
+  });
+
   it('never throws when storage refuses', () => {
     const refusing = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('full'); } } as unknown as Storage;
     expect(readSession(refusing)).toBeNull();

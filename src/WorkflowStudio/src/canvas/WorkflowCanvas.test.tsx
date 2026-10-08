@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useStore } from '@xyflow/react';
+import { useStore, useStoreApi } from '@xyflow/react';
+import { useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
@@ -10,6 +11,19 @@ import { EMPTY_DRAFT, moveBlocks, setShape } from '../design/draft';
 import { createTextFitter } from './fitText';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { ZoomControls } from './ZoomControls';
+
+/** Shows the size React Flow measured for the canvas; given `to`, sets it there (the canvas settling at another size). */
+function CanvasSize({ to = null }: { to?: { width: number; height: number } | null }) {
+  const store = useStoreApi();
+  const width = useStore((st) => st.width);
+  const height = useStore((st) => st.height);
+  useEffect(() => { if (to) store.setState({ width: to.width, height: to.height }); }, [store, to?.width, to?.height]);
+  return <output aria-label="Canvas size" data-width={width} data-height={height} />;
+}
+const measured = (c: HTMLElement) => {
+  const o = c.querySelector('output[aria-label="Canvas size"]')!;
+  return { width: Number(o.getAttribute('data-width')), height: Number(o.getAttribute('data-height')) };
+};
 
 const fitter = createTextFitter((t) => t.length * 7);
 
@@ -194,6 +208,41 @@ describe('WorkflowCanvas', () => {
       // the page hands back what the canvas reported after Fit was pressed
       rerender(canvas({ ...saved, followFit: true }));
       expect(screen.getByLabelText('Fit queued')).toHaveTextContent('false');
+    });
+
+    it('a restored view keeps its centre against the size it was saved at: a canvas that settles after a refresh does not move it', async () => {
+      // the deployed studio lays a restored canvas out 26 px taller for a frame, then at its saved size: measured
+      // from that first frame, the view came back 13 px off (session.spec on the deployed studio). jsdom measures
+      // this canvas once (the ResizeObserver shim); CanvasSize then sets the size the canvas settles at.
+      const transform = (c: HTMLElement) => (c.querySelector('.react-flow__viewport') as HTMLElement).style.transform.replace(/,\s*/g, ', ');
+      const doc = await twoSteps();
+      const probe = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800}><CanvasSize /></WorkflowCanvas>);
+      const first = measured(probe.container);
+      probe.unmount();
+      const saved = { x: -100, y: 40, zoom: 1.5, followFit: false, width: first.width, height: first.height - 26 };
+      const canvas = (size: { width: number; height: number } | null) => (
+        <WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={saved}><CanvasSize to={size} /></WorkflowCanvas>
+      );
+      const { container, rerender } = render(canvas(null));
+      // laid out 26 px taller than it was saved at: the saved centre stays the centre
+      await waitFor(() => expect(transform(container)).toBe('translate(-100px, 53px) scale(1.5)'));
+      // settled at the saved size: exactly the saved view
+      rerender(canvas({ width: saved.width, height: saved.height }));
+      await waitFor(() => expect(transform(container)).toBe('translate(-100px, 40px) scale(1.5)'));
+    });
+
+    it('reports the canvas size with each view, so a restore knows what the view was taken at', async () => {
+      const onViewChange = vi.fn();
+      const { container } = render(
+        <WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800}
+          initialView={{ x: -100, y: 40, zoom: 1.5, followFit: false }} onViewChange={onViewChange}>
+          <ZoomControls />
+          <CanvasSize />
+        </WorkflowCanvas>,
+      );
+      await waitFor(() => expect(screen.getByLabelText('Zoom level')).toHaveTextContent('150%'));
+      fireEvent.click(screen.getByLabelText('Zoom in'));
+      expect(onViewChange.mock.calls.at(-1)![0]).toMatchObject(measured(container));
     });
 
     it('fits a document whose saved view still followed Fit', async () => {

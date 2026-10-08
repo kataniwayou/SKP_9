@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, type MutableRefObject } f
 import { useReactFlow, useStore, type Viewport } from '@xyflow/react';
 import { FIT_VIEW_OPTIONS } from './fitOptions';
 
-interface Size { width: number; height: number }
+export interface Size { width: number; height: number }
 
 /** The viewport that shows the same flow point at the canvas centre after the canvas changes size. */
 export function keepCentre(v: Viewport, prev: Size, next: Size): Viewport {
@@ -27,12 +27,15 @@ export function useFollowFit(): (on: boolean) => void {
  * keeps the point at the centre at the centre. React Flow alone keeps the top-left corner, which
  * leaves the graph small and off to one side. Rendered inside the canvas's React Flow provider.
  */
-export function FollowSize() {
+export function FollowSize({ initial = null }: {
+  /** The size a restored view was taken at: the first size the canvas lays out at is a change from it. */
+  initial?: Size | null;
+}) {
   const follow = useContext(FollowFitContext);
   const { fitView, getViewport, setViewport } = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
-  const last = useRef<Size | null>(null);
+  const last = useRef<Size | null>(initial);
 
   useEffect(() => {
     if (width <= 0 || height <= 0) return; // not laid out (a hidden or moving panel): keep the last size
