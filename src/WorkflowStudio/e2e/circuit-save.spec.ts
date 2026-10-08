@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { centreOf, documentPanel, dragEnd, dragReading, edge, get, newWires, node, openWorkflow, pane, pointOnWire, save, setEntryCondition } from './studio';
+import { box, centreOf, documentPanel, dragEnd, dragReading, edge, get, newWires, node, openWorkflow, pane, pointOnWire, save, setEntryCondition, type Pt } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
 
 // Plan 9 §7: Save derives nextStepIds and entryStepIds by tracing the current. These tests save only their own throwaway
@@ -25,16 +25,47 @@ async function open(page: Page): Promise<Locator> {
   return documentPanel(page, t.workflow);
 }
 
+/** A page point inside the hub's disc at `deg` round its centre (0 right, 90 down). */
+async function onHub(panel: Locator, deg: number): Promise<Pt> {
+  const b = await box(node(panel, 'wf'));
+  const r = (deg * Math.PI) / 180, R = b.width / 2;
+  return { x: b.x + R + 0.8 * R * Math.cos(r), y: b.y + R + 0.8 * R * Math.sin(r) };
+}
+
+/** Where a wire's tail is drawn, in flow coordinates, and the hub's top ring point. */
+async function tailOf(panel: Locator, id: string): Promise<[number, number]> {
+  const d = (await edge(panel, id).locator('path.w').first().getAttribute('d')) ?? '';
+  const m = /M([-\d.e]+)[ ,]([-\d.e]+)/.exec(d)!;
+  return [Number(m[1]), Number(m[2])];
+}
+async function hubTop(panel: Locator): Promise<[number, number]> {
+  return node(panel, 'wf').evaluate((el) => {
+    const e = el as HTMLElement;
+    const m = /translate\(([-\d.e]+)px, ?([-\d.e]+)px\)/.exec(e.style.transform)!;
+    return [Number(m[1]) + e.offsetWidth / 2, Number(m[2])] as [number, number];
+  });
+}
+
 test('a tail joined on a wire fans out: Save writes the tapped step\'s current into both steps; a fresh read draws the junction again', async ({ page, request }) => {
   const panel = await open(page);
   expect(await dragEnd(page, panel, `${t.b}->${t.c}`, 'tail', await pointOnWire(panel, `${t.a}->${t.b}`, 0.5, 12))).toBe('join here');
+  // and the entry wire's tail at the hub's top (a hub angle): a design of its own, beside the junction
+  expect(await dragEnd(page, panel, `wf->${t.a}`, 'tail', await onHub(panel, 270))).toBe('connect here');
+  await expect(page.getByText('● design draft')).toBeVisible();
   await save(page);
   await expect(await pane(page, 'Output')).toContainText('Saved and applied');
   expect(sorted(await nextOf(request, t.a))).toEqual(sorted([t.b, t.c, t.d]));
   expect(await nextOf(request, t.b)).toEqual([]);
   expect(await entriesOf(request)).toEqual([t.a]);
+  // saved: the stored design is what is shown, so nothing is left to save (final review M5)
+  await expect(page.getByText('● design draft')).toHaveCount(0);
   await page.reload();
-  await expect(edge(documentPanel(page, t.workflow), `${t.b}->${t.c}`).locator('circle.nx-joint')).toHaveCount(1);
+  const again = documentPanel(page, t.workflow);
+  await expect(edge(again, `${t.b}->${t.c}`).locator('circle.nx-joint')).toHaveCount(1);
+  const [tx, ty] = await tailOf(again, `wf->${t.a}`), [hx, hy] = await hubTop(again);
+  expect(Math.hypot(tx - hx, ty - hy)).toBeLessThan(1);
+  // read fresh from BaseApi, the junction and the hub angle are the stored design, not a draft
+  await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 
 test('a head joined on a wire fans in; where it joins decides what its current reaches', async ({ page, request }) => {
