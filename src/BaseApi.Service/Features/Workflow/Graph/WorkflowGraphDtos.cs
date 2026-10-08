@@ -60,6 +60,14 @@ public sealed record GraphSchemaEdit(Guid ProcessorId, string Slot, string? Defi
 /// Parked steps (placed but unwired) are not reachable, so they are not here; the editor reads their
 /// ids from the layout and fetches them through <c>GET /steps/{id}</c>.
 /// </summary>
+/// <param name="Workflow">The workflow.</param>
+/// <param name="Steps">Every step reachable from the entry steps.</param>
+/// <param name="Processors">The processors those steps use.</param>
+/// <param name="Schemas">The schemas those processors reference.</param>
+/// <param name="Assignments">The workflow's assignments.</param>
+/// <param name="Caches">The workflow's caches.</param>
+/// <param name="Layout">The canvas layout, or null when never laid out.</param>
+/// <param name="Design">The studio's stored design (plan 8), or null when the real entities hold it.</param>
 public sealed record WorkflowGraphDto(
     WorkflowReadDto Workflow,
     List<StepReadDto> Steps,
@@ -67,7 +75,8 @@ public sealed record WorkflowGraphDto(
     List<SchemaReadDto> Schemas,
     List<AssignmentReadDto> Assignments,
     List<CacheReadDto> Caches,
-    JsonElement? Layout);
+    JsonElement? Layout,
+    JsonElement? Design);
 
 /// <summary>The workflow's new <c>UpdatedAt</c> after a layout save, for the editor's next graph save.</summary>
 public sealed record LayoutSavedDto(DateTime UpdatedAt);

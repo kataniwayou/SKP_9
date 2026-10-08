@@ -26,16 +26,12 @@ internal sealed class WorkflowGraphReader : IWorkflowGraphReader
     {
         var row = await _db.Set<WorkflowEntity>().AsNoTracking()
             .Where(w => w.Id == workflowId)
-            .Select(w => new { w.Layout })
+            .Select(w => new { w.Layout, w.Design })
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException(nameof(WorkflowEntity), workflowId);
 
-        JsonElement? layout = null;
-        if (row.Layout is not null)
-        {
-            using var doc = JsonDocument.Parse(row.Layout);
-            layout = doc.RootElement.Clone();
-        }
+        var layout = Json(row.Layout);
+        var design = Json(row.Design);
 
         // The snapshot clears itself on dispose, so everything is copied out before it goes.
         using var snapshot = await _loader.LoadL1Async([workflowId], ct);
@@ -51,6 +47,14 @@ internal sealed class WorkflowGraphReader : IWorkflowGraphReader
             snapshot.Schemas.Values.OrderBy(s => s.Name, StringComparer.Ordinal).ThenBy(s => s.Id).ToList(),
             snapshot.Assignments.Values.OrderBy(a => a.StepId).ThenBy(a => a.Id).ToList(),
             snapshot.Caches.Values.OrderBy(c => c.Name, StringComparer.Ordinal).ThenBy(c => c.Id).ToList(),
-            layout);
+            layout,
+            design);
+    }
+
+    private static JsonElement? Json(string? text)
+    {
+        if (text is null) return null;
+        using var doc = JsonDocument.Parse(text);
+        return doc.RootElement.Clone();
     }
 }

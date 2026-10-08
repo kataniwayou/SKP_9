@@ -31,5 +31,9 @@ internal sealed class WorkflowEntityConfiguration : IEntityTypeConfiguration<Wor
         // Postgres reject anything that is not JSON even if a caller bypasses the action's check.
         entity.Property(e => e.Layout)
             .HasColumnType("jsonb");
+
+        // jsonb like Layout: the stored design is a JSON object written by the design endpoint only.
+        entity.Property(e => e.Design)
+            .HasColumnType("jsonb");
     }
 }

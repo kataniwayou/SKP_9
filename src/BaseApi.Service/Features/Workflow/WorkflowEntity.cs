@@ -63,4 +63,15 @@ public sealed class WorkflowEntity : BaseEntity
     /// </para>
     /// </summary>
     public string? Layout { get; set; }
+
+    /// <summary>
+    /// The SKP Studio's stored design (plan 8) as JSON, or null when the real entities hold the design.
+    /// <para>
+    /// It is the last <c>PUT /workflows/{id}/design</c> body without its layout (the layout goes to
+    /// <see cref="Layout"/>), stored whether or not the design could be applied, and emptied in the same
+    /// transaction that applies it. The server reads it only to return it; last write wins.
+    /// </para>
+    /// <para>Like <see cref="Layout"/>, it is absent from every DTO.</para>
+    /// </summary>
+    public string? Design { get; set; }
 }

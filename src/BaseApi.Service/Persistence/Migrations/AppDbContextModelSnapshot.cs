@@ -433,6 +433,10 @@ namespace BaseApi.Service.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
+                    b.Property<string>("Design")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("design");
+
                     b.Property<string>("Diagram")
                         .HasColumnType("text")
                         .HasColumnName("diagram");
