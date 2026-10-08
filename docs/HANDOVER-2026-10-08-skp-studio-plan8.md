@@ -2,7 +2,7 @@
 
 Branch `feature/path-importer` (not pushed, not merged; the user has not chosen merge / PR / keep). Both plan 8
 halves are deployed to the dev cluster (ns `skp`): BaseApi with the `AddWorkflowDesign` migration, and the studio
-as `workflow-studio:local`, bundle `index-BlbJqTah.js`. Port forwards are supervised by
+as `workflow-studio:local`, bundle `index-CnvlygjW.js`. Port forwards are supervised by
 `./k8s/port-forward-realstack.ps1` (`-Status` to check, run it again to restart): studio `localhost:18081`,
 BaseApi `localhost:18080`. Do not stop them by hand.
 
@@ -44,12 +44,18 @@ the nullable jsonb `Design` column. The last is `2ce5b40`, the view-restore fix 
 `x ?? new Dictionary<,>()` in a deconstructing `foreach` header crashed the IDE0028 collection-initializer analyzer
 (AD0001) in SDK 8.0.4xx. Only the docker Release build hit it; the fallback is now hoisted to a local.
 
-**Studio.** Bundle `index-BlbJqTah.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
+**Studio.** Bundle `index-CnvlygjW.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
 exposed:
 - A restored canvas lays out 26 px taller for one frame before the dock settles. `FollowSize` measured from that
   frame, so after a refresh the view came back 13 px off.
 - Each saved view now carries the canvas size it was taken at, and a restore starts from that size.
 - `session.spec.ts:12` failed 6 of 8 runs on the old deployed bundle and passes 8 of 8 now.
+
+**After plan 8 (user request, 2026-10-08):** `55f5209`, `35c57ea`: a picked loose wire shows and uses the same
+squares as a connected wire. Open-end square = the open circle (attach / move, bends kept); start square moves the
+start onto another step or the hub (anywhere else snaps back); mid squares drag runs and the shape is kept
+(`LooseWire.bends`, in the layout and the session); right-click Reset route clears it. Vitest 753; Playwright 59 + 2
+skips on dev and on the deployed studio.
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
@@ -67,7 +73,7 @@ live 13/6/5 green):
   `WorkflowValidationLiveTests` 5/5.
 - Vitest: 742 passed.
 - Playwright on the dev server: 58 passed, 2 skipped (the expected `art.spec.ts` skips).
-- Playwright on the deployed studio (`index-BlbJqTah.js`):
+- Playwright on the deployed studio (`index-CnvlygjW.js`):
   - save + inspector + designer: 26/26.
   - whole suite: 58 passed, 2 skipped.
   - `session.spec.ts:12 --repeat-each=8`: 8/8.
