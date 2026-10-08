@@ -142,9 +142,11 @@ internal sealed class FileContentBuilder(
             // because at that moment both genuinely exist in memory.
             budget.Charge(entry.Content.LongLength);
 
+            var entryName = entry.Name.Length > 0 ? entry.Name : UnwrappedName(name);
+
             children.Add(BuildNode(
-                entry.Name,
-                Path.GetExtension(entry.Name),
+                entryName,
+                Path.GetExtension(entryName),
                 entry.Content,
                 entry.Content.LongLength,
                 // Archives record no creation time; only a modification time, and not in every
@@ -162,6 +164,29 @@ internal sealed class FileContentBuilder(
             // Null, not an empty list: an archive that expanded to nothing has no entries, and the
             // document says so with one value rather than an empty array a reader has to interpret.
             children.Count == 0 ? null : new FileContent.Entries(children));
+    }
+
+    /// <summary>
+    /// The name an entry takes when its format recorded none — a gzip written without FNAME, which
+    /// is most of them. <c>gunzip</c>'s own rule: the archive's name less its extension, and
+    /// <c>.tgz</c> becomes <c>.tar</c> so the next level's extension still says what it holds.
+    /// <para>
+    /// A name that would come out empty (an archive called just <c>.gz</c>) keeps the archive's
+    /// name, because a node with no name is not something the document can carry.
+    /// </para>
+    /// </summary>
+    private static string UnwrappedName(string archiveName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(archiveName);
+
+        if (stem.Length == 0)
+        {
+            return archiveName;
+        }
+
+        return Path.GetExtension(archiveName).Equals(".tgz", StringComparison.OrdinalIgnoreCase)
+            ? stem + ".tar"
+            : stem;
     }
 
     /// <summary>

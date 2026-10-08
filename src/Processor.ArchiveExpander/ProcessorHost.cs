@@ -128,6 +128,7 @@ public static class ProcessorHost
         builder.Services.AddSingleton<IArchiveExtractor, ZipExtractor>();
         builder.Services.AddSingleton<IArchiveExtractor, TarExtractor>();
         builder.Services.AddSingleton<IArchiveExtractor, RarExtractor>();
+        builder.Services.AddSingleton<IArchiveExtractor, GzipExtractor>();
 
         builder.Services.AddSingleton<FileContentBuilder>();
 
