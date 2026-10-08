@@ -51,47 +51,62 @@ export function computeLandings(
   placement: Placement,
   departures: Map<SourceId, Map<Id, number>>,
 ): Map<Id, Map<SourceId, number>> {
-  const byTarget = new Map<Id, SourceId[]>();
-  for (const w of wires) byTarget.set(w.target, [...(byTarget.get(w.target) ?? []), w.source]);
-
+  const keyOf = (w: WireEnd) => `${w.source}->${w.target}`;
+  const landed = landingsOf(wires.map((w) => ({ key: keyOf(w), target: w.target, y: departures.get(w.source)!.get(w.target)!, x: departureX(w.source, placement) })), placement);
   const result = new Map<Id, Map<SourceId, number>>();
-  for (const [target, sources] of byTarget) {
+  for (const w of wires) {
+    const m = result.get(w.target) ?? new Map<SourceId, number>();
+    m.set(w.source, landed.get(keyOf(w))!);
+    result.set(w.target, m);
+  }
+  return result;
+}
+
+/** One wire arriving on a step's input (plan 9): by its own key, from where it leaves (`y`, and `x`: Infinity when it cannot run straight). */
+export interface Arrival {
+  key: string;
+  target: Id;
+  y: number;
+  x: number;
+}
+
+/** The landing rule above (spec §5.2), arrival by arrival: two wires from one source into one step each land. */
+export function landingsOf(arrivals: readonly Arrival[], placement: Placement): Map<string, number> {
+  const byTarget = new Map<Id, Arrival[]>();
+  for (const a of arrivals) byTarget.set(a.target, [...(byTarget.get(a.target) ?? []), a]);
+  const result = new Map<string, number>();
+  for (const [target, list] of byTarget) {
     const p = placement.steps.get(target)!;
     const top = p.y + BAND_TOP, bottom = p.y + BAND_BOTTOM, middle = p.y + PMID;
     const used: number[] = [];
     const free = (y: number) => !used.some((u) => Math.abs(u - y) < PORT_GAP);
-    const landed = new Map<SourceId, number>();
-    const departure = (s: SourceId) => departures.get(s)!.get(target)!;
-
-    for (const s of sources) {
-      const d = departure(s);
-      if (d < top || d > bottom || departureX(s, placement) > p.x - STRAIGHT_MIN_GAP) continue;
-      const y = nearestFreeInBand(d, top, bottom, free);
+    const landed = new Map<string, number>();
+    for (const a of list) {
+      if (a.y < top || a.y > bottom || a.x > p.x - STRAIGHT_MIN_GAP) continue;
+      const y = nearestFreeInBand(a.y, top, bottom, free);
       if (y === null) continue;
       used.push(y);
-      landed.set(s, y);
+      landed.set(a.key, y);
     }
-
     const lo = p.y + CAP_H, hi = p.y + STEP_H;
-    const bent = sources.filter((s) => !landed.has(s)).sort((x, y) => departure(x) - departure(y));
+    const bent = list.filter((a) => !landed.has(a.key)).sort((a, b) => a.y - b.y);
     if (bent.length > 0) {
       const walkUsed = [...used];
       const walkFree = (y: number) => !walkUsed.some((u) => Math.abs(u - y) < PORT_GAP);
-      const walked = new Map<SourceId, number>();
-      for (const s of bent) {
-        const y = nearestFreeSlot(middle, departure(s) < middle ? -1 : 1, lo, hi, walkFree);
+      const walked = new Map<string, number>();
+      for (const a of bent) {
+        const y = nearestFreeSlot(middle, a.y < middle ? -1 : 1, lo, hi, walkFree);
         walkUsed.push(y);
-        walked.set(s, y);
+        walked.set(a.key, y);
       }
       let chosen = walked;
       if ([...walked.values()].some((y) => y < lo || y > hi)) {
         const packed = packSlots(lo, hi, used);
-        if (packed.length >= bent.length) chosen = new Map(bent.map((s, i) => [s, packed[i]!]));
+        if (packed.length >= bent.length) chosen = new Map(bent.map((a, i) => [a.key, packed[i]!]));
       }
-      for (const [s, y] of chosen) { used.push(y); landed.set(s, y); }
+      for (const [k, y] of chosen) { used.push(y); landed.set(k, y); }
     }
-
-    result.set(target, landed);
+    for (const [k, y] of landed) result.set(k, y);
   }
   return result;
 }

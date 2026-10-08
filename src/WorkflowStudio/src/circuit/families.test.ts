@@ -21,6 +21,24 @@ describe('families (plan 9 §4)', () => {
     expect(netsOf({ h: w(at('s1'), open), x: w(on('h', 40), open) }, cond({ s2: 1 })).map((n) => n.families)).toEqual([[]]);
   });
 
+  it('a net is decided by a tap head on a step while the host head is open', () => {
+    const c = { h: w(at('s1'), open), x: w(on('h', 40), at('s3')) };
+    expect(netsOf(c, cond({ s3: 2 })).map((n) => [[...n.wires].sort(), n.families])).toEqual([[['h', 'x'], [2]]]);
+  });
+
+  it('a junction on a host missing from the circuit makes no phantom net', () => {
+    const nets = netsOf({ x: w(on('gone', 8), at('s2')) }, cond({ s2: 1 }));
+    expect(nets.map((n) => [n.wires, n.families])).toEqual([[['x'], [1]]]);
+  });
+
+  it('the same circuit before and after its deciding head is taken off: decided, then undecided (grey)', () => {
+    const conditions = cond({ s2: 1 });
+    const before = { h: w(at('s1'), at('s2')), x: w(on('h', 40), open) };
+    const after = { ...before, h: w(at('s1'), open) };
+    expect(netsOf(before, conditions).map((n) => n.families)).toEqual([[1]]);
+    expect(netsOf(after, conditions).map((n) => n.families)).toEqual([[]]);
+  });
+
   it('a net with two families is a short circuit: its wires are left out of the trace', () => {
     const c = { h: w(at('s1'), at('s2')), x: w(on('h', 40), at('s3')), y: w(at('s5'), at('s6')) };
     const conditions = cond({ s2: 1, s3: 2, s6: 1 });

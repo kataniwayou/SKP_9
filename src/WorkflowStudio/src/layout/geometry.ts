@@ -41,7 +41,7 @@ export const snap = (v: number, step: number = GRID): number => Math.round(v / s
 /** The k-th of n evenly spaced offsets `gap` apart, centred on zero. */
 export const offset = (k: number, n: number, gap: number): number => (k - (n - 1) / 2) * gap;
 
-/** A slid landing stays inside the processor band, on the 8 px grid (spec §4.2). */
-export const LANDING_MIN = 64;
-export const LANDING_MAX = 128;
+/** A slid end stays on its side short of the frame's 14 px chamfered corners, on the 8 px grid (plan 9 §2.1, ruling). */
+export const LANDING_MIN = 16;
+export const LANDING_MAX = STEP_H - 16;
 export const clampLanding = (v: number): number => Math.min(Math.max(snap(v), LANDING_MIN), LANDING_MAX);

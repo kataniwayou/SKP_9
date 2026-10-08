@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Placement } from './placement';
-import { computeDepartures, computeLandings, WORKFLOW_SOURCE, type WireEnd } from './ports';
+import { computeDepartures, computeLandings, landingsOf, WORKFLOW_SOURCE, type WireEnd } from './ports';
 
 const placement = (steps: Record<string, [number, number]>): Placement => ({
   sphere: { cx: 128, cy: 128 },
@@ -134,5 +134,12 @@ describe('computeLandings', () => {
       }
       if (packed >= 8 - straight.length) for (const y of ys) { expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
     }
+  });
+});
+describe('landingsOf (plan 9: arrivals by wire, so two wires from one source into one step both land)', () => {
+  it('keeps two arrivals from the same place 16 apart', () => {
+    const placement = { sphere: { cx: 0, cy: 0 }, steps: new Map([['t', { x: 600, y: 0 }]]), caches: new Map() };
+    const landed = landingsOf([{ key: 'a', target: 't', y: 96, x: 224 }, { key: 'b', target: 't', y: 96, x: 224 }], placement);
+    expect(Math.abs(landed.get('a')! - landed.get('b')!)).toBeGreaterThanOrEqual(16);
   });
 });
