@@ -52,40 +52,48 @@ internal sealed class DesignRun
     /// stages go on. The tracker is cleared either way, so nothing of a failed entity reaches the next save.
     /// True when the change was applied.
     /// </summary>
-    public async Task<bool> UnitAsync(string kind, Guid id, string stage, Func<Task<List<FieldError>>> stageChange, CancellationToken ct)
+    public async Task<bool> UnitAsync(string kind, Guid id, string stage, Func<Task<List<FieldError>>> stageChange, CancellationToken ct, bool shared = false)
     {
-        var savepoint = $"design_unit_{++_units}";
-        await _tx.SavepointAsync(savepoint, ct);
-        try
+        // A shared entity is last write wins: if someone else's write lands between the load and the save, the
+        // unit runs again on a fresh load rather than reporting the owned conflict. Owned entities report it.
+        for (var attempt = 1; ; attempt++)
         {
-            var problems = await stageChange();
-            if (problems.Count > 0)
+            var savepoint = $"design_unit_{++_units}";
+            await _tx.SavepointAsync(savepoint, ct);
+            try
             {
-                foreach (var p in problems) Fail(kind, id, stage, p.Field, p.Message);
-                await _tx.RollbackToSavepointAsync(savepoint, ct);
+                var problems = await stageChange();
+                if (problems.Count > 0)
+                {
+                    foreach (var p in problems) Fail(kind, id, stage, p.Field, p.Message);
+                    await _tx.RollbackToSavepointAsync(savepoint, ct);
+                    return false;
+                }
+                await _db.SaveChangesAsync(ct);
+                await _tx.ReleaseSavepointAsync(savepoint, ct);
+                return true;
+            }
+            catch (DbUpdateException ex)
+            {
+                // not the request's token: a cancelled request must still leave the transaction usable for its rollback
+                await _tx.RollbackToSavepointAsync(savepoint, CancellationToken.None);
+                if (shared && ex is DbUpdateConcurrencyException && attempt < SharedAttempts) continue;
+                var (field, message) = Describe(ex, shared);
+                Fail(kind, id, stage, field, message);
                 return false;
             }
-            await _db.SaveChangesAsync(ct);
-            await _tx.ReleaseSavepointAsync(savepoint, ct);
-            return true;
-        }
-        catch (DbUpdateException ex)
-        {
-            // not the request's token: a cancelled request must still leave the transaction usable for its rollback
-            await _tx.RollbackToSavepointAsync(savepoint, CancellationToken.None);
-            var (field, message) = Describe(ex);
-            Fail(kind, id, stage, field, message);
-            return false;
-        }
-        finally
-        {
-            _db.ChangeTracker.Clear();
+            finally
+            {
+                _db.ChangeTracker.Clear();
+            }
         }
     }
 
-    private static (string? Field, string Message) Describe(DbUpdateException ex)
+    private const int SharedAttempts = 3;
+
+    private static (string? Field, string Message) Describe(DbUpdateException ex, bool shared)
     {
-        if (ex is DbUpdateConcurrencyException) return (null, Conflict);
+        if (ex is DbUpdateConcurrencyException) return (null, shared ? "The database refused this change." : Conflict);
         if (PostgresExceptionMapper.TryMap(ex, out _, out var detail, out var column))
             return (column is null ? null : DesignFields.FieldOf(column), detail);
         return (null, "The database refused this change.");

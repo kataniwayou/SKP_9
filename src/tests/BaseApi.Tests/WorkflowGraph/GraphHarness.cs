@@ -97,7 +97,7 @@ internal sealed class GraphHarness : IAsyncDisposable
     {
         var p = new ProcessorEntity
         {
-            Id = Guid.NewGuid(), Name = name, Version = "1.0.0", SourceHash = Guid.NewGuid().ToString("N"),
+            Id = Guid.NewGuid(), Name = name, Version = "1.0.0", SourceHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
             InputSchemaId = input, OutputSchemaId = output, ConfigSchemaId = config,
         };
         Db.Add(p);
@@ -136,6 +136,14 @@ internal sealed class GraphHarness : IAsyncDisposable
         return a.Id;
     }
 
+    public async Task<Guid> CacheAsync(string root)
+    {
+        var c = new CacheEntity { Id = Guid.NewGuid(), Name = "cache", Version = "1.0.0", Root = root, Items = "{}" };
+        Db.Add(c);
+        await Db.SaveChangesAsync(Ct);
+        return c.Id;
+    }
+
     /// <summary>Forgets every tracked entity, so the next read sees the store rather than the tracker.</summary>
     public void Forget() => Db.ChangeTracker.Clear();
 
@@ -169,7 +177,12 @@ internal sealed class GraphHarness : IAsyncDisposable
         new WorkflowDesignSyncer(Db, new HarnessDesignStore(Root, _name), new PassThroughDesignTransactions(), stages ?? AllStages());
 
     /// <summary>Every stage, in the spec's order (plan 8 §4.3); each stage task adds its own.</summary>
-    public IReadOnlyList<IDesignStage> AllStages() => [];
+    public IReadOnlyList<IDesignStage> AllStages() =>
+    [
+        new SchemaStage(Db, new SchemaCreateDtoValidator(), new SchemaEntityMapper()),
+        new ProcessorStage(Db, new ProcessorUpdateDtoValidator(), new ProcessorEntityMapper()),
+        new CacheStage(Db, new CacheUpdateDtoValidator(), new CacheEntityMapper()),
+    ];
 
     /// <summary>The store through a second context with no audit interceptor, as ExecuteUpdate bypasses it in production.</summary>
     private sealed class HarnessDesignStore(InMemoryDatabaseRoot root, string name) : IDesignStore

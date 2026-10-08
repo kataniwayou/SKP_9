@@ -31,6 +31,9 @@ internal static class WorkflowServiceCollectionExtensions
         // Plan 8: the design save (store, then the stages in one transaction).
         services.AddScoped<IDesignStore, RelationalDesignStore>();
         services.AddScoped<IDesignTransactions, RelationalDesignTransactions>();
+        services.AddScoped<SchemaStage>();
+        services.AddScoped<ProcessorStage>();
+        services.AddScoped<CacheStage>();
         services.AddScoped<IWorkflowDesignSyncer>(sp => new WorkflowDesignSyncer(
             sp.GetRequiredService<BaseDbContext>(), sp.GetRequiredService<IDesignStore>(),
             sp.GetRequiredService<IDesignTransactions>(), DesignStages.Ordered(sp)));
