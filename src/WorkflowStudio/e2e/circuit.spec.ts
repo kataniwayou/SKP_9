@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import {
-  box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
+  box, centreOf, clearMove, documentPanel, flowToPage, dragEnd, dragReading, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
   pickWire, pointOnWire, setEntryCondition, tab, test, type Pt,
 } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
@@ -244,9 +244,12 @@ test('rule 11: a short circuit is refused: a tail onto a wire of another family,
   expect(await dragEnd(page, panel, bc, 'tail', await pointOnWire(panel, ad, 0.5, 12))).toBe('short circuit');
   await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(0);
   expect(await pointsOf(panel, bc)).toEqual(bcBefore);
-  // a head: a new wire from a, tapped on a -> d (red), its head onto a -> b (teal)
-  const id = await newWire(page, panel, t.a, await emptySpot(panel));
-  expect(await dragEnd(page, panel, id, 'tail', await pointOnWire(panel, ad, 0.5, 12))).toBe('join here');
+  // a head: a new wire from a made red by a tap on it that feeds red d, its head onto a -> b (teal)
+  const spot = await emptySpot(panel);
+  const id = await newWire(page, panel, t.a, spot);
+  const tap = await newWire(page, panel, t.b, await emptySpot(panel, [spot]));
+  expect(await dragEnd(page, panel, tap, 'tail', await pointOnWire(panel, id, 0.5, 12))).toBe('join here');
+  expect(await dragEnd(page, panel, tap, 'head', await onSide(panel, t.d, 'in'))).toBe('connect here');
   expect(await colourOf(panel, id)).toBe(RED);
   const idBefore = await pointsOf(panel, id);
   expect(await dragEnd(page, panel, id, 'head', await pointOnWire(panel, ab, 0.5, 12))).toBe('short circuit');
@@ -260,15 +263,17 @@ test('rule 11: a short circuit is refused: a tail onto a wire of another family,
   await expect(panel.locator('circle.nx-joint.short')).toHaveCount(0);
 });
 
-test('rule 12: an undecided wire is grey and dashed; open at both ends it keeps its ring and its arrow head', async ({ page }) => {
+test('rule 12: an undecided wire is grey and dashed; open at both ends it has no direction: no ring, no arrow head (rule D, 2026-10-09)', async ({ page }) => {
   const panel = await open(page);
   const spot = await emptySpot(panel);
   const id = await newWire(page, panel, t.a, spot);
+  await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(1);
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(1);
   expect(await dragEnd(page, panel, id, 'tail', await emptySpot(panel, [spot]))).toBe('move here');
   expect(await colourOf(panel, id)).toBe(GREY);
   expect(await dashOf(panel, id)).not.toBe('none');
-  await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(1);
-  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(1);
+  await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(0);
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
   await expect(edge(panel, id).locator('circle.nx-open')).toHaveCount(0);
 });
 
@@ -531,23 +536,25 @@ test('drag rules: a wire dragged by its body moves whole (every point shifted by
   // not picked: a press on its body is enough
   await focusCanvas(page, panel);
   const from = await pointOnWire(panel, ab, 0.2);
+  // somewhere both its ends land on empty canvas (an end over a step or a line would connect there, rule B)
+  const by = await clearMove(panel, ab);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
-  await page.mouse.move(from.x + 30, from.y + 60, { steps: 4 });
-  await page.mouse.move(from.x + 60, from.y + 130, { steps: 4 });
+  await page.mouse.move(from.x + by.x / 2, from.y + by.y / 2, { steps: 4 });
+  await page.mouse.move(from.x + by.x, from.y + by.y, { steps: 4 });
   await page.mouse.up();
   await expect.poll(() => pointsOf(panel, ab)).not.toEqual(before);
   const after = await pointsOf(panel, ab);
   const { dx, dy } = shiftOf(before, after);
-  expect(dx % 8).toBe(0);
-  expect(dy % 8).toBe(0);
-  expect(dx).toBeGreaterThan(0);
-  expect(dy).toBeGreaterThan(dx);
-  // both ends open: no family, grey and dashed; the ends still drawn as a ring and an arrow head
+  expect(Math.abs(dx % 8)).toBe(0);
+  expect(Math.abs(dy % 8)).toBe(0);
+  expect(Math.sign(dx)).toBe(Math.sign(by.x));
+  expect(Math.sign(dy)).toBe(Math.sign(by.y));
+  // both ends open: no family, grey and dashed; no end on a step, so no direction: no ring, no arrow head (rule D)
   expect(await colourOf(panel, ab)).toBe(GREY);
   expect(await dashOf(panel, ab)).not.toBe('none');
-  await expect(edge(panel, ab).locator('circle.nx-src')).toHaveCount(1);
-  await expect(edge(panel, ab).locator('path.nx-head')).toHaveCount(1);
+  await expect(edge(panel, ab).locator('circle.nx-src')).toHaveCount(0);
+  await expect(edge(panel, ab).locator('path.nx-head')).toHaveCount(0);
   // the tail joined on it is open where it was drawn
   await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(0);
   await expect(edge(panel, bc).locator('circle.nx-src')).toHaveCount(1);
@@ -622,4 +629,307 @@ test('drag rules: an end square dragged across its last run adds one corner (an 
   expect(await dragEnd(page, panel, bc, 'head', await onSide(panel, t.c, 'in'))).toBe('connect here');
   expect(await dashOf(panel, bc)).toBe('none');
   expect((await pointsOf(panel, bc)).at(-1)![0]).toBe((await flowBox(panel, t.c)).x);
+});
+
+// ---- the user's drag rules (2026-10-09): B body drag lands each end, C an end square draws around corners, D wires
+// with no end on a step or the hub have no direction ----
+
+/** Two animation frames, so what is drawn is for the last pointer move. */
+const frames = (page: Page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
+const labelsOf = (panel: Locator) => panel.locator('.design-drop-label').allTextContents();
+/** Flow px per screen px is 1 / this: the canvas's zoom. */
+async function zoomOf(panel: Locator): Promise<number> {
+  const a = await flowToPage(panel, [0, 0]), b = await flowToPage(panel, [100, 0]);
+  return (b.x - a.x) / 100;
+}
+
+/** A new wire from step `from` with both its ends then moved open: no end on a step or the hub, direction-less. */
+async function freeWire(page: Page, panel: Locator, from: string, avoid: Pt[] = []): Promise<string> {
+  const spot = await emptySpot(panel, avoid);
+  const id = await newWire(page, panel, from, spot);
+  expect(await dragEnd(page, panel, id, 'tail', await emptySpot(panel, [spot, ...avoid]))).toBe('move here');
+  await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(0);
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
+  return id;
+}
+
+test('cursors (rule A): the open hand only on a wire\'s body, never on a square; four-way on end squares, two-way on run squares; the closed hand while the body is dragged', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  await pickWire(page, panel, ab);
+  const squares = await panel.locator(`.design-wire[data-wire="${ab}"] .design-handle`).all();
+  expect(squares.length).toBeGreaterThanOrEqual(3);
+  for (const sq of squares) {
+    const c = await centreOf(sq);
+    await page.mouse.move(c.x, c.y);
+    const cls = (await sq.getAttribute('class')) ?? '';
+    expect(await cursorAt(page, c)).toBe(/\bend\b/.test(cls) ? 'move' : /\bh\b/.test(cls) ? 'ns-resize' : 'ew-resize');
+  }
+  const body = await pointOnWire(panel, ab, 0.3);
+  await page.mouse.move(body.x, body.y);
+  expect(await cursorAt(page, body)).toBe('grab');
+  await page.mouse.down();
+  await page.mouse.move(body.x + 40, body.y + 60, { steps: 4 });
+  expect(await cursorAt(page, { x: body.x + 40, y: body.y + 60 })).toBe('grabbing');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+});
+
+test('rule B: a connected wire dragged away by its body and dropped back where it was connects at both ends again, solid and in its colour; a grid step lower it connects there, its shape exactly as moved', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  const before = await pointsOf(panel, ab);
+  const from = await pointOnWire(panel, ab, 0.5);
+  const away = await clearMove(panel, ab);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + away.x, from.y + away.y, { steps: 8 });
+  await frames(page);
+  // away: both ends open, each labelled; grey and dashed while it is moved
+  expect(await labelsOf(panel)).toEqual(['move here', 'move here']);
+  expect(await dashOf(panel, ab)).not.toBe('none');
+  // back where it was pressed: both ends are over their sides again, each block outlined green
+  await page.mouse.move(from.x, from.y, { steps: 8 });
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['connect here', 'connect here']);
+  await expect(node(panel, t.a)).toHaveClass(/drop-ok/);
+  await expect(node(panel, t.b)).toHaveClass(/drop-ok/);
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, ab)).toEqual(before);
+  expect(await dashOf(panel, ab)).toBe('none');
+  expect(await colourOf(panel, ab)).toBe(TEAL);
+  await expect(edge(panel, ab).locator('circle.nx-src')).toHaveCount(1);
+  await expect(edge(panel, ab).locator('path.nx-head')).toHaveCount(1);
+
+  // away again and back 16 lower: both ends connect there (slid down their sides), the shape exactly as moved
+  const z = await zoomOf(panel);
+  const again = await pointOnWire(panel, ab, 0.5);
+  const away2 = await clearMove(panel, ab);
+  await page.mouse.move(again.x, again.y);
+  await page.mouse.down();
+  await page.mouse.move(again.x + away2.x, again.y + away2.y, { steps: 8 });
+  await page.mouse.move(again.x, again.y + 16 * z, { steps: 8 });
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['connect here', 'connect here']);
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, ab)).not.toEqual(before);
+  const lower = await pointsOf(panel, ab);
+  expect(shiftOf(before, lower)).toEqual({ dx: 0, dy: 16 });
+  expect(await dashOf(panel, ab)).toBe('none');
+  expect(await colourOf(panel, ab)).toBe(TEAL);
+  await expect(edge(panel, ab).locator('circle.nx-src')).toHaveCount(1);
+  await expect(edge(panel, ab).locator('path.nx-head')).toHaveCount(1);
+});
+
+test('rule B: a wire with one end still connected, dragged by its body, moves whole: its shape frozen, that end detached (the closed hand never stretches a leg)', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  // its head open first (its end square): the tail stays on a
+  expect(await dragEnd(page, panel, ab, 'head', await emptySpot(panel))).toBe('move here');
+  const before = await pointsOf(panel, ab);
+  const a = await flowBox(panel, t.a);
+  expect(before[0]![0]).toBe(a.x + a.w);
+  const from = await pointOnWire(panel, ab, 0.5);
+  const by = await clearMove(panel, ab);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + by.x / 2, from.y + by.y / 2, { steps: 4 });
+  await page.mouse.move(from.x + by.x, from.y + by.y, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, ab)).not.toEqual(before);
+  const after = await pointsOf(panel, ab);
+  // every point moved by one amount: no leg stretched to keep the tail on a
+  const { dx, dy } = shiftOf(before, after);
+  expect(Math.hypot(dx, dy)).toBeGreaterThan(0);
+  expect(after[0]![0]).not.toBe(a.x + a.w);
+  // no end on a step now: grey, dashed, direction-less
+  expect(await colourOf(panel, ab)).toBe(GREY);
+  expect(await dashOf(panel, ab)).not.toBe('none');
+  await expect(edge(panel, ab).locator('circle.nx-src')).toHaveCount(0);
+  await expect(edge(panel, ab).locator('path.nx-head')).toHaveCount(0);
+});
+
+test('rule B with D: both ends of a moved wire over one step\'s input: the first connects (it is the head), the second is "wrong side" (red) and stays open, moved with the wire', async ({ page }) => {
+  const panel = await open(page);
+  const id = `wf->${t.a}`;
+  const before = await pointsOf(panel, id);
+  expect(before).toHaveLength(2);
+  const b = await flowBox(panel, t.b);
+  // its tail end into b's input half, 16 short of the side; its head end 64 further in
+  const dx = b.x + 16 - before[0]![0], dy = b.y + 96 - before[0]![1];
+  const z = await zoomOf(panel);
+  const from = await pointOnWire(panel, id, 0.5);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  // under b first, then straight up into it, so both ends arrive at once (from the left, the right end would get
+  // there first and connect alone, the other end left open short of b)
+  await page.mouse.move(from.x + dx * z, from.y + (dy + 240) * z, { steps: 6 });
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['move here', 'move here']);
+  await page.mouse.move(from.x + dx * z, from.y + dy * z, { steps: 6 });
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['connect here', 'wrong side']);
+  await expect(panel.locator('.design-drop-label.no')).toHaveCount(1);
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, id)).not.toEqual(before);
+  const after = await pointsOf(panel, id);
+  // the end that reached b first is its head now, on b's input side; the other is its tail, open where it was moved to
+  expect(after.at(-1)).toEqual([b.x, b.y + 96]);
+  expect(after[0]).toEqual([b.x + 64, b.y + 96]);
+  expect(await colourOf(panel, id)).toBe(TEAL);
+  expect(await dashOf(panel, id)).not.toBe('none');
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(1);
+});
+
+test('rule C: an end square draws its wire around corners in one drag: three turns of the pointer, three corners, each kept', async ({ page }) => {
+  const panel = await open(page);
+  const bc = `${t.b}->${t.c}`;
+  const straight = await pointsOf(panel, bc);
+  expect(straight).toHaveLength(2);
+  const [tx, ty] = straight[0]!, [hx, hy] = straight[1]!;
+  await pickWire(page, panel, bc);
+  const head = await centreOf(endSquare(panel, bc, 'head'));
+  // down below c, right, down again: one gesture
+  const legs: [number, number][] = [[hx, hy + 128], [hx + 96, hy + 128], [hx + 96, hy + 208]];
+  await page.mouse.move(head.x, head.y);
+  await page.mouse.down();
+  for (const p of legs) {
+    const q = await flowToPage(panel, p);
+    await page.mouse.move(q.x, q.y, { steps: 10 });
+  }
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['move here']);
+  await page.mouse.up();
+  await expect.poll(async () => (await pointsOf(panel, bc)).length).toBe(5);
+  const p = await pointsOf(panel, bc);
+  expect(p[0]).toEqual([tx, ty]);
+  const close = (a: [number, number], b: [number, number]) => expect(Math.hypot(a[0] - b[0], a[1] - b[1])).toBeLessThanOrEqual(8);
+  close(p[1]!, [hx, ty]);
+  close(p[2]!, [hx, hy + 128]);
+  close(p[3]!, [hx + 96, hy + 128]);
+  close(p[4]!, [hx + 96, hy + 208]);
+  // right angles all the way: horizontal, vertical, horizontal, vertical
+  expect([p[0]![1] === p[1]![1], p[1]![0] === p[2]![0], p[2]![1] === p[3]![1], p[3]![0] === p[4]![0]]).toEqual([true, true, true, true]);
+  expect(await dashOf(panel, bc)).not.toBe('none');
+});
+
+test('rule C: the corners drawn are kept when the end connects; only the last leg goes into the contact', async ({ page }) => {
+  const panel = await open(page);
+  const id = `wf->${t.a}`;
+  const before = await pointsOf(panel, id);
+  const [hx, hy] = before.at(-1)!;
+  const b = await flowBox(panel, t.b);
+  await pickWire(page, panel, id);
+  const head = await centreOf(endSquare(panel, id, 'head'));
+  // down under a, right to short of b, down, then right into b's input half
+  const legs: [number, number][] = [[hx, b.y + 48], [b.x - 32, b.y + 48], [b.x - 32, b.y + 128], [b.x + 24, b.y + 128]];
+  await page.mouse.move(head.x, head.y);
+  await page.mouse.down();
+  for (const q of legs) {
+    const at = await flowToPage(panel, q);
+    await page.mouse.move(at.x, at.y, { steps: 10 });
+  }
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['connect here']);
+  await page.mouse.up();
+  await expect.poll(async () => (await pointsOf(panel, id)).at(-1)).toEqual([b.x, b.y + 128]);
+  const p = await pointsOf(panel, id);
+  const close = (a: [number, number] | undefined, q: [number, number]) => expect(Math.hypot(a![0] - q[0], a![1] - q[1])).toBeLessThanOrEqual(8);
+  expect(p[0]).toEqual(before[0]);
+  close(p[1], [hx, hy]);
+  close(p[2], [hx, b.y + 48]);
+  close(p[3], [b.x - 32, b.y + 48]);
+  close(p[4], [b.x - 32, b.y + 128]);
+  expect(p).toHaveLength(6);
+  // connected to b: in b's colour, solid
+  expect(await colourOf(panel, id)).toBe(TEAL);
+  expect(await dashOf(panel, id)).toBe('none');
+});
+
+test('rule D: a direction-less wire has no ring and no arrow head; its first end on an output side is its tail (the arrow head goes to the other end), on an input side its head', async ({ page }) => {
+  const panel = await open(page);
+  const id = await freeWire(page, panel, t.c);
+  const was = await pointsOf(panel, id);
+  // its "head" end onto d's output: never the wrong side; that end is its tail now
+  expect(await dragEnd(page, panel, id, 'head', await onSide(panel, t.d, 'out'))).toBe('connect here');
+  const d = await flowBox(panel, t.d);
+  await expect.poll(async () => (await pointsOf(panel, id))[0]![0]).toBe(d.x + d.w);
+  const p = await pointsOf(panel, id);
+  expect(p.at(-1)).toEqual(was[0]);
+  await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(1);
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(1);
+  const ring = await centreOf(edge(panel, id).locator('circle.nx-src'));
+  const dBox = await box(node(panel, t.d));
+  expect(Math.abs(ring.x - (dBox.x + dBox.width))).toBeLessThan(6);
+
+  // another: its "tail" end onto c's input: that end is its head, the arrow head on c's input side
+  const other = await freeWire(page, panel, t.a, [ring]);
+  const was2 = await pointsOf(panel, other);
+  expect(await dragEnd(page, panel, other, 'tail', await onSide(panel, t.c, 'in'))).toBe('connect here');
+  const c = await flowBox(panel, t.c);
+  await expect.poll(async () => (await pointsOf(panel, other)).at(-1)![0]).toBe(c.x);
+  expect((await pointsOf(panel, other))[0]).toEqual(was2.at(-1));
+  await expect(edge(panel, other).locator('path.nx-head')).toHaveCount(1);
+  await expect(edge(panel, other).locator('circle.nx-src')).toHaveCount(1);
+  expect(await colourOf(panel, other)).toBe(TEAL);
+});
+
+test('rule D: a direction-less wire joined on a line, then onto a step: an output makes it the tail there (its junction the head), an input the head (its junction the tail)', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  const id = await freeWire(page, panel, t.c);
+  expect(await dragEnd(page, panel, id, 'tail', await pointOnWire(panel, ab, 0.5, 12))).toBe('join here');
+  await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(1);
+  await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(0);
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
+  // its other end onto d's output: d is its tail, the junction its head (current from d into a -> b)
+  expect(await dragEnd(page, panel, id, 'head', await onSide(panel, t.d, 'out'))).toBe('connect here');
+  const d = await flowBox(panel, t.d);
+  await expect.poll(async () => (await pointsOf(panel, id))[0]![0]).toBe(d.x + d.w);
+  await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(1);
+  await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(1);
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
+
+  // another joined on a -> b, its other end onto c's input: c is its head, the junction its tail (a tap)
+  const other = await freeWire(page, panel, t.a);
+  expect(await dragEnd(page, panel, other, 'head', await pointOnWire(panel, ab, 0.25, 12))).toBe('join here');
+  expect(await dragEnd(page, panel, other, 'tail', await onSide(panel, t.c, 'in'))).toBe('connect here');
+  const c = await flowBox(panel, t.c);
+  await expect.poll(async () => (await pointsOf(panel, other)).at(-1)![0]).toBe(c.x);
+  await expect(edge(panel, other).locator('path.nx-head')).toHaveCount(1);
+  await expect(edge(panel, other).locator('circle.nx-joint')).toHaveCount(1);
+  await expect(edge(panel, other).locator('circle.nx-src')).toHaveCount(0);
+  expect(await colourOf(panel, other)).toBe(TEAL);
+  expect(await dashOf(panel, other)).toBe('none');
+});
+
+test('rule D: a direction-less wire joined on one line is refused on a second: "needs a step first", and its end stays where it was', async ({ page }) => {
+  const panel = await open(page);
+  const id = await freeWire(page, panel, t.c);
+  expect(await dragEnd(page, panel, id, 'tail', await pointOnWire(panel, `${t.a}->${t.b}`, 0.5, 12))).toBe('join here');
+  const before = await pointsOf(panel, id);
+  expect(await dragEnd(page, panel, id, 'head', await pointOnWire(panel, `${t.b}->${t.c}`, 0.5, 12))).toBe('needs a step first');
+  await expect(panel.locator('.design-drop-label')).toHaveCount(0);
+  expect(await pointsOf(panel, id)).toEqual(before);
+  await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(1);
+});
+
+test('rule D: a refresh keeps direction-less wires as they are: no ring, no arrow head, the junction kept', async ({ page }) => {
+  const panel = await open(page);
+  const open1 = await freeWire(page, panel, t.c);
+  const joined = await freeWire(page, panel, t.a);
+  expect(await dragEnd(page, panel, joined, 'tail', await pointOnWire(panel, `${t.a}->${t.b}`, 0.5, 12))).toBe('join here');
+  const a = await pointsOf(panel, open1), j = await pointsOf(panel, joined);
+  await page.reload();
+  const again = documentPanel(page, t.workflow);
+  await expect(edge(again, open1)).toHaveCount(1);
+  await expect.poll(() => pointsOf(again, open1)).toEqual(a);
+  await expect.poll(() => pointsOf(again, joined)).toEqual(j);
+  for (const id of [open1, joined]) {
+    await expect(edge(again, id).locator('circle.nx-src')).toHaveCount(0);
+    await expect(edge(again, id).locator('path.nx-head')).toHaveCount(0);
+    expect(await dashOf(again, id)).not.toBe('none');
+  }
+  await expect(edge(again, joined).locator('circle.nx-joint')).toHaveCount(1);
+  await expect(page.getByText('● design draft')).toBeVisible();
 });

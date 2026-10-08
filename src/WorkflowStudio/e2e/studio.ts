@@ -203,6 +203,46 @@ export async function emptySpot(panel: Locator, avoid: Pt[] = []): Promise<Pt> {
   return found;
 }
 
+/** A flow point (canvas coordinates) on the page, through React Flow's viewport transform. */
+export async function flowToPage(panel: Locator, p: readonly [number, number]): Promise<Pt> {
+  return panel.locator('.react-flow__viewport').evaluate((el, [x, y]) => {
+    const m = /translate\(([-\d.e]+)px, ?([-\d.e]+)px\) scale\(([-\d.e]+)\)/.exec((el as HTMLElement).style.transform)!;
+    const r = el.closest('.react-flow')!.getBoundingClientRect();
+    return { x: r.left + Number(m[1]) + x! * Number(m[3]), y: r.top + Number(m[2]) + y! * Number(m[3]) };
+  }, p);
+}
+
+/** A wire's two drawn ends (its tail, then its head) in page coordinates. */
+export async function endsOnPage(panel: Locator, id: string): Promise<[Pt, Pt]> {
+  return panel.locator(`.react-flow__edge[data-id="${id}"]`).locator('path.w').first().evaluate((el) => {
+    const p = el as SVGPathElement;
+    const m = p.getScreenCTM()!;
+    const at = (d: number) => { const q = p.getPointAtLength(d); return { x: q.x * m.a + q.y * m.c + m.e, y: q.x * m.b + q.y * m.d + m.f }; };
+    return [at(0), at(p.getTotalLength())] as [{ x: number; y: number }, { x: number; y: number }];
+  });
+}
+
+/**
+ * A screen offset (at least `min` px each way it moves) that puts both ends of wire `id` on empty pane, nothing within
+ * 40 px of either: a wire moved whole by it lands with both ends open. Throws when none is found.
+ */
+export async function clearMove(panel: Locator, id: string, min = 48): Promise<Pt> {
+  const [tail, head] = await endsOnPage(panel, id);
+  const found = await panel.locator('.react-flow').evaluate((el, [t, h, least]) => {
+    const r = el.getBoundingClientRect();
+    const free = (x: number, y: number) => x > r.left + 20 && x < r.right - 20 && y > r.top + 20 && y < r.bottom - 20
+      && [[0, 0], [40, 0], [-40, 0], [0, 40], [0, -40]].every(([dx, dy]) => el.ownerDocument.elementFromPoint(x + dx!, y + dy!)?.classList.contains('react-flow__pane') === true);
+    const tries: { x: number; y: number }[] = [];
+    for (let dy = -400; dy <= 400; dy += 8) for (let dx = -400; dx <= 400; dx += 8) {
+      if (Math.abs(dx) >= least && Math.abs(dy) >= least) tries.push({ x: dx, y: dy });
+    }
+    tries.sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y));
+    return tries.find((o) => free(t.x + o.x, t.y + o.y) && free(h.x + o.x, h.y + o.y)) ?? null;
+  }, [tail, head, min] as const);
+  if (!found) throw new Error(`no move puts both ends of ${id} on empty canvas`);
+  return found;
+}
+
 /**
  * Presses `from`, moves to `to` with the real mouse, waits for the drop label to show there and for the page to
  * draw two frames (so the label is the one for `to`, not for a point on the way), reads it, then releases.

@@ -817,7 +817,7 @@ test('an entry wire\'s tail dragged off the hub is open there, its step no longe
   expect(await dashOf(wire(again, id))).toBe('none');
 });
 
-test('a joined wire\'s tail moved open keeps its junction and its host\'s colour', async ({ page, request }) => {
+test('a joined wire\'s tail moved open keeps its junction and its host\'s colour; with no end on a step it has no direction: no ring, no arrow head (rule D)', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null, 'no two same-colour wires into different steps');
   await openWorkflow(page, j!.workflow);
@@ -839,7 +839,9 @@ test('a joined wire\'s tail moved open keeps its junction and its host\'s colour
   await expect(edge).toHaveCount(1);
   expect(await edge.locator('path.w').first().getAttribute('stroke')).toBe(host);
   await expect(edge.locator('circle.nx-joint')).toHaveCount(1);
-  await expect(edge.locator('circle.nx-src')).toHaveCount(1);
+  // joined on a line and open: direction-less (the user's rule D, 2026-10-09)
+  await expect(edge.locator('circle.nx-src')).toHaveCount(0);
+  await expect(edge.locator('.nx-head')).toHaveCount(0);
   expect(await dashOf(edge)).not.toBe('none');
   await page.reload();
   const again = documentPanel(page, j!.workflow);
@@ -879,7 +881,7 @@ test('a host wire detached at its tail opens the end joined on it where it was d
   await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(0);
 });
 
-test('a wire moved open at its tail and then its head is open at both ends: grey, dashed, its ring and arrow head kept; a refresh keeps it; each end dropped on a step connects it again, coloured', async ({ page }) => {
+test('a wire moved open at its tail and then its head is open at both ends: grey, dashed, direction-less (no ring, no arrow head, rule D); a refresh keeps it; each end dropped on a step connects it again, coloured', async ({ page }) => {
   const { a, b } = chain!;
   const id = `${a}->${b}`;
   const panel = await open(page);
@@ -900,8 +902,8 @@ test('a wire moved open at its tail and then its head is open at both ends: grey
   const line = edge.locator('path.w').first();
   await expect.poll(() => line.getAttribute('stroke')).toBe('#8A97A8');
   expect(await dashOf(edge)).not.toBe('none');
-  await expect(edge.locator('circle.nx-src')).toHaveCount(1);
-  await expect(edge.locator('.nx-head')).toHaveCount(1);
+  await expect(edge.locator('circle.nx-src')).toHaveCount(0);
+  await expect(edge.locator('.nx-head')).toHaveCount(0);
   await expect(edge.locator('circle.nx-open')).toHaveCount(0);
   await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end`)).toHaveCount(2);
 
@@ -910,6 +912,8 @@ test('a wire moved open at its tail and then its head is open at both ends: grey
   const kept = wire(again, id);
   await expect(kept).toHaveCount(1);
   expect(await kept.locator('path.w').first().getAttribute('stroke')).toBe('#8A97A8');
+  await expect(kept.locator('circle.nx-src')).toHaveCount(0);
+  await expect(kept.locator('.nx-head')).toHaveCount(0);
 
   // its head onto b's input: b's colour, still dashed (its tail is open)
   const p = await pointOnWire(again, id);
@@ -918,6 +922,9 @@ test('a wire moved open at its tail and then its head is open at both ends: grey
   expect(await dragReading(page, again, end, await inputOf(again, b))).toBe('connect here');
   await expect.poll(() => kept.locator('path.w').first().getAttribute('stroke')).toBe(colour);
   expect(await dashOf(kept)).not.toBe('none');
+  // a head on a step: it has a direction again, its ring and its arrow head back
+  await expect(kept.locator('circle.nx-src')).toHaveCount(1);
+  await expect(kept.locator('.nx-head')).toHaveCount(1);
   // its tail onto a's output: the wire a -> b connected again, solid
   const start = await centreOf(endSquare(again, id, 'tail'));
   expect(await dragReading(page, again, start, await outputOf(again, a))).toBe('connect here');
