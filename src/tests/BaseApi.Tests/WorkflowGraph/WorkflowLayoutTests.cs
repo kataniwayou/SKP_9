@@ -71,7 +71,7 @@ public sealed class WorkflowLayoutTests
         var service = new WorkflowService(
             new WorkflowCreateDtoValidator(), new WorkflowUpdateDtoValidator(),
             new WorkflowEntityMapper(), new Repository<WorkflowEntity>(db), db);
-        return (db, new WorkflowsController(service, db, graphReader: null!, graphSaver: null!, validator: null!));
+        return (db, new WorkflowsController(service, db, graphReader: null!, graphSaver: null!, validator: null!, designSyncer: null!));
     }
 
     [Fact]

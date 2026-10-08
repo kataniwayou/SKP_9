@@ -8,9 +8,11 @@ using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
 using BaseApi.Service.Features.Step;
 using BaseApi.Service.Features.Workflow;
+using BaseApi.Service.Features.Workflow.Design;
 using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using BaseApi.Service.Features.Orchestration.Validation;
@@ -26,6 +28,15 @@ namespace BaseApi.Tests.WorkflowGraph;
 /// </summary>
 internal sealed class GraphHarness : IAsyncDisposable
 {
+    private readonly string _name = $"graph-{Guid.NewGuid():N}";
+
+    // One root for the whole test run (each harness has its own database name): a root per harness would make
+    // EF build a service provider per harness and trip ManyServiceProvidersCreatedWarning after twenty.
+    private static readonly InMemoryDatabaseRoot SharedRoot = new();
+
+    /// <summary>Shared by every context of this harness, so a second context (the design store's) sees the same rows.</summary>
+    public InMemoryDatabaseRoot Root => SharedRoot;
+
     public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero));
     public AppDbContext Db { get; }
     public IWorkflowGraphReader Reader { get; }
@@ -35,7 +46,7 @@ internal sealed class GraphHarness : IAsyncDisposable
     public GraphHarness()
     {
         Db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"graph-{Guid.NewGuid():N}")
+            .UseInMemoryDatabase(_name, Root)
             .AddInterceptors(new AuditInterceptor(new HttpContextAccessor(), Clock))
             .Options);
 
@@ -146,6 +157,57 @@ internal sealed class GraphHarness : IAsyncDisposable
         {
             try { return await work(ct); }
             finally { db.ChangeTracker.Clear(); }
+        }
+    }
+
+    /// <summary>
+    /// The design syncer over this harness. InMemory has no transactions, so the stages' writes are not
+    /// rolled back here: these tests assert the answer and what an applied design wrote;
+    /// WorkflowDesignLiveTests proves the rollback on Postgres.
+    /// </summary>
+    public IWorkflowDesignSyncer Syncer(IReadOnlyList<IDesignStage>? stages = null) =>
+        new WorkflowDesignSyncer(Db, new HarnessDesignStore(Root, _name), new PassThroughDesignTransactions(), stages ?? AllStages());
+
+    /// <summary>Every stage, in the spec's order (plan 8 §4.3); each stage task adds its own.</summary>
+    public IReadOnlyList<IDesignStage> AllStages() => [];
+
+    /// <summary>The store through a second context with no audit interceptor, as ExecuteUpdate bypasses it in production.</summary>
+    private sealed class HarnessDesignStore(InMemoryDatabaseRoot root, string name) : IDesignStore
+    {
+        private AppDbContext Plain() => new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(name, root).Options);
+
+        public async Task<bool> StoreAsync(Guid workflowId, string design, string layout, CancellationToken ct)
+        {
+            await using var db = Plain();
+            var row = await db.Workflows.FirstOrDefaultAsync(w => w.Id == workflowId, ct);
+            if (row is null) return false;
+            row.Design = design;
+            row.Layout = layout;
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+
+        public async Task ClearAsync(Guid workflowId, CancellationToken ct)
+        {
+            await using var db = Plain();
+            var row = await db.Workflows.FirstAsync(w => w.Id == workflowId, ct);
+            row.Design = null;
+            await db.SaveChangesAsync(ct);
+        }
+    }
+
+    private sealed class PassThroughDesignTransactions : IDesignTransactions
+    {
+        public Task<IDesignTransaction> BeginAsync(CancellationToken ct) => Task.FromResult<IDesignTransaction>(new Nothing());
+
+        private sealed class Nothing : IDesignTransaction
+        {
+            public Task SavepointAsync(string name, CancellationToken ct) => Task.CompletedTask;
+            public Task RollbackToSavepointAsync(string name, CancellationToken ct) => Task.CompletedTask;
+            public Task ReleaseSavepointAsync(string name, CancellationToken ct) => Task.CompletedTask;
+            public Task CommitAsync(CancellationToken ct) => Task.CompletedTask;
+            public Task RollbackAsync(CancellationToken ct) => Task.CompletedTask;
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }
 

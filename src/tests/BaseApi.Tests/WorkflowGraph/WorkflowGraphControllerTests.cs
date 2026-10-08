@@ -2,6 +2,7 @@ using System.Text.Json;
 using BaseApi.Core.Persistence.Repositories;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Workflow;
+using BaseApi.Service.Features.Workflow.Design;
 using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -16,7 +17,7 @@ public sealed class WorkflowGraphControllerTests
         new(new WorkflowService(
                 new WorkflowCreateDtoValidator(), new WorkflowUpdateDtoValidator(),
                 new WorkflowEntityMapper(), new Repository<WorkflowEntity>(h.Db), h.Db),
-            h.Db, h.Reader, h.Saver, h.Validator(RedisStub.AllLive(h.Clock)));
+            h.Db, h.Reader, h.Saver, h.Validator(RedisStub.AllLive(h.Clock)), h.Syncer());
 
     [Fact]
     public async Task GetGraphReturnsTheGraph()
@@ -97,5 +98,17 @@ public sealed class WorkflowGraphControllerTests
         var handler = new GraphConflictExceptionHandler(services.GetRequiredService<IProblemDetailsService>());
 
         Assert.False(await handler.TryHandleAsync(new DefaultHttpContext(), new InvalidOperationException(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PutDesignAnswersTheOutcome()
+    {
+        await using var h = new GraphHarness();
+        var step = await h.StepAsync(await h.ProcessorAsync());
+        var wf = await h.WorkflowAsync("wf", [step]);
+
+        var ok = Assert.IsType<OkObjectResult>(await Controller(h).PutDesign(wf, DesignBody.Of(), h.Ct));
+
+        Assert.True(Assert.IsType<DesignOutcomeDto>(ok.Value).Applied);
     }
 }

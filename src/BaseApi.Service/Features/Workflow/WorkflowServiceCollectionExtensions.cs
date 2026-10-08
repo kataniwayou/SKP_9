@@ -1,4 +1,6 @@
+using BaseApi.Core.Persistence;
 using BaseApi.Core.Services;
+using BaseApi.Service.Features.Workflow.Design;
 using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -25,6 +27,13 @@ internal static class WorkflowServiceCollectionExtensions
         services.AddScoped<GraphAssignmentResolver>();
         services.AddScoped<GraphSchemaEditor>();
         services.AddScoped<IWorkflowGraphSaver, WorkflowGraphSaver>();
+
+        // Plan 8: the design save (store, then the stages in one transaction).
+        services.AddScoped<IDesignStore, RelationalDesignStore>();
+        services.AddScoped<IDesignTransactions, RelationalDesignTransactions>();
+        services.AddScoped<IWorkflowDesignSyncer>(sp => new WorkflowDesignSyncer(
+            sp.GetRequiredService<BaseDbContext>(), sp.GetRequiredService<IDesignStore>(),
+            sp.GetRequiredService<IDesignTransactions>(), DesignStages.Ordered(sp)));
 
         // Runs via AddAppFeatures, so it lands after the core handlers and before the catch-all.
         services.AddExceptionHandler<GraphConflictExceptionHandler>();

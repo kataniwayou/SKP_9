@@ -2,6 +2,7 @@ using System.Text.Json;
 using BaseApi.Core.Controllers;
 using BaseApi.Core.Services;
 using BaseApi.Service.Features.Orchestration;
+using BaseApi.Service.Features.Workflow.Design;
 using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -42,19 +43,22 @@ public sealed class WorkflowsController :
     private readonly IWorkflowGraphReader _graphReader;
     private readonly IWorkflowGraphSaver _graphSaver;
     private readonly IWorkflowValidator _validator;
+    private readonly IWorkflowDesignSyncer _designSyncer;
 
     public WorkflowsController(
         BaseService<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto> service,
         AppDbContext db,
         IWorkflowGraphReader graphReader,
         IWorkflowGraphSaver graphSaver,
-        IWorkflowValidator validator)
+        IWorkflowValidator validator,
+        IWorkflowDesignSyncer designSyncer)
         : base(service)
     {
         _validator = validator;
         _db = db;
         _graphReader = graphReader;
         _graphSaver = graphSaver;
+        _designSyncer = designSyncer;
     }
 
     /// <summary>
@@ -220,6 +224,18 @@ public sealed class WorkflowsController :
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> PutGraph(Guid id, [FromBody] GraphSaveRequest request, CancellationToken ct)
         => Ok(await _graphSaver.SaveAsync(id, request, ct));
+
+    /// <summary>
+    /// Stores the studio's design on the workflow, then dry-runs it and aligns the real entities only when
+    /// it finds no errors (plan 8 §4.2). The answer is the outcome either way: <c>applied</c>, and every
+    /// error with its entity, stage and field. Only a body that is not a design is a 400.
+    /// </summary>
+    [HttpPut("{id:guid}/design")]
+    [ProducesResponseType(typeof(DesignOutcomeDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> PutDesign(Guid id, [FromBody] DesignSaveRequest request, CancellationToken ct)
+        => Ok(await _designSyncer.SaveAsync(id, request, ct));
 
     /// <summary>
     /// Every problem a start of this workflow would refuse, from every gate -- cycles, missing steps,
