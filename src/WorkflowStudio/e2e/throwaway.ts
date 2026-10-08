@@ -22,7 +22,7 @@ export interface Throwaway {
  * finds a partial set even when `createThrowaway` fails halfway.
  */
 export const created: {
-  workflowId?: string; stepId?: string; stepBId?: string; assignmentId?: string; processorId?: string; schemaId?: string; cacheId?: string; tag?: string;
+  workflowId?: string; stepId?: string; stepBId?: string; extraStepIds?: string[]; assignmentId?: string; processorId?: string; schemaId?: string; cacheId?: string; tag?: string;
 } = {};
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,9 +59,40 @@ export async function createThrowaway(request: APIRequestContext): Promise<Throw
   };
 }
 
+/** The circuit specs' workflow (plan 9 decision 15): steps a, b, c (Completed) and d (Failed); wf -> a, a -> b, a -> d, b -> c; one cache. */
+export interface CircuitThrowaway { workflow: LiveWorkflow; tag: string; a: string; b: string; c: string; d: string; cacheId: string }
+
+/**
+ * Creates the circuit throwaway through BaseApi's CRUD (`e2e-9-…`): a schema, a processor, four steps, a cache (a drop
+ * target that leaves an end open, plan 9 §6) and the workflow; no assignment.
+ */
+export async function createCircuitThrowaway(request: APIRequestContext): Promise<CircuitThrowaway> {
+  const tag = `e2e-9-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`;
+  created.tag = tag;
+  created.schemaId = await post(request, 'schemas', { name: `${tag}-config`, version: '1.0.0', description: null, definition: '{"type":"object"}' });
+  created.processorId = await post(request, 'processors', {
+    name: `${tag}-proc`, version: '1.0.0', description: null, sourceHash: randomBytes(32).toString('hex'), instanceId: null,
+    inputSchemaId: null, outputSchemaId: null, configSchemaId: created.schemaId,
+  });
+  const step = async (name: string, nextStepIds: string[], entryCondition: number): Promise<string> => {
+    const id = await post(request, 'steps', { name: `${tag}-${name}`, version: '1.0.0', description: null, processorId: created.processorId, nextStepIds, entryCondition });
+    created.extraStepIds = [...(created.extraStepIds ?? []), id];
+    return id;
+  };
+  const c = await step('c', [], 1);
+  const d = await step('d', [], 2);
+  const b = await step('b', [c], 1);
+  const a = await step('a', [b, d], 1);
+  created.cacheId = await post(request, 'caches', { name: `${tag}-cache`, version: '1.0.0', description: null, root: `${tag}-root`, items: '{}' });
+  created.workflowId = await post(request, 'workflows', {
+    name: tag, version: '1.0.0', description: null, entryStepIds: [a], assignmentIds: [], cacheIds: [created.cacheId], cronExpression: null,
+  });
+  return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, a, b, c, d, cacheId: created.cacheId };
+}
+
 /**
  * Deletes whatever `created` holds (a partial set too): the workflow; every assignment on step A or B (the
- * one made here and any a Save created); A and B, unwired first (a wire restricts both its ends); the
+ * one made here and any a Save created); every step this run made, unwired first (a wire restricts both its ends); the
  * processor; every schema named after this run's tag (the original and any copy a Save made, which keeps
  * its name); the cache. Every step is tried; a 404 is fine. Throws once at the end, listing every entity it
  * could not remove.
@@ -81,8 +112,8 @@ export async function removeThrowaway(request: APIRequestContext): Promise<void>
     if (!r.ok()) { failures.push(`${kind} (list: ${r.status()})`); return []; }
     return ((await r.json()) as T[]).filter(keep).map((x) => x.id);
   };
-  const { workflowId, stepId, stepBId, processorId, schemaId, cacheId, tag } = created;
-  const steps = [stepId, stepBId].filter((id): id is string => id !== undefined);
+  const { workflowId, stepId, stepBId, extraStepIds, processorId, schemaId, cacheId, tag } = created;
+  const steps = [stepId, stepBId, ...(extraStepIds ?? [])].filter((id): id is string => id !== undefined);
   if (workflowId) await del(`workflows/${workflowId}`);
   if (steps.length > 0) {
     await attempt(`assignments of steps ${steps.join(', ')}`, async () => {

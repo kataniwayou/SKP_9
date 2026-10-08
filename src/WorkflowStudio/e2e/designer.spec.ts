@@ -1,5 +1,8 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { centreOf, documentPanel, expect, inspector, openWorkflow, pointOnWire, settledView, tab, test, workflowsWithSteps, type LiveWorkflow } from './studio';
+import {
+  centreOf, documentPanel, dragReading, edge as wire, emptySpot, endSquare, expect, inspector, node, openWorkflow, pointOnWire, settledView, tab, test,
+  workflowsWithSteps, type LiveWorkflow,
+} from './studio';
 
 // Plan 4: the designer is a trial; nothing it does may write (studio.ts's read-only guard checks every
 // request). Each test starts from an empty session and works on a live workflow with a chain a -> b -> c
@@ -39,8 +42,6 @@ test.beforeEach(async ({ page }) => {
   await page.reload();
 });
 
-const node = (panel: Locator, id: string) => panel.locator(`.react-flow__node[data-id="${id}"]`);
-const wire = (panel: Locator, id: string) => panel.locator(`.react-flow__edge[data-id="${id}"]`);
 const pathOf = (panel: Locator, id: string) => wire(panel, id).locator('path.w').getAttribute('d');
 /** The last point of a wire's path: where its arrow lands. */
 const arrowEndOf = async (panel: Locator, id: string) => ((await pathOf(panel, id)) ?? '').match(/-?\d+(?:\.\d+)?/g)?.slice(-2).join(',');
@@ -141,7 +142,6 @@ async function outputOf(panel: Locator, id: string): Promise<{ x: number; y: num
   const b = (await node(panel, id).boundingBox())!;
   return { x: b.x + b.width * 0.75, y: b.y + b.height / 2 };
 }
-const endSquare = (panel: Locator, id: string, side: 'tail' | 'head') => panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="${side}"]`);
 const dashOf = (l: Locator) => l.locator('path.w').first().evaluate((el) => getComputedStyle(el).strokeDasharray);
 
 test('a wire end dropped where it closes a loop is allowed: green, "connect here", and the wire keeps its id (plan 8 §5, plan 9)', async ({ page }) => {
@@ -633,36 +633,6 @@ test('the legend shows the undecided wire and the short circuit; no loose wire, 
   await expect(items.filter({ hasText: /^short circuit$/ })).toHaveCount(1);
   await expect(items.filter({ hasText: /loose|broken|parked/i })).toHaveCount(0);
 });
-
-/** A point on the canvas's empty pane (no block, wire, handle or overlay under it), in page coordinates; null when none is found. */
-async function emptySpot(panel: Locator, avoid: { x: number; y: number }[] = []): Promise<{ x: number; y: number } | null> {
-  return panel.locator('.react-flow').evaluate((el, far) => {
-    const r = el.getBoundingClientRect();
-    for (let fy = 0.15; fy < 0.9; fy += 0.07) for (let fx = 0.9; fx > 0.1; fx -= 0.07) {
-      const x = r.left + r.width * fx, y = r.top + r.height * fy;
-      if (far.some((p) => Math.hypot(p.x - x, p.y - y) < 120)) continue;
-      // clear of everything 40 px around, so the drop reach of no block or line counts
-      const clear = [[0, 0], [40, 0], [-40, 0], [0, 40], [0, -40]].every(([dx, dy]) => {
-        const hit = el.ownerDocument.elementFromPoint(x + dx!, y + dy!);
-        return hit !== null && hit.classList.contains('react-flow__pane');
-      });
-      if (clear) return { x, y };
-    }
-    return null;
-  }, avoid);
-}
-
-/** Presses `from`, moves to `to` with the real mouse, reads the drop label there, then releases. */
-async function dragReading(page: Page, panel: Locator, from: { x: number; y: number }, to: { x: number; y: number }): Promise<string | null> {
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
-  await page.mouse.move(to.x, to.y, { steps: 5 });
-  const label = panel.locator('.design-drop-label');
-  const text = (await label.count()) > 0 ? await label.textContent() : null;
-  await page.mouse.up();
-  return text;
-}
 
 /** Picks a wire by a click on its line and returns its tail square's centre. */
 async function tailSquare(page: Page, panel: Locator, id: string): Promise<{ x: number; y: number }> {

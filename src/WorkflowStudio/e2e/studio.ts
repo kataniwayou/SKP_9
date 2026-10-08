@@ -168,3 +168,76 @@ export async function centreOf(l: Locator): Promise<{ x: number; y: number }> {
   const b = (await l.boundingBox())!;
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }
+
+// ---- the designer's wires, with the real mouse (plan 9; shared by every spec that drags a wire) ----
+
+export type Pt = { x: number; y: number };
+
+/** A block on a document's canvas (a step id, `wf` for the hub, `cache:{id}`). */
+export const node = (panel: Locator, id: string): Locator => panel.locator(`.react-flow__node[data-id="${id}"]`);
+/** A wire as React Flow draws it. */
+export const edge = (panel: Locator, id: string): Locator => panel.locator(`.react-flow__edge[data-id="${id}"]`);
+/** A picked wire's square on its tail or head. */
+export const endSquare = (panel: Locator, id: string, side: 'tail' | 'head'): Locator =>
+  panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="${side}"]`);
+/** Wires drawn in the designer (`w:{guid}`). */
+export const newWires = (panel: Locator): Locator => panel.locator('.react-flow__edge[data-id^="w:"]');
+
+/** A point on the canvas's empty pane, nothing within 40 px, at least 120 px from every point of `avoid`. Throws when none is found. */
+export async function emptySpot(panel: Locator, avoid: Pt[] = []): Promise<Pt> {
+  const found = await panel.locator('.react-flow').evaluate((el, far) => {
+    const r = el.getBoundingClientRect();
+    for (let fy = 0.15; fy < 0.9; fy += 0.07) for (let fx = 0.9; fx > 0.1; fx -= 0.07) {
+      const x = r.left + r.width * fx, y = r.top + r.height * fy;
+      if (far.some((p) => Math.hypot(p.x - x, p.y - y) < 120)) continue;
+      // clear of everything 40 px around, so the drop reach of no block or line counts
+      const clear = [[0, 0], [40, 0], [-40, 0], [0, 40], [0, -40]].every(([dx, dy]) => {
+        const hit = el.ownerDocument.elementFromPoint(x + dx!, y + dy!);
+        return hit !== null && hit.classList.contains('react-flow__pane');
+      });
+      if (clear) return { x, y };
+    }
+    return null;
+  }, avoid);
+  if (!found) throw new Error('no empty spot on the canvas');
+  return found;
+}
+
+/**
+ * Presses `from`, moves to `to` with the real mouse, waits for the drop label to show there and for the page to
+ * draw two frames (so the label is the one for `to`, not for a point on the way), reads it, then releases.
+ */
+export async function dragReading(page: Page, panel: Locator, from: Pt, to: Pt): Promise<string | null> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  const label = panel.locator('.design-drop-label');
+  await expect(label).toBeVisible();
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
+  const text = await label.textContent();
+  await page.mouse.up();
+  return text;
+}
+
+/** Picks a wire with a click on its line; its end squares show. */
+export async function pickWire(page: Page, panel: Locator, id: string, f = 0.5): Promise<void> {
+  const p = await pointOnWire(panel, id, f);
+  await page.mouse.click(p.x, p.y);
+  await expect(endSquare(panel, id, 'head')).toBeVisible();
+}
+
+/** Picks wire `id` and drags its `side` end square to `to` with the real mouse: the drop label read there. */
+export async function dragEnd(page: Page, panel: Locator, id: string, side: 'tail' | 'head', to: Pt): Promise<string | null> {
+  await pickWire(page, panel, id);
+  return dragReading(page, panel, await centreOf(endSquare(panel, id, side)), to);
+}
+
+/** Draws a new wire from block `from`'s connection point (a step, or `wf`) to `to`; its id (`w:…`). */
+export async function newWire(page: Page, panel: Locator, from: string, to: Pt): Promise<string> {
+  const before = await newWires(panel).count();
+  await node(panel, from).hover();
+  await dragReading(page, panel, await centreOf(node(panel, from).locator('.nx-port')), to);
+  await expect(newWires(panel)).toHaveCount(before + 1);
+  return (await newWires(panel).last().getAttribute('data-id'))!;
+}

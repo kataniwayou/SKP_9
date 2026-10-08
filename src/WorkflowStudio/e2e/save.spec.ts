@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { centreOf, documentPanel, inspector, openWorkflow, pointOnWire, tab } from './studio';
+import { centreOf, documentPanel, inspector, newWires, node, openWorkflow, pointOnWire, tab } from './studio';
 import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
 // Plan 8 §8: Save is the studio's only write, and these tests write only to their own throwaway workflow
@@ -17,8 +17,6 @@ test.beforeEach(async ({ page }) => {
 
 const field = (page: Page, label: string): Locator => inspector(page).getByLabel(label, { exact: true });
 const pill = (page: Page): Locator => inspector(page).locator('.kindpill');
-const node = (panel: Locator, id: string): Locator => panel.locator(`.react-flow__node[data-id="${id}"]`);
-const newWires = (panel: Locator): Locator => panel.locator('.react-flow__edge[data-id^="w:"]');
 
 async function get<T>(request: APIRequestContext, path: string): Promise<T> {
   const r = await request.get(`/api/v1/${path}`);
