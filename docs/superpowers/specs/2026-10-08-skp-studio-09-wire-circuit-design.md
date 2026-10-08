@@ -101,6 +101,12 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
   way. Both ends arriving at once (a body drag) decide together: two inputs or two outputs make the second "wrong
   side". Joined on one line, its other end onto another line is refused: "needs a step first". It writes nothing to
   BaseApi, and stays as it is through Save, reload and refresh. Once it has a direction, drops are judged as before.
+  *Review (2026-10-09):* a wire is judged as lifted: when the end dragged is its only end on a step or the hub, it
+  is direction-less while dragged, so a step side decides afresh and a second line is "needs a step first". A
+  direction-less wire carries no current at all: nothing flows through it or through the junctions on it (a wire
+  joined on one may be drawn, it just reaches nothing until the host has a direction). Turned round, the ends joined
+  on it keep their place (`at` measured from its new tail). A hub tail with a shape of its own starts at its ring
+  point snapped to the grid after a short lead, so a body drag lands on the hub by a grid shift and stays exact.
 
 ## 3. The model
 

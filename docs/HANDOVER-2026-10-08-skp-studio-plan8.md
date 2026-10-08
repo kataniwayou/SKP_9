@@ -149,6 +149,23 @@ and studio specs. The deployed bundle is still `index-BC19MgmE.js` (without thes
   body drag connects at the nearest 15 degrees (a few px off the frozen shape, the ring lead absorbs it); not yet run
   against the deployed studio (no deploy asked).
 
+**Review of the wire rules (2026-10-09):** `19d2711` (fixes), `20a9582` + the Save-test commit after it (e2e).
+- A wire is judged as lifted: when the dragged end is its only step/hub end it is direction-less while dragged (a
+  step side decides afresh, a second line is "needs a step first"). Before, a wire with its tail on a step and its
+  head joined could be joined on a second line and Save wrote a link through it.
+- `trace` leaves direction-less wires out: no current through them or their junctions (nothing joined on one reaches
+  BaseApi; they make no wire loop). Old trace tests that let a host open at both ends conduct were rewritten.
+- `reverseWire(c, id, length)` keeps joined ends in place (`at` -> `length - at`); a turned drop is judged against the
+  circuit as it was. Exact when the host keeps its shape; an automatic host re-routed after the turn still moves its
+  junctions (as any re-route does, plan 7 follow-up).
+- `hubStart`: a hub tail with its own bends starts at its ring point snapped to the grid after a short lead (an
+  automatic tail, or a left-half tail whose shape heads right, keeps `hubLead`); a body drag lands on it by a grid
+  shift. This also redraws existing manual hub-angle wires on the right half from the ring (at most a 4 px jog).
+- settle never re-heads a junction end onto its `s->t` target when the wire's tail is on t.
+- Tests after the review: Vitest 847; tsc clean; Playwright on dev 110 + 2 skips. New e2e (real mouse): lifted
+  direction and "needs a step first", a junction stays put when its host is turned, an entry wire moved onto the hub
+  and its step, Save with a wire poured into a direction-less wire; each fails with its fix reverted.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed

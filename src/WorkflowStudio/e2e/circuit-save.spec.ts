@@ -147,8 +147,8 @@ test('a direction-less wire writes nothing, nor does a wire joined on one: Save 
     await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(0);
     await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
   }
-  // and a wire from b poured into the one joined on a -> d: it carries nothing, so b gains no link into d
-  const fed = await newWire(page, panel, t.b, await emptySpot(panel, [spot, spot2]));
+  // and a wire from c poured into the one joined on a -> d: it carries nothing, so c gains no link into d
+  const fed = await newWire(page, panel, t.c, await emptySpot(panel, [spot, spot2]));
   expect(await dragEnd(page, panel, fed, 'head', await pointOnWire(panel, joined, 0.5, 12))).toBe('join here');
   await save(page);
   await expect(await pane(page, 'Output')).toContainText('Saved');
