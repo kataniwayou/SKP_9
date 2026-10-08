@@ -2,7 +2,7 @@ import type { StudioDocument } from '../app/document';
 import { freeWithout, reverseBends, reverseWire, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
 import { loopWires, trace } from '../circuit/trace';
-import { contactOn } from '../layout/circuitRoute';
+import { contactOn, routeCircuit, type RouteContext, type WireRoute } from '../layout/circuitRoute';
 import { lengthOf } from '../layout/junctions';
 import { clampLanding, snap, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
@@ -136,25 +136,60 @@ function reversed(shown: StudioDocument, circuit: Readonly<Circuit>, id: string)
   let byId = turned.get(circuit);
   if (!byId) { byId = new Map(); turned.set(circuit, byId); }
   let c = byId.get(id);
-  if (!c) { c = reverseWire(circuit, id, drawnLength(shown, id)); byId.set(id, c); }
+  if (!c) { c = reverseWire(circuit, id, drawnLength(shown, id) ?? 0); byId.set(id, c); }
   return c;
+}
+
+/**
+ * Where the wires are drawn before a drop (`routes`) and how to draw them again (`ctx`): `applyDrop` keeps the ends
+ * joined on the dropped wire in place by them.
+ */
+export interface Placing {
+  routes: readonly WireRoute[];
+  ctx: RouteContext;
 }
 
 /**
  * The circuit with wire `id`'s `side` end dropped on `t` (any verdict but a refusal), and which end it is now: a wire
  * direction-less once lifted by this end is turned round first when the drop makes this end the other one (rule D;
- * `side` the new name; `length`, its drawn length, keeps the ends joined on it in place). `keep`: the shape drawn
- * from the tail before the drop, kept (turned with the wire); undefined: `setEnd`'s rule.
+ * `side` the new name). `keep`: the shape drawn from the tail before the drop, kept (turned with the wire); undefined:
+ * `setEnd`'s rule. Every end joined on the wire keeps its distance from the end that did not move, on the wire as it
+ * is drawn after the drop (`place`; review 2026-10-09): a junction stays where it was on the part that stayed.
  */
-export function applyDrop(circuit: Readonly<Circuit>, id: string, side: Side, t: DropTarget, keep?: Bends | null, length?: number): { circuit: Circuit; side: Side } {
+export function applyDrop(circuit: Readonly<Circuit>, id: string, side: Side, t: DropTarget, place: Placing, keep?: Bends | null): { circuit: Circuit; side: Side } {
   if (!Object.hasOwn(circuit, id)) return { circuit: circuit as Circuit, side };
+  const drawn = place.routes.find((r) => r.id === id);
+  const length = drawn ? lengthOf([drawn.points]) : 0;
   const role = freeWithout(circuit[id]!, side) ? roleOf(t) : null;
   const turn = role !== null && role !== side;
   const c = turn ? reverseWire(circuit, id, length) : (circuit as Circuit);
   const s: Side = turn ? role : side;
   let next = setEnd(c, id, s, endOf(t));
   if (keep !== undefined) next = setBends(next, id, keep && turn ? reverseBends(keep) : keep);
-  return { circuit: next, side: s };
+  return { circuit: drawn ? placeJoined(circuit, next, id, side, s, length, place.ctx) : next, side: s };
+}
+
+/**
+ * The ends joined on wire `id` in `next` placed again (`applyDrop`): each as far from the end that did not move as it
+ * was in `was` (`length`: the wire's drawn length there, `dragged`: the end dropped, by its name there), measured on
+ * the wire as `next` draws it (`now`: that end's name in `next`).
+ */
+function placeJoined(was: Readonly<Circuit>, next: Circuit, id: string, dragged: Side, now: Side, length: number, ctx: RouteContext): Circuit {
+  const joined = Object.entries(was).filter(([k, x]) => k !== id && ((x.tail.on === 'wire' && x.tail.host === id) || (x.head.on === 'wire' && x.head.host === id)));
+  if (joined.length === 0) return next;
+  const r = routeCircuit(next, ctx).find((x) => x.id === id);
+  if (!r) return next;
+  const total = lengthOf([r.points]);
+  // how far from the end that stayed: from the tail when the head was dragged, else from the head
+  const fromStill = (at: number) => (dragged === 'head' ? at : length - at);
+  // the end that stayed is the tail now when the dropped end is called the head
+  const placed = (at: number) => Math.max(0, now === 'head' ? fromStill(at) : total - fromStill(at));
+  const out = Object.assign(Object.create(null) as Circuit, next);
+  for (const [k, x] of joined) {
+    const end = (e: End): End => (e.on === 'wire' && e.host === id ? { on: 'wire', host: id, at: placed(e.at) } : e);
+    out[k] = { ...next[k]!, tail: end(x.tail), head: end(x.head) };
+  }
+  return out;
 }
 
 /** The label next to the pointer while an end is dragged (plan 9 §6). */

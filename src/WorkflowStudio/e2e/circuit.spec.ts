@@ -989,3 +989,18 @@ test('rule B on the hub: an entry wire moved down a little lands on the ring and
   for (const p of after.slice(2)) expect([p[0] % 8, p[1] % 8].map(Math.abs)).toEqual([0, 0]);
   expect(await dashOf(panel, id)).toBe('none');
 });
+
+for (const [where, onto] of [['the hub', (panel: Locator) => onHub(panel, 0)], ['an output', (panel: Locator) => onSide(panel, t.d, 'out')]] as const) {
+  test(`rule D, turned: a direction-less wire's stored head dropped on ${where} is its tail now; an end joined on it near the end that stayed does not move`, async ({ page }) => {
+    const panel = await open(page);
+    const k = await freeWire(page, panel, t.c);
+    // a wire from a, its head joined on k near k's stored tail (the end that stays)
+    const g = await newWire(page, panel, t.a, await emptySpot(panel));
+    expect(await dragEnd(page, panel, g, 'head', await pointOnWire(panel, k, 0.2, 12))).toBe('join here');
+    const dot = await centreOf(edge(panel, g).locator('circle.nx-joint'));
+    expect(await dragEnd(page, panel, k, 'head', await onto(panel))).toBe('connect here');
+    await expect(edge(panel, k).locator('circle.nx-src')).toHaveCount(1);
+    const now = await centreOf(edge(panel, g).locator('circle.nx-joint'));
+    expect(Math.hypot(now.x - dot.x, now.y - dot.y)).toBeLessThan(4);
+  });
+}

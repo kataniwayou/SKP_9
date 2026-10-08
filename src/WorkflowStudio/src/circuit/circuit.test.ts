@@ -138,9 +138,9 @@ describe('direction-less wires (the user\'s rule D, 2026-10-09)', () => {
 
   it('turned round: tail and head swapped, its bends reversed, a held end the same end, same id', () => {
     const c: Circuit = { 'w:f': { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'wire', host: 'h', at: 40 }, bends: { xs: [10, 20, 30], ys: [5, 6] }, held: 'tail' } };
-    expect(reverseWire(c, 'w:f')['w:f']).toEqual({ tail: { on: 'wire', host: 'h', at: 40 }, head: { on: 'open', x: 0, y: 0 }, bends: { xs: [30, 20, 10], ys: [6, 5] }, held: 'head' });
-    expect(reverseWire(reverseWire(c, 'w:f'), 'w:f')['w:f']).toEqual(c['w:f']);
-    expect(reverseWire(c, 'gone')).toBe(c);
+    expect(reverseWire(c, 'w:f', 0)['w:f']).toEqual({ tail: { on: 'wire', host: 'h', at: 40 }, head: { on: 'open', x: 0, y: 0 }, bends: { xs: [30, 20, 10], ys: [6, 5] }, held: 'head' });
+    expect(reverseWire(reverseWire(c, 'w:f', 0), 'w:f', 0)['w:f']).toEqual(c['w:f']);
+    expect(reverseWire(c, 'gone', 0)).toBe(c);
   });
 
   it('turned round with its drawn length, the ends joined on it keep their point: measured from its new tail', () => {
@@ -152,8 +152,6 @@ describe('direction-less wires (the user\'s rule D, 2026-10-09)', () => {
     const out = reverseWire(c, 'w:f', 300);
     expect(out['w:g']!.head).toEqual({ on: 'wire', host: 'w:f', at: 260 });
     expect(out['w:h']!.tail).toEqual({ on: 'wire', host: 'w:f', at: 20 });
-    // with no length the joined ends are left as they are
-    expect(reverseWire(c, 'w:f')['w:g']).toBe(c['w:g']);
   });
 });
 

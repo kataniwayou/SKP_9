@@ -92,6 +92,8 @@ export function landBody(
     return s.xs.length > 0 ? s.xs[0]! : from.length > 1 ? from[from.length - 1]![0] : null;
   };
   const aimOf = (side: Side, sx: number): number | null => { const x = firstRun(side); return x === null ? null : x + sx; };
+  // the ends joined on the moved wire are opened by `moveWire`: applyDrop has none to place, these are its context
+  const placing = { routes: shown.wires, ctx: { placement: shown.placement, steps: shown.graph.steps } };
   const raw = placed(dx, dy);
   const sides: Side[] = ['tail', 'head'];
   const alone = sides.map((side) => {
@@ -112,7 +114,7 @@ export function landBody(
     // onto the hub the shift stays on the grid, so the moved shape does too
     const sx = A.target.on === 'hub' ? snap(dx + g.x) : dx + g.x, sy = A.target.on === 'hub' ? snap(dy + g.y) : dy + g.y;
     const moved = placed(sx, sy);
-    const one = applyDrop(moved.c, id, a, A.target, moved.c[id]?.bends ?? null);
+    const one = applyDrop(moved.c, id, a, A.target, placing, moved.c[id]?.bends ?? null);
     const b = other(a);
     const bAt = endAt(moved.pts, b);
     const l = look(one.circuit, bAt);
@@ -121,7 +123,7 @@ export function landBody(
     let fits = false;
     if (toneOf(verdict) === 'ok') {
       fits = gap(shown, l.target, bAt, aimOf(b, sx)).fits;
-      if (fits) result = applyDrop(one.circuit, id, other(one.side), l.target, one.circuit[id]?.bends ?? null).circuit;
+      if (fits) result = applyDrop(one.circuit, id, other(one.side), l.target, placing, one.circuit[id]?.bends ?? null).circuit;
       else verdict = 'move';
     }
     const ends: BodyEnd[] = [

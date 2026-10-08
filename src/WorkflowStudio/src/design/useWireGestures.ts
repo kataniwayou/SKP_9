@@ -11,7 +11,6 @@ import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { route, simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, normalize, shapeFromPoints, type Bends } from '../layout/shape';
-import { lengthOf } from '../layout/junctions';
 import { coreFrom, legsPath, moveLegs, startLegs, type Legs } from '../layout/wireMove';
 import { blockBoxes, portOf } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
@@ -338,7 +337,8 @@ export function useWireGestures(
           // the corners drawn are kept and only the last leg routed in (rule C); a direction-less wire the drop turns
           // round turns its bends with it (rule D)
           const keep = keepShape() ? bendsOf(into(t).core) : undefined;
-          next = applyDrop(circuit, wire.id, side, t, keep === undefined ? undefined : keep.xs.length > 0 ? keep : null, lengthOf([wire.points])).circuit;
+          const place = { routes: shown.current.wires, ctx: { placement: shown.current.placement, steps: shown.current.graph.steps } };
+          next = applyDrop(circuit, wire.id, side, t, place, keep === undefined ? undefined : keep.xs.length > 0 ? keep : null).circuit;
         }
         // a host detached (an end dropped open): the ends joined on it open where they are drawn (spec §2.2-6)
         if (was.on !== 'open' && end.on === 'open') next = openJoinedOn(next, [wire.id], endPointOf(shown.current.wires));

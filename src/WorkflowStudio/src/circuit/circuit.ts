@@ -218,16 +218,15 @@ export const freeWithout = (w: CircuitWire, side: Side): boolean => !isTerminalE
 
 /**
  * Wire `id` turned round (rule D: a direction-less wire's end that lands on a step's input is its head, on an output
- * or the hub its tail): tail and head swapped, its bends reversed, a held end still the same end. Same id. With its
- * drawn length `length`, the ends joined on it keep their point: a junction's distance along a host is measured from
- * the host's tail, so it becomes `length - at`.
+ * or the hub its tail): tail and head swapped, its bends reversed, a held end still the same end. Same id. `length`
+ * is its drawn length: the ends joined on it keep their point on that line, a junction's distance being measured from
+ * the host's tail (`length - at`). A drop that also re-draws the wire places them again (`applyDrop`).
  */
-export function reverseWire(c: Readonly<Circuit>, id: string, length?: number): Circuit {
+export function reverseWire(c: Readonly<Circuit>, id: string, length: number): Circuit {
   if (!has(c, id)) return c as Circuit;
   const w = c[id]!;
   const out = copy(c);
   out[id] = withBends(w.head, w.tail, w.bends ? reverseBends(w.bends) : null, w.held === undefined ? undefined : otherSide(w.held));
-  if (length === undefined) return out;
   const remap = (e: End): End => (e.on === 'wire' && e.host === id ? { on: 'wire', host: id, at: Math.max(0, length - e.at) } : e);
   for (const [k, x] of Object.entries(out)) {
     if (k === id) continue;
