@@ -4,19 +4,20 @@ import type { StudioDocument } from '../app/document';
 import { selectionForPicks } from '../canvas/selection';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
-import { addCircuitWire, holdEnd, moveWire, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
-import { endPointOf, type WireRoute } from '../layout/circuitRoute';
+import { addCircuitWire, holdEnd, isFree, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
+import { endPointOf, hubLead, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearPath, clearRun } from '../layout/detour';
 import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
-import { route, type Box, type Pt } from '../layout/router';
+import { route, simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, normalize, shapeFromPoints, type Bends } from '../layout/shape';
-import { movedEndShape, translatePoints } from '../layout/wireMove';
+import { coreFrom, legsPath, moveLegs, startLegs, type Legs } from '../layout/wireMove';
 import { blockBoxes, portOf } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
 import { circuitOf, withCircuit, type Draft } from './draft';
-import { endOf, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
+import { landBody, type BodyLanding } from './bodyDrop';
+import { applyDrop, endOf, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { newId } from './ids';
 
@@ -29,7 +30,7 @@ export interface DropHint {
   /** Green: the end connects or joins; grey: it is or stays open; red: it snaps back. */
   tone: 'ok' | 'move' | 'no';
   why: Verdict;
-  /** The pointer, in flow coordinates. */
+  /** The pointer (a body drag: the end), in flow coordinates. */
   at: Point;
 }
 
@@ -159,7 +160,8 @@ export function useWireGestures(
   const { run, abort, running } = useGesture(setActive);
   const { screenToFlowPosition, getZoom } = useReactFlow();
   const [ghost, setGhost] = useState<WireGhost | null>(null);
-  const [hint, setHint] = useState<DropHint | null>(null);
+  // one per dragged end: an end square's drag has one, a body drag one per end (rule B, 2026-10-09)
+  const [hints, setHints] = useState<DropHint[]>([]);
   // the drag's cursor: a horizontal run (even k) moves up and down, a vertical one sideways; an end square any way (rule 14)
   const [resize, setResize] = useState<'ns' | 'ew' | 'move' | null>(null);
   const designRef = useRef(design);
@@ -168,7 +170,7 @@ export function useWireGestures(
   // design mode ending mid-drag drops the drag and its preview
   const designOff = design === undefined;
   useEffect(() => {
-    if (designOff) { abort(); setPreview(null); setGhost(null); setHint(null); }
+    if (designOff) { abort(); setPreview(null); setGhost(null); setHints([]); }
   }, [designOff]); // abort and setPreview read refs and React state setters: no need to re-run for them
 
   /**
@@ -222,35 +224,39 @@ export function useWireGestures(
   /**
    * Drags one end of wire `id` (plan 9 §6). Each move finds what the pointer is over (a block within the drop reach
    * wins over a line; the dragged wire's own line counts except its run at the dragged end), judges the drop on
-   * `circuit`, and draws the wire there (`path`). Released: `done` with an allowed target; a refused one snaps back.
+   * `circuit`, and draws the wire there (`path`; `step` sees the pointer first). Released: `done` with an allowed
+   * target; a refused one snaps back.
    */
-  const dropGesture = (e: ReactPointerEvent, o: { id: string; ghost: string | null; side: Side; circuit: Circuit; path: (t: DropTarget) => Pt[]; done: (t: DropTarget) => void }) => {
+  const dropGesture = (e: ReactPointerEvent, o: { id: string; ghost: string | null; side: Side; circuit: Circuit; path: (t: DropTarget) => Pt[]; done: (t: DropTarget) => void; step?: (p: Point) => void }) => {
     let target: DropTarget | null = null;
     let verdict: Verdict = 'move';
     run(e, (p) => {
+      o.step?.(p);
       const reach = DROP_REACH / getZoom();
       const over = blockAt(shown.current, p, reach);
       const line = over === null ? wireAt(shown.current, p, reach, { id: o.id, side: o.side }) : null;
       target = targetOf(shown.current, o.circuit, p, over, line);
       verdict = judgeDrop(shown.current, o.circuit, o.id, o.side, target);
-      setHint({ id: line ? line.id : over, line: line !== null, tone: toneOf(verdict), why: verdict, at: p });
+      setHints([{ id: line ? line.id : over, line: line !== null, tone: toneOf(verdict), why: verdict, at: p }]);
       setGhost({ wire: o.ghost, points: o.path(target) });
     }, (cancelled) => {
       setGhost(null);
-      setHint(null);
+      setHints([]);
       if (cancelled || target === null || toneOf(verdict) === 'no') return;
       o.done(target);
     });
   };
 
   /**
-   * Drags a picked wire's end square (plan 9 §6), with the four-way cursor: its tail or its head, connected or open.
-   * Over nothing (or a cache) the end follows the pointer with one corner (the user's rule, 2026-10-08): the run at
-   * that end keeps its axis up to the pointer, then one perpendicular run goes on to it (`movedEndShape`); released
-   * there, the end is open and the wire keeps that shape. Over a step side, the hub or a wire the drop is judged as
-   * before: allowed, the end is there and the router draws its way in; refused, it snaps back. A drop where the end
-   * already is changes nothing. An end dropped open detaches the wire: the ends joined on it open where they are
-   * drawn (spec §2.2-6). The wire keeps its id and stays picked.
+   * Drags a picked wire's end square (plan 9 §6; the user's rule C, 2026-10-09), with the four-way cursor: its tail or
+   * its head, connected or open. The end draws its wire like a pen around corners (`Legs`): it follows the pointer with
+   * one corner (an L), each 90 degree turn of the pointer fixes the corner where it turned and starts a new leg, and
+   * back past a corner takes it away. Released over nothing (or a cache) the end is open there and the wire keeps the
+   * drawn shape. Over a step side, the hub or a wire the drop is judged as before (a direction-less wire's end takes
+   * the role the side gives it, rule D): allowed, the end is there, the corners drawn kept and only the last leg routed
+   * in (a wire that was automatic, with no corner fixed in this drag, stays automatic); refused, it snaps back. A drop
+   * where the end already is changes nothing. An end dropped open detaches the wire: the ends joined on it open where
+   * they are drawn (spec §2.2-6). The wire keeps its id and stays picked.
    */
   const startEnd = (wire: WireRoute, side: Side, e: ReactPointerEvent) => {
     const d = designRef.current;
@@ -258,30 +264,67 @@ export function useWireGestures(
     const base = d.draft;
     const circuit = circuitOf(saved, base);
     if (!Object.hasOwn(circuit, wire.id)) return;
-    const was = circuit[wire.id]![side];
+    const rec = circuit[wire.id]!;
+    const was = rec[side];
     // the other end, as drawn
     const [sx, sy] = side === 'head' ? wire.points[0]! : wire.points[wire.points.length - 1]!;
     // where the other end's core starts (for a dragged head) or ends (for a dragged tail): the bends are drawn from there
     const { ends } = wire.core;
     const fixed: Pt = side === 'head' ? [ends.sx, ends.sy] : [ends.tx, ends.ty];
-    const lShape = (q: Point) => movedEndShape(wire.points, side, q, fixed);
+    // drawn from the end that stays to the dragged end; `stored` turns such a path to the wire's own order and back
+    const stored = (pts: readonly Pt[]): Pt[] => (side === 'head' ? [...pts] : [...pts].reverse());
+    let legs: Legs = startLegs(stored(wire.points), flowPointOf(e));
     const boxes = blockBoxes(shown.current.placement);
+    /** The bends of a path drawn from the end that stays (`oriented`), its lead before the core left out. */
+    const bendsOf = (oriented: readonly Pt[]) => shapeFromPoints(stored(coreFrom(oriented, fixed)));
+    // an automatic wire with no corner fixed in this drag is routed again onto a step, the hub or a line (as before)
+    const keepShape = () => rec.bends !== undefined || legs.drawn;
+    /** The path into target `t` from the end that stays (a hub's lead at the dragged end apart), and that lead. */
+    const into = (t: DropTarget): { core: Pt[]; lead: Pt[] } => {
+      // the end this one is once dropped: a direction-less wire's end takes the role the side or the hub gives it
+      const role: Side = isFree(rec) ? roleOf(t) ?? side : side;
+      let start = pointOfTarget(shown.current, t), lead: Pt[] = [];
+      if (t.on === 'hub') {
+        const { cx, cy } = shown.current.placement.sphere;
+        const h = hubLead(cx, cy, t.angle);
+        start = h.start;
+        lead = [...h.lead].reverse();
+      }
+      if (!keepShape()) {
+        const leg = ghostPath({ x: sx, y: sy }, start, role, boxes);
+        return { core: role === 'head' ? leg : [...leg].reverse(), lead };
+      }
+      // the last leg: on along the anchor's way when it is vertical, then square into the contact from the side a wire
+      // takes it (a head from the left, a tail to the right), so the corner drawn there stays; otherwise routed as a
+      // wire leaves its tail (from the anchor to a head, from a tail to the anchor)
+      const a = legs.path[legs.path.length - 1]!;
+      const square = legs.axis === 'v' && (t.on === 'wire' || (role === 'head' ? a[0] <= start.x : a[0] >= start.x));
+      const leg = ghostPath({ x: a[0], y: a[1] }, start, role, boxes);
+      const fromAnchor: Pt[] = square ? [[a[0], start.y], [start.x, start.y]] : role === 'head' ? leg : [...leg].reverse();
+      return { core: simplify([...legs.path, ...fromAnchor]), lead };
+    };
     setResize('move');
     dropGesture(e, {
       id: wire.id, ghost: wire.id, side, circuit,
-      path: (t) => (t.on === 'open' ? lShape(t).points : ghostPath({ x: sx, y: sy }, pointOfTarget(shown.current, t), side, boxes)),
+      step: (p) => { legs = moveLegs(legs, p); },
+      path: (t) => {
+        if (t.on === 'open') return stored(legsPath(legs));
+        const { core, lead } = into(t);
+        return stored(simplify([...core, ...lead]));
+      },
       done: (t) => {
         const end = endOf(t);
         if (sameEnd(was, end)) return;
-        let next = setEnd(circuit, wire.id, side, end);
+        let next: Circuit;
         if (t.on === 'open') {
-          const { bends } = lShape(t);
+          next = setEnd(circuit, wire.id, side, end);
+          const bends = bendsOf(legsPath(legs));
           next = setBends(next, wire.id, bends.xs.length > 0 ? bends : null);
           // the other end stays where it is drawn: an automatic end on a step or the hub is held there (`held`), or
           // the fan-out or the landing rule would move it once this end has gone (the user's rule: the other points
           // stay); it goes back to automatic when this end connects again
           const other: Side = side === 'head' ? 'tail' : 'head';
-          const o = circuit[wire.id]![other];
+          const o = rec[other];
           const at = o.on === 'step' && o.y === null ? shown.current.placement.steps.get(o.step) : undefined;
           if (o.on === 'step' && at) next = holdEnd(next, wire.id, other, { on: 'step', step: o.step, y: sy - at.y });
           else if (o.on === 'hub' && o.angle === null) {
@@ -289,6 +332,11 @@ export function useWireGestures(
             const { cx, cy } = shown.current.placement.sphere;
             next = holdEnd(next, wire.id, other, { on: 'hub', angle: snapAngle((Math.atan2(sy - cy, sx - cx) * 180) / Math.PI) });
           }
+        } else {
+          // the corners drawn are kept and only the last leg routed in (rule C); a direction-less wire the drop turns
+          // round turns its bends with it (rule D)
+          const keep = keepShape() ? bendsOf(into(t).core) : undefined;
+          next = applyDrop(circuit, wire.id, side, t, keep === undefined ? undefined : keep.xs.length > 0 ? keep : null).circuit;
         }
         // a host detached (an end dropped open): the ends joined on it open where they are drawn (spec §2.2-6)
         if (was.on !== 'open' && end.on === 'open') next = openJoinedOn(next, [wire.id], endPointOf(shown.current.wires));
@@ -298,12 +346,16 @@ export function useWireGestures(
   };
 
   /**
-   * Drags a wire by its body (the user's rule, 2026-10-08), any wire, picked or not, with the closed hand: the whole
-   * wire moves rigidly, its drawn path frozen and shifted by the pointer's movement snapped to the grid. It detaches
-   * from everything: both its ends open where the moved path starts and ends, its shape kept as its bends, and the
-   * ends joined on it open where they are drawn (`moveWire`). A press that does not move is a click: it only picks
-   * the wire; so does one that moves less than a grid step (a wobbly click, whose click the gesture swallows), as a
-   * click would, Ctrl toggling it. Released, one history step, and the wire is the pick; Escape puts it back.
+   * Drags a wire by its body (the user's rules B and D, 2026-10-09), any wire, picked or not, with the closed hand: the
+   * whole wire moves rigidly, its drawn path frozen and shifted by the pointer's movement snapped to the grid, and
+   * detached from everything, connected ends too (`landBody`): the closed hand never stretches a leg. Each end is
+   * judged over what is under it as an end square's is, with its label and outline; one over a contact it may take
+   * shifts the wire exactly onto it (the end that got there first decides), and released, every end over a contact
+   * it may take connects (the wire has no direction while moved: the sides decide it); the others stay open. Moved
+   * back exactly where it was, it is as it was. The ends joined on it open where they are drawn. A press that does not
+   * move is a click: it only picks the wire; so does one that moves less than a grid step (a wobbly click, whose click
+   * the gesture swallows), as a click would, Ctrl toggling it. Released, one history step, and the wire is the pick;
+   * Escape puts it back.
    */
   const startBody = (wire: WireRoute, e: ReactPointerEvent) => {
     const d = designRef.current;
@@ -315,28 +367,36 @@ export function useWireGestures(
     const points = wire.points;
     // the joined ends open where they are drawn now, not where the preview has moved their host to
     const drawnAt = endPointOf(shown.current.wires);
-    let moved: { dx: number; dy: number; circuit: Circuit } | null = null;
+    let landing: (BodyLanding & { rawX: number; rawY: number }) | null = null;
+    // a grid step was made: from then on the press is a drag, even back where it began
+    let travelled = false;
     const toggle = e.ctrlKey;
     setResize(null);
     run(e, (p) => {
       // `|| 0`: a snapped -0 is no move
       const dx = snap(p.x - from.x) || 0, dy = snap(p.y - from.y) || 0;
-      if (moved && moved.dx === dx && moved.dy === dy) return;
-      moved = dx === 0 && dy === 0 ? null : { dx, dy, circuit: moveWire(circuit, wire.id, translatePoints(points, dx, dy), drawnAt) };
-      setPreview(moved ? withCircuit(base, saved, moved.circuit) : null);
+      if (dx !== 0 || dy !== 0) travelled = true;
+      if (!travelled || (landing && landing.rawX === dx && landing.rawY === dy)) return;
+      const l = landBody(shown.current, circuit, wire.id, points, drawnAt, dx, dy, landing?.first ?? null, DROP_REACH / getZoom());
+      landing = { ...l, rawX: dx, rawY: dy };
+      // shifted back exactly where it was: drawn as it was
+      setPreview(l.dx === 0 && l.dy === 0 ? null : withCircuit(base, saved, l.preview));
+      setHints(l.ends.map((x) => ({ id: x.id, line: x.line, tone: toneOf(x.verdict), why: x.verdict, at: x.at })));
     }, (cancelled, pressMoved) => {
       setPreview(null);
+      setHints([]);
       if (cancelled) return;
-      if (moved === null) {
-        // moved, but not a grid step: the click is swallowed, so this picks the wire as the click would have
+      const pick: Pick = { kind: 'wire', id: wire.id };
+      if (landing === null || (landing.dx === 0 && landing.dy === 0)) {
+        // moved, but not a grid step, or back exactly where it was: the click is swallowed, so this picks the wire as
+        // the click would have (a wobble's Ctrl toggles it)
         if (pressMoved && onSelect) {
-          const pick: Pick = { kind: 'wire', id: wire.id };
-          const picks = toggle ? togglePick(d.picks, pick) : [pick];
+          const picks = toggle && !travelled ? togglePick(d.picks, pick) : [pick];
           onSelect(selectionForPicks(picks, null, shown.current.graph), picks);
         }
         return;
       }
-      d.onCommit(withCircuit(base, saved, moved.circuit), { picks: [{ kind: 'wire', id: wire.id }] });
+      d.onCommit(withCircuit(base, saved, landing.result), { picks: [pick] });
     });
   };
 
@@ -382,5 +442,5 @@ export function useWireGestures(
   }), [shown]);
 
   // a run or end drag's cursor only while that drag runs; a body drag and a new wire keep the closed hand
-  return { gestures, startSegment, startEnd, ghost, hint, active, running, resize: active ? resize : null };
+  return { gestures, startSegment, startEnd, ghost, hints, active, running, resize: active ? resize : null };
 }

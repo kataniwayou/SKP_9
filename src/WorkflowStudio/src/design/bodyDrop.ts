@@ -1,0 +1,127 @@
+import type { StudioDocument } from '../app/document';
+import { moveWire, type Circuit, type Side } from '../circuit/circuit';
+import { GRID, SPHERE_R, type Point } from '../layout/geometry';
+import type { Pt } from '../layout/router';
+import { translatePoints } from '../layout/wireMove';
+import { applyDrop, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
+import { blockAt, wireAt } from './hit';
+
+/** One end of a wire moved whole (the user's rule B, 2026-10-09): what it is over, the verdict, and where it is drawn. */
+export interface BodyEnd {
+  /** The end's name in the wire as it was before the drag. */
+  side: Side;
+  target: DropTarget;
+  verdict: Verdict;
+  /** The block (node id) or, when `line`, the wire under the end; null over empty canvas. */
+  id: string | null;
+  line: boolean;
+  /** Where the end is drawn, in flow coordinates. */
+  at: Point;
+}
+
+/** Where a wire moved whole lands (rule B): its shift, its moved path, the circuit to show and the one a release makes. */
+export interface BodyLanding {
+  dx: number;
+  dy: number;
+  points: Pt[];
+  /** Moved, open at both ends where the moved path starts and ends: what the canvas shows while it is dragged. */
+  preview: Circuit;
+  /** Each end over a contact it may take, connected there, the shape kept; the others open. */
+  result: Circuit;
+  /** Tail, then head. */
+  ends: BodyEnd[];
+  /** The end that reached a contact first and decides the shift; null: neither is on one. */
+  first: Side | null;
+}
+
+const other = (s: Side): Side => (s === 'tail' ? 'head' : 'tail');
+
+/**
+ * How far the drawn end at `e` is from where `t` would put it, and whether a wire moved whole (its shape frozen)
+ * still takes `t` without moving: a step side must be met exactly (its height on the 8 px grid), a line within half a
+ * grid step (a junction's point along its host is snapped), the hub's ring within half its 15 degree spacing (its tails
+ * start every 15 degrees; the ring's lead takes the difference).
+ */
+function gap(shown: StudioDocument, t: DropTarget, e: Point): { x: number; y: number; fits: boolean } {
+  const c = pointOfTarget(shown, t);
+  const x = c.x - e.x, y = c.y - e.y;
+  const fits = t.on === 'step' ? Math.abs(x) < 0.5 && Math.abs(y) <= GRID / 2
+    : t.on === 'wire' ? Math.hypot(x, y) <= GRID / 2
+      : t.on === 'hub' ? Math.hypot(x, y) <= (SPHERE_R * Math.PI) / 24
+        : false;
+  return { x, y, fits };
+}
+
+/**
+ * Wire `id`, drawn as `points`, moved whole by (`dx`, `dy`) (the user's rule B, 2026-10-09): its shape frozen, detached
+ * from everything (`moveWire`; `drawnAt` opens the ends joined on it where they are drawn). Each end is judged over what
+ * is under it as an end square's drag is (`targetOf`, `judgeDrop`, the drop reach `reach` in flow units; the wire
+ * itself is not under its own ends); the wire has no direction while moved, so the side or the hub an end lands on
+ * decides it (rule D). An end over a contact it may take shifts the whole wire onto that contact (a step side's line,
+ * the hub's ring, the host's line): the end that got there first (`first`, kept from the last move while it is still
+ * on one) decides the shift. The other end connects too when the frozen shape meets its contact as well (or when
+ * shifting onto that one instead meets both); otherwise it stays open. A refused end moves with the wire and stays open.
+ */
+export function landBody(
+  shown: StudioDocument, circuit: Readonly<Circuit>, id: string, points: readonly Pt[], drawnAt: (id: string, side: Side) => Point | null,
+  dx: number, dy: number, first: Side | null, reach: number,
+): BodyLanding {
+  const placed = (sx: number, sy: number) => {
+    const pts = translatePoints(points, sx, sy);
+    return { pts, c: moveWire(circuit, id, pts, drawnAt) };
+  };
+  const endAt = (pts: readonly Pt[], side: Side): Point => {
+    const [x, y] = side === 'tail' ? pts[0]! : pts[pts.length - 1]!;
+    return { x, y };
+  };
+  const look = (c: Readonly<Circuit>, at: Point) => {
+    const over = blockAt(shown, at, reach);
+    const line = over === null ? wireAt(shown, at, reach, null, id) : null;
+    return { target: targetOf(shown, c, at, over, line), id: line ? line.id : over, line: line !== null };
+  };
+  const raw = placed(dx, dy);
+  const sides: Side[] = ['tail', 'head'];
+  const alone = sides.map((side) => {
+    const at = endAt(raw.pts, side);
+    const l = look(raw.c, at);
+    return { side, at, ...l, verdict: judgeDrop(shown, raw.c, id, side, l.target) };
+  });
+  const ok = (side: Side) => toneOf(alone[side === 'tail' ? 0 : 1]!.verdict) === 'ok';
+  const lead: Side | null = first !== null && ok(first) ? first : ok('tail') ? 'tail' : ok('head') ? 'head' : null;
+  if (lead === null) {
+    return { dx, dy, points: raw.pts, preview: raw.c, result: raw.c, ends: alone, first: null };
+  }
+
+  /** The wire shifted onto end `a`'s contact, `a` connected there, and the other end judged and connected if it fits. */
+  const onto = (a: Side) => {
+    const A = alone[a === 'tail' ? 0 : 1]!;
+    const g = gap(shown, A.target, A.at);
+    const sx = dx + g.x, sy = dy + g.y;
+    const moved = placed(sx, sy);
+    const one = applyDrop(moved.c, id, a, A.target, moved.c[id]?.bends ?? null);
+    const b = other(a);
+    const bAt = endAt(moved.pts, b);
+    const l = look(one.circuit, bAt);
+    let verdict = judgeDrop(shown, one.circuit, id, other(one.side), l.target);
+    let result = one.circuit;
+    let fits = false;
+    if (toneOf(verdict) === 'ok') {
+      fits = gap(shown, l.target, bAt).fits;
+      if (fits) result = applyDrop(one.circuit, id, other(one.side), l.target, one.circuit[id]?.bends ?? null).circuit;
+      else verdict = 'move';
+    }
+    const ends: BodyEnd[] = [
+      { side: a, target: A.target, verdict: A.verdict, id: A.id, line: A.line, at: endAt(moved.pts, a) },
+      { side: b, ...l, verdict, at: bAt },
+    ];
+    if (a === 'head') ends.reverse();
+    return { dx: sx, dy: sy, points: moved.pts, preview: moved.c, result, ends, fits };
+  };
+  let best = onto(lead);
+  // the shape does not meet both contacts shifted onto the first end's: shifted onto the other end's, it may
+  if (!best.fits && ok(other(lead))) {
+    const turn = onto(other(lead));
+    if (turn.fits) best = turn;
+  }
+  return { dx: best.dx, dy: best.dy, points: best.points, preview: best.preview, result: best.result, ends: best.ends, first: lead };
+}

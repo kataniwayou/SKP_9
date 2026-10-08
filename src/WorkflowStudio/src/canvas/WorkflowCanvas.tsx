@@ -136,8 +136,9 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const zoom = useStore((s) => s.transform[2]);
   // a key while a gesture runs would be overwritten by its drop: the canvas's keys wait for it (Escape is the gesture's)
   const onKeyDown = useDesignKeys(doc, shownRef, design, () => pressing() || wiring.running() || drag.dragging());
-  // the block under a dragged wire end, outlined green or red (spec §4.4); a line gets a halo instead (plan 7)
-  const shown = useMemo(() => withHint(selected, wiring.hint && !wiring.hint.line ? wiring.hint : null), [selected, wiring.hint]);
+  // the block under a dragged wire end, outlined green or red (spec §4.4); a line gets a halo instead (plan 7); a wire
+  // moved whole has one per end (rule B, 2026-10-09)
+  const shown = useMemo(() => wiring.hints.filter((h) => !h.line).reduce(withHint, selected), [selected, wiring.hints]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
   const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
   const edges = useMemo(() => marked.edges.map((e) => {
@@ -145,9 +146,10 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     let data = e.data;
     if (dragged && e.id === dragged.id) data = { ...data, points: dragged.points };
     // the line under a dragged end: green when the end may join it, red when refused (plan 7 §6.1, plan 9 §6)
-    if (wiring.hint?.line && e.id === wiring.hint.id && wiring.hint.tone !== 'move') data = { ...data, halo: wiring.hint.tone };
+    const line = wiring.hints.find((h) => h.line && h.id === e.id && h.tone !== 'move');
+    if (line && line.tone !== 'move') data = { ...data, halo: line.tone };
     return data === e.data ? e : { ...e, data };
-  }), [marked.edges, wiring.ghost, wiring.hint]);
+  }), [marked.edges, wiring.ghost, wiring.hints]);
   // picks naming wires that are gone (after an undo) draw nothing
   const pickedWires = useMemo(
     () => (design
@@ -245,7 +247,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hint={wiring.hint} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hints={wiring.hints} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />

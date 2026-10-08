@@ -62,9 +62,11 @@ export function blockAt(doc: StudioDocument, p: Point, reach = 0): string | null
  * is dragged counts too (an end on its own wire is refused out loud, plan 9 §3), except its run at that end, where
  * the drag starts (Review Focus 5); a wire of one run is all that run.
  */
-export function wireAt(doc: StudioDocument, p: Point, tolerance: number, own: { id: string; side: Side } | null = null): { id: string; at: number } | null {
+export function wireAt(doc: StudioDocument, p: Point, tolerance: number, own: { id: string; side: Side } | null = null, skip: string | null = null): { id: string; at: number } | null {
   let best: { id: string; at: number; gap: number } | null = null;
   for (const w of doc.wires) {
+    // a wire moved whole (`skip`) is never under its own ends
+    if (w.id === skip) continue;
     let from = 0, to = Infinity;
     if (own && w.id === own.id) {
       if (w.points.length < 3) continue;

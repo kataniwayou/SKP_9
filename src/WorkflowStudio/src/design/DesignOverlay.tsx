@@ -23,8 +23,8 @@ export interface DesignOverlayProps {
   onEnd: (wire: WireRoute, side: Side, e: ReactPointerEvent) => void;
   /** A new wire's path, right-angled from its source to the pointer (spec §4.5); a dragged end moves its own wire. */
   ghost: Pt[] | null;
-  /** What is under a dragged end: the label next to the pointer says what the drop does, or why it is refused. */
-  hint?: DropHint | null;
+  /** What is under each dragged end: the label next to it says what the drop does, or why it is refused. */
+  hints?: readonly DropHint[];
 }
 
 /** On-screen sizes (px) that do not shrink with the zoom: at the fitted zoom a 2 px line would vanish. */
@@ -44,10 +44,9 @@ function clearOfEnds(h: { x: number; y: number }, ends: Ends, k: number): boolea
  * wire's squares (§4.2, Visio; plan 9 rule 14): one on each end (tail and head, on whatever they are), one in the
  * middle of each run of its core (no mark on a bend); and the ghost of a new wire while it is drawn (§4.5).
  */
-export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hint = null }: DesignOverlayProps) {
+export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [] }: DesignOverlayProps) {
   // one screen pixel in flow units
   const k = 1 / useStore((s) => s.transform[2]);
-  const label = hint ? dropLabel(hint.why) : null;
   return (
     <ViewportPortal>
       <svg className="design-overlay" width={1} height={1}>
@@ -71,13 +70,16 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
           );
         })}
         {ghost && <path className="design-ghost" d={pathOf(ghost)} strokeWidth={GHOST * k} />}
-        {hint && label && (
-          // drawn in screen pixels: the group undoes the zoom, offset below-right of the pointer
-          <g className={`design-drop-label ${hint.tone}`} transform={`translate(${hint.at.x + 14 * k} ${hint.at.y + 14 * k}) scale(${k})`}>
-            <rect x={0} y={0} rx={4} height={LABEL_H} width={label.length * LABEL_FONT * 0.56 + 2 * LABEL_PAD} />
-            <text x={LABEL_PAD} y={LABEL_H / 2 + LABEL_FONT * 0.36} fontSize={LABEL_FONT}>{label}</text>
-          </g>
-        )}
+        {hints.map((hint, i) => {
+          const label = dropLabel(hint.why);
+          return (
+            // drawn in screen pixels: the group undoes the zoom, offset below-right of the pointer (or the end)
+            <g key={i} className={`design-drop-label ${hint.tone}`} transform={`translate(${hint.at.x + 14 * k} ${hint.at.y + 14 * k}) scale(${k})`}>
+              <rect x={0} y={0} rx={4} height={LABEL_H} width={label.length * LABEL_FONT * 0.56 + 2 * LABEL_PAD} />
+              <text x={LABEL_PAD} y={LABEL_H / 2 + LABEL_FONT * 0.36} fontSize={LABEL_FONT}>{label}</text>
+            </g>
+          );
+        })}
       </svg>
     </ViewportPortal>
   );

@@ -5,7 +5,7 @@ import { loadedDocument } from '../app/fixtures';
 import { createTextFitter } from '../canvas/fitText';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { StudioDocument } from '../app/document';
-import { clampLanding, STEP_H, STEP_W, type Point } from '../layout/geometry';
+import { clampLanding, PMID, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { circuitOf, EMPTY_DRAFT, isEmptyDraft, setShape, withCircuit, type Draft } from './draft';
 import { setEnd } from '../circuit/circuit';
 import { lengthOf, pointAt } from '../layout/junctions';
@@ -573,11 +573,14 @@ describe('wire gestures', () => {
     const host = designOf({ draft });
     const one = canvasOf(doc, host);
     const from = onLine(shown, 's1->s2', 0.3);
+    // 48 up: its ends are still on s1's output and s2's input (rule B, 2026-10-09): it connects there again, moved
+    // whole; the end joined on it is opened all the same
     pressBody(one.container, 's1->s2', from);
     fireEvent.pointerMove(document, { ...screenOf(one.container, { x: from.x, y: from.y - 48 }), pointerId: 1 });
     fireEvent.pointerUp(document, { ...screenOf(one.container, { x: from.x, y: from.y - 48 }), pointerId: 1 });
     const [next] = commits(host)[0]!;
-    expect(next.wires!['s1->s2']!.tail.on).toBe('open');
+    expect(next.wires!['s1->s2']!.tail).toEqual({ on: 'step', step: 's1', y: PMID - 48 });
+    expect(next.wires!['s1->s2']!.head).toMatchObject({ on: 'step', step: 's2' });
     expect(next.wires!['s3->s4']!.head).toEqual({ on: 'open', x: contact[0], y: contact[1] });
     one.unmount();
 
@@ -586,10 +589,11 @@ describe('wire gestures', () => {
     const own = shown.wires.find((w) => w.id === 's3->s4')!.points;
     const at = onLine(shown, 's3->s4', 0.2);
     pressBody(other.container, 's3->s4', at);
-    fireEvent.pointerMove(document, { ...screenOf(other.container, { x: at.x + 16, y: at.y + 64 }), pointerId: 1 });
-    fireEvent.pointerUp(document, { ...screenOf(other.container, { x: at.x + 16, y: at.y + 64 }), pointerId: 1 });
+    // down clear of every block and line: both its ends open where the moved path starts and ends
+    fireEvent.pointerMove(document, { ...screenOf(other.container, { x: at.x + 16, y: at.y + 400 }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(other.container, { x: at.x + 16, y: at.y + 400 }), pointerId: 1 });
     const [after] = commits(joined)[0]!;
-    const moved = translatePoints(own, 16, 64);
+    const moved = translatePoints(own, 16, 400);
     expect(after.wires!['s3->s4']).toMatchObject({ tail: { on: 'open', x: moved[0]![0], y: moved[0]![1] }, head: { on: 'open', x: moved.at(-1)![0], y: moved.at(-1)![1] } });
     expect(pathNow(doc, after, 's3->s4')).toEqual(moved);
     expect(after.wires!['s1->s2']).toEqual(draft.wires!['s1->s2']);
@@ -685,7 +689,7 @@ describe('wire gestures', () => {
     expect(picked.onCommit).not.toHaveBeenCalled();
   });
 
-  it('a straight wire moved whole stays straight where it is put, even across a block (it keeps a one-run shape)', async () => {
+  it('a straight wire moved whole stays straight where it is put (it keeps a one-run shape)', async () => {
     const doc = await three();
     const s1 = doc.placement.steps.get('s1')!;
     const design = designOf();
@@ -693,13 +697,13 @@ describe('wire gestures', () => {
     const before = doc.wires.find((w) => w.id === 's1->s2')!.points;
     expect(before).toHaveLength(2);
     const from = onLine(doc, 's1->s2');
-    // left by 128: the moved line lies across s1
+    // down below the steps, clear of every block: both ends open there
     pressBody(container, 's1->s2', from);
-    fireEvent.pointerMove(document, { ...screenOf(container, { x: from.x - 128, y: from.y }), pointerId: 1 });
-    fireEvent.pointerUp(document, { ...screenOf(container, { x: from.x - 128, y: from.y }), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: from.x - 64, y: from.y + 320 }), pointerId: 1 });
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: from.x - 64, y: from.y + 320 }), pointerId: 1 });
     const [next] = commits(design)[0]!;
-    const moved = translatePoints(before, -128, 0);
-    expect(moved[0]![0]).toBeLessThan(s1.x + STEP_W);
+    const moved = translatePoints(before, -64, 320);
+    expect(moved[0]![1]).toBeGreaterThan(s1.y + STEP_H);
     expect(next.wires!['s1->s2']!.bends).toEqual({ xs: [moved[0]![0]], ys: [] });
     expect(pathNow(doc, next, 's1->s2')).toEqual(moved);
   });
