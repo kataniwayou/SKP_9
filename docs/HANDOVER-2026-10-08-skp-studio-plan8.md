@@ -2,7 +2,7 @@
 
 Branch `feature/path-importer` (not pushed, not merged; the user has not chosen merge / PR / keep). Both plan 8
 halves are deployed to the dev cluster (ns `skp`): BaseApi with the `AddWorkflowDesign` migration, and the studio
-as `workflow-studio:local`, bundle `index-DfWumhnn.js`. Port forwards are supervised by
+as `workflow-studio:local`, bundle `index-DSM0kNl5.js`. Port forwards are supervised by
 `./k8s/port-forward-realstack.ps1` (`-Status` to check, run it again to restart): studio `localhost:18081`,
 BaseApi `localhost:18080`. Do not stop them by hand.
 
@@ -44,7 +44,7 @@ the nullable jsonb `Design` column. The last is `2ce5b40`, the view-restore fix 
 `x ?? new Dictionary<,>()` in a deconstructing `foreach` header crashed the IDE0028 collection-initializer analyzer
 (AD0001) in SDK 8.0.4xx. Only the docker Release build hit it; the fallback is now hoisted to a local.
 
-**Studio.** Bundle `index-DfWumhnn.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
+**Studio.** Bundle `index-DSM0kNl5.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
 exposed:
 - A restored canvas lays out 26 px taller for one frame before the dock settles. `FollowSize` measured from that
   frame, so after a refresh the view came back 13 px off.
@@ -75,6 +75,29 @@ minors left: `was` lost when a both-open wire's start connects first; `isLooseEn
 comments (designer.spec "snaps back", CableEdge doc, Inspector loose text); startBothEnd path builder duplicated.
 Vitest 785; Playwright 66 + 2 skips on dev and on the deployed studio.
 
+**Plan 9: wires as a circuit — BUILT and DEPLOYED (2026-10-08).** Spec
+`docs/superpowers/specs/2026-10-08-skp-studio-09-wire-circuit-design.md` (aaba7cd), plan
+`docs/superpowers/plans/2026-10-08-skp-studio-09-wire-circuit.md` (503f194), code 493f6fc..492b5a9, studio bundle
+`index-DSM0kNl5.js`. The circuit model: current flows one way hub → steps; a step's left side is its input (heads
+only), its right side its output (tails only), ends slide anywhere along their side (16..144); tails anywhere around
+the hub ring; tail and head junctions (fan-out / fan-in), position along a wire matters; family per net (head on a
+step decides; junctions inherit); joining two families is a short circuit, refused while dragging; an Inspector edit
+that makes one is listed in Problems, and Save stores the design as drawn but leaves every held-back source's list
+as BaseApi had it ("Saved and applied; N short circuit(s) not written; M link(s) held back until fixed"). Open ends
+keep the arrow head / ring; grey dashed while the family is undecided; four-way cursor on end squares. Old plan 7/8
+layouts and sessions load and settle against BaseApi (a disagreeing junction is drawn plain). Tests: Vitest 802;
+Playwright 93 + 2 skips on the dev server and on the deployed studio, incl. circuit.spec (one real-mouse test per
+rule 1-14 + the base circuit rule) and circuit-save.spec (fan-in, fan-out, hub entries, held-back short circuit,
+clean after Save + reload). Rulings (cost if wrong in brackets): ends slide the whole side minus corners (routing
+changes); detaching a host opens its joined ends (spec over plan); short-circuit refusal when a merged net gains a
+family (none known); settle opens only junctions whose links disagree (small); a shorted design is sent, held-back
+sources keep their lists, settle leaves their links alone (a partial apply while a short exists); no false "design
+draft" when the circuit equals the saved wiring; unrepresentable and self-links kept in saved lists (a step's link
+to itself can't be removed from the designer — use BaseApi CRUD). Follow-ups: art.spec's pulse selector
+(`.wire:not(.dashed)`) not yet run against a live workflow; junction draw vs traced order on a shortened host (plan
+7 behaviour); withCircuit per run-drag move not memoised; settle's non-convergence warning is dev-only; creating new
+wires deferred (spec §2.1).
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
@@ -91,7 +114,7 @@ live 13/6/5 green):
   `WorkflowValidationLiveTests` 5/5.
 - Vitest: 742 passed.
 - Playwright on the dev server: 58 passed, 2 skipped (the expected `art.spec.ts` skips).
-- Playwright on the deployed studio (`index-DfWumhnn.js`):
+- Playwright on the deployed studio (`index-DSM0kNl5.js`):
   - save + inspector + designer: 26/26.
   - whole suite: 58 passed, 2 skipped.
   - `session.spec.ts:12 --repeat-each=8`: 8/8.
