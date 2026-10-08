@@ -2,7 +2,7 @@
 
 Branch `feature/path-importer` (not pushed, not merged; the user has not chosen merge / PR / keep). Both plan 8
 halves are deployed to the dev cluster (ns `skp`): BaseApi with the `AddWorkflowDesign` migration, and the studio
-as `workflow-studio:local`, bundle `index-DSM0kNl5.js`. Port forwards are supervised by
+as `workflow-studio:local`, bundle `index-BC19MgmE.js`. Port forwards are supervised by
 `./k8s/port-forward-realstack.ps1` (`-Status` to check, run it again to restart): studio `localhost:18081`,
 BaseApi `localhost:18080`. Do not stop them by hand.
 
@@ -44,7 +44,7 @@ the nullable jsonb `Design` column. The last is `2ce5b40`, the view-restore fix 
 `x ?? new Dictionary<,>()` in a deconstructing `foreach` header crashed the IDE0028 collection-initializer analyzer
 (AD0001) in SDK 8.0.4xx. Only the docker Release build hit it; the fallback is now hoisted to a local.
 
-**Studio.** Bundle `index-DSM0kNl5.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
+**Studio.** Bundle `index-BC19MgmE.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
 exposed:
 - A restored canvas lays out 26 px taller for one frame before the dock settles. `FollowSize` measured from that
   frame, so after a refresh the view came back 13 px off.
@@ -78,7 +78,7 @@ Vitest 785; Playwright 66 + 2 skips on dev and on the deployed studio.
 **Plan 9: wires as a circuit — BUILT and DEPLOYED (2026-10-08).** Spec
 `docs/superpowers/specs/2026-10-08-skp-studio-09-wire-circuit-design.md` (aaba7cd), plan
 `docs/superpowers/plans/2026-10-08-skp-studio-09-wire-circuit.md` (503f194), code 493f6fc..492b5a9, studio bundle
-`index-DSM0kNl5.js`. The circuit model: current flows one way hub → steps; a step's left side is its input (heads
+`index-BC19MgmE.js`. The circuit model: current flows one way hub → steps; a step's left side is its input (heads
 only), its right side its output (tails only), ends slide anywhere along their side (16..144); tails anywhere around
 the hub ring; tail and head junctions (fan-out / fan-in), position along a wire matters; family per net (head on a
 step decides; junctions inherit); joining two families is a short circuit, refused while dragging; an Inspector edit
@@ -98,6 +98,16 @@ to itself can't be removed from the designer — use BaseApi CRUD). Follow-ups: 
 7 behaviour); withCircuit per run-drag move not memoised; settle's non-convergence warning is dev-only; creating new
 wires deferred (spec §2.1).
 
+**Wire drag (user request, 2026-10-08):** `fa8c137`, `f7e468c`. Cursors: open hand over a wire's body where there
+is no square, closed hand while the body is dragged, two-way arrow over run squares, four-way over end squares.
+Dragging the body moves the whole wire rigidly (shape frozen, stored as bends) and detaches it from every contact
+point (tail, head, its own junction ends); wires joined on it get their ends opened. A press that moves less than a
+grid step only picks. Run squares unchanged. An end square dragged across its last run adds exactly one corner (an
+L); dropped on a step / the hub / a wire it connects per the circuit rules. On an open drop the other automatic end
+is held at its drawn height (`held`, stored in the layout) and goes automatic again when the end reconnects.
+Moved wires and L legs are not routed around blocks (as asked). Vitest 821; Playwright 96 + 2 skips on dev and
+deployed. Spec §6 of plan 9 and the older specs carry superseded notes.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
@@ -114,7 +124,7 @@ live 13/6/5 green):
   `WorkflowValidationLiveTests` 5/5.
 - Vitest: 742 passed.
 - Playwright on the dev server: 58 passed, 2 skipped (the expected `art.spec.ts` skips).
-- Playwright on the deployed studio (`index-DSM0kNl5.js`):
+- Playwright on the deployed studio (`index-BC19MgmE.js`):
   - save + inspector + designer: 26/26.
   - whole suite: 58 passed, 2 skipped.
   - `session.spec.ts:12 --repeat-each=8`: 8/8.
