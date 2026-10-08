@@ -14,7 +14,7 @@ import type { TetherEdgeType } from './edges/TetherEdge';
 import { createTextFitter, FONT, type FittedText, type TextFitter } from './fitText';
 import type { CacheNodeData, CacheNodeType } from './nodes/CacheNode';
 import type { ProcessorView, StepNodeType } from './nodes/StepNode';
-import { PILL_STATE, PILL_W, type WorkflowNodeType } from './nodes/WorkflowNode';
+import { type WorkflowNodeType } from './nodes/WorkflowNode';
 
 export type StudioNode = WorkflowNodeType | StepNodeType | CacheNodeType;
 export type StudioEdge = CableEdgeType | TetherEdgeType;
@@ -56,7 +56,7 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
       // a loose wire from the hub ends on the hub itself: React Flow needs a target handle (plan 8 §5)
       handle('loose', 'target', Position.Right, 2 * SPHERE_R, SPHERE_R),
     ],
-    data: hubData(graph.workflow, fitter),
+    data: hubData(graph.workflow),
   });
 
   for (const [id, position] of placement.steps) {
@@ -205,11 +205,7 @@ function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitte
   };
 }
 
-/** The hub's tooltip and its pill's cron, cut to the room the state text leaves (gallery wfPill). */
-function hubData(workflow: Graph['workflow'], fitter: TextFitter): { tip: string; cron: FittedText } {
-  const room = PILL_W - 24 - fitter.width(PILL_STATE, FONT.hubPill);
-  return {
-    tip: entityName(workflow.name, workflow.version, workflow.id),
-    cron: fitter.fit(`⏱ ${workflow.cronExpression || 'not scheduled'}`, room, FONT.hubPill),
-  };
+/** The hub's tooltip: the workflow's unique name. */
+function hubData(workflow: Graph['workflow']): { tip: string } {
+  return { tip: entityName(workflow.name, workflow.version, workflow.id) };
 }

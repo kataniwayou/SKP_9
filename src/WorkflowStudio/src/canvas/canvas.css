@@ -75,5 +75,4 @@
 .design-drop-label.loose rect { fill: rgba(20, 26, 36, .92); stroke: #9AA7B8; }
 .design-drop-label text { fill: var(--ink); font-family: var(--sans); }
 /* a connection point is 12 px on screen at any zoom, centred on its spot (left/top in flow units) */
-.nx-port { position: absolute; width: calc(12px * var(--inv, 1)); height: calc(12px * var(--inv, 1)); transform: translate(-50%, -50%); border-radius: 50%; border: calc(2px * var(--inv, 1)) solid var(--accent); background: var(--panel); box-sizing: border-box; opacity: 0; cursor: pointer; transition: opacity .12s; }
-.react-flow__node:hover .nx-port, .studio-canvas.gesture .nx-port { opacity: 1; }
+.nx-port { position: absolute; width: calc(12px * var(--inv, 1)); height: calc(12px * var(--inv, 1)); transform: translate(-50%, -50%); border: 0; background: transparent; box-sizing: border-box; opacity: 0; cursor: pointer; } /* the connection point: a hit area only, never drawn */

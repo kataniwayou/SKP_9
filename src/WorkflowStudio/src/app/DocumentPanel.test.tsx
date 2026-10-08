@@ -256,7 +256,7 @@ describe('DocumentPanel', () => {
     expect(screen.queryByText('■ stopped')).not.toBeInTheDocument();
     expect(document.querySelector('.wf')!.getAttribute('data-started')).toBe('false'); // review focus 3
     // the hub looks not started but states no verdict: its pill says status unknown too (spec §5.1)
-    expect(document.querySelector('.wf .nx-state tspan')!.textContent).toBe('  ? status unknown');
+    expect(document.querySelector('.wf .nx-state tspan')!.textContent).toBe('? status unknown');
   });
 
   it('shows the hub started when the live list names the workflow', async () => {

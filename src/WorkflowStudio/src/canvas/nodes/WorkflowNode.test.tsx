@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { LiveStatus } from '../../api/liveStatus';
 import { WorkflowView, type WorkflowNodeData } from './WorkflowNode';
 
-const data: WorkflowNodeData = { tip: 'orders_1.0.0-wf1', cron: { text: '⏱ 0 * * * * *', full: '⏱ 0 * * * * *', cut: false } };
+const data: WorkflowNodeData = { tip: 'orders_1.0.0-wf1' };
 
 describe('WorkflowView', () => {
   it('writes only WORKFLOW on the dial, with the unique name as its tooltip', () => {
@@ -13,12 +13,12 @@ describe('WorkflowView', () => {
     expect([...container.querySelectorAll('text')].some((t) => t.textContent!.includes('orders'))).toBe(false);
   });
 
-  it('is grey, still and blinking when not started, with the cron and state on its pill', () => {
+  it('is grey, still and blinking when not started, with its state on its pill', () => {
     const { container } = render(<svg><WorkflowView {...data} started={false} status="stopped" /></svg>);
     const wf = container.querySelector('.wf')!;
     expect(wf.classList.contains('nx-idlewf')).toBe(true);
     expect(wf.getAttribute('data-started')).toBe('false');
-    expect(container.querySelector('.nx-state')!.textContent).toBe('⏱ 0 * * * * *  ○ not started');
+    expect(container.querySelector('.nx-state')!.textContent).toBe('○ not started');
   });
 
   it('is green and turning when started', () => {
@@ -27,7 +27,7 @@ describe('WorkflowView', () => {
     expect(wf.classList.contains('started')).toBe(true);
     expect(wf.classList.contains('nx-idlewf')).toBe(false);
     expect(container.querySelector('.hub-inner .nx-spin')).not.toBeNull();
-    expect(container.querySelector('.nx-state')!.textContent).toBe('⏱ 0 * * * * *  ● started');
+    expect(container.querySelector('.nx-state')!.textContent).toBe('● started');
   });
 
   it('states on its pill only what the live poll knows: started, not started, status unknown or checking', () => {
@@ -37,11 +37,10 @@ describe('WorkflowView', () => {
       unmount();
       return text;
     };
-    // two no-break spaces part the state from the cron
-    expect(pill(true, 'running')).toBe('  ● started');
-    expect(pill(false, 'stopped')).toBe('  ○ not started');
-    expect(pill(false, 'unknown')).toBe('  ? status unknown');
-    expect(pill(false, 'checking')).toBe('  checking…');
+    expect(pill(true, 'running')).toBe('● started');
+    expect(pill(false, 'stopped')).toBe('○ not started');
+    expect(pill(false, 'unknown')).toBe('? status unknown');
+    expect(pill(false, 'checking')).toBe('checking…');
   });
 
   it('looks not started (grey, still, blinking) while the status is unknown or checking (spec §5.1)', () => {
@@ -63,9 +62,9 @@ describe('WorkflowView', () => {
     expect(fills).toEqual(ids.map((id) => `url(#${id})`));
   });
 
-  it('keeps the full cron in a tooltip when it was cut', () => {
-    const cut = { text: '⏱ 0 0/5 …', full: '⏱ 0 0/5 * * * MON-FRI 2026', cut: true };
-    const { container } = render(<svg><WorkflowView {...data} cron={cut} started={false} status="stopped" /></svg>);
-    expect(container.querySelector('.nx-state')!.parentElement!.querySelector(':scope > title')!.textContent).toBe('⏱ 0 0/5 * * * MON-FRI 2026');
+  it('shows no cron on its pill', () => {
+    const { container } = render(<svg><WorkflowView {...data} started={false} status="stopped" /></svg>);
+    expect(container.querySelector('.nx-pill')!.textContent).not.toContain('⏱');
+    expect(container.querySelector('.nx-state')!.getAttribute('text-anchor')).toBe('middle');
   });
 });
