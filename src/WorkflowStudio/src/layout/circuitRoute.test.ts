@@ -55,7 +55,19 @@ describe('routeCircuit (plan 9 §5)', () => {
     const doc = await four();
     const r = routeCircuit({ x: w({ on: 'open', x: 40, y: 600 }, { on: 'open', x: 400, y: 640 }) }, ctxOf(doc))[0]!;
     expect([r.points[0], r.points.at(-1)]).toEqual([[40, 600], [400, 640]]);
-    expect(r).toMatchObject({ source: null, target: null, tailOn: 'open', headOn: 'open', condition: null, solid: false, short: false });
+    expect(r).toMatchObject({ source: null, target: null, tailOn: 'open', headOn: 'open', condition: null, solid: false, short: false, free: true });
+  });
+
+  it('a wire with no end on a step or the hub is direction-less (rule D), open or joined on a line; one end on a step or the hub gives it one', async () => {
+    const doc = await four();
+    const routes = byId(routeCircuit({
+      's1->s2': w(at('s1'), at('s2')),
+      j: w({ on: 'wire', host: 's1->s2', at: 40 }, { on: 'open', x: 400, y: 640 }),
+      t: w(at('s3'), { on: 'open', x: 400, y: 700 }),
+      h: w({ on: 'open', x: 40, y: 700 }, at('s4')),
+      hub: w({ on: 'hub', angle: null }, { on: 'open', x: 40, y: 800 }),
+    }, ctxOf(doc)));
+    expect([...routes].map(([id, r]) => [id, r.free])).toEqual([['s1->s2', false], ['j', true], ['t', false], ['h', false], ['hub', false]]);
   });
 
   it('a head junction ends on its host\'s line at its point; a tail junction leaves from it; hosts are routed first whatever the order', async () => {

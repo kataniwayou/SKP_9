@@ -102,7 +102,7 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
       // the gallery staggers its pulses by 0.41 s a wire; `|| 0` keeps the first one at +0, not -0
       data: {
         points: w.points, colour: w.condition === null ? UNDECIDED_COLOUR : conditionInfo(w.condition).colour,
-        delay: -Math.round(i * 41) / 100 || 0, dashed: !w.solid, tailOn: w.tailOn, headOn: w.headOn, short: w.short,
+        delay: -Math.round(i * 41) / 100 || 0, dashed: !w.solid, tailOn: w.tailOn, headOn: w.headOn, short: w.short, ...(w.free ? { free: true } : {}),
       },
     };
   });

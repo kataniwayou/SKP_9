@@ -34,8 +34,8 @@ function doc(over: Partial<Graph> = {}, parkedIds: string[] = []): StudioDocumen
       caches: new Map([['c1', { x: 32, y: 288 }]]),
     },
     wires: [
-      { id: 'wf->a', source: 'wf', target: 'a', points: [[224, 128], [288, 128]], core: { ends: { sx: 224, sy: 128, tx: 288, ty: 128 }, points: [[224, 128], [288, 128]] }, condition: 1, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false },
-      { id: 'a->b', source: 'a', target: 'b', points: [[512, 128], [576, 128]], core: { ends: { sx: 512, sy: 128, tx: 576, ty: 128 }, points: [[512, 128], [576, 128]] }, condition: 2, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false },
+      { id: 'wf->a', source: 'wf', target: 'a', points: [[224, 128], [288, 128]], core: { ends: { sx: 224, sy: 128, tx: 288, ty: 128 }, points: [[224, 128], [288, 128]] }, condition: 1, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false, free: false },
+      { id: 'a->b', source: 'a', target: 'b', points: [[512, 128], [576, 128]], core: { ends: { sx: 512, sy: 128, tx: 576, ty: 128 }, points: [[512, 128], [576, 128]] }, condition: 2, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false, free: false },
     ],
   };
 }
@@ -151,17 +151,18 @@ describe('toFlow', () => {
   it('draws every wire of the circuit as a cable edge with its family, dash and end kinds; a wire on no terminal hangs on the hub (plan 9 §5)', () => {
     const route = (over: Partial<WireRoute>): WireRoute => ({
       id: 'x', source: null, target: null, points: [[0, 0], [64, 0]], core: { ends: { sx: 0, sy: 0, tx: 64, ty: 0 }, points: [[0, 0], [64, 0]] },
-      condition: null, solid: false, tailOn: 'open', headOn: 'open', short: false, ...over,
+      condition: null, solid: false, tailOn: 'open', headOn: 'open', short: false, free: false, ...over,
     });
     const d: StudioDocument = { ...doc(), wires: [
-      route({ id: 'w:1' }),
+      route({ id: 'w:1', free: true }),
       route({ id: 'w:2', source: 'a', tailOn: 'terminal', headOn: 'junction', condition: 2, short: true }),
       route({ id: 'w:3', target: 'b', tailOn: 'junction', headOn: 'terminal', condition: 2, solid: true }),
     ] };
     const { edges } = toFlow(d, fitter);
     const e = (id: string) => edges.find((x) => x.id === id)!;
     expect([e('w:1').source, e('w:1').target, e('w:1').targetHandle]).toEqual([SPHERE_NODE_ID, SPHERE_NODE_ID, 'ring']);
-    expect(e('w:1').data).toMatchObject({ colour: UNDECIDED_COLOUR, dashed: true, tailOn: 'open', headOn: 'open' });
+    expect(e('w:1').data).toMatchObject({ colour: UNDECIDED_COLOUR, dashed: true, tailOn: 'open', headOn: 'open', free: true });
+    expect('free' in e('w:2').data!).toBe(false);
     expect([e('w:2').source, e('w:2').target, e('w:2').targetHandle]).toEqual(['a', 'a', 'in']);
     expect(e('w:2').data).toMatchObject({ colour: '#FF7A66', short: true, headOn: 'junction', dashed: true });
     expect([e('w:3').source, e('w:3').target, e('w:3').targetHandle]).toEqual(['b', 'b', 'in']);

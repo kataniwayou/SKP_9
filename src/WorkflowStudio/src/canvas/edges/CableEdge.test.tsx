@@ -44,6 +44,16 @@ describe('CableEdgeView', () => {
     expect(container.querySelector('circle.nx-open')).toBeNull();
   });
 
+  it('a direction-less wire (rule D) has no tail ring and no arrow head, open or joined; its junction circle stays', () => {
+    const open = render(<svg><CableEdgeView points={[[0, 8], [64, 8]]} colour="#8A97A8" delay={0} flowing={false} dashed tailOn="open" headOn="open" free /></svg>);
+    expect(open.container.querySelector('circle.nx-src')).toBeNull();
+    expect(open.container.querySelector('.nx-head')).toBeNull();
+    const joined = render(<svg><CableEdgeView points={[[0, 8], [64, 8]]} colour="#2DD4BF" delay={0} flowing={false} dashed tailOn="junction" headOn="open" free /></svg>);
+    expect(joined.container.querySelector('circle.nx-src')).toBeNull();
+    expect(joined.container.querySelector('.nx-head')).toBeNull();
+    expect(joined.container.querySelector('circle.nx-joint')).not.toBeNull();
+  });
+
   it('points an arrow head along the last run, whichever way it runs', () => {
     expect(arrowHead([0, 8], [64, 8])).toBe('M55 2L64 8L55 14');
     expect(arrowHead([64, 0], [64, 40])).toBe('M70 31L64 40L58 31');

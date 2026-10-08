@@ -1,4 +1,4 @@
-import { plainCircuit, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
+import { isFree, plainCircuit, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
 import type { Id, Step } from '../model/graph';
 import { clearPath } from './detour';
@@ -32,6 +32,8 @@ export interface WireRoute {
   headOn: EndKind;
   /** In a net whose families disagree (§2.2-7): its junctions are marked red. */
   short: boolean;
+  /** No end on a step or the hub (rule D, 2026-10-09): no direction yet, so neither a tail ring nor an arrow head. */
+  free: boolean;
 }
 
 export interface RouteContext {
@@ -204,7 +206,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     const r: WireRoute = {
       id, source, target: headOn === 'terminal' && w.head.on === 'step' ? w.head.step : null,
       points, core: { ends, points: core }, condition, solid: tailOn !== 'open' && headOn !== 'open' && condition !== null,
-      tailOn, headOn, short,
+      tailOn, headOn, short, free: isFree(w),
     };
     busy.delete(id);
     out.set(id, r);

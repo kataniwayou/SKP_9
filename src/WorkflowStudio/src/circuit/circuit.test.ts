@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Step } from '../model/graph';
 import {
-  addCircuitWire, holdEnd, legacyCircuit, moveWire, openJoinedOn, parseCircuit, plainCircuit, removeCircuitWires, sameEnd, setBends, setEnd, shapedByHand, snapAngle,
+  addCircuitWire, holdEnd, isFree, legacyCircuit, moveWire, openJoinedOn, parseCircuit, plainCircuit, removeCircuitWires, reverseWire, sameEnd, setBends, setEnd, shapedByHand, snapAngle,
   type Circuit, type CircuitWire, type Side,
 } from './circuit';
 
@@ -122,6 +122,25 @@ describe('editing a circuit', () => {
     expect(shapedByHand(plain('s1', 's2'))).toBe(false);
     expect(shapedByHand({ ...plain('s1', 's2'), bends })).toBe(true);
     expect(shapedByHand({ tail: { on: 'step', step: 's1', y: 72 }, head: { on: 'open', x: 0, y: 0 } })).toBe(true);
+  });
+});
+
+describe('direction-less wires (the user\'s rule D, 2026-10-09)', () => {
+  it('a wire with no end on a step or the hub has no direction: open at both ends, or joined on a line and open', () => {
+    const open = { on: 'open' as const, x: 0, y: 0 };
+    expect(isFree({ tail: open, head: open })).toBe(true);
+    expect(isFree({ tail: { on: 'wire', host: 'h', at: 40 }, head: open })).toBe(true);
+    expect(isFree({ tail: open, head: { on: 'wire', host: 'h', at: 40 } })).toBe(true);
+    expect(isFree({ tail: { on: 'hub', angle: null }, head: open })).toBe(false);
+    expect(isFree({ tail: open, head: { on: 'step', step: 's1', y: null } })).toBe(false);
+    expect(isFree(plain('s1', 's2'))).toBe(false);
+  });
+
+  it('turned round: tail and head swapped, its bends reversed, a held end the same end, same id', () => {
+    const c: Circuit = { 'w:f': { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'wire', host: 'h', at: 40 }, bends: { xs: [10, 20, 30], ys: [5, 6] }, held: 'tail' } };
+    expect(reverseWire(c, 'w:f')['w:f']).toEqual({ tail: { on: 'wire', host: 'h', at: 40 }, head: { on: 'open', x: 0, y: 0 }, bends: { xs: [30, 20, 10], ys: [6, 5] }, held: 'head' });
+    expect(reverseWire(reverseWire(c, 'w:f'), 'w:f')['w:f']).toEqual(c['w:f']);
+    expect(reverseWire(c, 'gone')).toBe(c);
   });
 });
 

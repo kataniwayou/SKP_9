@@ -197,6 +197,31 @@ export function moveWire(c: Readonly<Circuit>, id: string, points: readonly Pt[]
   return openJoinedOn(out, [id], pointOf);
 }
 
+/** On a step or the hub: an end that gives its wire a direction (the user's rule D, 2026-10-09). */
+export const isTerminalEnd = (e: End): boolean => e.on === 'step' || e.on === 'hub';
+
+/**
+ * A direction-less wire (the user's rule D, 2026-10-09): neither end on a step or the hub (open, or joined on another
+ * wire's line). It has no head and no tail yet: its two ends are only named `tail` and `head` for storage; the first
+ * end that lands on a step or the hub decides which is which.
+ */
+export const isFree = (w: CircuitWire): boolean => !isTerminalEnd(w.tail) && !isTerminalEnd(w.head);
+
+/** The same shape drawn the other way round: its verticals and the runs between them in reverse order. */
+export const reverseBends = (b: Bends): Bends => ({ xs: [...b.xs].reverse(), ys: [...b.ys].reverse() });
+
+/**
+ * Wire `id` turned round (rule D: a direction-less wire's end that lands on a step's input is its head, on an output
+ * or the hub its tail): tail and head swapped, its bends reversed, a held end still the same end. Same id.
+ */
+export function reverseWire(c: Readonly<Circuit>, id: string): Circuit {
+  if (!has(c, id)) return c as Circuit;
+  const w = c[id]!;
+  const out = copy(c);
+  out[id] = withBends(w.head, w.tail, w.bends ? reverseBends(w.bends) : null, w.held === undefined ? undefined : otherSide(w.held));
+  return out;
+}
+
 /** Shaped by hand: its own bends, or an end slid along a step's side (Reset route has something to undo). */
 export const shapedByHand = (w: CircuitWire): boolean =>
   (w.bends?.xs.length ?? 0) > 0 || (w.tail.on === 'step' && w.tail.y !== null) || (w.head.on === 'step' && w.head.y !== null);

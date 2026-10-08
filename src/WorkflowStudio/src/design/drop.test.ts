@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { addCircuitWire, plainCircuit, setEnd, type Circuit } from '../circuit/circuit';
 import { contactOn } from '../layout/circuitRoute';
 import { SPHERE_R, STEP_W } from '../layout/geometry';
-import { beforeDrop, dropLabel, endOf, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
+import { applyDrop, beforeDrop, dropLabel, endOf, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 
 // s1 -> s2 -> s3 (Completed) and s4 -> s5 (Failed); entries s1, s4
 const doc = () => loadedDocument(graphDto({
@@ -185,5 +185,75 @@ describe('drop targets', () => {
     expect(pointOfTarget(d, wire('s1->s2'))).toEqual({ x: p[0], y: p[1] });
     expect(endOf({ on: 'open', x: 8, y: 16 })).toEqual({ on: 'open', x: 8, y: 16 });
     expect(endOf(step('s2', 'in'))).toEqual({ on: 'step', step: 's2', y: 96 });
+  });
+});
+
+describe('direction-less wires (the user\'s rule D, 2026-10-09)', () => {
+  const free = (c: Circuit, id: string, tail: Parameters<typeof addCircuitWire>[2]['tail'], head: Parameters<typeof addCircuitWire>[2]['head']) => addCircuitWire(c, id, { tail, head });
+  const open = (x: number, y: number) => ({ on: 'open' as const, x, y });
+
+  it('a wire open at both ends is never told the wrong side or "only a tail": the side or the hub decides which end it is', async () => {
+    const d = await doc();
+    const c = free(circuitOfDoc(d), 'w:f', open(0, 0), open(100, 0));
+    // its "head" end onto an output, the hub; its "tail" end onto an input
+    expect(judgeDrop(d, c, 'w:f', 'head', step('s3', 'out'))).toBe('connect');
+    expect(judgeDrop(d, c, 'w:f', 'head', { on: 'hub', angle: 90 })).toBe('connect');
+    expect(judgeDrop(d, c, 'w:f', 'tail', step('s3', 'in'))).toBe('connect');
+    expect(judgeDrop(d, c, 'w:f', 'tail', step('s3', 'out'))).toBe('connect');
+    expect(judgeDrop(d, c, 'w:f', 'tail', wire('s1->s2'))).toBe('join');
+    expect(judgeDrop(d, c, 'w:f', 'head', wire('s1->s2'))).toBe('join');
+  });
+
+  it('a wire with a direction is judged as before', async () => {
+    const d = await doc();
+    const c = free(circuitOfDoc(d), 'w:g', { on: 'step', step: 's1', y: null }, open(100, 0));
+    expect(judgeDrop(d, c, 'w:g', 'head', step('s3', 'out'))).toBe('wrongSide');
+    expect(judgeDrop(d, c, 'w:g', 'head', { on: 'hub', angle: 0 })).toBe('hubTail');
+  });
+
+  it('joined on one line, its other end onto another line is "needs a step first"; onto the same line "same wire"; onto a step it gets a direction', async () => {
+    const d = await doc();
+    const c = free(circuitOfDoc(d), 'w:j', { on: 'wire', host: 's1->s2', at: 40 }, open(300, 300));
+    expect(judgeDrop(d, c, 'w:j', 'head', wire('s2->s3'))).toBe('needsStep');
+    expect(judgeDrop(d, c, 'w:j', 'head', wire('s1->s2', 80))).toBe('sameWire');
+    expect(judgeDrop(d, c, 'w:j', 'head', step('s3', 'in'))).toBe('connect');
+    // onto an output: that end is its tail, so the junction becomes its head: s3's current into s1 -> s2 (allowed)
+    expect(judgeDrop(d, c, 'w:j', 'head', step('s3', 'out'))).toBe('connect');
+    expect(dropLabel('needsStep')).toBe('needs a step first');
+    expect(toneOf('needsStep')).toBe('no');
+  });
+
+  it('the checks that need a direction are made on the wire turned: a short circuit, a step fed its own input', async () => {
+    const d = await doc();
+    // joined on s1 -> s2 (Completed), its other end onto s5 (Failed) as a head: a short circuit
+    const c = free(circuitOfDoc(d), 'w:j', { on: 'wire', host: 's1->s2', at: 40 }, open(300, 300));
+    expect(judgeDrop(d, c, 'w:j', 'head', step('s5', 'in'))).toBe('short');
+    // joined on s1 -> s2, its other end onto s2's output: its tail on s2, its head into s1 -> s2, so s2 feeds itself
+    expect(judgeDrop(d, c, 'w:j', 'head', step('s2', 'out'))).toBe('sameStep');
+  });
+
+  it('applyDrop turns a direction-less wire round when the end dropped becomes the other one, its bends with it; same id', async () => {
+    const d = await doc();
+    const bends = { xs: [40, 80], ys: [50] };
+    const c = addCircuitWire(circuitOfDoc(d), 'w:f', { tail: open(0, 0), head: open(120, 100), bends });
+    // the "tail" end onto an input: it is the head now
+    const a = applyDrop(c, 'w:f', 'tail', step('s3', 'in'));
+    expect(a.side).toBe('head');
+    expect(a.circuit['w:f']).toEqual({ tail: open(120, 100), head: { on: 'step', step: 's3', y: 96 } });
+    // a shape kept: reversed with the wire
+    const k = applyDrop(c, 'w:f', 'tail', step('s3', 'in'), bends);
+    expect(k.circuit['w:f']!.bends).toEqual({ xs: [80, 40], ys: [50] });
+    // the "head" end onto an output: its tail now
+    const b = applyDrop(c, 'w:f', 'head', step('s3', 'out'));
+    expect(b.side).toBe('tail');
+    expect(b.circuit['w:f']!.tail).toEqual({ on: 'step', step: 's3', y: 96 });
+    expect(b.circuit['w:f']!.head).toEqual(open(0, 0));
+    // the right end already: not turned
+    const e = applyDrop(c, 'w:f', 'head', step('s3', 'in'));
+    expect(e.side).toBe('head');
+    expect(e.circuit['w:f']!.tail).toEqual(open(0, 0));
+    // a directed wire is never turned
+    const g = addCircuitWire(c, 'w:g', { tail: { on: 'step', step: 's1', y: null }, head: open(0, 0) });
+    expect(applyDrop(g, 'w:g', 'head', step('s3', 'in')).circuit['w:g']!.tail).toEqual({ on: 'step', step: 's1', y: null });
   });
 });

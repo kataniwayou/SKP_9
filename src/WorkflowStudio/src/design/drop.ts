@@ -1,10 +1,11 @@
 import type { StudioDocument } from '../app/document';
-import { setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
+import { isFree, reverseBends, reverseWire, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
 import { loopWires, trace } from '../circuit/trace';
 import { contactOn } from '../layout/circuitRoute';
 import { clampLanding, snap, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
+import type { Bends } from '../layout/shape';
 import type { Id } from '../model/graph';
 
 /** What a dragged end is over (plan 9 §6): a step's input or output side, the hub's ring, a wire's line, or nothing. */
@@ -14,7 +15,8 @@ export type DropTarget =
   | { on: 'wire'; host: string; at: number }
   | { on: 'open'; x: number; y: number };
 
-export type Refusal = 'wrongSide' | 'sameStep' | 'sameWire' | 'short' | 'hubTail';
+/** `needsStep`: a direction-less wire already joined on one wire's line, its other end onto another line (rule D). */
+export type Refusal = 'wrongSide' | 'sameStep' | 'sameWire' | 'short' | 'hubTail' | 'needsStep';
 /** `connect`: onto a terminal; `join`: onto a wire; `move`: the end is or stays open there (decision 12). */
 export type Verdict = 'connect' | 'join' | 'move' | Refusal;
 
@@ -69,11 +71,21 @@ export function beforeDrop(shown: StudioDocument, circuit: Readonly<Circuit>): B
  * brought into a net that then holds two or more ('short'). A loop, a
  * self-feed or a short circuit already there before the drop does not refuse it: in a net already shorted (an
  * Inspector edit) an end may still slide along its side or its host, as long as no wire of the net gains a family.
+ * A direction-less wire (rule D, 2026-10-09) is never told the wrong side or "only a tail": the step side or the hub
+ * makes this end its head or its tail, and the drop is judged on the wire turned that way; joined on one line, its
+ * other end onto another line is "needs a step first".
  */
 export function judgeDrop(shown: StudioDocument, circuit: Readonly<Circuit>, id: string, side: Side, t: DropTarget): Verdict {
   if (!Object.hasOwn(circuit, id) || t.on === 'open') return 'move';
   const w = circuit[id]!;
   const other = side === 'tail' ? w.head : w.tail;
+  // a direction-less wire (rule D): the step side or the hub decides which end this is, and the rest is judged on the
+  // wire turned that way; a second line to join it on needs a step first
+  if (isFree(w)) {
+    if (t.on === 'wire' && other.on === 'wire' && other.host !== t.host && t.host !== id) return 'needsStep';
+    const role = roleOf(t);
+    if (role !== null && role !== side) return judgeDrop(shown, reversed(circuit, id), id, role, t);
+  }
   if (t.on === 'hub') {
     if (side === 'head') return 'hubTail';
   } else if (t.on === 'step') {
@@ -95,6 +107,41 @@ export function judgeDrop(shown: StudioDocument, circuit: Readonly<Circuit>, id:
   return t.on === 'wire' ? 'join' : 'connect';
 }
 
+/**
+ * What end a drop on `t` makes of a direction-less wire's end (rule D): on a step's input its head, on a step's output
+ * or the hub its tail; null on a line or nothing (no direction yet).
+ */
+export function roleOf(t: DropTarget): Side | null {
+  if (t.on === 'step') return t.side === 'in' ? 'head' : 'tail';
+  return t.on === 'hub' ? 'tail' : null;
+}
+
+const turned = new WeakMap<Readonly<Circuit>, Map<string, Circuit>>();
+/** `reverseWire`, the same circuit object for the same circuit and wire, so a drag's judging reuses `beforeDrop`. */
+function reversed(circuit: Readonly<Circuit>, id: string): Circuit {
+  let byId = turned.get(circuit);
+  if (!byId) { byId = new Map(); turned.set(circuit, byId); }
+  let c = byId.get(id);
+  if (!c) { c = reverseWire(circuit, id); byId.set(id, c); }
+  return c;
+}
+
+/**
+ * The circuit with wire `id`'s `side` end dropped on `t` (any verdict but a refusal), and which end it is now: a
+ * direction-less wire is turned round first when the drop makes this end the other one (rule D; `side` the new name).
+ * `keep`: the shape drawn from the tail before the drop, kept (turned with the wire); undefined: `setEnd`'s rule.
+ */
+export function applyDrop(circuit: Readonly<Circuit>, id: string, side: Side, t: DropTarget, keep?: Bends | null): { circuit: Circuit; side: Side } {
+  if (!Object.hasOwn(circuit, id)) return { circuit: circuit as Circuit, side };
+  const role = isFree(circuit[id]!) ? roleOf(t) : null;
+  const turn = role !== null && role !== side;
+  const c = turn ? reverseWire(circuit, id) : (circuit as Circuit);
+  const s: Side = turn ? role : side;
+  let next = setEnd(c, id, s, endOf(t));
+  if (keep !== undefined) next = setBends(next, id, keep && turn ? reverseBends(keep) : keep);
+  return { circuit: next, side: s };
+}
+
 /** The label next to the pointer while an end is dragged (plan 9 §6). */
 export function dropLabel(v: Verdict): string {
   switch (v) {
@@ -106,6 +153,7 @@ export function dropLabel(v: Verdict): string {
     case 'sameWire': return 'same wire';
     case 'short': return 'short circuit';
     case 'hubTail': return 'only a tail on the workflow';
+    case 'needsStep': return 'needs a step first';
   }
 }
 
