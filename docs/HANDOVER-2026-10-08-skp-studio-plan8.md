@@ -162,6 +162,14 @@ and studio specs. The deployed bundle is still `index-BC19MgmE.js` (without thes
   automatic tail, or a left-half tail whose shape heads right, keeps `hubLead`); a body drag lands on it by a grid
   shift. This also redraws existing manual hub-angle wires on the right half from the ring (at most a 4 px jog).
 - settle never re-heads a junction end onto its `s->t` target when the wire's tail is on t.
+- Re-review: `applyDrop` now takes `Placing` (drawn routes + route context, required) and places every end joined
+  on the dropped wire as far from the end that did not move as before, on the wire as drawn after the drop (turned
+  or not; `reverseWire`'s length is required). Fixes the junction drift when a stored head is dropped on the hub or
+  an output. If the re-drawn wire is shorter than that distance the junction is clamped to the wire's start.
+- Investigation (read-only GETs, deployed BaseApi, 2026-10-09): 7 workflows, every one with `layout` and `design`
+  null: no stored circuit anywhere, so no saved design has a direction-less wire with wires joined on it (the
+  `trace` change cannot alter any stored design on the cluster today). Script:
+  scratchpad `scan_designs.py` (reads plan 9 `wires` and plan 7/8 `routes`/`loose`).
 - Tests after the review: Vitest 847; tsc clean; Playwright on dev 110 + 2 skips. New e2e (real mouse): lifted
   direction and "needs a step first", a junction stays put when its host is turned, an entry wire moved onto the hub
   and its step, Save with a wire poured into a direction-less wire; each fails with its fix reverted.
