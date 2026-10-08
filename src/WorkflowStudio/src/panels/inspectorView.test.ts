@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { stepDto } from '../api/fixtures';
-import { loadedDocument } from '../app/fixtures';
 import { detailRows, formatInstant, kindLabel, uniqueNameOf } from './inspectorView';
 
 describe('inspectorView', () => {
@@ -15,12 +14,9 @@ describe('inspectorView', () => {
     ]);
   });
 
-  it('names the entity by its saved name and marks a parked step', async () => {
-    const doc = await loadedDocument();
+  it('names the entity by its saved name; the kind pill is the kind (an unwired step is an ordinary step, plan 8)', () => {
     expect(uniqueNameOf(stepDto('s1', { name: 'fetch' }))).toBe('fetch_1.0.0-s1');
-    expect(kindLabel({ kind: 'step', id: 's1' }, doc)).toBe('STEP');
-    expect(kindLabel({ kind: 'step', id: 'parked' }, { ...doc, parkedIds: ['parked'] })).toBe('STEP · PARKED');
-    expect(kindLabel({ kind: 'schema', id: 'sc1', slot: 'config' }, doc)).toBe('SCHEMA');
-    expect(kindLabel({ kind: 'newAssignment', stepId: 's1', stepName: 'fetch' }, doc)).toBe('NEW ASSIGNMENT');
+    expect(kindLabel({ kind: 'step', id: 's1' })).toBe('STEP');
+    expect(kindLabel({ kind: 'schema', id: 'sc1', slot: 'config', processorId: 'p1' })).toBe('SCHEMA');
   });
 });

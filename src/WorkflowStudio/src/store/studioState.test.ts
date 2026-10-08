@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { StudioDocument } from '../app/document';
-import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { assignmentDto, graphDto, stepDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { EMPTY_INSPECTOR } from './inspector';
 import { addWire, EMPTY_DRAFT, reattach } from '../design/draft';
-import { activeDocument, designDirty, INITIAL_STATE, inspectorKey, reduce, shownTargetOf, type StudioAction, type StudioState } from './studioState';
+import { EMPTY_EDITS } from '../design/design';
+import { restoredState } from '../app/session';
+import { activeDocument, canSave, designDirty, INITIAL_STATE, inspectorKey, reduce, shownTargetOf, type StudioAction, type StudioState } from './studioState';
 
 const doc = { graph: { workflow: { name: 'wf', version: '1.0.0' } } } as StudioDocument;
 const run = (...actions: StudioAction[]): StudioState => actions.reduce(reduce, INITIAL_STATE);
@@ -92,7 +94,6 @@ describe('the Inspector (slice 3b)', () => {
     let s = reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
     expect(s.docs[0]!.inspector).toEqual(EMPTY_INSPECTOR);
     s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'name', text: 'x', saved: 'fetch' });
     s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'workflow' } });
     expect(insp(s)).toEqual(EMPTY_INSPECTOR);
   });
@@ -101,20 +102,12 @@ describe('the Inspector (slice 3b)', () => {
     let s = opened();
     s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'step:s1', result: { ok: true, dto: step } });
     s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'schema', id: 'sc1', slot: 'config' } });
-    expect(shownTargetOf(s.docs[0]!)).toEqual({ kind: 'schema', id: 'sc1', slot: 'config' });
+    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'schema', id: 'sc1', slot: 'config', processorId: 'p1' } });
+    expect(shownTargetOf(s.docs[0]!)).toEqual({ kind: 'schema', id: 'sc1', slot: 'config', processorId: 'p1' });
     expect(insp(s).saved).toBeNull();
     s = reduce(s, { type: 'back', workflowId: 'wf1', depth: 0 });
     expect(insp(s).trail).toEqual([]);
     expect(shownTargetOf(s.docs[0]!)).toEqual({ kind: 'step', id: 's1' });
-  });
-
-  it('keeps an edit until it is typed back to the saved value', () => {
-    let s = opened();
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'new', saved: '' });
-    expect(insp(s).edits).toEqual({ description: 'new' });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: '', saved: '' });
-    expect(insp(s).edits).toEqual({});
   });
 
   it('drops a read for an entity it no longer shows (review focus 2)', () => {
@@ -124,158 +117,18 @@ describe('the Inspector (slice 3b)', () => {
     expect(insp(s).saved).toBeNull();
   });
 
-  it('a read drops edits that already match what was read; a failed read says why', () => {
+  it('a failed re-read keeps the form it had, with why', () => {
     let s = opened();
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'name', text: 'fetch', saved: 'old' });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
     s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'step:s1', result: { ok: true, dto: step } });
-    expect(insp(s).edits).toEqual({ description: 'typed' });
     s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'step:s1', result: { ok: false, message: 'Could not read it.' } });
     // a failed re-read keeps the form it had (spec §8): only the note is new
-    expect([insp(s).saved?.key, insp(s).readError, insp(s).edits]).toEqual(['step:s1', 'Could not read it.', { description: 'typed' }]);
+    expect([insp(s).saved?.key, insp(s).readError]).toEqual(['step:s1', 'Could not read it.']);
   });
 
   it('a failed read with nothing read before has no form, only why', () => {
     let s = opened();
     s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'step:s1', result: { ok: false, message: 'This step no longer exists.' } });
     expect([insp(s).saved, insp(s).readError]).toEqual([null, 'This step no longer exists.']);
-  });
-
-  it('saved clears only what it sent: text typed during the save stays (review focus 1)', () => {
-    let s = opened();
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'sent', saved: '' });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'name', text: 'typed meanwhile', saved: 'fetch' });
-    s = reduce(s, { type: 'saved', workflowId: 'wf1', write: 1, key: 'step:s1', sent: { description: 'sent' }, dto: { ...step, description: 'sent' } });
-    expect(insp(s)).toMatchObject({ edits: { name: 'typed meanwhile' }, busy: false, failure: null });
-    expect(insp(s).saved?.dto).toMatchObject({ description: 'sent' });
-  });
-
-  it('a failed save keeps the edits and says why; discard drops both', () => {
-    let s = opened();
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'version', text: 'abc', saved: '1.0.0' });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', write: 1, failure: { fields: { version: ['Version must be x.y.z.'] }, banner: null } });
-    expect(insp(s)).toMatchObject({ edits: { version: 'abc' }, busy: false, failure: { fields: { version: ['Version must be x.y.z.'] } } });
-    s = reduce(s, { type: 'discard', workflowId: 'wf1' });
-    expect(insp(s)).toMatchObject({ edits: {}, failure: null });
-  });
-
-  it('a created assignment replaces the new-assignment form in the trail', () => {
-    let s = opened();
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'fetch' } });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'created', workflowId: 'wf1', write: 1, target: { kind: 'assignment', id: 'a9', stepId: 's1' }, sent: {}, dto: { id: 'a9', stepId: 's1' } as never });
-    expect(insp(s).trail).toEqual([{ kind: 'assignment', id: 'a9', stepId: 's1' }]);
-    expect(insp(s).saved?.key).toBe('assignment:a9');
-  });
-
-  it('a created assignment keeps the text typed while it was created (final review 1)', () => {
-    let s = opened();
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'fetch' } });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'payload', text: '{"k":1}', saved: '{}' });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed meanwhile', saved: '' });
-    s = reduce(s, { type: 'created', workflowId: 'wf1', write: 1, target: { kind: 'assignment', id: 'a9', stepId: 's1' },
-      sent: { payload: '{"k":1}' }, dto: { id: 'a9', stepId: 's1', payload: '{"k":1}' } as never });
-    expect(insp(s)).toMatchObject({ trail: [{ kind: 'assignment', id: 'a9', stepId: 's1' }], edits: { description: 'typed meanwhile' }, busy: true });
-  });
-
-  it('a back carrying a write token applies only while that write is current; a back from the user always applies', () => {
-    let s = opened();
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'back', workflowId: 'wf1', depth: 0 });
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 2 });
-    s = reduce(s, { type: 'back', workflowId: 'wf1', depth: 0, write: 1 });
-    expect(insp(s)).toMatchObject({ trail: [{ kind: 'processor', id: 'p1' }], edits: { description: 'typed' }, busy: true, write: 2 });
-
-    s = reduce(s, { type: 'back', workflowId: 'wf1', depth: 0, write: 2 });
-    expect(insp(s)).toEqual(EMPTY_INSPECTOR);
-  });
-
-  it('a late saveFailed or created, after the user moved on, changes nothing', () => {
-    let s = opened();
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
-    const moved = s;
-    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', write: 1, failure: { fields: {}, banner: 'late' } });
-    expect(s).toBe(moved);
-    s = reduce(s, { type: 'back', workflowId: 'wf1', depth: 0 });
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'fetch' } });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 2 });
-    s = reduce(s, { type: 'back', workflowId: 'wf1', depth: 0 });
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'processor', id: 'p1' } });
-    s = reduce(s, { type: 'created', workflowId: 'wf1', write: 2, target: { kind: 'assignment', id: 'a9', stepId: 's1' }, sent: {}, dto: { id: 'a9' } as never });
-    expect(insp(s)).toMatchObject({ busy: false, write: null, trail: [{ kind: 'processor', id: 'p1' }] });
-  });
-
-  it('after created the Inspector stays busy until the link settles; only its own busy false clears it', () => {
-    let s = opened();
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'fetch' } });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'created', workflowId: 'wf1', write: 1, target: { kind: 'assignment', id: 'a9', stepId: 's1' }, sent: {}, dto: { id: 'a9' } as never });
-    expect(insp(s)).toMatchObject({ busy: true, write: 1 });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: false, write: 2 });
-    expect(insp(s).busy).toBe(true);
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: false, write: 1 });
-    expect(insp(s).busy).toBe(false);
-  });
-
-  it('a link that fails after created still shows its failure on the new assignment', () => {
-    let s = opened();
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'newAssignment', stepId: 's1', stepName: 'fetch' } });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'created', workflowId: 'wf1', write: 1, target: { kind: 'assignment', id: 'a9', stepId: 's1' }, sent: {}, dto: { id: 'a9' } as never });
-    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', write: 1, failure: { fields: {}, banner: 'not linked' } });
-    expect(insp(s)).toMatchObject({ busy: false, trail: [{ kind: 'assignment', id: 'a9', stepId: 's1' }], failure: { banner: 'not linked' } });
-  });
-
-  it('a late back from a remove, after the user left and re-opened the same assignment and typed, leaves the edits', () => {
-    let s = opened();
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'back', workflowId: 'wf1', depth: 0 });
-    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' });
-    s = reduce(s, { type: 'back', workflowId: 'wf1', depth: 0, write: 1 });
-    expect(insp(s)).toMatchObject({ trail: [{ kind: 'assignment', id: 'a1', stepId: 's1' }], edits: { description: 'typed' }, busy: false });
-  });
-
-  it('a late saved or saveFailed from an earlier write does not clear the busy flag of a newer write', () => {
-    let s = opened();
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'first', saved: '' });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 1 });
-    s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'workflow' } });
-    s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'second', saved: '' });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: true, write: 2 });
-    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', write: 1, failure: { fields: {}, banner: 'late' } });
-    expect(insp(s)).toMatchObject({ busy: true, write: 2, failure: null, edits: { description: 'second' } });
-    s = reduce(s, { type: 'saved', workflowId: 'wf1', write: 1, key: 'step:s1', sent: { description: 'second' }, dto: { ...step, description: 'first' } });
-    expect(insp(s)).toMatchObject({ busy: true, write: 2, saved: null, edits: { description: 'second' } });
-    s = reduce(s, { type: 'busy', workflowId: 'wf1', busy: false, write: 1 });
-    expect(insp(s).busy).toBe(true);
-    s = reduce(s, { type: 'saved', workflowId: 'wf1', write: 2, key: 'step:s1', sent: { description: 'second' }, dto: { ...step, description: 'second' } });
-    expect(insp(s)).toMatchObject({ busy: false, edits: {}, failure: null });
-  });
-
-  it('a refreshed document takes the new graph and name, keeping its Inspector; retry reloads a failed one', async () => {
-    let s = opened();
-    s = reduce(s, { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument() });
-    s = reduce(s, { type: 'edit', workflowId: 'wf1', key: 'description', text: 'kept', saved: '' });
-    const renamed = await loadedDocument(graphDto({ workflow: workflowDto({ name: 'renamed', version: '2.0.0' }) }));
-    s = reduce(s, { type: 'refreshed', workflowId: 'wf1', doc: renamed });
-    expect([s.docs[0]!.name, s.docs[0]!.version, insp(s).edits]).toEqual(['renamed', '2.0.0', { description: 'kept' }]);
-
-    s = reduce(s, { type: 'failed', workflowId: 'wf1', message: 'down' });
-    s = reduce(s, { type: 'refreshed', workflowId: 'wf1', doc: renamed });
-    expect(s.docs[0]!.status.kind).toBe('failed');            // only a ready document is refreshed
-    s = reduce(s, { type: 'retry', workflowId: 'wf1' });
-    expect(s.docs[0]!.status.kind).toBe('loading');
-    expect(insp(s).edits).toEqual({ description: 'kept' });   // a failed document keeps its draft (spec §6.1)
   });
 
   it('the Inspector key changes with the drill-down, so a hidden Inspector glows', () => {
@@ -285,12 +138,12 @@ describe('the Inspector (slice 3b)', () => {
   });
 });
 
-describe('designing (plan 4)', () => {
-  const opened = () => reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' });
+describe('designing (plan 4)', async () => {
+  const opened = async () => reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }), { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument() });
   const draft = { ...EMPTY_DRAFT, steps: { s1: { x: 8, y: 8 } } };
 
-  it('a selection carries its picks; picks alone keep the Inspector', () => {
-    let s = reduce(opened(), { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
+  it('a selection carries its picks; picks alone keep the Inspector', async () => {
+    let s = reduce(await opened(), { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
     expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
     s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' }, picks: [{ kind: 'node', id: 's1' }, { kind: 'node', id: 's2' }] });
     expect(s.docs[0]!.picks).toHaveLength(2);
@@ -298,8 +151,8 @@ describe('designing (plan 4)', () => {
     expect(s.docs[0]!.selection).toEqual({ kind: 'step', stepId: 's1' });
   });
 
-  it('a design step is undone, redone and discarded; the document is marked while it has a draft', () => {
-    let s = reduce(opened(), { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'node', id: 's1' }] });
+  it('a design step is undone, redone and discarded; the document is marked while it has a draft', async () => {
+    let s = reduce(await opened(), { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'node', id: 's1' }] });
     expect(designDirty(s.docs[0]!)).toBe(true);
     expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
     s = reduce(s, { type: 'undo', workflowId: 'wf1' });
@@ -311,11 +164,11 @@ describe('designing (plan 4)', () => {
     expect(s.docs[0]!.design.past).toEqual([]);
   });
 
-  it('a pick between nudges ends the run: the next nudge is a step of its own (spec §5.3)', () => {
+  it('a pick between nudges ends the run: the next nudge is a step of its own (spec §5.3)', async () => {
     const nudgeA1 = { ...EMPTY_DRAFT, steps: { s1: { x: 8, y: 0 } } };
     const nudgeA2 = { ...EMPTY_DRAFT, steps: { s1: { x: 16, y: 0 } } };
     const nudgeB = { ...nudgeA2, steps: { ...nudgeA2.steps, s2: { x: 8, y: 0 } } };
-    let s = reduce(opened(), { type: 'design', workflowId: 'wf1', draft: nudgeA1, merge: 'nudge' });
+    let s = reduce(await opened(), { type: 'design', workflowId: 'wf1', draft: nudgeA1, merge: 'nudge' });
     s = reduce(s, { type: 'design', workflowId: 'wf1', draft: nudgeA2, merge: 'nudge' });
     expect(s.docs[0]!.design.past).toHaveLength(1);
     s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's2' } });
@@ -372,5 +225,89 @@ describe('undo, redo and Discard design drop picks the document no longer has', 
     s = reduce(s, { type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, next: { s9: [] } }, picks: [{ kind: 'wire', id: 's9->s8' }] });
     s = reduce(s, { type: 'undo', workflowId: 'wf1' });
     expect(s.docs[0]!.picks).toEqual([{ kind: 'wire', id: 's9->s8' }]);
+  });
+});
+
+describe('the design (plan 8)', () => {
+  const graph = graphDto({
+    steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2')],
+    assignments: [assignmentDto('a2', { stepId: 's2', updatedAt: '2026-10-07T10:00:00Z' })],
+    design: { steps: [{ id: 's1', updatedAt: 't0', fields: { description: 'stored' } }] },
+  } as never);
+  const loaded = async (s: StudioState = run(open('wf1'))) => reduce(s, { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graph) });
+  const d0 = (s: StudioState) => s.docs[0]!;
+
+  it('loading takes the stored design; it is not dirty, and Save is offered because it is not applied', async () => {
+    const s = await loaded();
+    expect(d0(s).edits.steps['s1']!.fields).toEqual({ description: 'stored' });
+    expect(designDirty(d0(s))).toBe(false);
+    expect(canSave(d0(s))).toBe(true);
+  });
+
+  it('a restored document keeps its session design when it loads (Review Focus 3)', async () => {
+    const session = { version: 1 as const, activeId: 'wf1', showDetails: false, dock: null,
+      docs: [{ workflowId: 'wf1', name: 'orders', version: '1.0.0', selection: null, view: null,
+        design: { ...EMPTY_DRAFT, next: { s1: [] } }, edits: { ...EMPTY_EDITS, caches: { c9: { updatedAt: null, fields: { root: 'r' } } } } }] };
+    const s = await loaded(restoredState(session));
+    expect(d0(s).design.draft.next).toEqual({ s1: [] });
+    expect(d0(s).edits.caches['c9']).toBeDefined();
+    expect(d0(s).stored!.edits.steps['s1']).toBeDefined();
+    expect(designDirty(d0(s))).toBe(true);
+  });
+
+  it('Discard design returns to the stored design, not to nothing (Review Focus 4)', async () => {
+    let s = await loaded();
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, next: { s1: [] } } });
+    s = reduce(s, { type: 'discardDesign', workflowId: 'wf1' });
+    expect(d0(s).design.draft.next).toEqual({});
+    expect(d0(s).edits.steps['s1']!.fields).toEqual({ description: 'stored' });
+    expect(designDirty(d0(s))).toBe(false);
+  });
+
+  it('a typed field changes the shown entity in the design once its base is read; never while saving', async () => {
+    let s = reduce(await loaded(), { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's2' } });
+    const edit: StudioAction = { type: 'editField', workflowId: 'wf1', key: 'name', value: 'renamed', copyId: 'c' };
+    expect(reduce(s, edit)).toBe(s); // nothing read yet
+    s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'step:s2', result: { ok: true, dto: stepDto('s2') } });
+    s = reduce(s, edit);
+    expect(d0(s).edits.steps['s2']!.fields).toEqual({ name: 'renamed' });
+    expect(designDirty(d0(s))).toBe(true);
+    s = reduce(s, { type: 'revertEntity', workflowId: 'wf1' });
+    expect(d0(s).edits.steps['s2']).toBeUndefined();
+    const saving = reduce(s, { type: 'saving', workflowId: 'wf1' });
+    expect(reduce(saving, edit)).toBe(saving);
+  });
+
+  it('Create shows the new assignment at once; Remove of the shown one goes back to its step', async () => {
+    let s = reduce(await loaded(), { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
+    s = reduce(s, { type: 'createAssignment', workflowId: 'wf1', stepId: 's1', stepName: 'fetch', id: 'n1' });
+    expect(d0(s).edits.assignments['s1']).toMatchObject({ op: 'create', id: 'n1' });
+    expect(shownTargetOf(d0(s))).toEqual({ kind: 'assignment', id: 'n1', stepId: 's1' });
+    s = reduce(s, { type: 'removeAssignment', workflowId: 'wf1', stepId: 's1' });
+    expect(d0(s).edits.assignments['s1']).toBeUndefined();
+    expect(shownTargetOf(d0(s))).toEqual({ kind: 'step', id: 's1' });
+    // the base's assignment is deleted on Save, with its loaded stamp
+    s = reduce(s, { type: 'removeAssignment', workflowId: 'wf1', stepId: 's2' });
+    expect(d0(s).edits.assignments['s2']).toEqual({ op: 'delete', id: 'a2', updatedAt: '2026-10-07T10:00:00Z' });
+  });
+
+  it('a Save answer: the design read back is the stored one, the session edits go, errors and Output follow the answer', async () => {
+    let s = reduce(await loaded(), { type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, next: { s1: [] } } });
+    s = reduce(s, { type: 'saving', workflowId: 'wf1' });
+    expect(canSave(d0(s))).toBe(false);
+    const errors = [{ kind: 'step', id: 's1', stage: 'steps', field: 'version', message: 'bad' }];
+    const reread = await loadedDocument(graphDto({ ...graph, design: { steps: [{ id: 's1', nextStepIds: [] }] } } as never));
+    s = reduce(s, { type: 'saveAnswered', workflowId: 'wf1', at: '2026-10-07T12:00:00Z', applied: false, errors, doc: reread });
+    expect(d0(s).saving).toBe(false);
+    expect(d0(s).errors).toEqual(errors);
+    expect(d0(s).design.draft.next).toEqual({ s1: [] });
+    expect(designDirty(d0(s))).toBe(false);
+    expect(s.output.at(-1)).toMatchObject({ workflowId: 'wf1', text: 'Saved; not applied: 1 error' });
+
+    s = reduce(s, { type: 'saveAnswered', workflowId: 'wf1', at: '2026-10-07T12:01:00Z', applied: true, errors: [], doc: await loadedDocument(graphDto()) });
+    expect(d0(s).errors).toBeNull();
+    expect(s.output.at(-1)!.text).toBe('Saved and applied');
+    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', at: '2026-10-07T12:02:00Z', message: 'Network error: down' });
+    expect(s.output.at(-1)!.text).toBe('Not saved: Network error: down');
   });
 });

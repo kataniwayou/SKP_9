@@ -1,21 +1,22 @@
 import type { EntityKind } from '../api/entities';
+import type { EditTarget } from '../design/design';
 import type { Id } from '../model/graph';
 import type { Selection } from './selection';
 
 export type SchemaSlot = 'input' | 'output' | 'config';
 
 /**
- * What the Inspector shows (spec §7.1): an entity it reads and saves, or the form that adds a step's
- * assignment. The selection gives the first one; drill-downs (step → processor → schema, step →
- * assignment) add the rest, as a trail.
+ * What the Inspector shows (spec §7.1): an entity it reads and edits in the design (plan 8). The
+ * selection gives the first one; drill-downs (step → processor → schema, step → assignment) add the
+ * rest, as a trail.
  */
 export type InspectorTarget =
   | { kind: 'workflow'; id: Id }
   | { kind: 'step'; id: Id }
   | { kind: 'processor'; id: Id }
-  | { kind: 'schema'; id: Id; slot: SchemaSlot }
+  /** `id` is the slot's schema in the database ('' when the slot is empty); the design's copy is found by processor and slot (plan 8). */
+  | { kind: 'schema'; id: Id; slot: SchemaSlot; processorId: Id }
   | { kind: 'assignment'; id: Id; stepId: Id }
-  | { kind: 'newAssignment'; stepId: Id; stepName: string }
   | { kind: 'cache'; id: Id };
 
 /** The selection as a target; existence is the server's answer (a GET that 404s). */
@@ -36,13 +37,11 @@ export function currentTarget(root: InspectorTarget, trail: readonly InspectorTa
 
 export function targetKey(target: InspectorTarget | null): string {
   if (target === null) return 'none';
-  return target.kind === 'newAssignment' ? `newAssignment:${target.stepId}` : `${target.kind}:${target.id}`;
+  return target.kind === 'schema' ? `schema:${target.processorId}:${target.slot}` : `${target.kind}:${target.id}`;
 }
 
-/** The entity kind a target reads and saves; the new-assignment form becomes an assignment. */
-export function entityKindOf(target: InspectorTarget): EntityKind {
-  return target.kind === 'newAssignment' ? 'assignment' : target.kind;
-}
+/** The entity kind a target reads. */
+export const entityKindOf = (target: InspectorTarget): EntityKind => target.kind;
 
 const SLOT_LABEL: Record<SchemaSlot, string> = { input: 'Input', output: 'Output', config: 'Config' };
 
@@ -54,7 +53,6 @@ export function crumbLabel(target: InspectorTarget): string {
     case 'processor': return 'Processor';
     case 'schema': return `${SLOT_LABEL[target.slot]} schema`;
     case 'assignment': return 'Assignment';
-    case 'newAssignment': return 'New assignment';
     case 'cache': return 'Cache';
   }
 }
@@ -66,9 +64,18 @@ export function isTarget(value: unknown): value is InspectorTarget {
   const id = (key: string) => typeof v[key] === 'string' && v[key] !== '';
   switch (v.kind) {
     case 'workflow': case 'step': case 'processor': case 'cache': return id('id');
-    case 'schema': return id('id') && (v.slot === 'input' || v.slot === 'output' || v.slot === 'config');
+    case 'schema': return typeof v.id === 'string' && id('processorId') && (v.slot === 'input' || v.slot === 'output' || v.slot === 'config');
     case 'assignment': return id('id') && id('stepId');
-    case 'newAssignment': return id('stepId') && typeof v.stepName === 'string';
     default: return false;
+  }
+}
+
+/** The design entity a target edits (plan 8): a schema by its processor's slot, an assignment by its step. */
+export function editTargetOf(target: InspectorTarget): EditTarget {
+  switch (target.kind) {
+    case 'workflow': return { kind: 'workflow' };
+    case 'schema': return { kind: 'schema', processorId: target.processorId, slot: target.slot };
+    case 'assignment': return { kind: 'assignment', id: target.id, stepId: target.stepId };
+    default: return { kind: target.kind, id: target.id };
   }
 }

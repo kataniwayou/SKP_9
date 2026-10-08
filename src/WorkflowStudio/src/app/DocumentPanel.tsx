@@ -5,12 +5,9 @@ import type { LiveArt } from '../canvas/liveArt';
 import type { SavedView } from '../canvas/savedView';
 import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
-import { missingRequired } from '../store/entityForms';
-import { hasEdits } from '../store/inspector';
-import { entityKindOf, targetKey } from '../store/inspectorTarget';
 import type { Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
-import { designDirty, shownTargetOf, type OpenDocument } from '../store/studioState';
+import { designDirty } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
@@ -23,7 +20,7 @@ import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVi
  * `renderer: 'always'`, so both survive tab switches), its toolbar and its run status. Labels
  * are measured in the document the panel is drawn in, so a pop-out keeps its fonts (spec §6.3).
  */
-export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange, onSelect, onRetry, onSave }: {
+export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange, onSelect, onRetry }: {
   api: StudioApi;
   workflowId: string;
   panel: PanelLike;
@@ -38,8 +35,6 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   onSelect?: (selection: Selection | null, doc: Document, picks?: Pick[]) => void;
   /** Reads a failed document again; a Retry button shows when given. */
   onRetry?: () => void;
-  /** Saves the Inspector's edits (the capsule's Save). */
-  onSave?: () => void;
 }) {
   const open = useStudio((s) => s.docs.find((d) => d.workflowId === workflowId) ?? null);
   const store = useStudioStore();
@@ -59,7 +54,6 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   const edited = useMemo(() => (base && edits ? applyEdits(base, edits) : null), [base, edits]);
 
   if (open === null) return null;
-  const blank = missingRequiredShown(open);
   if (open.status.kind === 'failed') return <div className={cls}><div className="doc-msg error" role="alert">{open.status.message}{onRetry && <button type="button" className="btn" onClick={onRetry}>Retry</button>}</div></div>;
   if (open.status.kind === 'loading' || fitter === null) return <div className={cls}><div className="doc-msg">Loading…</div></div>;
 
@@ -85,7 +79,7 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
           store.dispatch({ type: 'select', workflowId, selection, picks });
         }}
       >
-        <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status} dirty={hasEdits(open.inspector)} busy={open.inspector.busy} blocked={blank} onSave={onSave}
+        <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status}
           design={actions ? {
             dirty: designDirty(open), canUndo: canUndo(open.design), canRedo: canRedo(open.design),
             onUndo: () => store.dispatch({ type: 'undo', workflowId }),
@@ -95,12 +89,4 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
       </WorkflowCanvas>
     </div>
   );
-}
-
-/** Whether the Inspector's edits would save a required field (Name, Version) blank; false until its entity is read. */
-function missingRequiredShown(open: OpenDocument): boolean {
-  const target = shownTargetOf(open);
-  const saved = open.inspector.saved;
-  if (target === null || saved === null || saved.key !== targetKey(target)) return false;
-  return missingRequired(entityKindOf(target), saved.dto, open.inspector.edits);
 }

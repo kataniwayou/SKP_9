@@ -18,10 +18,9 @@ import { entityName } from './model/entityNames';
 import { Inspector } from './panels/Inspector';
 import { Output, Toolbox } from './panels/PaneNote';
 import { Problems } from './panels/Problems';
-import { hasEdits } from './store/inspector';
 import type { Pick } from './store/picks';
 import { selectionKey, type Selection } from './store/selection';
-import { designDirty, inspectorKey, shownTargetOf } from './store/studioState';
+import { designDirty, inspectorKey } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
 
 export { describeError } from './api/describeError';
@@ -101,35 +100,12 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     });
   }, [api, store]);
 
-  // the page's toasts ("could not be re-read", a refused session write), shown by the dock
+  // the page's toast (a refused session write), shown by the dock
   const [notice, setNotice] = useState({ id: 0, text: '' });
 
-  /** Re-reads a ready document after a write (spec §7.1); a failure keeps its last drawing. */
-  const refresh = useCallback((id: string) => {
-    const token = (opens.current.get(id) ?? 0) + 1;
-    opens.current.set(id, token);
-    void loadDocument(api, id).then((r) => {
-      const current = store.getState().docs.find((d) => d.workflowId === id);
-      if (opens.current.get(id) !== token || current?.status.kind !== 'ready') return;
-      if (r.ok) store.dispatch({ type: 'refreshed', workflowId: id, doc: r.value });
-      else setNotice((n) => ({ id: n.id + 1, text: `${current.name} could not be re-read: ${describeError(r.error)}` }));
-    });
-  }, [api, store]);
-
-  const serviceRef = useRef<ReturnType<typeof createInspectorService> | null>(null);
-  /** After any write, every open document and every Inspector is read again (spec §7.1). */
-  const afterWrite = useCallback(() => {
-    for (const d of store.getState().docs) {
-      if (d.status.kind === 'ready') refresh(d.workflowId);
-      serviceRef.current?.read(d.workflowId, true);
-    }
-  }, [store, refresh]);
-  const service = useMemo(() => createInspectorService(api, store, afterWrite), [api, store, afterWrite]);
-  serviceRef.current = service;
+  const service = useMemo(() => createInspectorService(api, store), [api, store]);
 
   type Prompt =
-    | { kind: 'unsaved'; workflowId: string; proceed: () => void; doc: Document }
-    | { kind: 'remove'; workflowId: string; assignmentId: string; doc: Document; discards: boolean }
     | { kind: 'design'; workflowId: string; doc: Document }
     | { kind: 'closeDesign'; workflowId: string; doc: Document; proceed: () => void };
   const [prompt, setPromptState] = useState<Prompt | null>(null);
@@ -139,39 +115,13 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
 
   const actions: StudioActions = useMemo(() => ({
     service,
-    // while a question is open, nothing else asks or acts: the open question is not replaced
-    guard: (workflowId, proceed, doc = document) => {
-      if (asking.current !== null) return;
-      const open = store.getState().docs.find((d) => d.workflowId === workflowId);
-      if (!open || !hasEdits(open.inspector)) { proceed(); return; }
-      setPrompt({ kind: 'unsaved', workflowId, proceed, doc });
-    },
-    confirmRemove: (workflowId, assignmentId, doc = document) => {
-      if (asking.current !== null) return;
-      const open = store.getState().docs.find((d) => d.workflowId === workflowId);
-      // only the assignment's own edits go with it; a step's edits stay
-      const shown = open ? shownTargetOf(open) : null;
-      const discards = open !== undefined && shown?.kind === 'assignment' && hasEdits(open.inspector);
-      setPrompt({ kind: 'remove', workflowId, assignmentId, doc, discards });
-    },
+    // nothing is lost by moving away (plan 8): only an open question holds an action back
+    guard: (_workflowId, proceed) => { if (asking.current === null) proceed(); },
     confirmDiscardDesign: (workflowId, doc = document) => {
       if (asking.current !== null) return;
       setPrompt({ kind: 'design', workflowId, doc });
     },
-  }), [service, store, setPrompt]);
-
-  /**
-   * The dialog's Save: once the save is written, the action is guarded again, so text typed while the
-   * save was in flight is asked about, never dropped. A failed save stays where it is and says why.
-   */
-  const saveThenProceed = useCallback((asked: Extract<Prompt, { kind: 'unsaved' }>) => {
-    setPrompt(null);
-    void service.save(asked.workflowId).then(() => {
-      const after = store.getState().docs.find((d) => d.workflowId === asked.workflowId)?.inspector;
-      if (after && (after.busy || after.failure !== null)) return;
-      actions.guard(asked.workflowId, asked.proceed, asked.doc);
-    });
-  }, [service, store, actions, setPrompt]);
+  }), [service, setPrompt]);
 
   const openWorkflow = useCallback((id: string) => {
     const known = workflows.find((w) => w.id === id);
@@ -204,9 +154,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   }, [saver]);
 
   // the dock only needs each document's identity and names; a selection change must not re-render every tab
-  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}\u0000${hasEdits(d.inspector) || designDirty(d)}`).join('\u0001');
+  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}\u0000${designDirty(d)}`).join('\u0001');
   const documents: DockDocument[] = useMemo(
-    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId), dirty: hasEdits(d.inspector) || designDirty(d) })),
+    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId), dirty: designDirty(d) })),
     [identity], // the part of `docs` the dock shows; `docs` itself changes on every selection
 
   );
@@ -223,12 +173,11 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         activeDocumentId={activeId}
         onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
         onCloseDocument={(id, doc) => {
-          const close = () => actions.guard(id, () => {
+          const close = () => {
             views.current.delete(id); // reopened later, it fits afresh
             store.dispatch({ type: 'close', workflowId: id });
-          }, doc);
-          // a design draft cannot be saved by the trial: ask first, then the Inspector's own guard. Discard only
-          // proceeds: closing drops the draft with the document, and a Cancel in the Inspector's guard keeps both
+          };
+          // a design draft is asked about first: Discard closes, dropping the draft with the document
           const open = store.getState().docs.find((d) => d.workflowId === id);
           if (open && designDirty(open) && asking.current === null) setPrompt({ kind: 'closeDesign', workflowId: id, doc: doc ?? document, proceed: close });
           else close();
@@ -251,8 +200,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
               }
               actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection, picks }), doc);
             }}
-            onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }}
-            onSave={() => void service.save(id)} />
+            onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }} />
         )}
         renderTool={renderTool}
         inspectorKey={inspector}
@@ -265,21 +213,6 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         restore={session?.dock ?? null}
         onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
       />
-      {prompt?.kind === 'unsaved' && (
-        <ConfirmDialog doc={prompt.doc} title="Unsaved changes" onCancel={() => setPrompt(null)}
-          message={<>The Inspector has unsaved changes in <b>{store.getState().docs.find((d) => d.workflowId === prompt.workflowId)?.name}</b>.</>}
-          buttons={[
-            { label: 'Discard', onClick: () => { setPrompt(null); store.dispatch({ type: 'discard', workflowId: prompt.workflowId }); prompt.proceed(); } },
-            { label: 'Save', primary: true, onClick: () => saveThenProceed(prompt) },
-          ]} />
-      )}
-      {prompt?.kind === 'remove' && (
-        <ConfirmDialog doc={prompt.doc} title="Remove assignment" onCancel={() => setPrompt(null)}
-          message={prompt.discards
-            ? 'The assignment is taken off this workflow and deleted. This cannot be undone. Its unsaved changes will be discarded.'
-            : 'The assignment is taken off this workflow and deleted. This cannot be undone.'}
-          buttons={[{ label: 'Remove', primary: true, onClick: () => { setPrompt(null); void service.remove(prompt.workflowId, prompt.assignmentId); } }]} />
-      )}
       {prompt?.kind === 'design' && (
         <ConfirmDialog doc={prompt.doc} title="Discard design" onCancel={() => setPrompt(null)}
           message="Every design change in this workflow is dropped, and the canvas shows the saved workflow again."

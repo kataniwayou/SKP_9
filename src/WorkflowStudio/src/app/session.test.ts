@@ -5,6 +5,7 @@ import { EMPTY_DRAFT } from '../design/draft';
 import { EMPTY_EDITS } from '../design/design';
 import { historyOf } from '../design/history';
 import { INITIAL_STATE, reduce, type StudioState } from '../store/studioState';
+import { loadedDocument } from './fixtures';
 import { createSaver, readSession, readTabSession, restoredState, SESSION_KEY, sessionOf, writeSession, writeTabSession, type Session } from './session';
 
 const dock = { version: 1, dock: { grid: { root: { type: 'branch', data: [] }, width: 1200, height: 700, orientation: 'HORIZONTAL' }, panels: {} }, documentGroupId: null, hidden: [], sides: {}, homes: {}, popped: [] };
@@ -103,7 +104,7 @@ describe('sessionOf / restoredState', () => {
   it('keeps each open document with its selection and view, and drops views of closed documents', () => {
     const state: StudioState = {
       ...INITIAL_STATE,
-      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null }],
+      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, stored: null, restored: false, saving: false, errors: null }],
       activeId: 'a',
       showDetails: true,
     };
@@ -151,33 +152,14 @@ describe('createSaver', () => {
 });
 
 describe('the draft (slice 3b, spec §6.1)', () => {
-  const draft = { trail: [{ kind: 'processor', id: 'p1' }], edits: { description: 'typed' } };
-
-  it('reads a valid draft and drops a broken one, never the session', () => {
-    const storage = memoryStorage({ [SESSION_KEY]: JSON.stringify({
-      ...good,
-      docs: [{ ...good.docs[0], draft }, { ...good.docs[1], draft: { trail: [{ kind: 'wire' }], edits: { a: 1 } } }],
-    }) });
-    const read = readSession(storage)!;
-    expect(read.docs[0]!.draft).toEqual(draft);
-    expect(read.docs[1]!.draft).toBeUndefined();
-    expect(read.version).toBe(1);
-  });
-
-  it("writes a document's draft only when it has one, and restores it into the Inspector", () => {
-    const state: StudioState = {
-      ...INITIAL_STATE,
-      docs: [
-        { workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'step', stepId: 's1' }, inspector: { ...EMPTY_INSPECTOR, ...draft, trail: draft.trail as never }, picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null },
-        { workflowId: 'b', name: 'billing', version: '1.0.0', status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null },
-      ],
-      activeId: 'a',
-    };
-    const session = sessionOf(state, new Map(), null);
-    expect(session.docs[0]!.draft).toEqual(draft);
-    expect('draft' in session.docs[1]!).toBe(false);
-    expect(restoredState(session).docs[0]!.inspector).toEqual({ ...EMPTY_INSPECTOR, ...draft });
-    expect(restoredState(session).docs[1]!.inspector).toEqual(EMPTY_INSPECTOR);
+  it("keeps the Inspector's trail across a refresh, and drops a broken one", () => {
+    const storage = memoryStorage();
+    const trail = [{ kind: 'processor', id: 'p1' }];
+    writeSession(storage, { version: 1, activeId: 'wf1', showDetails: false, dock: null,
+      docs: [{ workflowId: 'wf1', name: 'a', version: '1', selection: { kind: 'step', stepId: 's1' }, view: null, draft: { trail } as never }] });
+    expect(restoredState(readSession(storage)).docs[0]!.inspector.trail).toEqual(trail);
+    storage.setItem(SESSION_KEY, JSON.stringify({ version: 1, docs: [{ workflowId: 'wf1', name: 'a', version: '1', draft: { trail: [{ kind: 'nope' }] } }] }));
+    expect(restoredState(readSession(storage)).docs[0]!.inspector.trail).toEqual([]);
   });
 
   it('a session write counts as kept when the next refresh will read it', () => {
@@ -190,10 +172,12 @@ describe('the draft (slice 3b, spec §6.1)', () => {
 });
 
 describe('the design draft (plan 4)', () => {
+  const storageWith = (session: unknown) => { const st = memoryStorage(); st.setItem(SESSION_KEY, JSON.stringify(session)); return st; };
   const draft = { ...EMPTY_DRAFT, steps: { s1: { x: 8, y: 16 } } };
 
-  it('keeps a document draft across a write and a read, with an empty history', () => {
-    let state = reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' });
+  it('keeps a document draft across a write and a read, with an empty history', async () => {
+    let state = reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }),
+      { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument() });
     state = reduce(state, { type: 'design', workflowId: 'wf1', draft });
     const storage = memoryStorage();
     writeSession(storage, sessionOf(state, new Map(), null));
@@ -209,8 +193,15 @@ describe('the design draft (plan 4)', () => {
     expect(back.docs[0]!.design.draft).toEqual(EMPTY_DRAFT);
   });
 
-  it('writes no design field while there is no draft', () => {
-    const state = reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' });
-    expect(sessionOf(state, new Map(), null).docs[0]).not.toHaveProperty('design');
+  it('writes the design and the edits only while they differ from the stored design, and restores both (plan 8 §3.2)', async () => {
+    let s = reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }),
+      { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument() });
+    expect(sessionOf(s, new Map(), null).docs[0]!.design).toBeUndefined();
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, loose: { l1: { source: 's1', end: { x: 8, y: 8 } } } } });
+    const written = JSON.parse(JSON.stringify(sessionOf(s, new Map(), null)));
+    const back = restoredState(readSession(storageWith(written))).docs[0]!;
+    expect(back.design.draft.loose['l1']).toEqual({ source: 's1', end: { x: 8, y: 8 } });
+    expect(back.edits).toEqual(EMPTY_EDITS);
+    expect(back.restored).toBe(true);
   });
 });

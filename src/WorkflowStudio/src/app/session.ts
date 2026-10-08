@@ -1,20 +1,21 @@
 import type { SavedView } from '../canvas/savedView';
-import { isEmptyDraft, parseDraft, type Draft } from '../design/draft';
-import { EMPTY_EDITS } from '../design/design';
+import { parseDraft, type Draft } from '../design/draft';
+import { EMPTY_EDITS, parseEdits, type EntityEdits } from '../design/design';
 import { historyOf } from '../design/history';
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
-import { EMPTY_INSPECTOR, hasEdits, type InspectorDraft } from '../store/inspector';
+import { EMPTY_INSPECTOR, type InspectorDraft } from '../store/inspector';
 import { isTarget } from '../store/inspectorTarget';
 import { picksOf } from '../store/picks';
 import type { Selection } from '../store/selection';
-import { INITIAL_STATE, type StudioState } from '../store/studioState';
+import { designDirty, INITIAL_STATE, type StudioState } from '../store/studioState';
 
 /**
  * The page as the user left it (spec §6.1, amended 2026-10-06): a refresh keeps the open documents,
  * the dock and each document's selection and view. The session is kept per tab, in sessionStorage
  * (it survives a refresh and is not shared between tabs), and every write is mirrored to
  * localStorage under the same key, to seed a new tab or a browser restart. Separate from Window ›
- * Save's named layout. Documents are fetched again on load: only where things were is kept.
+ * Save's named layout. Documents are fetched again on load: where things were is kept, and the
+ * unsaved design (plan 8 §3.2).
  */
 export const SESSION_KEY = 'skp.studio.session';
 export const SESSION_VERSION = 1;
@@ -26,10 +27,12 @@ export interface SessionDoc {
   selection: Selection | null;
   /** null: the view still followed Fit, or was never reported; the document is fitted on restore. */
   view: SavedView | null;
-  /** The document's unsaved Inspector work (slice 3b): absent when there is none. Optional, so the version stays 1. */
+  /** Where the document's Inspector was drilled to (slice 3b): absent at the selection itself. Optional, so the version stays 1. */
   draft?: InspectorDraft;
-  /** The document's design draft (plan 4): absent when there is none. Optional, so the version stays 1. */
+  /** The document's unsaved design draft (plan 4, plan 8): absent while the design is the stored one. Optional, so the version stays 1. */
   design?: Draft;
+  /** The unsaved entity edits (plan 8): absent when there are none. */
+  edits?: EntityEdits;
 }
 
 export interface Session {
@@ -64,8 +67,8 @@ export function readSession(storage: Storage | null): Session | null {
       workflowId: d.workflowId, name: d.name, version: d.version,
       selection: isSelection(d.selection) ? d.selection : null,
       view: isView(d.view) ? d.view : null,
-      ...(isDraft(d.draft) ? { draft: { trail: d.draft.trail, edits: d.draft.edits } } : {}),
-      ...designOf(d.design),
+      ...(isDraft(d.draft) ? { draft: { trail: d.draft.trail } } : {}),
+      ...designParts(d.design, d.edits),
     });
   }
   const activeId = typeof value.activeId === 'string' && docs.some((d) => d.workflowId === value.activeId)
@@ -127,8 +130,8 @@ export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedVi
     version: SESSION_VERSION,
     docs: state.docs.map((d) => ({
       workflowId: d.workflowId, name: d.name, version: d.version, selection: d.selection, view: views.get(d.workflowId) ?? null,
-      ...(d.inspector.trail.length > 0 || hasEdits(d.inspector) ? { draft: { trail: d.inspector.trail, edits: d.inspector.edits } } : {}),
-      ...(isEmptyDraft(d.design.draft) ? {} : { design: d.design.draft }),
+      ...(d.inspector.trail.length > 0 ? { draft: { trail: d.inspector.trail } } : {}),
+      ...(designDirty(d) ? { design: d.design.draft, edits: d.edits } : {}),
     })),
     activeId: state.activeId,
     showDetails: state.showDetails,
@@ -141,13 +144,18 @@ export function restoredState(session: Session | null): StudioState {
   if (session === null) return INITIAL_STATE;
   return {
     docs: session.docs.map((d) => ({ workflowId: d.workflowId, name: d.name, version: d.version, status: { kind: 'loading' }, selection: d.selection,
-      inspector: { ...EMPTY_INSPECTOR, ...(d.draft ?? {}) },
+      inspector: { ...EMPTY_INSPECTOR, trail: d.draft?.trail ?? [] },
       picks: picksOf(d.selection),
       design: historyOf(d.design),
-      edits: EMPTY_EDITS, errors: null,
+      edits: d.edits ?? EMPTY_EDITS,
+      stored: null,
+      restored: d.design !== undefined || d.edits !== undefined,
+      saving: false,
+      errors: null,
     })),
     activeId: session.activeId,
     showDetails: session.showDetails,
+    output: [],
   };
 }
 
@@ -178,13 +186,13 @@ function isSelection(value: unknown): value is Selection {
 }
 
 function isDraft(value: unknown): value is InspectorDraft {
-  return isRecord(value) && Array.isArray(value.trail) && value.trail.every(isTarget)
-    && isRecord(value.edits) && Object.values(value.edits).every((text) => typeof text === 'string');
+  return isRecord(value) && Array.isArray(value.trail) && value.trail.every(isTarget);
 }
 
-function designOf(value: unknown): { design?: Draft } {
-  const draft = parseDraft(value);
-  return draft !== null && !isEmptyDraft(draft) ? { design: draft } : {};
+function designParts(design: unknown, edits: unknown): { design?: Draft; edits?: EntityEdits } {
+  const draft = parseDraft(design);
+  const parsed = parseEdits(edits);
+  return { ...(draft !== null ? { design: draft } : {}), ...(parsed !== null ? { edits: parsed } : {}) };
 }
 
 function isView(value: unknown): value is SavedView {

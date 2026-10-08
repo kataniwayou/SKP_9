@@ -27,17 +27,15 @@ export async function renderInspector(api: Partial<StudioApi>, { selection, pick
   const full = {
     getEntity: vi.fn().mockResolvedValue(notFound), putEntity: vi.fn().mockResolvedValue(notFound),
     createAssignment: vi.fn().mockResolvedValue(notFound),
-    deleteAssignment: vi.fn().mockResolvedValue(notFound), ...api,
+    deleteAssignment: vi.fn().mockResolvedValue(notFound), saveDesign: vi.fn(), ...api,
   } as unknown as StudioApi;
-  const afterWrite = vi.fn();
-  const service = createInspectorService(full, store, afterWrite);
+  const service = createInspectorService(full, store);
   const guard = vi.fn<StudioActions['guard']>((_id, proceed) => proceed());
-  const confirmRemove = vi.fn<StudioActions['confirmRemove']>();
   const confirmDiscardDesign = vi.fn<StudioActions['confirmDiscardDesign']>();
   const view = render(
     <StudioStoreProvider value={store}>
-      <StudioActionsProvider value={{ service, guard, confirmRemove, confirmDiscardDesign }}><Inspector /></StudioActionsProvider>
+      <StudioActionsProvider value={{ service, guard, confirmDiscardDesign }}><Inspector /></StudioActionsProvider>
     </StudioStoreProvider>,
   );
-  return { ...view, store, api: full, service, guard, confirmRemove, afterWrite };
+  return { ...view, store, api: full, service, guard };
 }

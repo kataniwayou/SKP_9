@@ -6,12 +6,10 @@ import type { InspectorService } from './inspectorService';
 export interface StudioActions {
   service: InspectorService;
   /**
-   * Runs `proceed` now, or, when the document has unsaved Inspector edits, after the user chose
-   * Save (and it worked) or Discard in the dialog (spec §7.1). `doc`: the window the action came from.
+   * Runs `proceed` now; it waits only while a dialog is open (plan 8: Inspector edits live in the design,
+   * so moving away loses nothing). `doc`: the window the action came from.
    */
   guard(workflowId: Id, proceed: () => void, doc?: Document): void;
-  /** Asks before removing a step's assignment (taken off this workflow and deleted), then removes it. */
-  confirmRemove(workflowId: Id, assignmentId: Id, doc?: Document): void;
   /** Asks before dropping a document's design draft (spec §5.4), then drops it. */
   confirmDiscardDesign(workflowId: Id, doc?: Document): void;
 }

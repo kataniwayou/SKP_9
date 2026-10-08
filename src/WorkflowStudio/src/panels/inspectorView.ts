@@ -1,5 +1,4 @@
 import type { EntityReadDto } from '../api/entities';
-import type { StudioDocument } from '../app/document';
 import { entityName } from '../model/entityNames';
 import type { InspectorTarget } from '../store/inspectorTarget';
 
@@ -35,11 +34,7 @@ export function uniqueNameOf(dto: EntityReadDto): string {
   return entityName(dto.name ?? '', dto.version ?? '', dto.id ?? '');
 }
 
-/** The kind pill. */
-export function kindLabel(target: InspectorTarget, doc: StudioDocument): string {
-  switch (target.kind) {
-    case 'step': return doc.parkedIds.includes(target.id) ? 'STEP · PARKED' : 'STEP';
-    case 'newAssignment': return 'NEW ASSIGNMENT';
-    default: return target.kind.toUpperCase();
-  }
+/** The kind pill. An unwired step is an ordinary step (plan 8). */
+export function kindLabel(target: InspectorTarget): string {
+  return target.kind.toUpperCase();
 }

@@ -1,16 +1,17 @@
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment, useEffect, useMemo } from 'react';
 import type { EntityReadDto } from '../api/entities';
-import type { AssignmentReadDto, ProcessorReadDto, StepReadDto } from '../api/types';
+import type { StepReadDto } from '../api/types';
 import type { StudioDocument } from '../app/document';
 import { useStudioActions } from '../app/studioActions';
+import { applyEdits } from '../design/apply';
+import { fieldsOf, slotKey, valueText } from '../design/design';
 import { wireEnds } from '../design/draft';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { entityName } from '../model/entityNames';
 import type { Graph } from '../model/graph';
-import { FIELDS, missingRequired, savedText, shownText, type FieldSpec } from '../store/entityForms';
-import { hasEdits } from '../store/inspector';
-import { crumbLabel, entityKindOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
+import { FIELDS, savedText, type FieldSpec } from '../store/entityForms';
+import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
 import { activeDocument, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { FieldEditor } from './FieldEditor';
@@ -24,8 +25,8 @@ const readOnly = (row: Row) => (
 
 /**
  * The shared Inspector (spec §7, §7.1). It follows the active document's selection wherever the pane
- * is, reads the shown entity, and edits its own metadata: Save and Revert, drill-downs with a
- * breadcrumb, server errors under their fields or in a banner. Unsaved edits live in the store.
+ * is, reads the shown entity, and edits its own metadata: Revert, drill-downs with a breadcrumb, the
+ * last Save's errors under their fields. Edits go to the design (plan 8 §3.3); nothing here writes to BaseApi.
  */
 export function Inspector() {
   const active = useStudio(activeDocument);
@@ -46,7 +47,7 @@ export function Inspector() {
   const onlyWire = active.picks.length === 1 && active.picks[0]!.kind === 'wire' ? active.picks[0]!.id : null;
   if (onlyWire !== null) return <PaneNote pane="inspector">{wireNote(active.status.doc.graph, onlyWire)}</PaneNote>;
   if (target === null) return <PaneNote pane="inspector">Nothing selected. Click a step, a processor, a cache or the workflow.</PaneNote>;
-  return <EntityPane open={active} doc={active.status.doc} target={target} />;
+  return <EntityPane open={active} target={target} />;
 }
 
 /** "Wire: {source} → {target}" by unique names (spec §3.3); an id no longer in the graph shows as itself. */
@@ -60,24 +61,26 @@ function wireNote(graph: Graph, id: string): string {
   return `Wire: ${name(source)} → ${name(target)}`;
 }
 
-function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocument; target: InspectorTarget }) {
+function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTarget }) {
   const store = useStudioStore();
   const showDetails = useStudio((s) => s.showDetails);
-  const { service, guard, confirmRemove } = useStudioActions();
-  const askRemove = (assignmentId: string) => confirmRemove(workflowId, assignmentId, owner.current?.ownerDocument ?? document);
-  const owner = useRef<HTMLDivElement>(null);
+  const { service } = useStudioActions();
   const { workflowId, inspector } = open;
-  const go = (proceed: () => void) => guard(workflowId, proceed, owner.current?.ownerDocument ?? document);
-  const drill = (next: InspectorTarget) => go(() => store.dispatch({ type: 'drill', workflowId, target: next }));
-  const back = (depth: number) => go(() => store.dispatch({ type: 'back', workflowId, depth }));
+  const base = open.status.kind === 'ready' ? open.status.doc : null;
+  // the Inspector shows the design: names, assignments and schema copies as edited (spec §3.1)
+  const doc = useMemo(() => (base ? applyEdits(base, open.edits) : null), [base, open.edits]);
+  if (doc === null || base === null) return null;
+  const drill = (next: InspectorTarget) => store.dispatch({ type: 'drill', workflowId, target: next });
+  const back = (depth: number) => store.dispatch({ type: 'back', workflowId, depth });
   const crumbs = [rootTarget(open.selection, workflowId)!, ...inspector.trail];
   const saved = inspector.saved?.key === targetKey(target) ? inspector.saved.dto : null;
-  const dirty = hasEdits(inspector);
+  const fields = fieldsOf(open.edits, editTargetOf(target));
+  const dirty = Object.keys(fields).length > 0;
 
   return (
-    <div className="paneBody" data-pane="inspector" ref={owner}>
+    <div className="paneBody" data-pane="inspector">
       <div className="ph2">
-        <span className="kindpill">{kindLabel(target, doc)}</span>
+        <span className="kindpill">{kindLabel(target)}</span>
         {dirty && <span className="unsaved">● unsaved changes</span>}
       </div>
       {crumbs.length > 1 && (
@@ -92,41 +95,24 @@ function EntityPane({ open, doc, target }: { open: OpenDocument; doc: StudioDocu
         <div className="pbody">
           <div className="sec">
             <p className={inspector.readError ? 'note warn' : 'note'}>{inspector.readError ?? 'Loading…'}</p>
-            {inspector.readError && (
-              <button type="button" className="btn" onClick={() => service.read(workflowId, true)}>Retry</button>
-            )}
-            {inspector.readError && dirty && (
-              <button type="button" className="btn" disabled={inspector.busy}
-                onClick={() => store.dispatch({ type: 'discard', workflowId })}>Discard unsaved changes</button>
-            )}
+            {inspector.readError && <button type="button" className="btn" onClick={() => service.read(workflowId, true)}>Retry</button>}
           </div>
         </div>
       ) : (
         <>
           <div className="pbody">
-            {/* a failed re-read keeps the form (spec §8): it only says so */}
             {inspector.readError && <div className="sec"><p className="note warn">{inspector.readError}</p></div>}
-            <EntityForm open={open} doc={doc} target={target} saved={saved} showDetails={showDetails} drill={drill} askRemove={askRemove} />
+            {/* read-only while a Save is in flight (spec §4.1) */}
+            <fieldset className="plain" disabled={open.saving}>
+              <EntityForm open={open} doc={doc} base={base} target={target} saved={saved} fields={fields} showDetails={showDetails} drill={drill} />
+            </fieldset>
           </div>
           <div className="savebar">
-            {inspector.failure?.banner && <div className="banner" role="alert">{inspector.failure.banner}</div>}
-            {target.kind === 'newAssignment' ? (
-              <>
-                <button type="button" className="btn" onClick={() => back(inspector.trail.length - 1)}>Cancel</button>
-                <button type="button" className="btn primary" disabled={inspector.busy || missingRequired('assignment', saved, inspector.edits)}
-                  onClick={() => void service.create(workflowId)}>{inspector.busy ? 'Creating…' : 'Create'}</button>
-              </>
-            ) : (
-              <>
-                {target.kind === 'assignment' && (
-                  <button type="button" className="link danger" disabled={inspector.busy}
-                    onClick={() => askRemove(target.id)}>Remove assignment</button>
-                )}
-                <button type="button" className="btn" disabled={!dirty || inspector.busy} onClick={() => store.dispatch({ type: 'discard', workflowId })}>Revert</button>
-                <button type="button" className="btn primary" disabled={!dirty || inspector.busy || missingRequired(entityKindOf(target), saved, inspector.edits)}
-                  onClick={() => void service.save(workflowId)}>{inspector.busy ? 'Saving…' : 'Save'}</button>
-              </>
+            {target.kind === 'assignment' && (
+              <button type="button" className="link danger" disabled={open.saving}
+                onClick={() => service.removeAssignment(workflowId, target.stepId)}>Remove assignment</button>
             )}
+            <button type="button" className="btn" disabled={!dirty || open.saving} onClick={() => service.revert(workflowId)}>Revert</button>
           </div>
         </>
       )}
@@ -140,21 +126,24 @@ const SLOTS: ReadonlyArray<{ slot: SchemaSlot; label: string; key: 'inputSchemaI
   { slot: 'config', label: 'Config', key: 'configSchemaId' },
 ];
 
-function EntityForm({ open, doc, target, saved, showDetails, drill, askRemove }: {
-  open: OpenDocument; doc: StudioDocument; target: InspectorTarget; saved: EntityReadDto; showDetails: boolean; drill: (t: InspectorTarget) => void;
-  askRemove: (assignmentId: string) => void;
+function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill }: {
+  open: OpenDocument; doc: StudioDocument; base: StudioDocument; target: InspectorTarget; saved: EntityReadDto;
+  fields: Readonly<Record<string, string | number | null>>; showDetails: boolean; drill: (t: InspectorTarget) => void;
 }) {
   const store = useStudioStore();
-  const { workflowId, inspector } = open;
-  const kind = entityKindOf(target);
+  const { service } = useStudioActions();
+  const { workflowId } = open;
+  const shown = (key: string) => (Object.hasOwn(fields, key) ? valueText(fields[key]) : savedText(saved, key));
+  // the last Save's errors on this entity, under their fields (Problems lists them all)
+  const entityId = target.kind === 'workflow' ? workflowId : target.kind === 'schema' ? open.edits.schemas[slotKey(target.processorId, target.slot)]?.id ?? target.id : target.id;
+  const errorsOf = (key: string) => (open.errors ?? []).filter((e) => e.id === entityId && e.field === key).map((e) => e.message);
   const editor = (spec: FieldSpec) => (
-    <FieldEditor key={spec.key} spec={spec} value={shownText(saved, inspector.edits, spec.key)} saved={savedText(saved, spec.key)}
-      errors={inspector.failure?.fields[spec.key] ?? []}
-      onChange={(text) => store.dispatch({ type: 'edit', workflowId, key: spec.key, text, saved: savedText(saved, spec.key) })} />
+    <FieldEditor key={spec.key} spec={spec} value={shown(spec.key)} saved={savedText(saved, spec.key)} errors={errorsOf(spec.key)}
+      onChange={(text) => service.edit(workflowId, spec, text)} />
   );
   const { graph } = doc;
-  const name = target.kind === 'newAssignment'
-    ? `New assignment for ${(() => { const s = graph.steps.get(target.stepId); return s ? entityName(s.name, s.version, s.id) : target.stepName; })()}`
+  const name = target.kind === 'schema' && open.edits.schemas[slotKey(target.processorId, target.slot)]
+    ? entityName(shown('name'), shown('version'), open.edits.schemas[slotKey(target.processorId, target.slot)]!.id)
     : uniqueNameOf(saved);
 
   return (
@@ -162,16 +151,14 @@ function EntityForm({ open, doc, target, saved, showDetails, drill, askRemove }:
       <div className="sec">
         <div className="uname" aria-label="Unique name"><span className="ro" data-tipcut={name}>{name}</span></div>
         <div className="sec-title">{crumbLabel(target)}</div>
-        {FIELDS[kind].slice(0, 2).map(editor)}
-        {target.kind !== 'newAssignment' && (
-          <div className="metatog">
-            <button type="button" className="link" onClick={() => store.dispatch({ type: 'toggleDetails' })}>
-              {showDetails ? '▾ hide details' : '▸ show all'}
-            </button>
-          </div>
-        )}
-        {showDetails && target.kind !== 'newAssignment' && <div className="meta">{detailRows(saved).map(readOnly)}</div>}
-        {FIELDS[kind].slice(2).map(editor)}
+        {FIELDS[target.kind].slice(0, 2).map(editor)}
+        <div className="metatog">
+          <button type="button" className="link" onClick={() => store.dispatch({ type: 'toggleDetails' })}>
+            {showDetails ? '▾ hide details' : '▸ show all'}
+          </button>
+        </div>
+        {showDetails && <div className="meta">{detailRows(saved).map(readOnly)}</div>}
+        {FIELDS[target.kind].slice(2).map(editor)}
         {target.kind === 'step' && (() => {
           const step = saved as StepReadDto;
           const p = graph.processors.get(step.processorId ?? '');
@@ -186,11 +173,10 @@ function EntityForm({ open, doc, target, saved, showDetails, drill, askRemove }:
         {target.kind === 'step' && (() => {
           const assignment = assignmentByStep(graph.assignments).get(target.id);
           if (!assignment) {
-            const stepName = (saved as StepReadDto).name ?? '';
             return (
               <div className="field">
                 <label>Assignment</label>
-                <button type="button" className="link" disabled={inspector.busy} onClick={() => drill({ kind: 'newAssignment', stepId: target.id, stepName })}>＋ Create</button>
+                <button type="button" className="link" onClick={() => service.createAssignment(workflowId, target.id, shown('name'))}>＋ Create</button>
               </div>
             );
           }
@@ -201,32 +187,33 @@ function EntityForm({ open, doc, target, saved, showDetails, drill, askRemove }:
               <label>Assignment</label>
               <div className="fval arow">
                 <button type="button" className="drill" onClick={() => drill({ kind: 'assignment', id: assignment.id, stepId: target.id })}>{label}</button>
-                <button type="button" className="link danger" disabled={inspector.busy} onClick={() => askRemove(assignment.id)}>✕ Remove</button>
+                <button type="button" className="link danger" onClick={() => service.removeAssignment(workflowId, target.id)}>✕ Remove</button>
               </div>
             </div>
           );
         })()}
-        {(target.kind === 'assignment' || target.kind === 'newAssignment') && (() => {
-          const stepId = (saved as AssignmentReadDto).stepId ?? target.stepId;
-          const s = graph.steps.get(stepId);
-          return readOnly({ label: 'Step', value: s ? entityName(s.name, s.version, s.id) : stepId });
+        {target.kind === 'assignment' && (() => {
+          const s = graph.steps.get(target.stepId);
+          return readOnly({ label: 'Step', value: s ? entityName(s.name, s.version, s.id) : target.stepId });
         })()}
-        {target.kind === 'step' && doc.parkedIds.includes(target.id) && <div className="note warn">⚠ Parked: not connected, so not part of this workflow.</div>}
       </div>
       {target.kind === 'processor' && (
         <div className="sec">
           <div className="sec-title">Schemas</div>
           {SLOTS.map(({ slot, label, key }) => {
-            const id = (saved as ProcessorReadDto)[key];
-            const schema = id ? graph.schemas.get(id) : undefined;
-            const text = id ? (schema ? entityName(schema.name, schema.version, schema.id) : id) : '∅';
+            // the slot as designed (a copy re-points it); the drill reads the base's schema and edits it through the copy
+            const designed = graph.processors.get(target.id)?.[key] ?? null;
+            const original = base.graph.processors.get(target.id)?.[key] ?? null;
+            const schema = designed ? graph.schemas.get(designed) : undefined;
+            const text = designed ? (schema ? entityName(schema.name, schema.version, schema.id) : designed) : '∅';
+            const go = () => drill({ kind: 'schema', id: original ?? '', slot, processorId: target.id });
             return (
               <div key={slot} className="slot">
                 <span className="k">{label}</span>
-                {id
-                  ? <button type="button" className="v drill" data-tipcut={text} onClick={() => drill({ kind: 'schema', id, slot })}>{text}</button>
+                {designed
+                  ? <button type="button" className="v drill" data-tipcut={text} onClick={go}>{text}</button>
                   : <span className="v null" data-tipcut={text}>{text}</span>}
-                <span />
+                {designed ? <span /> : <button type="button" className="link" onClick={go}>＋ Define</button>}
               </div>
             );
           })}

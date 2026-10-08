@@ -247,49 +247,6 @@ describe('DocumentPanel', () => {
     expect(screen.getByRole('button', { name: '▶ Start' }).parentElement).toHaveAttribute('data-tip', 'Not available yet');
   });
 
-  it('enables Save only with edits, says so, and hands a click to onSave', async () => {
-    const store = createStudioStore();
-    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
-    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
-    const api = { listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }), listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as unknown as StudioApi;
-    const onSave = vi.fn();
-    render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}>
-      <DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} onSave={onSave} />
-    </div></StudioStoreProvider>);
-
-    const save = await screen.findByRole('button', { name: '⤓ Save' });
-    expect(save).toBeDisabled();
-    expect(save.parentElement).toHaveAttribute('data-tip', 'Nothing to save yet');
-    expect(screen.queryByText('● unsaved changes')).not.toBeInTheDocument();
-
-    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'description', text: 'typed', saved: '' }));
-    expect(screen.getByText('● unsaved changes')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '⤓ Save' }));
-    expect(onSave).toHaveBeenCalledTimes(1);
-    await screen.findByText('■ stopped');
-  });
-
-  it('disables Save while the shown entity would be saved with a blank Name (final review 5)', async () => {
-    const store = createStudioStore();
-    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
-    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
-    store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
-    const api = { listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }), listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as unknown as StudioApi;
-    render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}>
-      <DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} onSave={vi.fn()} />
-    </div></StudioStoreProvider>);
-    await screen.findByText('fetch');
-
-    // not read yet: nothing says the name is blank, so Save stays enabled
-    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'name', text: '', saved: 'fetch' }));
-    expect(screen.getByRole('button', { name: '⤓ Save' })).toBeEnabled();
-    act(() => store.dispatch({ type: 'read', workflowId: 'wf1', key: 'step:s1', result: { ok: true, dto: stepDto('s1', { name: 'fetch' }) } }));
-    expect(screen.getByRole('button', { name: '⤓ Save' })).toBeDisabled();
-    act(() => store.dispatch({ type: 'edit', workflowId: 'wf1', key: 'name', text: 'renamed', saved: 'fetch' }));
-    expect(screen.getByRole('button', { name: '⤓ Save' })).toBeEnabled();
-    await screen.findByText('■ stopped');
-  });
-
   it('shows status unknown, not stopped, when the live poll fails', async () => {
     const { store } = await setup(vi.fn().mockResolvedValue({ ok: false, error: { kind: 'http', status: 500, detail: 'Redis down' } }));
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));
@@ -392,5 +349,18 @@ describe('DocumentPanel', () => {
     expect(onSelect).toHaveBeenCalledWith({ kind: 'step', stepId: 's1' }, document, [{ kind: 'node', id: 's1' }]);
     expect(store.getState().docs[0]!.selection).toBeNull();
     await screen.findByText('■ stopped');
+  });
+
+  it('draws the design: a step renamed in the Inspector shows its new name on the canvas (plan 8 §3.1)', async () => {
+    const { store } = await setup();
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));
+    act(() => store.dispatch({ type: 'loaded', workflowId: 'wf1', doc }));
+    await screen.findByText('fetch');
+    act(() => {
+      store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
+      store.dispatch({ type: 'read', workflowId: 'wf1', key: 'step:s1', result: { ok: true, dto: stepDto('s1', { name: 'fetch' }) } });
+      store.dispatch({ type: 'editField', workflowId: 'wf1', key: 'name', value: 'gather', copyId: 'x' });
+    });
+    expect(await screen.findByText('gather')).toBeInTheDocument();
   });
 });

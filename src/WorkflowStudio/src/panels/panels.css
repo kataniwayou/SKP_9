@@ -70,3 +70,4 @@ textarea.input.json { white-space: pre; overflow: auto; }
 .link.danger { color: var(--f); }
 .link:disabled { opacity: .45; cursor: default; }
 .arow { display: flex; align-items: center; gap: 12px; }
+fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }

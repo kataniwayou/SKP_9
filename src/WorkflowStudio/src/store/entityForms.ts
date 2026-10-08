@@ -1,6 +1,5 @@
-import type { EntityKind, EntityReadDto, ReadDtoOf, UpdateDtoOf } from '../api/entities';
-import type { AssignmentCreateDto, AssignmentReadDto } from '../api/types';
-import type { Id } from '../model/graph';
+import type { EntityKind, EntityReadDto } from '../api/entities';
+import type { FieldValue } from '../design/design';
 
 export type FieldKind = 'text' | 'multiline' | 'json' | 'condition';
 
@@ -9,9 +8,9 @@ export interface FieldSpec {
   key: string;
   label: string;
   kind: FieldKind;
-  /** Save is disabled while it is blank (Name and Version only, spec §7.1). */
+  /** Name and Version (spec §7.1): blank, the field shows the saved value as its placeholder. */
   required?: boolean;
-  /** Blank text is sent as null. */
+  /** Blank text is kept as null. */
   nullable?: boolean;
 }
 
@@ -29,16 +28,6 @@ export const FIELDS: Record<EntityKind, readonly FieldSpec[]> = {
   cache: [NAME, VERSION, DESCRIPTION, { key: 'root', label: 'Root', kind: 'text' }, { key: 'items', label: 'Items', kind: 'json' }],
 };
 
-/** Every field of each update DTO, in the generated type's order: exactly what a PUT sends. */
-export const UPDATE_KEYS: Record<EntityKind, readonly string[]> = {
-  workflow: ['name', 'version', 'description', 'entryStepIds', 'assignmentIds', 'cacheIds', 'cronExpression'],
-  step: ['name', 'version', 'description', 'processorId', 'nextStepIds', 'entryCondition'],
-  assignment: ['name', 'version', 'description', 'stepId', 'payload'],
-  processor: ['name', 'version', 'description', 'sourceHash', 'instanceId', 'inputSchemaId', 'outputSchemaId', 'configSchemaId'],
-  schema: ['name', 'version', 'description', 'definition'],
-  cache: ['name', 'version', 'description', 'root', 'items'],
-};
-
 const field = (dto: EntityReadDto, key: string): unknown => (dto as Record<string, unknown>)[key];
 
 /** A saved value as form text: null and absent read as '', the entry condition as its number. */
@@ -52,26 +41,11 @@ export function shownText(dto: EntityReadDto, edits: Readonly<Record<string, str
   return Object.hasOwn(edits, key) ? edits[key]! : savedText(dto, key);
 }
 
-function toDtoValue(spec: FieldSpec, text: string): unknown {
+/** Typed text as the design keeps it (plan 8): the entry condition's number; a blank nullable field is null. */
+export function fieldValue(spec: FieldSpec, text: string): FieldValue {
   if (spec.kind === 'condition') return Number(text);
   if (spec.nullable && text.trim() === '') return null;
   return text;
-}
-
-/**
- * The PUT body (spec §7.1, §9): every field of the update DTO exactly as `saved` has it (structural
- * lists and ids included; null stays null), then only the edited writable fields replaced.
- */
-export function updateDto<K extends EntityKind>(kind: K, saved: ReadDtoOf[K], edits: Readonly<Record<string, string>>): UpdateDtoOf[K] {
-  const body: Record<string, unknown> = {};
-  for (const key of UPDATE_KEYS[kind]) body[key] = field(saved, key) ?? null;
-  for (const spec of FIELDS[kind]) if (Object.hasOwn(edits, spec.key)) body[spec.key] = toDtoValue(spec, edits[spec.key]!);
-  return body as UpdateDtoOf[K];
-}
-
-/** True while Name or Version would be sent blank: Save stays disabled. */
-export function missingRequired(kind: EntityKind, dto: EntityReadDto, edits: Readonly<Record<string, string>>): boolean {
-  return FIELDS[kind].some((spec) => spec.required === true && shownText(dto, edits, spec.key).trim() === '');
 }
 
 /** "Not valid JSON" while a JSON field does not parse; the server still judges it on save. */
@@ -82,30 +56,4 @@ export function jsonProblem(text: string): string | null {
   } catch {
     return 'Not valid JSON';
   }
-}
-
-/**
- * A 400's messages (keys are C# property names: `CronExpression`) under the form's fields
- * (`cronExpression`); messages about anything the form does not edit go to `other`, for the banner.
- */
-export function splitErrors(kind: EntityKind, errors: Readonly<Record<string, string[]>>): { fields: Record<string, string[]>; other: string[] } {
-  const writable = new Set(FIELDS[kind].map((spec) => spec.key));
-  const fields: Record<string, string[]> = {};
-  const other: string[] = [];
-  for (const [name, messages] of Object.entries(errors)) {
-    const key = name.charAt(0).toLowerCase() + name.slice(1);
-    if (writable.has(key)) fields[key] = [...(fields[key] ?? []), ...messages];
-    else other.push(...messages);
-  }
-  return { fields, other };
-}
-
-/** The new-assignment form's starting values (spec §7.1); `id` stays '' until it is created. */
-export function newAssignmentDto(step: { id: Id; name: string }): AssignmentReadDto {
-  return { id: '', name: `${step.name}-assignment`, version: '1.0.0', description: null, stepId: step.id, payload: '{}' } as AssignmentReadDto;
-}
-
-/** The POST body for the new-assignment form: its starting values with what was typed. */
-export function createAssignmentDto(saved: AssignmentReadDto, edits: Readonly<Record<string, string>>): AssignmentCreateDto {
-  return updateDto('assignment', saved, edits);
 }

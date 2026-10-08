@@ -1,14 +1,16 @@
 import type { StudioDocument } from '../app/document';
 import type { EntityReadDto } from '../api/entities';
 import type { DesignError, Id } from '../model/graph';
-import { EMPTY_EDITS, type EntityEdits } from '../design/design';
-import { entriesOf, isEmptyDraft, nextOf, wireEnds, type Draft } from '../design/draft';
+import {
+  createAssignment, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf,
+  type Design, type EntityEdits, type FieldValue,
+} from '../design/design';
+import { EMPTY_DRAFT, entriesOf, LOOSE_PREFIX, nextOf, wireEnds, type Draft } from '../design/draft';
 import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { WORKFLOW_SOURCE } from '../layout/ports';
-import { savedText } from './entityForms';
-import { EMPTY_INSPECTOR, type InspectorState, type SaveFailure } from './inspector';
-import { currentTarget, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
+import { EMPTY_INSPECTOR, type InspectorState } from './inspector';
+import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
 import { picksOf, samePicks, type Pick } from './picks';
 import { selectionKey, type Selection } from './selection';
 
@@ -26,7 +28,7 @@ export interface OpenDocument {
   status: DocStatus;
   /** Kept per document, so switching tabs and coming back keeps it (spec §9). */
   selection: Selection | null;
-  /** This document's Inspector (slice 3b): its trail and edits are the draft the session keeps. */
+  /** This document's Inspector (slice 3b): its trail is the draft the session keeps. */
   inspector: InspectorState;
   /** What is picked on the canvas (plan 4); the Inspector's `selection` is the one entity it shows. */
   picks: Pick[];
@@ -36,11 +38,25 @@ export interface OpenDocument {
   edits: EntityEdits;
   /** The last Save's errors (plan 8 §4.1); null: no Save answered with errors since it was opened, saved or discarded. */
   errors: DesignError[] | null;
+  /** The last saved design (plan 8 §3.1): the stored design read back with the graph; null until it is loaded. */
+  stored: Design | null;
+  /** The session brought unsaved design edits back: loading keeps them instead of the stored design. */
+  restored: boolean;
+  /** A Save is in flight: the design is read-only (spec §4.1). */
+  saving: boolean;
+}
+
+export interface OutputLine {
+  /** ISO time of the answer. */
+  at: string;
+  workflowId: Id;
+  name: string;
+  text: string;
 }
 
 /**
  * The studio's shared state. The page keeps it in its session (app/session.ts), so a refresh brings it back
- * (spec §6.1); a document's Inspector edits are its draft.
+ * (spec §6.1); a document's unsaved design comes back with it (plan 8 §3.2).
  */
 export interface StudioState {
   /** In the order they were opened. */
@@ -49,6 +65,8 @@ export interface StudioState {
   activeId: Id | null;
   /** The Inspector's one "▸ show all" switch, shared by every entity (spec §7). */
   showDetails: boolean;
+  /** Save results, oldest first (plan 8 §4.1); not kept across a refresh. */
+  output: OutputLine[];
 }
 
 export type StudioAction =
@@ -68,30 +86,26 @@ export type StudioAction =
   | { type: 'discardDesign'; workflowId: Id }
   | { type: 'toggleDetails' }
   | { type: 'drill'; workflowId: Id; target: InspectorTarget }
-  /**
-   * Keeps the first `depth` drill-downs (0: back to the selection). The user's back carries no `write`;
-   * a remove's back carries its write's token and applies only while that write is the Inspector's.
-   */
-  | { type: 'back'; workflowId: Id; depth: number; write?: number }
-  | { type: 'edit'; workflowId: Id; key: string; text: string; saved: string }
-  | { type: 'discard'; workflowId: Id }
+  /** Keeps the first `depth` drill-downs (0: back to the selection). */
+  | { type: 'back'; workflowId: Id; depth: number }
   | { type: 'read'; workflowId: Id; key: string; result: { ok: true; dto: EntityReadDto } | { ok: false; message: string } }
-  /**
-   * Write results below carry the token `busy: true` started their write with (from the service's counter).
-   * Each applies only while `inspector.write` is that token; otherwise it changes nothing, not even busy.
-   */
-  | { type: 'busy'; workflowId: Id; busy: boolean; write: number }
-  | { type: 'saveFailed'; workflowId: Id; write: number; failure: SaveFailure }
-  /** `sent`: the edits the PUT carried; only those are cleared. */
-  | { type: 'saved'; workflowId: Id; write: number; key: string; sent: Record<string, string>; dto: EntityReadDto }
-  /** `sent`: the edits the POST carried; text typed meanwhile stays, on the new assignment. */
-  | { type: 'created'; workflowId: Id; write: number; target: InspectorTarget; sent: Record<string, string>; dto: EntityReadDto }
-  /** A ready document re-read after a write: the new graph, keeping selection, view and Inspector. */
-  | { type: 'refreshed'; workflowId: Id; doc: StudioDocument }
+  /** A field typed into the shown entity: a design edit (spec §3.3). `copyId` names a schema copy if this edit makes one. */
+  | { type: 'editField'; workflowId: Id; key: string; value: FieldValue; copyId: string }
+  /** Drops the shown entity's design edits. */
+  | { type: 'revertEntity'; workflowId: Id }
+  /** Creates a step's assignment in the design and shows it. */
+  | { type: 'createAssignment'; workflowId: Id; stepId: Id; stepName: string; id: Id }
+  /** Removes a step's assignment in the design. */
+  | { type: 'removeAssignment'; workflowId: Id; stepId: Id }
+  | { type: 'saving'; workflowId: Id }
+  /** BaseApi's answer to a Save, with the document read again (null: the re-read failed). */
+  | { type: 'saveAnswered'; workflowId: Id; at: string; applied: boolean; errors: DesignError[]; doc: StudioDocument | null }
+  /** A Save that never got an answer (400, network): nothing was stored. */
+  | { type: 'saveFailed'; workflowId: Id; at: string; message: string }
   /** A failed document goes back to loading. */
   | { type: 'retry'; workflowId: Id };
 
-export const INITIAL_STATE: StudioState = { docs: [], activeId: null, showDetails: false };
+export const INITIAL_STATE: StudioState = { docs: [], activeId: null, showDetails: false, output: [] };
 
 const update = (state: StudioState, id: Id, change: (doc: OpenDocument) => OpenDocument): StudioState => {
   const index = state.docs.findIndex((d) => d.workflowId === id);
@@ -132,6 +146,7 @@ function prunedPicks(d: OpenDocument, draft: Draft): Pick[] {
       if (p.id.startsWith(CACHE_NODE_PREFIX)) return saved.placement.caches.has(p.id.slice(CACHE_NODE_PREFIX.length));
       return saved.placement.steps.has(p.id);
     }
+    if (p.id.startsWith(LOOSE_PREFIX)) return Object.hasOwn(draft.loose, p.id.slice(LOOSE_PREFIX.length));
     const { source, target } = wireEnds(p.id);
     if (!saved.graph.steps.has(target)) return false;
     return (source === WORKFLOW_SOURCE ? entriesOf(saved, draft) : nextOf(saved, draft, source)).includes(target);
@@ -143,9 +158,6 @@ function prunedPicks(d: OpenDocument, draft: Draft): Pick[] {
 const redesign = (d: OpenDocument, design: DesignHistory): OpenDocument =>
   design === d.design ? d : { ...d, design, picks: prunedPicks(d, design.draft) };
 
-const without = (edits: Record<string, string>, drop: (key: string, text: string) => boolean): Record<string, string> =>
-  Object.fromEntries(Object.entries(edits).filter(([key, text]) => !drop(key, text)));
-
 /** Pure: every change to the studio's state goes through here. Unknown ids leave the state as it was. */
 export function reduce(state: StudioState, action: StudioAction): StudioState {
   switch (action.type) {
@@ -153,14 +165,17 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       if (state.docs.some((d) => d.workflowId === action.workflowId)) return { ...state, activeId: action.workflowId };
       const doc: OpenDocument = {
         workflowId: action.workflowId, name: action.name, version: action.version, status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR,
-        picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null,
+        picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null, stored: null, restored: false, saving: false,
       };
       return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
     }
     case 'loaded':
-      return update(state, action.workflowId, (d) => ({
-        ...d, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc },
-      }));
+      return update(state, action.workflowId, (d) => {
+        const stored = storedDesignOf(action.doc.graph.design, action.doc.graph.layout);
+        // a refresh's unsaved edits win over the stored design (spec §3.2)
+        const design = d.restored ? {} : { design: historyOf(stored.draft), edits: stored.edits };
+        return { ...d, ...design, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc }, stored, restored: false };
+      });
     case 'failed':
       return update(state, action.workflowId, (d) => ({ ...d, status: { kind: 'failed', message: action.message } }));
     case 'close': {
@@ -196,67 +211,92 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'redo':
       return update(state, action.workflowId, (d) => redesign(d, redo(d.design)));
     case 'discardDesign':
-      return update(state, action.workflowId, (d) => redesign(d, historyOf()));
+      return update(state, action.workflowId, (d) => {
+        const back = redesign(d, historyOf(d.stored?.draft ?? EMPTY_DRAFT));
+        return { ...back, edits: d.stored?.edits ?? EMPTY_EDITS, errors: null };
+      });
     case 'toggleDetails':
       return { ...state, showDetails: !state.showDetails };
     case 'drill':
       return inspect(state, action.workflowId, (i) => ({ ...EMPTY_INSPECTOR, trail: [...i.trail, action.target] }));
     case 'back':
-      return inspect(state, action.workflowId, (i) => {
-        if (action.write !== undefined && i.write !== action.write) return i;
-        return action.depth >= i.trail.length ? i : { ...EMPTY_INSPECTOR, trail: i.trail.slice(0, Math.max(0, action.depth)) };
-      });
-    case 'edit':
-      return inspect(state, action.workflowId, (i) => {
-        const edits = without(i.edits, (key) => key === action.key);
-        if (action.text !== action.saved) edits[action.key] = action.text;
-        return { ...i, edits };
-      });
-    case 'discard':
-      return inspect(state, action.workflowId, (i) => ({ ...i, edits: {}, failure: null }));
+      return inspect(state, action.workflowId, (i) => (action.depth >= i.trail.length ? i : { ...EMPTY_INSPECTOR, trail: i.trail.slice(0, Math.max(0, action.depth)) }));
     case 'read':
-      // a read has no write token: the key check is what drops a read for an entity no longer shown
+      // the key check is what drops a read for an entity no longer shown
       return inspect(state, action.workflowId, (i, d) => {
         if (targetKey(shownTargetOf(d)) !== action.key) return i;
         // a failed re-read keeps the form it had, with a note (spec §8); with nothing read, only why
         if (!action.result.ok) return { ...i, saved: i.saved?.key === action.key ? i.saved : null, readError: action.result.message };
-        const dto = action.result.dto;
-        return { ...i, saved: { key: action.key, dto }, readError: null, edits: without(i.edits, (key, text) => text === savedText(dto, key)) };
+        return { ...i, saved: { key: action.key, dto: action.result.dto }, readError: null };
       });
-    // Write results are guarded by the write token alone: only select, drill, back and created change what the
-    // Inspector shows, and the first three reset `write` to null, so a matching token means the entity the write
-    // began on (or, after created, the assignment it made) is still shown. No key check is needed on top.
-    case 'busy':
-      return inspect(state, action.workflowId, (i) => {
-        if (action.busy) return i.busy && i.write === action.write ? i : { ...i, busy: true, write: action.write };
-        return i.write !== action.write || !i.busy ? i : { ...i, busy: false };
+    case 'editField':
+      return update(state, action.workflowId, (d) => {
+        const target = shownTargetOf(d);
+        const base = d.inspector.saved;
+        if (d.saving || target === null || base === null || base.key !== targetKey(target)) return d;
+        return { ...d, edits: setField(d.edits, editTargetOf(target), base.dto, action.key, action.value, () => action.copyId) };
       });
-    case 'saveFailed':
-      return inspect(state, action.workflowId, (i) => (i.write !== action.write ? i : { ...i, busy: false, failure: action.failure }));
-    case 'saved':
-      return inspect(state, action.workflowId, (i) => {
-        if (i.write !== action.write) return i;
-        const edits = without(i.edits, (key, text) => action.sent[key] === text);
-        return { ...i, edits, busy: false, failure: null, readError: null, saved: { key: action.key, dto: action.dto } };
+    case 'revertEntity':
+      return update(state, action.workflowId, (d) => {
+        const target = shownTargetOf(d);
+        return d.saving || target === null ? d : { ...d, edits: revertEntity(d.edits, editTargetOf(target)) };
       });
-    case 'created':
-      // stays busy under the same token: the link that follows is still part of this write. It ends with its own
-      // busy false, or a saveFailed that says on the new assignment why it is not linked. Typing goes on meanwhile.
-      return inspect(state, action.workflowId, (i) => (i.write !== action.write ? i : {
-        ...EMPTY_INSPECTOR, trail: [...i.trail.slice(0, -1), action.target], saved: { key: targetKey(action.target), dto: action.dto },
-        edits: without(i.edits, (key, text) => action.sent[key] === text), busy: true, write: action.write,
-      }));
-    case 'refreshed':
-      return update(state, action.workflowId, (d) => (d.status.kind !== 'ready' ? d : {
-        ...d, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc },
-      }));
+    case 'createAssignment':
+      return update(state, action.workflowId, (d) => {
+        if (d.saving) return d;
+        const edits = createAssignment(d.edits, action.stepId, action.stepName, action.id);
+        const shown = edits.assignments[action.stepId]!;
+        return { ...d, edits, inspector: { ...EMPTY_INSPECTOR, trail: [...d.inspector.trail, { kind: 'assignment', id: shown.id, stepId: action.stepId }] } };
+      });
+    case 'removeAssignment':
+      return update(state, action.workflowId, (d) => {
+        if (d.saving) return d;
+        const base = d.status.kind === 'ready' ? d.status.doc.graph.assignments.find((a) => a.stepId === action.stepId) : undefined;
+        const edits = removeAssignment(d.edits, action.stepId, base && { id: base.id, updatedAt: base.updatedAt });
+        const shown = shownTargetOf(d);
+        const leave = shown?.kind === 'assignment' && shown.stepId === action.stepId;
+        return { ...d, edits, inspector: leave ? { ...EMPTY_INSPECTOR, trail: d.inspector.trail.slice(0, -1) } : d.inspector };
+      });
+    case 'saving':
+      return update(state, action.workflowId, (d) => (d.saving ? d : { ...d, saving: true }));
+    case 'saveAnswered': {
+      const doc = state.docs.find((d) => d.workflowId === action.workflowId);
+      if (!doc) return state;
+      const n = action.errors.length;
+      const text = action.applied ? 'Saved and applied' : `Saved; not applied: ${n} error${n === 1 ? '' : 's'}`;
+      const next = update(state, action.workflowId, (d) => {
+        // either way the design is now stored on the workflow and the session's edits are cleared (spec §4.1)
+        const stored = action.doc ? storedDesignOf(action.doc.graph.design, action.doc.graph.layout) : designOf(d);
+        const status: DocStatus = action.doc ? { kind: 'ready', doc: action.doc } : d.status;
+        const out: OpenDocument = {
+          ...d, status, stored, restored: false, saving: false, errors: action.applied ? null : action.errors,
+          design: historyOf(stored.draft), edits: stored.edits,
+          name: action.doc?.graph.workflow.name ?? d.name, version: action.doc?.graph.workflow.version ?? d.version,
+        };
+        return { ...out, picks: prunedPicks(out, stored.draft) };
+      });
+      return { ...next, output: [...next.output, { at: action.at, workflowId: action.workflowId, name: doc.name, text: action.doc ? text : `${text} (the workflow could not be read again)` }] };
+    }
+    case 'saveFailed': {
+      const doc = state.docs.find((d) => d.workflowId === action.workflowId);
+      if (!doc) return state;
+      const next = update(state, action.workflowId, (d) => ({ ...d, saving: false }));
+      return { ...next, output: [...next.output, { at: action.at, workflowId: action.workflowId, name: doc.name, text: `Not saved: ${action.message}` }] };
+    }
     case 'retry':
       return update(state, action.workflowId, (d) => (d.status.kind !== 'failed' ? d : { ...d, status: { kind: 'loading' } }));
   }
 }
 
-/** The document has a design draft (spec §5.4): its tab is marked and closing it asks. */
-export const designDirty = (doc: OpenDocument): boolean => !isEmptyDraft(doc.design.draft);
+/** The design as it stands: the canvas draft and the entity edits. */
+export const designOf = (d: OpenDocument): Design => ({ draft: d.design.draft, edits: d.edits });
+
+/** The design differs from the last saved one (spec §3.2): the tab is marked, closing asks, the session keeps it. */
+export const designDirty = (d: OpenDocument): boolean => (d.stored === null ? d.restored : !sameDesign(designOf(d), d.stored));
+
+/** Save is offered (spec §4.1): the design differs from the stored one, or the stored one is not applied yet. */
+export const canSave = (d: OpenDocument): boolean =>
+  d.status.kind === 'ready' && !d.saving && d.stored !== null && (designDirty(d) || hasGraphChanges(d.stored));
 
 export function activeDocument(state: StudioState): OpenDocument | null {
   return state.docs.find((d) => d.workflowId === state.activeId) ?? null;
