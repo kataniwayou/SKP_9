@@ -3,8 +3,9 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { assignmentDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
+import { entityName } from '../model/entityNames';
 import { createStudioStore, StudioStoreProvider, type StudioStore } from '../store/studioStore';
-import { renderInspector } from '../test/inspector';
+import { inspectorGraph, renderInspector } from '../test/inspector';
 import { Output, Toolbox } from './PaneNote';
 import type { DesignError } from '../model/graph';
 import { Problems } from './Problems';
@@ -123,11 +124,91 @@ describe('Inspector editing (plan 8 §3.3: the design, never BaseApi)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '＋ Create' }));
     expect(await screen.findByText('ASSIGNMENT')).toBeInTheDocument();
     expect(await screen.findByLabelText('Name')).toHaveValue('fetch-assignment');
+    // not in the database yet: named by what the design holds, with its new id
+    const id = store.getState().docs[0]!.edits.assignments['s1']!.id;
+    expect(screen.getByLabelText('Unique name')).toHaveTextContent(entityName('fetch-assignment', '1.0.0', id));
     fireEvent.click(screen.getByRole('button', { name: 'Remove assignment' }));
     expect(await screen.findByText('STEP')).toBeInTheDocument();
     expect(store.getState().docs[0]!.edits.assignments).toEqual({});
     expect(api.createAssignment).not.toHaveBeenCalled();
     expect(api.deleteAssignment).not.toHaveBeenCalled();
+  });
+  it("the step row drills into its assignment, and ✕ Remove takes it off in the design only", async () => {
+    const getEntity = vi.fn(async (kind: string, id: string) => reads(kind, id));
+    const graph = graphDto({ ...inspectorGraph, assignments: [assignmentDto('a1', { stepId: 's1', payload: '{"a":1,"b":2}' })] } as never);
+    const { store, api } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' }, graph });
+    fireEvent.click(await screen.findByRole('button', { name: '◆ 2 keys' }));
+    expect(await screen.findByText('ASSIGNMENT')).toBeInTheDocument();
+    expect(getEntity).toHaveBeenCalledWith('assignment', 'a1');
+    fireEvent.click(screen.getByRole('button', { name: 'Step' }));
+    fireEvent.click(await screen.findByRole('button', { name: '✕ Remove' }));
+    expect(store.getState().docs[0]!.edits.assignments['s1']).toMatchObject({ op: 'delete', id: 'a1' });
+    expect(await screen.findByRole('button', { name: '＋ Create' })).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    for (const write of [api.putEntity, api.createAssignment, api.deleteAssignment, api.saveDesign]) expect(write).not.toHaveBeenCalled();
+  });
+
+  it('drills step → processor → schema with a breadcrumb, and the crumbs go back', async () => {
+    const getEntity = vi.fn(async (kind: string, id: string) => reads(kind, id));
+    await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'fetcher_1.0.0-p1' }));
+    expect(await screen.findByText('PROCESSOR')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'sc1' }));
+    expect(await screen.findByText('SCHEMA')).toBeInTheDocument();
+    const crumbs = screen.getByRole('navigation', { name: 'Drill-down' });
+    expect(crumbs).toHaveTextContent('Step›Processor›Config schema');
+    fireEvent.click(within(crumbs).getByRole('button', { name: 'Back' }));
+    expect(await screen.findByText('PROCESSOR')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Drill-down' })).getByRole('button', { name: 'Step' }));
+    expect(await screen.findByText('STEP')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Drill-down' })).toBeNull();
+  });
+
+  it('a failed read offers Retry, which reads it again', async () => {
+    const getEntity = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: { kind: 'network', message: 'down' } })
+      .mockImplementation(async (kind: string, id: string) => reads(kind, id));
+    await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' } });
+    expect(await screen.findByText(/^Could not read it\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByLabelText('Description')).toBeInTheDocument();
+    expect(getEntity).toHaveBeenCalledTimes(2);
+  });
+
+  describe("the last Save's errors under their fields", () => {
+    // a Save answered with errors; the design read back holds a copy of p1's config schema, id cp1
+    const answered = async (store: StudioStore, errors: DesignError[]) => {
+      const design = {
+        processors: [{ id: 'p1', slots: { config: 'cp1' } }],
+        schemas: [{ id: 'cp1', name: 'cfg', version: '1.2.3', description: null, definition: '{}' }],
+      };
+      const doc = await loadedDocument(graphDto({ ...inspectorGraph, design } as never));
+      act(() => store.dispatch({ type: 'saveAnswered', workflowId: 'wf1', at: '2026-10-08T10:00:00Z', applied: false, errors, doc }));
+    };
+
+    it("shows a step's error under its field, and only there", async () => {
+      const getEntity = vi.fn(async (kind: string, id: string) => reads(kind, id));
+      const { store } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' } });
+      await answered(store, [
+        { kind: 'step', id: 's1', stage: 'steps', field: 'description', message: 'too long' },
+        { kind: 'step', id: 's2', stage: 'steps', field: 'name', message: 'not this one' },
+      ]);
+      expect(await screen.findByLabelText('Description')).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByText('too long')).toBeInTheDocument();
+      expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid');
+      expect(screen.queryByText('not this one')).toBeNull();
+    });
+
+    it("finds a schema copy's error by the copy's id, reached from the processor's slot", async () => {
+      const getEntity = vi.fn(async (kind: string, id: string) => reads(kind, id));
+      const { store } = await renderInspector({ getEntity }, { selection: { kind: 'processor', processorId: 'p1', stepId: 's1' } });
+      await answered(store, [{ kind: 'schema', id: 'cp1', stage: 'schemas', field: 'definition', message: 'not a schema' }]);
+      fireEvent.click(await screen.findByRole('button', { name: 'cfg_1.2.3-cp1' }));
+      expect(await screen.findByLabelText('Definition')).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByText('not a schema')).toBeInTheDocument();
+      expect(screen.getByLabelText('Unique name')).toHaveTextContent('cfg_1.2.3-cp1');
+      expect(getEntity).toHaveBeenCalledWith('schema', 'sc1');
+    });
   });
 });
 

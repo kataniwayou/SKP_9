@@ -197,6 +197,7 @@ describe('the design draft (plan 4)', () => {
     let s = reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }),
       { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument() });
     expect(sessionOf(s, new Map(), null).docs[0]!.design).toBeUndefined();
+    expect(sessionOf(s, new Map(), null).docs[0]!.edits).toBeUndefined();
     s = reduce(s, { type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, loose: { l1: { source: 's1', end: { x: 8, y: 8 } } } } });
     const written = JSON.parse(JSON.stringify(sessionOf(s, new Map(), null)));
     const back = restoredState(readSession(storageWith(written))).docs[0]!;

@@ -138,7 +138,7 @@ describe('the Inspector (slice 3b)', () => {
   });
 });
 
-describe('designing (plan 4)', async () => {
+describe('designing (plan 4)', () => {
   const opened = async () => reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }), { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument() });
   const draft = { ...EMPTY_DRAFT, steps: { s1: { x: 8, y: 8 } } };
 
@@ -252,6 +252,17 @@ describe('the design (plan 8)', () => {
     expect(d0(s).design.draft.next).toEqual({ s1: [] });
     expect(d0(s).edits.caches['c9']).toBeDefined();
     expect(d0(s).stored!.edits.steps['s1']).toBeDefined();
+    expect(designDirty(d0(s))).toBe(true);
+  });
+
+  it('a restored document that failed, then is retried and loads, still keeps its session design (a refresh keeps everything)', async () => {
+    const session = { version: 1 as const, activeId: 'wf1', showDetails: false, dock: null,
+      docs: [{ workflowId: 'wf1', name: 'orders', version: '1.0.0', selection: null, view: null, design: { ...EMPTY_DRAFT, next: { s1: [] } } }] };
+    let s = reduce(restoredState(session), { type: 'failed', workflowId: 'wf1', message: 'down' });
+    s = reduce(s, { type: 'retry', workflowId: 'wf1' });
+    expect(d0(s).status.kind).toBe('loading');
+    s = await loaded(s);
+    expect(d0(s).design.draft.next).toEqual({ s1: [] });
     expect(designDirty(d0(s))).toBe(true);
   });
 

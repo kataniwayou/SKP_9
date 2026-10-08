@@ -142,9 +142,12 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
       onChange={(text) => service.edit(workflowId, spec, text)} />
   );
   const { graph } = doc;
-  const name = target.kind === 'schema' && open.edits.schemas[slotKey(target.processorId, target.slot)]
-    ? entityName(shown('name'), shown('version'), open.edits.schemas[slotKey(target.processorId, target.slot)]!.id)
-    : uniqueNameOf(saved);
+  // a schema copy and a created assignment are not in the database: they are named by what the design holds
+  const copy = target.kind === 'schema' ? open.edits.schemas[slotKey(target.processorId, target.slot)] : undefined;
+  const created = target.kind === 'assignment' && open.edits.assignments[target.stepId]?.op === 'create';
+  const name = copy ? entityName(shown('name'), shown('version'), copy.id)
+    : created ? entityName(shown('name'), shown('version'), target.id)
+      : uniqueNameOf(saved);
 
   return (
     <>
