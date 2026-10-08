@@ -19,7 +19,10 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
     private readonly List<Guid> _workflows = [], _steps = [], _caches = [], _schemas = [];
     private Guid _processor;
 
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    private bool _cleaning;
+
+    // the test's token, except while cleaning up after it
+    private CancellationToken Ct => _cleaning ? CancellationToken.None : TestContext.Current.CancellationToken;
     private static string Tag() => $"design-live-{Guid.NewGuid():N}"[..24];
     private static string Hash() => Convert.ToHexString(Guid.NewGuid().ToByteArray().Concat(Guid.NewGuid().ToByteArray()).ToArray()).ToLowerInvariant();
 
@@ -31,31 +34,43 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
+        if (!RealStack.Enabled) { _http.Dispose(); return; }
+        _cleaning = true;
         // FK order: workflows (they cascade their links), their steps' assignments, unwired steps, steps,
         // caches; then the processor's slots cleared so the schemas can go, then the processor.
-        foreach (var w in _workflows) await TryAsync(() => _http.DeleteAsync($"/api/v1/workflows/{w}"));
-        await TryAsync(async () =>
+        foreach (var w in _workflows) await DeleteAsync($"workflows/{w}");
+        await TryAsync("list assignments", async () =>
         {
-            var all = JsonDocument.Parse(await _http.GetStringAsync("/api/v1/assignments")).RootElement;
+            var all = JsonDocument.Parse(await _http.GetStringAsync("/api/v1/assignments", CancellationToken.None)).RootElement;
             foreach (var a in all.EnumerateArray().Where(a => _steps.Contains(a.GetProperty("stepId").GetGuid())))
-                await _http.DeleteAsync($"/api/v1/assignments/{a.GetProperty("id").GetGuid()}");
+                await DeleteAsync($"assignments/{a.GetProperty("id").GetGuid()}");
         });
-        foreach (var s in _steps) await TryAsync(() => PutStepAsync(s, next: []));
-        foreach (var s in _steps) await TryAsync(() => _http.DeleteAsync($"/api/v1/steps/{s}"));
-        foreach (var c in _caches) await TryAsync(() => _http.DeleteAsync($"/api/v1/caches/{c}"));
+        foreach (var s in _steps) await TryAsync($"unwire step {s}", () => PutStepAsync(s, next: []));
+        foreach (var s in _steps) await DeleteAsync($"steps/{s}");
+        foreach (var c in _caches) await DeleteAsync($"caches/{c}");
         if (_processor != Guid.Empty)
         {
-            await TryAsync(() => PutProcessorAsync(clearSlots: true));
-            foreach (var s in _schemas) await TryAsync(() => _http.DeleteAsync($"/api/v1/schemas/{s}"));
-            await TryAsync(() => _http.DeleteAsync($"/api/v1/processors/{_processor}"));
+            await TryAsync("clear processor slots", () => PutProcessorAsync(clearSlots: true));
+            foreach (var s in _schemas) await DeleteAsync($"schemas/{s}");
+            await DeleteAsync($"processors/{_processor}");
         }
         _http.Dispose();
     }
 
-    private static async Task TryAsync(Func<Task> work)
+    // Cleanup never fails a test, but a row it could not remove is reported in the test output.
+    private static void Report(string message) => TestContext.Current.TestOutputHelper?.WriteLine("cleanup: " + message);
+
+    private async Task TryAsync(string what, Func<Task> work)
     {
-        try { await work(); } catch (Exception) { }
+        try { await work(); } catch (Exception ex) { Report($"{what}: {ex.Message}"); }
     }
+
+    private async Task DeleteAsync(string path) => await TryAsync($"DELETE {path}", async () =>
+    {
+        using var r = await _http.DeleteAsync($"/api/v1/{path}", CancellationToken.None);
+        if (!r.IsSuccessStatusCode && r.StatusCode != HttpStatusCode.NotFound)
+            Report($"DELETE {path} -> {(int)r.StatusCode}: {await r.Content.ReadAsStringAsync(CancellationToken.None)}");
+    });
 
     private async Task<Guid> PostAsync(string resource, object body)
     {
@@ -101,7 +116,8 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
             processorId = s.GetProperty("processorId").GetGuid(),
             nextStepIds = next ?? s.GetProperty("nextStepIds").EnumerateArray().Select(x => x.GetGuid()).ToArray(),
             entryCondition = s.GetProperty("entryCondition").GetInt32(),
-        });
+        }, Ct);
+        Assert.True(r.IsSuccessStatusCode, $"PUT step -> {(int)r.StatusCode}");
     }
 
     private async Task PutProcessorAsync(string? description = null, Guid? configSchemaId = null, bool clearSlots = false)
@@ -113,8 +129,19 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
             name = Text(p, "name"), version = Text(p, "version"), description = description ?? Text(p, "description"),
             sourceHash = Text(p, "sourceHash"), instanceId = Text(p, "instanceId"),
             inputSchemaId = Slot("inputSchemaId"), outputSchemaId = Slot("outputSchemaId"), configSchemaId = configSchemaId ?? Slot("configSchemaId"),
-        });
+        }, Ct);
         Assert.True(r.IsSuccessStatusCode, $"PUT processor -> {(int)r.StatusCode}");
+    }
+
+    private async Task PutAssignmentAsync(Guid id, string payload)
+    {
+        var a = await GetAsync($"assignments/{id}");
+        using var r = await _http.PutAsJsonAsync($"/api/v1/assignments/{id}", new
+        {
+            name = Text(a, "name"), version = Text(a, "version"), description = Text(a, "description"),
+            stepId = a.GetProperty("stepId").GetGuid(), payload,
+        }, Ct);
+        Assert.True(r.IsSuccessStatusCode, $"PUT assignment -> {(int)r.StatusCode}");
     }
 
     private static object Body(object? workflow = null, object[]? steps = null, object[]? processors = null,
@@ -331,17 +358,6 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
         Assert.True(applied, Describe(errors));
         Assert.Equal([a], (await GetAsync($"steps/{b}")).GetProperty("nextStepIds").EnumerateArray().Select(x => x.GetGuid()));
     }
-    private async Task PutAssignmentAsync(Guid id, string payload)
-    {
-        var a = await GetAsync($"assignments/{id}");
-        using var r = await _http.PutAsJsonAsync($"/api/v1/assignments/{id}", new
-        {
-            name = Text(a, "name"), version = Text(a, "version"), description = Text(a, "description"),
-            stepId = a.GetProperty("stepId").GetGuid(), payload,
-        }, Ct);
-        Assert.True(r.IsSuccessStatusCode, $"PUT assignment -> {(int)r.StatusCode}");
-    }
-
     [Fact]
     public async Task AStaleAssignmentUpdateOrDeleteFailsWithTheConflictAndNothingIsWritten()
     {
@@ -382,7 +398,10 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
             [new { op = "delete", id = x, stepId = s1, updatedAt = Stamp(await GetAsync($"assignments/{x}")), fields = (object?)null }]));
 
         Assert.False(applied);
-        Assert.Contains(errors, e => e.GetProperty("kind").GetString() == "assignment" && e.GetProperty("id").GetGuid() == x);
+        var refused = Assert.Single(errors);
+        Assert.True(Is(refused, "assignment", x, "assignmentId"), Describe(errors));
+        Assert.Equal("assignments", refused.GetProperty("stage").GetString());
+        Assert.Contains("Foreign key violation", refused.GetProperty("message").GetString());
         Assert.Equal(HttpStatusCode.OK, (await _http.GetAsync($"/api/v1/assignments/{x}", Ct)).StatusCode);
         Assert.Contains(x, (await GetAsync($"workflows/{wf}")).GetProperty("assignmentIds").EnumerateArray().Select(e => e.GetGuid()));
     }
@@ -400,7 +419,10 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
             steps: [new { id = a, updatedAt = await StepStampAsync(a), fields = (object?)null, nextStepIds = new[] { missing } }]));
 
         Assert.False(applied);
-        Assert.Contains(errors, e => e.GetProperty("kind").GetString() == "step" && e.GetProperty("id").GetGuid() == a && e.GetProperty("stage").GetString() == "wires");
+        var refused = Assert.Single(errors);
+        Assert.True(Is(refused, "step", a, "nextStepId"), Describe(errors));
+        Assert.Equal("wires", refused.GetProperty("stage").GetString());
+        Assert.Contains("Foreign key violation", refused.GetProperty("message").GetString());
         Assert.Equal([b], (await GetAsync($"steps/{a}")).GetProperty("nextStepIds").EnumerateArray().Select(x => x.GetGuid()));
     }
 }
