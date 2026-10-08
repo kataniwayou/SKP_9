@@ -2,7 +2,7 @@
 
 Branch `feature/path-importer` (not pushed, not merged; the user has not chosen merge / PR / keep). Both plan 8
 halves are deployed to the dev cluster (ns `skp`): BaseApi with the `AddWorkflowDesign` migration, and the studio
-as `workflow-studio:local`, bundle `index-DkYMqlx1.js`. Port forwards are supervised by
+as `workflow-studio:local`, bundle `index-DfWumhnn.js`. Port forwards are supervised by
 `./k8s/port-forward-realstack.ps1` (`-Status` to check, run it again to restart): studio `localhost:18081`,
 BaseApi `localhost:18080`. Do not stop them by hand.
 
@@ -44,7 +44,7 @@ the nullable jsonb `Design` column. The last is `2ce5b40`, the view-restore fix 
 `x ?? new Dictionary<,>()` in a deconstructing `foreach` header crashed the IDE0028 collection-initializer analyzer
 (AD0001) in SDK 8.0.4xx. Only the docker Release build hit it; the fallback is now hoisted to a local.
 
-**Studio.** Bundle `index-DkYMqlx1.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
+**Studio.** Bundle `index-DfWumhnn.js`. Fix `2ce5b40` is a pre-plan-8 view-restore bug that the production timing
 exposed:
 - A restored canvas lays out 26 px taller for one frame before the dock settles. `FollowSize` measured from that
   frame, so after a refresh the view came back 13 px off.
@@ -66,6 +66,15 @@ follow a host re-attached to a new source (`was`). Follow-ups: wires joined on a
 it is detached; a start-loose wire joined on a renamed host is not renamed (renameHost only rewrites routes).
 Vitest 775; Playwright 65 + 2 skips on dev and on the deployed studio.
 
+**Both ends open (user request, 2026-10-08):** `dffc157` removes "needs one end" (and "cannot start here" /
+"start stays on a block"): a wire may be detached at its tail, head or both. Colour follows what is connected: head
+on a step = the step's colour; head joined at a junction = the line's colour (joins only between same colours, chains
+agree); head not connected = grey; nothing connected = grey dashed with an open circle at each end, outside the
+workflow, kept in the layout and session. A both-open wire's head over a line moves (no colour to join with). Review
+minors left: `was` lost when a both-open wire's start connects first; `isLooseEnd` uses `!('open' in l)`; stale
+comments (designer.spec "snaps back", CableEdge doc, Inspector loose text); startBothEnd path builder duplicated.
+Vitest 785; Playwright 66 + 2 skips on dev and on the deployed studio.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
@@ -82,7 +91,7 @@ live 13/6/5 green):
   `WorkflowValidationLiveTests` 5/5.
 - Vitest: 742 passed.
 - Playwright on the dev server: 58 passed, 2 skipped (the expected `art.spec.ts` skips).
-- Playwright on the deployed studio (`index-DkYMqlx1.js`):
+- Playwright on the deployed studio (`index-DfWumhnn.js`):
   - save + inspector + designer: 26/26.
   - whole suite: 58 passed, 2 skipped.
   - `session.spec.ts:12 --repeat-each=8`: 8/8.
