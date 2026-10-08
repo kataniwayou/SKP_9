@@ -5,7 +5,7 @@ import { setEnd } from '../circuit/circuit';
 import { applyDesign } from './apply';
 import { EMPTY_EDITS, setField } from './design';
 import { circuitOf, EMPTY_DRAFT, withCircuit } from './draft';
-import { isShortCircuitError, shortCircuitErrors } from './shortCircuits';
+import { isShortCircuitError, shortCircuitErrors, shortedSources } from './shortCircuits';
 
 describe('shortCircuitErrors (plan 9 §2.2-7, §7)', () => {
   it('reports each net whose families disagree once, on a step of its last family', async () => {
@@ -34,5 +34,19 @@ describe('shortCircuitErrors (plan 9 §2.2-7, §7)', () => {
     expect(shortCircuitErrors(applyDesign(base, draft, edits), draft)).toEqual([
       { kind: 'step', id: 's3', stage: 'wires', field: null, message: 'short circuit: Completed meets Cancelled' },
     ]);
+  });
+
+  it('shortedSources: the steps and the hub whose tails feed a short-circuited net, none for an agreeing one', async () => {
+    const base = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's4'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3', { entryCondition: 2 }), stepDto('s4', { nextStepIds: ['s5'] }), stepDto('s5')],
+    }));
+    const plain = circuitOf(base, EMPTY_DRAFT);
+    const draft = withCircuit(EMPTY_DRAFT, base, setEnd(plain, 's1->s3', 'tail', { on: 'wire', host: 's1->s2', at: 40 }));
+    expect(shortedSources(applyDesign(base, draft, EMPTY_EDITS), draft)).toEqual({ steps: new Set(['s1']), hub: false });
+    expect(shortedSources(base, EMPTY_DRAFT)).toEqual({ steps: new Set(), hub: false });
+    // the hub's own wire tapped into a net of two families
+    const hub = withCircuit(EMPTY_DRAFT, base, setEnd(plain, 's1->s3', 'tail', { on: 'wire', host: 'wf->s1', at: 40 }));
+    expect(shortedSources(applyDesign(base, hub, EMPTY_EDITS), hub)).toEqual({ steps: new Set(), hub: true });
   });
 });

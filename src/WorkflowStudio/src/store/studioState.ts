@@ -265,13 +265,15 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const doc = state.docs.find((d) => d.workflowId === action.workflowId);
       if (!doc) return state;
       const n = action.errors.length;
-      const text = action.applied ? 'Saved and applied' : `Saved; not applied: ${n} error${n === 1 ? '' : 's'}`;
+      // applied by BaseApi, the only errors left are the design's short circuits (plan 9 §7), whose links were not written
+      const text = !action.applied ? `Saved; not applied: ${n} error${n === 1 ? '' : 's'}`
+        : n === 0 ? 'Saved and applied' : `Saved and applied; ${n} short circuit${n === 1 ? '' : 's'} not written`;
       const next = update(state, action.workflowId, (d) => {
         // either way the design is now stored on the workflow and the session's edits are cleared (spec §4.1)
         const stored = action.doc ? settleDesign(storedDesignOf(action.doc.graph.design, action.doc.graph.layout), action.doc) : designOf(d);
         const status: DocStatus = action.doc ? { kind: 'ready', doc: action.doc } : d.status;
         const out: OpenDocument = {
-          ...d, status, stored, restored: false, saving: false, errors: action.applied ? null : action.errors,
+          ...d, status, stored, restored: false, saving: false, errors: n === 0 ? null : action.errors,
           design: historyOf(stored.draft), edits: stored.edits,
           name: action.doc?.graph.workflow.name ?? d.name, version: action.doc?.graph.workflow.version ?? d.version,
         };

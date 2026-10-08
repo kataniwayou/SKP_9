@@ -6,7 +6,7 @@ import { applyDesign } from '../design/apply';
 import { parseSlotKey, type Design, type FieldValue, type SchemaCopy } from '../design/design';
 import { sameList } from '../design/draft';
 import { layoutOf, type SavedLayout } from '../design/layoutDesign';
-import { shortCircuitErrors } from '../design/shortCircuits';
+import { shortCircuitErrors, shortedSources } from '../design/shortCircuits';
 import type { Id } from '../model/graph';
 import type { SchemaSlot } from '../store/inspectorTarget';
 import { canSave, designOf } from '../store/studioState';
@@ -29,8 +29,9 @@ export interface DesignRequest {
 
 /**
  * The design's changes relative to the base (spec §4.2; plan 9 §7). The lists are the shown ones, which the
- * circuit's current gives with short-circuited nets left out and no step its own next step: a step whose list
- * differs from the base's sends it, and so does the entry list. The workflow always carries its stamp (the
+ * circuit's current gives with no step its own next step: a step whose list differs from the base's sends it, and
+ * so does the entry list. A source with a wire in a short-circuited net (the hub for the entry list) keeps the
+ * loaded workflow's list: no link is written, dropped or added through the net; the layout keeps it as drawn. The workflow always carries its stamp (the
  * workflow stage needs it when assignment links change); a step carries the stamp the design kept, else the
  * base's. A wire with an open end makes no link: it lives only in the layout. Entities the base no longer has
  * are left out.
@@ -38,10 +39,11 @@ export interface DesignRequest {
 export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, { draft, edits }: Design): DesignRequest {
   const g = base.graph;
   const has = (id: Id) => g.steps.has(id);
-  const nextOf = (id: Id) => shown.graph.steps.get(id)?.nextStepIds ?? g.steps.get(id)!.nextStepIds;
+  const shorted = shortedSources(shown, draft);
+  const nextOf = (id: Id) => (shorted.steps.has(id) ? g.steps.get(id)!.nextStepIds : shown.graph.steps.get(id)?.nextStepIds ?? g.steps.get(id)!.nextStepIds);
   const rewired = new Set([...g.steps.keys()].filter((id) => !sameList(nextOf(id), g.steps.get(id)!.nextStepIds)));
   const stepIds = [...new Set([...Object.keys(edits.steps), ...rewired])].filter(has).sort();
-  const entries = shown.graph.workflow.entryStepIds;
+  const entries = shorted.hub ? g.workflow.entryStepIds : shown.graph.workflow.entryStepIds;
 
   const slots = new Map<Id, Partial<Record<SchemaSlot, Id>>>();
   const schemas: SchemaCopy[] = [];
@@ -76,12 +78,8 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
  * Save (spec §4.1): the design's changes in one request, the design read-only until the answer. Either way
  * the design is then stored on the workflow: the document is read again with GETs (the stored design comes
  * back with it), its errors go to Problems and a line to Output. A request that got no answer stored
- * nothing: Output says why and the edits stay.
- *
- * A design with a short circuit (plan 9 §2.2-7, §7) is not sent: BaseApi would apply the rest and so drop the
- * links that run through the net, while any error must leave the workflow as it is (plan 8: nothing aligned).
- * BaseApi has no way to store a design without running it, so nothing is stored: Problems lists the short
- * circuits (live), Output says the Save did not happen, and the design stays in the session.
+ * nothing: Output says why and the edits stay. A short circuit (plan 9 §7) is an error of the design's wiring:
+ * the design is stored as drawn, its sources keep their loaded lists, and its errors come with the answer's.
  */
 export async function saveDesign(api: StudioApi, store: StudioStore, workflowId: Id, now: () => Date = () => new Date()): Promise<void> {
   const open = store.getState().docs.find((d) => d.workflowId === workflowId);
@@ -90,11 +88,6 @@ export async function saveDesign(api: StudioApi, store: StudioStore, workflowId:
   const design = designOf(open);
   const shown = applyDesign(base, design.draft, design.edits);
   const shorts = shortCircuitErrors(shown, design.draft);
-  if (shorts.length > 0) {
-    const n = shorts.length;
-    store.dispatch({ type: 'saveFailed', workflowId, at: now().toISOString(), message: `${n} short circuit${n === 1 ? '' : 's'} (see Problems)` });
-    return;
-  }
   const body = buildDesignRequest(base, shown, design);
   store.dispatch({ type: 'saving', workflowId });
   const answer = await api.saveDesign(workflowId, body as unknown as DesignSaveRequest);
@@ -105,6 +98,6 @@ export async function saveDesign(api: StudioApi, store: StudioStore, workflowId:
   const reread = await loadDocument(api, workflowId);
   store.dispatch({
     type: 'saveAnswered', workflowId, at: now().toISOString(), applied: answer.value.applied === true,
-    errors: designErrorsFromDto(answer.value), doc: reread.ok ? reread.value : null,
+    errors: [...shorts, ...designErrorsFromDto(answer.value)], doc: reread.ok ? reread.value : null,
   });
 }
