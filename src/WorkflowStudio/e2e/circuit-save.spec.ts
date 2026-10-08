@@ -135,10 +135,11 @@ test('a direction-less wire writes nothing, nor does a wire joined on one: Save 
     next: await Promise.all([t.a, t.b, t.c, t.d].map(async (id) => sorted(await nextOf(request, id)))),
   });
   const before = await lists();
-  // one joined on a -> d's line and open at its other end, one open at both ends: neither has an end on a step
+  // one with its head joined on a -> d's line and its tail open, one open at both ends: neither has an end on a step
   const spot = await emptySpot(panel);
   const joined = await newWire(page, panel, t.c, spot);
-  expect(await dragEnd(page, panel, joined, 'tail', await pointOnWire(panel, `${t.a}->${t.d}`, 0.5, 12))).toBe('join here');
+  expect(await dragEnd(page, panel, joined, 'head', await pointOnWire(panel, `${t.a}->${t.d}`, 0.5, 12))).toBe('join here');
+  expect(await dragEnd(page, panel, joined, 'tail', await emptySpot(panel, [spot]))).toBe('move here');
   const spot2 = await emptySpot(panel, [spot]);
   const loose = await newWire(page, panel, t.b, spot2);
   expect(await dragEnd(page, panel, loose, 'tail', await emptySpot(panel, [spot, spot2]))).toBe('move here');
@@ -146,9 +147,9 @@ test('a direction-less wire writes nothing, nor does a wire joined on one: Save 
     await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(0);
     await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
   }
-  // and a wire from d poured into the direction-less one: it carries nothing, so d gains no link
-  const fed = await newWire(page, panel, t.d, await emptySpot(panel, [spot, spot2]));
-  expect(await dragEnd(page, panel, fed, 'head', await pointOnWire(panel, loose, 0.5, 12))).toBe('join here');
+  // and a wire from b poured into the one joined on a -> d: it carries nothing, so b gains no link into d
+  const fed = await newWire(page, panel, t.b, await emptySpot(panel, [spot, spot2]));
+  expect(await dragEnd(page, panel, fed, 'head', await pointOnWire(panel, joined, 0.5, 12))).toBe('join here');
   await save(page);
   await expect(await pane(page, 'Output')).toContainText('Saved');
   expect(await lists()).toEqual(before);
